@@ -1,6 +1,54 @@
-[package]
+[workspace]
+members = [
+    "examples",
+    "prover",
+    "runtime",
+    "recursion",
+]
+resolver = "2"
+
+[workspace.package]
 name = "brevis-vm"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+keywords = ["zkvm", "plonky3", "stark", "FRI"]
+categories = ["cryptography"]
 
-[dependencies]
+
+[profile.release]
+opt-level = 3
+
+[profile.bench]
+opt-level = 3
+
+[profile.fast]
+inherits = "release"
+debug = true
+debug-assertions = true
+
+[workspace.dependencies]
+p3-air = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-field = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-commit = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-matrix = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-baby-bear = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-util = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-challenger = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-dft = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-fri = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-goldilocks = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-keccak = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-keccak-air = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-blake3 = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-mds = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-merkle-tree = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-poseidon2 = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-symmetric = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-uni-stark = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-maybe-rayon = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+p3-bn254-fr = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
+
+log = "0.4.21"
+hex = "0.4.3"
+anyhow = { version = "1.0.40", default-features = false }
