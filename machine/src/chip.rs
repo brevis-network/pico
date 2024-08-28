@@ -2,7 +2,8 @@ use p3_air::{Air, BaseAir, AirBuilder};
 use p3_field::{Field, ExtensionField};
 use p3_matrix::dense::RowMajorMatrix;
 
-pub trait ChipBahavior<F: Field>: Air<F> + BaseAir<F> {
+/// Chip behavior 
+pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
@@ -11,29 +12,36 @@ pub trait ChipBahavior<F: Field>: Air<F> + BaseAir<F> {
     fn generate_main(&self) -> RowMajorMatrix<F>;
 }
 
-pub struct Chip<F: Field, C: ChipBehavior<F>, B: Air> {
+/// Chip builder
+pub trait ChipBuilder<F: Field>: AirBuilder<F = F> + Sync {}
+
+
+/// Chip wrapper, includes interactions
+pub struct BaseChip<F: Field, C> {
     /// Underlying chip
     chip: C,
-    /// Interactions that the chip sends, ignore for now
-    // sends: Vec<Interaction<F>>,
-    /// Interactions that the chip receives, ignore for now
-    // receives: Vec<Interaction<F>>,
+    // Interactions that the chip sends, ignore for now
+    sends: Vec<F>,
+    // Interactions that the chip receives, ignore for now
+    receives: Vec<F>,
 }
 
-impl<F, C> Chip<F, C>
-where
-    F: Field,
-    C: ChipBehavior<F>,
-{
-    pub fn new(chip: C) -> Self { }
 
-    pub fn generate_permutation<EF: ExtensionField<F>>( ) -> RowMajorMatrix<EF> { }
+impl<F: Field, C: ChipBehavior<F>> BaseChip<F, C> {
+    pub fn new(chip: C) -> Self {
+        Self {
+            chip,
+            sends: vec![],
+            receives: vec![],
+        }
+    }
 }
 
-impl<F, C> BaseAir<F> for Chip<F, C>
+/// BaseAir implementation for the chip
+impl<F, C> BaseAir<F> for BaseChip<F, C>
 where
     F: Field,
-    C: ChipBahavior<F>,
+    C: BaseAir<F>,
 {
     fn width(&self) -> usize {
         self.chip.width()
@@ -44,16 +52,40 @@ where
     }
 }
 
-impl<F, C, AB> Air<AB> for Chip<F, C>
+/// Air implementation for the chip
+impl<F, C, CB> Air<CB> for BaseChip<F, C>
 where
     F: Field,
-    C: ChipBahavior<F>,
-    AB: AirBuilder<F>,
+    C: Air<CB>,
+    CB: ChipBuilder<F>,
 {
-    fn eval(&self, builder: &mut AB) {
+    fn eval(&self, builder: &mut CB) {
         self.chip.eval(builder);
-        eval_permutation(builder);
+    }
+}
+
+
+/// Chip Behavior implementation for the chip
+impl<F, C> ChipBehavior<F> for BaseChip<F, C>
+where
+    F: Field,
+    C: ChipBehavior<F>,
+{
+    fn name(&self) -> String {
+        self.chip.name()
     }
 
-    fn eval_permutation(&self, builder: &mut AB) { }
+    fn generate_preprocessed(&self) -> Option<RowMajorMatrix<F>> {
+        self.chip.generate_preprocessed()
+    }
+
+    fn generate_main(&self) -> RowMajorMatrix<F> {
+        self.chip.generate_main()
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+
 }
