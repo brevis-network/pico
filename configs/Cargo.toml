@@ -28,3 +28,5 @@ p3-symmetric = { workspace = true }
 p3-uni-stark = { workspace = true }
 p3-maybe-rayon = { workspace = true }
 p3-bn254-fr = { workspace = true }
+
+rand = {workspace = true}

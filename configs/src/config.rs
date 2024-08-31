@@ -61,6 +61,6 @@ pub trait StarkGenericConfig: Sync {
     /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;
 
-    // /// Initialize a new challenger.
-    // fn challenger(&self) -> Self::Challenger;
+    /// Initialize a new challenger.
+    fn challenger(&self) -> Self::Challenger;
 }
