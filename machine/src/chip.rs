@@ -8,7 +8,9 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
-    fn generate_preprocessed(&self) -> Option<RowMajorMatrix<F>>;
+    fn generate_preprocessed(&self) -> Option<RowMajorMatrix<F>> {
+        None
+    }
 
     fn generate_main(&self) -> RowMajorMatrix<F>;
 
