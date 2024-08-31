@@ -1,6 +1,7 @@
 use p3_air::{Air, BaseAir, AirBuilder};
 use p3_field::{Field, ExtensionField};
 use p3_matrix::dense::RowMajorMatrix;
+use p3_uni_stark::{get_log_quotient_degree, SymbolicAirBuilder};
 
 /// Chip behavior 
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
@@ -10,6 +11,10 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     fn generate_preprocessed(&self) -> Option<RowMajorMatrix<F>>;
 
     fn generate_main(&self) -> RowMajorMatrix<F>;
+
+    fn preprocessed_width(&self) -> usize {
+        0
+    }
 }
 
 /// Chip builder
@@ -24,15 +29,23 @@ pub struct BaseChip<F: Field, C> {
     sends: Vec<F>,
     // Interactions that the chip receives, ignore for now
     receives: Vec<F>,
+    /// log degree of quotient polynomial
+    log_quotient_degree: usize,
 }
 
 
-impl<F: Field, C: ChipBehavior<F>> BaseChip<F, C> {
-    pub fn new(chip: C) -> Self {
+impl<F: Field, C> BaseChip<F, C> {
+    pub fn new(chip: C) -> Self
+    where
+        C: ChipBehavior<F> + Air<SymbolicAirBuilder<F>>,
+    {
+        // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
+        let log_quotient_degree = get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width(), 0);
         Self {
             chip,
             sends: vec![],
             receives: vec![],
+            log_quotient_degree,
         }
     }
 }
