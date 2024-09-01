@@ -1,12 +1,14 @@
 use p3_air::{AirBuilder, AirBuilderWithPublicValues};
-use p3_field::AbstractField;
+use p3_field::{Field, AbstractField};
 use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
 use p3_matrix::stack::VerticalPair;
 
 use pico_configs::config::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
+use crate::chip::ChipBuilder;
 // from p3: uni-stark/src/folder.rs
 
+/// Prover Constraint Folder
 #[derive(Debug)]
 pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub main: RowMajorMatrix<PackedVal<SC>>,
@@ -16,19 +18,6 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub is_transition: PackedVal<SC>,
     pub alpha: SC::Challenge,
     pub accumulator: PackedChallenge<SC>,
-}
-
-type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixView<'a, T>>;
-
-#[derive(Debug)]
-pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
-    pub main: ViewPair<'a, SC::Challenge>,
-    pub public_values: &'a Vec<Val<SC>>,
-    pub is_first_row: SC::Challenge,
-    pub is_last_row: SC::Challenge,
-    pub is_transition: SC::Challenge,
-    pub alpha: SC::Challenge,
-    pub accumulator: SC::Challenge,
 }
 
 impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
@@ -72,6 +61,25 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for ProverConstraint
     }
 }
 
+impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for ProverConstraintFolder<'a, SC> { }
+
+
+
+
+type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixView<'a, T>>;
+
+/// Verifier Constraint Folder
+#[derive(Debug)]
+pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
+    pub main: ViewPair<'a, SC::Challenge>,
+    pub public_values: &'a Vec<Val<SC>>,
+    pub is_first_row: SC::Challenge,
+    pub is_last_row: SC::Challenge,
+    pub is_transition: SC::Challenge,
+    pub alpha: SC::Challenge,
+    pub accumulator: SC::Challenge,
+}
+
 impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC> {
     type F = Val<SC>;
     type Expr = SC::Challenge;
@@ -112,3 +120,5 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for VerifierConstrai
         self.public_values
     }
 }
+
+impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for VerifierConstraintFolder<'a, SC> { }
