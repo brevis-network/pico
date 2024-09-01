@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use alloc::vec::Vec;
-
-use pico_configs::config::{StarkGenericConfig, Com, PcsProof};
+use p3_matrix::dense::RowMajorMatrix;
+use pico_configs::config::{StarkGenericConfig, Val, Com, PcsProof, PcsProverData};
 
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -18,9 +18,15 @@ pub struct ChunkCommitments<Com> {
     pub quotient: Com,
 }
 
+pub struct TraceCommitments<SC: StarkGenericConfig> {
+    pub traces: Vec<RowMajorMatrix<Val<SC>>>,
+    pub commitment: Com<SC>,
+    pub data: PcsProverData<SC>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChunkOpenedValues<Challenge> {
-    pub chip_opened_values: Vec<ChipOpenedValues<Challenge>>,
+    pub chips_opened_values: Vec<ChipOpenedValues<Challenge>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
