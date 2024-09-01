@@ -37,3 +37,5 @@ p3-bn254-fr = { workspace = true }
 # misc
 serde = { version = "1.0.207", features = ["derive"] }
 hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
+itertools = "0.13.0"
+anyhow.workspace = true
