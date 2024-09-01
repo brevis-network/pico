@@ -1,0 +1,89 @@
+use core::iter;
+use itertools::Itertools;
+
+use p3_air::Air;
+use p3_matrix::{dense::RowMajorMatrix, stack::VerticalPair, Matrix};
+use p3_util::log2_strict_usize;
+use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
+use p3_commit::PolynomialSpace;
+use p3_maybe_rayon::prelude::*;
+
+
+use pico_configs::config::{PackedChallenge, StarkGenericConfig, Val, Domain, PackedVal};
+
+use crate::chip::{BaseChip, ChipBehavior};
+use crate::folder::ProverConstraintFolder;
+
+pub fn compute_quotient_values<SC, C, Mat>(
+    chip: &BaseChip<Val<SC>, C>,
+    public_values: &Vec<Val<SC>>,
+    trace_domain: Domain<SC>,
+    quotient_domain: Domain<SC>,
+    main_on_quotient_domain: Mat,
+    alpha: SC::Challenge,
+) -> Vec<SC::Challenge>
+where
+    SC: StarkGenericConfig,
+    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    Mat: Matrix<Val<SC>> + Sync,
+{
+    let quotient_size = quotient_domain.size();
+    let main_width = main_on_quotient_domain.width();
+    let mut sels = trace_domain.selectors_on_coset(quotient_domain);
+
+    let qdb = log2_strict_usize(quotient_domain.size()) - log2_strict_usize(trace_domain.size());
+    let next_step = 1 << qdb;
+
+    for _ in quotient_size..PackedVal::<SC>::WIDTH {
+        sels.is_first_row.push(Val::<SC>::default());
+        sels.is_last_row.push(Val::<SC>::default());
+        sels.is_transition.push(Val::<SC>::default());
+        sels.inv_zeroifier.push(Val::<SC>::default());
+    }
+
+    (0..quotient_size)
+        .into_iter()
+        .step_by(PackedVal::<SC>::WIDTH)
+        .flat_map_iter(|i_start| {
+            let i_range = i_start..i_start + PackedVal::<SC>::WIDTH;
+
+            let is_first_row = *PackedVal::<SC>::from_slice(&sels.is_first_row[i_range.clone()]);
+            let is_last_row = *PackedVal::<SC>::from_slice(&sels.is_last_row[i_range.clone()]);
+            let is_transition = *PackedVal::<SC>::from_slice(&sels.is_transition[i_range.clone()]);
+            let inv_zerofier = *PackedVal::<SC>::from_slice(&sels.inv_zeroifier[i_range.clone()]);
+
+            let main = RowMajorMatrix::new(
+                iter::empty()
+                    .chain(main_on_quotient_domain.vertically_packed_row(i_start))
+                    .chain(main_on_quotient_domain.vertically_packed_row(i_start + next_step))
+                    .collect_vec(),
+                main_width,
+            );
+
+            let accumulator = PackedChallenge::<SC>::zero();
+
+            let mut folder = ProverConstraintFolder {
+                main,
+                public_values,
+                is_first_row,
+                is_last_row,
+                is_transition,
+                alpha,
+                accumulator,
+            };
+            chip.eval(&mut folder);
+
+            let quotient = folder.accumulator * inv_zerofier;
+
+            // todo: need to check this in detail
+            (0..core::cmp::min(quotient_size, PackedVal::<SC>::WIDTH)).map(move |idx_in_packing| {
+                let quotient_value = (0..<SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
+                    .map(|coeff_idx| quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing])
+                    .collect::<Vec<_>>();
+                SC::Challenge::from_base_slice(&quotient_value)
+            })
+        })
+        .collect()
+
+}
+
