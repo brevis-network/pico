@@ -50,6 +50,10 @@ impl<F: Field, C> BaseChip<F, C> {
             log_quotient_degree,
         }
     }
+
+    pub fn get_log_quotient_degree(&self) -> usize {
+        self.log_quotient_degree
+    }
 }
 
 /// BaseAir implementation for the chip
@@ -97,6 +101,7 @@ where
     fn generate_main(&self) -> RowMajorMatrix<F> {
         self.chip.generate_main()
     }
+
 }
 
 
