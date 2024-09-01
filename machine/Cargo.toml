@@ -1,5 +1,5 @@
 [package]
-name = "vm-prover"
+name = "pico-machine"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,11 @@ categories.workspace = true
 
 
 [dependencies]
+# pico
+pico-chips = { workspace = true }
+pico-configs = { workspace = true }
+
+# p3
 p3-air = { workspace = true}
 p3-field = { workspace = true }
 p3-commit = { workspace = true }
@@ -28,3 +33,9 @@ p3-symmetric = { workspace = true }
 p3-uni-stark = { workspace = true }
 p3-maybe-rayon = { workspace = true }
 p3-bn254-fr = { workspace = true }
+
+# misc
+serde = { version = "1.0.207", features = ["derive"] }
+hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
+itertools = "0.13.0"
+anyhow.workspace = true

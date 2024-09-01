@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "examples",
-    "prover",
-    "runtime",
-    "recursion",
+    "machine",
+    "compiler",
+    "configs",
 ]
 resolver = "2"
 
@@ -28,6 +28,13 @@ debug = true
 debug-assertions = true
 
 [workspace.dependencies]
+# pico
+pico-configs = { path = "configs" }
+pico-machine = { path = "machine" }
+pico-chips = { path = "chips" }
+pico-compiler = { path = "compiler" }
+
+# p3
 p3-air = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
 p3-field = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
 p3-commit = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
@@ -49,6 +56,8 @@ p3-uni-stark = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", bran
 p3-maybe-rayon = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
 p3-bn254-fr = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
 
+# misc
 log = "0.4.21"
 hex = "0.4.3"
+rand = "0.8.5"
 anyhow = { version = "1.0.40", default-features = false }
