@@ -8,16 +8,13 @@
   - The structure that holds the chip's behaviors, interactions, etc;
 - [x] `main`
   - Main trace of chips and its involvement in the proving procedure;
-- [ ] `preprocessed`
-  - Preprocessed trace of chips and its involvement in the proving procedure;
-  - Partially done, need to complete by adding it to the production of `ChunkProof`
 - [x] `BaseProver`
   - The core prover to be called whenever a proof from a machine is needed;
+- [x] quotient
+  - Quotient polynomials and its involvement in the proving procedure;
 - [ ] baseverifier
   - The core verifier to be called whenever a proof from a machine needs to be verified;
   - Ongoing
-- [x] quotient
-  - Quotient polynomials and its involvement in the proving procedure;
 - [ ] core executor migration
   - Migration of the core executor to the `compiler` folder;
   - Need to be able to compile a simple `addition` code;
@@ -44,6 +41,9 @@
   - [ ] Mul
   - [ ] ShiftLeft 
   - [ ] ShiftRight
+- [ ] `preprocessed`
+  - Preprocessed trace of chips and its involvement in the proving procedure;
+  - Partially done, need to complete by adding it to the production of `ChunkProof`
 - [ ] public values
 - [ ] chip ordering
 - [ ] dependencies 
