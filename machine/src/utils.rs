@@ -2,17 +2,18 @@ use core::iter;
 use itertools::Itertools;
 
 use p3_air::Air;
-use p3_matrix::{dense::RowMajorMatrix, stack::VerticalPair, Matrix};
-use p3_util::log2_strict_usize;
-use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
 use p3_commit::PolynomialSpace;
+use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
+use p3_matrix::{dense::RowMajorMatrix, stack::VerticalPair, Matrix};
 use p3_maybe_rayon::prelude::*;
+use p3_util::log2_strict_usize;
 
+use pico_configs::config::{Domain, PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
-use pico_configs::config::{PackedChallenge, StarkGenericConfig, Val, Domain, PackedVal};
-
-use crate::chip::{BaseChip, ChipBehavior};
-use crate::folder::ProverConstraintFolder;
+use crate::{
+    chip::{BaseChip, ChipBehavior},
+    folder::ProverConstraintFolder,
+};
 
 pub fn compute_quotient_values<SC, C, Mat>(
     chip: &BaseChip<Val<SC>, C>,
@@ -84,6 +85,4 @@ where
             })
         })
         .collect()
-
 }
-

@@ -1,5 +1,5 @@
 use p3_matrix::dense::RowMajorMatrix;
-use pico_configs::config::{StarkGenericConfig, Val, Com};
+use pico_configs::config::{Com, StarkGenericConfig, Val};
 
 pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// The commitment to the named traces.

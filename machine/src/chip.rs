@@ -1,9 +1,9 @@
-use p3_air::{Air, BaseAir, AirBuilder};
-use p3_field::{Field, ExtensionField};
+use p3_air::{Air, AirBuilder, BaseAir};
+use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{get_log_quotient_degree, SymbolicAirBuilder};
 
-/// Chip behavior 
+/// Chip behavior
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     /// Returns the name of the chip.
     fn name(&self) -> String;
@@ -22,7 +22,6 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
 /// Chip builder
 pub trait ChipBuilder<F: Field>: AirBuilder<F = F> + Sync {}
 
-
 /// Chip wrapper, includes interactions
 pub struct BaseChip<F: Field, C> {
     /// Underlying chip
@@ -35,14 +34,14 @@ pub struct BaseChip<F: Field, C> {
     log_quotient_degree: usize,
 }
 
-
 impl<F: Field, C> BaseChip<F, C> {
     pub fn new(chip: C) -> Self
     where
         C: ChipBehavior<F> + Air<SymbolicAirBuilder<F>>,
     {
         // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
-        let log_quotient_degree = get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width(), 0);
+        let log_quotient_degree =
+            get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width(), 0);
         Self {
             chip,
             sends: vec![],
@@ -83,7 +82,6 @@ where
     }
 }
 
-
 /// Chip Behavior implementation for the chip
 impl<F, C> ChipBehavior<F> for BaseChip<F, C>
 where
@@ -101,11 +99,7 @@ where
     fn generate_main(&self) -> RowMajorMatrix<F> {
         self.chip.generate_main()
     }
-
 }
-
 
 #[cfg(test)]
-mod test {
-
-}
+mod test {}

@@ -1,7 +1,9 @@
 use p3_air::{AirBuilder, AirBuilderWithPublicValues};
-use p3_field::{Field, AbstractField};
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
-use p3_matrix::stack::VerticalPair;
+use p3_field::{AbstractField, Field};
+use p3_matrix::{
+    dense::{RowMajorMatrix, RowMajorMatrixView},
+    stack::VerticalPair,
+};
 
 use pico_configs::config::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
@@ -61,10 +63,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for ProverConstraint
     }
 }
 
-impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for ProverConstraintFolder<'a, SC> { }
-
-
-
+impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for ProverConstraintFolder<'a, SC> {}
 
 type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixView<'a, T>>;
 
@@ -121,4 +120,4 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for VerifierConstrai
     }
 }
 
-impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for VerifierConstraintFolder<'a, SC> { }
+impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for VerifierConstraintFolder<'a, SC> {}

@@ -1,8 +1,7 @@
-use serde::{Deserialize, Serialize};
 use alloc::vec::Vec;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_configs::config::{StarkGenericConfig, Val, Com, PcsProof, PcsProverData};
-
+use pico_configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
@@ -35,4 +34,3 @@ pub struct ChipOpenedValues<Challenge> {
     pub main_next: Vec<Challenge>,
     pub quotient: Vec<Vec<Challenge>>,
 }
-

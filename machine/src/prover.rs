@@ -1,21 +1,23 @@
+use anyhow::Result;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use anyhow::Result;
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
+use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
 use p3_util::log2_strict_usize;
-use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
 
-use pico_configs::config::{StarkGenericConfig, Val, Com, PcsProof};
+use pico_configs::config::{Com, PcsProof, StarkGenericConfig, Val};
 
-use crate::keys::{BaseProvingKey, BaseVerifyingKey};
-use crate::chip::{BaseChip, ChipBehavior};
-use crate::folder::ProverConstraintFolder;
-use crate::program::Program;
-use crate::proof::{ChunkCommitments, ChunkOpenedValues, ChunkProof, TraceCommitments, ChipOpenedValues};
-use crate::utils::compute_quotient_values;
+use crate::{
+    chip::{BaseChip, ChipBehavior},
+    folder::ProverConstraintFolder,
+    keys::{BaseProvingKey, BaseVerifyingKey},
+    program::Program,
+    proof::{ChipOpenedValues, ChunkCommitments, ChunkOpenedValues, ChunkProof, TraceCommitments},
+    utils::compute_quotient_values,
+};
 
 pub struct BaseProver<SC: StarkGenericConfig, C> {
     config: SC,
@@ -41,12 +43,7 @@ where
         let domains_and_preprocessed = chips_and_preprocessed
             .clone()
             .into_iter()
-            .map(|(_, trace)| {
-                (
-                    pcs.natural_domain_for_degree(trace.height()),
-                    trace
-                )
-            })
+            .map(|(_, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
             .collect::<Vec<_>>();
         let (commit, _) = pcs.commit(domains_and_preprocessed);
 
@@ -55,9 +52,7 @@ where
                 commit: commit.clone(),
                 chips_and_preprocessed,
             },
-            BaseVerifyingKey {
-                commit,
-            }
+            BaseVerifyingKey { commit },
         )
     }
 
@@ -66,9 +61,8 @@ where
         self.chips
             .iter()
             .filter_map(|chip| {
-                chip.generate_preprocessed().map(|trace| {
-                    (chip.name(), trace)
-                })
+                chip.generate_preprocessed()
+                    .map(|trace| (chip.name(), trace))
             })
             .collect::<Vec<_>>()
     }
@@ -76,30 +70,24 @@ where
     pub fn generate_main(&self) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         self.chips
             .iter()
-            .map(|chip| {
-                (chip.name(), chip.generate_main())
-            })
+            .map(|chip| (chip.name(), chip.generate_main()))
             .collect::<Vec<_>>()
     }
 
     pub fn commit(
         &self,
-        chips_and_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>
+        chips_and_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
     ) -> TraceCommitments<SC> {
         let pcs = self.config.pcs();
-        let domains_and_traces = chips_and_traces.clone()
+        let domains_and_traces = chips_and_traces
+            .clone()
             .into_iter()
-            .map(|(name, trace)| {
-                (
-                    pcs.natural_domain_for_degree(trace.height()),
-                    trace
-                )
-            })
+            .map(|(name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
             .collect::<Vec<_>>();
         let (commitment, data) = pcs.commit(domains_and_traces);
         let traces = chips_and_traces
             .into_iter()
-            .map(|(_, trace)| { trace })
+            .map(|(_, trace)| trace)
             .collect::<Vec<_>>();
 
         TraceCommitments {
@@ -109,13 +97,11 @@ where
         }
     }
 
-
     pub fn prove(
         &self,
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
     ) -> Result<ChunkProof<SC>> {
-
         // setup pcs
         let pcs = self.config.pcs();
 
@@ -142,22 +128,19 @@ where
             .collect::<Vec<_>>();
 
         // observation. is the first step necessary?
-        log_degrees
-            .iter()
-            .for_each(
-                |log_degree|
-                challenger.observe(Val::<SC>::from_canonical_usize(*log_degree))
-            );
+        log_degrees.iter().for_each(|log_degree| {
+            challenger.observe(Val::<SC>::from_canonical_usize(*log_degree))
+        });
         challenger.observe(main_commitments.commitment.clone());
 
         // todo: handle permutation here
-
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
 
         /// Handle quotient
         // get quotient degrees
-        let log_quotient_degrees = self.chips
+        let log_quotient_degrees = self
+            .chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
             .collect::<Vec<_>>();
@@ -206,8 +189,7 @@ where
             })
             .collect::<Vec<_>>();
 
-        let (quotient_commit, quotient_data) = pcs
-            .commit(quotient_domains_and_values);
+        let (quotient_commit, quotient_data) = pcs.commit(quotient_domains_and_values);
 
         challenger.observe(quotient_commit.clone());
 
@@ -224,14 +206,13 @@ where
             .collect::<Vec<_>>();
 
         // todo: need to check in more details
-        let (opened_values, opening_proof) = pcs
-            .open(
-                vec![
-                    (&main_commitments.data, main_opening_points),
-                    (&quotient_data, quotient_opening_points),
-                ],
-                challenger,
-            );
+        let (opened_values, opening_proof) = pcs.open(
+            vec![
+                (&main_commitments.data, main_opening_points),
+                (&quotient_data, quotient_opening_points),
+            ],
+            challenger,
+        );
 
         let [main_values, mut quotient_values] = opened_values.try_into().unwrap();
         let main_opened_values = main_values
@@ -251,12 +232,10 @@ where
         let opened_values = main_opened_values
             .into_iter()
             .zip_eq(quotient_opened_values)
-            .map(|((main_local, main_next), quotient)| {
-                ChipOpenedValues {
-                    main_local,
-                    main_next,
-                    quotient,
-                }
+            .map(|((main_local, main_next), quotient)| ChipOpenedValues {
+                main_local,
+                main_next,
+                quotient,
             })
             .collect::<Vec<_>>();
 

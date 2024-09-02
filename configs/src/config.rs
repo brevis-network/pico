@@ -39,7 +39,6 @@ pub type PcsError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenger,
 >>::Error;
 
-
 pub trait StarkGenericConfig: Sync {
     // type Val: Field;
     //

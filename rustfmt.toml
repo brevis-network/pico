@@ -1,0 +1,6 @@
+edition = "2021"
+
+imports_granularity = "Crate"
+max_width = 100
+newline_style = "Unix"
+reorder_imports = true
