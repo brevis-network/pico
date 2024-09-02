@@ -1,10 +1,5 @@
 [workspace]
-members = [
-    "examples",
-    "machine",
-    "compiler",
-    "configs",
-]
+members = ["examples", "machine", "compiler", "configs"]
 resolver = "2"
 
 [workspace.package]
@@ -61,3 +56,4 @@ log = "0.4.21"
 hex = "0.4.3"
 rand = "0.8.5"
 anyhow = { version = "1.0.40", default-features = false }
+itertools = "0.13"

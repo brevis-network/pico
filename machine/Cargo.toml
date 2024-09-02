@@ -9,11 +9,10 @@ categories.workspace = true
 
 [dependencies]
 # pico
-pico-chips = { workspace = true }
 pico-configs = { workspace = true }
 
 # p3
-p3-air = { workspace = true}
+p3-air = { workspace = true }
 p3-field = { workspace = true }
 p3-commit = { workspace = true }
 p3-matrix = { workspace = true }
@@ -39,3 +38,10 @@ serde = { version = "1.0.207", features = ["derive"] }
 hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
 itertools = "0.13.0"
 anyhow.workspace = true
+
+[dev-dependencies]
+# We only used the specific chips in the examples (and tests).
+# It could not be added to the dependencies, since the specific chips need to implement
+# the traits (as `ChipBehavior`), otherwise it causes the cyclic dependency.
+pico-chips = { workspace = true }
+
