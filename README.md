@@ -7,3 +7,7 @@
 - `docs` includes documentations during development of VM;
 - `examples` includes examples that demonstrate the usage of the VMs;
 - `machine` includes main proving logic of VMs based on [Plonky3](https://github.com/Plonky3/Plonky3);
+
+## Development
+- `make fmt` could be used to format the current code.
+- `make lint` could be used to check the code with lint tools.
