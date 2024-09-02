@@ -1,10 +1,11 @@
 // use p3_field::Field;
 // use vm_configs::config_stark::{StarkGenericConfig, Val, Com, PcsProverData, Dom};
 // use crate::prover::Prover;
-//
-// pub enum ToyChipType<F: Field> {
-//     Toy(ToyChip),
-// }
+use pico_chips::toy::ToyChip;
+
+pub enum ToyChipType<F> {
+    Toy(ToyChip<F>),
+}
 //
 // impl<F: Field> ToyChipType<F> {
 //     pub fn machine<SC, C>(config: SC) -> Prover<SC, C>
@@ -13,3 +14,5 @@
 //         Prover::new(config, chips)
 //     }
 // }
+
+fn main() {}
