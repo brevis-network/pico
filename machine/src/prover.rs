@@ -29,6 +29,10 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseProver<SC, C>
 where
     C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
+    pub fn new(config: SC, chips: Vec<BaseChip<Val<SC>, C>>) -> Self {
+        Self { config, chips }
+    }
+
     pub fn config(&self) -> &SC {
         &self.config
     }
@@ -37,7 +41,7 @@ where
         &self.chips
     }
 
-    pub fn setup(&self) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+    pub fn setup_keys(&self) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let pcs = self.config.pcs();
         let chips_and_preprocessed = self.generate_preprocessed();
         let domains_and_preprocessed = chips_and_preprocessed
