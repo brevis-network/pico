@@ -117,22 +117,22 @@ where
         let main_commitments = self.commit(self.generate_main());
         let main_traces = main_commitments.traces;
 
-        let degrees = main_traces
+        let main_degrees = main_traces
             .iter()
             .map(|trace| trace.height())
             .collect::<Vec<_>>();
-        let log_degrees = degrees
+        let log_main_degrees = main_degrees
             .iter()
             .map(|degree| log2_strict_usize(*degree))
             .collect::<Vec<_>>();
 
-        let main_domains = degrees
+        let main_domains = main_degrees
             .iter()
             .map(|degree| pcs.natural_domain_for_degree(*degree))
             .collect::<Vec<_>>();
 
         // observation. is the first step necessary?
-        log_degrees.iter().for_each(|log_degree| {
+        log_main_degrees.iter().for_each(|log_degree| {
             challenger.observe(Val::<SC>::from_canonical_usize(*log_degree))
         });
         challenger.observe(main_commitments.commitment.clone());
@@ -156,7 +156,7 @@ where
         // quotient domains and values
         let quotient_domains = main_domains
             .iter()
-            .zip_eq(log_degrees.iter())
+            .zip_eq(log_main_degrees.iter())
             .zip_eq(log_quotient_degrees.iter())
             .map(|((domain, log_degree), log_quotient_degree)| {
                 domain.create_disjoint_domain(1 << (log_degree + log_quotient_degree))
@@ -189,7 +189,7 @@ where
                 let quotient_flat = RowMajorMatrix::new_col(values).flatten_to_base();
                 let quotient_chunks = domain.split_evals(*degree, quotient_flat);
                 let qc_domains = domain.split_domains(*degree);
-                qc_domains.into_iter().zip_eq(quotient_chunks.into_iter())
+                qc_domains.into_iter().zip_eq(quotient_chunks)
             })
             .collect::<Vec<_>>();
 
@@ -246,13 +246,15 @@ where
         // final chunk proof
         Ok(ChunkProof::<SC> {
             commitments: ChunkCommitments {
-                main: main_commitments.commitment,
-                quotient: quotient_commit,
+                main_commit: main_commitments.commitment,
+                quotient_commit,
             },
             opened_values: ChunkOpenedValues {
                 chips_opened_values: opened_values,
             },
             opening_proof,
+            log_main_degrees,
+            log_quotient_degrees,
         })
     }
 }
