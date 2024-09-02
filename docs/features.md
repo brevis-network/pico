@@ -10,19 +10,19 @@
   - Main trace of chips and its involvement in the proving procedure;
 - [x] `BaseProver`
   - The core prover to be called whenever a proof from a machine is needed;
-- [x] quotient
+- [x] `quotient`
   - Quotient polynomials and its involvement in the proving procedure;
-- [ ] baseverifier
+- [ ] `BaseVerifier`
   - The core verifier to be called whenever a proof from a machine needs to be verified;
   - Ongoing
-- [ ] core executor migration
+- [ ] `Executor` migration for core
   - Migration of the core executor to the `compiler` folder;
   - Need to be able to compile a simple `addition` code;
-- [ ] toychip
+- [ ] `ToyChip`
   - A simple chip that only contains the addition operation;
   - Before core executor ready, could implement the trace generation on its own;
   - After core executor ready, could implement the trace generation as expected (taking `Record` as input);
-- [ ] toymachine
+- [ ] `ToyMachine`
   - A simple machine that only proves the addition program;
   - This is the final target for this stage
 
