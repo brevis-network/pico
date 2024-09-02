@@ -43,7 +43,6 @@ where
     }
 
     (0..quotient_size)
-        .into_iter()
         .step_by(PackedVal::<SC>::WIDTH)
         .flat_map_iter(|i_start| {
             let i_range = i_start..i_start + PackedVal::<SC>::WIDTH;
