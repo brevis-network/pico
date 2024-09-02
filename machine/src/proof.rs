@@ -9,12 +9,14 @@ pub struct ChunkProof<SC: StarkGenericConfig> {
     pub commitments: ChunkCommitments<Com<SC>>,
     pub opened_values: ChunkOpenedValues<SC::Challenge>,
     pub opening_proof: PcsProof<SC>,
+    pub log_main_degrees: Vec<usize>,
+    pub log_quotient_degrees: Vec<usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChunkCommitments<Com> {
-    pub main: Com,
-    pub quotient: Com,
+    pub main_commit: Com,
+    pub quotient_commit: Com,
 }
 
 pub struct TraceCommitments<SC: StarkGenericConfig> {
