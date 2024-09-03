@@ -23,7 +23,7 @@ pub struct BaseProver<SC: StarkGenericConfig, C>
 where
     C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    config: SC,
+    pub config: SC,
 
     chips: Vec<BaseChip<Val<SC>, C>>,
 }
@@ -72,6 +72,26 @@ where
                     .map(|trace| (chip.name(), trace))
             })
             .collect::<Vec<_>>()
+    }
+
+    pub fn setup_keys_for_main(&self) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+        let pcs = self.config.pcs();
+        let chips_and_traces = self.generate_main();
+        let chips_and_traces = chips_and_traces
+            .clone()
+            .into_iter()
+            .map(|(_, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
+            .collect::<Vec<_>>();
+        let (commit, _) = pcs.commit(chips_and_traces);
+
+        (
+            BaseProvingKey {
+                commit: commit.clone(),
+                // TODO:
+                chips_and_preprocessed: vec![],
+            },
+            BaseVerifyingKey { commit },
+        )
     }
 
     pub fn generate_main(&self) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {

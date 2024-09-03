@@ -2,12 +2,11 @@
 
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
-use p3_field::{Field, PrimeField};
+use p3_field::{AbstractField, Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::ParallelIterator;
 use pico_machine::chip::{ChipBehavior, ChipBuilder};
 use std::{marker::PhantomData, mem::size_of};
-use p3_uni_stark::SymbolicAirBuilder;
 
 /// The number of main trace columns for `ToyChip`
 pub const NUM_TOY_COLS: usize = size_of::<ToyCols<u8>>();
@@ -16,7 +15,7 @@ pub const NUM_TOY_COLS: usize = size_of::<ToyCols<u8>>();
 const TOY_CHIP_NAME: &str = "Toy";
 
 /// Testing input events used to generate the main trace
-const INPUT_EVENTS: [[u8; 3]; 3] = [[1, 2, 3], [2, 4, 6], [5, 3, 8]];
+const INPUT_EVENTS: [[u8; 3]; 4] = [[1, 2, 3], [2, 4, 6], [5, 3, 8], [0, 6, 6]];
 
 /// A chip that implements a simple addition for two bytes.
 #[derive(Default)]

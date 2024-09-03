@@ -1,17 +1,23 @@
-use std::marker::PhantomData;
 use p3_air::Air;
+use p3_baby_bear::BabyBear;
 use p3_field::Field;
 use p3_uni_stark::SymbolicAirBuilder;
+use std::marker::PhantomData;
 
-use pico_chips::toy::{ToyChip};
-use pico_configs::config::{StarkGenericConfig, Val};
-use pico_configs::bb_poseidon2::BabyBearPoseidon2;
+use pico_chips::toy::ToyChip;
+use pico_configs::{
+    bb_poseidon2::BabyBearPoseidon2,
+    config::{StarkGenericConfig, Val},
+};
 
-use pico_machine::chip::{BaseChip, ChipBehavior};
-use pico_machine::folder::ProverConstraintFolder;
-use pico_machine::prover::{BaseProver};
-use pico_machine::verifier::{BaseVerifier};
+use pico_machine::{
+    chip::{BaseChip, ChipBehavior},
+    folder::ProverConstraintFolder,
+    prover::BaseProver,
+    verifier::BaseVerifier,
+};
 
+/*
 pub enum ToyChipType<F, C, SC> {
     Toy(ToyChip<F>),
     NON(PhantomData<(C,SC)>)
@@ -39,19 +45,31 @@ where
         ]
     }
 }
+*/
 
 fn main() {
-    let config_p = BabyBearPoseidon2::new();
-    let config_v = BabyBearPoseidon2::new();
-    let chip_type = ToyChipType::Toy(ToyChip::default());
-    let toy_prover = chip_type.get_prover(config_p);
-    let toy_verifier = chip_type.get_verifier(config_v);
+    // Create the prover.
+    let config = BabyBearPoseidon2::new();
+    let chips = vec![BaseChip::<BabyBear, _>::new(ToyChip::default())];
+    let prover = BaseProver::new(config, chips);
+    // Setup PK and VK.
+    let (pk, vk) = prover.setup_keys_for_main();
 
-    let (pk, vk) = toy_prover.setup_keys();
+    // TODO: I know it's strange here, we may figure out to clone BabyBearPoseidon2.
+    let mut challenger = prover.config().challenger();
+    // Generate the proof.
+    let proof = prover.prove(&pk, &mut challenger);
+    println!("Generated the proof");
 
-    let mut challenger = config.challenger();
-    let toy_proof = toy_prover.prove(&pk, &mut challenger);
+    // Create the verifier.
+    // TODO: Clone the BabyBearPoseidon2.
+    let config = prover.config;
+    let chips = vec![BaseChip::<BabyBear, _>::new(ToyChip::default())];
+    let verifier = BaseVerifier::new(config, chips);
 
-    let mut challenger = config.challenger();
-    let result = toy_verifier.verify(&vk, &mut challenger, &toy_proof);
+    // Verify the proof.
+    // TODO: Clone the BabyBearPoseidon2.
+    let mut challenger = verifier.config().challenger();
+    let result = verifier.verify(&vk, &mut challenger, &proof);
+    println!("result = {result:?}");
 }

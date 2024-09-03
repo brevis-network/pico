@@ -148,7 +148,6 @@ where
             let valid_shape = values.main_local.len() == chip.width()
                 && values.main_next.len() == chip.width()
                 && values.quotient.len() == 1 << log_quotient_degree
-                && values.quotient.iter().all(|v| v.len() == chip.width())
                 && values
                     .quotient
                     .iter()

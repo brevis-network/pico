@@ -4,7 +4,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{get_log_quotient_degree, SymbolicAirBuilder};
 
 /// Chip behavior
-pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
+pub trait ChipBehavior<F: Field>: BaseAir<F> + Air<SymbolicAirBuilder<F>> + Sync {
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
@@ -20,7 +20,8 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
 }
 
 /// Chip builder
-pub trait ChipBuilder<F: Field>: AirBuilder<F = F> + Sync {}
+pub trait ChipBuilder<F: Field>: AirBuilder<F = F> {}
+impl<F: Field> ChipBuilder<F> for SymbolicAirBuilder<F> {}
 
 /// Chip wrapper, includes interactions
 pub struct BaseChip<F: Field, C> {
@@ -37,7 +38,7 @@ pub struct BaseChip<F: Field, C> {
 impl<F: Field, C> BaseChip<F, C> {
     pub fn new(chip: C) -> Self
     where
-        C: ChipBehavior<F> + Air<SymbolicAirBuilder<F>>,
+        C: ChipBehavior<F>,
     {
         // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
         let log_quotient_degree =
