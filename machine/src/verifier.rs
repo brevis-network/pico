@@ -19,25 +19,31 @@ use crate::{
 };
 
 /// struct of BaseVerifier where SC specifies type of config and C is not used
-pub struct BaseVerifier<SC: StarkGenericConfig, C> {
-    config: SC,
-    _phantom: PhantomData<C>,
-}
-
-impl<SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseVerifier<SC, C>
+pub struct BaseVerifier<SC, C>
 where
+    SC: StarkGenericConfig,
     C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    /// I want to initialize the verifier with a config.
-    pub fn new(config: SC) -> Self {
-        Self {
-            config,
-            _phantom: PhantomData,
-        }
+    config: SC,
+    chips: Vec<BaseChip<Val<SC>, C>>,
+}
+
+impl<SC, C> BaseVerifier<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+{
+    /// Initialize verifier with the same config and chips as prover.
+    pub fn new(config: SC, chips: Vec<BaseChip<Val<SC>, C>>) -> Self {
+        Self { config, chips }
     }
 
     pub fn config(&self) -> &SC {
         &self.config
+    }
+
+    pub fn chips(&self) -> &[BaseChip<Val<SC>, C>] {
+        &self.chips
     }
 
     pub fn verify(
@@ -45,7 +51,6 @@ where
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
         proof: &ChunkProof<SC>,
-        chips: &[BaseChip<Val<SC>, C>],
     ) -> Result<()> {
         let ChunkProof {
             commitments,
@@ -133,7 +138,7 @@ where
         .map_err(|e| anyhow!("{e:?}"))?;
 
         for (chip, main_domain, quotient_chunk_domain, log_quotient_degree, values) in izip!(
-            chips.iter(),
+            self.chips.iter(),
             main_domains,
             quotient_chunk_domains,
             log_quotient_degrees.iter(),

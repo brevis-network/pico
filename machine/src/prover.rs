@@ -19,7 +19,10 @@ use crate::{
     utils::compute_quotient_values,
 };
 
-pub struct BaseProver<SC: StarkGenericConfig, C> {
+pub struct BaseProver<SC: StarkGenericConfig, C>
+where
+    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+{
     config: SC,
 
     chips: Vec<BaseChip<Val<SC>, C>>,
@@ -105,7 +108,8 @@ where
         &self,
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
-    ) -> Result<ChunkProof<SC>> {
+        //public_values: &'a [Val<SC>]
+    ) -> ChunkProof<SC> {
         // setup pcs
         let pcs = self.config.pcs();
 
@@ -244,7 +248,7 @@ where
             .collect::<Vec<_>>();
 
         // final chunk proof
-        Ok(ChunkProof::<SC> {
+        ChunkProof::<SC> {
             commitments: ChunkCommitments {
                 main_commit: main_commitments.commitment,
                 quotient_commit,
@@ -255,6 +259,6 @@ where
             opening_proof,
             log_main_degrees,
             log_quotient_degrees,
-        })
+        }
     }
 }

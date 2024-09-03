@@ -14,7 +14,7 @@ use crate::chip::ChipBuilder;
 #[derive(Debug)]
 pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub main: RowMajorMatrix<PackedVal<SC>>,
-    pub public_values: &'a Vec<Val<SC>>,
+    pub public_values: &'a [Val<SC>],
     pub is_first_row: PackedVal<SC>,
     pub is_last_row: PackedVal<SC>,
     pub is_transition: PackedVal<SC>,
@@ -59,7 +59,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for ProverConstraint
     type PublicVar = Self::F;
 
     fn public_values(&self) -> &[Self::F] {
-        self.public_values
+        &self.public_values
     }
 }
 

@@ -7,6 +7,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::ParallelIterator;
 use pico_machine::chip::{ChipBehavior, ChipBuilder};
 use std::{marker::PhantomData, mem::size_of};
+use p3_uni_stark::SymbolicAirBuilder;
 
 /// The number of main trace columns for `ToyChip`
 pub const NUM_TOY_COLS: usize = size_of::<ToyCols<u8>>();
@@ -15,7 +16,11 @@ pub const NUM_TOY_COLS: usize = size_of::<ToyCols<u8>>();
 const INPUT_EVENTS: [[u8; 3]; 3] = [[1, 2, 3], [2, 4, 6], [5, 3, 8]];
 
 /// A chip that implements a simple addition for two bytes.
+#[derive(Default)]
 pub struct ToyChip<F>(PhantomData<F>);
+
+// #[derive(Default)]
+// pub struct ToyChip2<F>(PhantomData<F>);
 
 /// The column layout for toy chip
 #[derive(Debug)]
@@ -83,5 +88,6 @@ where
         b.assert_zero(*local.a + *local.b - *local.result);
     }
 }
+
 
 // TODO: add test

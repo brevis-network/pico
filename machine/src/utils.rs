@@ -17,7 +17,7 @@ use crate::{
 
 pub fn compute_quotient_values<SC, C, Mat>(
     chip: &BaseChip<Val<SC>, C>,
-    public_values: &Vec<Val<SC>>,
+    public_values: &[Val<SC>],
     trace_domain: Domain<SC>,
     quotient_domain: Domain<SC>,
     main_on_quotient_domain: Mat,
