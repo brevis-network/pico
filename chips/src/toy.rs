@@ -11,10 +11,14 @@ use std::{marker::PhantomData, mem::size_of};
 /// The number of main trace columns for `ToyChip`
 pub const NUM_TOY_COLS: usize = size_of::<ToyCols<u8>>();
 
+/// The name of toy chip
+const TOY_CHIP_NAME: &str = "Toy";
+
 /// Testing input events used to generate the main trace
 const INPUT_EVENTS: [[u8; 3]; 3] = [[1, 2, 3], [2, 4, 6], [5, 3, 8]];
 
 /// A chip that implements a simple addition for two bytes.
+#[derive(Default)]
 pub struct ToyChip<F>(PhantomData<F>);
 
 /// The column layout for toy chip
@@ -37,7 +41,7 @@ impl<'a, T: Clone> ToyCols<&'a T> {
 
 impl<F: PrimeField> ChipBehavior<F> for ToyChip<F> {
     fn name(&self) -> String {
-        "Toy".to_string()
+        TOY_CHIP_NAME.to_string()
     }
 
     fn generate_preprocessed(&self) -> Option<RowMajorMatrix<F>> {
@@ -84,4 +88,41 @@ where
     }
 }
 
-// TODO: add test
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_baby_bear::BabyBear;
+    use p3_field::AbstractField;
+    use rand::{thread_rng, Rng};
+    use std::array;
+
+    type F = BabyBear;
+
+    #[test]
+    fn test_toy_cols() {
+        let rng = &mut thread_rng();
+
+        let [a, b, result] = array::from_fn(|_| F::from_canonical_u8(rng.gen()));
+        let cols = ToyCols::new(&a, &b, &result);
+
+        assert_eq!(cols.to_row(), [a, b, result]);
+    }
+
+    #[test]
+    fn test_toy_chip() {
+        let chip: ToyChip<F> = ToyChip::default();
+
+        assert_eq!(chip.name(), TOY_CHIP_NAME);
+        assert_eq!(chip.width(), NUM_TOY_COLS);
+
+        let rows = INPUT_EVENTS
+            .into_iter()
+            .flat_map(|cols| cols.map(F::from_canonical_u8))
+            .collect_vec();
+        let expected_trace = RowMajorMatrix::new(rows, NUM_TOY_COLS);
+        let real_trace = chip.generate_main();
+        assert_eq!(real_trace, expected_trace);
+    }
+
+    // TODO: Add tests for proving and verification.
+}
