@@ -32,3 +32,6 @@ p3-bn254-fr.workspace = true
 
 itertools.workspace = true
 pico-machine.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
