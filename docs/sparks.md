@@ -60,7 +60,7 @@
 
 # Detailed Design
 
-- [ ] Should we add `Val` to `SC` or not? Adding it will make development easier but will be riskier since it might introduce inconsistency in other parts of `SC`. Experimental branch at `experimental/generic_chiptype` and is left for future discussion since currently the tradeoff is rather unclear.
+- [ ] Should we add `Val` to `SC` or not. Currently `Val<SC>` is already able to extract the field type from SC instance, thus adding its own `Val` is purely a design choice. Adding it will make development easier but the development will be riskier since it might introduce inconsistency of `Val` against other parts of `SC`. Experimental branch at `experimental/generic_chiptype` and is left for future discussion. 
 - [ ] Necessity to add `col` to each of sub chips in `core/src/alu`;
 - [ ] `Program` defined in `core/src/runtime/program.rs` but implemented in `core/src/disassembler`. `disassembler` should be integrated into `runtime`;
 - [ ] `Instruction` defined in `core/src/runtime/instruction.rs` but implemented in `disassembler`
