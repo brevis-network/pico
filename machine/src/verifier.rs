@@ -19,22 +19,22 @@ use crate::{
 };
 
 /// struct of BaseVerifier where SC specifies type of config and C is not used
-pub struct BaseVerifier<SC, C>
+pub struct BaseVerifier<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    config: SC,
+    config: &'a SC,
     chips: Vec<BaseChip<Val<SC>, C>>,
 }
 
-impl<SC, C> BaseVerifier<SC, C>
+impl<'a, SC, C> BaseVerifier<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
     /// Initialize verifier with the same config and chips as prover.
-    pub fn new(config: SC, chips: Vec<BaseChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: &'a SC, chips: Vec<BaseChip<Val<SC>, C>>) -> Self {
         Self { config, chips }
     }
 
@@ -50,7 +50,7 @@ where
         &self,
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
-        proof: &ChunkProof<SC>,
+        proof: &'a ChunkProof<SC>,
     ) -> Result<()> {
         let ChunkProof {
             commitments,
@@ -193,9 +193,10 @@ where
             );
 
             // todo: public values to be added later
+            let public_values = vec![];
             let mut folder = VerifierConstraintFolder {
                 main,
-                public_values: &vec![],
+                public_values,
                 is_first_row: sels.is_first_row,
                 is_last_row: sels.is_last_row,
                 is_transition: sels.is_transition,

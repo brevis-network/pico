@@ -19,25 +19,25 @@ use crate::{
     utils::compute_quotient_values,
 };
 
-pub struct BaseProver<SC: StarkGenericConfig, C>
+pub struct BaseProver<'a, SC: StarkGenericConfig, C>
 where
-    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    pub config: SC,
+    pub config: &'a SC,
 
     chips: Vec<BaseChip<Val<SC>, C>>,
 }
 
-impl<SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseProver<SC, C>
+impl<'a, SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseProver<'a, SC, C>
 where
-    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    pub fn new(config: SC, chips: Vec<BaseChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: &'a SC, chips: Vec<BaseChip<Val<SC>, C>>) -> Self {
         Self { config, chips }
     }
 
     pub fn config(&self) -> &SC {
-        &self.config
+        self.config
     }
 
     pub fn chips(&self) -> &[BaseChip<Val<SC>, C>] {
@@ -196,7 +196,7 @@ where
                     .to_row_major_matrix();
                 compute_quotient_values(
                     &self.chips[i],
-                    &vec![],
+                    &[],
                     main_domains[i],
                     *quotient_domain,
                     main_on_quotient_domain,

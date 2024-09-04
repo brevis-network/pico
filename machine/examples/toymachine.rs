@@ -49,27 +49,28 @@ where
 
 fn main() {
     // Create the prover.
+    println!("Creating prover");
     let config = BabyBearPoseidon2::new();
     let chips = vec![BaseChip::<BabyBear, _>::new(ToyChip::default())];
-    let prover = BaseProver::new(config, chips);
+    let prover = BaseProver::new(&config, chips);
+
     // Setup PK and VK.
+    println!("Setup PK and VK");
     let (pk, vk) = prover.setup_keys_for_main();
 
-    // TODO: I know it's strange here, we may figure out to clone BabyBearPoseidon2.
-    let mut challenger = prover.config().challenger();
+    println!("Generating proof");
+    let mut challenger = config.challenger();
     // Generate the proof.
     let proof = prover.prove(&pk, &mut challenger);
-    println!("Generated the proof");
 
     // Create the verifier.
-    // TODO: Clone the BabyBearPoseidon2.
-    let config = prover.config;
+    println!("Creating verifier");
     let chips = vec![BaseChip::<BabyBear, _>::new(ToyChip::default())];
-    let verifier = BaseVerifier::new(config, chips);
+    let verifier = BaseVerifier::new(&config, chips);
 
     // Verify the proof.
-    // TODO: Clone the BabyBearPoseidon2.
-    let mut challenger = verifier.config().challenger();
+    println!("Verifying proof");
+    let mut challenger = config.challenger();
     let result = verifier.verify(&vk, &mut challenger, &proof);
-    println!("result = {result:?}");
+    println!("The proof is verified: {}", result.is_ok());
 }

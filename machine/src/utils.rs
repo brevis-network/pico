@@ -15,9 +15,9 @@ use crate::{
     folder::ProverConstraintFolder,
 };
 
-pub fn compute_quotient_values<SC, C, Mat>(
+pub fn compute_quotient_values<'a, SC, C, Mat>(
     chip: &BaseChip<Val<SC>, C>,
-    public_values: &[Val<SC>],
+    public_values: &'a [Val<SC>],
     trace_domain: Domain<SC>,
     quotient_domain: Domain<SC>,
     main_on_quotient_domain: Mat,
@@ -25,7 +25,7 @@ pub fn compute_quotient_values<SC, C, Mat>(
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
-    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
     Mat: Matrix<Val<SC>> + Sync,
 {
     let quotient_size = quotient_domain.size();
