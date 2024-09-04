@@ -12,19 +12,20 @@
   - The core prover to be called whenever a proof from a machine is needed;
 - [x] `quotient`
   - Quotient polynomials and its involvement in the proving procedure;
-- [ ] `BaseVerifier`
+- [x] `BaseVerifier`
   - The core verifier to be called whenever a proof from a machine needs to be verified;
   - Ongoing
-- [ ] `Executor` migration for core
-  - Migration of the core executor to the `compiler` folder;
-  - Need to be able to compile a simple `addition` code;
-- [ ] `ToyChip`
+- [x] `ToyChip`
   - A simple chip that only contains the addition operation;
   - Before core executor ready, could implement the trace generation on its own;
   - After core executor ready, could implement the trace generation as expected (taking `Record` as input);
-- [ ] `ToyMachine`
+- [x] `ToyMachine`
   - A simple machine that only proves the addition program;
   - This is the final target for this stage
+- [ ] `Executor` migration for core
+  - Migration of the core executor to the `compiler` folder;
+  - Need to be able to compile a simple `addition` code;
+  - Integration with `ToyMachine`
 
 ## Fibonacci
 #### Goal
@@ -44,6 +45,7 @@
 - [ ] `preprocessed`
   - Preprocessed trace of chips and its involvement in the proving procedure;
   - Partially done, need to complete by adding it to the production of `ChunkProof`
+- [ ] config extension: M31 field and CSTARK
 - [ ] public values
 - [ ] chip ordering
 - [ ] dependencies 
