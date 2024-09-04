@@ -62,11 +62,22 @@
 - [ ] Shrinking the proof size earlier in the recursion process
 
 
+# Design Choices to be Discussed
 
+- [ ] Adding `Val` to `SC`. 
+  - Currently `Val<SC>` is already able to extract the field type from SC instance, thus adding its own `Val` is purely a design choice. 
+  - Adding it will make development easier but the development will be riskier since it might introduce inconsistency of `Val` against other parts of `SC`. 
+  - Experimental branch at `experimental/generic_chiptype` and is left for future discussion. 
+- [ ] Decompose current `compiler` into `compiler` and `vm`.
+  - Currently `compiler` is containing both the compilation of source code to machine code (e.g., `Rust` to `Program`) and machine code to record (e.g., `Program` to `ExecutionRecord`). 
+  - Decomposing will make it easier to maintain and extend the code.
+  - Meanwhile, necessity needs to be considered since if each of compiler is tightly coupled with the vm, it might be better to keep them together in one folder instead of separating them.
+- [ ] `Deferred` implementation.
+  * Some use cases: [https://www.youtube.com/watch?v=x0-7Y46bQO0](https://www.youtube.com/watch?v=x0-7Y46bQO0)
+  * Could think of how to integrate zk-coprocessor into our VM, which may play a key role in differentiation against other existing VMs.
+  * Also keep in mind it might be useful when multiple proving systems kick in.
 
-# Detailed Design
-
-- [ ] Should we add `Val` to `SC` or not. Currently `Val<SC>` is already able to extract the field type from SC instance, thus adding its own `Val` is purely a design choice. Adding it will make development easier but the development will be riskier since it might introduce inconsistency of `Val` against other parts of `SC`. Experimental branch at `experimental/generic_chiptype` and is left for future discussion. 
+# Detailed Code Org
 - [ ] Necessity to add `col` to each of sub chips in `core/src/alu`;
 - [ ] `Program` defined in `core/src/runtime/program.rs` but implemented in `core/src/disassembler`. `disassembler` should be integrated into `runtime`;
 - [ ] `Instruction` defined in `core/src/runtime/instruction.rs` but implemented in `disassembler`
@@ -76,13 +87,9 @@
 - [ ] `memory` related records are located in `core/src/runtime/memory.rs` but `MemoryAccessRecord` in `record.rs`
 - [ ] `PublicValues` vs. `SP1PublicValues`, and multiple places for “normal” `public_values`
 - [ ] `Events` are located in different places (`event.rs`, `mod.rs`, etc)
-- [ ] `SubproofVerifier` really needed?
-  * Some use cases: [https://www.youtube.com/watch?v=x0-7Y46bQO0](https://www.youtube.com/watch?v=x0-7Y46bQO0)
-  * Deprioritize for now
-  * Keep in mind it might be useful when multiple proving systems kick in
 - [ ] `Instruction` defined in both `recursion/../runtime/instruction.rs` and `core/src/runtime/instruction.rs` , essential reason is they use different `Opcode`. Should consider rename to emphasize differences (e.g., Program is already differentiated: `Program` vs. `RecursionProgram`)
 - [ ] `core/src/alu/lt/mod.rs` L\#104, `type Program = Program` necessary?
-- [ ] `AirBuilder` part is messy"
+- [ ] `AirBuilder` part is messy
 - [ ] `core/src/program/mod.rs`
     * tests: is it really testing anything?
     * necessity: consider merge it directly with `cpuchip` — see no reason for separating it out.
@@ -96,7 +103,7 @@
 - [ ] `AirBuilder` and `Air` should be defined out of core since these are also shared with recursion chips
 - [ ] Necessity for all files in `recursion/core/src/cpu/air/`? Or just implement them in one place? This is a new way of implementation of CpuChip, but it should bring lots of overhead\! Might be able to improve
 - [x] Why `Block` only exist in recursion but not core? Shouldn’t it be used in both cases, or is it redundant?
-  - Recursion VM is handling both 32bits and 128bits (extension field), as opposed to Core VM where only 32bits are handled.
+- Recursion VM is handling both 32bits and 128bits (extension field), as opposed to Core VM where only 32bits are handled.
 - [ ] `CpuChip` same name redefined in recursion. Should specify a new name.
 - [ ] `Poseidon2CompressEvent` and `Poseidon2HashEvent` both in `ExecutionRecord`?
 - [ ] `ExecutionRecord` in recursion should be renamed
