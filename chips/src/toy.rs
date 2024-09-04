@@ -18,7 +18,7 @@ const TOY_CHIP_NAME: &str = "Toy";
 const INPUT_EVENTS: [[u8; 3]; 4] = [[1, 2, 3], [2, 4, 6], [5, 3, 8], [0, 6, 6]];
 
 /// A chip that implements a simple addition for two bytes.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct ToyChip<F>(PhantomData<F>);
 
 // #[derive(Default)]
@@ -42,7 +42,7 @@ impl<'a, T: Clone> ToyCols<&'a T> {
     }
 }
 
-impl<F: PrimeField> ChipBehavior<F> for ToyChip<F> {
+impl<F: Field> ChipBehavior<F> for ToyChip<F> {
     fn name(&self) -> String {
         TOY_CHIP_NAME.to_string()
     }
