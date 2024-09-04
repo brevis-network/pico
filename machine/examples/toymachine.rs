@@ -10,11 +10,12 @@ use pico_configs::{
 };
 use pico_machine::{
     chip::{BaseChip, ChipBehavior, ChipBuilder},
-    folder::ProverConstraintFolder,
+    folder::{ProverConstraintFolder, VerifierConstraintFolder},
     prover::BaseProver,
+    utils::{get_prover, get_verifier},
     verifier::BaseVerifier,
 };
-use std::marker::PhantomData;
+use std::{any::type_name, marker::PhantomData};
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
@@ -41,6 +42,12 @@ impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
             Self::Toy(chip) => chip.generate_main(),
         }
     }
+
+    fn preprocessed_width(&self) -> usize {
+        match self {
+            Self::Toy(chip) => chip.preprocessed_width(),
+        }
+    }
 }
 impl<F: Field> BaseAir<F> for ToyChipType<F> {
     fn width(&self) -> usize {
@@ -49,6 +56,7 @@ impl<F: Field> BaseAir<F> for ToyChipType<F> {
         }
     }
 
+    /// todo: this should not be called. all should go to generate_preprocessed.
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
         match self {
             Self::Toy(chip) => chip.preprocessed_trace(),
@@ -68,42 +76,24 @@ where
     }
 }
 
-/// Factory for creating prover and verifier instances
-trait ProvingFactory<SC: StarkGenericConfig> {
-    /// Create a new prover.
-    fn get_prover(config: &SC) -> BaseProver<SC, ToyChipType<Val<SC>>>;
-
-    /// Create a new verifier.
-    fn get_verifier(config: &SC) -> BaseVerifier<SC, ToyChipType<Val<SC>>>;
-}
-
-impl<SC: StarkGenericConfig> ProvingFactory<SC> for ToyChipType<Val<SC>> {
-    fn get_prover(config: &SC) -> BaseProver<SC, Self> {
-        // }-> BaseProver<'a, SC, Self> {
-        let chips = Self::all_chips();
-
-        BaseProver::new(config, chips)
-    }
-
-    fn get_verifier(config: &SC) -> BaseVerifier<SC, Self> {
-        // }-> BaseProver<'a, SC, Self> {
-        let chips = Self::all_chips();
-
-        BaseVerifier::new(config, chips)
-    }
-}
-
 impl<F: Field> ToyChipType<F> {
     pub fn all_chips() -> Vec<BaseChip<F, Self>> {
         vec![BaseChip::new(Self::Toy(ToyChip::default()))]
     }
 }
 
+fn print_type_of<T>(_: &T) {
+    println!("Type: {}", type_name::<T>());
+}
+
 fn main() {
     // Create the prover.
     println!("Creating prover");
     let config = BabyBearPoseidon2::new();
-    let prover = ToyChipType::get_prover(&config);
+
+    //println!("{:?}", Val<config>);
+    let chips = ToyChipType::all_chips();
+    let prover = get_prover(&config, chips);
 
     // Setup PK and VK.
     println!("Setup PK and VK");
@@ -116,7 +106,9 @@ fn main() {
 
     // Create the verifier.
     println!("Creating verifier");
-    let verifier = ToyChipType::get_verifier(&config);
+    // let verifier = ToyChipType::get_verifier(&config);
+    let chips = ToyChipType::all_chips();
+    let verifier = get_verifier(&config, chips);
 
     // Verify the proof.
     println!("Verifying proof");

@@ -1,5 +1,6 @@
 use core::iter;
 use itertools::Itertools;
+use std::any::type_name;
 
 use p3_air::Air;
 use p3_commit::PolynomialSpace;
@@ -12,9 +13,36 @@ use pico_configs::config::{Domain, PackedChallenge, PackedVal, StarkGenericConfi
 
 use crate::{
     chip::{BaseChip, ChipBehavior},
-    folder::ProverConstraintFolder,
+    folder::{ProverConstraintFolder, VerifierConstraintFolder},
+    prover::BaseProver,
+    verifier::BaseVerifier,
 };
 
+/// Create a new prover.
+pub fn get_prover<'a, SC, C>(
+    config: &'a SC,
+    chips: Vec<BaseChip<Val<SC>, C>>,
+) -> BaseProver<'a, SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>> + Air<ProverConstraintFolder<'a, SC>>,
+{
+    BaseProver::new(config, chips)
+}
+
+/// Create a new verifier.
+pub fn get_verifier<'a, SC, C>(
+    config: &'a SC,
+    chips: Vec<BaseChip<Val<SC>, C>>,
+) -> BaseVerifier<'a, SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>> + Air<VerifierConstraintFolder<'a, SC>>,
+{
+    BaseVerifier::new(config, chips)
+}
+
+/// Compute quotient values for opening proof
 pub fn compute_quotient_values<'a, SC, C, Mat>(
     chip: &BaseChip<Val<SC>, C>,
     public_values: &'a [Val<SC>],
