@@ -38,6 +38,12 @@
 - [ ] **Supporting multiple hashes**
   - Poseidon2
   - Blake (e.g., https://hackmd.io/@starkware-hackmd/SJUbOQj9C)
+- [ ] **Supporting multiple lookup arguments**
+  - GrandProduct
+  - LogUp
+  - LogUp-GKR
+  - etc.
+
 
 ### Recursion
 - [ ] Recursion with precomiples 
