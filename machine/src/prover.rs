@@ -8,6 +8,7 @@ use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
 use p3_util::log2_strict_usize;
 
+use pico_compiler::record::ExecutionRecord;
 use pico_configs::config::{Com, PcsProof, StarkGenericConfig, Val};
 
 use crate::{
@@ -44,9 +45,12 @@ where
         &self.chips
     }
 
-    pub fn setup_keys(&self) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+    pub fn setup_keys(
+        &self,
+        input: &ExecutionRecord,
+    ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let pcs = self.config.pcs();
-        let chips_and_preprocessed = self.generate_preprocessed();
+        let chips_and_preprocessed = self.generate_preprocessed(input);
         let domains_and_preprocessed = chips_and_preprocessed
             .clone()
             .into_iter()
@@ -63,41 +67,24 @@ where
         )
     }
 
-    pub fn generate_preprocessed(&self) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
+    pub fn generate_preprocessed(
+        &self,
+        input: &ExecutionRecord,
+    ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         // todo: double check this to make sure it filters out none preprocessed traces
         self.chips
             .iter()
             .filter_map(|chip| {
-                chip.generate_preprocessed()
+                chip.generate_preprocessed(input)
                     .map(|trace| (chip.name(), trace))
             })
             .collect::<Vec<_>>()
     }
 
-    pub fn setup_keys_for_main(&self) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        let pcs = self.config.pcs();
-        let chips_and_traces = self.generate_main();
-        let chips_and_traces = chips_and_traces
-            .clone()
-            .into_iter()
-            .map(|(_, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
-            .collect::<Vec<_>>();
-        let (commit, _) = pcs.commit(chips_and_traces);
-
-        (
-            BaseProvingKey {
-                commit: commit.clone(),
-                // TODO:
-                chips_and_preprocessed: vec![],
-            },
-            BaseVerifyingKey { commit },
-        )
-    }
-
-    pub fn generate_main(&self) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
+    pub fn generate_main(&self, input: &ExecutionRecord) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         self.chips
             .iter()
-            .map(|chip| (chip.name(), chip.generate_main()))
+            .map(|chip| (chip.name(), chip.generate_main(input)))
             .collect::<Vec<_>>()
     }
 
@@ -128,6 +115,7 @@ where
         &self,
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
+        record: &ExecutionRecord,
         //public_values: &'a [Val<SC>]
     ) -> ChunkProof<SC> {
         // setup pcs
@@ -138,7 +126,7 @@ where
 
         /// Handle Main
         // get main commitments and degrees
-        let main_commitments = self.commit(self.generate_main());
+        let main_commitments = self.commit(self.generate_main(record));
         let main_traces = main_commitments.traces;
 
         let main_degrees = main_traces

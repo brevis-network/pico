@@ -1,21 +1,23 @@
 use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
-use p3_field::{Field, PrimeField};
+use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_uni_stark::SymbolicAirBuilder;
 use pico_chips::toy::ToyChip;
-use pico_configs::{
-    bb_poseidon2::BabyBearPoseidon2,
-    config::{StarkGenericConfig, Val},
-};
+use pico_compiler::{events::alu::AluEvent, opcode::Opcode, record::ExecutionRecord};
+use pico_configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig};
 use pico_machine::{
     chip::{BaseChip, ChipBehavior, ChipBuilder},
-    folder::{ProverConstraintFolder, VerifierConstraintFolder},
-    prover::BaseProver,
     utils::{get_prover, get_verifier},
-    verifier::BaseVerifier,
 };
-use std::{any::type_name, marker::PhantomData};
+use std::{any::type_name, collections::HashMap};
+
+// Testing input events used to generate the main trace
+const TEST_INPUT_EVENTS: [AluEvent; 5] = [
+    AluEvent::new(Opcode::ADD, 1, 2, 3),
+    AluEvent::new(Opcode::SUB, 6, 2, 4),
+    AluEvent::new(Opcode::ADD, 4, 5, 9),
+    AluEvent::new(Opcode::SUB, 6, 6, 0),
+    AluEvent::new(Opcode::SUB, 9, 1, 8),
+];
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
@@ -31,15 +33,15 @@ impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
         }
     }
 
-    fn generate_preprocessed(&self) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
         match self {
-            Self::Toy(chip) => chip.generate_preprocessed(),
+            Self::Toy(chip) => chip.generate_preprocessed(input),
         }
     }
 
-    fn generate_main(&self) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
         match self {
-            Self::Toy(chip) => chip.generate_main(),
+            Self::Toy(chip) => chip.generate_main(input),
         }
     }
 
@@ -87,22 +89,32 @@ fn print_type_of<T>(_: &T) {
 }
 
 fn main() {
+    // Create a test input exection record.
+    let mut record = ExecutionRecord::new();
+    let mut events = HashMap::new();
+    TEST_INPUT_EVENTS.into_iter().for_each(|event| {
+        events
+            .entry(event.opcode)
+            .or_insert_with(Vec::new)
+            .push(event);
+    });
+    record.add_alu_events(events);
+
     // Create the prover.
     println!("Creating prover");
     let config = BabyBearPoseidon2::new();
 
-    //println!("{:?}", Val<config>);
     let chips = ToyChipType::all_chips();
     let prover = get_prover(&config, chips);
 
     // Setup PK and VK.
     println!("Setup PK and VK");
-    let (pk, vk) = prover.setup_keys_for_main();
+    let (pk, vk) = prover.setup_keys(&record);
 
     println!("Generating proof");
     let mut challenger = config.challenger();
     // Generate the proof.
-    let proof = prover.prove(&pk, &mut challenger);
+    let proof = prover.prove(&pk, &mut challenger, &record);
 
     // Create the verifier.
     println!("Creating verifier");

@@ -18,6 +18,15 @@ use crate::{
     verifier::BaseVerifier,
 };
 
+pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<T>) {
+    debug_assert!(values.len() % N == 0);
+    let mut n_real_rows = values.len() / N;
+    if n_real_rows < 16 {
+        n_real_rows = 16;
+    }
+    values.resize(n_real_rows.next_power_of_two() * N, T::default());
+}
+
 /// Create a new prover.
 pub fn get_prover<'a, SC, C>(
     config: &'a SC,

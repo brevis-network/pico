@@ -52,8 +52,9 @@ p3-maybe-rayon = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", br
 p3-bn254-fr = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
 
 # misc
-log = "0.4.21"
-hex = "0.4.3"
-rand = "0.8.5"
 anyhow = { version = "1.0.40", default-features = false }
+hex = "0.4.3"
 itertools = "0.13"
+log = "0.4.21"
+rand = "0.8.5"
+serde = "1.0"

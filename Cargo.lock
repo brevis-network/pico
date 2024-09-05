@@ -767,6 +767,7 @@ dependencies = [
  "p3-symmetric",
  "p3-uni-stark",
  "p3-util",
+ "pico-compiler",
  "pico-machine",
  "rand",
 ]
@@ -774,6 +775,10 @@ dependencies = [
 [[package]]
 name = "pico-compiler"
 version = "0.1.0"
+dependencies = [
+ "p3-field",
+ "serde",
+]
 
 [[package]]
 name = "pico-configs"
@@ -856,6 +861,7 @@ dependencies = [
  "p3-uni-stark",
  "p3-util",
  "pico-chips",
+ "pico-compiler",
  "pico-configs",
  "serde",
 ]

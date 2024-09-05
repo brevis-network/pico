@@ -2,17 +2,18 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{get_log_quotient_degree, SymbolicAirBuilder};
+use pico_compiler::record::ExecutionRecord;
 
 /// Chip behavior
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Air<SymbolicAirBuilder<F>> + Sync {
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
-    fn generate_preprocessed(&self) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, _input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
         None
     }
 
-    fn generate_main(&self) -> RowMajorMatrix<F>;
+    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F>;
 
     fn preprocessed_width(&self) -> usize {
         0
@@ -93,12 +94,12 @@ where
         self.chip.name()
     }
 
-    fn generate_preprocessed(&self) -> Option<RowMajorMatrix<F>> {
-        self.chip.generate_preprocessed()
+    fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
+        self.chip.generate_preprocessed(input)
     }
 
-    fn generate_main(&self) -> RowMajorMatrix<F> {
-        self.chip.generate_main()
+    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
+        self.chip.generate_main(input)
     }
 }
 
