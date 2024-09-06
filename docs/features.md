@@ -42,6 +42,7 @@
   - [ ] Mul
   - [ ] ShiftLeft 
   - [ ] ShiftRight
+  - [ ] Memory
 - [ ] `preprocessed`
   - Preprocessed trace of chips and its involvement in the proving procedure;
   - Partially done, need to complete by adding it to the production of `ChunkProof`
@@ -59,12 +60,14 @@
 #### Goal
 - Pico-VM should be able to prove a Fibonacci program with huge workload (thus need to be chunked) in this stage.
 #### Features
-- [ ] chunking
+- [ ] Supporting chunking
   - [ ] baseprover
   - [ ] baseverifier
   - [ ] proofs
+  - [ ] chips
 - [ ] recursion executor migration
 - [ ] compiler detach
+- [ ] deferred proofs
 
 ## Anytime
 #### Goal
