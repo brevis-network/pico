@@ -22,15 +22,17 @@
 - [x] `ToyMachine`
   - A simple machine that only proves the addition program;
   - This is the final target for this stage
-- [ ] `Executor` migration for core
-  - Migration of the core executor to the `compiler` folder;
-  - Need to be able to compile a simple `addition` code;
-  - Integration with `ToyMachine`
+- [ ] `ExecutionRecord` simulation
+  - Simulate `ExecutionRecord` in the `ToyMachine` to generate the trace;
 
 ## Fibonacci
 #### Goal
 - Pico-VM should be able to prove a small Fibonacci program in this stage.
 #### Features
+- [ ] `Executor` migration for core
+  - Migration of the core executor to the `compiler` folder;
+  - Need to be able to compile a simple `addition` code;
+  - Integration with `ToyMachine`
 - [ ] chips for Fibonacci
   - [ ] CPU (main heavy-lifting part)
   - [ ] Program
