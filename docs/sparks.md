@@ -79,6 +79,7 @@
 
 # Detailed Code Org
 
+- [ ] Rename `PairCol` since the current name makes little sense;
 - [ ] Necessity to add `col` to each of sub chips in `core/src/alu`;
 - [ ] `Program` defined in `core/src/runtime/program.rs` but implemented in `core/src/disassembler`. `disassembler` should be integrated into `runtime`;
 - [ ] `Instruction` defined in `core/src/runtime/instruction.rs` but implemented in `disassembler`
