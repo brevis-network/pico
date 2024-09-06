@@ -12,7 +12,7 @@ use p3_util::log2_strict_usize;
 use pico_configs::config::{Domain, PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
 use crate::{
-    chip::{BaseChip, ChipBehavior},
+    chip::{MetaChip, ChipBehavior},
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
     prover::BaseProver,
     verifier::BaseVerifier,
@@ -30,7 +30,7 @@ pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<
 /// Create a new prover.
 pub fn get_prover<'a, SC, C>(
     config: &'a SC,
-    chips: Vec<BaseChip<Val<SC>, C>>,
+    chips: Vec<MetaChip<Val<SC>, C>>,
 ) -> BaseProver<'a, SC, C>
 where
     SC: StarkGenericConfig,
@@ -42,7 +42,7 @@ where
 /// Create a new verifier.
 pub fn get_verifier<'a, SC, C>(
     config: &'a SC,
-    chips: Vec<BaseChip<Val<SC>, C>>,
+    chips: Vec<MetaChip<Val<SC>, C>>,
 ) -> BaseVerifier<'a, SC, C>
 where
     SC: StarkGenericConfig,
@@ -53,7 +53,7 @@ where
 
 /// Compute quotient values for opening proof
 pub fn compute_quotient_values<'a, SC, C, Mat>(
-    chip: &BaseChip<Val<SC>, C>,
+    chip: &MetaChip<Val<SC>, C>,
     public_values: &'a [Val<SC>],
     trace_domain: Domain<SC>,
     quotient_domain: Domain<SC>,

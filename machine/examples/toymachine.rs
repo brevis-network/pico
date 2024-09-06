@@ -5,7 +5,7 @@ use pico_chips::toy::ToyChip;
 use pico_compiler::{events::alu::AluEvent, opcode::Opcode, record::ExecutionRecord};
 use pico_configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig};
 use pico_machine::{
-    chip::{BaseChip, ChipBehavior, ChipBuilder},
+    chip::{MetaChip, ChipBehavior, ChipBuilder},
     utils::{get_prover, get_verifier},
 };
 use std::{any::type_name, collections::HashMap};
@@ -23,8 +23,8 @@ pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
 }
 
-// NOTE: These trait implementations are used to save this `ToyChipType` to `BaseChip`.
-// Since BaseChip has a generic parameter which is one type (cannot be two chip types).
+// NOTE: These trait implementations are used to save this `ToyChipType` to `MetaChip`.
+// Since MetaChip has a generic parameter which is one type (cannot be two chip types).
 // This code is annoyed, we could refactor to use macro later (but less readable).
 impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
     fn name(&self) -> String {
@@ -79,8 +79,8 @@ where
 }
 
 impl<F: Field> ToyChipType<F> {
-    pub fn all_chips() -> Vec<BaseChip<F, Self>> {
-        vec![BaseChip::new(Self::Toy(ToyChip::default()))]
+    pub fn all_chips() -> Vec<MetaChip<F, Self>> {
+        vec![MetaChip::new(Self::Toy(ToyChip::default()))]
     }
 }
 

@@ -4,7 +4,7 @@
 #### Goal
 - Pico-VM should be able to prove a simple addition program in the first stage.
 #### Features
-- [x] `BaseChip`
+- [x] `MetaChip`
   - The structure that holds the chip's behaviors, interactions, etc;
 - [x] `main`
   - Main trace of chips and its involvement in the proving procedure;

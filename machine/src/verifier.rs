@@ -12,7 +12,7 @@ use pico_configs::config::{StarkGenericConfig, Val};
 use std::marker::PhantomData;
 
 use crate::{
-    chip::{BaseChip, ChipBehavior},
+    chip::{MetaChip, ChipBehavior},
     folder::VerifierConstraintFolder,
     keys::{BaseProvingKey, BaseVerifyingKey},
     proof::{ChipOpenedValues, ChunkCommitments, ChunkOpenedValues, ChunkProof, TraceCommitments},
@@ -25,7 +25,7 @@ where
     C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
     config: &'a SC,
-    chips: Vec<BaseChip<Val<SC>, C>>,
+    chips: Vec<MetaChip<Val<SC>, C>>,
 }
 
 impl<'a, SC, C> BaseVerifier<'a, SC, C>
@@ -34,7 +34,7 @@ where
     C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
     /// Initialize verifier with the same config and chips as prover.
-    pub fn new(config: &'a SC, chips: Vec<BaseChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: &'a SC, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
         Self { config, chips }
     }
 
@@ -42,7 +42,7 @@ where
         &self.config
     }
 
-    pub fn chips(&self) -> &[BaseChip<Val<SC>, C>] {
+    pub fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
         &self.chips
     }
 

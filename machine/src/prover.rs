@@ -12,7 +12,7 @@ use pico_compiler::record::ExecutionRecord;
 use pico_configs::config::{Com, PcsProof, StarkGenericConfig, Val};
 
 use crate::{
-    chip::{BaseChip, ChipBehavior},
+    chip::{MetaChip, ChipBehavior},
     folder::ProverConstraintFolder,
     keys::{BaseProvingKey, BaseVerifyingKey},
     program::Program,
@@ -26,14 +26,14 @@ where
 {
     pub config: &'a SC,
 
-    chips: Vec<BaseChip<Val<SC>, C>>,
+    chips: Vec<MetaChip<Val<SC>, C>>,
 }
 
 impl<'a, SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseProver<'a, SC, C>
 where
     C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    pub fn new(config: &'a SC, chips: Vec<BaseChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: &'a SC, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
         Self { config, chips }
     }
 
@@ -41,7 +41,7 @@ where
         self.config
     }
 
-    pub fn chips(&self) -> &[BaseChip<Val<SC>, C>] {
+    pub fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
         &self.chips
     }
 

@@ -25,7 +25,7 @@ pub trait ChipBuilder<F: Field>: AirBuilder<F = F> {}
 impl<F: Field> ChipBuilder<F> for SymbolicAirBuilder<F> {}
 
 /// Chip wrapper, includes interactions
-pub struct BaseChip<F: Field, C> {
+pub struct MetaChip<F: Field, C> {
     /// Underlying chip
     chip: C,
     // Interactions that the chip sends, ignore for now
@@ -36,7 +36,7 @@ pub struct BaseChip<F: Field, C> {
     log_quotient_degree: usize,
 }
 
-impl<F: Field, C> BaseChip<F, C> {
+impl<F: Field, C> MetaChip<F, C> {
     pub fn new(chip: C) -> Self
     where
         C: ChipBehavior<F>,
@@ -58,7 +58,7 @@ impl<F: Field, C> BaseChip<F, C> {
 }
 
 /// BaseAir implementation for the chip
-impl<F, C> BaseAir<F> for BaseChip<F, C>
+impl<F, C> BaseAir<F> for MetaChip<F, C>
 where
     F: Field,
     C: BaseAir<F>,
@@ -73,7 +73,7 @@ where
 }
 
 /// Air implementation for the chip
-impl<F, C, CB> Air<CB> for BaseChip<F, C>
+impl<F, C, CB> Air<CB> for MetaChip<F, C>
 where
     F: Field,
     C: Air<CB>,
@@ -85,7 +85,7 @@ where
 }
 
 /// Chip Behavior implementation for the chip
-impl<F, C> ChipBehavior<F> for BaseChip<F, C>
+impl<F, C> ChipBehavior<F> for MetaChip<F, C>
 where
     F: Field,
     C: ChipBehavior<F>,

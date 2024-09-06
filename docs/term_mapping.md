@@ -12,7 +12,7 @@
 | lift + join    | compress + shrink            | compress + combine              | machine    |
 |                | Interaction                  | (Base)Interaction               | chip       |
 |                | RiscvAir / RecursionAir      | (Base)ChipType                  | chip       |
-|                | Chip                         | BaseChip                        | chip       |
+|                | Chip                         | MetaChip                        | chip       |
 |                | MachineAir                   | ChipBehavior                    | chip       |
 | identity_p254  | wrap_bn254                   | embed_bn254                     | compiler   |
 | stark_to_snark | wrap_plonk_bn254             | convert_groth16                 | compiler   |
