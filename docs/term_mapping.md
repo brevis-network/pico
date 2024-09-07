@@ -9,7 +9,7 @@
 |                | SP1Prover                    | (Brevis)Machine                 | machine    |
 | Receipt        | Proof                        | (Base)Proof                     | machine    |
 | prove_segment  | prove_core                   | prove_chunk                     | machine    |
-| lift + join    | compress + shrink            | compress + combine              | machine    |
+| lift + join    | compress + shrink            | combine + compress              | machine    |
 |                | Interaction                  | (Base)Interaction               | chip       |
 |                | RiscvAir / RecursionAir      | (Base)ChipType                  | chip       |
 |                | Chip                         | MetaChip                        | chip       |
