@@ -27,12 +27,14 @@
 
 ## Fibonacci
 #### Goal
-- Pico-VM should be able to prove a small Fibonacci program in this stage.
+- Pico-VM should be able to prove a small Fibonacci program at this stage.
 #### Features
-- [ ] `Executor` migration for core
-  - Migration of the core executor to the `compiler` folder;
-  - Need to be able to compile a simple `addition` code;
-  - Integration with `ToyMachine`
+- [ ] Core `Executor`
+  - [ ] Migration of the core executor to the `compiler` folder;
+  - [ ] Integration with current `ToyMachine`
+- [ ] Abstraction framework update
+  - [ ] machine type/behavior
+  - [ ] proofs type/behavior
 - [ ] chips for Fibonacci
   - [ ] CPU (main heavy-lifting part)
   - [ ] Program
@@ -48,27 +50,48 @@
 - [ ] `preprocessed`
   - Preprocessed trace of chips and its involvement in the proving procedure;
   - Partially done, need to complete by adding it to the production of `ChunkProof`
-- [ ] config extension: M31 field and CSTARK
 - [ ] public values
 - [ ] chip ordering
 - [ ] dependencies 
 - [ ] lookups (need to be carefully handled)
   - [ ] interactions
   - [ ] permutation 
-    - [ ] traces
+    - [ ] traces generation
     - [ ] eval
 
-## Large fibonacci
+## Large Fibonacci
 #### Goal
-- Pico-VM should be able to prove a Fibonacci program with huge workload (thus need to be chunked) in this stage.
+- Pico-VM should be able to prove a Fibonacci program with huge workload (thus need to be chunked) at this stage.
 #### Features
-- [ ] Supporting chunking
-  - [ ] baseprover
-  - [ ] baseverifier
-  - [ ] proofs
+- [ ] Chunking support for base machine
   - [ ] chips
-- [ ] recursion executor migration
-- [ ] compiler detach
+  - [ ] machine
+- [ ] Concrete instantiation
+  - [ ] BaseMachine
+  - [ ] CompressMachine
+  - [ ] CombineMachine
+  - [ ] EmbedMachine
+  - [ ] Wrap - need to be a machine?
+  - [ ] PicoMachine, not exactly a machine type but a wrapper of various machines to support own logic
+- [ ] Recursion `Executor` 
+  - [ ] migration
+  - [ ] detach to compiler
+- [ ] Executor abstraction
+
+## Performance Optimization
+#### Goal
+- Pico-VM should be thuroughly profiled and optimized to perform on-par with existing system (CPU version).
+#### Features
+- [ ] Complete profiling
+  - [ ] proof sizes
+  - [ ] chip workload
+  - [ ] cpu time
+  - [ ] user time
+- [ ] Adding parallelization
+- [ ] Deferred proofs
+- [ ] config extension: M31 field and CSTARK
+- [ ] batch opening and verifying (mmcs)
+- [ ] logup-gkr integration
 - [ ] deferred proofs
 
 ## Anytime
@@ -78,11 +101,5 @@
 #### Compiler Features
 - [ ] Zirgen - circuits
 
-#### Prover Features
-- [ ] batch opening and verifying (mmcs)
-- [ ] multiple fields/starks
-- [ ] logup-gkr
-- [ ] deferred proofs
 
-#### Others
-- [ ] Parallelism
+
