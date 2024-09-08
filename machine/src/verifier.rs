@@ -12,10 +12,10 @@ use pico_configs::config::{StarkGenericConfig, Val};
 use std::marker::PhantomData;
 
 use crate::{
-    chip::{MetaChip, ChipBehavior},
+    chip::{ChipBehavior, MetaChip},
     folder::VerifierConstraintFolder,
     keys::{BaseProvingKey, BaseVerifyingKey},
-    proof::{ChipOpenedValues, ChunkCommitments, ChunkOpenedValues, ChunkProof, TraceCommitments},
+    proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, TraceCommitments},
 };
 
 /// struct of BaseVerifier where SC specifies type of config and C is not used
@@ -25,7 +25,7 @@ where
     C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
     config: &'a SC,
-    chips: Vec<MetaChip<Val<SC>, C>>,
+    chips: &'a [MetaChip<Val<SC>, C>],
 }
 
 impl<'a, SC, C> BaseVerifier<'a, SC, C>
@@ -34,25 +34,25 @@ where
     C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
     /// Initialize verifier with the same config and chips as prover.
-    pub fn new(config: &'a SC, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: &'a SC, chips: &'a [MetaChip<Val<SC>, C>]) -> Self {
         Self { config, chips }
     }
 
     pub fn config(&self) -> &SC {
-        &self.config
+        self.config
     }
 
     pub fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
-        &self.chips
+        self.chips
     }
 
     pub fn verify(
         &self,
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
-        proof: &'a ChunkProof<SC>,
+        proof: &'a BaseProof<SC>,
     ) -> Result<()> {
-        let ChunkProof {
+        let BaseProof {
             commitments,
             opened_values,
             opening_proof,
@@ -69,7 +69,7 @@ where
             challenger.observe(Val::<SC>::from_canonical_usize(*log_main_degree))
         });
 
-        let ChunkCommitments {
+        let BaseCommitments {
             main_commit,
             quotient_commit,
         } = commitments;

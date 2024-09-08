@@ -5,7 +5,7 @@ use pico_chips::toy::ToyChip;
 use pico_compiler::{events::alu::AluEvent, opcode::Opcode, record::ExecutionRecord};
 use pico_configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig};
 use pico_machine::{
-    chip::{MetaChip, ChipBehavior, ChipBuilder},
+    chip::{ChipBehavior, ChipBuilder, MetaChip},
     utils::{get_prover, get_verifier},
 };
 use std::{any::type_name, collections::HashMap};
@@ -105,7 +105,7 @@ fn main() {
     let config = BabyBearPoseidon2::new();
 
     let chips = ToyChipType::all_chips();
-    let prover = get_prover(&config, chips);
+    let prover = get_prover(&config, &chips);
 
     // Setup PK and VK.
     println!("Setup PK and VK");
@@ -119,8 +119,8 @@ fn main() {
     // Create the verifier.
     println!("Creating verifier");
     // let verifier = ToyChipType::get_verifier(&config);
-    let chips = ToyChipType::all_chips();
-    let verifier = get_verifier(&config, chips);
+    //let chips = ToyChipType::all_chips();
+    let verifier = get_verifier(&config, &chips);
 
     // Verify the proof.
     println!("Verifying proof");

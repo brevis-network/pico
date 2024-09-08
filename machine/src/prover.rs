@@ -12,11 +12,11 @@ use pico_compiler::record::ExecutionRecord;
 use pico_configs::config::{Com, PcsProof, StarkGenericConfig, Val};
 
 use crate::{
-    chip::{MetaChip, ChipBehavior},
+    chip::{ChipBehavior, MetaChip},
     folder::ProverConstraintFolder,
     keys::{BaseProvingKey, BaseVerifyingKey},
     program::Program,
-    proof::{ChipOpenedValues, ChunkCommitments, ChunkOpenedValues, ChunkProof, TraceCommitments},
+    proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, TraceCommitments},
     utils::compute_quotient_values,
 };
 
@@ -24,16 +24,16 @@ pub struct BaseProver<'a, SC: StarkGenericConfig, C>
 where
     C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    pub config: &'a SC,
+    config: &'a SC,
 
-    chips: Vec<MetaChip<Val<SC>, C>>,
+    chips: &'a [MetaChip<Val<SC>, C>],
 }
 
 impl<'a, SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseProver<'a, SC, C>
 where
     C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    pub fn new(config: &'a SC, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: &'a SC, chips: &'a [MetaChip<Val<SC>, C>]) -> Self {
         Self { config, chips }
     }
 
@@ -42,7 +42,7 @@ where
     }
 
     pub fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
-        &self.chips
+        self.chips
     }
 
     pub fn setup_keys(
@@ -117,7 +117,7 @@ where
         challenger: &mut SC::Challenger,
         record: &ExecutionRecord,
         //public_values: &'a [Val<SC>]
-    ) -> ChunkProof<SC> {
+    ) -> BaseProof<SC> {
         // setup pcs
         let pcs = self.config.pcs();
 
@@ -255,13 +255,13 @@ where
             })
             .collect::<Vec<_>>();
 
-        // final chunk proof
-        ChunkProof::<SC> {
-            commitments: ChunkCommitments {
+        // final base proof
+        BaseProof::<SC> {
+            commitments: BaseCommitments {
                 main_commit: main_commitments.commitment,
                 quotient_commit,
             },
-            opened_values: ChunkOpenedValues {
+            opened_values: BaseOpenedValues {
                 chips_opened_values: opened_values,
             },
             opening_proof,
