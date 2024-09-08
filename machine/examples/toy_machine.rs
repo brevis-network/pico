@@ -3,10 +3,14 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::toy::ToyChip;
 use pico_compiler::{events::alu::AluEvent, opcode::Opcode, record::ExecutionRecord};
-use pico_configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig};
+use pico_configs::{
+    bb_poseidon2::BabyBearPoseidon2,
+    config::{StarkGenericConfig, Val},
+};
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
-    utils::{get_prover, get_verifier},
+    machine::{MachineBehavior, SimpleMachine},
+    proof::ElementProof,
 };
 use std::{any::type_name, collections::HashMap};
 
@@ -100,31 +104,25 @@ fn main() {
     });
     record.add_alu_events(events);
 
-    // Create the prover.
-    println!("Creating prover");
+    // Setup config and chips.
+    println!("Creating SimpleMachine..");
     let config = BabyBearPoseidon2::new();
-
     let chips = ToyChipType::all_chips();
-    let prover = get_prover(&config, &chips);
 
-    // Setup PK and VK.
-    println!("Setup PK and VK");
-    let (pk, vk) = prover.setup_keys(&record);
+    // Create a new machine based on config and chips
+    let simple_machine = SimpleMachine::new(config, chips);
+    println!("{} created.", simple_machine.name());
 
-    println!("Generating proof");
-    let mut challenger = config.challenger();
+    // Setup machine prover, verifier, pk and vk.
+    println!("Setup machine..");
+    let (pk, vk) = simple_machine.setup(&record);
+
     // Generate the proof.
-    let proof = prover.prove(&pk, &mut challenger, &record);
-
-    // Create the verifier.
-    println!("Creating verifier");
-    // let verifier = ToyChipType::get_verifier(&config);
-    //let chips = ToyChipType::all_chips();
-    let verifier = get_verifier(&config, &chips);
+    println!("Generating proof..");
+    let proof = simple_machine.prove(&record, &pk);
+    println!("{} generated.", proof.name());
 
     // Verify the proof.
-    println!("Verifying proof");
-    let mut challenger = config.challenger();
-    let result = verifier.verify(&vk, &mut challenger, &proof);
+    let result = simple_machine.verify(&proof, &vk);
     println!("The proof is verified: {}", result.is_ok());
 }

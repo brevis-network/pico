@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 pub struct MetaProof<'a, SC, P>
 where
     SC: StarkGenericConfig,
-    P: ProofBehavior<SC>,
 {
     /// The configuration of the proof
     pub config: &'a SC,
@@ -48,6 +47,12 @@ pub struct ElementProof<SC: StarkGenericConfig> {
 impl<SC: StarkGenericConfig> ProofBehavior<SC> for ElementProof<SC> {
     fn name(&self) -> String {
         "ElementProof".to_string()
+    }
+}
+
+impl<SC: StarkGenericConfig> ElementProof<SC> {
+    pub fn new(proof: BaseProof<SC>) -> Self {
+        Self { proof }
     }
 }
 

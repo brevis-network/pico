@@ -5,6 +5,7 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{AbstractExtensionField, AbstractField, PackedValue};
+use p3_fri::FriConfig;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
 use p3_util::log2_strict_usize;
 
@@ -20,37 +21,31 @@ use crate::{
     utils::compute_quotient_values,
 };
 
-pub struct BaseProver<'a, SC: StarkGenericConfig, C>
-where
-    C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+pub struct BaseProver<SC, C>
+// where
+//     C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    config: &'a SC,
-
-    chips: &'a [MetaChip<Val<SC>, C>],
+    _phantom: std::marker::PhantomData<(SC, C)>,
 }
 
-impl<'a, SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseProver<'a, SC, C>
+impl<SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseProver<SC, C>
 where
-    C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    pub fn new(config: &'a SC, chips: &'a [MetaChip<Val<SC>, C>]) -> Self {
-        Self { config, chips }
-    }
-
-    pub fn config(&self) -> &SC {
-        self.config
-    }
-
-    pub fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
-        self.chips
+    pub fn new() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     pub fn setup_keys(
         &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
         input: &ExecutionRecord,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        let pcs = self.config.pcs();
-        let chips_and_preprocessed = self.generate_preprocessed(input);
+        let pcs = config.pcs();
+        let chips_and_preprocessed = self.generate_preprocessed(chips, input);
         let domains_and_preprocessed = chips_and_preprocessed
             .clone()
             .into_iter()
@@ -69,10 +64,11 @@ where
 
     pub fn generate_preprocessed(
         &self,
+        chips: &[MetaChip<Val<SC>, C>],
         input: &ExecutionRecord,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         // todo: double check this to make sure it filters out none preprocessed traces
-        self.chips
+        chips
             .iter()
             .filter_map(|chip| {
                 chip.generate_preprocessed(input)
@@ -81,8 +77,12 @@ where
             .collect::<Vec<_>>()
     }
 
-    pub fn generate_main(&self, input: &ExecutionRecord) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
-        self.chips
+    pub fn generate_main(
+        &self,
+        chips: &[MetaChip<Val<SC>, C>],
+        input: &ExecutionRecord,
+    ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
+        chips
             .iter()
             .map(|chip| (chip.name(), chip.generate_main(input)))
             .collect::<Vec<_>>()
@@ -90,9 +90,10 @@ where
 
     pub fn commit(
         &self,
+        config: &SC,
         chips_and_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
     ) -> TraceCommitments<SC> {
-        let pcs = self.config.pcs();
+        let pcs = config.pcs();
         let domains_and_traces = chips_and_traces
             .clone()
             .into_iter()
@@ -113,20 +114,22 @@ where
 
     pub fn prove(
         &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         record: &ExecutionRecord,
         //public_values: &'a [Val<SC>]
     ) -> BaseProof<SC> {
         // setup pcs
-        let pcs = self.config.pcs();
+        let pcs = config.pcs();
 
         // observe preprocessed traces
         challenger.observe(pk.commit.clone());
 
         /// Handle Main
         // get main commitments and degrees
-        let main_commitments = self.commit(self.generate_main(record));
+        let main_commitments = self.commit(config, self.generate_main(chips, record));
         let main_traces = main_commitments.traces;
 
         let main_degrees = main_traces
@@ -155,8 +158,7 @@ where
 
         /// Handle quotient
         // get quotient degrees
-        let log_quotient_degrees = self
-            .chips
+        let log_quotient_degrees = chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
             .collect::<Vec<_>>();
@@ -183,7 +185,7 @@ where
                     .get_evaluations_on_domain(&main_commitments.data, i, *quotient_domain)
                     .to_row_major_matrix();
                 compute_quotient_values(
-                    &self.chips[i],
+                    &chips[i],
                     &[],
                     main_domains[i],
                     *quotient_domain,

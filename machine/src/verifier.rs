@@ -19,38 +19,33 @@ use crate::{
 };
 
 /// struct of BaseVerifier where SC specifies type of config and C is not used
-pub struct BaseVerifier<'a, SC, C>
-where
-    SC: StarkGenericConfig,
-    C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+pub struct BaseVerifier<SC, C>
+// where
+//     SC: StarkGenericConfig,
+//     C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
-    config: &'a SC,
-    chips: &'a [MetaChip<Val<SC>, C>],
+    _phantom: std::marker::PhantomData<(SC, C)>,
 }
 
-impl<'a, SC, C> BaseVerifier<'a, SC, C>
+impl<SC, C> BaseVerifier<SC, C>
 where
     SC: StarkGenericConfig,
-    C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
 {
     /// Initialize verifier with the same config and chips as prover.
-    pub fn new(config: &'a SC, chips: &'a [MetaChip<Val<SC>, C>]) -> Self {
-        Self { config, chips }
-    }
-
-    pub fn config(&self) -> &SC {
-        self.config
-    }
-
-    pub fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
-        self.chips
+    pub fn new() -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
     }
 
     pub fn verify(
         &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
-        proof: &'a BaseProof<SC>,
+        proof: &BaseProof<SC>,
     ) -> Result<()> {
         let BaseProof {
             commitments,
@@ -60,7 +55,7 @@ where
             log_quotient_degrees,
         } = proof;
 
-        let pcs = self.config.pcs();
+        let pcs = config.pcs();
 
         // observe preprocessed traces
         challenger.observe(vk.commit.clone());
@@ -138,7 +133,7 @@ where
         .map_err(|e| anyhow!("{e:?}"))?;
 
         for (chip, main_domain, quotient_chunk_domain, log_quotient_degree, values) in izip!(
-            self.chips.iter(),
+            chips.iter(),
             main_domains,
             quotient_chunk_domains,
             log_quotient_degrees.iter(),

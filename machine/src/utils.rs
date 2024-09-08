@@ -31,29 +31,23 @@ pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<
     values.resize(n_real_rows.next_power_of_two() * N, T::default());
 }
 
-/// Create a new prover.
-pub fn get_prover<'a, SC, C>(
-    config: &'a SC,
-    chips: &'a [MetaChip<Val<SC>, C>],
-) -> BaseProver<'a, SC, C>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>> + Air<ProverConstraintFolder<'a, SC>>,
-{
-    BaseProver::new(config, chips)
-}
-
-/// Create a new verifier.
-pub fn get_verifier<'a, SC, C>(
-    config: &'a SC,
-    chips: &'a [MetaChip<Val<SC>, C>],
-) -> BaseVerifier<'a, SC, C>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>> + Air<VerifierConstraintFolder<'a, SC>>,
-{
-    BaseVerifier::new(config, chips)
-}
+// /// Create a new prover.
+// pub fn get_prover<SC, C>() -> BaseProver<SC, C>
+// {
+//     BaseProver::new(config, chips)
+// }
+//
+// /// Create a new verifier.
+// pub fn get_verifier<'a, SC, C>(
+//     config: &'a SC,
+//     chips: &'a [MetaChip<Val<SC>, C>],
+// ) -> BaseVerifier<'a, SC, C>
+// where
+//     SC: StarkGenericConfig,
+//     C: ChipBehavior<Val<SC>> + Air<VerifierConstraintFolder<'a, SC>>,
+// {
+//     BaseVerifier::new(config, chips)
+// }
 
 /// Compute quotient values for opening proof
 pub fn compute_quotient_values<'a, SC, C, Mat>(
