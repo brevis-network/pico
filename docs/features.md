@@ -1,6 +1,6 @@
 # Features @ Stages
 
-## Addition
+## ~~Addition~~
 #### Goal
 - Pico-VM should be able to prove a simple addition program in the first stage.
 #### Features
@@ -22,23 +22,23 @@
 - [x] `ToyMachine`
   - A simple machine that only proves the addition program;
   - This is the final target for this stage
-- [ ] `ExecutionRecord` simulation
-  - Simulate `ExecutionRecord` in the `ToyMachine` to generate the trace;
+- [x] Core `Executor`
+  - [x] Migration of the core executor to the `compiler` folder;
+  - [x] Integration with current `toy_machine` and `toy_prover`
 
-## Fibonacci
+## Fibonacci (Ongoing)
 #### Goal
 - Pico-VM should be able to prove a small Fibonacci program at this stage.
 #### Features
-- [ ] Core `Executor`
-  - [ ] Migration of the core executor to the `compiler` folder;
-  - [ ] Integration with current `ToyMachine`
-- [ ] Abstraction framework update
-  - [ ] machine type/behavior
-  - [ ] proofs type/behavior
+- [x] Abstraction framework update
+  - [x] machine type/behavior
+  - [x] proofs type/behavior
+- [ ] `Compiler` separation into `Compiler` and `Executor`
 - [ ] chips for Fibonacci
   - [ ] CPU (main heavy-lifting part)
   - [ ] Program
   - [ ] MemoryProgram 
+  - [ ] Memory
   - [ ] AddSub 
   - [ ] Bitwise 
   - [ ] Byte
@@ -46,7 +46,6 @@
   - [ ] Mul
   - [ ] ShiftLeft 
   - [ ] ShiftRight
-  - [ ] Memory
 - [ ] `preprocessed`
   - Preprocessed trace of chips and its involvement in the proving procedure;
   - Partially done, need to complete by adding it to the production of `ChunkProof`
