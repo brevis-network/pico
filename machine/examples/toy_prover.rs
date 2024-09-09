@@ -2,23 +2,14 @@ use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::toy::ToyChip;
-use pico_compiler::{events::alu::AluEvent, opcode::Opcode, record::ExecutionRecord};
+use pico_compiler::{opts::PicoCoreOpts, record::ExecutionRecord, Executor, Program};
 use pico_configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig};
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
     prover::BaseProver,
     verifier::BaseVerifier,
 };
-use std::{any::type_name, collections::HashMap};
-
-// Testing input events used to generate the main trace
-const TEST_INPUT_EVENTS: [AluEvent; 5] = [
-    AluEvent::new(Opcode::ADD, 1, 2, 3),
-    AluEvent::new(Opcode::SUB, 6, 2, 4),
-    AluEvent::new(Opcode::ADD, 4, 5, 9),
-    AluEvent::new(Opcode::SUB, 6, 6, 0),
-    AluEvent::new(Opcode::SUB, 9, 1, 8),
-];
+use std::any::type_name;
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
@@ -90,16 +81,16 @@ fn print_type_of<T>(_: &T) {
 }
 
 fn main() {
-    // Create a test input exection record.
-    let mut record = ExecutionRecord::new();
-    let mut events = HashMap::new();
-    TEST_INPUT_EVENTS.into_iter().for_each(|event| {
-        events
-            .entry(event.opcode)
-            .or_insert_with(Vec::new)
-            .push(event);
-    });
-    record.add_alu_events(events);
+    println!("Creating Program..");
+    const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
+    let program = Program::from(ELF).unwrap();
+
+    println!("Creating Runtime..");
+    let mut runtime = Executor::new(program, PicoCoreOpts::default());
+    runtime.state.input_stream.push(vec![2, 0, 0, 0]);
+    runtime.run().unwrap();
+
+    let record = &runtime.records[0];
 
     // Create the prover.
     println!("Creating prover");
@@ -115,7 +106,7 @@ fn main() {
     println!("Generating proof");
     let mut challenger = config.challenger();
     // Generate the proof.
-    let proof = prover.prove(&config, &chips, &pk, &mut challenger, &record);
+    let proof = prover.prove(&config, &chips, &pk, &mut challenger, record);
 
     // Create the verifier.
     println!("Creating verifier");
