@@ -1,10 +1,24 @@
-//! Opcodes for the zkVM
+//! Opcodes for the Pico zkVM.
 
 use std::fmt::Display;
 
 use p3_field::Field;
 use serde::{Deserialize, Serialize};
 
+/// An opcode (short for "operation code") specifies the operation to be perfomed by the processor.
+///
+/// In the context of the RISC-V ISA, an opcode specifies which operation (i.e., addition,
+/// subtraction, multiplication, etc.) to perform on up to three operands such as registers,
+/// immediates, or memory addresses.
+///
+/// While the Pico zkVM targets the RISC-V ISA, it uses a custom instruction encoding that uses
+/// a different set of opcodes. The main difference is that the Pico zkVM encodes register
+/// operations and immediate operations as the same opcode. For example, the RISC-V opcodes ADD and
+/// ADDI both become ADD inside the Pico zkVM. We utilize flags inside the instruction itself to
+/// distinguish between the two.
+///
+/// Refer to the "RV32I Reference Card" [here](https://github.com/johnwinans/rvalp/releases) for
+/// more details.
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum Opcode {

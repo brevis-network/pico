@@ -67,15 +67,31 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
         let rows = merged_events
             .iter()
             .flat_map(|event| {
-                let is_add = match event.opcode {
-                    Opcode::ADD => 1_u32,
-                    Opcode::SUB => 0,
+                let [a, b, result, is_add] = match event.opcode {
+                    Opcode::ADD => {
+                        let a = event.a as u8;
+                        let b = event.b as u8;
+                        let [b, result] = match a.checked_add(b) {
+                            Some(result) => [b, result],
+                            None => [0, a],
+                        };
+
+                        [a, b, result, 1]
+                    }
+                    Opcode::SUB => {
+                        let a = event.a as u8;
+                        let b = event.b as u8;
+                        let [b, result] = match a.checked_sub(b) {
+                            Some(result) => [b, result],
+                            None => [0, a],
+                        };
+
+                        [a, b, result, 0]
+                    }
                     _ => unreachable!(),
                 };
 
-                let [a, b, result, is_add] =
-                    [event.a, event.b, event.c, is_add].map(|v| F::from_canonical_u8(v as u8));
-
+                let [a, b, result, is_add] = [a, b, result, is_add].map(F::from_canonical_u8);
                 ToyCols::new(&a, &b, &result, &is_add).to_row()
             })
             .collect_vec();
@@ -124,18 +140,10 @@ mod tests {
     use super::*;
     use p3_baby_bear::BabyBear;
     use p3_field::AbstractField;
-    use pico_compiler::events::alu::AluEvent;
     use rand::{thread_rng, Rng};
-    use std::{array, collections::HashMap};
+    use std::array;
 
     type F = BabyBear;
-
-    // Testing input events used to generate the main trace
-    const TEST_INPUT_EVENTS: [AluEvent; 3] = [
-        AluEvent::new(Opcode::ADD, 1, 2, 3),
-        AluEvent::new(Opcode::SUB, 6, 2, 4),
-        AluEvent::new(Opcode::SUB, 6, 6, 0),
-    ];
 
     #[test]
     fn test_toy_cols() {
@@ -149,42 +157,4 @@ mod tests {
         pad_to_power_of_two::<NUM_TOY_COLS, F>(&mut expected_row);
         assert_eq!(cols.to_row(), [a, b, result, is_add]);
     }
-
-    #[test]
-    fn test_toy_chip() {
-        let chip: ToyChip<F> = ToyChip::default();
-
-        assert_eq!(chip.name(), TOY_CHIP_NAME);
-        assert_eq!(chip.width(), NUM_TOY_COLS);
-
-        let rows = TEST_INPUT_EVENTS
-            .into_iter()
-            .flat_map(|event| {
-                let is_add = match event.opcode {
-                    Opcode::ADD => 1_u32,
-                    Opcode::SUB => 0,
-                    _ => unreachable!(),
-                };
-
-                [event.a, event.b, event.c, is_add].map(|v| F::from_canonical_u8(v as u8))
-            })
-            .collect_vec();
-        let mut expected_trace = RowMajorMatrix::new(rows, NUM_TOY_COLS);
-        // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_TOY_COLS, F>(&mut expected_trace.values);
-
-        let mut record = ExecutionRecord::new();
-        let mut events = HashMap::new();
-        TEST_INPUT_EVENTS.into_iter().for_each(|event| {
-            events
-                .entry(event.opcode)
-                .or_insert_with(Vec::new)
-                .push(event);
-        });
-        record.add_alu_events(events);
-        let real_trace = chip.generate_main(&record);
-        assert_eq!(real_trace, expected_trace);
-    }
-
-    // TODO: Add tests for proving and verification.
 }

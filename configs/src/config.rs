@@ -62,4 +62,7 @@ pub trait StarkGenericConfig: Sync {
 
     /// Initialize a new challenger.
     fn challenger(&self) -> Self::Challenger;
+
+    /// Name of config
+    fn name(&self) -> String;
 }

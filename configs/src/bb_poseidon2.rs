@@ -67,4 +67,8 @@ impl StarkGenericConfig for BabyBearPoseidon2 {
     fn challenger(&self) -> Self::Challenger {
         Challenger::new(self.perm.clone())
     }
+
+    fn name(&self) -> String {
+        "BabyBearPoseidon2".to_string()
+    }
 }
