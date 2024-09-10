@@ -219,7 +219,8 @@ where
             .map(|domain| vec![zeta, domain.next_point(zeta).unwrap()])
             .collect::<Vec<_>>();
 
-        let quotient_opening_points = (0..quotient_degrees.len())
+        let num_quotient_chunks = quotient_degrees.iter().sum();
+        let quotient_opening_points = (0..num_quotient_chunks)
             .map(|_| vec![zeta])
             .collect::<Vec<_>>();
 
