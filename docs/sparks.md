@@ -22,6 +22,8 @@
   - With BaseVM defined, we consider offloading all chip-related implementation into a single folder where each chip is a single subfolder. Each specific VM could load a different subset of chips in the chip folder based on its special purpose;
   - Chips in this way could be more modular and easier to maintain, as opposed to current case where `Col`, `Air`, `AirBuilder`, `Event` for a single chip might be located at different places and chips are located in specific VM folder and hard to be shared.
 
+- [ ] Let chips define `ExecutionRecord` -- `ExecutionRecord` should only contain events that the set of chips defining the machine could accept and used to generate trace. One should not define `ExecutionRecord` and the `ChipType` enum for a machine separately.
+
 - [ ] Dynamic ISA
   - Following the design of modular precompile chips, we could actually implement a dynamic (subset) of full ISA to reduce prover overhead. ISA could be determined right after `runtime` is generated, and the corresponding chips could then be loaded to construct prover.
   - Verifier need to change?
