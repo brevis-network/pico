@@ -16,7 +16,6 @@ use crate::{
     chip::{ChipBehavior, MetaChip},
     folder::ProverConstraintFolder,
     keys::{BaseProvingKey, BaseVerifyingKey},
-    program::Program,
     proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, TraceCommitments},
     utils::compute_quotient_values,
 };
