@@ -7,11 +7,11 @@ pub mod opcode;
 pub mod opts;
 pub mod program;
 mod programs;
-mod public_values;
+pub mod public_values;
 pub mod record;
 mod register;
 mod state;
-mod syscalls;
+pub mod syscalls;
 
 pub use executor::*;
 pub use instruction::*;

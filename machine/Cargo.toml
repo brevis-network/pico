@@ -35,13 +35,16 @@ p3-bn254-fr = { workspace = true }
 
 # misc
 anyhow.workspace = true
-hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
-itertools = "0.13.0"
+hashbrown.workspace = true
+itertools.workspace = true
+log.workspace = true
 pico-compiler.workspace = true
-serde = { version = "1.0.207", features = ["derive"] }
+serde.workspace = true
 
 [dev-dependencies]
+env_logger.workspace = true
+log.workspace = true
 # We only used the specific chips in the examples (and tests).
 # It could not be added to the dependencies, since the specific chips need to implement
 # the traits (as `ChipBehavior`), otherwise it causes the cyclic dependency.
-pico-chips = { workspace = true }
+pico-chips.workspace = true

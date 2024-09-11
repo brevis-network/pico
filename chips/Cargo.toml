@@ -6,8 +6,12 @@ license.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-
 [dependencies]
+# pico
+pico-compiler.workspace = true
+pico-derive.workspace = true
+pico-machine.workspace = true
+
 # p3
 p3-air.workspace = true
 p3-field.workspace = true
@@ -30,9 +34,16 @@ p3-uni-stark.workspace = true
 p3-maybe-rayon.workspace = true
 p3-bn254-fr.workspace = true
 
+# misc
+arrayref.workspace = true
+hashbrown.workspace = true
 itertools.workspace = true
-pico-compiler.workspace = true
-pico-machine.workspace = true
+log.workspace = true
+num_cpus.workspace = true
+rayon.workspace = true
+serde.workspace = true
+static_assertions.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 rand.workspace = true

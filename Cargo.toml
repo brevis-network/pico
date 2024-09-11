@@ -1,5 +1,5 @@
 [workspace]
-members = ["examples", "machine", "compiler", "configs"]
+members = ["chips", "derive", "examples", "machine", "compiler", "configs"]
 resolver = "2"
 
 [workspace.package]
@@ -28,6 +28,7 @@ pico-configs = { path = "configs" }
 pico-machine = { path = "machine" }
 pico-chips = { path = "chips" }
 pico-compiler = { path = "compiler" }
+pico-derive = { path = "derive" }
 
 # p3
 p3-air = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }
@@ -53,8 +54,18 @@ p3-bn254-fr = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branc
 
 # misc
 anyhow = { version = "1.0.40", default-features = false }
+arrayref = "0.3"
+env_logger = "0.11"
+hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
 hex = "0.4.3"
 itertools = "0.13"
 log = "0.4.21"
+num_cpus = "1.16"
+proc-macro2 = "1.0"
+quote = "1.0"
 rand = "0.8.5"
+rayon = "1.10"
 serde = "1.0"
+static_assertions = "1.1"
+syn = { version = "1.0", features = ["full"] }
+tracing = "0.1"

@@ -2,82 +2,77 @@ use log::info;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_chips::chips::toy::ToyChip;
+use pico_chips::chips::cpu::CpuChip;
 use pico_compiler::{opts::PicoCoreOpts, record::ExecutionRecord, Executor, Program};
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
     machine::{MachineBehavior, SimpleMachine},
 };
-use std::any::type_name;
 
-pub enum ToyChipType<F: Field> {
-    Toy(ToyChip<F>),
+pub enum FibChipType<F: Field> {
+    Cpu(CpuChip<F>),
 }
 
-// NOTE: These trait implementations are used to save this `ToyChipType` to `MetaChip`.
+// NOTE: These trait implementations are used to save this `FibChipType` to `MetaChip`.
 // Since MetaChip has a generic parameter which is one type (cannot be two chip types).
 // This code is annoyed, we could refactor to use macro later (but less readable).
-impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
+impl<F: Field> ChipBehavior<F> for FibChipType<F> {
     fn name(&self) -> String {
         match self {
-            Self::Toy(chip) => chip.name(),
+            Self::Cpu(chip) => chip.name(),
         }
     }
 
     fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
         match self {
-            Self::Toy(chip) => chip.generate_preprocessed(input),
+            Self::Cpu(chip) => chip.generate_preprocessed(input),
         }
     }
 
     fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
         match self {
-            Self::Toy(chip) => chip.generate_main(input),
+            Self::Cpu(chip) => chip.generate_main(input),
         }
     }
 
     fn preprocessed_width(&self) -> usize {
         match self {
-            Self::Toy(chip) => chip.preprocessed_width(),
+            Self::Cpu(chip) => chip.preprocessed_width(),
         }
     }
 }
-impl<F: Field> BaseAir<F> for ToyChipType<F> {
+impl<F: Field> BaseAir<F> for FibChipType<F> {
     fn width(&self) -> usize {
         match self {
-            Self::Toy(chip) => chip.width(),
+            Self::Cpu(chip) => chip.width(),
         }
     }
 
     /// todo: this should not be called. all should go to generate_preprocessed.
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
         match self {
-            Self::Toy(chip) => chip.preprocessed_trace(),
+            Self::Cpu(chip) => chip.preprocessed_trace(),
         }
     }
 }
 
-impl<F, CB> Air<CB> for ToyChipType<F>
+impl<F, CB> Air<CB> for FibChipType<F>
 where
     F: Field,
     CB: ChipBuilder<F>,
 {
     fn eval(&self, b: &mut CB) {
         match self {
-            Self::Toy(chip) => chip.eval(b),
+            Self::Cpu(chip) => chip.eval(b),
         }
     }
 }
 
-impl<F: Field> ToyChipType<F> {
+impl<F: Field> FibChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
-        vec![MetaChip::new(Self::Toy(ToyChip::default()))]
+        vec![MetaChip::new(Self::Cpu(CpuChip::default()))]
     }
-}
-
-fn print_type_of<T>(_: &T) {
-    info!("Type: {}", type_name::<T>());
 }
 
 fn main() {
@@ -97,7 +92,7 @@ fn main() {
     // Setup config and chips.
     info!("Creating SimpleMachine..");
     let config = BabyBearPoseidon2::new();
-    let chips = ToyChipType::all_chips();
+    let chips = FibChipType::all_chips();
 
     // Create a new machine based on config and chips
     let simple_machine = SimpleMachine::new(config, chips);
