@@ -2,7 +2,7 @@ use log::info;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_chips::chips::cpu::CpuChip;
+use pico_chips::chips::{cpu::CpuChip, program::ProgramChip};
 use pico_compiler::{opts::PicoCoreOpts, record::ExecutionRecord, Executor, Program};
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_machine::{
@@ -11,6 +11,7 @@ use pico_machine::{
 };
 
 pub enum FibChipType<F: Field> {
+    Program(ProgramChip<F>),
     Cpu(CpuChip<F>),
 }
 
@@ -20,24 +21,28 @@ pub enum FibChipType<F: Field> {
 impl<F: Field> ChipBehavior<F> for FibChipType<F> {
     fn name(&self) -> String {
         match self {
+            Self::Program(chip) => chip.name(),
             Self::Cpu(chip) => chip.name(),
         }
     }
 
     fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
         match self {
+            Self::Program(chip) => chip.generate_preprocessed(input),
             Self::Cpu(chip) => chip.generate_preprocessed(input),
         }
     }
 
     fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
         match self {
+            Self::Program(chip) => chip.generate_main(input),
             Self::Cpu(chip) => chip.generate_main(input),
         }
     }
 
     fn preprocessed_width(&self) -> usize {
         match self {
+            Self::Program(chip) => chip.preprocessed_width(),
             Self::Cpu(chip) => chip.preprocessed_width(),
         }
     }
@@ -45,6 +50,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
 impl<F: Field> BaseAir<F> for FibChipType<F> {
     fn width(&self) -> usize {
         match self {
+            Self::Program(chip) => chip.width(),
             Self::Cpu(chip) => chip.width(),
         }
     }
@@ -52,6 +58,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
     /// todo: this should not be called. all should go to generate_preprocessed.
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
         match self {
+            Self::Program(chip) => chip.preprocessed_trace(),
             Self::Cpu(chip) => chip.preprocessed_trace(),
         }
     }
@@ -64,6 +71,7 @@ where
 {
     fn eval(&self, b: &mut CB) {
         match self {
+            Self::Program(chip) => chip.eval(b),
             Self::Cpu(chip) => chip.eval(b),
         }
     }
@@ -71,7 +79,10 @@ where
 
 impl<F: Field> FibChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
-        vec![MetaChip::new(Self::Cpu(CpuChip::default()))]
+        vec![
+            MetaChip::new(Self::Program(ProgramChip::default())),
+            MetaChip::new(Self::Cpu(CpuChip::default())),
+        ]
     }
 }
 
