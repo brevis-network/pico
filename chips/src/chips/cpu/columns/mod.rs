@@ -20,7 +20,7 @@ pub use opcode_selector::*;
 pub use opcode_specific::*;
 
 use crate::{
-    chips::memory::{MemoryCols, MemoryReadCols, MemoryReadWriteCols},
+    chips::memory::read_write::columns::{MemoryCols, MemoryReadCols, MemoryReadWriteCols},
     utils::word::Word,
 };
 use pico_derive::AlignedBorrow;

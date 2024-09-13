@@ -5,7 +5,7 @@ use crate::{
             constraints::CpuCols,
             CpuChip,
         },
-        memory::MemoryCols,
+        memory::read_write::columns::MemoryCols,
     },
     gadgets::baby_bear_word::BabyBearWordRangeChecker,
     utils::word::Word,

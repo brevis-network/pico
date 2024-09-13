@@ -11,7 +11,7 @@ use crate::chips::{
         columns::{CpuCols, CPU_COL_MAP, NUM_CPU_COLS},
         CpuChip,
     },
-    memory::MemoryCols,
+    memory::read_write::columns::MemoryCols,
 };
 use hashbrown::HashMap;
 use log::info;

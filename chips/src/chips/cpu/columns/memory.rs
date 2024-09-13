@@ -1,6 +1,6 @@
 use crate::{
-    chips::memory::MemoryReadWriteCols, gadgets::baby_bear_word::BabyBearWordRangeChecker,
-    utils::word::Word,
+    chips::memory::read_write::columns::MemoryReadWriteCols,
+    gadgets::baby_bear_word::BabyBearWordRangeChecker, utils::word::Word,
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;

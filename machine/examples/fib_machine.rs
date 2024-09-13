@@ -2,7 +2,11 @@ use log::info;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_chips::chips::{cpu::CpuChip, program::ProgramChip};
+use pico_chips::chips::{
+    cpu::CpuChip,
+    memory::init_finalize::{MemoryChipType, MemoryInitFinalizeChip},
+    program::ProgramChip,
+};
 use pico_compiler::{opts::PicoCoreOpts, record::ExecutionRecord, Executor, Program};
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_machine::{
@@ -13,6 +17,8 @@ use pico_machine::{
 pub enum FibChipType<F: Field> {
     Program(ProgramChip<F>),
     Cpu(CpuChip<F>),
+    MemoryInit(MemoryInitFinalizeChip<F>),
+    MemoryFinalize(MemoryInitFinalizeChip<F>),
 }
 
 // NOTE: These trait implementations are used to save this `FibChipType` to `MetaChip`.
@@ -23,6 +29,8 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
         match self {
             Self::Program(chip) => chip.name(),
             Self::Cpu(chip) => chip.name(),
+            Self::MemoryInit(chip) => chip.name(),
+            Self::MemoryFinalize(chip) => chip.name(),
         }
     }
 
@@ -30,6 +38,8 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
         match self {
             Self::Program(chip) => chip.generate_preprocessed(input),
             Self::Cpu(chip) => chip.generate_preprocessed(input),
+            Self::MemoryInit(chip) => chip.generate_preprocessed(input),
+            Self::MemoryFinalize(chip) => chip.generate_preprocessed(input),
         }
     }
 
@@ -37,6 +47,8 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
         match self {
             Self::Program(chip) => chip.generate_main(input),
             Self::Cpu(chip) => chip.generate_main(input),
+            Self::MemoryInit(chip) => chip.generate_main(input),
+            Self::MemoryFinalize(chip) => chip.generate_main(input),
         }
     }
 
@@ -44,6 +56,8 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
         match self {
             Self::Program(chip) => chip.preprocessed_width(),
             Self::Cpu(chip) => chip.preprocessed_width(),
+            Self::MemoryInit(chip) => chip.preprocessed_width(),
+            Self::MemoryFinalize(chip) => chip.preprocessed_width(),
         }
     }
 }
@@ -52,6 +66,8 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
         match self {
             Self::Program(chip) => chip.width(),
             Self::Cpu(chip) => chip.width(),
+            Self::MemoryInit(chip) => chip.width(),
+            Self::MemoryFinalize(chip) => chip.width(),
         }
     }
 
@@ -60,6 +76,8 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
         match self {
             Self::Program(chip) => chip.preprocessed_trace(),
             Self::Cpu(chip) => chip.preprocessed_trace(),
+            Self::MemoryInit(chip) => chip.preprocessed_trace(),
+            Self::MemoryFinalize(chip) => chip.preprocessed_trace(),
         }
     }
 }
@@ -73,6 +91,8 @@ where
         match self {
             Self::Program(chip) => chip.eval(b),
             Self::Cpu(chip) => chip.eval(b),
+            Self::MemoryInit(chip) => chip.eval(b),
+            Self::MemoryFinalize(chip) => chip.eval(b),
         }
     }
 }
@@ -82,6 +102,12 @@ impl<F: Field> FibChipType<F> {
         vec![
             MetaChip::new(Self::Program(ProgramChip::default())),
             MetaChip::new(Self::Cpu(CpuChip::default())),
+            MetaChip::new(Self::MemoryInit(MemoryInitFinalizeChip::new(
+                MemoryChipType::Initialize,
+            ))),
+            MetaChip::new(Self::MemoryFinalize(MemoryInitFinalizeChip::new(
+                MemoryChipType::Finalize,
+            ))),
         ]
     }
 }

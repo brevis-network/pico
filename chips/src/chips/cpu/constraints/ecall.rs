@@ -4,7 +4,7 @@ use crate::{
             columns::{CpuCols, OpcodeSelectorCols},
             CpuChip,
         },
-        memory::MemoryCols,
+        memory::read_write::columns::MemoryCols,
     },
     gadgets::{baby_bear_word::BabyBearWordRangeChecker, is_zero::IsZeroOperation},
     utils::word::Word,

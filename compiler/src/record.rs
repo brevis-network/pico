@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{program::Program, Opcode};
 
-use crate::events::{AluEvent, CpuEvent, MemoryRecordEnum};
+use crate::events::{AluEvent, CpuEvent, MemoryInitializeFinalizeEvent, MemoryRecordEnum};
 
 /// A record of the execution of a program.
 ///
@@ -37,6 +37,10 @@ pub struct ExecutionRecord {
     pub divrem_events: Vec<AluEvent>,
     /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
     pub lt_events: Vec<AluEvent>,
+    /// A trace of the memory initialize events.
+    pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
+    /// A trace of the memory finalize events.
+    pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
 }
 
 impl ExecutionRecord {

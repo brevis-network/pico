@@ -1,6 +1,6 @@
 use crate::chips::{
     cpu::{columns::CpuCols, CpuChip},
-    memory::MemoryCols,
+    memory::read_write::columns::MemoryCols,
 };
 use hashbrown::HashMap;
 use p3_field::Field;
