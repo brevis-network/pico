@@ -30,14 +30,16 @@ p3-merkle-tree = { workspace = true }
 p3-poseidon2 = { workspace = true }
 p3-symmetric = { workspace = true }
 p3-uni-stark = { workspace = true }
-p3-maybe-rayon = { workspace = true }
+p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 p3-bn254-fr = { workspace = true }
 
 # misc
 anyhow.workspace = true
+
 hashbrown.workspace = true
 itertools.workspace = true
 log.workspace = true
+rayon-scan = {workspace = true}
 pico-compiler.workspace = true
 serde.workspace = true
 

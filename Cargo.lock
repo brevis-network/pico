@@ -1056,6 +1056,9 @@ dependencies = [
 name = "p3-maybe-rayon"
 version = "0.1.0"
 source = "git+ssh://git@github.com/brevis-network/p3-for-vm.git?branch=main#c667f2d0b736f0d8ff0d360e5ad5c923a3048f91"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "p3-mds"
@@ -1344,6 +1347,7 @@ dependencies = [
  "pico-chips",
  "pico-compiler",
  "pico-configs",
+ "rayon-scan",
  "serde",
 ]
 
@@ -1450,6 +1454,15 @@ checksum = "1465873a3dfdaa8ae7cb14b4383657caab0b3e8a0aa9ae8e04b044854c8dfce2"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rayon-scan"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f87cc11a0140b4b0da0ffc889885760c61b13672d80a908920b2c0df078fa14"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]

@@ -38,6 +38,7 @@ p3-bn254-fr.workspace = true
 arrayref.workspace = true
 hashbrown.workspace = true
 itertools.workspace = true
+
 log.workspace = true
 num_cpus.workspace = true
 rayon.workspace = true

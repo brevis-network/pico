@@ -1,5 +1,6 @@
 use crate::utils::type_name_of;
 use alloc::vec::Vec;
+use hashbrown::HashMap;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val};
 use serde::{Deserialize, Serialize};
@@ -77,11 +78,13 @@ pub struct BaseProof<SC: StarkGenericConfig> {
     pub opening_proof: PcsProof<SC>,
     pub log_main_degrees: Vec<usize>,
     pub log_quotient_degrees: Vec<usize>,
+    pub chip_indexes: HashMap<String, usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BaseCommitments<Com> {
     pub main_commit: Com,
+    pub permutation_commit: Com,
     pub quotient_commit: Com,
 }
 
@@ -98,7 +101,12 @@ pub struct BaseOpenedValues<Challenge> {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChipOpenedValues<Challenge> {
+    pub preprocessed_local: Vec<Challenge>,
+    pub preprocessed_next: Vec<Challenge>,
     pub main_local: Vec<Challenge>,
     pub main_next: Vec<Challenge>,
+    pub permutation_local: Vec<Challenge>,
+    pub permutation_next: Vec<Challenge>,
     pub quotient: Vec<Vec<Challenge>>,
+    pub cumulative_sum: Challenge,
 }

@@ -1,5 +1,4 @@
 use core::mem::take;
-use std::marker::PhantomData;
 
 /// Context to run a program inside Pico.
 #[derive(Clone, Default)]

@@ -1,6 +1,4 @@
-use core::{fmt::Debug, mem::size_of};
-use std::borrow::{Borrow, BorrowMut};
-
+use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 
 /// The number of 32 bit words in the Pico proof's commited value digest.

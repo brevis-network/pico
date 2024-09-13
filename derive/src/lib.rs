@@ -59,8 +59,7 @@ pub fn aligned_borrow_derive(input: TokenStream) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    // Get impl generics (`<T, N: NumLimbs, const M: usize>`), type generics (`<T, N>`), where
-    // clause (`where T: Clone`)
+    // Get impl generics (`<T, N: NumLimbs, const M: usize>`), type generics (`<T, N>`), where clause (`where T: Clone`)
     let (impl_generics, type_generics, where_clause) = ast.generics.split_for_impl();
 
     let methods = quote! {

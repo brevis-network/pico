@@ -1,13 +1,18 @@
+use crate::{
+    builder::{ChipProxyBuilder, MessageBuilder, PermSumAirBuilder},
+    lookup::{AirInteraction, LookupPayload},
+    permutation::{eval_permutation_constraints, generate_permutation_trace},
+};
 use itertools::Itertools;
 use log::debug;
-use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder};
-use p3_field::{AbstractField, Field};
+use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder, PairBuilder};
+use p3_field::{AbstractField, ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{get_log_quotient_degree, SymbolicAirBuilder};
 use pico_compiler::record::ExecutionRecord;
 
 /// Chip behavior
-pub trait ChipBehavior<F: Field>: BaseAir<F> + Air<SymbolicAirBuilder<F>> + Sync {
+pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
@@ -23,7 +28,9 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Air<SymbolicAirBuilder<F>> + Sync
 }
 
 /// Chip builder
-pub trait ChipBuilder<F: Field>: AirBuilder<F = F> {
+pub trait ChipBuilder<F: Field>:
+    AirBuilder<F = F> + MessageBuilder<AirInteraction<Self::Expr>>
+{
     /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
     fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<Self> {
         self.when_ne(condition, Self::F::one())
@@ -74,17 +81,14 @@ pub trait ChipBuilder<F: Field>: AirBuilder<F = F> {
     }
 }
 
-impl<F: Field> ChipBuilder<F> for SymbolicAirBuilder<F> {}
-impl<'a, F: Field, AB: AirBuilder<F = F>> ChipBuilder<F> for FilteredAirBuilder<'a, AB> {}
-
 /// Chip wrapper, includes interactions
 pub struct MetaChip<F: Field, C> {
     /// Underlying chip
     chip: C,
-    // Interactions that the chip sends, ignore for now
-    sends: Vec<F>,
-    // Interactions that the chip receives, ignore for now
-    receives: Vec<F>,
+    /// messages for chip as looking table
+    looking: Vec<LookupPayload<F>>,
+    /// messages for chip as looked table
+    looked: Vec<LookupPayload<F>>,
     /// log degree of quotient polynomial
     log_quotient_degree: usize,
 }
@@ -92,8 +96,12 @@ pub struct MetaChip<F: Field, C> {
 impl<F: Field, C> MetaChip<F, C> {
     pub fn new(chip: C) -> Self
     where
-        C: ChipBehavior<F>,
+        C: ChipBehavior<F> + Air<ChipProxyBuilder<F>> + Air<SymbolicAirBuilder<F>>,
     {
+        let mut builder = ChipProxyBuilder::new(chip.preprocessed_width(), chip.width());
+        chip.eval(&mut builder);
+        let (looking, looked) = builder.lookup_message();
+
         // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
         let log_quotient_degree =
             get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width(), 0);
@@ -104,10 +112,35 @@ impl<F: Field, C> MetaChip<F, C> {
         );
         Self {
             chip,
-            sends: vec![],
-            receives: vec![],
+            looking,
+            looked,
             log_quotient_degree,
         }
+    }
+
+    pub fn generate_permutation<EF: ExtensionField<F>>(
+        &self,
+        preprocessed: Option<&RowMajorMatrix<F>>,
+        main: &RowMajorMatrix<F>,
+        perm_challenges: &[EF],
+    ) -> RowMajorMatrix<EF> {
+        let batch_size = 1 << self.log_quotient_degree;
+
+        // Generate the RLC elements to uniquely identify each interaction.
+        let alpha = perm_challenges[0];
+
+        // Generate the RLC elements to uniquely identify each item in the looked up tuple.
+        let beta = perm_challenges[1];
+
+        generate_permutation_trace(
+            &self.looking,
+            &self.looked,
+            preprocessed,
+            main,
+            alpha,
+            beta,
+            batch_size,
+        )
     }
 
     pub fn get_log_quotient_degree(&self) -> usize {
@@ -135,10 +168,16 @@ impl<F, C, CB> Air<CB> for MetaChip<F, C>
 where
     F: Field,
     C: Air<CB>,
-    CB: ChipBuilder<F>,
+    CB: ChipBuilder<F> + PermSumAirBuilder + PairBuilder,
 {
     fn eval(&self, builder: &mut CB) {
         self.chip.eval(builder);
+        eval_permutation_constraints(
+            &self.looking,
+            &self.looked,
+            1 << self.log_quotient_degree,
+            builder,
+        )
     }
 }
 
@@ -158,6 +197,10 @@ where
 
     fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
         self.chip.generate_main(input)
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        self.chip.preprocessed_width()
     }
 }
 

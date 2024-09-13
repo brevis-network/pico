@@ -1203,9 +1203,7 @@ impl Default for ExecutorMode {
 mod tests {
     use crate::{opts::PicoCoreOpts, programs::tests::simple_fibo_program};
 
-    use crate::Register;
-
-    use super::{Executor, Instruction, Opcode, Program};
+    use super::Executor;
 
     fn _assert_send<T: Send>() {}
 

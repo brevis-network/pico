@@ -104,6 +104,10 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
 
         trace
     }
+
+    fn preprocessed_width(&self) -> usize {
+        4
+    }
 }
 
 impl<F: Field> BaseAir<F> for ToyChip<F> {

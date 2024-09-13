@@ -4,17 +4,13 @@ use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{AbstractExtensionField, AbstractField, Field};
-use p3_matrix::{
-    dense::{RowMajorMatrix, RowMajorMatrixView},
-    stack::VerticalPair,
-};
+use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use pico_configs::config::{StarkGenericConfig, Val};
-use std::marker::PhantomData;
 
 use crate::{
     chip::{ChipBehavior, MetaChip},
     folder::VerifierConstraintFolder,
-    keys::{BaseProvingKey, BaseVerifyingKey},
+    keys::BaseVerifyingKey,
     proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, TraceCommitments},
 };
 
@@ -53,6 +49,7 @@ where
             opening_proof,
             log_main_degrees,
             log_quotient_degrees,
+            chip_indexes,
         } = proof;
 
         let pcs = config.pcs();
@@ -66,11 +63,19 @@ where
 
         let BaseCommitments {
             main_commit,
+            permutation_commit,
             quotient_commit,
         } = commitments;
 
         // main commitment observation
         challenger.observe(main_commit.clone());
+
+        // get permutation challenges
+        let permutation_challenges = (0..2)
+            .map(|_| challenger.sample_ext_element::<SC::Challenge>())
+            .collect::<Vec<_>>();
+
+        challenger.observe(permutation_commit.clone());
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
 
@@ -84,6 +89,22 @@ where
             .map(|log_degree| pcs.natural_domain_for_degree(1 << log_degree))
             .collect::<Vec<_>>();
 
+        let preprocessed_domains_points_and_opens = vk
+            .preprocessed_info
+            .iter()
+            .map(|(name, domain, _)| {
+                let i = chip_indexes[name];
+                let values = opened_values.chips_opened_values[i].clone();
+                (
+                    *domain,
+                    vec![
+                        (zeta, values.preprocessed_local),
+                        (domain.next_point(zeta).unwrap(), values.preprocessed_next),
+                    ],
+                )
+            })
+            .collect::<Vec<_>>();
+
         let main_domains_and_opens = main_domains
             .iter()
             .zip_eq(opened_values.chips_opened_values.iter())
@@ -93,6 +114,23 @@ where
                     vec![
                         (zeta, values.main_local.clone()),
                         (domain.next_point(zeta).unwrap(), values.main_next.clone()),
+                    ],
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let permutation_domains_points_and_opens = main_domains
+            .iter()
+            .zip_eq(opened_values.chips_opened_values.iter())
+            .map(|(domain, values)| {
+                (
+                    *domain,
+                    vec![
+                        (zeta, values.permutation_local.clone()),
+                        (
+                            domain.next_point(zeta).unwrap(),
+                            values.permutation_next.clone(),
+                        ),
                     ],
                 )
             })
@@ -124,7 +162,12 @@ where
         // verify openings
         pcs.verify(
             vec![
+                (vk.commit.clone(), preprocessed_domains_points_and_opens),
                 (main_commit.clone(), main_domains_and_opens),
+                (
+                    permutation_commit.clone(),
+                    permutation_domains_points_and_opens,
+                ),
                 (quotient_commit.clone(), quotient_domains_and_opens),
             ],
             opening_proof,
@@ -151,6 +194,8 @@ where
             if !valid_shape {
                 panic!("Invalid proof shape");
             }
+
+            let sels = main_domain.selectors_at_point(zeta);
 
             // Verify constraints
             let zps = quotient_chunk_domain
@@ -181,16 +226,43 @@ where
                 })
                 .sum::<SC::Challenge>();
 
-            let sels = main_domain.selectors_at_point(zeta);
+            let preprocessed = VerticalPair::new(
+                RowMajorMatrixView::new_row(&values.preprocessed_local),
+                RowMajorMatrixView::new_row(&values.preprocessed_next),
+            );
+
             let main = VerticalPair::new(
                 RowMajorMatrixView::new_row(&values.main_local),
                 RowMajorMatrixView::new_row(&values.main_next),
             );
 
+            let unflatten = |v: &[SC::Challenge]| {
+                v.chunks_exact(SC::Challenge::D)
+                    .map(|chunk| {
+                        chunk
+                            .iter()
+                            .enumerate()
+                            .map(|(e_i, &x)| SC::Challenge::monomial(e_i) * x)
+                            .sum()
+                    })
+                    .collect::<Vec<SC::Challenge>>()
+            };
+
+            let perm_local_ext = unflatten(&values.permutation_local.clone());
+            let perm_next_ext = unflatten(&values.permutation_next.clone());
+            let perm = VerticalPair::new(
+                RowMajorMatrixView::new_row(&perm_local_ext),
+                RowMajorMatrixView::new_row(&perm_next_ext),
+            );
+
             // todo: public values to be added later
             let public_values = vec![];
             let mut folder = VerifierConstraintFolder {
+                preprocessed,
                 main,
+                perm,
+                perm_challenges: &permutation_challenges,
+                cumulative_sum: values.cumulative_sum,
                 public_values,
                 is_first_row: sels.is_first_row,
                 is_last_row: sels.is_last_row,

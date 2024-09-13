@@ -1,20 +1,24 @@
-use p3_matrix::dense::RowMajorMatrix;
-use pico_configs::config::{Com, StarkGenericConfig, Val};
+use hashbrown::HashMap;
+use p3_matrix::{dense::RowMajorMatrix, Dimensions};
+use pico_configs::config::{Com, Domain, PcsProverData, StarkGenericConfig, Val};
 
 pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// The commitment to the named traces.
     pub commit: Com<SC>,
     /// named preprocessed traces.
-    pub chips_and_preprocessed: Vec<(String, RowMajorMatrix<Val<SC>>)>,
-    // The pcs data for the preprocessed traces.
-    // pub data: PcsProverData<SC>,
+    pub preprocessed_trace: Vec<RowMajorMatrix<Val<SC>>>,
+    /// The pcs data for the preprocessed traces.
+    pub preprocessed_prover_data: PcsProverData<SC>,
+
+    // the index of for chips, chip name for key
+    pub chip_indexes: HashMap<String, usize>,
 }
 
 pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     /// The commitment to the preprocessed traces.
     pub commit: Com<SC>,
-    // The chip information.
-    // pub chip_information: Vec<(String, Dom<SC>, Dimensions)>,
-    // The chip ordering.
-    // pub chip_ordering: HashMap<String, usize>,
+    // The reprocessed information.
+    pub preprocessed_info: Vec<(String, Domain<SC>, Dimensions)>,
+    // the index of for chips, chip name for key
+    pub chip_indexes: HashMap<String, usize>,
 }
