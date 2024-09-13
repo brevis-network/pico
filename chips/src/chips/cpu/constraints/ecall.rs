@@ -11,10 +11,7 @@ use crate::{
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
-use pico_compiler::{
-    public_values::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-    syscalls::SyscallCode,
-};
+use pico_compiler::syscalls::SyscallCode;
 use pico_machine::chip::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
@@ -126,8 +123,9 @@ impl<F: Field> CpuChip<F> {
         &self,
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
-        commit_digest: [Word<CB::Expr>; PV_DIGEST_NUM_WORDS],
-        deferred_proofs_digest: [CB::Expr; POSEIDON_NUM_WORDS],
+        // TODO: Enable after adding public values.
+        // commit_digest: [Word<CB::Expr>; PV_DIGEST_NUM_WORDS],
+        // deferred_proofs_digest: [CB::Expr; POSEIDON_NUM_WORDS],
     ) {
         let (is_commit, is_commit_deferred_proofs) =
             self.get_is_commit_related_syscall(builder, local);
@@ -135,39 +133,41 @@ impl<F: Field> CpuChip<F> {
         // Get the ecall specific columns.
         let ecall_columns = local.opcode_specific.ecall();
 
-        // Verify the index bitmap.
-        let mut bitmap_sum = CB::Expr::zero();
-        // They should all be bools.
-        for bit in ecall_columns.index_bitmap.iter() {
+        /* TODO: Enable after adding public values.
+            // Verify the index bitmap.
+            let mut bitmap_sum = CB::Expr::zero();
+            // They should all be bools.
+            for bit in ecall_columns.index_bitmap.iter() {
+                builder
+                    .when(local.opcode_selector.is_ecall)
+                    .assert_bool(*bit);
+                bitmap_sum += (*bit).into();
+            }
+            // When the syscall is COMMIT or COMMIT_DEFERRED_PROOFS, there should be one set bit.
             builder
-                .when(local.opcode_selector.is_ecall)
-                .assert_bool(*bit);
-            bitmap_sum += (*bit).into();
-        }
-        // When the syscall is COMMIT or COMMIT_DEFERRED_PROOFS, there should be one set bit.
-        builder
-            .when(
-                local.opcode_selector.is_ecall
-                    * (is_commit.clone() + is_commit_deferred_proofs.clone()),
-            )
-            .assert_one(bitmap_sum.clone());
-        // When it's some other syscall, there should be no set bits.
-        builder
-            .when(
-                local.opcode_selector.is_ecall
-                    * (CB::Expr::one() - (is_commit.clone() + is_commit_deferred_proofs.clone())),
-            )
-            .assert_zero(bitmap_sum);
+                .when(
+                    local.opcode_selector.is_ecall
+                        * (is_commit.clone() + is_commit_deferred_proofs.clone()),
+                )
+                .assert_one(bitmap_sum.clone());
+            // When it's some other syscall, there should be no set bits.
+            builder
+                .when(
+                    local.opcode_selector.is_ecall
+                        * (CB::Expr::one() - (is_commit.clone() + is_commit_deferred_proofs.clone())),
+                )
+                .assert_zero(bitmap_sum);
 
-        // Verify that word_idx corresponds to the set bit in index bitmap.
-        for (i, bit) in ecall_columns.index_bitmap.iter().enumerate() {
-            builder
-                .when(*bit * local.opcode_selector.is_ecall)
-                .assert_eq(
-                    local.op_b_access.prev_value()[0],
-                    CB::Expr::from_canonical_u32(i as u32),
-                );
-        }
+            // Verify that word_idx corresponds to the set bit in index bitmap.
+            for (i, bit) in ecall_columns.index_bitmap.iter().enumerate() {
+                builder
+                    .when(*bit * local.opcode_selector.is_ecall)
+                    .assert_eq(
+                        local.op_b_access.prev_value()[0],
+                        CB::Expr::from_canonical_u32(i as u32),
+                    );
+            }
+        */
         // Verify that the 3 upper bytes of the word_idx are 0.
         for i in 0..3 {
             builder
@@ -220,7 +220,8 @@ impl<F: Field> CpuChip<F> {
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
         next: &CpuCols<CB::Var>,
-        public_values: &PublicValues<Word<CB::Expr>, CB::Expr>,
+        // TODO: Enable after adding public values.
+        // public_values: &PublicValues<Word<CB::Expr>, CB::Expr>,
     ) {
         let is_halt = self.get_is_halt_syscall(builder, local);
 
@@ -240,10 +241,12 @@ impl<F: Field> CpuChip<F> {
                     .assert_word_eq(local.op_b_val(), ecall_columns.operand_to_check);
         */
 
-        builder.when(is_halt.clone()).assert_eq(
-            local.op_b_access.value().reduce::<CB>(),
-            public_values.exit_code.clone(),
-        );
+        /* TODO: Enable after adding public values.
+                builder.when(is_halt.clone()).assert_eq(
+                    local.op_b_access.value().reduce::<CB>(),
+                    public_values.exit_code.clone(),
+                );
+        */
     }
 
     /// Returns a boolean expression indicating whether the instruction is a HALT instruction.

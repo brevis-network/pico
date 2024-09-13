@@ -7,7 +7,6 @@ pub mod opcode;
 pub mod opts;
 pub mod program;
 mod programs;
-pub mod public_values;
 pub mod record;
 mod register;
 mod state;

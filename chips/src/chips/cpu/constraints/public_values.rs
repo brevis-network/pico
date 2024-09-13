@@ -4,9 +4,10 @@ use crate::{
 };
 use p3_air::AirBuilder;
 use p3_field::Field;
-use pico_compiler::public_values::PublicValues;
+// use pico_compiler::public_values::PublicValues;
 use pico_machine::chip::ChipBuilder;
 
+/* TODO: Enable after adding public values.
 impl<F: Field> CpuChip<F> {
     /// Constraints related to the public values.
     pub(crate) fn eval_public_values<CB: ChipBuilder<F>>(
@@ -43,3 +44,4 @@ impl<F: Field> CpuChip<F> {
             .assert_eq(public_values.next_pc.clone(), local.next_pc);
     }
 }
+*/

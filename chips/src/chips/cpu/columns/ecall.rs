@@ -2,7 +2,8 @@ use crate::{
     gadgets::{baby_bear_word::BabyBearWordRangeChecker, is_zero::IsZeroOperation},
     utils::word::Word,
 };
-use pico_compiler::public_values::PV_DIGEST_NUM_WORDS;
+// TODO: Enable after adding public values.
+// use pico_compiler::public_values::PV_DIGEST_NUM_WORDS;
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
@@ -28,7 +29,8 @@ pub struct EcallCols<T> {
 
     /// Field to store the word index passed into the COMMIT ecall.  index_bitmap[word index]
     /// should be set to 1 and everything else set to 0.
-    pub index_bitmap: [T; PV_DIGEST_NUM_WORDS],
+    // TODO: Enable after adding public values.
+    // pub index_bitmap: [T; PV_DIGEST_NUM_WORDS],
 
     /// The nonce of the syscall operation.
     pub syscall_nonce: T,
