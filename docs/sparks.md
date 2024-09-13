@@ -22,7 +22,7 @@
   - With BaseVM defined, we consider offloading all chip-related implementation into a single folder where each chip is a single subfolder. Each specific VM could load a different subset of chips in the chip folder based on its special purpose;
   - Chips in this way could be more modular and easier to maintain, as opposed to current case where `Col`, `Air`, `AirBuilder`, `Event` for a single chip might be located at different places and chips are located in specific VM folder and hard to be shared.
 
-- [ ] Let chips define `ExecutionRecord` -- `ExecutionRecord` should only contain events that the set of chips defining the machine could accept and used to generate trace. One should not define `ExecutionRecord` and the `ChipType` enum for a machine separately.
+- [ ] Let chips define `EmulationRecord` -- `EmulationRecord` should only contain events that the set of chips defining the machine could accept and used to generate trace. One should not define `ExecutionRecord` and the `ChipType` enum for a machine separately.
 
 - [ ] Dynamic ISA
   - Following the design of modular precompile chips, we could actually implement a dynamic (subset) of full ISA to reduce prover overhead. ISA could be determined right after `runtime` is generated, and the corresponding chips could then be loaded to construct prover.
@@ -109,5 +109,5 @@
 - [x] Why `Block` only exist in recursion but not core? Shouldn’t it be used in both cases, or is it redundant?
 - Recursion VM is handling both 32bits and 128bits (extension field), as opposed to Core VM where only 32bits are handled.
 - [ ] `CpuChip` same name redefined in recursion. Should specify a new name.
-- [ ] `Poseidon2CompressEvent` and `Poseidon2HashEvent` both in `ExecutionRecord`?
-- [ ] `ExecutionRecord` in recursion should be renamed
+- [ ] `Poseidon2CompressEvent` and `Poseidon2HashEvent` both in `EmulationRecord`?
+- [ ] `EmulationRecord` in recursion should be renamed

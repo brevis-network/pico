@@ -9,8 +9,8 @@ use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use std::cmp::Reverse;
 
-use pico_compiler::record::ExecutionRecord;
 use pico_configs::config::{Com, Domain, PackedChallenge, PcsProof, StarkGenericConfig, Val};
+use pico_emulator::record::EmulationRecord;
 
 use crate::{
     chip::{ChipBehavior, MetaChip},
@@ -41,7 +41,7 @@ where
         &self,
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],
-        input: &ExecutionRecord,
+        input: &EmulationRecord,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let mut named_preprocessed_traces = chips
             .par_iter()
@@ -104,7 +104,7 @@ where
     pub fn generate_preprocessed(
         &self,
         chips: &[MetaChip<Val<SC>, C>],
-        input: &ExecutionRecord,
+        input: &EmulationRecord,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         chips
             .iter()
@@ -118,7 +118,7 @@ where
     pub fn generate_main(
         &self,
         chips: &[MetaChip<Val<SC>, C>],
-        input: &ExecutionRecord,
+        input: &EmulationRecord,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         chips
             .iter()
@@ -193,7 +193,7 @@ where
         chips: &[MetaChip<Val<SC>, C>],
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
-        record: &ExecutionRecord,
+        record: &EmulationRecord,
         //public_values: &'a [Val<SC>]
     ) -> BaseProof<SC> {
         // setup pcs

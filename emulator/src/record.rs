@@ -1,19 +1,15 @@
 use hashbrown::HashMap;
-use itertools::{EitherOrBoth, Itertools};
-use p3_field::AbstractField;
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-
-use super::{program::Program, Opcode};
-
 use crate::events::{AluEvent, CpuEvent, MemoryInitializeFinalizeEvent, MemoryRecordEnum};
+use pico_compiler::program::Program;
+use serde::{Deserialize, Serialize};
 
 /// A record of the execution of a program.
 ///
 /// The trace of the execution is represented as a list of "events" that occur every cycle.
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct ExecutionRecord {
+pub struct EmulationRecord {
     /// The program.
     pub program: Arc<Program>,
     /// The nonce lookup.
@@ -43,8 +39,8 @@ pub struct ExecutionRecord {
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
 }
 
-impl ExecutionRecord {
-    /// Create a new [`ExecutionRecord`].
+impl EmulationRecord {
+    /// Create a new [`EmulationRecord`].
     #[must_use]
     pub fn new(program: Arc<Program>) -> Self {
         Self {

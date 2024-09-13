@@ -1,8 +1,6 @@
-use serde::{Deserialize, Serialize};
-
-use crate::Opcode;
-
 use super::create_alu_lookups;
+use pico_compiler::opcode::Opcode;
+use serde::{Deserialize, Serialize};
 
 /// Arithmetic Logic Unit (ALU) Event.
 ///

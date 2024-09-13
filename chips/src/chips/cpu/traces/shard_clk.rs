@@ -1,6 +1,6 @@
 use crate::chips::cpu::{columns::CpuCols, CpuChip};
 use p3_field::Field;
-use pico_compiler::events::{ByteRecord, CpuEvent};
+use pico_emulator::events::{ByteRecord, CpuEvent};
 
 impl<F: Field> CpuChip<F> {
     /// Populates the shard, channel, and clk related rows.

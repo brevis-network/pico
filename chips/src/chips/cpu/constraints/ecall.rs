@@ -11,7 +11,7 @@ use crate::{
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
-use pico_compiler::syscalls::SyscallCode;
+use pico_emulator::syscalls::SyscallCode;
 use pico_machine::chip::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {

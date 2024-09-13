@@ -1,9 +1,8 @@
+use crate::{instruction::Instruction, opcode::Opcode, riscv::register::Register};
 use rrs_lib::{
     instruction_formats::{BType, IType, ITypeCSR, ITypeShamt, JType, RType, SType, UType},
     process_instruction, InstructionProcessor,
 };
-
-use crate::{Instruction, Opcode, Register};
 
 impl Instruction {
     /// Create a new [`Instruction`] from an R-type instruction.

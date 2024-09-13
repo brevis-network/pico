@@ -2,8 +2,7 @@ use crate::{
     gadgets::{baby_bear_word::BabyBearWordRangeChecker, is_zero::IsZeroOperation},
     utils::word::Word,
 };
-// TODO: Enable after adding public values.
-// use pico_compiler::public_values::PV_DIGEST_NUM_WORDS;
+
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 

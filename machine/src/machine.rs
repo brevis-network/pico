@@ -8,8 +8,8 @@ use crate::{
 };
 use anyhow::Result;
 use p3_air::Air;
-use pico_compiler::record::ExecutionRecord;
 use pico_configs::config::{StarkGenericConfig, Val};
+use pico_emulator::record::EmulationRecord;
 
 /// Functions that each machine should implement.
 pub trait MachineBehavior<SC, C, P>
@@ -29,10 +29,10 @@ where
     fn chips(&self) -> &[MetaChip<Val<SC>, C>];
 
     /// setup prover, verfier and keys.
-    fn setup(&self, input: &ExecutionRecord) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
+    fn setup(&self, input: &EmulationRecord) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
 
     /// Get the prover of the machine.
-    fn prove(&self, input: &ExecutionRecord, pk: &BaseProvingKey<SC>) -> MetaProof<SC, P>;
+    fn prove(&self, input: &EmulationRecord, pk: &BaseProvingKey<SC>) -> MetaProof<SC, P>;
 
     /// Verify the proof.
     fn verify(&self, proof: &MetaProof<SC, P>, vk: &BaseVerifyingKey<SC>) -> Result<()>;
@@ -82,7 +82,7 @@ where
     }
 
     /// setup proving and verifying keys.
-    fn setup(&self, input: &ExecutionRecord) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+    fn setup(&self, input: &EmulationRecord) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let (pk, vk) = self.prover.setup_keys(&self.config, &self.chips, input);
 
         (pk, vk)
@@ -91,7 +91,7 @@ where
     /// Prove based on record and proving key.
     fn prove(
         &self,
-        input: &ExecutionRecord,
+        input: &EmulationRecord,
         pk: &BaseProvingKey<SC>,
     ) -> MetaProof<SC, ElementProof<SC>> {
         let mut challenger = self.config.challenger();

@@ -106,9 +106,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.87"
+version = "1.0.88"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10f00e1f6e58a40e807377c75c6a7f97bf9044fab57816f2414e6f5f4499d7b8"
+checksum = "4e1496f8fb1fbf272686b8d37f523dab3e4a7443300055e74cdaa449f3114356"
 
 [[package]]
 name = "arrayref"
@@ -1215,6 +1215,7 @@ dependencies = [
  "p3-util",
  "pico-compiler",
  "pico-derive",
+ "pico-emulator",
  "pico-machine",
  "rand",
  "rayon",
@@ -1290,6 +1291,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico-emulator"
+version = "0.1.0"
+dependencies = [
+ "arrayref",
+ "bincode",
+ "bytemuck",
+ "elf",
+ "eyre",
+ "generic-array 1.1.0",
+ "hashbrown 0.14.5",
+ "hex",
+ "itertools 0.13.0",
+ "log",
+ "nohash-hasher",
+ "num",
+ "p3-field",
+ "p3-maybe-rayon",
+ "pico-compiler",
+ "rand",
+ "rrs-succinct",
+ "serde",
+ "serde_with",
+ "strum",
+ "strum_macros",
+ "thiserror",
+ "tiny-keccak",
+ "tracing",
+ "typenum",
+]
+
+[[package]]
 name = "pico-examples"
 version = "0.1.0"
 dependencies = [
@@ -1347,6 +1379,7 @@ dependencies = [
  "pico-chips",
  "pico-compiler",
  "pico-configs",
+ "pico-emulator",
  "rayon-scan",
  "serde",
 ]
@@ -1808,9 +1841,9 @@ checksum = "42ff0bf0c66b8238c6f3b578df37d0b7848e55df8577b3f74f92a69acceeb825"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.12"
+version = "1.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
+checksum = "e91b56cd4cadaeb79bbf1a5645f6b4f8dc5bde8834ad5894a8db35fda9efa1fe"
 
 [[package]]
 name = "unroll"

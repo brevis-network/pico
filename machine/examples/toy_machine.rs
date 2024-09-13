@@ -3,8 +3,9 @@ use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::toy::ToyChip;
-use pico_compiler::{opts::PicoCoreOpts, record::ExecutionRecord, Executor, Program};
+use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
+use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
     machine::{MachineBehavior, SimpleMachine},
@@ -25,13 +26,13 @@ impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
         }
     }
 
-    fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
         match self {
             Self::Toy(chip) => chip.generate_preprocessed(input),
         }
     }
 
-    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         match self {
             Self::Toy(chip) => chip.generate_main(input),
         }

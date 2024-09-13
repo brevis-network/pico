@@ -2,11 +2,10 @@
 
 mod code;
 mod commit;
-mod context;
 mod deferred;
 mod halt;
 mod hint;
-mod unconstrained;
+pub mod syscall_context;
 mod write;
 
 use std::sync::Arc;
@@ -14,11 +13,12 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 
 pub use code::*;
-pub use context::*;
 use hint::{HintLenSyscall, HintReadSyscall};
 
-use crate::syscalls::{commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall};
-use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
+use crate::syscalls::{
+    commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall,
+    syscall_context::SyscallContext,
+};
 use write::WriteSyscall;
 
 /// A system call in the Pico RISC-V zkVM.
@@ -45,16 +45,6 @@ pub trait Syscall: Send + Sync {
 #[must_use]
 pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     let mut syscall_map = HashMap::<SyscallCode, Arc<dyn Syscall>>::default();
-
-    syscall_map.insert(
-        SyscallCode::ENTER_UNCONSTRAINED,
-        Arc::new(EnterUnconstrainedSyscall),
-    );
-
-    syscall_map.insert(
-        SyscallCode::EXIT_UNCONSTRAINED,
-        Arc::new(ExitUnconstrainedSyscall),
-    );
 
     syscall_map.insert(SyscallCode::WRITE, Arc::new(WriteSyscall));
 

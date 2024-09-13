@@ -1,11 +1,9 @@
 use itertools::izip;
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
-use pico_compiler::{
-    events::{ByteLookupEvent, ByteRecord},
-    ByteOpcode,
-};
+use pico_compiler::opcode::ByteOpcode;
 use pico_derive::AlignedBorrow;
+use pico_emulator::events::{ByteLookupEvent, ByteRecord};
 use pico_machine::chip::ChipBuilder;
 
 /// Operation columns for verifying that an element is within the range `[0, modulus)`.

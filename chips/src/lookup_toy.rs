@@ -3,8 +3,8 @@ use core::borrow::Borrow;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use pico_compiler::record::ExecutionRecord;
 use pico_derive::AlignedBorrow;
+use pico_emulator::record::EmulationRecord;
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder},
     lookup::{AirInteraction, LookupType},
@@ -38,7 +38,7 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
         "Add Looking Chip".to_string()
     }
 
-    fn generate_main(&self, _: &ExecutionRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, _: &EmulationRecord) -> RowMajorMatrix<F> {
         // because of just test lookup feature, hardcode test data instead of the inputs are not from execution records
         let row_num = 8;
 
@@ -58,7 +58,7 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
         trace
     }
 
-    fn generate_preprocessed(&self, _input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, _input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
         Some(self.generate_main(_input))
     }
     fn preprocessed_width(&self) -> usize {
@@ -103,7 +103,7 @@ impl<F: Field> ChipBehavior<F> for AddLookedChip<F> {
         "Add Looked Chip".to_string()
     }
 
-    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         // because of just test lookup feature, hardcode test data instead of the inputs are not from execution records
         let row_num = 8;
 

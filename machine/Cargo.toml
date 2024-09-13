@@ -10,6 +10,7 @@ categories.workspace = true
 [dependencies]
 # pico
 pico-configs = { workspace = true }
+pico-emulator = { workspace = true }
 
 # p3
 p3-air = { workspace = true }

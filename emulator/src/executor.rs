@@ -9,20 +9,22 @@ use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{
-    context::PicoContext,
-    opts::PicoCoreOpts,
-    record::{ExecutionRecord, MemoryAccessRecord},
-    state::{ExecutionState, ForkState},
-    Instruction, Opcode, Program, Register,
+use pico_compiler::{
+    instruction::Instruction, opcode::Opcode, program::Program, riscv::register::Register,
 };
 
+use crate::syscalls::{default_syscall_map, Syscall, SyscallCode};
+
 use crate::{
+    context::PicoContext,
     events::{
         create_alu_lookup_id, create_alu_lookups, AluEvent, CpuEvent, MemoryAccessPosition,
         MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
     },
-    syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
+    opts::PicoCoreOpts,
+    record::{EmulationRecord, MemoryAccessRecord},
+    state::ExecutionState,
+    syscalls::syscall_context::SyscallContext,
 };
 
 pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;
@@ -47,26 +49,16 @@ pub struct Executor {
     pub state: ExecutionState,
 
     /// The current trace of the execution that is being collected.
-    pub record: ExecutionRecord,
+    pub record: EmulationRecord,
 
     /// The collected records, split by cpu cycles.
-    pub records: Vec<ExecutionRecord>,
+    pub records: Vec<EmulationRecord>,
 
     /// The maximum size of each shard.
     pub shard_size: u32,
 
     /// The maximimum number of shards to execute at once.
     pub shard_batch_size: u32,
-
-    /// Whether the runtime is in constrained mode or not.
-    ///
-    /// In unconstrained mode, any events, clock, register, or memory changes are reset after
-    /// leaving the unconstrained block. The only thing preserved is writes to the input
-    /// stream.
-    pub unconstrained: bool,
-
-    /// The state of the runtime when in unconstrained mode.
-    pub unconstrained_state: ForkState,
 
     /// The mapping between syscall codes and their implementations.
     pub syscall_map: HashMap<SyscallCode, Arc<dyn Syscall>>,
@@ -77,6 +69,9 @@ pub struct Executor {
     /// Memory addresses that were touched in this batch of shards. Used to minimize the size of
     /// checkpoints.
     pub memory_checkpoint: HashMap<u32, Option<MemoryRecord>, BuildNoHashHasher<u32>>,
+
+    /// The maximum number of cycles for a syscall.
+    pub max_syscall_cycles: u32,
 }
 
 /// The different modes the executor can run in.
@@ -163,7 +158,7 @@ impl Executor {
         // Create a shared reference to the program.
         let program = Arc::new(program);
 
-        let record = ExecutionRecord {
+        let record = EmulationRecord {
             program: program.clone(),
             ..Default::default()
         };
@@ -188,9 +183,8 @@ impl Executor {
             opts,
             max_cycles: context.max_cycles,
             executor_mode: ExecutorMode::Simple,
-            unconstrained: false,
             memory_checkpoint: HashMap::default(),
-            unconstrained_state: ForkState::default(),
+            max_syscall_cycles,
         }
     }
 
@@ -233,11 +227,8 @@ impl Executor {
     }
 
     fn execute(&mut self) -> Result<bool, ExecutionError> {
-        // Get the program.
-        let program = self.program.clone();
-
         // Get the current shard.
-        let start_shard = self.state.current_shard;
+        let start_shard = self.state.current_shard; // needed for public input
 
         // If it's the first cycle, initialize the program.
         if self.state.global_clk == 0 {
@@ -273,24 +264,7 @@ impl Executor {
             self.bump_record();
         }
 
-        println!("records size {}", self.records.len());
-        for i in 0..self.records.len() {
-            println!(
-                "record {} cpu event size: {}",
-                i,
-                self.records[i].cpu_events.len()
-            );
-            println!(
-                "record {} add event size: {}",
-                i,
-                self.records[i].add_events.len()
-            );
-            println!(
-                "record {} sub event size: {}",
-                i,
-                self.records[i].sub_events.len()
-            );
-        }
+        // TODO save public inputs in each record
 
         Ok(done)
     }
@@ -543,12 +517,6 @@ impl Executor {
                 // which is not permitted in unconstrained mode. This will result in
                 // non-zero memory interactions when generating a proof.
 
-                if self.unconstrained
-                    && (syscall != SyscallCode::EXIT_UNCONSTRAINED && syscall != SyscallCode::WRITE)
-                {
-                    return Err(ExecutionError::InvalidSyscallUsage(syscall_id as u64));
-                }
-
                 let syscall_impl = self.get_syscall(syscall).cloned();
                 let mut precompile_rt = SyscallContext::new(self);
                 precompile_rt.syscall_lookup_id = syscall_lookup_id;
@@ -597,9 +565,6 @@ impl Executor {
                     .entry(syscall_for_count)
                     .or_insert(0);
                 let (threshold, multiplier) = match syscall_for_count {
-                    SyscallCode::KECCAK_PERMUTE => (self.opts.split_opts.keccak, 24),
-                    SyscallCode::SHA_EXTEND => (self.opts.split_opts.sha_extend, 48),
-                    SyscallCode::SHA_COMPRESS => (self.opts.split_opts.sha_compress, 80),
                     _ => (self.opts.split_opts.deferred, 1),
                 };
                 let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
@@ -683,9 +648,7 @@ impl Executor {
         let channel = self.channel();
 
         // Update the channel to the next cycle.
-        if !self.unconstrained {
-            self.state.channel = (self.state.channel + 1) % NUM_BYTE_LOOKUP_CHANNELS;
-        }
+        self.state.channel = (self.state.channel + 1) % NUM_BYTE_LOOKUP_CHANNELS;
 
         // Emit the CPU event for this cycle.
         if self.executor_mode == ExecutorMode::Trace {
@@ -754,19 +717,6 @@ impl Executor {
             }
         }
 
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
-        if self.unconstrained {
-            let record = match entry {
-                Entry::Occupied(ref entry) => Some(entry.get()),
-                Entry::Vacant(_) => None,
-            };
-            self.unconstrained_state
-                .memory_diff
-                .entry(addr)
-                .or_insert(record.copied());
-        }
-
         // If it's the first time accessing this address, initialize previous values.
         let record: &mut MemoryRecord = match entry {
             Entry::Occupied(entry) => entry.into_mut(),
@@ -806,19 +756,6 @@ impl Executor {
                     self.memory_checkpoint.entry(addr).or_insert(None);
                 }
             }
-        }
-
-        // If we're in unconstrained mode, we don't want to modify state, so we'll save the
-        // original state if it's the first time modifying it.
-        if self.unconstrained {
-            let record = match entry {
-                Entry::Occupied(ref entry) => Some(entry.get()),
-                Entry::Vacant(_) => None,
-            };
-            self.unconstrained_state
-                .memory_diff
-                .entry(addr)
-                .or_insert(record.copied());
         }
 
         // If it's the first time accessing this address, initialize previous values.
@@ -862,7 +799,7 @@ impl Executor {
         let record = self.mr(addr, self.shard(), self.timestamp(&position));
 
         // If we're not in unconstrained mode, record the access for the current cycle.
-        if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
+        if self.executor_mode == ExecutorMode::Trace {
             match position {
                 MemoryAccessPosition::A => self.memory_accesses.a = Some(record.into()),
                 MemoryAccessPosition::B => self.memory_accesses.b = Some(record.into()),
@@ -887,7 +824,7 @@ impl Executor {
         let record = self.mw(addr, value, self.shard(), self.timestamp(&position));
 
         // If we're not in unconstrained mode, record the access for the current cycle.
-        if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
+        if self.executor_mode == ExecutorMode::Trace {
             match position {
                 MemoryAccessPosition::A => {
                     assert!(self.memory_accesses.a.is_none());
@@ -1180,7 +1117,7 @@ impl Executor {
     /// Bump the record.
     pub fn bump_record(&mut self) {
         let removed_record =
-            std::mem::replace(&mut self.record, ExecutionRecord::new(self.program.clone()));
+            std::mem::replace(&mut self.record, EmulationRecord::new(self.program.clone()));
         //let public_values = removed_record.public_values;
         //self.record.public_values = public_values;
         self.records.push(removed_record);
@@ -1201,9 +1138,16 @@ impl Default for ExecutorMode {
 }
 
 mod tests {
-    use crate::{opts::PicoCoreOpts, programs::tests::simple_fibo_program};
+    use super::{Executor, Program};
+    use crate::opts::PicoCoreOpts;
 
-    use super::Executor;
+    const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
+
+    #[must_use]
+    #[allow(clippy::unreadable_literal)]
+    pub fn simple_fibo_program() -> Program {
+        Program::from(ELF).unwrap()
+    }
 
     fn _assert_send<T: Send>() {}
 

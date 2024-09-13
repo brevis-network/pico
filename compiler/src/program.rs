@@ -5,8 +5,8 @@ use std::{collections::BTreeMap, fs::File, io::Read};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    disassembler::{transpile, Elf},
     instruction::Instruction,
+    riscv::disassembler::{transpile, Elf},
 };
 
 /// A program that can be executed by the Pico zkVM.

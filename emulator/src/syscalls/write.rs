@@ -1,4 +1,4 @@
-use crate::{Executor, Register};
+use pico_compiler::riscv::register::Register;
 
 use super::{Syscall, SyscallContext};
 
@@ -48,29 +48,5 @@ impl Syscall for WriteSyscall {
             tracing::warn!("tried to write to unknown file descriptor {fd}");
         }
         None
-    }
-}
-
-/// An enum representing the different cycle tracker commands.
-#[derive(Clone)]
-enum CycleTrackerCommand {
-    Start(String),
-    End(String),
-    ReportStart(String),
-    ReportEnd(String),
-}
-
-/// Parse a cycle tracker command from a string. If the string does not match any known command,
-/// returns None.
-fn parse_cycle_tracker_command(s: &str) -> Option<CycleTrackerCommand> {
-    let (command, fn_name) = s.split_once(':')?;
-    let trimmed_name = fn_name.trim().to_string();
-
-    match command {
-        "cycle-tracker-start" => Some(CycleTrackerCommand::Start(trimmed_name)),
-        "cycle-tracker-end" => Some(CycleTrackerCommand::End(trimmed_name)),
-        "cycle-tracker-report-start" => Some(CycleTrackerCommand::ReportStart(trimmed_name)),
-        "cycle-tracker-report-end" => Some(CycleTrackerCommand::ReportEnd(trimmed_name)),
-        _ => None,
     }
 }

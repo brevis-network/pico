@@ -9,7 +9,7 @@ use hashbrown::HashMap;
 use log::info;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_compiler::record::ExecutionRecord;
+use pico_emulator::record::EmulationRecord;
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::borrow::BorrowMut;
 
@@ -22,7 +22,7 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
         NUM_PROGRAM_PREPROCESSED_COLS
     }
 
-    fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
         info!("ProgramChip - generate_preprocessed: BEGIN");
 
         let program = &input.program;
@@ -59,7 +59,7 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
         Some(trace)
     }
 
-    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         info!("ProgramChip - generate_main: BEGIN");
 
         // Generate the trace rows for each event.

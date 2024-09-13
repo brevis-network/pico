@@ -12,6 +12,8 @@ p3-maybe-rayon = { workspace = true}
 #p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 p3-field = { workspace = true }
 
+pico-compiler = { workspace = true }
+
 # misc
 serde = { version = "1.0.205", features = ["derive", "rc"] }
 elf = "0.7.4"

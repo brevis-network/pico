@@ -4,7 +4,7 @@ use crate::chips::memory::init_finalize::{
 };
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_compiler::{events::MemoryInitializeFinalizeEvent, record::ExecutionRecord};
+use pico_emulator::{events::MemoryInitializeFinalizeEvent, record::EmulationRecord};
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::{array, borrow::BorrowMut};
 
@@ -21,12 +21,12 @@ impl<F: Field> ChipBehavior<F> for MemoryInitFinalizeChip<F> {
         NUM_MEMORY_INIT_FINALIZE_COLS
     }
 
-    fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
         // NOTE: It's not reasonable, just for testing.
         Some(self.generate_main(input))
     }
 
-    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         let mut memory_events = match self.kind {
             MemoryChipType::Initialize => input.memory_initialize_events.clone(),
             MemoryChipType::Finalize => input.memory_finalize_events.clone(),

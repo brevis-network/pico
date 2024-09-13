@@ -7,8 +7,12 @@ use pico_chips::chips::{
     memory::init_finalize::{MemoryChipType, MemoryInitFinalizeChip},
     program::ProgramChip,
 };
-use pico_compiler::{opts::PicoCoreOpts, record::ExecutionRecord, Executor, Program};
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
+use pico_emulator::{
+    executor::{Executor, Program},
+    opts::PicoCoreOpts,
+    record::EmulationRecord,
+};
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
     machine::{MachineBehavior, SimpleMachine},
@@ -34,7 +38,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
         }
     }
 
-    fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
         match self {
             Self::Program(chip) => chip.generate_preprocessed(input),
             Self::Cpu(chip) => chip.generate_preprocessed(input),
@@ -43,7 +47,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
         }
     }
 
-    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         match self {
             Self::Program(chip) => chip.generate_main(input),
             Self::Cpu(chip) => chip.generate_main(input),

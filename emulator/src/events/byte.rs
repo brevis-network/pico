@@ -1,15 +1,12 @@
-use crate::{ByteOpcode, Opcode};
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::{Field, PrimeField32};
+use p3_field::PrimeField32;
 use p3_maybe_rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
+use pico_compiler::opcode::ByteOpcode;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
-
-/// The number of different byte operations.
-pub const NUM_BYTE_OPS: usize = 9;
 
 /// Byte Lookup Event.
 ///
@@ -176,7 +173,7 @@ impl ByteRecord for HashMap<u32, HashMap<ByteLookupEvent, usize>> {
     }
 }
 
-pub(crate) fn add_sharded_byte_lookup_events(
+pub fn add_sharded_byte_lookup_events(
     sharded_blu_events: &mut HashMap<u32, HashMap<ByteLookupEvent, usize>>,
     new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
 ) {
@@ -229,44 +226,5 @@ pub(crate) fn add_sharded_byte_lookup_events(
     // Move ownership of the blu maps back to self.
     for (shard, blu) in shards.into_iter().zip(self_blu_maps.into_iter()) {
         sharded_blu_events.insert(shard, blu);
-    }
-}
-
-impl From<Opcode> for ByteOpcode {
-    /// Convert an opcode to a byte opcode.
-    fn from(value: Opcode) -> Self {
-        match value {
-            Opcode::AND => Self::AND,
-            Opcode::OR => Self::OR,
-            Opcode::XOR => Self::XOR,
-            Opcode::SLL => Self::SLL,
-            _ => panic!("Invalid opcode for ByteChip: {value:?}"),
-        }
-    }
-}
-
-impl ByteOpcode {
-    /// Get all the byte opcodes.
-    #[must_use]
-    pub fn all() -> Vec<Self> {
-        let opcodes = vec![
-            ByteOpcode::AND,
-            ByteOpcode::OR,
-            ByteOpcode::XOR,
-            ByteOpcode::SLL,
-            ByteOpcode::U8Range,
-            ByteOpcode::ShrCarry,
-            ByteOpcode::LTU,
-            ByteOpcode::MSB,
-            ByteOpcode::U16Range,
-        ];
-        assert_eq!(opcodes.len(), NUM_BYTE_OPS);
-        opcodes
-    }
-
-    /// Convert the opcode to a field element.
-    #[must_use]
-    pub fn as_field<F: Field>(self) -> F {
-        F::from_canonical_u8(self as u8)
     }
 }

@@ -4,7 +4,7 @@ use crate::chips::{
 };
 use hashbrown::HashMap;
 use p3_field::Field;
-use pico_compiler::{events::CpuEvent, syscalls::SyscallCode};
+use pico_emulator::{events::CpuEvent, syscalls::SyscallCode};
 
 impl<F: Field> CpuChip<F> {
     /// Populate columns related to ECALL.

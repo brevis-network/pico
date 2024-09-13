@@ -1,8 +1,9 @@
 use crate::{
     events::{MemoryReadRecord, MemoryWriteRecord},
-    record::ExecutionRecord,
-    Executor, Register,
+    executor::Executor,
+    record::EmulationRecord,
 };
+use pico_compiler::riscv::register::Register;
 
 /// A runtime for syscalls that is protected so that developers cannot arbitrarily modify the
 /// runtime.
@@ -38,7 +39,7 @@ impl<'a> SyscallContext<'a> {
     }
 
     /// Get a mutable reference to the execution record.
-    pub fn record_mut(&mut self) -> &mut ExecutionRecord {
+    pub fn record_mut(&mut self) -> &mut EmulationRecord {
         &mut self.rt.record
     }
 

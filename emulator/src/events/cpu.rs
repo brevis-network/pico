@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::Instruction;
+use pico_compiler::instruction::Instruction;
 
 use super::memory::MemoryRecordEnum;
 

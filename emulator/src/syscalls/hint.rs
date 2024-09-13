@@ -28,10 +28,6 @@ impl Syscall for HintReadSyscall {
         }
         let vec = &ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr];
         ctx.rt.state.input_stream_ptr += 1;
-        assert!(
-            !ctx.rt.unconstrained,
-            "hint read should not be used in a unconstrained block"
-        );
         assert_eq!(
             vec.len() as u32,
             len,

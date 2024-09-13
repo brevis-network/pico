@@ -1,4 +1,4 @@
-use super::{context::SyscallContext, Syscall};
+use super::{Syscall, SyscallContext};
 
 pub(crate) struct HaltSyscall;
 

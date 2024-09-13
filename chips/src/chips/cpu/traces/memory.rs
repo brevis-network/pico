@@ -5,10 +5,10 @@ use crate::{
 use hashbrown::HashMap;
 use p3_field::Field;
 use pico_compiler::{
-    events::{create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent},
-    ByteOpcode, Opcode,
-    Register::X0,
+    opcode::{ByteOpcode, Opcode},
+    riscv::register::Register::X0,
 };
+use pico_emulator::events::{create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent};
 use std::array;
 
 impl<F: Field> CpuChip<F> {

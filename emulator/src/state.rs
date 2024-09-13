@@ -1,17 +1,13 @@
-use std::{
-    fs::File,
-    io::{Seek, Write},
-};
-
 use hashbrown::HashMap;
 use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
+use crate::events::MemoryRecord;
+
 use crate::{
-    events::MemoryRecord,
     executor::ExecutorMode,
-    record::{ExecutionRecord, MemoryAccessRecord},
+    record::{EmulationRecord, MemoryAccessRecord},
     syscalls::SyscallCode,
 };
 
@@ -81,7 +77,7 @@ pub struct ForkState {
     /// The original memory access record at the fork point.
     pub op_record: MemoryAccessRecord,
     /// The original execution record at the fork point.
-    pub record: ExecutionRecord,
+    pub record: EmulationRecord,
     /// Whether `emit_events` was enabled at the fork point.
     pub executor_mode: ExecutorMode,
 }

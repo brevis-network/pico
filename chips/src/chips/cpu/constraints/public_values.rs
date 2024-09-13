@@ -4,7 +4,6 @@ use crate::{
 };
 use p3_air::AirBuilder;
 use p3_field::Field;
-// use pico_compiler::public_values::PublicValues;
 use pico_machine::chip::ChipBuilder;
 
 /* TODO: Enable after adding public values.

@@ -2,8 +2,9 @@ use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::lookup_toy::{AddLookedChip, AddLookingChip};
-use pico_compiler::{record::ExecutionRecord, Program};
+use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
+use pico_emulator::record::EmulationRecord;
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
     machine::{MachineBehavior, SimpleMachine},
@@ -32,14 +33,14 @@ impl<F: Field> ChipBehavior<F> for LookupToyChipType<F> {
         }
     }
 
-    fn generate_preprocessed(&self, input: &ExecutionRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
         match self {
             Self::LookingChip(chip) => chip.generate_preprocessed(input),
             Self::LookedChip(chip) => chip.generate_preprocessed(input),
         }
     }
 
-    fn generate_main(&self, input: &ExecutionRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         match self {
             Self::LookingChip(chip) => chip.generate_main(input),
             Self::LookedChip(chip) => chip.generate_main(input),
@@ -95,7 +96,7 @@ fn main() {
     // Setup PK and VK.
     println!("Setup PK and VK");
 
-    let record = ExecutionRecord::new(Arc::new(Program::default()));
+    let record = EmulationRecord::new(Arc::new(Program::default()));
     let (pk, vk) = simple_machine.setup(&record);
 
     // Generate the proof.

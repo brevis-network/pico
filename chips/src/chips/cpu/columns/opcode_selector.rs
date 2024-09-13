@@ -1,6 +1,6 @@
 use crate::chips::cpu::columns::utils::make_selector_col_map;
 use p3_field::Field;
-use pico_compiler::{Instruction, Opcode};
+use pico_compiler::{instruction::Instruction, opcode::Opcode};
 use pico_derive::AlignedBorrow;
 use std::{mem::size_of, vec::IntoIter};
 

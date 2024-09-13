@@ -186,3 +186,45 @@ impl Display for Opcode {
         f.write_str(self.mnemonic())
     }
 }
+
+/// The number of different byte operations.
+pub const NUM_BYTE_OPS: usize = 9;
+
+impl From<Opcode> for ByteOpcode {
+    /// Convert an opcode to a byte opcode.
+    fn from(value: Opcode) -> Self {
+        match value {
+            Opcode::AND => Self::AND,
+            Opcode::OR => Self::OR,
+            Opcode::XOR => Self::XOR,
+            Opcode::SLL => Self::SLL,
+            _ => panic!("Invalid opcode for ByteChip: {value:?}"),
+        }
+    }
+}
+
+impl ByteOpcode {
+    /// Get all the byte opcodes.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        let opcodes = vec![
+            ByteOpcode::AND,
+            ByteOpcode::OR,
+            ByteOpcode::XOR,
+            ByteOpcode::SLL,
+            ByteOpcode::U8Range,
+            ByteOpcode::ShrCarry,
+            ByteOpcode::LTU,
+            ByteOpcode::MSB,
+            ByteOpcode::U16Range,
+        ];
+        assert_eq!(opcodes.len(), NUM_BYTE_OPS);
+        opcodes
+    }
+
+    /// Convert the opcode to a field element.
+    #[must_use]
+    pub fn as_field<F: Field>(self) -> F {
+        F::from_canonical_u8(self as u8)
+    }
+}
