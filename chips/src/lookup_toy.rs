@@ -91,7 +91,7 @@ where
         // no constraints for main trace, addition result is constrained by lookup
         builder.looking(AirInteraction::new(
             vec![local.a.into(), local.b.into(), local.result.into()],
-            F::zero().into(),
+            F::one().into(),
             LookupType::Byte,
         ))
     }
@@ -152,7 +152,7 @@ where
 
         builder.looked(AirInteraction::new(
             vec![local.a.into(), local.b.into(), local.result.into()],
-            F::zero().into(),
+            F::one().into(),
             LookupType::Byte,
         ))
     }

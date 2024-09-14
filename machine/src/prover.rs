@@ -3,7 +3,7 @@ use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::{AbstractField, PackedValue};
+use p3_field::{AbstractField, Field, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
@@ -312,7 +312,7 @@ where
                     main_on_quotient_domain,
                     permutation_trace_on_quotient_domains,
                     packed_perm_challenges.as_slice(),
-                    cumulative_sums[i],
+                    cumulative_sums.clone()[i],
                     alpha,
                 )
             })
@@ -400,7 +400,7 @@ where
             .into_iter()
             .zip_eq(permutation_opened_values)
             .zip_eq(quotient_opened_values)
-            .zip_eq(cumulative_sums)
+            .zip_eq(cumulative_sums.clone())
             .enumerate()
             .map(|(i, (((main, permutation), quotient), cumulative_sum))| {
                 let preprocessed = pk
@@ -424,6 +424,16 @@ where
                 }
             })
             .collect::<Vec<_>>();
+
+        let mut cumulative_sum = SC::Challenge::zero();
+        cumulative_sum += cumulative_sums.clone().iter().copied().sum::<SC::Challenge>();
+
+        println!("Cumulative sum: {cumulative_sum}");
+
+        // If the cumulative sum is not zero, debug the interactions.
+        if !cumulative_sum.is_zero() {
+            panic!("Lookup cumulative sum is not zero");
+        }
 
         // final base proof
         BaseProof::<SC> {
