@@ -33,7 +33,7 @@
 - [x] Abstraction framework update
   - [x] machine type/behavior
   - [x] proofs type/behavior
-- [ ] `Compiler` separation into `Compiler` and `Executor`
+- [x] `Compiler` separation into `Compiler` and `Executor`
 - [ ] chips for Fibonacci
   - [ ] CPU (main heavy-lifting part)
   - [ ] Program
@@ -46,17 +46,16 @@
   - [ ] Mul
   - [ ] ShiftLeft 
   - [ ] ShiftRight
-- [ ] `preprocessed`
+- [x] `preprocessed`
   - Preprocessed trace of chips and its involvement in the proving procedure;
   - Partially done, need to complete by adding it to the production of `ChunkProof`
 - [ ] public values
-- [ ] chip ordering
-- [ ] dependencies 
-- [ ] lookups (need to be carefully handled)
-  - [ ] interactions
-  - [ ] permutation 
-    - [ ] traces generation
-    - [ ] eval
+- [x] dependencies 
+- [x] lookups (need to be carefully handled)
+  - [x] interactions
+  - [x] permutation 
+    - [x] traces generation
+    - [x] eval
 
 ## Large Fibonacci
 #### Goal
@@ -88,10 +87,10 @@
   - [ ] user time
 - [ ] Adding parallelization
 - [ ] Deferred proofs
+- [ ] Precompile chips
 - [ ] config extension: M31 field and CSTARK
 - [ ] batch opening and verifying (mmcs)
 - [ ] logup-gkr integration
-- [ ] deferred proofs
 
 ## Anytime
 #### Goal
