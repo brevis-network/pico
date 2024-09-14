@@ -1,9 +1,8 @@
 use crate::{
     chips::{
         cpu::{
-            columns::{MemoryColumns, OpcodeSelectorCols},
-            constraints::CpuCols,
-            CpuChip,
+            columns::CpuCols, memory::columns::MemoryColumns,
+            opcode_selector::columns::OpcodeSelectorCols, CpuChip,
         },
         memory::read_write::columns::MemoryCols,
     },

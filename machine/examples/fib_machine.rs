@@ -7,12 +7,9 @@ use pico_chips::chips::{
     memory::init_finalize::{MemoryChipType, MemoryInitFinalizeChip},
     program::ProgramChip,
 };
+use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
-use pico_emulator::{
-    executor::{Executor, Program},
-    opts::PicoCoreOpts,
-    record::EmulationRecord,
-};
+use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
     machine::{MachineBehavior, SimpleMachine},

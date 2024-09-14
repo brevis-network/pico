@@ -1,18 +1,9 @@
-pub mod auipc;
-pub mod branch;
-pub mod channel_selector;
-pub mod ecall;
-pub mod jump;
-pub mod memory;
-pub mod public_values;
-pub mod register;
-pub mod shard_clk;
-
 use crate::chips::cpu::{
-    columns::{CpuCols, OpcodeSelectorCols, OPCODE_SELECTORS_COL_MAP},
+    channel_selector::constraints::eval_channel_selector,
+    columns::CpuCols,
+    opcode_selector::columns::{OpcodeSelectorCols, OPCODE_SELECTORS_COL_MAP},
     CpuChip,
 };
-use channel_selector::eval_channel_selector;
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};

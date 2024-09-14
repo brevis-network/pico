@@ -1,11 +1,3 @@
-mod auipc;
-mod branch;
-mod channel_selector;
-mod ecall;
-mod jump;
-mod memory;
-mod shard_clk;
-
 use crate::chips::{
     cpu::{
         columns::{CpuCols, CPU_COL_MAP, NUM_CPU_COLS},

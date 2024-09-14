@@ -1,4 +1,6 @@
-use crate::chips::cpu::columns::{InstructionCols, OpcodeSelectorCols};
+use crate::chips::cpu::{
+    instruction::columns::InstructionCols, opcode_selector::columns::OpcodeSelectorCols,
+};
 use core::mem::size_of;
 use pico_derive::AlignedBorrow;
 

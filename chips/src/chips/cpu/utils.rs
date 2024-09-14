@@ -1,5 +1,6 @@
-use crate::chips::cpu::columns::{
-    CpuCols, OpcodeSelectorCols, NUM_CPU_COLS, NUM_OPCODE_SELECTOR_COLS,
+use crate::chips::cpu::{
+    columns::{CpuCols, NUM_CPU_COLS},
+    opcode_selector::columns::{OpcodeSelectorCols, NUM_OPCODE_SELECTOR_COLS},
 };
 use p3_util::indices_arr;
 use std::mem::transmute;

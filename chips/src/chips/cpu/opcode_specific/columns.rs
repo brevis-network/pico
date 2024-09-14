@@ -1,5 +1,6 @@
-use crate::chips::cpu::columns::{
-    ecall::EcallCols, AuipcCols, BranchCols, JumpCols, MemoryColumns,
+use crate::chips::cpu::{
+    auipc::columns::AuipcCols, branch::columns::BranchCols, ecall::columns::EcallCols,
+    jump::columns::JumpCols, memory::columns::MemoryColumns,
 };
 use static_assertions::const_assert;
 use std::{

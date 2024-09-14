@@ -1,8 +1,5 @@
 use crate::{
-    chips::cpu::{
-        columns::{CpuCols, OpcodeSelectorCols},
-        CpuChip,
-    },
+    chips::cpu::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCols, CpuChip},
     gadgets::baby_bear_word::BabyBearWordRangeChecker,
 };
 use p3_air::AirBuilder;

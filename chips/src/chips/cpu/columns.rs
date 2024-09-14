@@ -1,31 +1,16 @@
-mod auipc;
-mod branch;
-mod channel_selector;
-mod ecall;
-mod instruction;
-mod jump;
-mod memory;
-mod opcode_selector;
-mod opcode_specific;
-mod utils;
-
-pub use auipc::*;
-pub use branch::*;
-pub use channel_selector::*;
-pub use ecall::*;
-pub use instruction::*;
-pub use jump::*;
-pub use memory::*;
-pub use opcode_selector::*;
-pub use opcode_specific::*;
-
 use crate::{
-    chips::memory::read_write::columns::{MemoryCols, MemoryReadCols, MemoryReadWriteCols},
+    chips::{
+        cpu::{
+            channel_selector::columns::ChannelSelectorCols, instruction::columns::InstructionCols,
+            opcode_selector::columns::OpcodeSelectorCols,
+            opcode_specific::columns::OpcodeSpecificCols, utils::make_col_map,
+        },
+        memory::read_write::columns::{MemoryCols, MemoryReadCols, MemoryReadWriteCols},
+    },
     utils::word::Word,
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
-use utils::make_col_map;
 
 pub const NUM_CPU_COLS: usize = size_of::<CpuCols<u8>>();
 

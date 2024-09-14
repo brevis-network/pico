@@ -1,9 +1,6 @@
 use crate::{
     chips::{
-        cpu::{
-            columns::{CpuCols, OpcodeSelectorCols},
-            CpuChip,
-        },
+        cpu::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCols, CpuChip},
         memory::read_write::columns::MemoryCols,
     },
     gadgets::{baby_bear_word::BabyBearWordRangeChecker, is_zero::IsZeroOperation},
