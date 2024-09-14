@@ -9,6 +9,7 @@ use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder, PairBuilder};
 use p3_field::{AbstractField, ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::{get_log_quotient_degree, SymbolicAirBuilder};
+use pico_compiler::program::Program;
 use pico_emulator::record::EmulationRecord;
 
 /// Chip behavior
@@ -16,7 +17,7 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
-    fn generate_preprocessed(&self, _input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         None
     }
 
@@ -191,8 +192,8 @@ where
         self.chip.name()
     }
 
-    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
-        self.chip.generate_preprocessed(input)
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
+        self.chip.generate_preprocessed(program)
     }
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {

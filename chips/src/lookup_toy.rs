@@ -3,13 +3,14 @@ use core::borrow::Borrow;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use pico_compiler::program::Program;
 use pico_derive::AlignedBorrow;
 use pico_emulator::record::EmulationRecord;
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder},
     lookup::{AirInteraction, LookupType},
 };
-use std::{marker::PhantomData, mem::size_of};
+use std::{marker::PhantomData, mem::size_of, sync::Arc};
 
 #[repr(C)]
 #[derive(Debug, AlignedBorrow)]
@@ -58,8 +59,9 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
         trace
     }
 
-    fn generate_preprocessed(&self, _input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
-        Some(self.generate_main(_input))
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
+        let record = EmulationRecord::new(Arc::new(Program::default()));
+        Some(self.generate_main(&record))
     }
     fn preprocessed_width(&self) -> usize {
         3

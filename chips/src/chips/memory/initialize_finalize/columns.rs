@@ -4,11 +4,12 @@ use crate::gadgets::{
 use core::mem::size_of;
 use pico_derive::AlignedBorrow;
 
-pub(crate) const NUM_MEMORY_INIT_FINALIZE_COLS: usize = size_of::<MemoryInitFinalizeCols<u8>>();
+pub(crate) const NUM_MEMORY_INITIALIZE_FINALIZE_COLS: usize =
+    size_of::<MemoryInitializeFinalizeCols<u8>>();
 
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct MemoryInitFinalizeCols<T> {
+pub struct MemoryInitializeFinalizeCols<T> {
     /// The shard number of the memory access.
     pub shard: T,
 

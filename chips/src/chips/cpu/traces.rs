@@ -10,7 +10,7 @@ use log::info;
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_compiler::opcode::Opcode;
+use pico_compiler::{opcode::Opcode, program::Program};
 use pico_emulator::{
     events::{AluEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
     record::EmulationRecord,
@@ -39,9 +39,10 @@ impl<F: Field> ChipBehavior<F> for CpuChip<F> {
         NUM_CPU_COLS
     }
 
-    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         // NOTE: It's not reasonable, just for testing.
-        Some(self.generate_main(input))
+        // Some(self.generate_main(input))
+        None
     }
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {

@@ -26,9 +26,9 @@ impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
         }
     }
 
-    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         match self {
-            Self::Toy(chip) => chip.generate_preprocessed(input),
+            Self::Toy(chip) => chip.generate_preprocessed(program),
         }
     }
 
@@ -102,7 +102,7 @@ fn main() {
 
     // Setup PK and VK.
     println!("Setup PK and VK");
-    let (pk, vk) = prover.setup_keys(&config, &chips, &record);
+    let (pk, vk) = prover.setup_keys(&config, &chips, &record.program);
 
     println!("Generating proof");
     let mut challenger = config.challenger();

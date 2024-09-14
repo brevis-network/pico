@@ -7,10 +7,10 @@ use p3_field::{AbstractField, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
-use std::cmp::Reverse;
-
+use pico_compiler::program::Program;
 use pico_configs::config::{Com, Domain, PackedChallenge, PcsProof, StarkGenericConfig, Val};
 use pico_emulator::record::EmulationRecord;
+use std::cmp::Reverse;
 
 use crate::{
     chip::{ChipBehavior, MetaChip},
@@ -41,13 +41,13 @@ where
         &self,
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],
-        input: &EmulationRecord,
+        program: &Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let mut named_preprocessed_traces = chips
             .par_iter()
             .filter_map(|chip| {
                 let chip_name = chip.name();
-                let prep_trace = chip.generate_preprocessed(input);
+                let prep_trace = chip.generate_preprocessed(program);
                 // Assert that the chip width data is correct.
                 let expected_width = prep_trace.as_ref().map(|t| t.width()).unwrap_or(0);
                 assert_eq!(
@@ -104,12 +104,12 @@ where
     pub fn generate_preprocessed(
         &self,
         chips: &[MetaChip<Val<SC>, C>],
-        input: &EmulationRecord,
+        program: &Program,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         chips
             .iter()
             .filter_map(|chip| {
-                chip.generate_preprocessed(input)
+                chip.generate_preprocessed(program)
                     .map(|trace| (chip.name(), trace))
             })
             .collect::<Vec<_>>()

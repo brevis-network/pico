@@ -33,10 +33,10 @@ impl<F: Field> ChipBehavior<F> for LookupToyChipType<F> {
         }
     }
 
-    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         match self {
-            Self::LookingChip(chip) => chip.generate_preprocessed(input),
-            Self::LookedChip(chip) => chip.generate_preprocessed(input),
+            Self::LookingChip(chip) => chip.generate_preprocessed(program),
+            Self::LookedChip(chip) => chip.generate_preprocessed(program),
         }
     }
 
@@ -97,7 +97,7 @@ fn main() {
     println!("Setup PK and VK");
 
     let record = EmulationRecord::new(Arc::new(Program::default()));
-    let (pk, vk) = simple_machine.setup(&record);
+    let (pk, vk) = simple_machine.setup(&record.program);
 
     // Generate the proof.
     println!("Generating proof..");

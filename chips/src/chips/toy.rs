@@ -5,7 +5,7 @@ use p3_air::{Air, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::ParallelIterator;
-use pico_compiler::opcode::Opcode;
+use pico_compiler::{opcode::Opcode, program::Program};
 use pico_emulator::record::EmulationRecord;
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder},
@@ -52,9 +52,10 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
         TOY_CHIP_NAME.to_string()
     }
 
-    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         // NOTE: It's not reasonable, just for testing.
-        Some(self.generate_main(input))
+        //Some(self.generate_main(input))
+        None
     }
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {

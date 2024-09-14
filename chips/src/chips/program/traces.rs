@@ -9,6 +9,7 @@ use hashbrown::HashMap;
 use log::info;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
+use pico_compiler::program::Program;
 use pico_emulator::record::EmulationRecord;
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::borrow::BorrowMut;
@@ -22,10 +23,9 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
         NUM_PROGRAM_PREPROCESSED_COLS
     }
 
-    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         info!("ProgramChip - generate_preprocessed: BEGIN");
 
-        let program = &input.program;
         debug_assert!(!program.instructions.is_empty(), "empty program");
 
         let rows = program

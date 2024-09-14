@@ -1,14 +1,15 @@
-use crate::chips::memory::init_finalize::{
-    columns::{MemoryInitFinalizeCols, NUM_MEMORY_INIT_FINALIZE_COLS},
-    MemoryChipType, MemoryInitFinalizeChip,
+use crate::chips::memory::initialize_finalize::{
+    columns::{MemoryInitializeFinalizeCols, NUM_MEMORY_INITIALIZE_FINALIZE_COLS},
+    MemoryChipType, MemoryInitializeFinalizeChip,
 };
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
+use pico_compiler::program::Program;
 use pico_emulator::{events::MemoryInitializeFinalizeEvent, record::EmulationRecord};
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::{array, borrow::BorrowMut};
 
-impl<F: Field> ChipBehavior<F> for MemoryInitFinalizeChip<F> {
+impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     fn name(&self) -> String {
         match self.kind {
             MemoryChipType::Initialize => "MemoryInit".to_string(),
@@ -18,12 +19,13 @@ impl<F: Field> ChipBehavior<F> for MemoryInitFinalizeChip<F> {
 
     fn preprocessed_width(&self) -> usize {
         // NOTE: It's not reasonable, just for testing.
-        NUM_MEMORY_INIT_FINALIZE_COLS
+        NUM_MEMORY_INITIALIZE_FINALIZE_COLS
     }
 
-    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         // NOTE: It's not reasonable, just for testing.
-        Some(self.generate_main(input))
+        // Some(self.generate_main(input))
+        None
     }
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
@@ -40,7 +42,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitFinalizeChip<F> {
         */
 
         memory_events.sort_by_key(|event| event.addr);
-        let rows: Vec<[F; NUM_MEMORY_INIT_FINALIZE_COLS]> = (0..memory_events.len()) // OPT: change this to par_iter
+        let rows: Vec<[F; NUM_MEMORY_INITIALIZE_FINALIZE_COLS]> = (0..memory_events.len()) // OPT: change this to par_iter
             .map(|i| {
                 let MemoryInitializeFinalizeEvent {
                     addr,
@@ -50,8 +52,8 @@ impl<F: Field> ChipBehavior<F> for MemoryInitFinalizeChip<F> {
                     used,
                 } = memory_events[i];
 
-                let mut row = [F::zero(); NUM_MEMORY_INIT_FINALIZE_COLS];
-                let cols: &mut MemoryInitFinalizeCols<F> = row.as_mut_slice().borrow_mut();
+                let mut row = [F::zero(); NUM_MEMORY_INITIALIZE_FINALIZE_COLS];
+                let cols: &mut MemoryInitializeFinalizeCols<F> = row.as_mut_slice().borrow_mut();
                 cols.addr = F::from_canonical_u32(addr);
                 cols.addr_bits.populate(addr);
                 cols.shard = F::from_canonical_u32(shard);
@@ -97,10 +99,10 @@ impl<F: Field> ChipBehavior<F> for MemoryInitFinalizeChip<F> {
 
         let mut trace = RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_MEMORY_INIT_FINALIZE_COLS,
+            NUM_MEMORY_INITIALIZE_FINALIZE_COLS,
         );
 
-        pad_to_power_of_two::<NUM_MEMORY_INIT_FINALIZE_COLS, F>(&mut trace.values);
+        pad_to_power_of_two::<NUM_MEMORY_INITIALIZE_FINALIZE_COLS, F>(&mut trace.values);
 
         trace
     }

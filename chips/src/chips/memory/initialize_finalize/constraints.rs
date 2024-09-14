@@ -1,7 +1,7 @@
 use crate::{
-    chips::memory::init_finalize::{
-        columns::{MemoryInitFinalizeCols, NUM_MEMORY_INIT_FINALIZE_COLS},
-        MemoryChipType, MemoryInitFinalizeChip,
+    chips::memory::initialize_finalize::{
+        columns::{MemoryInitializeFinalizeCols, NUM_MEMORY_INITIALIZE_FINALIZE_COLS},
+        MemoryChipType, MemoryInitializeFinalizeChip,
     },
     gadgets::baby_bear_range::BabyBearBitDecomposition,
 };
@@ -11,22 +11,22 @@ use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
 use pico_machine::chip::ChipBuilder;
 
-impl<F: Field> BaseAir<F> for MemoryInitFinalizeChip<F> {
+impl<F: Field> BaseAir<F> for MemoryInitializeFinalizeChip<F> {
     fn width(&self) -> usize {
-        NUM_MEMORY_INIT_FINALIZE_COLS
+        NUM_MEMORY_INITIALIZE_FINALIZE_COLS
     }
 }
 
-impl<F: Field, CB: ChipBuilder<F>> Air<CB> for MemoryInitFinalizeChip<F>
+impl<F: Field, CB: ChipBuilder<F>> Air<CB> for MemoryInitializeFinalizeChip<F>
 where
     CB::Var: Sized,
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
         let local = main.row_slice(0);
-        let local: &MemoryInitFinalizeCols<CB::Var> = (*local).borrow();
+        let local: &MemoryInitializeFinalizeCols<CB::Var> = (*local).borrow();
         let next = main.row_slice(1);
-        let next: &MemoryInitFinalizeCols<CB::Var> = (*next).borrow();
+        let next: &MemoryInitializeFinalizeCols<CB::Var> = (*next).borrow();
 
         builder.assert_bool(local.is_real);
         for i in 0..32 {

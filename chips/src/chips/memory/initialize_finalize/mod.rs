@@ -12,12 +12,12 @@ pub enum MemoryChipType {
 }
 
 /// A memory chip that can initialize or finalize values in memory.
-pub struct MemoryInitFinalizeChip<F> {
+pub struct MemoryInitializeFinalizeChip<F> {
     pub kind: MemoryChipType,
     _phantom: PhantomData<F>,
 }
 
-impl<F> MemoryInitFinalizeChip<F> {
+impl<F> MemoryInitializeFinalizeChip<F> {
     /// Creates a new memory chip with a certain type.
     pub const fn new(kind: MemoryChipType) -> Self {
         Self {

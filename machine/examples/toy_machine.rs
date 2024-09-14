@@ -26,9 +26,9 @@ impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
         }
     }
 
-    fn generate_preprocessed(&self, input: &EmulationRecord) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         match self {
-            Self::Toy(chip) => chip.generate_preprocessed(input),
+            Self::Toy(chip) => chip.generate_preprocessed(program),
         }
     }
 
@@ -106,7 +106,7 @@ fn main() {
 
     // Setup machine prover, verifier, pk and vk.
     info!("Setup machine..");
-    let (pk, vk) = simple_machine.setup(record);
+    let (pk, vk) = simple_machine.setup(&record.program);
 
     // Generate the proof.
     info!("Generating proof..");
