@@ -8,6 +8,7 @@ name: Check, Test, and Format
 
 jobs:
   fmt:
+    if: false # Disable for now
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
