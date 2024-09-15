@@ -4,7 +4,6 @@ use crate::chips::memory::initialize_finalize::{
 };
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_compiler::program::Program;
 use pico_emulator::{events::MemoryInitializeFinalizeEvent, record::EmulationRecord};
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::{array, borrow::BorrowMut};
@@ -15,17 +14,6 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
             MemoryChipType::Initialize => "MemoryInit".to_string(),
             MemoryChipType::Finalize => "MemoryFinalize".to_string(),
         }
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        // NOTE: It's not reasonable, just for testing.
-        NUM_MEMORY_INITIALIZE_FINALIZE_COLS
-    }
-
-    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
-        // NOTE: It's not reasonable, just for testing.
-        // Some(self.generate_main(input))
-        None
     }
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {

@@ -426,7 +426,11 @@ where
             .collect::<Vec<_>>();
 
         let mut cumulative_sum = SC::Challenge::zero();
-        cumulative_sum += cumulative_sums.clone().iter().copied().sum::<SC::Challenge>();
+        cumulative_sum += cumulative_sums
+            .clone()
+            .iter()
+            .copied()
+            .sum::<SC::Challenge>();
 
         println!("Cumulative sum: {cumulative_sum}");
 

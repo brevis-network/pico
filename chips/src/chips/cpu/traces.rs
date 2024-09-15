@@ -34,17 +34,6 @@ impl<F: Field> ChipBehavior<F> for CpuChip<F> {
         "CPU".to_string()
     }
 
-    fn preprocessed_width(&self) -> usize {
-        // NOTE: It's not reasonable, just for testing.
-        NUM_CPU_COLS
-    }
-
-    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
-        // NOTE: It's not reasonable, just for testing.
-        // Some(self.generate_main(input))
-        None
-    }
-
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         info!("CpuChip - generate_main: BEGIN");
         let mut values = vec![F::zero(); input.cpu_events.len() * NUM_CPU_COLS];

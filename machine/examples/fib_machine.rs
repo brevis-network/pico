@@ -1,5 +1,5 @@
 use log::info;
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::{
@@ -86,7 +86,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
 impl<F, CB> Air<CB> for FibChipType<F>
 where
     F: Field,
-    CB: ChipBuilder<F>,
+    CB: ChipBuilder<F> + PairBuilder,
 {
     fn eval(&self, b: &mut CB) {
         match self {

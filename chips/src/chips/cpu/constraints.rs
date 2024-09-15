@@ -1,14 +1,18 @@
 use crate::chips::cpu::{
     channel_selector::constraints::eval_channel_selector,
     columns::CpuCols,
+    instruction::columns::InstructionCols,
     opcode_selector::columns::{OpcodeSelectorCols, OPCODE_SELECTORS_COL_MAP},
     CpuChip,
 };
-use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-use pico_machine::chip::ChipBuilder;
+use pico_machine::{
+    chip::ChipBuilder,
+    lookup::{AirInteraction, LookupType},
+};
+use std::{borrow::Borrow, iter::once};
 
 impl<F: Field, CB: ChipBuilder<F>> Air<CB> for CpuChip<F>
 where
@@ -28,16 +32,15 @@ where
                     public_values_slice.as_slice().borrow();
         */
 
-        /* TODO: Enable after lookup integration.
-                // Program constraints.
-                builder.send_program(
-                    local.pc,
-                    local.instruction,
-                    local.opcode_selector,
-                    local.shard,
-                    local.is_real,
-                );
-        */
+        // Contrain the interaction with program table.
+        self.looking_program(
+            builder,
+            local.pc,
+            local.instruction,
+            local.opcode_selector,
+            local.shard,
+            local.is_real,
+        );
 
         // Compute some flags for which type of instruction we are dealing with.
         let is_memory_instruction: CB::Expr =
@@ -207,5 +210,30 @@ impl<F: Field> CpuChip<F> {
             .when_transition()
             .when_not(local.is_real)
             .assert_zero(next.is_real);
+    }
+
+    fn looking_program<CB: ChipBuilder<F>>(
+        &self,
+        builder: &mut CB,
+        pc: impl Into<CB::Expr>,
+        instruction: InstructionCols<impl Into<CB::Expr> + Copy>,
+        selectors: OpcodeSelectorCols<impl Into<CB::Expr> + Copy>,
+        shard: impl Into<CB::Expr> + Copy,
+        multiplicity: impl Into<CB::Expr>,
+    ) {
+        let values = once(pc.into())
+            .chain(once(instruction.opcode.into()))
+            .chain(instruction.into_iter().map(|x| x.into()))
+            .chain(selectors.into_iter().map(|x| x.into()))
+            // TODO: The shard number is populated from public values,
+            // enable after adding public values.
+            // .chain(once(shard.into()))
+            .collect();
+
+        builder.looking(AirInteraction::new(
+            values,
+            multiplicity.into(),
+            LookupType::Program,
+        ));
     }
 }

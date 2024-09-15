@@ -1,12 +1,19 @@
-use super::{
-    columns::{ProgramMultiplicityCols, ProgramPreprocessedCols, NUM_PROGRAM_MULT_COLS},
-    ProgramChip,
+use crate::chips::{
+    cpu::{instruction::columns::InstructionCols, opcode_selector::columns::OpcodeSelectorCols},
+    program::{
+        columns::{ProgramMultiplicityCols, ProgramPreprocessedCols, NUM_PROGRAM_MULT_COLS},
+        ProgramChip,
+    },
 };
 use core::borrow::Borrow;
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, PairBuilder};
 use p3_field::Field;
 use p3_matrix::Matrix;
-use pico_machine::chip::ChipBuilder;
+use pico_machine::{
+    chip::ChipBuilder,
+    lookup::{AirInteraction, LookupType},
+};
+use std::iter::once;
 
 impl<F: Field> BaseAir<F> for ProgramChip<F> {
     fn width(&self) -> usize {
@@ -14,14 +21,12 @@ impl<F: Field> BaseAir<F> for ProgramChip<F> {
     }
 }
 
-impl<F: Field, CB: ChipBuilder<F>> Air<CB> for ProgramChip<F>
+impl<F: Field, CB: ChipBuilder<F> + PairBuilder> Air<CB> for ProgramChip<F>
 where
     CB::Var: Sized,
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-
-        /* TODO: May wait for lookup to avoid conflict.
         let preprocessed = builder.preprocessed();
 
         let prep_local = preprocessed.row_slice(0);
@@ -29,14 +34,41 @@ where
         let mult_local = main.row_slice(0);
         let mult_local: &ProgramMultiplicityCols<CB::Var> = (*mult_local).borrow();
 
-                // Contrain the interaction with CPU table
-                builder.receive_program(
-                    prep_local.pc,
-                    prep_local.instruction,
-                    prep_local.selectors,
-                    mult_local.shard,
-                    mult_local.multiplicity,
-                );
-        */
+        // Contrain the interaction with CPU table.
+        self.looked_program(
+            builder,
+            prep_local.pc,
+            prep_local.instruction,
+            prep_local.selectors,
+            mult_local.shard,
+            mult_local.multiplicity,
+        );
+    }
+}
+
+impl<F: Field> ProgramChip<F> {
+    fn looked_program<CB: ChipBuilder<F>>(
+        &self,
+        builder: &mut CB,
+        pc: impl Into<CB::Expr>,
+        instruction: InstructionCols<impl Into<CB::Expr> + Copy>,
+        selectors: OpcodeSelectorCols<impl Into<CB::Expr> + Copy>,
+        shard: impl Into<CB::Expr> + Copy,
+        multiplicity: impl Into<CB::Expr>,
+    ) {
+        let values: Vec<CB::Expr> = once(pc.into())
+            .chain(once(instruction.opcode.into()))
+            .chain(instruction.into_iter().map(|x| x.into()))
+            .chain(selectors.into_iter().map(|x| x.into()))
+            // TODO: The shard number is populated from public values,
+            // enable after adding public values.
+            // .chain(once(shard.into()))
+            .collect();
+
+        builder.looked(AirInteraction::new(
+            values,
+            multiplicity.into(),
+            LookupType::Program,
+        ))
     }
 }
