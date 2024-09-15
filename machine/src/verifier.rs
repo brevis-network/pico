@@ -11,7 +11,8 @@ use crate::{
     chip::{ChipBehavior, MetaChip},
     folder::VerifierConstraintFolder,
     keys::BaseVerifyingKey,
-    proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, TraceCommitments},
+    proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, MainTraceCommitments},
+    utils::order_chips,
 };
 
 /// struct of BaseVerifier where SC specifies type of config and C is not used
@@ -49,17 +50,20 @@ where
             opening_proof,
             log_main_degrees,
             log_quotient_degrees,
-            chip_indexes,
+            main_chip_ordering,
         } = proof;
+
+        let ordered_chips =
+            order_chips::<SC, C>(chips, main_chip_ordering.clone()).collect::<Vec<_>>();
 
         let pcs = config.pcs();
 
         // observe preprocessed traces
-        challenger.observe(vk.commit.clone());
+        // challenger.observe(vk.commit.clone());
 
-        log_main_degrees.iter().for_each(|log_main_degree| {
-            challenger.observe(Val::<SC>::from_canonical_usize(*log_main_degree))
-        });
+        // log_main_degrees.iter().for_each(|log_main_degree| {
+        //     challenger.observe(Val::<SC>::from_canonical_usize(*log_main_degree))
+        // });
 
         let BaseCommitments {
             main_commit,
@@ -68,7 +72,7 @@ where
         } = commitments;
 
         // main commitment observation
-        challenger.observe(main_commit.clone());
+        // challenger.observe(main_commit.clone());
 
         // get permutation challenges
         let permutation_challenges = (0..2)
@@ -93,7 +97,7 @@ where
             .preprocessed_info
             .iter()
             .map(|(name, domain, _)| {
-                let i = chip_indexes[name];
+                let i = main_chip_ordering[name];
                 let values = opened_values.chips_opened_values[i].clone();
                 (
                     *domain,
@@ -176,7 +180,7 @@ where
         .map_err(|e| anyhow!("{e:?}"))?;
 
         for (chip, main_domain, quotient_chunk_domain, log_quotient_degree, values) in izip!(
-            chips.iter(),
+            ordered_chips.iter(),
             main_domains,
             quotient_chunk_domains,
             log_quotient_degrees.iter(),
@@ -284,7 +288,7 @@ where
     }
 }
 
-// from Plonky3 uni-stark/src/verifier.rs
+// from Plonky3 uni-machine/src/verifier.rs
 #[derive(Debug)]
 pub enum VerificationError<PcsErr> {
     InvalidProofShape,

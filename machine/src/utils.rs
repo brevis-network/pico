@@ -1,13 +1,13 @@
 use core::iter;
+use hashbrown::HashMap;
 use itertools::Itertools;
-use std::any::type_name;
-
 use p3_air::Air;
 use p3_commit::PolynomialSpace;
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, PackedValue, Powers};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
+use std::any::type_name;
 
 use pico_configs::config::{Domain, PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
@@ -30,23 +30,19 @@ pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<
     values.resize(n_real_rows.next_power_of_two() * N, T::default());
 }
 
-// /// Create a new prover.
-// pub fn get_prover<SC, C>() -> BaseProver<SC, C>
-// {
-//     BaseProver::new(config, chips)
-// }
-//
-// /// Create a new verifier.
-// pub fn get_verifier<'a, SC, C>(
-//     config: &'a SC,
-//     chips: &'a [MetaChip<Val<SC>, C>],
-// ) -> BaseVerifier<'a, SC, C>
-// where
-//     SC: StarkGenericConfig,
-//     C: ChipBehavior<Val<SC>> + Air<VerifierConstraintFolder<'a, SC>>,
-// {
-//     BaseVerifier::new(config, chips)
-// }
+pub fn order_chips<SC, C>(
+    chips: &[MetaChip<Val<SC>, C>],
+    chip_ordering: HashMap<String, usize>,
+) -> impl Iterator<Item = &MetaChip<Val<SC>, C>>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>,
+{
+    chips
+        .iter()
+        .filter(|chip| chip_ordering.contains_key(&chip.name()))
+        .sorted_by_key(|chip| chip_ordering.get(&chip.name()))
+}
 
 /// Compute quotient values for opening proof
 pub fn compute_quotient_values<'a, SC, C, Mat>(

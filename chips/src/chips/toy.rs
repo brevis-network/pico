@@ -53,9 +53,9 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
     }
 
     fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
-        // NOTE: It's not reasonable, just for testing.
-        //Some(self.generate_main(input))
-        None
+        // NOTE: It's not reasonable, just to enable testing.
+        // `4096` is the column number equalled to main trace.
+        Some(RowMajorMatrix::new(vec![F::zero(); 4096], 1))
     }
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
@@ -108,7 +108,7 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
     }
 
     fn preprocessed_width(&self) -> usize {
-        4
+        0
     }
 }
 

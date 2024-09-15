@@ -10,9 +10,10 @@ use pico_chips::chips::{
 use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
+use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
-    machine::{MachineBehavior, SimpleMachine},
+    machine::{BaseMachine, MachineBehavior},
 };
 
 pub enum FibChipType<F: Field> {
@@ -126,9 +127,10 @@ fn main() {
     runtime.run().unwrap();
 
     let record = &runtime.records[0];
+    let records = vec![record.clone()];
 
     // Setup config and chips.
-    info!("Creating SimpleMachine..");
+    info!("Creating BaseMachine..");
     let config = BabyBearPoseidon2::new();
     let chips = FibChipType::all_chips();
 
@@ -138,14 +140,15 @@ fn main() {
 
     // Setup machine prover, verifier, pk and vk.
     info!("Setup machine..");
-    let (pk, vk) = simple_machine.setup(&record.program);
+    let (pk, vk) = simple_machine.setup_keys(&record.program);
 
     // Generate the proof.
     info!("Generating proof..");
-    let proof = simple_machine.prove(record, &pk);
+    let proof = simple_machine.prove(&pk, &records);
     info!("{} generated.", proof.name());
 
     // Verify the proof.
-    let result = simple_machine.verify(&proof, &vk);
+    let result = simple_machine.verify(&vk, &proof);
     info!("The proof is verified: {}", result.is_ok());
+    println!("The proof is verified: {}", result.is_ok());
 }

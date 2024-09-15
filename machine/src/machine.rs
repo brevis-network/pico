@@ -2,17 +2,20 @@ use crate::{
     chip::{ChipBehavior, MetaChip},
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
     keys::{BaseProvingKey, BaseVerifyingKey},
-    proof::{ElementProof, MetaProof},
+    proof::{BaseProof, ElementProof, MainTraceCommitments, MetaProof},
     prover::BaseProver,
+    utils::type_name_of,
     verifier::BaseVerifier,
 };
 use anyhow::Result;
 use p3_air::Air;
+use p3_challenger::CanObserve;
+use p3_fri::FriConfig;
 use pico_compiler::program::Program;
 use pico_configs::config::{StarkGenericConfig, Val};
 use pico_emulator::record::EmulationRecord;
 
-/// Functions that each machine should implement.
+/// Functions that each machine instance should implement.
 pub trait MachineBehavior<SC, C, P>
 where
     SC: StarkGenericConfig,
@@ -29,112 +32,175 @@ where
     /// Get the chips of the machine.
     fn chips(&self) -> &[MetaChip<Val<SC>, C>];
 
-    /// setup prover, verfier and keys.
-    fn setup(&self, program: &Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
+    /// setup prover, verifier and keys.
+    fn setup_keys(&self, program: &Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
 
     /// Get the prover of the machine.
-    fn prove(&self, input: &EmulationRecord, pk: &BaseProvingKey<SC>) -> MetaProof<SC, P>;
+    fn prove(&self, pk: &BaseProvingKey<SC>, records: &[EmulationRecord]) -> MetaProof<SC, P>;
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<SC, P>, vk: &BaseVerifyingKey<SC>) -> Result<()>;
+    fn verify(&self, vk: &BaseVerifyingKey<SC>, proof: &MetaProof<SC, P>) -> Result<()>;
 }
 
-/// A simple machine that impls MachineBehavior.
+/// A basic machine that includes elemental proving gadgets.
 /// Mainly for testing purposes.
-pub struct SimpleMachine<SC, C, P>
+pub struct BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    //pub program: PG, (ignore for now until executor integration)
-    pub config: SC,
-
-    pub chips: Vec<MetaChip<Val<SC>, C>>,
-
     pub prover: BaseProver<SC, C>,
 
     pub verifier: BaseVerifier<SC, C>,
-
-    _phantom: std::marker::PhantomData<P>,
 }
 
-impl<SC, C> MachineBehavior<SC, C, ElementProof<SC>> for SimpleMachine<SC, C, ElementProof<SC>>
+impl<SC, C> BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    /// Name of machine with config.
+    /// Create BaseMachine based on config and chip behavior.
+    pub fn new() -> Self {
+        Self {
+            prover: BaseProver::<SC, C>::new(),
+            verifier: BaseVerifier::<SC, C>::new(),
+        }
+    }
+
+    /// Name of BaseMachine with config.
     fn name(&self) -> String {
-        format!("SimpleMachine with config {}", self.config.name(),)
-    }
-
-    /// Get the configuration of the machine.
-    fn config(&self) -> &SC {
-        &self.config
-    }
-
-    /// Get the chips of the machine.
-    fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
-        &self.chips
+        "BaseMachine".to_string()
     }
 
     /// setup proving and verifying keys.
-    fn setup(&self, program: &Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        let (pk, vk) = self.prover.setup_keys(&self.config, &self.chips, program);
+    pub fn setup_keys(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
+        program: &Program,
+    ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+        let (pk, vk) = self.prover.setup_keys(config, chips, program);
 
         (pk, vk)
     }
 
     /// Prove based on record and proving key.
-    fn prove(
+    pub fn prove_element(
         &self,
-        input: &EmulationRecord,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
         pk: &BaseProvingKey<SC>,
-    ) -> MetaProof<SC, ElementProof<SC>> {
-        let mut challenger = self.config.challenger();
-        let base_proof = self
+        record: &EmulationRecord,
+    ) -> BaseProof<SC> {
+        // todo: generate dependencies
+
+        // observe preprocessed
+        let mut challenger = config.challenger();
+        challenger.observe(pk.commit.clone());
+
+        let main_commitment = self
             .prover
-            .prove(&self.config, &self.chips, pk, &mut challenger, input);
+            .commit_main(config, self.prover.generate_main(chips, record));
 
-        MetaProof::new(self.config(), ElementProof::new(base_proof))
+        challenger.observe(main_commitment.commitment.clone());
+
+        self.prove(config, chips, pk, &mut challenger, main_commitment)
     }
 
-    /// Verify the proof based on verifying key.
-    fn verify(
+    pub fn prove_ensemble(
         &self,
-        proof: &MetaProof<SC, ElementProof<SC>>,
-        vk: &BaseVerifyingKey<SC>,
-    ) -> Result<()> {
-        let mut challenger = self.config.challenger();
-        self.verifier.verify(
-            &self.config,
-            &self.chips,
-            vk,
-            &mut challenger,
-            &proof.proof.proof,
-        )
-    }
-}
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
+        pk: &BaseProvingKey<SC>,
+        records: &[EmulationRecord],
+    ) -> Vec<BaseProof<SC>> {
+        // todo: generate dependencies
 
-impl<SC, C, P> SimpleMachine<SC, C, P>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
-{
-    /// Create SimpleMachine based on config and chips
-    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
-        Self {
-            config,
-            chips,
-            prover: BaseProver::<SC, C>::new(),
-            verifier: BaseVerifier::<SC, C>::new(),
-            _phantom: std::marker::PhantomData,
+        let mut challenger = config.challenger();
+        // observe preprocessed
+        challenger.observe(pk.commit.clone());
+
+        let main_commitments = records
+            .iter()
+            .map(|record| {
+                let commitment = self
+                    .prover
+                    .commit_main(config, self.prover.generate_main(chips, record));
+                challenger.observe(commitment.commitment.clone());
+                commitment
+            })
+            .collect::<Vec<_>>();
+
+        main_commitments
+            .into_iter()
+            .map(|commitment| self.prove(config, chips, pk, &mut challenger, commitment))
+            .collect::<Vec<_>>()
+    }
+
+    pub fn prove(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
+        pk: &BaseProvingKey<SC>,
+        challenger: &mut SC::Challenger,
+        main_commitments: MainTraceCommitments<SC>,
+    ) -> BaseProof<SC> {
+        self.prover
+            .prove(config, chips, pk, challenger, main_commitments)
+    }
+
+    pub fn verify_element(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
+        vk: &BaseVerifyingKey<SC>,
+        proof: &BaseProof<SC>,
+    ) -> Result<()> {
+        let mut challenger = config.challenger();
+
+        challenger.observe(vk.commit.clone());
+        challenger.observe(proof.commitments.main_commit.clone());
+
+        self.verify(config, chips, vk, &mut challenger, proof)?;
+
+        Ok(())
+    }
+
+    pub fn verify_ensemble(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
+        vk: &BaseVerifyingKey<SC>,
+        proofs: &[BaseProof<SC>],
+    ) -> Result<()> {
+        let mut challenger = config.challenger();
+
+        challenger.observe(vk.commit.clone());
+        proofs.iter().for_each(|proof| {
+            challenger.observe(proof.commitments.main_commit.clone());
+        });
+
+        for proof in proofs {
+            self.verify(config, chips, vk, &mut challenger, proof)?;
         }
+
+        Ok(())
+    }
+    /// Verify the proof based on verifying key.
+    pub fn verify(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
+        vk: &BaseVerifyingKey<SC>,
+        challenger: &mut SC::Challenger,
+        proof: &BaseProof<SC>,
+    ) -> Result<()> {
+        self.verifier.verify(config, chips, vk, challenger, proof)?;
+
+        Ok(())
     }
 }

@@ -9,16 +9,15 @@ pub struct BaseProvingKey<SC: StarkGenericConfig> {
     pub preprocessed_trace: Vec<RowMajorMatrix<Val<SC>>>,
     /// The pcs data for the preprocessed traces.
     pub preprocessed_prover_data: PcsProverData<SC>,
-
-    // the index of for chips, chip name for key
-    pub chip_indexes: HashMap<String, usize>,
+    /// the index of for chips, chip name for key
+    pub preprocessed_chip_ordering: HashMap<String, usize>,
 }
 
 pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     /// The commitment to the preprocessed traces.
     pub commit: Com<SC>,
-    // The reprocessed information.
+    /// The preprocessed information.
     pub preprocessed_info: Vec<(String, Domain<SC>, Dimensions)>,
-    // the index of for chips, chip name for key
-    pub chip_indexes: HashMap<String, usize>,
+    /// the index of for chips, chip name for key
+    pub preprocessed_chip_ordering: HashMap<String, usize>,
 }

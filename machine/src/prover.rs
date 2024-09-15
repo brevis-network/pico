@@ -16,14 +16,11 @@ use crate::{
     chip::{ChipBehavior, MetaChip},
     folder::ProverConstraintFolder,
     keys::{BaseProvingKey, BaseVerifyingKey},
-    proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, TraceCommitments},
-    utils::compute_quotient_values,
+    proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, MainTraceCommitments},
+    utils::{compute_quotient_values, order_chips},
 };
 
-pub struct BaseProver<SC, C>
-// where
-//     C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
-{
+pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
 }
 
@@ -43,169 +40,178 @@ where
         chips: &[MetaChip<Val<SC>, C>],
         program: &Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        let mut named_preprocessed_traces = chips
-            .par_iter()
-            .filter_map(|chip| {
-                let chip_name = chip.name();
-                let prep_trace = chip.generate_preprocessed(program);
-                // Assert that the chip width data is correct.
-                let expected_width = prep_trace.as_ref().map(|t| t.width()).unwrap_or(0);
-                assert_eq!(
-                    expected_width,
-                    chip.preprocessed_width(),
-                    "Incorrect number of preprocessed columns for chip {chip_name}"
-                );
-                prep_trace.map(move |t| (chip_name, t))
-            })
-            .collect::<Vec<_>>();
+        let chips_and_preprocessed = self.generate_preprocessed(chips, program);
 
         // Get the chip ordering.
-        let chip_indexes = named_preprocessed_traces
+        let preprocessed_chip_ordering = chips_and_preprocessed
             .iter()
             .enumerate()
             .map(|(i, (name, _))| (name.to_owned(), i))
             .collect::<HashMap<_, _>>();
 
-        named_preprocessed_traces.sort_by_key(|(_, trace)| Reverse(trace.height()));
-
         let pcs = config.pcs();
 
-        let (preprocessed_info, domains_and_traces): (Vec<_>, Vec<_>) = named_preprocessed_traces
-            .iter()
-            .map(|(name, trace)| {
-                let domain = pcs.natural_domain_for_degree(trace.height());
-                (
-                    (name.to_owned(), domain, trace.dimensions()),
-                    (domain, trace.to_owned()),
-                )
-            })
-            .unzip();
+        let (preprocessed_info, domains_and_preprocessed): (Vec<_>, Vec<_>) =
+            chips_and_preprocessed
+                .iter()
+                .map(|(name, trace)| {
+                    let domain = pcs.natural_domain_for_degree(trace.height());
+                    (
+                        (name.to_owned(), domain, trace.dimensions()),
+                        (domain, trace.to_owned()),
+                    )
+                })
+                .unzip();
 
         // Commit to the batch of traces.
-        let (commit, prover_data) = pcs.commit(domains_and_traces);
+        let (commit, preprocessed_prover_data) = pcs.commit(domains_and_preprocessed);
 
-        let preprocessed_trace = named_preprocessed_traces.into_iter().map(|t| t.1).collect();
+        let preprocessed_trace = chips_and_preprocessed
+            .into_iter()
+            .map(|t| t.1)
+            .collect::<Vec<_>>();
 
         (
             BaseProvingKey {
                 commit: commit.clone(),
                 preprocessed_trace,
-                preprocessed_prover_data: prover_data,
-                chip_indexes: chip_indexes.clone(),
+                preprocessed_prover_data,
+                preprocessed_chip_ordering: preprocessed_chip_ordering.clone(),
             },
             BaseVerifyingKey {
                 commit,
                 preprocessed_info,
-                chip_indexes,
+                preprocessed_chip_ordering,
             },
         )
     }
 
+    /// generate ordered preprocessed traces with chip names
     pub fn generate_preprocessed(
         &self,
         chips: &[MetaChip<Val<SC>, C>],
         program: &Program,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
-        chips
+        let mut chips_and_preprocessed = chips
             .iter()
             .filter_map(|chip| {
                 chip.generate_preprocessed(program)
                     .map(|trace| (chip.name(), trace))
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        chips_and_preprocessed.sort_by_key(|(_, trace)| Reverse(trace.height()));
+
+        chips_and_preprocessed
     }
 
+    /// generate ordered main traces with chip names
     pub fn generate_main(
         &self,
         chips: &[MetaChip<Val<SC>, C>],
-        input: &EmulationRecord,
+        record: &EmulationRecord,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
-        chips
+        let mut chips_and_main = chips
             .iter()
-            .map(|chip| (chip.name(), chip.generate_main(input)))
-            .collect::<Vec<_>>()
-    }
-
-    /// generate chips permutation traces and cumulative sums
-    pub fn generate_permutation(
-        &self,
-        pk: &BaseProvingKey<SC>,
-        chips: &[MetaChip<Val<SC>, C>],
-        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
-        perm_challenges: &[SC::Challenge],
-    ) -> (Vec<RowMajorMatrix<SC::Challenge>>, Vec<SC::Challenge>) {
-        let pre_traces = chips
-            .iter()
-            .map(|chip| {
-                pk.chip_indexes
-                    .get(&chip.name())
-                    .map(|index| &pk.preprocessed_trace[*index])
-            })
+            .map(|chip| (chip.name(), chip.generate_main(record)))
             .collect::<Vec<_>>();
+        chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
 
-        let mut cumulative_sums = Vec::with_capacity(chips.len());
-        let mut permutation_traces = Vec::with_capacity(chips.len());
-
-        chips
-            .par_iter()
-            .zip(main_traces.clone().par_iter_mut())
-            .zip(pre_traces.clone().par_iter_mut())
-            .map(|((chip, main_trace), pre_trace)| {
-                let perm_trace = chip.generate_permutation(*pre_trace, main_trace, perm_challenges);
-                let cumulative_sum = perm_trace
-                    .row_slice(main_trace.height() - 1)
-                    .last()
-                    .copied()
-                    .unwrap();
-                (perm_trace, cumulative_sum)
-            })
-            .unzip_into_vecs(&mut permutation_traces, &mut cumulative_sums);
-        (permutation_traces, cumulative_sums)
+        chips_and_main
     }
 
-    pub fn commit(
+    pub fn commit_main(
         &self,
         config: &SC,
-        chips_and_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
-    ) -> TraceCommitments<SC> {
+        chips_and_main: Vec<(String, RowMajorMatrix<Val<SC>>)>,
+    ) -> MainTraceCommitments<SC> {
         let pcs = config.pcs();
-        let domains_and_traces = chips_and_traces
+        // todo: optimize in the future
+        let domains_and_traces = chips_and_main
             .clone()
             .into_iter()
             .map(|(name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
             .collect::<Vec<_>>();
         let (commitment, data) = pcs.commit(domains_and_traces);
-        let traces = chips_and_traces
+
+        let main_chip_ordering = chips_and_main
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (name.to_owned(), i))
+            .collect::<HashMap<_, _>>();
+
+        let main_traces = chips_and_main
             .into_iter()
             .map(|(_, trace)| trace)
             .collect::<Vec<_>>();
 
-        TraceCommitments {
-            traces,
+        MainTraceCommitments {
+            main_traces,
+            main_chip_ordering,
             commitment,
             data,
         }
     }
 
+    /// generate chips permutation traces and cumulative sums
+    pub fn generate_permutation(
+        &self,
+        ordered_chips: &[&MetaChip<Val<SC>, C>],
+        pk: &BaseProvingKey<SC>,
+        main_trace_commitments: &MainTraceCommitments<SC>,
+        perm_challenges: &[SC::Challenge],
+    ) -> (Vec<RowMajorMatrix<SC::Challenge>>, Vec<SC::Challenge>) {
+        let preprocessed_traces = ordered_chips
+            .iter()
+            .map(|chip| {
+                pk.preprocessed_chip_ordering
+                    .get(&chip.name())
+                    .map(|index| &pk.preprocessed_trace[*index])
+            })
+            .collect::<Vec<_>>();
+
+        let (permutation_traces, cumulative_sums): (Vec<_>, Vec<_>) = ordered_chips
+            .par_iter()
+            .zip(main_trace_commitments.main_traces.par_iter())
+            .zip(preprocessed_traces.into_par_iter())
+            .map(|((chip, main_trace), preprocessed_trace)| {
+                let permutation_trace =
+                    chip.generate_permutation(preprocessed_trace, main_trace, perm_challenges);
+                let cumulative_sum = permutation_trace
+                    .row_slice(main_trace.height() - 1)
+                    .last()
+                    .copied()
+                    .unwrap();
+                (permutation_trace, cumulative_sum)
+            })
+            .unzip();
+
+        (permutation_traces, cumulative_sums)
+    }
+
+    /// core proving function in BaseProver
+    /// Note that it assumes preprocessed and main have already been
+    /// generated and observed by challenger
     pub fn prove(
         &self,
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
-        record: &EmulationRecord,
+        main_commitments: MainTraceCommitments<SC>,
         //public_values: &'a [Val<SC>]
     ) -> BaseProof<SC> {
         // setup pcs
         let pcs = config.pcs();
 
-        // observe preprocessed traces
-        challenger.observe(pk.commit.clone());
+        // Get the ordered chip, will be used in all following operations on chips
+        // No chips should be used from now on!
+        let ordered_chips =
+            order_chips::<SC, C>(chips, main_commitments.main_chip_ordering.clone())
+                .collect::<Vec<_>>();
 
         // Handle Main
         // get main commitments and degrees
-        let main_commitments = self.commit(config, self.generate_main(chips, record));
-        let main_traces = main_commitments.traces;
+        let main_traces = &main_commitments.main_traces;
 
         let main_degrees = main_traces
             .iter()
@@ -222,18 +228,22 @@ where
             .collect::<Vec<_>>();
 
         // observation. is the first step necessary?
-        log_main_degrees.iter().for_each(|log_degree| {
-            challenger.observe(Val::<SC>::from_canonical_usize(*log_degree))
-        });
-        challenger.observe(main_commitments.commitment.clone());
+        // log_main_degrees.iter().for_each(|log_degree| {
+        //     challenger.observe(Val::<SC>::from_canonical_usize(*log_degree))
+        // });
+        // challenger.observe(main_commitments.commitment.clone());
 
         let mut permutation_challenges: Vec<SC::Challenge> = Vec::new();
         for _ in 0..2 {
             permutation_challenges.push(challenger.sample_ext_element());
         }
 
-        let (mut permutation_traces, mut cumulative_sums) =
-            self.generate_permutation(pk, chips, main_traces.clone(), &permutation_challenges);
+        let (mut permutation_traces, mut cumulative_sums) = self.generate_permutation(
+            &ordered_chips,
+            pk,
+            &main_commitments,
+            &permutation_challenges,
+        );
 
         // commit permutation traces on main domain
         let perm_domain = permutation_traces
@@ -253,7 +263,7 @@ where
 
         // Handle quotient
         // get quotient degrees
-        let log_quotient_degrees = chips
+        let log_quotient_degrees = ordered_chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
             .collect::<Vec<_>>();
@@ -277,8 +287,8 @@ where
             .enumerate()
             .map(|(i, quotient_domain)| {
                 let pre_trace_on_quotient_domains = pk
-                    .chip_indexes
-                    .get(&chips[i].name())
+                    .preprocessed_chip_ordering
+                    .get(&ordered_chips[i].name())
                     .map(|index| {
                         pcs.get_evaluations_on_domain(
                             &pk.preprocessed_prover_data,
@@ -304,7 +314,7 @@ where
                     .collect::<Vec<_>>();
 
                 compute_quotient_values(
-                    &chips[i],
+                    &ordered_chips[i],
                     &[],
                     main_domains[i],
                     *quotient_domain,
@@ -404,8 +414,8 @@ where
             .enumerate()
             .map(|(i, (((main, permutation), quotient), cumulative_sum))| {
                 let preprocessed = pk
-                    .chip_indexes
-                    .get(&chips[i].name())
+                    .preprocessed_chip_ordering
+                    .get(&ordered_chips[i].name())
                     .map(|&index| preprocessed_opened_values[index].clone())
                     .unwrap_or((vec![], vec![]));
 
@@ -452,7 +462,7 @@ where
             opening_proof,
             log_main_degrees,
             log_quotient_degrees,
-            chip_indexes: pk.chip_indexes.clone(),
+            main_chip_ordering: main_commitments.main_chip_ordering,
         }
     }
 }

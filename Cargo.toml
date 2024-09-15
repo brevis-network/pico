@@ -1,5 +1,5 @@
 [workspace]
-members = ["chips", "derive", "examples", "machine", "compiler", "configs", "emulator"]
+members = ["chips", "derive", "examples", "machine", "compiler", "configs", "emulator", "instances"]
 resolver = "2"
 
 [workspace.package]
@@ -30,6 +30,7 @@ pico-chips = { path = "chips" }
 pico-compiler = { path = "compiler" }
 pico-derive = { path = "derive" }
 pico-emulator =  { path = "emulator" }
+pico-instances = { path = "instances" }
 
 # p3
 p3-air = { git = "ssh://git@github.com/brevis-network/p3-for-vm.git", branch = "main" }

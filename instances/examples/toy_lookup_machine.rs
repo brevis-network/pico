@@ -5,9 +5,10 @@ use pico_chips::lookup_toy::{AddLookedChip, AddLookingChip};
 use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::record::EmulationRecord;
+use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
-    machine::{MachineBehavior, SimpleMachine},
+    machine::{BaseMachine, MachineBehavior},
 };
 use std::sync::Arc;
 
@@ -97,14 +98,15 @@ fn main() {
     println!("Setup PK and VK");
 
     let record = EmulationRecord::new(Arc::new(Program::default()));
-    let (pk, vk) = simple_machine.setup(&record.program);
+    let records = vec![record.clone(), record.clone()];
+    let (pk, vk) = simple_machine.setup_keys(&record.program);
 
     // Generate the proof.
     println!("Generating proof..");
-    let proof = simple_machine.prove(&record, &pk);
+    let proof = simple_machine.prove(&pk, &records);
     println!("{} generated.", proof.name());
 
     // Verify the proof.
-    let result = simple_machine.verify(&proof, &vk);
+    let result = simple_machine.verify(&vk, &proof);
     println!("The proof is verified: {}", result.is_ok());
 }

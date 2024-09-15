@@ -84,7 +84,7 @@ impl<F: Field> AirBuilder for ChipProxyBuilder<F> {
         if size == 2 {
             SymbolicExpression::IsTransition
         } else {
-            panic!("uni-stark only supports a window size of 2")
+            panic!("uni-machine only supports a window size of 2")
         }
     }
 

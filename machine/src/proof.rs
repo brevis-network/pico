@@ -32,12 +32,18 @@ where
     pub fn name(&self) -> String {
         format!("{} with config {}", self.proof.name(), self.config.name(),)
     }
+
+    pub fn proofs(&self) -> &[BaseProof<SC>] {
+        self.proof.proofs()
+    }
 }
 
 /// Each type of proof should impl ProofBehavior
 /// Represents the middle layer of abstraction
 pub trait ProofBehavior<SC: StarkGenericConfig> {
     fn name(&self) -> String;
+
+    fn proofs(&self) -> &[BaseProof<SC>];
 }
 
 /// Proof wrapper for an element (single chunk)
@@ -48,6 +54,10 @@ pub struct ElementProof<SC: StarkGenericConfig> {
 impl<SC: StarkGenericConfig> ProofBehavior<SC> for ElementProof<SC> {
     fn name(&self) -> String {
         "ElementProof".to_string()
+    }
+
+    fn proofs(&self) -> &[BaseProof<SC>] {
+        std::slice::from_ref(&self.proof)
     }
 }
 
@@ -66,6 +76,16 @@ impl<SC: StarkGenericConfig> ProofBehavior<SC> for EnsembleProof<SC> {
     fn name(&self) -> String {
         format!("EnsembleProof of {} BaseProofs", self.proof.len())
     }
+
+    fn proofs(&self) -> &[BaseProof<SC>] {
+        &self.proof
+    }
+}
+
+impl<SC: StarkGenericConfig> EnsembleProof<SC> {
+    pub fn new(proof: Vec<BaseProof<SC>>) -> Self {
+        Self { proof }
+    }
 }
 
 /// Base proof produced by base prover
@@ -78,7 +98,7 @@ pub struct BaseProof<SC: StarkGenericConfig> {
     pub opening_proof: PcsProof<SC>,
     pub log_main_degrees: Vec<usize>,
     pub log_quotient_degrees: Vec<usize>,
-    pub chip_indexes: HashMap<String, usize>,
+    pub main_chip_ordering: HashMap<String, usize>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -88,8 +108,9 @@ pub struct BaseCommitments<Com> {
     pub quotient_commit: Com,
 }
 
-pub struct TraceCommitments<SC: StarkGenericConfig> {
-    pub traces: Vec<RowMajorMatrix<Val<SC>>>,
+pub struct MainTraceCommitments<SC: StarkGenericConfig> {
+    pub main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+    pub main_chip_ordering: HashMap<String, usize>,
     pub commitment: Com<SC>,
     pub data: PcsProverData<SC>,
 }

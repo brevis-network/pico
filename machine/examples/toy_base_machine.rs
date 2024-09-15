@@ -7,6 +7,7 @@ use pico_configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig};
 use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
+    machine::BaseMachine,
     prover::BaseProver,
     verifier::BaseVerifier,
 };
@@ -94,30 +95,22 @@ fn main() {
     let record = &runtime.records[0];
 
     // Create the prover.
-    println!("Creating prover");
+    println!("Creating Base Machine");
     let config = BabyBearPoseidon2::new();
 
     let chips = ToyChipType::all_chips();
-    let prover = BaseProver::new();
+    let base_machine = BaseMachine::new();
 
     // Setup PK and VK.
     println!("Setup PK and VK");
-    let (pk, vk) = prover.setup_keys(&config, &chips, &record.program);
+    let (pk, vk) = base_machine.setup_keys(&config, &chips, &record.program);
 
     println!("Generating proof");
-    let mut challenger = config.challenger();
     // Generate the proof.
-    let proof = prover.prove(&config, &chips, &pk, &mut challenger, record);
-
-    // Create the verifier.
-    println!("Creating verifier");
-    // let verifier = ToyChipType::get_verifier(&config);
-    //let chips = ToyChipType::all_chips();
-    let verifier = BaseVerifier::new();
+    let proof = base_machine.prove_element(&config, &chips, &pk, &record);
 
     // Verify the proof.
     println!("Verifying proof");
-    let mut challenger = config.challenger();
-    let result = verifier.verify(&config, &chips, &vk, &mut challenger, &proof);
+    let result = base_machine.verify_element(&config, &chips, &vk, &proof);
     println!("The proof is verified: {}", result.is_ok());
 }

@@ -8,8 +8,10 @@ use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
 use pico_machine::{
     chip::{ChipBehavior, ChipBuilder, MetaChip},
-    machine::{MachineBehavior, SimpleMachine},
+    machine::{BaseMachine, MachineBehavior},
 };
+
+use pico_instances::simple_machine::SimpleMachine;
 use std::any::type_name;
 
 pub enum ToyChipType<F: Field> {
@@ -44,6 +46,7 @@ impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
         }
     }
 }
+
 impl<F: Field> BaseAir<F> for ToyChipType<F> {
     fn width(&self) -> usize {
         match self {
@@ -77,10 +80,6 @@ impl<F: Field> ToyChipType<F> {
     }
 }
 
-fn print_type_of<T>(_: &T) {
-    info!("Type: {}", type_name::<T>());
-}
-
 fn main() {
     env_logger::init();
 
@@ -94,9 +93,10 @@ fn main() {
     runtime.run().unwrap();
 
     let record = &runtime.records[0];
+    let records = vec![record.clone(), record.clone()];
 
     // Setup config and chips.
-    info!("Creating SimpleMachine..");
+    info!("Creating BaseMachine..");
     let config = BabyBearPoseidon2::new();
     let chips = ToyChipType::all_chips();
 
@@ -106,14 +106,14 @@ fn main() {
 
     // Setup machine prover, verifier, pk and vk.
     info!("Setup machine..");
-    let (pk, vk) = simple_machine.setup(&record.program);
+    let (pk, vk) = simple_machine.setup_keys(&record.program);
 
     // Generate the proof.
     info!("Generating proof..");
-    let proof = simple_machine.prove(record, &pk);
+    let proof = simple_machine.prove(&pk, &records);
     info!("{} generated.", proof.name());
 
     // Verify the proof.
-    let result = simple_machine.verify(&proof, &vk);
+    let result = simple_machine.verify(&vk, &proof);
     info!("The proof is verified: {}", result.is_ok());
 }

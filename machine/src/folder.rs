@@ -10,7 +10,7 @@ use p3_matrix::{
 use pico_configs::config::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
 use crate::chip::ChipBuilder;
-// from p3: uni-stark/src/folder.rs
+// from p3: uni-machine/src/folder.rs
 
 /// Prover Constraint Folder
 #[derive(Debug)]
@@ -50,7 +50,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
         if size == 2 {
             self.is_transition
         } else {
-            panic!("uni-stark only supports a window size of 2")
+            panic!("uni-machine only supports a window size of 2")
         }
     }
 
@@ -153,7 +153,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC>
         if size == 2 {
             self.is_transition
         } else {
-            panic!("uni-stark only supports a window size of 2")
+            panic!("uni-machine only supports a window size of 2")
         }
     }
 
