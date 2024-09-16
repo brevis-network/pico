@@ -7,10 +7,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::ParallelIterator;
 use pico_compiler::{opcode::Opcode, program::Program};
 use pico_emulator::record::EmulationRecord;
-use pico_machine::{
-    chip::{ChipBehavior, ChipBuilder},
-    utils::pad_to_power_of_two,
-};
+use pico_machine::{builder::ChipBuilder, chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::{marker::PhantomData, mem::size_of};
 
 /// The number of main trace columns for `ToyChip`

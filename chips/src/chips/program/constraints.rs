@@ -6,12 +6,12 @@ use crate::chips::{
     },
 };
 use core::borrow::Borrow;
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::Matrix;
 use pico_machine::{
-    chip::ChipBuilder,
-    lookup::{AirInteraction, LookupType},
+    builder::ChipBuilder,
+    lookup::{LookupType, SymbolicLookup},
 };
 use std::iter::once;
 
@@ -21,7 +21,7 @@ impl<F: Field> BaseAir<F> for ProgramChip<F> {
     }
 }
 
-impl<F: Field, CB: ChipBuilder<F> + PairBuilder> Air<CB> for ProgramChip<F>
+impl<F: Field, CB: ChipBuilder<F>> Air<CB> for ProgramChip<F>
 where
     CB::Var: Sized,
 {
@@ -65,7 +65,7 @@ impl<F: Field> ProgramChip<F> {
             // .chain(once(shard.into()))
             .collect();
 
-        builder.looked(AirInteraction::new(
+        builder.looked(SymbolicLookup::new(
             values,
             multiplicity.into(),
             LookupType::Program,

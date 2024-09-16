@@ -1,6 +1,10 @@
-use crate::{builder::PermSumAirBuilder, lookup::LookupPayload, utils::populate_permutation_row};
+use crate::{
+    builder::{ChipBuilder, PermutationBuilder},
+    lookup::VirtualPairLookup,
+    utils::populate_permutation_row,
+};
 use itertools::Itertools;
-use p3_air::{ExtensionBuilder, PairBuilder, PermutationAirBuilder};
+use p3_air::ExtensionBuilder;
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
@@ -8,8 +12,8 @@ use rayon_scan::ScanParallelIterator;
 use std::borrow::Borrow;
 
 pub fn generate_permutation_trace<F: Field, EF: ExtensionField<F>>(
-    looking: &[LookupPayload<F>],
-    looked: &[LookupPayload<F>],
+    looking: &[VirtualPairLookup<F>],
+    looked: &[VirtualPairLookup<F>],
     preprocessed: Option<&RowMajorMatrix<F>>,
     main: &RowMajorMatrix<F>,
     alpha: EF,
@@ -99,14 +103,14 @@ pub fn generate_permutation_trace<F: Field, EF: ExtensionField<F>>(
 ///     - That the RLC per interaction is computed correctly.
 ///     - The running sum column ends at the (currently) given cumulative sum.
 pub fn eval_permutation_constraints<F, AB>(
-    looking: &[LookupPayload<F>],
-    looked: &[LookupPayload<F>],
+    looking: &[VirtualPairLookup<F>],
+    looked: &[VirtualPairLookup<F>],
     batch_size: usize,
     builder: &mut AB,
 ) where
     F: Field,
     AB::EF: ExtensionField<F>,
-    AB: PermSumAirBuilder<F = F> + PairBuilder,
+    AB: PermutationBuilder<F = F> + ChipBuilder<F>,
 {
     // Get the permutation challenges.
     let permutation_challenges = builder.permutation_randomness();

@@ -4,7 +4,8 @@ use pico_compiler::program::Program;
 use pico_configs::config::{StarkGenericConfig, Val};
 use pico_emulator::record::EmulationRecord;
 use pico_machine::{
-    chip::{ChipBehavior, ChipBuilder, MetaChip},
+    builder::ChipBuilder,
+    chip::{ChipBehavior, MetaChip},
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
     keys::{BaseProvingKey, BaseVerifyingKey},
     machine::{BaseMachine, MachineBehavior},

@@ -1,7 +1,7 @@
 use crate::chips::cpu::{columns::CpuCols, CpuChip};
 use p3_air::AirBuilder;
 use p3_field::Field;
-use pico_machine::chip::ChipBuilder;
+use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
     /// Constraints related to the shard and clk.

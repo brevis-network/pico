@@ -7,7 +7,8 @@ use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
 use pico_machine::{
-    chip::{ChipBehavior, ChipBuilder, MetaChip},
+    builder::ChipBuilder,
+    chip::{ChipBehavior, MetaChip},
     machine::{BaseMachine, MachineBehavior},
 };
 

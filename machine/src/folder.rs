@@ -1,16 +1,143 @@
-use crate::builder::PermSumAirBuilder;
-use p3_air::{
-    AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, PairBuilder, PermutationAirBuilder,
-};
-use p3_field::AbstractField;
+use crate::builder::{LookupBuilder, PermutationBuilder, PublicValuesBuilder};
+use p3_air::{AirBuilder, ExtensionBuilder};
+use p3_field::{AbstractField, Field};
 use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
     stack::VerticalPair,
 };
+use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 use pico_configs::config::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
-use crate::chip::ChipBuilder;
-// from p3: uni-machine/src/folder.rs
+use crate::{
+    builder::ChipBuilder,
+    lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
+};
+
+// SymbolicConstraintFolder for lookup-related variables and constraints
+// It also impls functions for SymbolicAirBuilder, thus replacing it
+pub struct SymbolicConstraintFolder<F: Field> {
+    preprocessed: RowMajorMatrix<SymbolicVariable<F>>,
+    main: RowMajorMatrix<SymbolicVariable<F>>,
+    looking: Vec<VirtualPairLookup<F>>,
+    looked: Vec<VirtualPairLookup<F>>,
+    constraints: Vec<SymbolicExpression<F>>,
+    public_values: Vec<SymbolicVariable<F>>,
+}
+
+impl<F: Field> SymbolicConstraintFolder<F> {
+    /// Creates a new [`InteractionBuilder`] with the given width.
+    #[must_use]
+    pub fn new(preprocessed_width: usize, main_width: usize) -> Self {
+        let preprocessed_width = preprocessed_width.max(1);
+        let preprocessed_values = [0, 1]
+            .into_iter()
+            .flat_map(|offset| {
+                (0..preprocessed_width).map(move |column| {
+                    SymbolicVariable::new(Entry::Preprocessed { offset }, column)
+                })
+            })
+            .collect();
+
+        let main_values = [0, 1]
+            .into_iter()
+            .flat_map(|offset| {
+                (0..main_width)
+                    .map(move |column| SymbolicVariable::new(Entry::Main { offset }, column))
+            })
+            .collect();
+
+        Self {
+            preprocessed: RowMajorMatrix::new(preprocessed_values, preprocessed_width),
+            main: RowMajorMatrix::new(main_values, main_width),
+            looking: vec![],
+            looked: vec![],
+            constraints: vec![],
+            public_values: vec![],
+        }
+    }
+
+    /// Returns lookup
+    #[must_use]
+    pub fn lookups(self) -> (Vec<VirtualPairLookup<F>>, Vec<VirtualPairLookup<F>>) {
+        (self.looking, self.looked)
+    }
+
+    pub fn constraints(self) -> Vec<SymbolicExpression<F>> {
+        self.constraints
+    }
+}
+
+impl<F: Field> AirBuilder for SymbolicConstraintFolder<F> {
+    type F = F;
+    type Expr = SymbolicExpression<F>;
+    type Var = SymbolicVariable<F>;
+    type M = RowMajorMatrix<Self::Var>;
+
+    fn main(&self) -> Self::M {
+        self.main.clone()
+    }
+
+    fn is_first_row(&self) -> Self::Expr {
+        SymbolicExpression::IsFirstRow
+    }
+
+    fn is_last_row(&self) -> Self::Expr {
+        SymbolicExpression::IsLastRow
+    }
+
+    fn is_transition_window(&self, size: usize) -> Self::Expr {
+        if size == 2 {
+            SymbolicExpression::IsTransition
+        } else {
+            panic!("uni-machine only supports a window size of 2")
+        }
+    }
+
+    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
+        self.constraints.push(x.into());
+    }
+}
+
+impl<F: Field> PublicValuesBuilder for SymbolicConstraintFolder<F> {
+    type PublicVar = SymbolicVariable<F>;
+    fn public_values(&self) -> &[Self::PublicVar] {
+        &self.public_values
+    }
+}
+
+impl<F: Field> LookupBuilder<SymbolicLookup<SymbolicExpression<F>>> for SymbolicConstraintFolder<F> {
+    fn looking(&mut self, message: SymbolicLookup<SymbolicExpression<F>>) {
+        let values = message
+            .values
+            .into_iter()
+            .map(|v| symbolic_to_virtual_pair(&v))
+            .collect::<Vec<_>>();
+
+        let multiplicity = symbolic_to_virtual_pair(&message.multiplicity);
+
+        self.looking
+            .push(VirtualPairLookup::new(values, multiplicity, message.kind));
+    }
+
+    fn looked(&mut self, message: SymbolicLookup<SymbolicExpression<F>>) {
+        let values = message
+            .values
+            .into_iter()
+            .map(|v| symbolic_to_virtual_pair(&v))
+            .collect::<Vec<_>>();
+
+        let multiplicity = symbolic_to_virtual_pair(&message.multiplicity);
+
+        self.looked
+            .push(VirtualPairLookup::new(values, multiplicity, message.kind));
+    }
+}
+
+impl<F: Field> ChipBuilder<F> for SymbolicConstraintFolder<F> {
+    fn preprocessed(&self) -> Self::M {
+        self.preprocessed.clone()
+    }
+}
 
 /// Prover Constraint Folder
 #[derive(Debug)]
@@ -61,11 +188,30 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
     }
 }
 
-impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for ProverConstraintFolder<'a, SC> {
+impl<'a, SC: StarkGenericConfig> PublicValuesBuilder for ProverConstraintFolder<'a, SC> {
     type PublicVar = Self::F;
 
     fn public_values(&self) -> &[Self::F] {
         &self.public_values
+    }
+}
+
+impl<'a, SC: StarkGenericConfig> PermutationBuilder for ProverConstraintFolder<'a, SC> {
+    type MP = RowMajorMatrix<PackedChallenge<SC>>;
+    type RandomVar = PackedChallenge<SC>;
+
+    fn permutation(&self) -> Self::MP {
+        self.perm.clone()
+    }
+
+    fn permutation_randomness(&self) -> &[Self::RandomVar] {
+        self.perm_challenges
+    }
+
+    type Sum = PackedChallenge<SC>;
+
+    fn cumulative_sum(&self) -> Self::Sum {
+        PackedChallenge::<SC>::from_f(self.cumulative_sum)
     }
 }
 
@@ -84,34 +230,11 @@ impl<'a, SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<'a,
     }
 }
 
-impl<'a, SC: StarkGenericConfig> PermutationAirBuilder for ProverConstraintFolder<'a, SC> {
-    type MP = RowMajorMatrix<PackedChallenge<SC>>;
-    type RandomVar = PackedChallenge<SC>;
-
-    fn permutation(&self) -> Self::MP {
-        self.perm.clone()
-    }
-
-    fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        self.perm_challenges
-    }
-}
-
-impl<'a, SC: StarkGenericConfig> PermSumAirBuilder for ProverConstraintFolder<'a, SC> {
-    type Sum = PackedChallenge<SC>;
-
-    fn cumulative_sum(&self) -> Self::Sum {
-        PackedChallenge::<SC>::from_f(self.cumulative_sum)
-    }
-}
-
-impl<'a, SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<'a, SC> {
+impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for ProverConstraintFolder<'a, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }
 }
-
-impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for ProverConstraintFolder<'a, SC> {}
 
 type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixView<'a, T>>;
 
@@ -179,7 +302,7 @@ impl<'a, SC: StarkGenericConfig> ExtensionBuilder for VerifierConstraintFolder<'
     }
 }
 
-impl<'a, SC: StarkGenericConfig> PermutationAirBuilder for VerifierConstraintFolder<'a, SC> {
+impl<'a, SC: StarkGenericConfig> PermutationBuilder for VerifierConstraintFolder<'a, SC> {
     type MP = ViewPair<'a, SC::Challenge>;
     type RandomVar = SC::Challenge;
 
@@ -190,9 +313,7 @@ impl<'a, SC: StarkGenericConfig> PermutationAirBuilder for VerifierConstraintFol
     fn permutation_randomness(&self) -> &[Self::RandomVar] {
         self.perm_challenges
     }
-}
 
-impl<'a, SC: StarkGenericConfig> PermSumAirBuilder for VerifierConstraintFolder<'a, SC> {
     type Sum = SC::Challenge;
 
     fn cumulative_sum(&self) -> Self::Sum {
@@ -200,16 +321,16 @@ impl<'a, SC: StarkGenericConfig> PermSumAirBuilder for VerifierConstraintFolder<
     }
 }
 
-impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC> {
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed
-    }
-}
-
-impl<'a, SC: StarkGenericConfig> AirBuilderWithPublicValues for VerifierConstraintFolder<'a, SC> {
+impl<'a, SC: StarkGenericConfig> PublicValuesBuilder for VerifierConstraintFolder<'a, SC> {
     type PublicVar = Self::F;
 
     fn public_values(&self) -> &[Self::F] {
         &self.public_values
+    }
+}
+
+impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for VerifierConstraintFolder<'a, SC> {
+    fn preprocessed(&self) -> Self::M {
+        self.preprocessed.clone()
     }
 }

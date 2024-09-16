@@ -9,8 +9,8 @@ use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
 use pico_machine::{
-    chip::ChipBuilder,
-    lookup::{AirInteraction, LookupType},
+    builder::ChipBuilder,
+    lookup::{LookupType, SymbolicLookup},
 };
 use std::{borrow::Borrow, iter::once};
 
@@ -230,7 +230,7 @@ impl<F: Field> CpuChip<F> {
             // .chain(once(shard.into()))
             .collect();
 
-        builder.looking(AirInteraction::new(
+        builder.looking(SymbolicLookup::new(
             values,
             multiplicity.into(),
             LookupType::Program,

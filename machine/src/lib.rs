@@ -7,7 +7,7 @@ pub mod folder;
 pub mod keys;
 pub mod lookup;
 pub mod machine;
-mod permutation;
+pub mod permutation;
 pub mod proof;
 pub mod prover;
 pub mod utils;

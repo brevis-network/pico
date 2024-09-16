@@ -1,6 +1,6 @@
 use crate::chips::cpu::{columns::CpuCols, CpuChip};
 use p3_field::{AbstractField, Field};
-use pico_machine::chip::ChipBuilder;
+use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a branch instruction.

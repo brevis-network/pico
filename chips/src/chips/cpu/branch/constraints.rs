@@ -4,7 +4,7 @@ use crate::{
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
-use pico_machine::chip::ChipBuilder;
+use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a branch instruction.

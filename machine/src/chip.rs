@@ -1,14 +1,15 @@
 use crate::{
-    builder::{ChipProxyBuilder, MessageBuilder, PermSumAirBuilder},
-    lookup::{AirInteraction, LookupPayload},
+    builder::{ChipBuilder, LookupBuilder, PermutationBuilder},
+    folder::SymbolicConstraintFolder,
+    lookup::{SymbolicLookup, VirtualPairLookup},
     permutation::{eval_permutation_constraints, generate_permutation_trace},
+    utils::get_log_quotient_degree,
 };
 use itertools::Itertools;
 use log::debug;
-use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder, PairBuilder};
+use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder};
 use p3_field::{AbstractField, ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_uni_stark::{get_log_quotient_degree, SymbolicAirBuilder};
 use pico_compiler::program::Program;
 use pico_emulator::record::EmulationRecord;
 
@@ -28,68 +29,14 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     }
 }
 
-/// Chip builder
-pub trait ChipBuilder<F: Field>:
-    AirBuilder<F = F> + MessageBuilder<AirInteraction<Self::Expr>>
-{
-    /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
-    fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<Self> {
-        self.when_ne(condition, Self::F::one())
-    }
-
-    /// Asserts that an iterator of expressions are all equal.
-    fn assert_all_eq<I1: Into<Self::Expr>, I2: Into<Self::Expr>>(
-        &mut self,
-        left: impl IntoIterator<Item = I1>,
-        right: impl IntoIterator<Item = I2>,
-    ) {
-        for (left, right) in left.into_iter().zip_eq(right) {
-            self.assert_eq(left, right);
-        }
-    }
-
-    /// Asserts that an iterator of expressions are all zero.
-    fn assert_all_zero<I: Into<Self::Expr>>(&mut self, iter: impl IntoIterator<Item = I>) {
-        iter.into_iter().for_each(|expr| self.assert_zero(expr));
-    }
-
-    /// Will return `a` if `condition` is 1, else `b`.  This assumes that `condition` is already
-    /// checked to be a boolean.
-    #[inline]
-    fn if_else(
-        &mut self,
-        condition: impl Into<Self::Expr> + Clone,
-        a: impl Into<Self::Expr> + Clone,
-        b: impl Into<Self::Expr> + Clone,
-    ) -> Self::Expr {
-        condition.clone().into() * a.into() + (Self::Expr::one() - condition.into()) * b.into()
-    }
-
-    /// Index an array of expressions using an index bitmap.  This function assumes that the
-    /// `EIndex` type is a boolean and that `index_bitmap`'s entries sum to 1.
-    fn index_array(
-        &mut self,
-        array: &[impl Into<Self::Expr> + Clone],
-        index_bitmap: &[impl Into<Self::Expr> + Clone],
-    ) -> Self::Expr {
-        let mut result = Self::Expr::zero();
-
-        for (value, i) in array.iter().zip_eq(index_bitmap) {
-            result += value.clone().into() * i.clone().into();
-        }
-
-        result
-    }
-}
-
 /// Chip wrapper, includes interactions
 pub struct MetaChip<F: Field, C> {
     /// Underlying chip
     chip: C,
     /// messages for chip as looking table
-    looking: Vec<LookupPayload<F>>,
+    looking: Vec<VirtualPairLookup<F>>,
     /// messages for chip as looked table
-    looked: Vec<LookupPayload<F>>,
+    looked: Vec<VirtualPairLookup<F>>,
     /// log degree of quotient polynomial
     log_quotient_degree: usize,
 }
@@ -97,15 +44,14 @@ pub struct MetaChip<F: Field, C> {
 impl<F: Field, C> MetaChip<F, C> {
     pub fn new(chip: C) -> Self
     where
-        C: ChipBehavior<F> + Air<ChipProxyBuilder<F>> + Air<SymbolicAirBuilder<F>>,
+        C: ChipBehavior<F> + Air<SymbolicConstraintFolder<F>>,
     {
-        let mut builder = ChipProxyBuilder::new(chip.preprocessed_width(), chip.width());
+        let mut builder = SymbolicConstraintFolder::new(chip.preprocessed_width(), chip.width());
         chip.eval(&mut builder);
-        let (looking, looked) = builder.lookup_message();
+        let (looking, looked) = builder.lookups();
 
         // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
-        let log_quotient_degree =
-            get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width(), 0);
+        let log_quotient_degree = get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width());
         debug!(
             "chip_preprocessed_width = {}, log_quotient_degree = {}",
             chip.preprocessed_width(),
@@ -169,7 +115,7 @@ impl<F, C, CB> Air<CB> for MetaChip<F, C>
 where
     F: Field,
     C: Air<CB>,
-    CB: ChipBuilder<F> + PermSumAirBuilder + PairBuilder,
+    CB: ChipBuilder<F> + PermutationBuilder,
 {
     fn eval(&self, builder: &mut CB) {
         self.chip.eval(builder);

@@ -7,7 +7,8 @@ use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::record::EmulationRecord;
 use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
-    chip::{ChipBehavior, ChipBuilder, MetaChip},
+    builder::ChipBuilder,
+    chip::{ChipBehavior, MetaChip},
     machine::{BaseMachine, MachineBehavior},
 };
 use std::sync::Arc;

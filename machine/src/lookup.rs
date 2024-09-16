@@ -1,9 +1,9 @@
-use crate::builder::eval_symbolic_to_virtual_pair;
+use crate::utils::eval_symbolic_to_virtual_pair;
 use p3_air::VirtualPairCol;
 use p3_field::Field;
 use p3_uni_stark::SymbolicExpression;
 
-pub struct LookupPayload<F: Field> {
+pub struct VirtualPairLookup<F: Field> {
     /// The values of the interaction.
     pub values: Vec<VirtualPairCol<F>>,
     /// The multiplicity of the interaction.
@@ -12,7 +12,7 @@ pub struct LookupPayload<F: Field> {
     pub kind: LookupType,
 }
 
-impl<F: Field> LookupPayload<F> {
+impl<F: Field> VirtualPairLookup<F> {
     pub fn new(values: Vec<VirtualPairCol<F>>, mult: VirtualPairCol<F>, kind: LookupType) -> Self {
         Self { values, mult, kind }
     }
@@ -61,7 +61,7 @@ pub(crate) fn symbolic_to_virtual_pair<F: Field>(
 }
 
 /// An interaction is a cross-table lookup.
-pub struct AirInteraction<E> {
+pub struct SymbolicLookup<E> {
     /// The values of the interaction.
     pub values: Vec<E>,
     /// The multiplicity of the interaction.
@@ -70,8 +70,8 @@ pub struct AirInteraction<E> {
     pub kind: LookupType,
 }
 
-impl<E> AirInteraction<E> {
-    /// Create a new [`AirInteraction`].
+impl<E> SymbolicLookup<E> {
+    /// Create a new [`SymbolicLookup`].
     pub const fn new(values: Vec<E>, multiplicity: E, kind: LookupType) -> Self {
         Self {
             values,

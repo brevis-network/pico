@@ -7,8 +7,9 @@ use pico_compiler::program::Program;
 use pico_derive::AlignedBorrow;
 use pico_emulator::record::EmulationRecord;
 use pico_machine::{
-    chip::{ChipBehavior, ChipBuilder},
-    lookup::{AirInteraction, LookupType},
+    builder::ChipBuilder,
+    chip::ChipBehavior,
+    lookup::{LookupType, SymbolicLookup},
 };
 use std::{marker::PhantomData, mem::size_of, sync::Arc};
 
@@ -89,7 +90,7 @@ where
         let local: &AddLookingCols<CB::Var> = (*local).borrow();
 
         // no constraints for main trace, addition result is constrained by lookup
-        builder.looking(AirInteraction::new(
+        builder.looking(SymbolicLookup::new(
             vec![local.a.into(), local.b.into(), local.result.into()],
             F::one().into(),
             LookupType::Byte,
@@ -150,7 +151,7 @@ where
         let result = local.a + local.b;
         builder.assert_eq(result, local.result);
 
-        builder.looked(AirInteraction::new(
+        builder.looked(SymbolicLookup::new(
             vec![local.a.into(), local.b.into(), local.result.into()],
             F::one().into(),
             LookupType::Byte,

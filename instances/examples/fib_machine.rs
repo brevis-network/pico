@@ -1,5 +1,5 @@
 use log::info;
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::{
@@ -12,7 +12,8 @@ use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
 use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
-    chip::{ChipBehavior, ChipBuilder, MetaChip},
+    builder::ChipBuilder,
+    chip::{ChipBehavior, MetaChip},
     machine::{BaseMachine, MachineBehavior},
 };
 
@@ -87,7 +88,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
 impl<F, CB> Air<CB> for FibChipType<F>
 where
     F: Field,
-    CB: ChipBuilder<F> + PairBuilder,
+    CB: ChipBuilder<F>,
 {
     fn eval(&self, b: &mut CB) {
         match self {

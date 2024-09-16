@@ -9,7 +9,7 @@ use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-use pico_machine::chip::ChipBuilder;
+use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> BaseAir<F> for MemoryInitializeFinalizeChip<F> {
     fn width(&self) -> usize {
@@ -49,7 +49,7 @@ where
                 if self.kind == MemoryChipType::Initialize {
                     let mut values = vec![CB::Expr::zero(), CB::Expr::zero(), local.addr.into()];
                     values.extend(value.map(Into::into));
-                    builder.receive(AirInteraction::new(
+                    builder.receive(SymbolicLookup::new(
                         values,
                         local.is_real.into(),
                         InteractionKind::Memory,
@@ -61,7 +61,7 @@ where
                         local.addr.into(),
                     ];
                     values.extend(value);
-                    builder.send(AirInteraction::new(
+                    builder.send(SymbolicLookup::new(
                         values,
                         local.is_real.into(),
                         InteractionKind::Memory,
