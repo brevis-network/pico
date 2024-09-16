@@ -14,6 +14,7 @@ use pico_machine::{
 
 use pico_instances::simple_machine::SimpleMachine;
 use std::any::type_name;
+use pico_compiler::compiler::{Compiler, SourceType};
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
@@ -86,7 +87,11 @@ fn main() {
 
     info!("Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
-    let program = Program::from(ELF).unwrap();
+    let compiler = Compiler::new(
+        SourceType::RiscV,
+        ELF,
+    );
+    let program = compiler.compile();
 
     info!("Creating Runtime..");
     let mut runtime = Executor::new(program, PicoCoreOpts::default());

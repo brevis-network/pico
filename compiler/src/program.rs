@@ -13,6 +13,8 @@ use crate::{
 ///
 /// Contains a series of instructions along with the initial memory image. It also contains the
 /// start address and base address of the program.
+///
+/// This could be used across different machines
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Program {
     /// The instructions of the program.
@@ -35,37 +37,5 @@ impl Program {
             pc_base,
             memory_image: BTreeMap::new(),
         }
-    }
-
-    /// Disassemble a RV32IM ELF to a program that be executed by the VM.
-    ///
-    /// # Errors
-    ///
-    /// This function may return an error if the ELF is not valid.
-    pub fn from(input: &[u8]) -> eyre::Result<Self> {
-        // Decode the bytes as an ELF.
-        let elf = Elf::decode(input)?;
-
-        // Transpile the RV32IM instructions.
-        let instructions = transpile(&elf.instructions);
-
-        // Return the program.
-        Ok(Program {
-            instructions,
-            pc_start: elf.pc_start,
-            pc_base: elf.pc_base,
-            memory_image: elf.memory_image,
-        })
-    }
-
-    /// Disassemble a RV32IM ELF to a program that be executed by the VM from a file path.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if the file cannot be opened or read.
-    pub fn from_elf(path: &str) -> eyre::Result<Self> {
-        let mut elf_code = Vec::new();
-        File::open(path)?.read_to_end(&mut elf_code)?;
-        Program::from(&elf_code)
     }
 }

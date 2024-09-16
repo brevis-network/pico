@@ -1138,6 +1138,7 @@ impl Default for ExecutorMode {
 }
 
 mod tests {
+    use pico_compiler::compiler::{Compiler, SourceType};
     use super::{Executor, Program};
     use crate::opts::PicoCoreOpts;
 
@@ -1146,7 +1147,12 @@ mod tests {
     #[must_use]
     #[allow(clippy::unreadable_literal)]
     pub fn simple_fibo_program() -> Program {
-        Program::from(ELF).unwrap()
+        let compiler = Compiler::new(
+            SourceType::RiscV,
+            ELF,
+        );
+        
+        compiler.compile()
     }
 
     fn _assert_send<T: Send>() {}

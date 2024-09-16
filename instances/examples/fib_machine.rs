@@ -1,3 +1,4 @@
+use std::path::Path;
 use log::info;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
@@ -8,6 +9,8 @@ use pico_chips::chips::{
     program::ProgramChip,
 };
 use pico_compiler::program::Program;
+use pico_compiler::{compiler::{Compiler, SourceType}};
+use pico_compiler::compiler::Compilable;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
 use pico_instances::simple_machine::SimpleMachine;
@@ -120,7 +123,12 @@ fn main() {
 
     info!("Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
-    let program = Program::from(ELF).unwrap();
+    
+    let compiler = Compiler::new(
+        SourceType::RiscV,
+        ELF,
+    );
+    let program = compiler.compile();
 
     info!("Creating Runtime..");
     let mut runtime = Executor::new(program, PicoCoreOpts::default());

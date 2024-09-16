@@ -1,11 +1,16 @@
 use std::{cmp::min, collections::BTreeMap};
-
+use std::fs::File;
 use elf::{
     abi::{EM_RISCV, ET_EXEC, PF_X, PT_LOAD},
     endian::LittleEndian,
     file::Class,
     ElfBytes,
 };
+use crate::compiler::Compilable;
+use crate::program::Program;
+
+use std::{io::Read};
+use crate::riscv::disassembler::transpile;
 
 /// The maximum size of the memory in bytes.
 pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;
@@ -36,21 +41,7 @@ pub(crate) struct Elf {
 
 impl Elf {
     /// Create a new [Elf].
-    #[must_use]
-    pub(crate) const fn new(
-        instructions: Vec<u32>,
-        pc_start: u32,
-        pc_base: u32,
-        memory_image: BTreeMap<u32, u32>,
-    ) -> Self {
-        Self {
-            instructions,
-            pc_start,
-            pc_base,
-            memory_image,
-        }
-    }
-
+    ///
     /// Parse the ELF file into a vector of 32-bit encoded instructions and the first memory
     /// address.
     ///
@@ -59,11 +50,14 @@ impl Elf {
     /// This function may return an error if the ELF is not valid.
     ///
     /// Reference: [Executable and Linkable Format](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format)
-    pub(crate) fn decode(input: &[u8]) -> eyre::Result<Self> {
+
+    #[must_use]
+    pub fn new(source_code: &[u8]) -> eyre::Result<Self> {
+        // Decode the bytes as an ELF.
         let mut image: BTreeMap<u32, u32> = BTreeMap::new();
 
         // Parse the ELF file assuming that it is little-endian..
-        let elf = ElfBytes::<LittleEndian>::minimal_parse(input)?;
+        let elf = ElfBytes::<LittleEndian>::minimal_parse(source_code)?;
 
         // Some sanity checks to make sure that the ELF file is valid.
         if elf.ehdr.class != Class::ELF32 {
@@ -144,7 +138,7 @@ impl Elf {
                 let len = min(file_size - i, WORD_SIZE as u32);
                 for j in 0..len {
                     let offset = (offset + i + j) as usize;
-                    let byte = input
+                    let byte = source_code
                         .get(offset)
                         .ok_or_else(|| eyre::eyre!("failed to read segment offset"))?;
                     word |= u32::from(*byte) << (j * 8);
@@ -156,6 +150,25 @@ impl Elf {
             }
         }
 
-        Ok(Elf::new(instructions, entry, base_address, image))
+        Ok(Self{
+            instructions,
+            pc_start: entry,
+            pc_base: base_address,
+            memory_image: image,
+        })
+    }
+
+    pub fn compile(&self) -> Program {
+        // Transpile the RV32IM instructions.
+        let instructions = transpile(&self.instructions);
+
+        // Return the program.
+        // clone() may take much time, consider optimize in the future
+        Program {
+            instructions,
+            pc_start: self.pc_start,
+            pc_base: self.pc_base,
+            memory_image: self.memory_image.clone(),
+        }
     }
 }
