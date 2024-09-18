@@ -1,14 +1,14 @@
-use crate::{
-    chips::cpu::{columns::CpuCols, CpuChip},
-    consts::WORD_SIZE,
-};
+use crate::chips::cpu::{columns::CpuCols, CpuChip};
 use hashbrown::HashMap;
 use p3_field::Field;
 use pico_compiler::{
     opcode::{ByteOpcode, Opcode},
     riscv::register::Register::X0,
 };
-use pico_emulator::riscv::events::{create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent};
+use pico_emulator::riscv::events::{
+    create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent,
+};
+use pico_machine::word::WORD_SIZE;
 use std::array;
 
 impl<F: Field> CpuChip<F> {

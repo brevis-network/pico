@@ -1396,6 +1396,7 @@ name = "pico-machine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arrayref",
  "env_logger",
  "hashbrown 0.14.5",
  "itertools 0.13.0",

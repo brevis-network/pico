@@ -1,25 +1,28 @@
-use std::path::Path;
 use log::info;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::{
+    alu::add_sub::AddSubChip,
     byte::ByteChip,
     cpu::CpuChip,
     memory::initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
     program::ProgramChip,
 };
-use pico_compiler::program::Program;
-use pico_compiler::{compiler::{Compiler, SourceType}};
-use pico_compiler::compiler::Compilable;
+use pico_compiler::{
+    compiler::{Compiler, SourceType},
+    program::Program,
+};
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
-use pico_emulator::opts::PicoCoreOpts;
-use pico_emulator::riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator};
+use pico_emulator::{
+    opts::PicoCoreOpts,
+    riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
+};
 use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
     builder::ChipBuilder,
     chip::{ChipBehavior, MetaChip},
-    machine::{BaseMachine, MachineBehavior},
+    machine::MachineBehavior,
 };
 
 pub enum FibChipType<F: Field> {
@@ -28,6 +31,7 @@ pub enum FibChipType<F: Field> {
     Cpu(CpuChip<F>),
     MemoryInitialize(MemoryInitializeFinalizeChip<F>),
     MemoryFinalize(MemoryInitializeFinalizeChip<F>),
+    AddSub(AddSubChip<F>),
 }
 
 // NOTE: These trait implementations are used to save this `FibChipType` to `MetaChip`.
@@ -35,7 +39,7 @@ pub enum FibChipType<F: Field> {
 // This code is annoyed, we could refactor to use macro later (but less readable).
 impl<F: Field> ChipBehavior<F> for FibChipType<F> {
     type Record = EmulationRecord;
-    
+
     fn name(&self) -> String {
         match self {
             Self::Byte(chip) => chip.name(),
@@ -43,6 +47,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::Cpu(chip) => chip.name(),
             Self::MemoryInitialize(chip) => chip.name(),
             Self::MemoryFinalize(chip) => chip.name(),
+            Self::AddSub(chip) => chip.name(),
         }
     }
 
@@ -53,6 +58,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::Cpu(chip) => chip.generate_preprocessed(program),
             Self::MemoryInitialize(chip) => chip.generate_preprocessed(program),
             Self::MemoryFinalize(chip) => chip.generate_preprocessed(program),
+            Self::AddSub(chip) => chip.generate_preprocessed(program),
         }
     }
 
@@ -63,6 +69,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::Cpu(chip) => chip.generate_main(input),
             Self::MemoryInitialize(chip) => chip.generate_main(input),
             Self::MemoryFinalize(chip) => chip.generate_main(input),
+            Self::AddSub(chip) => chip.generate_main(input),
         }
     }
 
@@ -73,6 +80,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::Cpu(chip) => chip.preprocessed_width(),
             Self::MemoryInitialize(chip) => chip.preprocessed_width(),
             Self::MemoryFinalize(chip) => chip.preprocessed_width(),
+            Self::AddSub(chip) => chip.preprocessed_width(),
         }
     }
 }
@@ -84,6 +92,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
             Self::Cpu(chip) => chip.width(),
             Self::MemoryInitialize(chip) => chip.width(),
             Self::MemoryFinalize(chip) => chip.width(),
+            Self::AddSub(chip) => chip.width(),
         }
     }
 
@@ -95,6 +104,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
             Self::Cpu(chip) => chip.preprocessed_trace(),
             Self::MemoryInitialize(chip) => chip.preprocessed_trace(),
             Self::MemoryFinalize(chip) => chip.preprocessed_trace(),
+            Self::AddSub(chip) => chip.preprocessed_trace(),
         }
     }
 }
@@ -111,6 +121,7 @@ where
             Self::Cpu(chip) => chip.eval(b),
             Self::MemoryInitialize(chip) => chip.eval(b),
             Self::MemoryFinalize(chip) => chip.eval(b),
+            Self::AddSub(chip) => chip.eval(b),
         }
     }
 }
@@ -127,6 +138,7 @@ impl<F: Field> FibChipType<F> {
             MetaChip::new(Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Finalize,
             ))),
+            MetaChip::new(Self::AddSub(AddSubChip::default())),
         ]
     }
 }
@@ -136,11 +148,8 @@ fn main() {
 
     info!("Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
-    
-    let compiler = Compiler::new(
-        SourceType::RiscV,
-        ELF,
-    );
+
+    let compiler = Compiler::new(SourceType::RiscV, ELF);
     let program = compiler.compile();
 
     info!("Creating Runtime..");

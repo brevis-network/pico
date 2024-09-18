@@ -1,3 +1,4 @@
+pub mod alu;
 pub mod cpu;
 pub mod memory;
 pub mod program;

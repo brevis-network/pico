@@ -7,11 +7,10 @@ use crate::{
         memory::read_write::columns::MemoryCols,
     },
     gadgets::baby_bear_word::BabyBearWordRangeChecker,
-    utils::word::Word,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
-use pico_machine::builder::ChipBuilder;
+use pico_machine::{builder::ChipBuilder, word::Word};
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a memory instruction.
@@ -87,15 +86,13 @@ impl<F: Field> CpuChip<F> {
             is_memory_instruction.clone(),
         );
 
-        /* TODO: Enable after adding word gadget.
-                // Check that each addr_word element is a byte.
-                builder.slice_range_check_u8(
-                    &memory_columns.addr_word.0,
-                    local.shard,
-                    local.channel,
-                    is_memory_instruction.clone(),
-                );
-        */
+        // Check that each addr_word element is a byte.
+        builder.slice_range_check_u8(
+            &memory_columns.addr_word.0,
+            local.shard,
+            local.channel,
+            is_memory_instruction.clone(),
+        );
 
         // Evaluate the addr_offset column and offset flags.
         self.eval_offset_value_flags(builder, memory_columns, local);

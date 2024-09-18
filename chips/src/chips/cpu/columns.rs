@@ -1,15 +1,13 @@
-use crate::{
-    chips::{
-        cpu::{
-            channel_selector::columns::ChannelSelectorCols, instruction::columns::InstructionCols,
-            opcode_selector::columns::OpcodeSelectorCols,
-            opcode_specific::columns::OpcodeSpecificCols, utils::make_col_map,
-        },
-        memory::read_write::columns::{MemoryCols, MemoryReadCols, MemoryReadWriteCols},
+use crate::chips::{
+    cpu::{
+        channel_selector::columns::ChannelSelectorCols, instruction::columns::InstructionCols,
+        opcode_selector::columns::OpcodeSelectorCols, opcode_specific::columns::OpcodeSpecificCols,
+        utils::make_col_map,
     },
-    utils::word::Word,
+    memory::read_write::columns::{MemoryCols, MemoryReadCols, MemoryReadWriteCols},
 };
 use pico_derive::AlignedBorrow;
+use pico_machine::word::Word;
 use std::mem::size_of;
 
 pub const NUM_CPU_COLS: usize = size_of::<CpuCols<u8>>();

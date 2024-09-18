@@ -1,4 +1,3 @@
-use crate::consts::WORD_SIZE;
 use arrayref::array_ref;
 use itertools::Itertools;
 use p3_air::AirBuilder;
@@ -8,6 +7,9 @@ use std::{
     array::IntoIter,
     ops::{Index, IndexMut},
 };
+
+/// The size of a word in bytes.
+pub const WORD_SIZE: usize = 4;
 
 ///A word to represent a 32-bit value including 4 bytes
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

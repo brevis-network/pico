@@ -1,5 +1,5 @@
-use crate::utils::word::Word;
 use pico_derive::AlignedBorrow;
+use pico_machine::word::Word;
 
 /// Memory read access.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

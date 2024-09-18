@@ -1,6 +1,7 @@
 use crate::{
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
-    lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup, LookupType},
+    lookup::{symbolic_to_virtual_pair, LookupType, SymbolicLookup, VirtualPairLookup},
+    word::{Word, WORD_SIZE},
 };
 use itertools::Itertools;
 use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder, PairCol, PermutationAirBuilder};
@@ -8,9 +9,11 @@ use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 use pico_configs::config::{StarkGenericConfig, Val};
+use std::{array, iter::once};
 
 /// Chip builder
-pub trait ChipBuilder<F: Field>: AirBuilder<F = F> + LookupBuilder<SymbolicLookup<Self::Expr>>
+pub trait ChipBuilder<F: Field>:
+    AirBuilder<F = F> + LookupBuilder<SymbolicLookup<Self::Expr>>
 {
     /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
     fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<Self> {
@@ -65,6 +68,175 @@ pub trait ChipBuilder<F: Field>: AirBuilder<F = F> + LookupBuilder<SymbolicLooku
     /// Originally from PaiBuilder in p3
     fn preprocessed(&self) -> Self::M;
 
+    /// Looking for  an ALU operation to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn looking_alu(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a: Word<impl Into<Self::Expr>>,
+        b: Word<impl Into<Self::Expr>>,
+        c: Word<impl Into<Self::Expr>>,
+        shard: impl Into<Self::Expr>,
+        channel: impl Into<Self::Expr>,
+        nonce: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        let values = once(opcode.into())
+            .chain(a.0.into_iter().map(Into::into))
+            .chain(b.0.into_iter().map(Into::into))
+            .chain(c.0.into_iter().map(Into::into))
+            .chain(once(shard.into()))
+            .chain(once(channel.into()))
+            .chain(once(nonce.into()))
+            .collect();
+
+        self.looking(SymbolicLookup::new(
+            values,
+            multiplicity.into(),
+            LookupType::Alu,
+        ));
+    }
+
+    /// Looked for an ALU operation to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn looked_alu(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a: Word<impl Into<Self::Expr>>,
+        b: Word<impl Into<Self::Expr>>,
+        c: Word<impl Into<Self::Expr>>,
+        shard: impl Into<Self::Expr>,
+        channel: impl Into<Self::Expr>,
+        nonce: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        let values = once(opcode.into())
+            .chain(a.0.into_iter().map(Into::into))
+            .chain(b.0.into_iter().map(Into::into))
+            .chain(c.0.into_iter().map(Into::into))
+            .chain(once(shard.into()))
+            .chain(once(channel.into()))
+            .chain(once(nonce.into()))
+            .collect();
+
+        self.looked(SymbolicLookup::new(
+            values,
+            multiplicity.into(),
+            LookupType::Alu,
+        ));
+    }
+
+    /// Asserts that the two words are equal.
+    fn assert_word_eq(
+        &mut self,
+        left: Word<impl Into<Self::Expr>>,
+        right: Word<impl Into<Self::Expr>>,
+    ) {
+        for (left, right) in left.0.into_iter().zip(right.0) {
+            self.assert_eq(left, right);
+        }
+    }
+
+    /// Asserts that the word is zero.
+    fn assert_word_zero(&mut self, word: Word<impl Into<Self::Expr>>) {
+        for limb in word.0 {
+            self.assert_zero(limb);
+        }
+    }
+
+    /// Index an array of words using an index bitmap.
+    fn index_word_array(
+        &mut self,
+        array: &[Word<impl Into<Self::Expr> + Clone>],
+        index_bitmap: &[impl Into<Self::Expr> + Clone],
+    ) -> Word<Self::Expr> {
+        let mut result = Word::default();
+        for i in 0..WORD_SIZE {
+            result[i] = self.index_array(
+                array
+                    .iter()
+                    .map(|word| word[i].clone())
+                    .collect_vec()
+                    .as_slice(),
+                index_bitmap,
+            );
+        }
+        result
+    }
+
+    /// Same as `if_else` above, but arguments are `Word` instead of individual expressions.
+    fn select_word(
+        &mut self,
+        condition: impl Into<Self::Expr> + Clone,
+        a: Word<impl Into<Self::Expr> + Clone>,
+        b: Word<impl Into<Self::Expr> + Clone>,
+    ) -> Word<Self::Expr> {
+        Word(array::from_fn(|i| {
+            self.if_else(condition.clone(), a[i].clone(), b[i].clone())
+        }))
+    }
+
+    /// Check that each limb of the given slice is a u8.
+    fn slice_range_check_u8(
+        &mut self,
+        input: &[impl Into<Self::Expr> + Clone],
+        shard: impl Into<Self::Expr> + Clone,
+        channel: impl Into<Self::Expr> + Clone,
+        mult: impl Into<Self::Expr> + Clone,
+    ) {
+        let mut index = 0;
+        while index + 1 < input.len() {
+            /* TODO: Enable after adding byte chip.
+                        self.send_byte(
+                            Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
+                            Self::Expr::zero(),
+                            input[index].clone(),
+                            input[index + 1].clone(),
+                            shard.clone(),
+                            channel.clone(),
+                            mult.clone(),
+                        );
+            */
+            index += 2;
+        }
+        if index < input.len() {
+            /* TODO: Enable after adding byte chip.
+                        self.send_byte(
+                            Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
+                            Self::Expr::zero(),
+                            input[index].clone(),
+                            Self::Expr::zero(),
+                            shard.clone(),
+                            channel.clone(),
+                            mult.clone(),
+                        );
+            */
+        }
+    }
+
+    /// Check that each limb of the given slice is a u16.
+    fn slice_range_check_u16(
+        &mut self,
+        input: &[impl Into<Self::Expr> + Copy],
+        shard: impl Into<Self::Expr> + Clone,
+        channel: impl Into<Self::Expr> + Clone,
+        mult: impl Into<Self::Expr> + Clone,
+    ) {
+        input.iter().for_each(|limb| {
+            /* TODO: Enable after adding byte chip.
+                        self.send_byte(
+                            Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+                            *limb,
+                            Self::Expr::zero(),
+                            Self::Expr::zero(),
+                            shard.clone(),
+                            channel.clone(),
+                            mult.clone(),
+                        );
+            */
+        });
+    }
+
     /// Sends a byte operation to be processed.
     #[allow(clippy::too_many_arguments)]
     fn looking_byte(
@@ -77,7 +249,16 @@ pub trait ChipBuilder<F: Field>: AirBuilder<F = F> + LookupBuilder<SymbolicLooku
         channel: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.looking_byte_pair(opcode, a, Self::Expr::zero(), b, c, shard, channel, multiplicity);
+        self.looking_byte_pair(
+            opcode,
+            a,
+            Self::Expr::zero(),
+            b,
+            c,
+            shard,
+            channel,
+            multiplicity,
+        );
     }
 
     /// Sends a byte operation with two outputs to be processed.
@@ -161,4 +342,3 @@ pub trait PublicValuesBuilder: AirBuilder {
 
     fn public_values(&self) -> &[Self::PublicVar];
 }
-

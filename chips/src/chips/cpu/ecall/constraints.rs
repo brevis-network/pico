@@ -4,12 +4,11 @@ use crate::{
         memory::read_write::columns::MemoryCols,
     },
     gadgets::{baby_bear_word::BabyBearWordRangeChecker, is_zero::IsZeroOperation},
-    utils::word::Word,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_emulator::riscv::syscalls::SyscallCode;
-use pico_machine::builder::ChipBuilder;
+use pico_machine::{builder::ChipBuilder, word::Word};
 
 impl<F: Field> CpuChip<F> {
     /// Whether the instruction is an ECALL instruction.

@@ -1,5 +1,6 @@
-use crate::{gadgets::baby_bear_word::BabyBearWordRangeChecker, utils::word::Word};
+use crate::gadgets::baby_bear_word::BabyBearWordRangeChecker;
 use pico_derive::AlignedBorrow;
+use pico_machine::word::Word;
 use std::mem::size_of;
 
 pub const NUM_JUMP_COLS: usize = size_of::<JumpCols<u8>>();

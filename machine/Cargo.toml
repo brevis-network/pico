@@ -36,11 +36,11 @@ p3-bn254-fr = { workspace = true }
 
 # misc
 anyhow.workspace = true
-
+arrayref.workspace = true
 hashbrown.workspace = true
 itertools.workspace = true
 log.workspace = true
-rayon-scan = {workspace = true}
+rayon-scan = { workspace = true }
 pico-compiler.workspace = true
 serde.workspace = true
 
