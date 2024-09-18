@@ -7,10 +7,11 @@ use pico_chips::chips::{
     byte::ByteChip,
     cpu::CpuChip,
     memory::initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
+    memory_program::MemoryProgramChip,
     program::ProgramChip,
 };
 use pico_compiler::{
-    compiler::{Compiler, SourceType},
+    compiler::{Compilable, Compiler, SourceType},
     program::Program,
 };
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
@@ -24,11 +25,13 @@ use pico_machine::{
     chip::{ChipBehavior, MetaChip},
     machine::MachineBehavior,
 };
+use std::path::Path;
 
 pub enum FibChipType<F: Field> {
     Byte(ByteChip<F>),
     Program(ProgramChip<F>),
     Cpu(CpuChip<F>),
+    MemoryProgram(MemoryProgramChip<F>),
     MemoryInitialize(MemoryInitializeFinalizeChip<F>),
     MemoryFinalize(MemoryInitializeFinalizeChip<F>),
     AddSub(AddSubChip<F>),
@@ -45,6 +48,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::Byte(chip) => chip.name(),
             Self::Program(chip) => chip.name(),
             Self::Cpu(chip) => chip.name(),
+            Self::MemoryProgram(chip) => chip.name(),
             Self::MemoryInitialize(chip) => chip.name(),
             Self::MemoryFinalize(chip) => chip.name(),
             Self::AddSub(chip) => chip.name(),
@@ -56,6 +60,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::Byte(chip) => chip.generate_preprocessed(program),
             Self::Program(chip) => chip.generate_preprocessed(program),
             Self::Cpu(chip) => chip.generate_preprocessed(program),
+            Self::MemoryProgram(chip) => chip.generate_preprocessed(program),
             Self::MemoryInitialize(chip) => chip.generate_preprocessed(program),
             Self::MemoryFinalize(chip) => chip.generate_preprocessed(program),
             Self::AddSub(chip) => chip.generate_preprocessed(program),
@@ -67,6 +72,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::Byte(chip) => chip.generate_main(input),
             Self::Program(chip) => chip.generate_main(input),
             Self::Cpu(chip) => chip.generate_main(input),
+            Self::MemoryProgram(chip) => chip.generate_main(input),
             Self::MemoryInitialize(chip) => chip.generate_main(input),
             Self::MemoryFinalize(chip) => chip.generate_main(input),
             Self::AddSub(chip) => chip.generate_main(input),
@@ -78,6 +84,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::Byte(chip) => chip.preprocessed_width(),
             Self::Program(chip) => chip.preprocessed_width(),
             Self::Cpu(chip) => chip.preprocessed_width(),
+            Self::MemoryProgram(chip) => chip.preprocessed_width(),
             Self::MemoryInitialize(chip) => chip.preprocessed_width(),
             Self::MemoryFinalize(chip) => chip.preprocessed_width(),
             Self::AddSub(chip) => chip.preprocessed_width(),
@@ -90,6 +97,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
             Self::Byte(chip) => chip.width(),
             Self::Program(chip) => chip.width(),
             Self::Cpu(chip) => chip.width(),
+            Self::MemoryProgram(chip) => chip.width(),
             Self::MemoryInitialize(chip) => chip.width(),
             Self::MemoryFinalize(chip) => chip.width(),
             Self::AddSub(chip) => chip.width(),
@@ -102,6 +110,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
             Self::Byte(chip) => chip.preprocessed_trace(),
             Self::Program(chip) => chip.preprocessed_trace(),
             Self::Cpu(chip) => chip.preprocessed_trace(),
+            Self::MemoryProgram(chip) => chip.preprocessed_trace(),
             Self::MemoryInitialize(chip) => chip.preprocessed_trace(),
             Self::MemoryFinalize(chip) => chip.preprocessed_trace(),
             Self::AddSub(chip) => chip.preprocessed_trace(),
@@ -119,6 +128,7 @@ where
             Self::Byte(chip) => chip.eval(b),
             Self::Program(chip) => chip.eval(b),
             Self::Cpu(chip) => chip.eval(b),
+            Self::MemoryProgram(chip) => chip.eval(b),
             Self::MemoryInitialize(chip) => chip.eval(b),
             Self::MemoryFinalize(chip) => chip.eval(b),
             Self::AddSub(chip) => chip.eval(b),
@@ -132,6 +142,7 @@ impl<F: Field> FibChipType<F> {
             MetaChip::new(Self::Byte(ByteChip::default())),
             MetaChip::new(Self::Program(ProgramChip::default())),
             MetaChip::new(Self::Cpu(CpuChip::default())),
+            MetaChip::new(Self::MemoryProgram(MemoryProgramChip::default())),
             MetaChip::new(Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Initialize,
             ))),

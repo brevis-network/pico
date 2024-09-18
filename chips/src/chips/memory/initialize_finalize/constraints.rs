@@ -9,7 +9,10 @@ use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-use pico_machine::builder::ChipBuilder;
+use pico_machine::{
+    builder::ChipBuilder,
+    lookup::{LookupType, SymbolicLookup},
+};
 
 impl<F: Field> BaseAir<F> for MemoryInitializeFinalizeChip<F> {
     fn width(&self) -> usize {
@@ -45,29 +48,27 @@ where
         }
         let value = [byte1, byte2, byte3, byte4];
 
-        /* TODO: Enable after lookup integration.
-                if self.kind == MemoryChipType::Initialize {
-                    let mut values = vec![CB::Expr::zero(), CB::Expr::zero(), local.addr.into()];
-                    values.extend(value.map(Into::into));
-                    builder.receive(SymbolicLookup::new(
-                        values,
-                        local.is_real.into(),
-                        InteractionKind::Memory,
-                    ));
-                } else {
-                    let mut values = vec![
-                        local.shard.into(),
-                        local.timestamp.into(),
-                        local.addr.into(),
-                    ];
-                    values.extend(value);
-                    builder.send(SymbolicLookup::new(
-                        values,
-                        local.is_real.into(),
-                        InteractionKind::Memory,
-                    ));
-                }
-        */
+        if self.kind == MemoryChipType::Initialize {
+            let mut values = vec![CB::Expr::zero(), CB::Expr::zero(), local.addr.into()];
+            values.extend(value.map(Into::into));
+            builder.looked(SymbolicLookup::new(
+                values,
+                local.is_real.into(),
+                LookupType::Memory,
+            ));
+        } else {
+            let mut values = vec![
+                local.shard.into(),
+                local.timestamp.into(),
+                local.addr.into(),
+            ];
+            values.extend(value);
+            builder.looking(SymbolicLookup::new(
+                values,
+                local.is_real.into(),
+                LookupType::Memory,
+            ));
+        }
 
         // Canonically decompose the address into bits so we can do comparisons.
         BabyBearBitDecomposition::<CB::F>::range_check(
