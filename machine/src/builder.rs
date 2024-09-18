@@ -1,6 +1,6 @@
 use crate::{
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
-    lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
+    lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup, LookupType},
 };
 use itertools::Itertools;
 use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder, PairCol, PermutationAirBuilder};
@@ -10,8 +10,7 @@ use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 use pico_configs::config::{StarkGenericConfig, Val};
 
 /// Chip builder
-pub trait ChipBuilder<F: Field>:
-    AirBuilder<F = F> + LookupBuilder<SymbolicLookup<Self::Expr>>
+pub trait ChipBuilder<F: Field>: AirBuilder<F = F> + LookupBuilder<SymbolicLookup<Self::Expr>>
 {
     /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
     fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<Self> {
@@ -65,6 +64,49 @@ pub trait ChipBuilder<F: Field>:
     /// get preprocessed trace
     /// Originally from PaiBuilder in p3
     fn preprocessed(&self) -> Self::M;
+
+    /// Sends a byte operation to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn looking_byte(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a: impl Into<Self::Expr>,
+        b: impl Into<Self::Expr>,
+        c: impl Into<Self::Expr>,
+        shard: impl Into<Self::Expr>,
+        channel: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        self.looking_byte_pair(opcode, a, Self::Expr::zero(), b, c, shard, channel, multiplicity);
+    }
+
+    /// Sends a byte operation with two outputs to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn looking_byte_pair(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a1: impl Into<Self::Expr>,
+        a2: impl Into<Self::Expr>,
+        b: impl Into<Self::Expr>,
+        c: impl Into<Self::Expr>,
+        shard: impl Into<Self::Expr>,
+        channel: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        self.looking(SymbolicLookup::new(
+            vec![
+                opcode.into(),
+                a1.into(),
+                a2.into(),
+                b.into(),
+                c.into(),
+                shard.into(),
+                channel.into(),
+            ],
+            multiplicity.into(),
+            LookupType::Byte,
+        ));
+    }
 }
 
 impl<'a, F: Field, AB: AirBuilder<F = F>> ChipBuilder<F> for FilteredAirBuilder<'a, AB> {
@@ -119,3 +161,4 @@ pub trait PublicValuesBuilder: AirBuilder {
 
     fn public_values(&self) -> &[Self::PublicVar];
 }
+

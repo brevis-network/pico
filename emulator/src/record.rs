@@ -1,7 +1,9 @@
 use hashbrown::HashMap;
 use std::sync::Arc;
 
-use crate::events::{AluEvent, CpuEvent, MemoryInitializeFinalizeEvent, MemoryRecordEnum};
+use crate::events::{
+    add_sharded_byte_lookup_events, ByteLookupEvent, ByteRecord,
+    AluEvent, CpuEvent, MemoryInitializeFinalizeEvent, MemoryRecordEnum};
 use pico_compiler::program::Program;
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +35,8 @@ pub struct EmulationRecord {
     pub divrem_events: Vec<AluEvent>,
     /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
     pub lt_events: Vec<AluEvent>,
+    /// A trace of the byte lookups that are needed.
+    pub byte_lookups: HashMap<u32, HashMap<ByteLookupEvent, usize>>,
     /// A trace of the memory initialize events.
     pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the memory finalize events.
@@ -60,4 +64,18 @@ pub struct MemoryAccessRecord {
     pub c: Option<MemoryRecordEnum>,
     /// The memory access of the `memory` register.
     pub memory: Option<MemoryRecordEnum>,
+}
+
+impl ByteRecord for EmulationRecord {
+    fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
+        *self.byte_lookups.entry(blu_event.shard).or_default().entry(blu_event).or_insert(0) += 1;
+    }
+
+    #[inline]
+    fn add_sharded_byte_lookup_events(
+        &mut self,
+        new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
+    ) {
+        add_sharded_byte_lookup_events(&mut self.byte_lookups, new_events);
+    }
 }

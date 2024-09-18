@@ -4,6 +4,7 @@ use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::{
+    byte::ByteChip,
     cpu::CpuChip,
     memory::initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
     program::ProgramChip,
@@ -21,6 +22,7 @@ use pico_machine::{
 };
 
 pub enum FibChipType<F: Field> {
+    Byte(ByteChip<F>),
     Program(ProgramChip<F>),
     Cpu(CpuChip<F>),
     MemoryInitialize(MemoryInitializeFinalizeChip<F>),
@@ -33,6 +35,7 @@ pub enum FibChipType<F: Field> {
 impl<F: Field> ChipBehavior<F> for FibChipType<F> {
     fn name(&self) -> String {
         match self {
+            Self::Byte(chip) => chip.name(),
             Self::Program(chip) => chip.name(),
             Self::Cpu(chip) => chip.name(),
             Self::MemoryInitialize(chip) => chip.name(),
@@ -42,6 +45,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
 
     fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         match self {
+            Self::Byte(chip) => chip.generate_preprocessed(program),
             Self::Program(chip) => chip.generate_preprocessed(program),
             Self::Cpu(chip) => chip.generate_preprocessed(program),
             Self::MemoryInitialize(chip) => chip.generate_preprocessed(program),
@@ -51,6 +55,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         match self {
+            Self::Byte(chip) => chip.generate_main(input),
             Self::Program(chip) => chip.generate_main(input),
             Self::Cpu(chip) => chip.generate_main(input),
             Self::MemoryInitialize(chip) => chip.generate_main(input),
@@ -60,6 +65,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
 
     fn preprocessed_width(&self) -> usize {
         match self {
+            Self::Byte(chip) => chip.preprocessed_width(),
             Self::Program(chip) => chip.preprocessed_width(),
             Self::Cpu(chip) => chip.preprocessed_width(),
             Self::MemoryInitialize(chip) => chip.preprocessed_width(),
@@ -70,6 +76,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
 impl<F: Field> BaseAir<F> for FibChipType<F> {
     fn width(&self) -> usize {
         match self {
+            Self::Byte(chip) => chip.width(),
             Self::Program(chip) => chip.width(),
             Self::Cpu(chip) => chip.width(),
             Self::MemoryInitialize(chip) => chip.width(),
@@ -80,6 +87,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
     /// todo: this should not be called. all should go to generate_preprocessed.
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
         match self {
+            Self::Byte(chip) => chip.preprocessed_trace(),
             Self::Program(chip) => chip.preprocessed_trace(),
             Self::Cpu(chip) => chip.preprocessed_trace(),
             Self::MemoryInitialize(chip) => chip.preprocessed_trace(),
@@ -95,6 +103,7 @@ where
 {
     fn eval(&self, b: &mut CB) {
         match self {
+            Self::Byte(chip) => chip.eval(b),
             Self::Program(chip) => chip.eval(b),
             Self::Cpu(chip) => chip.eval(b),
             Self::MemoryInitialize(chip) => chip.eval(b),
@@ -106,6 +115,7 @@ where
 impl<F: Field> FibChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![
+            MetaChip::new(Self::Byte(ByteChip::default())),
             MetaChip::new(Self::Program(ProgramChip::default())),
             MetaChip::new(Self::Cpu(CpuChip::default())),
             MetaChip::new(Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
