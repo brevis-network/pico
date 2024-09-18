@@ -13,7 +13,8 @@ use pico_compiler::program::Program;
 use pico_compiler::{compiler::{Compiler, SourceType}};
 use pico_compiler::compiler::Compilable;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
-use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
+use pico_emulator::opts::PicoCoreOpts;
+use pico_emulator::riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator};
 use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
     builder::ChipBuilder,
@@ -33,6 +34,8 @@ pub enum FibChipType<F: Field> {
 // Since MetaChip has a generic parameter which is one type (cannot be two chip types).
 // This code is annoyed, we could refactor to use macro later (but less readable).
 impl<F: Field> ChipBehavior<F> for FibChipType<F> {
+    type Record = EmulationRecord;
+    
     fn name(&self) -> String {
         match self {
             Self::Byte(chip) => chip.name(),
@@ -53,7 +56,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
         }
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
         match self {
             Self::Byte(chip) => chip.generate_main(input),
             Self::Program(chip) => chip.generate_main(input),
@@ -141,7 +144,7 @@ fn main() {
     let program = compiler.compile();
 
     info!("Creating Runtime..");
-    let mut runtime = Executor::new(program, PicoCoreOpts::default());
+    let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
 

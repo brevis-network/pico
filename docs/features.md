@@ -17,13 +17,13 @@
   - Ongoing
 - [x] `ToyChip`
   - A simple chip that only contains the addition operation;
-  - Before core executor ready, could implement the trace generation on its own;
-  - After core executor ready, could implement the trace generation as expected (taking `Record` as input);
+  - Before core emulator ready, could implement the trace generation on its own;
+  - After core emulator ready, could implement the trace generation as expected (taking `Record` as input);
 - [x] `ToyMachine`
   - A simple machine that only proves the addition program;
   - This is the final target for this stage
-- [x] Core `Executor`
-  - [x] Migration of the core executor to the `compiler` folder;
+- [x] Core `Emulator`
+  - [x] Migration of the core emulator to the `compiler` folder;
   - [x] Integration with current `toy_machine` and `toy_prover`
 
 ## Fibonacci (Ongoing)
@@ -33,7 +33,7 @@
 - [x] Abstraction framework update
   - [x] machine type/behavior
   - [x] proofs type/behavior
-- [x] `Compiler` separation into `Compiler` and `Executor`
+- [x] `Compiler` separation into `Compiler` and `Emulator`
 - [ ] chips for Fibonacci
   - [ ] CPU (main heavy-lifting part)
   - [ ] Program
@@ -71,10 +71,10 @@
   - [ ] EmbedMachine
   - [ ] Wrap - need to be a machine?
   - [ ] PicoMachine, not exactly a machine type but a wrapper of various machines to support own logic
-- [ ] Recursion `Executor` 
+- [ ] Recursion `Emulator` 
   - [ ] migration
   - [ ] detach to compiler
-- [ ] Executor abstraction
+- [ ] Emulator abstraction
 
 ## Performance Optimization
 #### Goal

@@ -4,7 +4,7 @@ pub(crate) struct CommitSyscall;
 
 impl Syscall for CommitSyscall {
     #[allow(clippy::mut_mut)]
-    fn execute(
+    fn emulate(
         &self,
         ctx: &mut SyscallContext,
         word_idx: u32,

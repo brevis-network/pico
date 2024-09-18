@@ -2,7 +2,7 @@ use anyhow::Result;
 use p3_air::Air;
 use pico_compiler::program::Program;
 use pico_configs::config::{StarkGenericConfig, Val};
-use pico_emulator::record::EmulationRecord;
+use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::{
     chip::{ChipBehavior,  MetaChip},
     builder::ChipBuilder,
@@ -60,7 +60,7 @@ where
     fn prove(
         &self,
         pk: &BaseProvingKey<SC>,
-        records: &[EmulationRecord],
+        records: &[C::Record],
     ) -> MetaProof<SC, EnsembleProof<SC>> {
         // todo: implement specific proving logic here
 

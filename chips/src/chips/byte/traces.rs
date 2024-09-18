@@ -8,7 +8,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_air::BaseAir;
 
 use pico_compiler::{opcode::ByteOpcode, program::Program};
-use pico_emulator::record::EmulationRecord;
+use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::chip::ChipBehavior;
 
 use super::{
@@ -20,6 +20,8 @@ use super::{
 pub const NUM_ROWS: usize = 1 << 16;
 
 impl<F: Field> ChipBehavior<F> for ByteChip<F> {
+    type Record = EmulationRecord; 
+    
     fn name(&self) -> String {
         "Byte".to_string()
     }

@@ -12,44 +12,44 @@ use thiserror::Error;
 use pico_compiler::{
     instruction::Instruction, opcode::Opcode, program::Program, riscv::register::Register,
 };
+use crate::context::PicoContext;
+use crate::opts::PicoCoreOpts;
+use crate::riscv::syscalls::{default_syscall_map, Syscall, SyscallCode};
 
-use crate::syscalls::{default_syscall_map, Syscall, SyscallCode};
-
-use crate::{
-    context::PicoContext,
+use crate::riscv::{
     events::{
-        create_alu_lookup_id, create_alu_lookups, AluEvent, CpuEvent, MemoryAccessPosition,
+        AluEvent, CpuEvent, create_alu_lookup_id, create_alu_lookups, MemoryAccessPosition,
         MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
     },
-    opts::PicoCoreOpts,
     record::{EmulationRecord, MemoryAccessRecord},
-    state::ExecutionState,
+    state::RiscvEmulationState,
     syscalls::syscall_context::SyscallContext,
 };
-use crate::events::MemoryInitializeFinalizeEvent;
+use crate::stdin::PicoStdin;
+use crate::riscv::events::MemoryInitializeFinalizeEvent;
 
 pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;
 
-/// An executor for the Pico RISC-V zkVM.
+/// An emulator for the Pico RISC-V zkVM.
 ///
 /// The exeuctor is responsible for executing a user program and tracing important events which
-/// occur during execution (i.e., memory reads, alu operations, etc).
-pub struct Executor {
+/// occur during emulation (i.e., memory reads, alu operations, etc).
+pub struct RiscvEmulator {
     /// The program.
     pub program: Arc<Program>,
 
     /// The options for the runtime.
     pub opts: PicoCoreOpts,
 
-    /// The maximum number of cpu cycles to use for execution.
+    /// The maximum number of cpu cycles to use for emulation.
     pub max_cycles: Option<u64>,
 
-    pub executor_mode: ExecutorMode,
+    pub emulator_mode: EmulatorMode,
 
-    /// The state of the execution.
-    pub state: ExecutionState,
+    /// The state of the emulation.
+    pub state: RiscvEmulationState,
 
-    /// The current trace of the execution that is being collected.
+    /// The current trace of the emulation that is being collected.
     pub record: EmulationRecord,
 
     /// The collected records, split by cpu cycles.
@@ -58,7 +58,7 @@ pub struct Executor {
     /// The maximum size of each shard.
     pub shard_size: u32,
 
-    /// The maximimum number of shards to execute at once.
+    /// The maximimum number of shards to emulate at once.
     pub shard_batch_size: u32,
 
     /// The mapping between syscall codes and their implementations.
@@ -75,45 +75,45 @@ pub struct Executor {
     pub max_syscall_cycles: u32,
 }
 
-/// The different modes the executor can run in.
+/// The different modes the emulator can run in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ExecutorMode {
-    /// Run the execution with no tracing or checkpointing.
+pub enum EmulatorMode {
+    /// Run the emulation with no tracing or checkpointing.
     Simple,
-    /// Run the execution with checkpoints for memory.
+    /// Run the emulation with checkpoints for memory.
     Checkpoint,
-    /// Run the execution with full tracing of events.
+    /// Run the emulation with full tracing of events.
     Trace,
 }
 
-/// Errors that the [``Executor``] can throw.
+/// Errors that the [``Emulator``] can throw.
 #[derive(Error, Debug, Serialize, Deserialize)]
-pub enum ExecutionError {
-    /// The execution failed with a non-zero exit code.
-    #[error("execution failed with exit code {0}")]
+pub enum EmulationError {
+    /// The emulation failed with a non-zero exit code.
+    #[error("emulation failed with exit code {0}")]
     HaltWithNonZeroExitCode(u32),
 
-    /// The execution failed with an invalid memory access.
+    /// The emulation failed with an invalid memory access.
     #[error("invalid memory access for opcode {0} and address {1}")]
     InvalidMemoryAccess(Opcode, u32),
 
-    /// The execution failed with an unimplemented syscall.
+    /// The emulation failed with an unimplemented syscall.
     #[error("unimplemented syscall {0}")]
     UnsupportedSyscall(u32),
 
-    /// The execution failed with a breakpoint.
+    /// The emulation failed with a breakpoint.
     #[error("breakpoint encountered")]
     Breakpoint(),
 
-    /// The execution failed with an exceeded cycle limit.
+    /// The emulation failed with an exceeded cycle limit.
     #[error("exceeded cycle limit of {0}")]
     ExceededCycleLimit(u64),
 
-    /// The execution failed because the syscall was called in unconstrained mode.
+    /// The emulation failed because the syscall was called in unconstrained mode.
     #[error("syscall called in unconstrained mode")]
     InvalidSyscallUsage(u64),
 
-    /// The execution failed with an unimplemented feature.
+    /// The emulation failed with an unimplemented feature.
     #[error("got unimplemented as opcode")]
     Unimplemented(),
 }
@@ -125,8 +125,7 @@ macro_rules! assert_valid_memory_access {
     };
 }
 
-impl Executor {
-    /// Create a new [``Executor``] from a program and options.
+impl RiscvEmulator {
     #[must_use]
     pub fn new(program: Program, opts: PicoCoreOpts) -> Self {
         Self::with_context(program, opts, PicoContext::default())
@@ -179,11 +178,11 @@ impl Executor {
             shard_batch_size: opts.shard_batch_size as u32,
             record,
             records: vec![],
-            state: ExecutionState::new(program.pc_start),
+            state: RiscvEmulationState::new(program.pc_start),
             program,
             opts,
             max_cycles: context.max_cycles,
-            executor_mode: ExecutorMode::Simple,
+            emulator_mode: EmulatorMode::Simple,
             memory_checkpoint: HashMap::default(),
             max_syscall_cycles,
         }
@@ -194,14 +193,14 @@ impl Executor {
         self.program.instructions[idx]
     }
 
-    /// Executes one cycle of the program, returning whether the program has finished.
+    /// Emulates one cycle of the program, returning whether the program has finished.
     #[inline]
-    fn execute_cycle(&mut self) -> Result<bool, ExecutionError> {
+    fn emulate_cycle(&mut self) -> Result<bool, EmulationError> {
         // Fetch the instruction at the current program counter.
         let instruction = self.fetch();
 
-        // Execute the instruction.
-        self.execute_instruction(&instruction)?;
+        // Emulate the instruction.
+        self.emulate_instruction(&instruction)?;
 
         // Increment the clock.
         self.state.global_clk += 1;
@@ -210,24 +209,32 @@ impl Executor {
             >= (self.program.instructions.len() * 4) as u32)
     }
 
-    pub fn run_fast(&mut self) -> Result<(), ExecutionError> {
-        self.executor_mode = ExecutorMode::Simple;
-        while !self.execute()? {}
+    pub fn run_fast(&mut self) -> Result<(), EmulationError> {
+        self.emulator_mode = EmulatorMode::Simple;
+        while !self.emulate()? {}
         Ok(())
     }
 
-    /// Executes the program and prints the execution report.
+    /// Emulates the program and prints the emulation report.
     ///
     /// # Errors
     ///
-    /// This function will return an error if the program execution fails.
-    pub fn run(&mut self) -> Result<(), ExecutionError> {
-        self.executor_mode = ExecutorMode::Trace;
-        while !self.execute()? {}
+    /// This function will return an error if the program emulation fails.
+    pub fn run(&mut self) -> Result<(), EmulationError> {
+        self.emulator_mode = EmulatorMode::Trace;
+        while !self.emulate()? {}
         Ok(())
     }
 
-    fn execute(&mut self) -> Result<bool, ExecutionError> {
+    pub fn run_with_stdin(&mut self, stdin: PicoStdin) -> Result<(), EmulationError> {
+        self.emulator_mode = EmulatorMode::Trace;
+        for input in &stdin.buffer {
+            self.state.input_stream.push(input.clone());
+        }
+        self.run()
+    }
+
+    fn emulate(&mut self) -> Result<bool, EmulationError> {
         // Get the current shard.
         let start_shard = self.state.current_shard; // needed for public input
 
@@ -236,21 +243,21 @@ impl Executor {
             self.initialize();
         }
 
-        // Loop until we've executed `self.shard_batch_size` shards if `self.shard_batch_size` is
+        // Loop until we've emulated `self.shard_batch_size` shards if `self.shard_batch_size` is
         // set.
         let mut done = false;
         let mut current_shard = self.state.current_shard;
-        let mut num_shards_executed = 0;
+        let mut num_shards_emulated = 0;
         loop {
-            if self.execute_cycle()? {
+            if self.emulate_cycle()? {
                 done = true;
                 break;
             }
 
             if self.shard_batch_size > 0 && current_shard != self.state.current_shard {
-                num_shards_executed += 1;
+                num_shards_emulated += 1;
                 current_shard = self.state.current_shard;
-                if num_shards_executed == self.shard_batch_size {
+                if num_shards_emulated == self.shard_batch_size {
                     break;
                 }
             }
@@ -262,7 +269,7 @@ impl Executor {
 
         if done {
             self.postprocess();
-            // Push the remaining execution record with memory initialize & finalize events.
+            // Push the remaining emulation record with memory initialize & finalize events.
             self.bump_record();
         }
 
@@ -271,9 +278,9 @@ impl Executor {
         Ok(done)
     }
 
-    /// Execute the given instruction over the current state of the runtime.
+    /// Emulate the given instruction over the current state of the runtime.
     #[allow(clippy::too_many_lines)]
-    fn execute_instruction(&mut self, instruction: &Instruction) -> Result<(), ExecutionError> {
+    fn emulate_instruction(&mut self, instruction: &Instruction) -> Result<(), EmulationError> {
         let mut pc = self.state.pc;
         let mut clk = self.state.clk;
         let mut exit_code = 0u32;
@@ -285,15 +292,15 @@ impl Executor {
         let (addr, memory_read_value): (u32, u32);
         let mut memory_store_value: Option<u32> = None;
 
-        if self.executor_mode != ExecutorMode::Simple {
+        if self.emulator_mode != EmulatorMode::Simple {
             self.memory_accesses = MemoryAccessRecord::default();
         }
-        let lookup_id = if self.executor_mode == ExecutorMode::Simple {
+        let lookup_id = if self.emulator_mode == EmulatorMode::Simple {
             0
         } else {
             create_alu_lookup_id()
         };
-        let syscall_lookup_id = if self.executor_mode == ExecutorMode::Simple {
+        let syscall_lookup_id = if self.emulator_mode == EmulatorMode::Simple {
             0
         } else {
             create_alu_lookup_id()
@@ -363,7 +370,7 @@ impl Executor {
             Opcode::LH => {
                 (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
                 if addr % 2 != 0 {
-                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LH, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LH, addr));
                 }
                 let value = match (addr >> 1) % 2 {
                     0 => memory_read_value & 0x0000_FFFF,
@@ -377,7 +384,7 @@ impl Executor {
             Opcode::LW => {
                 (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
                 if addr % 4 != 0 {
-                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LW, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LW, addr));
                 }
                 a = memory_read_value;
                 memory_store_value = Some(memory_read_value);
@@ -393,7 +400,7 @@ impl Executor {
             Opcode::LHU => {
                 (rd, b, c, addr, memory_read_value) = self.load_rr(instruction);
                 if addr % 2 != 0 {
-                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::LHU, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LHU, addr));
                 }
                 let value = match (addr >> 1) % 2 {
                     0 => memory_read_value & 0x0000_FFFF,
@@ -421,7 +428,7 @@ impl Executor {
             Opcode::SH => {
                 (a, b, c, addr, memory_read_value) = self.store_rr(instruction);
                 if addr % 2 != 0 {
-                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::SH, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::SH, addr));
                 }
                 let value = match (addr >> 1) % 2 {
                     0 => (a & 0x0000_FFFF) + (memory_read_value & 0xFFFF_0000),
@@ -434,7 +441,7 @@ impl Executor {
             Opcode::SW => {
                 (a, b, c, addr, _) = self.store_rr(instruction);
                 if addr % 4 != 0 {
-                    return Err(ExecutionError::InvalidMemoryAccess(Opcode::SW, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::SW, addr));
                 }
                 let value = a;
                 memory_store_value = Some(value);
@@ -527,7 +534,7 @@ impl Executor {
                         // Executing a syscall optionally returns a value to write to the t0
                         // register. If it returns None, we just keep the
                         // syscall_id in t0.
-                        let res = syscall_impl.execute(&mut precompile_rt, b, c);
+                        let res = syscall_impl.emulate(&mut precompile_rt, b, c);
                         if let Some(val) = res {
                             a = val;
                         } else {
@@ -536,7 +543,7 @@ impl Executor {
 
                         // If the syscall is `HALT` and the exit code is non-zero, return an error.
                         if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
-                            return Err(ExecutionError::HaltWithNonZeroExitCode(
+                            return Err(EmulationError::HaltWithNonZeroExitCode(
                                 precompile_rt.exit_code,
                             ));
                         }
@@ -547,7 +554,7 @@ impl Executor {
                             precompile_rt.exit_code,
                         )
                     } else {
-                        return Err(ExecutionError::UnsupportedSyscall(syscall_id));
+                        return Err(EmulationError::UnsupportedSyscall(syscall_id));
                     };
 
                 // Allow the syscall impl to modify state.clk/pc (exit unconstrained does this)
@@ -574,7 +581,7 @@ impl Executor {
                 *syscall_count += 1;
             }
             Opcode::EBREAK => {
-                return Err(ExecutionError::Breakpoint());
+                return Err(EmulationError::Breakpoint());
             }
 
             // Multiply instructions.
@@ -637,7 +644,7 @@ impl Executor {
 
             // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/master/riscv-asm.md#instruction-aliases
             Opcode::UNIMP => {
-                return Err(ExecutionError::Unimplemented());
+                return Err(EmulationError::Unimplemented());
             }
         }
 
@@ -653,7 +660,7 @@ impl Executor {
         self.state.channel = (self.state.channel + 1) % NUM_BYTE_LOOKUP_CHANNELS;
 
         // Emit the CPU event for this cycle.
-        if self.executor_mode == ExecutorMode::Trace {
+        if self.emulator_mode == EmulatorMode::Trace {
             self.emit_cpu(
                 self.shard(),
                 channel,
@@ -705,7 +712,7 @@ impl Executor {
     pub fn mr(&mut self, addr: u32, shard: u32, timestamp: u32) -> MemoryReadRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
-        if self.executor_mode != ExecutorMode::Simple {
+        if self.emulator_mode != EmulatorMode::Simple {
             match entry {
                 Entry::Occupied(ref entry) => {
                     let record = entry.get();
@@ -746,7 +753,7 @@ impl Executor {
     pub fn mw(&mut self, addr: u32, value: u32, shard: u32, timestamp: u32) -> MemoryWriteRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
-        if self.executor_mode != ExecutorMode::Simple {
+        if self.emulator_mode != EmulatorMode::Simple {
             match entry {
                 Entry::Occupied(ref entry) => {
                     let record = entry.get();
@@ -801,7 +808,7 @@ impl Executor {
         let record = self.mr(addr, self.shard(), self.timestamp(&position));
 
         // If we're not in unconstrained mode, record the access for the current cycle.
-        if self.executor_mode == ExecutorMode::Trace {
+        if self.emulator_mode == EmulatorMode::Trace {
             match position {
                 MemoryAccessPosition::A => self.memory_accesses.a = Some(record.into()),
                 MemoryAccessPosition::B => self.memory_accesses.b = Some(record.into()),
@@ -826,7 +833,7 @@ impl Executor {
         let record = self.mw(addr, value, self.shard(), self.timestamp(&position));
 
         // If we're not in unconstrained mode, record the access for the current cycle.
-        if self.executor_mode == ExecutorMode::Trace {
+        if self.emulator_mode == EmulatorMode::Trace {
             match position {
                 MemoryAccessPosition::A => {
                     assert!(self.memory_accesses.a.is_none());
@@ -990,7 +997,7 @@ impl Executor {
         lookup_id: u128,
     ) {
         self.rw(rd, a);
-        if self.executor_mode == ExecutorMode::Trace {
+        if self.emulator_mode == EmulatorMode::Trace {
             self.emit_alu(self.state.clk, instruction.opcode, a, b, c, lookup_id);
         }
     }
@@ -1028,9 +1035,9 @@ impl Executor {
         self.syscall_map.get(&code)
     }
 
-    /// Recover runtime state from a program and existing execution state.
+    /// Recover runtime state from a program and existing emulation state.
     #[must_use]
-    pub fn recover(program: Program, state: ExecutionState, opts: PicoCoreOpts) -> Self {
+    pub fn recover(program: Program, state: RiscvEmulationState, opts: PicoCoreOpts) -> Self {
         let mut runtime = Self::new(program, opts);
         runtime.state = state;
         runtime
@@ -1045,7 +1052,7 @@ impl Executor {
             let addr = Register::from_u32(i as u32) as u32;
             let record = self.state.memory.get(&addr);
 
-            if self.executor_mode != ExecutorMode::Simple {
+            if self.emulator_mode != EmulatorMode::Simple {
                 match record {
                     Some(record) => {
                         self.memory_checkpoint
@@ -1072,7 +1079,7 @@ impl Executor {
         let addr = register as u32;
         let record = self.state.memory.get(&addr);
 
-        if self.executor_mode != ExecutorMode::Simple {
+        if self.emulator_mode != EmulatorMode::Simple {
             match record {
                 Some(record) => {
                     self.memory_checkpoint
@@ -1097,7 +1104,7 @@ impl Executor {
         #[allow(clippy::single_match_else)]
         let record = self.state.memory.get(&addr);
 
-        if self.executor_mode != ExecutorMode::Simple {
+        if self.emulator_mode != EmulatorMode::Simple {
             match record {
                 Some(record) => {
                     self.memory_checkpoint
@@ -1187,18 +1194,18 @@ pub const fn align(addr: u32) -> u32 {
     addr - addr % 4
 }
 
-impl Default for ExecutorMode {
+impl Default for EmulatorMode {
     fn default() -> Self {
         Self::Simple
     }
 }
 
 mod tests {
+    use super::{Program, RiscvEmulator};
     use pico_compiler::compiler::{Compiler, SourceType};
-    use super::{Executor, Program};
     use crate::opts::PicoCoreOpts;
 
-    const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
+    const ELF: &[u8] = include_bytes!("../../../compiler/test_data/riscv32im-succinct-zkvm-elf");
 
     #[must_use]
     #[allow(clippy::unreadable_literal)]
@@ -1207,7 +1214,7 @@ mod tests {
             SourceType::RiscV,
             ELF,
         );
-        
+
         compiler.compile()
     }
 
@@ -1215,7 +1222,7 @@ mod tests {
 
     /// Runtime needs to be Send so we can use it across async calls.
     fn _assert_runtime_is_send() {
-        _assert_send::<Executor>();
+        _assert_send::<RiscvEmulator>();
     }
 
     #[test]
@@ -1224,7 +1231,7 @@ mod tests {
         // just run a simple elf file in the compiler folder(test_data)
         let program = simple_fibo_program();
 
-        let mut runtime = Executor::new(program, PicoCoreOpts::default());
+        let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
         runtime.state.input_stream.push(vec![2, 0, 0, 0]);
         runtime.run().unwrap();
     }

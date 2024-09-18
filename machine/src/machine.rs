@@ -13,7 +13,7 @@ use p3_challenger::CanObserve;
 use p3_fri::FriConfig;
 use pico_compiler::program::Program;
 use pico_configs::config::{StarkGenericConfig, Val};
-use pico_emulator::record::EmulationRecord;
+use pico_emulator::record::RecordBehavior;
 
 /// Functions that each machine instance should implement.
 pub trait MachineBehavior<SC, C, P>
@@ -32,11 +32,23 @@ where
     /// Get the chips of the machine.
     fn chips(&self) -> &[MetaChip<Val<SC>, C>];
 
+    /// Complete the record after emulation.
+    fn complement_record(&self, records: &mut [C::Record]) {
+        let chips = self.chips();
+        records.iter_mut().for_each(|record| {
+            chips.iter().for_each(|chip| {
+                let mut extra = C::Record::default();
+                chip.extra_record(record, &mut extra);
+                record.append(&mut extra);
+            });
+        });
+    }
+
     /// setup prover, verifier and keys.
     fn setup_keys(&self, program: &Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
 
     /// Get the prover of the machine.
-    fn prove(&self, pk: &BaseProvingKey<SC>, records: &[EmulationRecord]) -> MetaProof<SC, P>;
+    fn prove(&self, pk: &BaseProvingKey<SC>, records: &[C::Record]) -> MetaProof<SC, P>;
 
     /// Verify the proof.
     fn verify(&self, vk: &BaseVerifyingKey<SC>, proof: &MetaProof<SC, P>) -> Result<()>;
@@ -94,7 +106,7 @@ where
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],
         pk: &BaseProvingKey<SC>,
-        record: &EmulationRecord,
+        record: &C::Record,
     ) -> BaseProof<SC> {
         // todo: generate dependencies
 
@@ -116,7 +128,7 @@ where
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],
         pk: &BaseProvingKey<SC>,
-        records: &[EmulationRecord],
+        records: &[C::Record],
     ) -> Vec<BaseProof<SC>> {
         // todo: generate dependencies
 

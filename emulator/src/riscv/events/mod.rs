@@ -1,4 +1,4 @@
-//! Type definitions for the events emitted by the [`crate::Executor`] during execution.
+//! Type definitions for the events emitted by the [`crate::Emulator`] during emulation.
 
 pub mod alu;
 mod byte;

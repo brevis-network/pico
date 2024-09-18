@@ -3,7 +3,7 @@ use core::mem::take;
 /// Context to run a program inside Pico.
 #[derive(Clone, Default)]
 pub struct PicoContext {
-    /// The maximum number of cpu cycles to use for execution.
+    /// The maximum number of cpu cycles to use for emulation.
     pub max_cycles: Option<u64>,
 }
 
@@ -44,7 +44,7 @@ impl<'a> PicoContextBuilder {
         }
     }
 
-    /// Set the maximum number of cpu cycles to use for execution.
+    /// Set the maximum number of cpu cycles to use for emulation.
     pub fn max_cycles(&mut self, max_cycles: u64) -> &mut Self {
         self.max_cycles = Some(max_cycles);
         self

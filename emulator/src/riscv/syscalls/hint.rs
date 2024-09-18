@@ -3,7 +3,7 @@ use super::{Syscall, SyscallContext};
 pub(crate) struct HintLenSyscall;
 
 impl Syscall for HintLenSyscall {
-    fn execute(&self, ctx: &mut SyscallContext, _arg1: u32, _arg2: u32) -> Option<u32> {
+    fn emulate(&self, ctx: &mut SyscallContext, _arg1: u32, _arg2: u32) -> Option<u32> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
             panic!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
@@ -18,7 +18,7 @@ impl Syscall for HintLenSyscall {
 pub(crate) struct HintReadSyscall;
 
 impl Syscall for HintReadSyscall {
-    fn execute(&self, ctx: &mut SyscallContext, ptr: u32, len: u32) -> Option<u32> {
+    fn emulate(&self, ctx: &mut SyscallContext, ptr: u32, len: u32) -> Option<u32> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
             panic!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",

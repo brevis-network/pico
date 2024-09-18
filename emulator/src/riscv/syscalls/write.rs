@@ -5,7 +5,7 @@ use super::{Syscall, SyscallContext};
 pub(crate) struct WriteSyscall;
 
 impl Syscall for WriteSyscall {
-    /// Handle writes to file descriptors during execution.
+    /// Handle writes to file descriptors during emulation.
     ///
     /// If stdout (fd = 1):
     /// - If the stream is a cycle tracker, either log the cycle tracker or accumulate it in the
@@ -25,7 +25,7 @@ impl Syscall for WriteSyscall {
     ///
     /// Else, log a warning.
     #[allow(clippy::pedantic)]
-    fn execute(&self, ctx: &mut SyscallContext, arg1: u32, arg2: u32) -> Option<u32> {
+    fn emulate(&self, ctx: &mut SyscallContext, arg1: u32, arg2: u32) -> Option<u32> {
         let a2 = Register::X12;
         let rt = &mut ctx.rt;
         let fd = arg1;

@@ -5,7 +5,7 @@ use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_compiler::program::Program;
 use pico_derive::AlignedBorrow;
-use pico_emulator::record::EmulationRecord;
+use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::{
     builder::ChipBuilder,
     chip::ChipBehavior,
@@ -36,12 +36,14 @@ const ADD_LOOKED_COLS: usize = size_of::<AddLookedCols<u8>>();
 pub struct AddLookingChip<F>(PhantomData<F>);
 
 impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
+    type Record = EmulationRecord;
+    
     fn name(&self) -> String {
         "Add Looking Chip".to_string()
     }
 
-    fn generate_main(&self, _: &EmulationRecord) -> RowMajorMatrix<F> {
-        // because of just test lookup feature, hardcode test data instead of the inputs are not from execution records
+    fn generate_main(&self, _: &Self::Record) -> RowMajorMatrix<F> {
+        // because of just test lookup feature, hardcode test data instead of the inputs are not from emulation records
         let row_num = 8;
 
         let mut trace = RowMajorMatrix::new(
@@ -102,12 +104,14 @@ where
 pub struct AddLookedChip<F>(PhantomData<F>);
 
 impl<F: Field> ChipBehavior<F> for AddLookedChip<F> {
+    type Record = EmulationRecord;
+
     fn name(&self) -> String {
         "Add Looked Chip".to_string()
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
-        // because of just test lookup feature, hardcode test data instead of the inputs are not from execution records
+    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+        // because of just test lookup feature, hardcode test data instead of the inputs are not from emulation records
         let row_num = 8;
 
         let mut trace = RowMajorMatrix::new(

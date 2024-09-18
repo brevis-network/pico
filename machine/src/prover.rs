@@ -9,9 +9,8 @@ use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use pico_compiler::program::Program;
 use pico_configs::config::{Com, Domain, PackedChallenge, PcsProof, StarkGenericConfig, Val};
-use pico_emulator::record::EmulationRecord;
 use std::cmp::Reverse;
-
+use pico_emulator::record::RecordBehavior;
 use crate::{
     chip::{ChipBehavior, MetaChip},
     folder::ProverConstraintFolder,
@@ -104,11 +103,28 @@ where
         chips_and_preprocessed
     }
 
+
+    /// emulate to generate extra events
+    /// should only be called after first emulator run and before generate_main
+    pub fn complement_record(
+        &self,
+        chips: &[MetaChip<Val<SC>, C>],
+        input: &mut C::Record,
+    ) {
+        chips
+            .iter()
+            .for_each(|chip| {
+                let mut extra = C::Record::default();
+                chip.extra_record(input, &mut extra);
+                input.append(&mut extra);
+            });
+    }
+
     /// generate ordered main traces with chip names
     pub fn generate_main(
         &self,
         chips: &[MetaChip<Val<SC>, C>],
-        record: &EmulationRecord,
+        record: &C::Record,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         let mut chips_and_main = chips
             .iter()

@@ -4,11 +4,13 @@ use crate::chips::memory::initialize_finalize::{
 };
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_emulator::{events::MemoryInitializeFinalizeEvent, record::EmulationRecord};
+use pico_emulator::riscv::{events::MemoryInitializeFinalizeEvent, record::EmulationRecord};
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::{array, borrow::BorrowMut};
 
 impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
+    type Record = EmulationRecord;
+    
     fn name(&self) -> String {
         match self.kind {
             MemoryChipType::Initialize => "MemoryInit".to_string(),
@@ -16,7 +18,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
         }
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
         let mut memory_events = match self.kind {
             MemoryChipType::Initialize => input.memory_initialize_events.clone(),
             MemoryChipType::Finalize => input.memory_finalize_events.clone(),

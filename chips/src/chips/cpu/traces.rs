@@ -11,7 +11,7 @@ use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_compiler::{opcode::Opcode, program::Program};
-use pico_emulator::{
+use pico_emulator::riscv::{
     events::{AluEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
     record::EmulationRecord,
 };
@@ -30,11 +30,14 @@ impl<F: Field> BaseAir<F> for CpuChip<F> {
 }
 
 impl<F: Field> ChipBehavior<F> for CpuChip<F> {
+    type Record = EmulationRecord;
+    
+    /// This name is now hard-coded and is related to MachineBehavior
     fn name(&self) -> String {
-        "CPU".to_string()
+        "Cpu".to_string()
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
         info!("CpuChip - generate_main: BEGIN");
         let mut values = vec![F::zero(); input.cpu_events.len() * NUM_CPU_COLS];
 
@@ -72,7 +75,7 @@ impl<F: Field> ChipBehavior<F> for CpuChip<F> {
 
     /* TODO: Enable after lookup integration.
             #[instrument(name = "generate cpu dependencies", level = "debug", skip_all)]
-            fn generate_dependencies(&self, input: &EmulationRecord, output: &mut ExecutionRecord) {
+            fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
                 // Generate the trace rows for each event.
                 let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
 

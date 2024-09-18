@@ -2,7 +2,7 @@ use crate::chips::memory::read_write::columns::{
     MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols,
 };
 use p3_field::Field;
-use pico_emulator::events::{
+use pico_emulator::riscv::events::{
     ByteRecord, MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
 };
 

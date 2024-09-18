@@ -4,7 +4,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::examples::lookup_toy::{AddLookedChip, AddLookingChip};
 use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
-use pico_emulator::record::EmulationRecord;
+use pico_emulator::riscv::record::EmulationRecord;
 use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
     builder::ChipBuilder,
@@ -28,6 +28,8 @@ impl<F: Field> LookupToyChipType<F> {
 }
 
 impl<F: Field> ChipBehavior<F> for LookupToyChipType<F> {
+    type Record = EmulationRecord;
+
     fn name(&self) -> String {
         match self {
             Self::LookingChip(chip) => chip.name(),
@@ -42,7 +44,7 @@ impl<F: Field> ChipBehavior<F> for LookupToyChipType<F> {
         }
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
         match self {
             Self::LookingChip(chip) => chip.generate_main(input),
             Self::LookedChip(chip) => chip.generate_main(input),

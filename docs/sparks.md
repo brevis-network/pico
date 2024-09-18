@@ -22,7 +22,7 @@
   - With BaseVM defined, we consider offloading all chip-related implementation into a single folder where each chip is a single subfolder. Each specific VM could load a different subset of chips in the chip folder based on its special purpose;
   - Chips in this way could be more modular and easier to maintain, as opposed to current case where `Col`, `Air`, `AirBuilder`, `Event` for a single chip might be located at different places and chips are located in specific VM folder and hard to be shared.
 
-- [ ] Let chips define `EmulationRecord` -- `EmulationRecord` should only contain events that the set of chips defining the machine could accept and used to generate trace. One should not define `ExecutionRecord` and the `ChipType` enum for a machine separately.
+- [ ] Let chips define `EmulationRecord` -- `EmulationRecord` should only contain events that the set of chips defining the machine could accept and used to generate trace. One should not define `EmulationRecord` and the `ChipType` enum for a machine separately.
 
 - [ ] Dynamic ISA
   - Following the design of modular precompile chips, we could actually implement a dynamic (subset) of full ISA to reduce prover overhead. ISA could be determined right after `runtime` is generated, and the corresponding chips could then be loaded to construct prover.
@@ -71,7 +71,7 @@
   - Adding it will make development easier but the development will be riskier since it might introduce inconsistency of `Val` against other parts of `SC`. 
   - Experimental branch at `experimental/generic_chiptype` and is left for future discussion. 
 - [ ] Decompose current `compiler` into `compiler` and `vm`.
-  - Currently `compiler` is containing both the compilation of source code to machine code (e.g., `Rust` to `Program`) and machine code to record (e.g., `Program` to `ExecutionRecord`). 
+  - Currently `compiler` is containing both the compilation of source code to machine code (e.g., `Rust` to `Program`) and machine code to record (e.g., `Program` to `EmulationRecord`). 
   - Decomposing will make it easier to maintain and extend the code.
   - Meanwhile, necessity needs to be considered since if each of compiler is tightly coupled with the vm, it might be better to keep them together in one folder instead of separating them.
 - [ ] `Deferred` implementation.

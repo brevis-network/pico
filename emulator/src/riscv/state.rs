@@ -3,26 +3,26 @@ use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::events::MemoryRecord;
+use crate::riscv::events::MemoryRecord;
 
-use crate::{
-    executor::ExecutorMode,
+use crate::riscv::{
+    riscv_emulator::EmulatorMode,
     record::{EmulationRecord, MemoryAccessRecord},
     syscalls::SyscallCode,
 };
 
-/// Holds data describing the current state of a program's execution.
+/// Holds data describing the current state of a program's emulation.
 #[serde_as]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ExecutionState {
-    /// The global clock keeps track of how many instrutions have been executed through all shards.
+pub struct RiscvEmulationState {
+    /// The global clock keeps track of how many instrutions have been emulated through all shards.
     pub global_clk: u64,
 
-    /// The shard clock keeps track of how many shards have been executed.
+    /// The shard clock keeps track of how many shards have been emulated.
     pub current_shard: u32,
 
     /// The clock increments by 4 (possibly more in syscalls) for each instruction that has been
-    /// executed in this shard.
+    /// emulated in this shard.
     pub clk: u32,
 
     /// The channel alternates between 0 and [crate::bytes::NUM_BYTE_LOOKUP_CHANNELS],
@@ -76,15 +76,15 @@ pub struct ForkState {
     pub memory_diff: HashMap<u32, Option<MemoryRecord>, BuildNoHashHasher<u32>>,
     /// The original memory access record at the fork point.
     pub op_record: MemoryAccessRecord,
-    /// The original execution record at the fork point.
+    /// The original emulation record at the fork point.
     pub record: EmulationRecord,
     /// Whether `emit_events` was enabled at the fork point.
-    pub executor_mode: ExecutorMode,
+    pub emulator_mode: EmulatorMode,
 }
 
-impl ExecutionState {
+impl RiscvEmulationState {
     #[must_use]
-    /// Create a new [`ExecutionState`].
+    /// Create a new [`EmulationState`].
     pub fn new(pc_start: u32) -> Self {
         Self {
             global_clk: 0,

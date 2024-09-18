@@ -3,7 +3,7 @@ use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::opcode::ByteOpcode;
 use pico_derive::AlignedBorrow;
-use pico_emulator::events::{ByteLookupEvent, ByteRecord};
+use pico_emulator::riscv::events::{ByteLookupEvent, ByteRecord};
 use pico_machine::builder::ChipBuilder;
 
 /// Operation columns for verifying that an element is within the range `[0, modulus)`.

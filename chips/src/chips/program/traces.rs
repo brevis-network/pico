@@ -10,11 +10,13 @@ use log::info;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_compiler::program::Program;
-use pico_emulator::record::EmulationRecord;
+use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::borrow::BorrowMut;
 
 impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
+    type Record = EmulationRecord;
+    
     fn name(&self) -> String {
         "Program".to_string()
     }
@@ -59,7 +61,7 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
         Some(trace)
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
         info!("ProgramChip - generate_main: BEGIN");
 
         // Generate the trace rows for each event.
@@ -87,7 +89,7 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
                 let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
                 // TODO: Set shard if it's added in record.
                 cols.shard = F::zero();
-                // cols.shard = F::from_canonical_u32(input.public_values.execution_shard);
+                // cols.shard = F::from_canonical_u32(input.public_values.emulation_shard);
                 cols.multiplicity =
                     F::from_canonical_usize(*instruction_counts.get(&pc).unwrap_or(&0));
                 row

@@ -11,10 +11,12 @@ use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder};
 use p3_field::{AbstractField, ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_compiler::program::Program;
-use pico_emulator::record::EmulationRecord;
+use pico_emulator::record::RecordBehavior;
 
 /// Chip behavior
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
+    type Record: RecordBehavior;
+
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
@@ -22,7 +24,10 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
         None
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F>;
+    /// Emulate record to extract extra record
+    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) { }
+
+    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F>;
 
     fn preprocessed_width(&self) -> usize {
         0
@@ -134,6 +139,8 @@ where
     F: Field,
     C: ChipBehavior<F>,
 {
+    type Record = C::Record;
+
     fn name(&self) -> String {
         self.chip.name()
     }
@@ -142,7 +149,11 @@ where
         self.chip.generate_preprocessed(program)
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn extra_record(&self, input: &mut C::Record, extra: &mut C::Record) {
+        self.chip.extra_record(input, extra);
+    }
+
+    fn generate_main(&self, input: &C::Record) -> RowMajorMatrix<F> {
         self.chip.generate_main(input)
     }
 

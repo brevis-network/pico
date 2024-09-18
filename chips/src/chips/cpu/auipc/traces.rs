@@ -5,7 +5,7 @@ use crate::{
 use hashbrown::HashMap;
 use p3_field::Field;
 use pico_compiler::opcode::Opcode;
-use pico_emulator::events::{create_alu_lookups, AluEvent, CpuEvent};
+use pico_emulator::riscv::events::{create_alu_lookups, AluEvent, CpuEvent};
 
 impl<F: Field> CpuChip<F> {
     /// Populate columns related to AUIPC.

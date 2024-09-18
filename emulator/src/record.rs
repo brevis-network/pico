@@ -1,81 +1,10 @@
 use hashbrown::HashMap;
-use std::sync::Arc;
+use p3_field::Field;
 
-use crate::events::{
-    add_sharded_byte_lookup_events, ByteLookupEvent, ByteRecord,
-    AluEvent, CpuEvent, MemoryInitializeFinalizeEvent, MemoryRecordEnum};
-use pico_compiler::program::Program;
-use serde::{Deserialize, Serialize};
+pub trait RecordBehavior: Default {
+    fn name(&self) -> String;
 
-/// A record of the execution of a program.
-///
-/// The trace of the execution is represented as a list of "events" that occur every cycle.
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct EmulationRecord {
-    /// The program.
-    pub program: Arc<Program>,
-    /// The nonce lookup.
-    pub nonce_lookup: HashMap<u128, u32>,
+    fn stats(&self) -> HashMap<String, usize>;
 
-    pub cpu_events: Vec<CpuEvent>,
-
-    /// A trace of the ADD, and ADDI events.
-    pub add_events: Vec<AluEvent>,
-    /// A trace of the MUL events.
-    pub mul_events: Vec<AluEvent>,
-    /// A trace of the SUB events.
-    pub sub_events: Vec<AluEvent>,
-    /// A trace of the XOR, XORI, OR, ORI, AND, and ANDI events.
-    pub bitwise_events: Vec<AluEvent>,
-    /// A trace of the SLL and SLLI events.
-    pub shift_left_events: Vec<AluEvent>,
-    /// A trace of the SRL, SRLI, SRA, and SRAI events.
-    pub shift_right_events: Vec<AluEvent>,
-    /// A trace of the DIV, DIVU, REM, and REMU events.
-    pub divrem_events: Vec<AluEvent>,
-    /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
-    pub lt_events: Vec<AluEvent>,
-    /// A trace of the byte lookups that are needed.
-    pub byte_lookups: HashMap<u32, HashMap<ByteLookupEvent, usize>>,
-    /// A trace of the memory initialize events.
-    pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
-    /// A trace of the memory finalize events.
-    pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
-}
-
-impl EmulationRecord {
-    /// Create a new [`EmulationRecord`].
-    #[must_use]
-    pub fn new(program: Arc<Program>) -> Self {
-        Self {
-            program,
-            ..Default::default()
-        }
-    }
-}
-
-#[derive(Debug, Copy, Clone, Default)]
-pub struct MemoryAccessRecord {
-    /// The memory access of the `a` register.
-    pub a: Option<MemoryRecordEnum>,
-    /// The memory access of the `b` register.
-    pub b: Option<MemoryRecordEnum>,
-    /// The memory access of the `c` register.
-    pub c: Option<MemoryRecordEnum>,
-    /// The memory access of the `memory` register.
-    pub memory: Option<MemoryRecordEnum>,
-}
-
-impl ByteRecord for EmulationRecord {
-    fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
-        *self.byte_lookups.entry(blu_event.shard).or_default().entry(blu_event).or_insert(0) += 1;
-    }
-
-    #[inline]
-    fn add_sharded_byte_lookup_events(
-        &mut self,
-        new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
-    ) {
-        add_sharded_byte_lookup_events(&mut self.byte_lookups, new_events);
-    }
+    fn append(&mut self, extra: &mut Self);
 }

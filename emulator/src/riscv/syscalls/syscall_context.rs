@@ -1,6 +1,6 @@
-use crate::{
+use crate::riscv::{
     events::{MemoryReadRecord, MemoryWriteRecord},
-    executor::Executor,
+    riscv_emulator::RiscvEmulator,
     record::EmulationRecord,
 };
 use pico_compiler::riscv::register::Register;
@@ -18,14 +18,14 @@ pub struct SyscallContext<'a: 'a> {
     /// The exit code.
     pub exit_code: u32,
     /// The runtime.
-    pub rt: &'a mut Executor,
+    pub rt: &'a mut RiscvEmulator,
     /// The syscall lookup id.
     pub syscall_lookup_id: u128,
 }
 
 impl<'a> SyscallContext<'a> {
     /// Create a new [`SyscallContext`].
-    pub fn new(runtime: &'a mut Executor) -> Self {
+    pub fn new(runtime: &'a mut RiscvEmulator) -> Self {
         let current_shard = runtime.shard();
         let clk = runtime.state.clk;
         Self {
@@ -38,7 +38,7 @@ impl<'a> SyscallContext<'a> {
         }
     }
 
-    /// Get a mutable reference to the execution record.
+    /// Get a mutable reference to the emulation record.
     pub fn record_mut(&mut self) -> &mut EmulationRecord {
         &mut self.rt.record
     }

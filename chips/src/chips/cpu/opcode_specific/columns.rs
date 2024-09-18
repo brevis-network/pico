@@ -10,7 +10,7 @@ use std::{
 
 pub const NUM_OPCODE_SPECIFIC_COLS: usize = size_of::<OpcodeSpecificCols<u8>>();
 
-/// Shared columns whose interpretation depends on the instruction being executed.
+/// Shared columns whose interpretation depends on the instruction being emulated.
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub union OpcodeSpecificCols<T: Copy> {

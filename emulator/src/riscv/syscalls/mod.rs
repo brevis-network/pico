@@ -1,4 +1,4 @@
-//! Syscall definitions & implementations for the [`crate::Executor`].
+//! Syscall definitions & implementations for the [`crate::Emulator`].
 
 mod code;
 mod commit;
@@ -15,7 +15,7 @@ use hashbrown::HashMap;
 pub use code::*;
 use hint::{HintLenSyscall, HintReadSyscall};
 
-use crate::syscalls::{
+use crate::riscv::syscalls::{
     commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall,
     syscall_context::SyscallContext,
 };
@@ -23,17 +23,17 @@ use write::WriteSyscall;
 
 /// A system call in the Pico RISC-V zkVM.
 ///
-/// This trait implements methods needed to execute a system call inside the [`crate::Executor`].
+/// This trait implements methods needed to emulate a system call inside the [`crate::Emulator`].
 pub trait Syscall: Send + Sync {
-    /// Executes the syscall.
+    /// Emulates the syscall.
     ///
     /// Returns the resulting value of register a0. `arg1` and `arg2` are the values in registers
     /// X10 and X11, respectively. While not a hard requirement, the convention is that the return
     /// value is only for system calls such as `HALT`. Most precompiles use `arg1` and `arg2` to
     /// denote the addresses of the input data, and write the result to the memory at `arg1`.
-    fn execute(&self, ctx: &mut SyscallContext, arg1: u32, arg2: u32) -> Option<u32>;
+    fn emulate(&self, ctx: &mut SyscallContext, arg1: u32, arg2: u32) -> Option<u32>;
 
-    /// The number of extra cycles that the syscall takes to execute.
+    /// The number of extra cycles that the syscall takes to emulate.
     ///
     /// Unless this syscall is complex and requires many cycles, this should be zero.
     fn num_extra_cycles(&self) -> u32 {

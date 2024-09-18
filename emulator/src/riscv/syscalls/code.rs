@@ -35,19 +35,19 @@ pub enum SyscallCode {
     /// Exit unconstrained block.
     EXIT_UNCONSTRAINED = 0x00_00_00_04,
 
-    /// Executes the `COMMIT` precompile.
+    /// Emulates the `COMMIT` precompile.
     COMMIT = 0x00_00_00_10,
 
-    /// Executes the `COMMIT_DEFERRED_PROOFS` precompile.
+    /// Emulates the `COMMIT_DEFERRED_PROOFS` precompile.
     COMMIT_DEFERRED_PROOFS = 0x00_00_00_1A,
 
-    /// Executes the `VERIFY_PICO_PROOF` precompile.
+    /// Emulates the `VERIFY_PICO_PROOF` precompile.
     VERIFY_PICO_PROOF = 0x00_00_00_1B,
 
-    /// Executes the `HINT_LEN` precompile.
+    /// Emulates the `HINT_LEN` precompile.
     HINT_LEN = 0x00_00_00_F0,
 
-    /// Executes the `HINT_READ` precompile.
+    /// Emulates the `HINT_READ` precompile.
     HINT_READ = 0x00_00_00_F1,
 }
 

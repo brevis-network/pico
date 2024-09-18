@@ -12,7 +12,7 @@ use crate::opcode::Opcode;
 /// Pico zkVM.
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct Instruction {
-    /// The operation to execute.
+    /// The operation to emulate.
     pub opcode: Opcode,
     /// The first operand.
     pub op_a: u32,

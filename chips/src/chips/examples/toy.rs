@@ -6,7 +6,7 @@ use p3_field::{AbstractField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::ParallelIterator;
 use pico_compiler::{opcode::Opcode, program::Program};
-use pico_emulator::record::EmulationRecord;
+use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::{builder::ChipBuilder, chip::ChipBehavior, utils::pad_to_power_of_two};
 use std::{marker::PhantomData, mem::size_of};
 
@@ -45,6 +45,8 @@ impl<'a, T: Clone> ToyCols<&'a T> {
 }
 
 impl<F: Field> ChipBehavior<F> for ToyChip<F> {
+    type Record = EmulationRecord;
+    
     fn name(&self) -> String {
         TOY_CHIP_NAME.to_string()
     }
@@ -55,7 +57,7 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
         Some(RowMajorMatrix::new(vec![F::zero(); 4096], 1))
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
         // Generate the rows for the trace.
         let merged_events = input
             .add_events

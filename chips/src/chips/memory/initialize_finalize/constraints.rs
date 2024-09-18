@@ -156,7 +156,7 @@ where
                 );
         */
 
-        // TODO: Enable after generating memory init and finalize events to execution record.
+        // TODO: Enable after generating memory init and finalize events to emulation record.
         // Ensure at least one real row.
         // builder.when_first_row().assert_one(local.is_real);
 
