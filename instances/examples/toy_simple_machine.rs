@@ -2,7 +2,7 @@ use log::info;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_chips::chips::toy::ToyChip;
+use pico_chips::chips::examples::toy::ToyChip;
 use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};

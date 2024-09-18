@@ -1,7 +1,7 @@
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_chips::lookup_toy::{AddLookedChip, AddLookingChip};
+use pico_chips::chips::examples::lookup_toy::{AddLookedChip, AddLookingChip};
 use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::record::EmulationRecord;
@@ -9,7 +9,7 @@ use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
     builder::ChipBuilder,
     chip::{ChipBehavior, MetaChip},
-    machine::{BaseMachine, MachineBehavior},
+    machine::MachineBehavior,
 };
 use std::sync::Arc;
 

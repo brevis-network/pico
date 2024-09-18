@@ -1,16 +1,14 @@
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use pico_chips::chips::toy::ToyChip;
+use pico_chips::chips::examples::toy::ToyChip;
 use pico_compiler::program::Program;
-use pico_configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig};
+use pico_configs::{bb_poseidon2::BabyBearPoseidon2};
 use pico_emulator::{executor::Executor, opts::PicoCoreOpts, record::EmulationRecord};
 use pico_machine::{
     builder::ChipBuilder,
     chip::{ChipBehavior, MetaChip},
     machine::BaseMachine,
-    prover::BaseProver,
-    verifier::BaseVerifier,
 };
 use std::any::type_name;
 use pico_compiler::compiler::{Compiler, SourceType};
