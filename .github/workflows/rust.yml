@@ -53,7 +53,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Cargo Run examples
         run: |
-          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --example toy_base_machine
-          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --example toy_simple_machine
-          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --example toy_lookup_machine
-          # RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --example fib_machine
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example toy_base_machine
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example toy_simple_machine
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example toy_lookup_machine
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example fib_machine
