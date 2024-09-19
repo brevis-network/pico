@@ -192,5 +192,5 @@ fn main() {
     // Verify the proof.
     let result = simple_machine.verify(&vk, &proof);
     info!("The proof is verified: {}", result.is_ok());
-    println!("The proof is verified: {}", result.is_ok());
+    assert_eq!(result.is_ok(), true);
 }

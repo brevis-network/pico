@@ -1,15 +1,27 @@
 on:
   pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - '.gitignore'
+      - 'Makefile'
   push:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - '.gitignore'
+      - 'Makefile'
 
 name: Check, Test, and Format
 
 jobs:
   fmt:
     if: false # Disable for now
-    name: Rustfmt
+    name: Format
     runs-on: ubuntu-latest
     steps:
       - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
@@ -26,9 +38,8 @@ jobs:
           args: --all -- --check
 
   test:
-    # Enable if available
-    if: false
-    name: Test Suite
+    if: true
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -48,8 +59,9 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --release
+      - name: Cargo Run examples
+        run: |
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --example toy_base_machine
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --example toy_simple_machine
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --example toy_lookup_machine
+          # RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --example fib_machine

@@ -1,3 +1,4 @@
+use log::info;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::Air;
@@ -458,7 +459,7 @@ where
             .copied()
             .sum::<SC::Challenge>();
 
-        println!("Cumulative sum: {cumulative_sum}");
+        info!("Cumulative sum: {cumulative_sum}");
 
         // If the cumulative sum is not zero, debug the interactions.
         if !cumulative_sum.is_zero() {

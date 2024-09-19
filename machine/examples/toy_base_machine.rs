@@ -1,3 +1,4 @@
+use log::info;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
@@ -88,7 +89,9 @@ fn print_type_of<T>(_: &T) {
 }
 
 fn main() {
-    println!("Creating Program..");
+    env_logger::init();
+
+    info!("Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
     let compiler = Compiler::new(
         SourceType::RiscV,
@@ -96,7 +99,7 @@ fn main() {
     );
     let program = compiler.compile();
 
-    println!("Creating Runtime..");
+    info!("Creating Runtime..");
     let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
@@ -104,22 +107,23 @@ fn main() {
     let record = &runtime.records[0];
 
     // Create the prover.
-    println!("Creating Base Machine");
+    info!("Creating Base Machine");
     let config = BabyBearPoseidon2::new();
 
     let chips = ToyChipType::all_chips();
     let base_machine = BaseMachine::new();
 
     // Setup PK and VK.
-    println!("Setup PK and VK");
+    info!("Setup PK and VK");
     let (pk, vk) = base_machine.setup_keys(&config, &chips, &record.program);
 
-    println!("Generating proof");
+    info!("Generating proof");
     // Generate the proof.
     let proof = base_machine.prove_element(&config, &chips, &pk, &record);
 
     // Verify the proof.
-    println!("Verifying proof");
+    info!("Verifying proof");
     let result = base_machine.verify_element(&config, &chips, &vk, &proof);
-    println!("The proof is verified: {}", result.is_ok());
+    info!("The proof is verified: {}", result.is_ok());
+    assert_eq!(result.is_ok(), true);
 }

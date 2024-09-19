@@ -1,3 +1,4 @@
+use log::info;
 use crate::program::Program;
 use crate::riscv::disassembler::Elf;
 
@@ -50,7 +51,7 @@ impl Compiler  {
     }
 
     pub fn compile(&self) -> Program {
-        println!("Compiling {} source...", self.name());
+        info!("Compiling {} source...", self.name());
         self.source.compile()
     }
 }

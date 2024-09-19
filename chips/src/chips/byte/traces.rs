@@ -1,5 +1,5 @@
+use log::info;
 use std::borrow::BorrowMut;
-
 use itertools::Itertools;
 use hashbrown::HashMap;
 
@@ -31,11 +31,14 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
     }
 
     fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
+        info!("ByteChip - generate_preprocessed: BEGIN");
         let trace = Self::preprocess();
+        info!("ByteChip - generate_preprocessed: END");
         Some(trace)
     }
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+        info!("ByteChip - generate_main: BEGIN");
         let mut trace =
             RowMajorMatrix::new(vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS], NUM_BYTE_MULT_COLS);
         let shard = 0;
@@ -52,6 +55,8 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
             cols.mult_channels[channel].multiplicities[index] += F::from_canonical_usize(*mult);
             cols.shard = F::from_canonical_u32(shard);
         }
+
+        info!("ByteChip - generate_main: END");
         trace
     }
 }
