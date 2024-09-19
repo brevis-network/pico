@@ -7,14 +7,6 @@ on:
       - 'README.md'
       - '.gitignore'
       - 'Makefile'
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - '.gitignore'
-      - 'Makefile'
 
 name: Check, Test, and Format
 
