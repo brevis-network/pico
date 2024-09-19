@@ -3,7 +3,7 @@ use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::{
-    alu::add_sub::AddSubChip,
+    alu::{add_sub::AddSubChip, bitwise::BitwiseChip},
     byte::ByteChip,
     cpu::CpuChip,
     memory::initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
@@ -35,6 +35,7 @@ pub enum FibChipType<F: Field> {
     MemoryInitialize(MemoryInitializeFinalizeChip<F>),
     MemoryFinalize(MemoryInitializeFinalizeChip<F>),
     AddSub(AddSubChip<F>),
+    Bitwise(BitwiseChip<F>),
 }
 
 // NOTE: These trait implementations are used to save this `FibChipType` to `MetaChip`.
@@ -52,6 +53,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::MemoryInitialize(chip) => chip.name(),
             Self::MemoryFinalize(chip) => chip.name(),
             Self::AddSub(chip) => chip.name(),
+            Self::Bitwise(chip) => chip.name(),
         }
     }
 
@@ -64,6 +66,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::MemoryInitialize(chip) => chip.generate_preprocessed(program),
             Self::MemoryFinalize(chip) => chip.generate_preprocessed(program),
             Self::AddSub(chip) => chip.generate_preprocessed(program),
+            Self::Bitwise(chip) => chip.generate_preprocessed(program),
         }
     }
 
@@ -76,6 +79,7 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::MemoryInitialize(chip) => chip.generate_main(input),
             Self::MemoryFinalize(chip) => chip.generate_main(input),
             Self::AddSub(chip) => chip.generate_main(input),
+            Self::Bitwise(chip) => chip.generate_main(input),
         }
     }
 
@@ -88,9 +92,24 @@ impl<F: Field> ChipBehavior<F> for FibChipType<F> {
             Self::MemoryInitialize(chip) => chip.preprocessed_width(),
             Self::MemoryFinalize(chip) => chip.preprocessed_width(),
             Self::AddSub(chip) => chip.preprocessed_width(),
+            Self::Bitwise(chip) => chip.preprocessed_width(),
+        }
+    }
+
+    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+        match self {
+            Self::Byte(chip) => chip.extra_record(input, extra),
+            Self::Program(chip) => chip.extra_record(input, extra),
+            Self::Cpu(chip) => chip.extra_record(input, extra),
+            Self::MemoryProgram(chip) => chip.extra_record(input, extra),
+            Self::MemoryInitialize(chip) => chip.extra_record(input, extra),
+            Self::MemoryFinalize(chip) => chip.extra_record(input, extra),
+            Self::AddSub(chip) => chip.extra_record(input, extra),
+            Self::Bitwise(chip) => chip.extra_record(input, extra),
         }
     }
 }
+
 impl<F: Field> BaseAir<F> for FibChipType<F> {
     fn width(&self) -> usize {
         match self {
@@ -101,6 +120,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
             Self::MemoryInitialize(chip) => chip.width(),
             Self::MemoryFinalize(chip) => chip.width(),
             Self::AddSub(chip) => chip.width(),
+            Self::Bitwise(chip) => chip.width(),
         }
     }
 
@@ -114,6 +134,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
             Self::MemoryInitialize(chip) => chip.preprocessed_trace(),
             Self::MemoryFinalize(chip) => chip.preprocessed_trace(),
             Self::AddSub(chip) => chip.preprocessed_trace(),
+            Self::Bitwise(chip) => chip.preprocessed_trace(),
         }
     }
 }
@@ -132,6 +153,7 @@ where
             Self::MemoryInitialize(chip) => chip.eval(b),
             Self::MemoryFinalize(chip) => chip.eval(b),
             Self::AddSub(chip) => chip.eval(b),
+            Self::Bitwise(chip) => chip.eval(b),
         }
     }
 }
@@ -139,7 +161,6 @@ where
 impl<F: Field> FibChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![
-            MetaChip::new(Self::Byte(ByteChip::default())),
             MetaChip::new(Self::Program(ProgramChip::default())),
             MetaChip::new(Self::Cpu(CpuChip::default())),
             MetaChip::new(Self::MemoryProgram(MemoryProgramChip::default())),
@@ -150,6 +171,10 @@ impl<F: Field> FibChipType<F> {
                 MemoryChipType::Finalize,
             ))),
             MetaChip::new(Self::AddSub(AddSubChip::default())),
+            MetaChip::new(Self::Bitwise(BitwiseChip::default())),
+            // NOTE: The byte chip must be initialized at the end, since we may add the new BLU
+            // events during main trace generation in other chips.
+            MetaChip::new(Self::Byte(ByteChip::default())),
         ]
     }
 }
@@ -169,7 +194,7 @@ fn main() {
     runtime.run().unwrap();
 
     let record = &runtime.records[0];
-    let records = vec![record.clone()];
+    let mut records = vec![record.clone()];
 
     // Setup config and chips.
     info!("Creating BaseMachine..");
@@ -183,6 +208,9 @@ fn main() {
     // Setup machine prover, verifier, pk and vk.
     info!("Setup machine..");
     let (pk, vk) = simple_machine.setup_keys(&record.program);
+
+    info!("Complement records..");
+    simple_machine.complement_record(&mut records);
 
     // Generate the proof.
     info!("Generating proof..");

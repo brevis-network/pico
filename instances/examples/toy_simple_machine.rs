@@ -5,17 +5,17 @@ use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::examples::toy::ToyChip;
 use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
-use pico_emulator::riscv::{riscv_emulator::RiscvEmulator, record::EmulationRecord};
+use pico_emulator::riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator};
 use pico_machine::{
     builder::ChipBuilder,
     chip::{ChipBehavior, MetaChip},
     machine::{BaseMachine, MachineBehavior},
 };
 
-use pico_instances::simple_machine::SimpleMachine;
-use std::any::type_name;
 use pico_compiler::compiler::{Compiler, SourceType};
 use pico_emulator::opts::PicoCoreOpts;
+use pico_instances::simple_machine::SimpleMachine;
+use std::any::type_name;
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
@@ -90,10 +90,7 @@ fn main() {
 
     info!("Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
-    let compiler = Compiler::new(
-        SourceType::RiscV,
-        ELF,
-    );
+    let compiler = Compiler::new(SourceType::RiscV, ELF);
     let program = compiler.compile();
 
     info!("Creating Runtime..");
@@ -102,7 +99,7 @@ fn main() {
     runtime.run().unwrap();
 
     let record = &runtime.records[0];
-    let records = vec![record.clone(), record.clone()];
+    let mut records = vec![record.clone(), record.clone()];
 
     // Setup config and chips.
     info!("Creating BaseMachine..");
@@ -116,6 +113,9 @@ fn main() {
     // Setup machine prover, verifier, pk and vk.
     info!("Setup machine..");
     let (pk, vk) = simple_machine.setup_keys(&record.program);
+
+    info!("Complement records..");
+    simple_machine.complement_record(&mut records);
 
     // Generate the proof.
     info!("Generating proof..");

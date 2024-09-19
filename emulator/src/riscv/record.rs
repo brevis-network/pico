@@ -1,10 +1,15 @@
 use hashbrown::HashMap;
 use std::sync::Arc;
 
-use crate::riscv::events::{AluEvent, ByteLookupEvent, CpuEvent, MemoryInitializeFinalizeEvent, MemoryRecordEnum};
+use crate::{
+    record::RecordBehavior,
+    riscv::events::{
+        add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent,
+        MemoryInitializeFinalizeEvent, MemoryRecordEnum,
+    },
+};
 use pico_compiler::program::Program;
 use serde::{Deserialize, Serialize};
-use crate::record::RecordBehavior;
 
 /// A record of the emulation of a program.
 ///
@@ -64,12 +69,24 @@ impl RecordBehavior for EmulationRecord {
         stats.insert("Mul Events".to_string(), self.mul_events.len());
         stats.insert("Sub Events".to_string(), self.sub_events.len());
         stats.insert("Bitwise Events".to_string(), self.bitwise_events.len());
-        stats.insert("Shift Left Events".to_string(), self.shift_left_events.len());
-        stats.insert("Shift Right Events".to_string(), self.shift_right_events.len());
+        stats.insert(
+            "Shift Left Events".to_string(),
+            self.shift_left_events.len(),
+        );
+        stats.insert(
+            "Shift Right Events".to_string(),
+            self.shift_right_events.len(),
+        );
         stats.insert("Divrem Events".to_string(), self.divrem_events.len());
         stats.insert("Lt Events".to_string(), self.lt_events.len());
-        stats.insert("Memory Initialize Events".to_string(), self.memory_initialize_events.len());
-        stats.insert("Memory Finalize Events".to_string(), self.memory_finalize_events.len());
+        stats.insert(
+            "Memory Initialize Events".to_string(),
+            self.memory_initialize_events.len(),
+        );
+        stats.insert(
+            "Memory Finalize Events".to_string(),
+            self.memory_finalize_events.len(),
+        );
 
         // Filter out the empty events.
         stats.retain(|_, v| *v != 0);
@@ -83,11 +100,16 @@ impl RecordBehavior for EmulationRecord {
         self.sub_events.append(&mut extra.sub_events);
         self.bitwise_events.append(&mut extra.bitwise_events);
         self.shift_left_events.append(&mut extra.shift_left_events);
-        self.shift_right_events.append(&mut extra.shift_right_events);
+        self.shift_right_events
+            .append(&mut extra.shift_right_events);
         self.divrem_events.append(&mut extra.divrem_events);
         self.lt_events.append(&mut extra.lt_events);
-        self.memory_initialize_events.append(&mut extra.memory_initialize_events);
-        self.memory_finalize_events.append(&mut extra.memory_finalize_events);
+        self.memory_initialize_events
+            .append(&mut extra.memory_initialize_events);
+        self.memory_finalize_events
+            .append(&mut extra.memory_finalize_events);
+        self.byte_lookups
+            .add_sharded_byte_lookup_events(vec![&extra.byte_lookups]);
     }
 }
 
@@ -101,4 +123,23 @@ pub struct MemoryAccessRecord {
     pub c: Option<MemoryRecordEnum>,
     /// The memory access of the `memory` register.
     pub memory: Option<MemoryRecordEnum>,
+}
+
+impl ByteRecord for EmulationRecord {
+    fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
+        *self
+            .byte_lookups
+            .entry(blu_event.shard)
+            .or_default()
+            .entry(blu_event)
+            .or_insert(0) += 1;
+    }
+
+    #[inline]
+    fn add_sharded_byte_lookup_events(
+        &mut self,
+        new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
+    ) {
+        add_sharded_byte_lookup_events(&mut self.byte_lookups, new_events);
+    }
 }

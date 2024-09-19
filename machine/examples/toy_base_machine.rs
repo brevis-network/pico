@@ -3,9 +3,15 @@ use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::examples::toy::ToyChip;
-use pico_compiler::program::Program;
+use pico_compiler::{
+    compiler::{Compiler, SourceType},
+    program::Program,
+};
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
-use pico_emulator::riscv::{riscv_emulator::RiscvEmulator, record::EmulationRecord};
+use pico_emulator::{
+    opts::PicoCoreOpts,
+    riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
+};
 use pico_machine::{
     builder::ChipBuilder,
     chip::{ChipBehavior, MetaChip},
@@ -14,8 +20,6 @@ use pico_machine::{
     verifier::BaseVerifier,
 };
 use std::any::type_name;
-use pico_compiler::compiler::{Compiler, SourceType};
-use pico_emulator::opts::PicoCoreOpts;
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
@@ -93,10 +97,7 @@ fn main() {
 
     info!("Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
-    let compiler = Compiler::new(
-        SourceType::RiscV,
-        ELF,
-    );
+    let compiler = Compiler::new(SourceType::RiscV, ELF);
     let program = compiler.compile();
 
     info!("Creating Runtime..");
@@ -104,7 +105,7 @@ fn main() {
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
 
-    let record = &runtime.records[0];
+    let record = &mut runtime.records[0];
 
     // Create the prover.
     info!("Creating Base Machine");
@@ -119,7 +120,7 @@ fn main() {
 
     info!("Generating proof");
     // Generate the proof.
-    let proof = base_machine.prove_element(&config, &chips, &pk, &record);
+    let proof = base_machine.prove_element(&config, &chips, &pk, record);
 
     // Verify the proof.
     info!("Verifying proof");

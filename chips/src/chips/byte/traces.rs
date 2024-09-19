@@ -1,27 +1,27 @@
+use hashbrown::HashMap;
+use itertools::Itertools;
 use log::info;
 use std::borrow::BorrowMut;
-use itertools::Itertools;
-use hashbrown::HashMap;
 
+use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_air::BaseAir;
 
 use pico_compiler::{opcode::ByteOpcode, program::Program};
 use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::chip::ChipBehavior;
 
 use super::{
-    ByteChip,
-    columns::{BytePreprocessedCols, ByteMultCols, NUM_BYTE_MULT_COLS, NUM_BYTE_PREPROCESSED_COLS},
+    columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS, NUM_BYTE_PREPROCESSED_COLS},
     utils::shr_carry,
+    ByteChip,
 };
 
 pub const NUM_ROWS: usize = 1 << 16;
 
 impl<F: Field> ChipBehavior<F> for ByteChip<F> {
-    type Record = EmulationRecord; 
-    
+    type Record = EmulationRecord;
+
     fn name(&self) -> String {
         "Byte".to_string()
     }
@@ -39,10 +39,18 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
 
     fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
         info!("ByteChip - generate_main: BEGIN");
-        let mut trace =
-            RowMajorMatrix::new(vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS], NUM_BYTE_MULT_COLS);
-        let shard = 0;
-        for (lookup, mult) in input.byte_lookups.get(&shard).unwrap_or(&HashMap::new()).iter() {
+        let mut trace = RowMajorMatrix::new(
+            vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS],
+            NUM_BYTE_MULT_COLS,
+        );
+        // TODO: We always have one shard for now, and the shard number starts from 1.
+        let shard = 1;
+        for (lookup, mult) in input
+            .byte_lookups
+            .get(&shard)
+            .unwrap_or(&HashMap::new())
+            .iter()
+        {
             let row = if lookup.opcode != ByteOpcode::U16Range {
                 (((lookup.b as u16) << 8) + lookup.c as u16) as usize
             } else {
@@ -60,7 +68,6 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
         trace
     }
 }
-
 
 impl<F: Field> ByteChip<F> {
     /// Creates the preprocessed byte trace.
@@ -105,8 +112,7 @@ impl<F: Field> ByteChip<F> {
                         let sll = b << (c & 7);
                         col.sll = F::from_canonical_u8(sll);
                     }
-                    ByteOpcode::U8Range => {
-                    }
+                    ByteOpcode::U8Range => {}
                     ByteOpcode::ShrCarry => {
                         let (res, carry) = shr_carry(b, c);
                         col.shr = F::from_canonical_u8(res);

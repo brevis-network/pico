@@ -108,8 +108,6 @@ where
         pk: &BaseProvingKey<SC>,
         record: &C::Record,
     ) -> BaseProof<SC> {
-        // todo: generate dependencies
-
         // observe preprocessed
         let mut challenger = config.challenger();
         challenger.observe(pk.commit.clone());
@@ -130,8 +128,6 @@ where
         pk: &BaseProvingKey<SC>,
         records: &[C::Record],
     ) -> Vec<BaseProof<SC>> {
-        // todo: generate dependencies
-
         let mut challenger = config.challenger();
         // observe preprocessed
         challenger.observe(pk.commit.clone());

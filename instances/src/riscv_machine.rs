@@ -4,8 +4,8 @@ use pico_compiler::program::Program;
 use pico_configs::config::{StarkGenericConfig, Val};
 use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::{
-    chip::{ChipBehavior,  MetaChip},
     builder::ChipBuilder,
+    chip::{ChipBehavior, MetaChip},
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
     keys::{BaseProvingKey, BaseVerifyingKey},
     machine::{BaseMachine, MachineBehavior},
@@ -62,8 +62,6 @@ where
         pk: &BaseProvingKey<SC>,
         records: &[C::Record],
     ) -> MetaProof<SC, EnsembleProof<SC>> {
-        // todo: implement specific proving logic here
-
         let proofs = self
             .base_machine
             .prove_ensemble(self.config(), self.chips(), pk, records);

@@ -104,10 +104,12 @@ fn main() {
     info!("Setup PK and VK");
 
     let record = EmulationRecord::new(Arc::new(Program::default()));
-    let records = vec![record.clone(), record.clone()];
+    let mut records = vec![record.clone(), record.clone()];
     let (pk, vk) = simple_machine.setup_keys(&record.program);
 
-    // Generate the proof.
+    info!("Complement records..");
+    simple_machine.complement_record(&mut records);
+
     info!("Generating proof..");
     let proof = simple_machine.prove(&pk, &records);
     info!("{} generated.", proof.name());
