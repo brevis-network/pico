@@ -1,7 +1,7 @@
 use crate::riscv::{
     events::{MemoryReadRecord, MemoryWriteRecord},
-    riscv_emulator::RiscvEmulator,
     record::EmulationRecord,
+    riscv_emulator::RiscvEmulator,
 };
 use pico_compiler::riscv::register::Register;
 

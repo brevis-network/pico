@@ -112,13 +112,9 @@ where
         let mut challenger = config.challenger();
         challenger.observe(pk.commit.clone());
 
-        let main_commitment = self
-            .prover
-            .commit_main(
-                config,
-                record,
-                self.prover.generate_main(chips, record)
-            );
+        let main_commitment =
+            self.prover
+                .commit_main(config, record, self.prover.generate_main(chips, record));
 
         challenger.observe(main_commitment.commitment.clone());
         challenger.observe_slice(&main_commitment.public_values);
@@ -140,13 +136,11 @@ where
         let main_commitments = records
             .iter()
             .map(|record| {
-                let commitment = self
-                    .prover
-                    .commit_main(
-                        config,
-                        record,
-                        self.prover.generate_main(chips, record)
-                    );
+                let commitment = self.prover.commit_main(
+                    config,
+                    record,
+                    self.prover.generate_main(chips, record),
+                );
                 challenger.observe(commitment.commitment.clone());
                 challenger.observe_slice(&commitment.public_values);
                 commitment

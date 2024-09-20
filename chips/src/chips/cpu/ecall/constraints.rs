@@ -7,9 +7,9 @@ use crate::{
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
-use pico_emulator::riscv::syscalls::SyscallCode;
-use pico_machine::{builder::ChipBuilder};
 use pico_compiler::word::Word;
+use pico_emulator::riscv::syscalls::SyscallCode;
+use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
     /// Whether the instruction is an ECALL instruction.

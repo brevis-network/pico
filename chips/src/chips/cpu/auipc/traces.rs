@@ -1,9 +1,8 @@
 use crate::chips::cpu::{columns::CpuCols, CpuChip};
 use hashbrown::HashMap;
 use p3_field::Field;
-use pico_compiler::opcode::Opcode;
+use pico_compiler::{opcode::Opcode, word::Word};
 use pico_emulator::riscv::events::{create_alu_lookups, AluEvent, CpuEvent};
-use pico_compiler::word::Word;
 
 impl<F: Field> CpuChip<F> {
     /// Populate columns related to AUIPC.

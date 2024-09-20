@@ -1,7 +1,5 @@
+use crate::{opts::PicoCoreOpts, riscv::riscv_emulator::RiscvEmulator, stdin::PicoStdin};
 use pico_compiler::program::Program;
-use crate::opts::PicoCoreOpts;
-use crate::riscv::riscv_emulator::RiscvEmulator;
-use crate::stdin::PicoStdin;
 
 pub enum EmulatorType {
     Riscv,
@@ -25,11 +23,7 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn new(
-        emulator_type: EmulatorType,
-        program: Program,
-        opts: PicoCoreOpts
-    ) -> Self {
+    pub fn new(emulator_type: EmulatorType, program: Program, opts: PicoCoreOpts) -> Self {
         // create a new emulator based on the emulator type
         let emulator = match emulator_type {
             EmulatorType::Riscv => Emulatable::Riscv(RiscvEmulator::new(program, opts)),

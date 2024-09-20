@@ -2,12 +2,12 @@ use crate::{
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
     lookup::{symbolic_to_virtual_pair, LookupType, SymbolicLookup, VirtualPairLookup},
 };
-use pico_compiler::word::{Word, WORD_SIZE};
 use itertools::Itertools;
 use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder, PairCol, PermutationAirBuilder};
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
+use pico_compiler::word::{Word, WORD_SIZE};
 use pico_configs::config::{StarkGenericConfig, Val};
 use std::{array, iter::once};
 

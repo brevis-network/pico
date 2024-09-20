@@ -1,6 +1,6 @@
 use crate::gadgets::{baby_bear_word::BabyBearWordRangeChecker, is_zero::IsZeroOperation};
-use pico_derive::AlignedBorrow;
 use pico_compiler::word::Word;
+use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
 pub const NUM_ECALL_COLS: usize = size_of::<EcallCols<u8>>();

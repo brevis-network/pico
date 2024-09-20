@@ -1,7 +1,7 @@
 use crate::gadgets::is_zero::IsZeroOperation;
 use core::mem::size_of;
-use pico_derive::AlignedBorrow;
 use pico_compiler::word::Word;
+use pico_derive::AlignedBorrow;
 
 pub const NUM_MEMORY_PROGRAM_PREPROCESSED_COLS: usize =
     size_of::<MemoryProgramPreprocessedCols<u8>>();

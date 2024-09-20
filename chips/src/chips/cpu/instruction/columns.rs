@@ -1,7 +1,6 @@
 use p3_field::Field;
-use pico_compiler::{instruction::Instruction, riscv::register::Register};
+use pico_compiler::{instruction::Instruction, riscv::register::Register, word::Word};
 use pico_derive::AlignedBorrow;
-use pico_compiler::word::Word;
 use std::{iter::once, mem::size_of, vec::IntoIter};
 
 pub const NUM_INSTRUCTION_COLS: usize = size_of::<InstructionCols<u8>>();

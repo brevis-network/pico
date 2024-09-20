@@ -5,9 +5,9 @@ use crate::{
     proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, MainTraceCommitments},
     utils::{compute_quotient_values, order_chips},
 };
-use log::info;
 use hashbrown::HashMap;
 use itertools::Itertools;
+use log::info;
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};

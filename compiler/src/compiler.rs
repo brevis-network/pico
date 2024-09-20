@@ -1,6 +1,5 @@
+use crate::{program::Program, riscv::disassembler::Elf};
 use log::info;
-use crate::program::Program;
-use crate::riscv::disassembler::Elf;
 
 pub enum SourceType {
     RiscV,
@@ -14,24 +13,18 @@ impl Compilable {
     fn compile(&self) -> Program {
         // match on self
         match self {
-            Compilable::RiscV(elf) => {
-                elf.compile()
-            }
+            Compilable::RiscV(elf) => elf.compile(),
         }
     }
 }
-
 
 pub struct Compiler {
     pub source_type: SourceType,
     pub source: Compilable,
 }
 
-impl Compiler  {
-    pub fn new(
-        source_type: SourceType,
-        source_code: &[u8],
-    ) -> Self {
+impl Compiler {
+    pub fn new(source_type: SourceType, source_code: &[u8]) -> Self {
         match source_type {
             SourceType::RiscV => {
                 let source = Elf::new(source_code).unwrap();
@@ -55,4 +48,3 @@ impl Compiler  {
         self.source.compile()
     }
 }
-

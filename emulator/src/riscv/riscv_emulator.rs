@@ -9,24 +9,27 @@ use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::{
+    context::PicoContext,
+    opts::PicoCoreOpts,
+    riscv::syscalls::{default_syscall_map, Syscall, SyscallCode},
+};
 use pico_compiler::{
     instruction::Instruction, opcode::Opcode, program::Program, riscv::register::Register,
 };
-use crate::context::PicoContext;
-use crate::opts::PicoCoreOpts;
-use crate::riscv::syscalls::{default_syscall_map, Syscall, SyscallCode};
 
-use crate::riscv::{
-    events::{
-        AluEvent, CpuEvent, create_alu_lookup_id, create_alu_lookups, MemoryAccessPosition,
-        MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
+use crate::{
+    riscv::{
+        events::{
+            create_alu_lookup_id, create_alu_lookups, AluEvent, CpuEvent, MemoryAccessPosition,
+            MemoryInitializeFinalizeEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
+        },
+        record::{EmulationRecord, MemoryAccessRecord},
+        state::RiscvEmulationState,
+        syscalls::syscall_context::SyscallContext,
     },
-    record::{EmulationRecord, MemoryAccessRecord},
-    state::RiscvEmulationState,
-    syscalls::syscall_context::SyscallContext,
+    stdin::PicoStdin,
 };
-use crate::stdin::PicoStdin;
-use crate::riscv::events::MemoryInitializeFinalizeEvent;
 
 pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;
 
@@ -1133,7 +1136,6 @@ impl RiscvEmulator {
     }
 
     fn postprocess(&mut self) {
-
         // Ensure that all proofs and input bytes were read, otherwise warn the user.
         // if self.state.proof_stream_ptr != self.state.proof_stream.len() {
         //     panic!(
@@ -1153,10 +1155,16 @@ impl RiscvEmulator {
 
         let addr_0_final_record = match addr_0_record {
             Some(record) => record,
-            None => &MemoryRecord { value: 0, shard: 0, timestamp: 1 },
+            None => &MemoryRecord {
+                value: 0,
+                shard: 0,
+                timestamp: 1,
+            },
         };
-        memory_finalize_events
-            .push(MemoryInitializeFinalizeEvent::finalize_from_record(0, addr_0_final_record));
+        memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
+            0,
+            addr_0_final_record,
+        ));
 
         let memory_initialize_events = &mut self.record.memory_initialize_events;
         let addr_0_initialize_event =
@@ -1181,8 +1189,9 @@ impl RiscvEmulator {
             }
 
             let record = *self.state.memory.get(addr).unwrap();
-            memory_finalize_events
-                .push(MemoryInitializeFinalizeEvent::finalize_from_record(*addr, &record));
+            memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
+                *addr, &record,
+            ));
         }
     }
 }
@@ -1202,18 +1211,15 @@ impl Default for EmulatorMode {
 
 mod tests {
     use super::{Program, RiscvEmulator};
-    use pico_compiler::compiler::{Compiler, SourceType};
     use crate::opts::PicoCoreOpts;
+    use pico_compiler::compiler::{Compiler, SourceType};
 
     const ELF: &[u8] = include_bytes!("../../../compiler/test_data/riscv32im-succinct-zkvm-elf");
 
     #[must_use]
     #[allow(clippy::unreadable_literal)]
     pub fn simple_fibo_program() -> Program {
-        let compiler = Compiler::new(
-            SourceType::RiscV,
-            ELF,
-        );
+        let compiler = Compiler::new(SourceType::RiscV, ELF);
 
         compiler.compile()
     }

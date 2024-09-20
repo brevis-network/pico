@@ -105,7 +105,9 @@ impl<F: Field> PublicValuesBuilder for SymbolicConstraintFolder<F> {
     }
 }
 
-impl<F: Field> LookupBuilder<SymbolicLookup<SymbolicExpression<F>>> for SymbolicConstraintFolder<F> {
+impl<F: Field> LookupBuilder<SymbolicLookup<SymbolicExpression<F>>>
+    for SymbolicConstraintFolder<F>
+{
     fn looking(&mut self, message: SymbolicLookup<SymbolicExpression<F>>) {
         let values = message
             .values

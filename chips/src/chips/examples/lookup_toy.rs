@@ -37,7 +37,7 @@ pub struct AddLookingChip<F>(PhantomData<F>);
 
 impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
     type Record = EmulationRecord;
-    
+
     fn name(&self) -> String {
         "Add Looking Chip".to_string()
     }

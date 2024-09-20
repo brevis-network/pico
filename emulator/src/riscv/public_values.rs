@@ -1,9 +1,11 @@
-use std::mem::size_of;
-use p3_field::AbstractField;
 use crate::record::MAX_NUM_PVS;
+use p3_field::AbstractField;
 use pico_compiler::word::Word;
 use serde::{Deserialize, Serialize};
-use std::borrow::{Borrow, BorrowMut};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+};
 
 pub const RISCV_NUM_PVS: usize = size_of::<PublicValues<Word<u8>, u8>>();
 
@@ -15,7 +17,6 @@ pub struct PublicValues<W, T> {
     pub committed_value_digest: [W; PV_DIGEST_NUM_WORDS],
 
     // didn't include deferred since currently no need
-
     /// The shard's start program counter.
     pub start_pc: T,
 
@@ -54,7 +55,6 @@ impl PublicValues<u32, u32> {
         pv
     }
 }
-
 
 impl<T: Clone> Borrow<PublicValues<Word<T>, T>> for [T] {
     fn borrow(&self) -> &PublicValues<Word<T>, T> {

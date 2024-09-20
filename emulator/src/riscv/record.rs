@@ -1,11 +1,18 @@
+use crate::{
+    record::RecordBehavior,
+    riscv::{
+        events::{
+            add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent,
+            MemoryInitializeFinalizeEvent, MemoryRecordEnum,
+        },
+        public_values::PublicValues,
+    },
+};
 use hashbrown::HashMap;
-use std::sync::Arc;
 use p3_field::AbstractField;
-use crate::riscv::events::{add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent, MemoryInitializeFinalizeEvent, MemoryRecordEnum};
 use pico_compiler::program::Program;
 use serde::{Deserialize, Serialize};
-use crate::record::RecordBehavior;
-use crate::riscv::public_values::PublicValues;
+use std::sync::Arc;
 
 /// A record of the emulation of a program.
 ///

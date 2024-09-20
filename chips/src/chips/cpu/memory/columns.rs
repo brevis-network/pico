@@ -2,8 +2,8 @@ use crate::{
     chips::memory::read_write::columns::MemoryReadWriteCols,
     gadgets::baby_bear_word::BabyBearWordRangeChecker,
 };
-use pico_derive::AlignedBorrow;
 use pico_compiler::word::Word;
+use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
 pub const NUM_MEMORY_COLUMNS: usize = size_of::<MemoryColumns<u8>>();

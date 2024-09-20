@@ -16,7 +16,7 @@ use std::borrow::BorrowMut;
 
 impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
     type Record = EmulationRecord;
-    
+
     fn name(&self) -> String {
         "Program".to_string()
     }

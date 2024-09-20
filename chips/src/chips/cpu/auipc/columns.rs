@@ -1,6 +1,6 @@
 use crate::gadgets::baby_bear_word::BabyBearWordRangeChecker;
-use pico_derive::AlignedBorrow;
 use pico_compiler::word::Word;
+use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
 pub const NUM_AUIPC_COLS: usize = size_of::<AuipcCols<u8>>();

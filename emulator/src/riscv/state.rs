@@ -6,8 +6,8 @@ use serde_with::serde_as;
 use crate::riscv::events::MemoryRecord;
 
 use crate::riscv::{
-    riscv_emulator::EmulatorMode,
     record::{EmulationRecord, MemoryAccessRecord},
+    riscv_emulator::EmulatorMode,
     syscalls::SyscallCode,
 };
 

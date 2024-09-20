@@ -46,7 +46,7 @@ impl<'a, T: Clone> ToyCols<&'a T> {
 
 impl<F: Field> ChipBehavior<F> for ToyChip<F> {
     type Record = EmulationRecord;
-    
+
     fn name(&self) -> String {
         TOY_CHIP_NAME.to_string()
     }

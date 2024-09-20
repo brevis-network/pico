@@ -10,7 +10,7 @@ use std::{array, borrow::BorrowMut};
 
 impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     type Record = EmulationRecord;
-    
+
     fn name(&self) -> String {
         match self.kind {
             MemoryChipType::Initialize => "MemoryInit".to_string(),

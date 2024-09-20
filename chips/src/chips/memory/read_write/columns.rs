@@ -1,5 +1,5 @@
-use pico_derive::AlignedBorrow;
 use pico_compiler::word::Word;
+use pico_derive::AlignedBorrow;
 
 /// Memory read access.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

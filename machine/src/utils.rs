@@ -13,7 +13,7 @@ use std::any::type_name;
 
 use crate::{
     chip::{ChipBehavior, MetaChip},
-    folder::{SymbolicConstraintFolder, ProverConstraintFolder},
+    folder::{ProverConstraintFolder, SymbolicConstraintFolder},
     lookup::VirtualPairLookup,
 };
 

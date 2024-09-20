@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-pub mod constraints;
 pub mod columns;
+pub mod constraints;
 pub mod traces;
 pub mod utils;
 

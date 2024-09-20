@@ -2,14 +2,13 @@ use core::borrow::Borrow;
 
 use p3_air::{Air, BaseAir};
 use p3_field::{AbstractField, Field};
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 
 use pico_compiler::opcode::ByteOpcode;
 
 use super::{
-    ByteChip, NUM_BYTE_LOOKUP_CHANNELS,
     columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS},
+    ByteChip, NUM_BYTE_LOOKUP_CHANNELS,
 };
 
 use pico_machine::{
@@ -48,7 +47,8 @@ where
                         builder, field_op, local.and, local.b, local.c, shard, channel_f, mult,
                     ),
                     ByteOpcode::OR => self.looked_byte(
-                        builder, field_op, local.or, local.b, local.c, shard, channel_f, mult),
+                        builder, field_op, local.or, local.b, local.c, shard, channel_f, mult,
+                    ),
                     ByteOpcode::XOR => self.looked_byte(
                         builder, field_op, local.xor, local.b, local.c, shard, channel_f, mult,
                     ),
@@ -120,7 +120,16 @@ impl<F: Field> ByteChip<F> {
         multiplicity: impl Into<CB::Expr>,
     ) {
         self.looked_byte_pair(
-            builder, opcode, a, CB::Expr::zero(), b, c, shard, channel, multiplicity);
+            builder,
+            opcode,
+            a,
+            CB::Expr::zero(),
+            b,
+            c,
+            shard,
+            channel,
+            multiplicity,
+        );
     }
 
     /// Receives a byte operation with two outputs to be processed.

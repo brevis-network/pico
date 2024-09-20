@@ -31,7 +31,7 @@ impl<F: Field> BaseAir<F> for CpuChip<F> {
 
 impl<F: Field> ChipBehavior<F> for CpuChip<F> {
     type Record = EmulationRecord;
-    
+
     /// This name is now hard-coded and is related to MachineBehavior
     fn name(&self) -> String {
         "Cpu".to_string()

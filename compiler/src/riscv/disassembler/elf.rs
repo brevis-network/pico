@@ -1,16 +1,14 @@
-use std::{cmp::min, collections::BTreeMap};
-use std::fs::File;
+use crate::{compiler::Compilable, program::Program};
 use elf::{
     abi::{EM_RISCV, ET_EXEC, PF_X, PT_LOAD},
     endian::LittleEndian,
     file::Class,
     ElfBytes,
 };
-use crate::compiler::Compilable;
-use crate::program::Program;
+use std::{cmp::min, collections::BTreeMap, fs::File};
 
-use std::{io::Read};
 use crate::riscv::disassembler::transpile;
+use std::io::Read;
 
 /// The maximum size of the memory in bytes.
 pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;
@@ -150,7 +148,7 @@ impl Elf {
             }
         }
 
-        Ok(Self{
+        Ok(Self {
             instructions,
             pc_start: entry,
             pc_base: base_address,

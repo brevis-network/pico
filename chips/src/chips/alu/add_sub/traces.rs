@@ -8,13 +8,12 @@ use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
-use pico_compiler::opcode::Opcode;
+use pico_compiler::{opcode::Opcode, word::Word};
 use pico_emulator::riscv::{
     events::{AluEvent, ByteRecord},
     record::EmulationRecord,
 };
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
-use pico_compiler::word::Word;
 
 impl<F: Field> BaseAir<F> for AddSubChip<F> {
     fn width(&self) -> usize {

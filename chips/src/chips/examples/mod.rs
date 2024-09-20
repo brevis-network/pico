@@ -1,2 +1,2 @@
-pub mod toy;
 pub mod lookup_toy;
+pub mod toy;

@@ -1,6 +1,6 @@
 use crate::gadgets::add::AddOperation;
-use pico_derive::AlignedBorrow;
 use pico_compiler::word::Word;
+use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
 /// The number of main trace columns for `AddSubChip`.

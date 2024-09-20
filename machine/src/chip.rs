@@ -25,7 +25,7 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     }
 
     /// Emulate record to extract extra record
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) { }
+    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {}
 
     fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F>;
 

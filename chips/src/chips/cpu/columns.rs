@@ -6,8 +6,8 @@ use crate::chips::{
     },
     memory::read_write::columns::{MemoryCols, MemoryReadCols, MemoryReadWriteCols},
 };
-use pico_derive::AlignedBorrow;
 use pico_compiler::word::Word;
+use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
 pub const NUM_CPU_COLS: usize = size_of::<CpuCols<u8>>();

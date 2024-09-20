@@ -12,7 +12,7 @@ name: Check, Test, and Format
 
 jobs:
   fmt:
-    if: false # Disable for now
+    if: true # Disable for now
     name: Format
     runs-on: ubuntu-latest
     steps:
