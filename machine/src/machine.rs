@@ -114,9 +114,14 @@ where
 
         let main_commitment = self
             .prover
-            .commit_main(config, self.prover.generate_main(chips, record));
+            .commit_main(
+                config,
+                record,
+                self.prover.generate_main(chips, record)
+            );
 
         challenger.observe(main_commitment.commitment.clone());
+        challenger.observe_slice(&main_commitment.public_values);
 
         self.prove(config, chips, pk, &mut challenger, main_commitment)
     }
@@ -137,8 +142,13 @@ where
             .map(|record| {
                 let commitment = self
                     .prover
-                    .commit_main(config, self.prover.generate_main(chips, record));
+                    .commit_main(
+                        config,
+                        record,
+                        self.prover.generate_main(chips, record)
+                    );
                 challenger.observe(commitment.commitment.clone());
+                challenger.observe_slice(&commitment.public_values);
                 commitment
             })
             .collect::<Vec<_>>();
@@ -172,6 +182,7 @@ where
 
         challenger.observe(vk.commit.clone());
         challenger.observe(proof.commitments.main_commit.clone());
+        challenger.observe_slice(&proof.public_values);
 
         self.verify(config, chips, vk, &mut challenger, proof)?;
 
@@ -190,6 +201,7 @@ where
         challenger.observe(vk.commit.clone());
         proofs.iter().for_each(|proof| {
             challenger.observe(proof.commitments.main_commit.clone());
+            challenger.observe_slice(&proof.public_values);
         });
 
         for proof in proofs {

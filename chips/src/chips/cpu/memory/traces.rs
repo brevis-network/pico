@@ -8,7 +8,7 @@ use pico_compiler::{
 use pico_emulator::riscv::events::{
     create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent,
 };
-use pico_machine::word::WORD_SIZE;
+use pico_compiler::word::WORD_SIZE;
 use std::array;
 
 impl<F: Field> CpuChip<F> {

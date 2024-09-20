@@ -51,6 +51,7 @@ where
             log_main_degrees,
             log_quotient_degrees,
             main_chip_ordering,
+            public_values,
         } = proof;
 
         let ordered_chips =
@@ -260,7 +261,6 @@ where
             );
 
             // todo: public values to be added later
-            let public_values = vec![];
             let mut folder = VerifierConstraintFolder {
                 preprocessed,
                 main,

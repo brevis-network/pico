@@ -1,8 +1,8 @@
 use crate::{
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
     lookup::{symbolic_to_virtual_pair, LookupType, SymbolicLookup, VirtualPairLookup},
-    word::{Word, WORD_SIZE},
 };
+use pico_compiler::word::{Word, WORD_SIZE};
 use itertools::Itertools;
 use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder, PairCol, PermutationAirBuilder};
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field};

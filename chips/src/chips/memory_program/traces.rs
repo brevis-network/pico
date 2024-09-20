@@ -11,7 +11,8 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_compiler::program::Program;
 use pico_emulator::riscv::record::EmulationRecord;
-use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two, word::Word};
+use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
+use pico_compiler::word::Word;
 
 impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
     type Record = EmulationRecord;

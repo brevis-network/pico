@@ -132,6 +132,7 @@ where
     pub fn commit_main(
         &self,
         config: &SC,
+        record: &C::Record,
         chips_and_main: Vec<(String, RowMajorMatrix<Val<SC>>)>,
     ) -> MainTraceCommitments<SC> {
         let pcs = config.pcs();
@@ -159,6 +160,7 @@ where
             main_chip_ordering,
             commitment,
             data,
+            public_values: record.public_values(),
         }
     }
 
@@ -325,7 +327,7 @@ where
 
                 compute_quotient_values(
                     &ordered_chips[i],
-                    &[],
+                    &main_commitments.public_values,
                     main_domains[i],
                     *quotient_domain,
                     pre_trace_on_quotient_domains,
@@ -473,6 +475,7 @@ where
             log_main_degrees,
             log_quotient_degrees,
             main_chip_ordering: main_commitments.main_chip_ordering,
+            public_values: main_commitments.public_values,
         }
     }
 }

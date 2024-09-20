@@ -1246,6 +1246,7 @@ dependencies = [
  "log",
  "nohash-hasher",
  "num",
+ "p3-air",
  "p3-field",
  "p3-maybe-rayon",
  "rand",

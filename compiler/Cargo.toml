@@ -11,6 +11,7 @@ categories.workspace = true
 p3-maybe-rayon = { workspace = true}
 #p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 p3-field = { workspace = true }
+p3-air = { workspace = true }
 
 # misc
 serde = { version = "1.0.205", features = ["derive", "rc"] }

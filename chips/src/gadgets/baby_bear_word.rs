@@ -1,7 +1,7 @@
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_derive::AlignedBorrow;
-use pico_machine::word::Word;
+use pico_compiler::word::Word;
 use std::array;
 
 /// A set of columns needed to compute the add of two words.

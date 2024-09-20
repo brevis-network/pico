@@ -1,15 +1,11 @@
 use hashbrown::HashMap;
 use std::sync::Arc;
-
-use crate::{
-    record::RecordBehavior,
-    riscv::events::{
-        add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent,
-        MemoryInitializeFinalizeEvent, MemoryRecordEnum,
-    },
-};
+use p3_field::AbstractField;
+use crate::riscv::events::{add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent, MemoryInitializeFinalizeEvent, MemoryRecordEnum};
 use pico_compiler::program::Program;
 use serde::{Deserialize, Serialize};
+use crate::record::RecordBehavior;
+use crate::riscv::public_values::PublicValues;
 
 /// A record of the emulation of a program.
 ///
@@ -45,6 +41,9 @@ pub struct EmulationRecord {
     pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the memory finalize events.
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
+
+    /// Public values
+    pub public_values: PublicValues<u32, u32>,
 }
 
 impl EmulationRecord {
@@ -110,6 +109,10 @@ impl RecordBehavior for EmulationRecord {
             .append(&mut extra.memory_finalize_events);
         self.byte_lookups
             .add_sharded_byte_lookup_events(vec![&extra.byte_lookups]);
+    }
+
+    fn public_values<F: AbstractField>(&self) -> Vec<F> {
+        self.public_values.to_vec()
     }
 }
 

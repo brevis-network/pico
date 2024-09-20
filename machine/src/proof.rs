@@ -99,6 +99,7 @@ pub struct BaseProof<SC: StarkGenericConfig> {
     pub log_main_degrees: Vec<usize>,
     pub log_quotient_degrees: Vec<usize>,
     pub main_chip_ordering: HashMap<String, usize>,
+    pub public_values: Vec<Val<SC>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -113,6 +114,7 @@ pub struct MainTraceCommitments<SC: StarkGenericConfig> {
     pub main_chip_ordering: HashMap<String, usize>,
     pub commitment: Com<SC>,
     pub data: PcsProverData<SC>,
+    pub public_values: Vec<Val<SC>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
