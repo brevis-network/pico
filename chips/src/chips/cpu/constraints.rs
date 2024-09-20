@@ -6,15 +6,16 @@ use crate::chips::cpu::{
     CpuChip,
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, Field};
+use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::Matrix;
+use pico_compiler::{opcode::Opcode, word::Word};
 use pico_machine::{
     builder::ChipBuilder,
     lookup::{LookupType, SymbolicLookup},
 };
 use std::{borrow::Borrow, iter::once};
 
-impl<F: Field, CB: ChipBuilder<F>> Air<CB> for CpuChip<F>
+impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for CpuChip<F>
 where
     CB::Var: Sized,
 {
@@ -67,19 +68,19 @@ where
             next.is_real,
         );
 
-        /* TODO: Enable after lookup integration.
-                // ALU instructions.
-                builder.send_alu(
-                    local.instruction.opcode,
-                    local.op_a_val(),
-                    local.op_b_val(),
-                    local.op_c_val(),
-                    local.shard,
-                    local.channel,
-                    local.nonce,
-                    is_alu_instruction,
-                );
-        */
+        // ALU instructions.
+        let is_alu_lookup_supported: CB::Expr =
+            self.is_alu_lookup_supported::<CB>(&local.opcode_selector);
+        builder.looking_alu(
+            local.instruction.opcode,
+            local.op_a_val(),
+            local.op_b_val(),
+            local.op_c_val(),
+            local.shard,
+            local.channel,
+            CB::Expr::zero(), // local.nonce,
+            is_alu_lookup_supported,
+        );
 
         // Branch instructions.
         self.eval_branch_ops::<CB>(builder, is_branch_instruction.clone(), local, next);
@@ -142,6 +143,14 @@ where
 }
 
 impl<F: Field> CpuChip<F> {
+    /// TODO: Delete after all ALU opcodes integration.
+    pub(crate) fn is_alu_lookup_supported<CB: ChipBuilder<F>>(
+        &self,
+        opcode_selectors: &OpcodeSelectorCols<CB::Var>,
+    ) -> CB::Expr {
+        opcode_selectors.is_alu_lookup_supported.into()
+    }
+
     /// Whether the instruction is an ALU instruction.
     pub(crate) fn is_alu_instruction<CB: ChipBuilder<F>>(
         &self,

@@ -3,10 +3,11 @@ use crate::{
     gadgets::baby_bear_word::BabyBearWordRangeChecker,
 };
 use p3_air::AirBuilder;
-use p3_field::Field;
+use p3_field::{AbstractField, PrimeField32};
+use pico_compiler::opcode::Opcode;
 use pico_machine::builder::ChipBuilder;
 
-impl<F: Field> CpuChip<F> {
+impl<F: PrimeField32> CpuChip<F> {
     /// Constraints related to the AUIPC opcode.
     pub(crate) fn eval_auipc<CB: ChipBuilder<F>>(
         &self,

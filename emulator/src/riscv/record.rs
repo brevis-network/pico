@@ -10,7 +10,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use p3_field::AbstractField;
-use pico_compiler::program::Program;
+use pico_compiler::{opcode::Opcode, program::Program};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -59,6 +59,38 @@ impl EmulationRecord {
         Self {
             program,
             ..Default::default()
+        }
+    }
+
+    /// Add a batch of alu events to the execution record.
+    pub fn add_alu_events(&mut self, mut alu_events: HashMap<Opcode, Vec<AluEvent>>) {
+        for (opcode, value) in &mut alu_events {
+            match opcode {
+                Opcode::ADD => {
+                    self.add_events.append(value);
+                }
+                Opcode::MUL | Opcode::MULH | Opcode::MULHU | Opcode::MULHSU => {
+                    self.mul_events.append(value);
+                }
+                Opcode::SUB => {
+                    self.sub_events.append(value);
+                }
+                Opcode::XOR | Opcode::OR | Opcode::AND => {
+                    self.bitwise_events.append(value);
+                }
+                Opcode::SLL => {
+                    self.shift_left_events.append(value);
+                }
+                Opcode::SRL | Opcode::SRA => {
+                    self.shift_right_events.append(value);
+                }
+                Opcode::SLT | Opcode::SLTU => {
+                    self.lt_events.append(value);
+                }
+                _ => {
+                    panic!("Invalid opcode: {opcode:?}");
+                }
+            }
         }
     }
 }

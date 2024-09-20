@@ -1,6 +1,6 @@
 use log::info;
 use p3_air::{Air, BaseAir};
-use p3_field::Field;
+use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::{
     alu::{add_sub::AddSubChip, bitwise::BitwiseChip},
@@ -41,7 +41,7 @@ pub enum FibChipType<F: Field> {
 // NOTE: These trait implementations are used to save this `FibChipType` to `MetaChip`.
 // Since MetaChip has a generic parameter which is one type (cannot be two chip types).
 // This code is annoyed, we could refactor to use macro later (but less readable).
-impl<F: Field> ChipBehavior<F> for FibChipType<F> {
+impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
     type Record = EmulationRecord;
 
     fn name(&self) -> String {
@@ -141,7 +141,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
 
 impl<F, CB> Air<CB> for FibChipType<F>
 where
-    F: Field,
+    F: PrimeField32,
     CB: ChipBuilder<F>,
 {
     fn eval(&self, b: &mut CB) {
@@ -158,7 +158,7 @@ where
     }
 }
 
-impl<F: Field> FibChipType<F> {
+impl<F: PrimeField32> FibChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![
             MetaChip::new(Self::Program(ProgramChip::default())),

@@ -1,4 +1,4 @@
-use crate::chips::cpu::utils::make_selector_col_map;
+use crate::chips::{cpu::utils::make_selector_col_map, SUPPORTTED_ALU_LOOKUP_OPCODES};
 use p3_field::Field;
 use pico_compiler::{instruction::Instruction, opcode::Opcode};
 use pico_derive::AlignedBorrow;
@@ -48,6 +48,10 @@ pub struct OpcodeSelectorCols<T> {
     /// Miscellaneous.
     pub is_auipc: T,
     pub is_unimpl: T,
+
+    /// TODO: Delete after all ALU opcodes integration.
+    /// Boolean to indicate whether lookup is supported.
+    pub is_alu_lookup_supported: T,
 }
 
 impl<F: Field> OpcodeSelectorCols<F> {
@@ -55,6 +59,9 @@ impl<F: Field> OpcodeSelectorCols<F> {
         self.imm_b = F::from_bool(instruction.imm_b);
         self.imm_c = F::from_bool(instruction.imm_c);
 
+        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&instruction.opcode) {
+            self.is_alu_lookup_supported = F::one();
+        }
         if instruction.is_alu_instruction() {
             self.is_alu = F::one();
         } else if instruction.is_ecall_instruction() {
@@ -121,6 +128,7 @@ impl<T> IntoIterator for OpcodeSelectorCols<T> {
             self.is_jal,
             self.is_auipc,
             self.is_unimpl,
+            self.is_alu_lookup_supported,
         ];
         assert_eq!(columns.len(), NUM_OPCODE_SELECTOR_COLS);
         columns.into_iter()

@@ -33,4 +33,11 @@ pub struct AddSubCols<T> {
 
     /// Boolean to indicate whether the row is for a sub operation.
     pub is_sub: T,
+
+    /// TODO: Delete after all ALU opcodes integration.
+    /// Boolean to indicate whether lookup is supported.
+    pub is_lookup_supported: T,
+    /// TODO: Delete after all ALU opcodes integration.
+    /// Avoid `degree multiple is too high`.
+    pub opcode: T,
 }

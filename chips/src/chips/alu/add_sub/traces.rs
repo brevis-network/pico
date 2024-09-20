@@ -1,6 +1,9 @@
-use crate::chips::alu::add_sub::{
-    columns::{AddSubCols, NUM_ADD_SUB_COLS},
-    AddSubChip,
+use crate::chips::{
+    alu::add_sub::{
+        columns::{AddSubCols, NUM_ADD_SUB_COLS},
+        AddSubChip,
+    },
+    SUPPORTTED_ALU_LOOKUP_OPCODES,
 };
 use core::borrow::BorrowMut;
 use log::info;
@@ -84,42 +87,40 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
 
         trace
     }
+
+    /*
+        fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+            info!("AddSubChip - extra_record: BEGIN");
+
+            let chunk_size = std::cmp::max(
+                (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
+                1,
+            );
+
+            let event_iter = input
+                .add_events
+                .chunks(chunk_size)
+                .chain(input.sub_events.chunks(chunk_size));
+
+            let blu_batches = event_iter
+                .par_bridge()
+                .map(|events| {
+                    let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                    events.iter().for_each(|event| {
+                        let mut row = [F::zero(); NUM_ADD_SUB_COLS];
+                        let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
+                        self.event_to_row(event, cols, &mut blu);
+                    });
+                    blu
+                })
+                .collect::<Vec<_>>();
+
+            extra.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+
+            info!("AddSubChip - extra_record: END");
+        }
+    */
 }
-
-/*
-
-    fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
-        let chunk_size = std::cmp::max(
-            (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
-            1,
-        );
-
-        let event_iter = input
-            .add_events
-            .chunks(chunk_size)
-            .chain(input.sub_events.chunks(chunk_size));
-
-        let blu_batches = event_iter
-            .par_bridge()
-            .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
-                events.iter().for_each(|event| {
-                    let mut row = [F::zero(); NUM_ADD_SUB_COLS];
-                    let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
-                });
-                blu
-            })
-            .collect::<Vec<_>>();
-
-        output.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
-    }
-
-    fn included(&self, shard: &Self::Record) -> bool {
-        !shard.add_events.is_empty() || !shard.sub_events.is_empty()
-    }
-}
-*/
 
 impl<F: Field> AddSubChip<F> {
     /// Create a row from an event.
@@ -137,5 +138,10 @@ impl<F: Field> AddSubChip<F> {
             .populate(blu, event.shard, event.channel, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
+
+        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
+            cols.is_lookup_supported = F::one();
+        }
+        cols.opcode = event.opcode.as_field::<F>();
     }
 }

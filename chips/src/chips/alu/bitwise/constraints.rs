@@ -57,8 +57,8 @@ where
             + local.is_and * Opcode::AND.as_field::<CB::F>();
 
         /* TODO: Enable after we have the full ALU chips.
-                // Looked the ALU arguments.
-                builder.looked_alu(
+                // Looking the ALU arguments.
+                builder.looking_alu(
                     cpu_opcode,
                     local.a,
                     local.b,

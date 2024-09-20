@@ -5,7 +5,6 @@ use crate::{
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-use pico_compiler::opcode::Opcode;
 use pico_machine::builder::ChipBuilder;
 use std::borrow::Borrow;
 
@@ -37,32 +36,18 @@ where
             local.is_add + local.is_sub,
         );
 
-        /* TODO: This depends generate_dependencies.
-                // Receive the arguments.  There are seperate receives for ADD and SUB.
-                // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
-                builder.looked_alu(
-                    Opcode::ADD.as_field::<CB::F>(),
-                    local.add_operation.value,
-                    local.operand_1,
-                    local.operand_2,
-                    local.shard,
-                    local.channel,
-                    local.nonce,
-                    local.is_add,
-                );
-
-                // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
-                builder.looked_alu(
-                    Opcode::SUB.as_field::<CB::F>(),
-                    local.operand_1,
-                    local.add_operation.value,
-                    local.operand_2,
-                    local.shard,
-                    local.channel,
-                    local.nonce,
-                    local.is_sub,
-                );
-        */
+        // Receive the arguments.  There are seperate receives for ADD and SUB.
+        // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
+        builder.looked_alu(
+            local.opcode,
+            local.add_operation.value,
+            local.operand_1,
+            local.operand_2,
+            local.shard,
+            local.channel,
+            CB::Expr::zero(), // local.nonce,
+            local.is_lookup_supported,
+        );
 
         let is_real = local.is_add + local.is_sub;
         builder.assert_bool(local.is_add);

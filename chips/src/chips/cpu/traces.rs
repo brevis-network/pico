@@ -4,15 +4,18 @@ use crate::chips::{
         CpuChip,
     },
     memory::read_write::columns::MemoryCols,
+    SUPPORTTED_ALU_LOOKUP_OPCODES,
 };
 use hashbrown::HashMap;
+use itertools::Itertools;
 use log::info;
 use p3_air::BaseAir;
-use p3_field::Field;
+use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use pico_compiler::{opcode::Opcode, program::Program};
+use p3_maybe_rayon::prelude::ParallelSlice;
+use pico_compiler::opcode::{ByteOpcode, Opcode};
 use pico_emulator::riscv::{
-    events::{AluEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
+    events::{AluEvent, ByteLookupEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
     record::EmulationRecord,
 };
 use pico_machine::chip::ChipBehavior;
@@ -29,7 +32,7 @@ impl<F: Field> BaseAir<F> for CpuChip<F> {
     }
 }
 
-impl<F: Field> ChipBehavior<F> for CpuChip<F> {
+impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     type Record = EmulationRecord;
 
     /// This name is now hard-coded and is related to MachineBehavior
@@ -78,7 +81,6 @@ impl<F: Field> ChipBehavior<F> for CpuChip<F> {
             fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
                 // Generate the trace rows for each event.
                 let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
-
                 let (alu_events, blu_events): (Vec<_>, Vec<_>) = input
                     .cpu_events
                     .par_chunks(chunk_size)
@@ -97,21 +99,18 @@ impl<F: Field> ChipBehavior<F> for CpuChip<F> {
                         (alu, blu)
                     })
                     .unzip();
-
                 for alu_events_chunk in alu_events.into_iter() {
                     output.add_alu_events(alu_events_chunk);
                 }
-
                 output.add_sharded_byte_lookup_events(blu_events.iter().collect_vec());
             }
-
         fn included(&self, input: &Self::Record) -> bool {
             !input.cpu_events.is_empty()
         }
     */
 }
 
-impl<F: Field> CpuChip<F> {
+impl<F: PrimeField32> CpuChip<F> {
     /// Create a row from an event.
     fn event_to_row(
         &self,
