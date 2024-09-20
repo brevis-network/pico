@@ -1,6 +1,6 @@
 use core::mem::size_of;
 use pico_derive::AlignedBorrow;
-use pico_machine::word::Word;
+use pico_compiler::word::Word;
 
 /// The number of main trace columns for `BitwiseChip`.
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();

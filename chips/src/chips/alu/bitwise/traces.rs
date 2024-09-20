@@ -14,7 +14,8 @@ use pico_emulator::riscv::{
     events::{AluEvent, ByteLookupEvent, ByteRecord},
     record::EmulationRecord,
 };
-use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two, word::Word};
+use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
+use pico_compiler::word::Word;
 
 impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
     type Record = EmulationRecord;
