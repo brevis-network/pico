@@ -92,7 +92,7 @@ fn main() {
     env_logger::init();
 
     // Create the prover.
-    info!("Creating prover");
+    info!("\n Creating prover");
     let config = BabyBearPoseidon2::new();
 
     let chips = LookupToyChipType::all_chips();
@@ -101,13 +101,12 @@ fn main() {
     info!("{} created.", simple_machine.name());
 
     // Setup PK and VK.
-    info!("Setup PK and VK");
-
+    info!("\n Setup machine");
     let record = EmulationRecord::new(Arc::new(Program::default()));
     let mut records = vec![record.clone(), record.clone()];
     let (pk, vk) = simple_machine.setup_keys(&record.program);
 
-    info!("Complement records..");
+    info!("\n Complement records..");
     simple_machine.complement_record(&mut records);
 
     info!("Generating proof..");
@@ -116,6 +115,6 @@ fn main() {
 
     // Verify the proof.
     let result = simple_machine.verify(&vk, &proof);
-    info!("The proof is verified: {}", result.is_ok());
+    info!("\n The proof is verified: {}", result.is_ok());
     assert_eq!(result.is_ok(), true);
 }

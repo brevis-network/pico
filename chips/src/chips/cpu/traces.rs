@@ -8,7 +8,7 @@ use crate::chips::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::info;
+use log::{debug, info};
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -41,7 +41,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        info!("CpuChip - generate_main: BEGIN");
+        debug!("{} chip - generate_main: BEGIN", self.name());
         let mut values = vec![F::zero(); input.cpu_events.len() * NUM_CPU_COLS];
 
         let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
@@ -71,7 +71,11 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         // Pad the trace to a power of two.
         Self::pad_to_power_of_two(&mut trace.values);
 
-        info!("CpuChip - generate_main: END");
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
 
         trace
     }

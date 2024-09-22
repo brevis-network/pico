@@ -95,12 +95,12 @@ fn print_type_of<T>(_: &T) {
 fn main() {
     env_logger::init();
 
-    info!("Creating Program..");
+    info!("\n Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
     let compiler = Compiler::new(SourceType::RiscV, ELF);
     let program = compiler.compile();
 
-    info!("Creating Runtime..");
+    info!("\n Creating Runtime..");
     let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
@@ -108,23 +108,23 @@ fn main() {
     let record = &mut runtime.records[0];
 
     // Create the prover.
-    info!("Creating Base Machine");
+    info!("\n Creating Base Machine");
     let config = BabyBearPoseidon2::new();
 
     let chips = ToyChipType::all_chips();
     let base_machine = BaseMachine::new();
 
     // Setup PK and VK.
-    info!("Setup PK and VK");
+    info!("\n Setup PK and VK");
     let (pk, vk) = base_machine.setup_keys(&config, &chips, &record.program);
 
-    info!("Generating proof");
+    info!("\n Generating proof");
     // Generate the proof.
     let proof = base_machine.prove_unit(&config, &chips, &pk, record);
 
     // Verify the proof.
-    info!("Verifying proof");
+    info!("\n Verifying proof");
     let result = base_machine.verify_unit(&config, &chips, &vk, &proof);
-    info!("The proof is verified: {}", result.is_ok());
+    info!("\n The proof is verified: {}", result.is_ok());
     assert_eq!(result.is_ok(), true);
 }

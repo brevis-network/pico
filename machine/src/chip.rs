@@ -46,7 +46,7 @@ pub struct MetaChip<F: Field, C> {
     log_quotient_degree: usize,
 }
 
-impl<F: Field, C> MetaChip<F, C> {
+impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
     pub fn new(chip: C) -> Self
     where
         C: ChipBehavior<F> + Air<SymbolicConstraintFolder<F>>,
@@ -58,7 +58,8 @@ impl<F: Field, C> MetaChip<F, C> {
         // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
         let log_quotient_degree = get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width());
         debug!(
-            "chip_preprocessed_width = {}, log_quotient_degree = {}",
+            "{} chip preprocessed_width = {}, log_quotient_degree = {}",
+            chip.name(),
             chip.preprocessed_width(),
             log_quotient_degree
         );
@@ -76,6 +77,7 @@ impl<F: Field, C> MetaChip<F, C> {
         main: &RowMajorMatrix<F>,
         perm_challenges: &[EF],
     ) -> RowMajorMatrix<EF> {
+        debug!("{} chip - generate_permutation: BEGIN", self.name());
         let batch_size = 1 << self.log_quotient_degree;
 
         // Generate the RLC elements to uniquely identify each interaction.
@@ -84,7 +86,7 @@ impl<F: Field, C> MetaChip<F, C> {
         // Generate the RLC elements to uniquely identify each item in the looked up tuple.
         let beta = perm_challenges[1];
 
-        generate_permutation_trace(
+        let trace = generate_permutation_trace(
             &self.looking,
             &self.looked,
             preprocessed,
@@ -92,7 +94,15 @@ impl<F: Field, C> MetaChip<F, C> {
             alpha,
             beta,
             batch_size,
-        )
+        );
+        debug!(
+            "{} chip - generate_permutation: END. looking {} looked {} trace len {}",
+            self.name(),
+            self.looking.len(),
+            self.looked.len(),
+            trace.values.len()
+        );
+        trace
     }
 
     pub fn get_log_quotient_degree(&self) -> usize {

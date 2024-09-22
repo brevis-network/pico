@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::info;
+use log::{debug, info};
 use std::borrow::BorrowMut;
 
 use p3_air::BaseAir;
@@ -31,14 +31,18 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
     }
 
     fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
-        info!("ByteChip - generate_preprocessed: BEGIN");
+        debug!("{} chip - generate_preprocessed: BEGIN", self.name());
         let trace: p3_matrix::dense::DenseMatrix<F> = Self::preprocess();
-        info!("ByteChip - generate_preprocessed: END");
+        debug!(
+            "{} chip - generate_preprocessed: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
         Some(trace)
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        info!("ByteChip - generate_main: BEGIN");
+        debug!("{} chip - generate_main: BEGIN", self.name());
         let mut trace = RowMajorMatrix::new(
             vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS],
             NUM_BYTE_MULT_COLS,
@@ -64,7 +68,11 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
             cols.chunk = F::from_canonical_u32(chunk);
         }
 
-        info!("ByteChip - generate_main: END");
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
         trace
     }
 }

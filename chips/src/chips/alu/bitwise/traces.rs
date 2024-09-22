@@ -5,7 +5,7 @@ use super::{
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::info;
+use log::{debug, info};
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
@@ -27,7 +27,7 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        info!("BitwiseChip - generate_main: BEGIN");
+        debug!("{} chip - generate_main: BEGIN", self.name());
 
         let rows = input
             .bitwise_events
@@ -56,13 +56,17 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
             cols.nonce = F::from_canonical_usize(i);
         }
 
-        info!("BitwiseChip - generate_main: END");
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
 
         trace
     }
 
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
-        info!("BitwiseChip - extra_record: BEGIN");
+        debug!("{} chip - extra_record: BEGIN", self.name());
 
         let chunk_size = std::cmp::max(input.bitwise_events.len() / num_cpus::get(), 1);
 
@@ -82,7 +86,7 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
 
         extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
 
-        info!("BitwiseChip - extra_record: END");
+        debug!("{} chip - extra_record: END", self.name());
     }
 }
 

@@ -7,7 +7,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::info;
+use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
@@ -40,6 +40,7 @@ where
         chips: &[MetaChip<Val<SC>, C>],
         program: &Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+        info!("setup keys: BEGIN");
         let chips_and_preprocessed = self.generate_preprocessed(chips, program);
 
         // Get the chip ordering.
@@ -71,6 +72,7 @@ where
             .map(|t| t.1)
             .collect::<Vec<_>>();
 
+        info!("setup keys: END");
         (
             BaseProvingKey {
                 commit: commit.clone(),
@@ -120,6 +122,7 @@ where
         chips: &[MetaChip<Val<SC>, C>],
         record: &C::Record,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
+        info!("generate ordered main traces with chip names: BEGIN");
         let mut chips_and_main = chips
             .iter()
             .map(|chip| {
@@ -130,7 +133,7 @@ where
             })
             .collect::<Vec<_>>();
         chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
-
+        info!("generate ordered main traces with chip names: END");
         chips_and_main
     }
 
@@ -140,6 +143,7 @@ where
         record: &C::Record,
         chips_and_main: Vec<(String, RowMajorMatrix<Val<SC>>)>,
     ) -> MainTraceCommitments<SC> {
+        info!("base prover commit main trace: BEGIN");
         let pcs = config.pcs();
         // todo: optimize in the future
         let domains_and_traces = chips_and_main
@@ -147,19 +151,23 @@ where
             .into_iter()
             .map(|(name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
             .collect::<Vec<_>>();
+        debug!("base prover commit main trace: commit");
         let (commitment, data) = pcs.commit(domains_and_traces);
 
+        debug!("base prover commit main trace: ordering");
         let main_chip_ordering = chips_and_main
             .iter()
             .enumerate()
             .map(|(i, (name, _))| (name.to_owned(), i))
             .collect::<HashMap<_, _>>();
 
+        debug!("base prover commit main trace: get main traces");
         let main_traces = chips_and_main
             .into_iter()
             .map(|(_, trace)| trace)
             .collect::<Vec<_>>();
 
+        info!("base prover commit main trace: END");
         MainTraceCommitments {
             main_traces,
             main_chip_ordering,
@@ -217,6 +225,7 @@ where
         main_commitments: MainTraceCommitments<SC>,
         //public_values: &'a [Val<SC>]
     ) -> BaseProof<SC> {
+        info!("base prove core - BEGIN");
         // setup pcs
         let pcs = config.pcs();
 
@@ -255,6 +264,7 @@ where
             permutation_challenges.push(challenger.sample_ext_element());
         }
 
+        debug!("base prove core - generate permutation");
         let (mut permutation_traces, mut cumulative_sums) = self.generate_permutation(
             &ordered_chips,
             pk,
@@ -263,6 +273,7 @@ where
         );
 
         // commit permutation traces on main domain
+        debug!("base prove core - commit permutation traces on main domain");
         let perm_domain = permutation_traces
             .into_iter()
             .zip(main_domains.iter())
@@ -280,6 +291,7 @@ where
 
         // Handle quotient
         // get quotient degrees
+        debug!("base prove core - handle quotient");
         let log_quotient_degrees = ordered_chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
@@ -290,6 +302,7 @@ where
             .collect::<Vec<_>>();
 
         // quotient domains and values
+        debug!("base prove core - handle quotient - commit domains and values");
         let quotient_domains = main_domains
             .iter()
             .zip_eq(log_main_degrees.iter())
@@ -362,6 +375,7 @@ where
         challenger.observe(quotient_commit.clone());
 
         // quotient argument
+        debug!("base prove core - handle quotient - open");
         let zeta: SC::Challenge = challenger.sample_ext_element();
 
         let preprocessed_opening_points = pk
@@ -459,13 +473,13 @@ where
             .copied()
             .sum::<SC::Challenge>();
 
-        info!("Cumulative sum: {cumulative_sum}");
+        debug!("base prove core - cumulative sum: {cumulative_sum}");
 
         // If the cumulative sum is not zero, debug the interactions.
         if !cumulative_sum.is_zero() {
             panic!("Lookup cumulative sum is not zero");
         }
-
+        info!("base prove core - END");
         // final base proof
         BaseProof::<SC> {
             commitments: BaseCommitments {

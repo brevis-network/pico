@@ -6,7 +6,7 @@ use crate::chips::{
     SUPPORTED_ALU_LOOKUP_OPCODES,
 };
 use core::borrow::BorrowMut;
-use log::info;
+use log::{debug, info};
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -36,7 +36,7 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
         input: &EmulationRecord,
         output: &mut Self::Record,
     ) -> RowMajorMatrix<F> {
-        info!("AddSubChip - generate_main: BEGIN");
+        debug!("{} chip - generate_main: BEGIN", self.name());
 
         // Generate the rows for the trace.
         let chunk_size = std::cmp::max(
@@ -87,7 +87,11 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
             cols.nonce = F::from_canonical_usize(i);
         }
 
-        info!("AddSubChip - generate_main: END");
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
 
         trace
     }

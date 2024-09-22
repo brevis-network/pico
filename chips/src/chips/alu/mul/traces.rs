@@ -1,6 +1,6 @@
 use std::borrow::BorrowMut;
 
-use log::info;
+use log::{debug, info};
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -43,7 +43,7 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
         input: &EmulationRecord,
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        info!("MulChip - generate_main: BEGIN");
+        debug!("{} chip - generate_main: BEGIN", self.name());
         let mul_events = input.mul_events.clone();
         // Compute the chunk size based on the number of events and the number of CPUs.
         let chunk_size = std::cmp::max(mul_events.len() / num_cpus::get(), 1);
@@ -196,7 +196,12 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
             cols.nonce = F::from_canonical_usize(i);
         }
 
-        info!("MulChip - generate_main: END");
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
+
         trace
     }
 

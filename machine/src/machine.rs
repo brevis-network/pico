@@ -8,6 +8,7 @@ use crate::{
     verifier::BaseVerifier,
 };
 use anyhow::Result;
+use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_fri::FriConfig;
@@ -132,8 +133,10 @@ where
     ) -> Vec<BaseProof<SC>> {
         let mut challenger = config.challenger();
         // observe preprocessed
+        info!("challenger observe preprocessed");
         challenger.observe(pk.commit.clone());
 
+        info!("generate commitments for {} records", records.len());
         let main_commitments = records
             .iter()
             .map(|record| {
@@ -148,6 +151,7 @@ where
             })
             .collect::<Vec<_>>();
 
+        info!("iterate {} commitments and prove", main_commitments.len());
         main_commitments
             .into_iter()
             .map(|commitment| self.prove(config, chips, pk, &mut challenger, commitment))

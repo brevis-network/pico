@@ -201,13 +201,13 @@ impl<F: PrimeField32> FibChipType<F> {
 fn main() {
     env_logger::init();
 
-    info!("Creating Program..");
+    info!("\n Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
 
     let compiler = Compiler::new(SourceType::RiscV, ELF);
     let program = compiler.compile();
 
-    info!("Creating Runtime..");
+    info!("\n Creating Runtime..");
     let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
@@ -216,7 +216,7 @@ fn main() {
     let mut records = vec![record.clone()];
 
     // Setup config and chips.
-    info!("Creating BaseMachine..");
+    info!("\n Creating BaseMachine..");
     let config = BabyBearPoseidon2::new();
     let chips = FibChipType::all_chips();
 
@@ -225,19 +225,19 @@ fn main() {
     info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.
-    info!("Setup machine..");
+    info!("\n Setup machine..");
     let (pk, vk) = simple_machine.setup_keys(&record.program);
 
-    info!("Complement records..");
+    info!("\n Complement records..");
     simple_machine.complement_record(&mut records);
 
     // Generate the proof.
-    info!("Generating proof..");
+    info!("\n Generating proof..");
     let proof = simple_machine.prove(&pk, &records);
     info!("{} generated.", proof.name());
 
     // Verify the proof.
     let result = simple_machine.verify(&vk, &proof);
-    info!("The proof is verified: {}", result.is_ok());
+    info!("\n The proof is verified: {}", result.is_ok());
     assert_eq!(result.is_ok(), true);
 }

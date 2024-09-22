@@ -2,6 +2,7 @@ use crate::chips::memory::initialize_finalize::{
     columns::{MemoryInitializeFinalizeCols, NUM_MEMORY_INITIALIZE_FINALIZE_COLS},
     MemoryChipType, MemoryInitializeFinalizeChip,
 };
+use log::{debug, info};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_emulator::riscv::{events::MemoryInitializeFinalizeEvent, record::EmulationRecord};
@@ -19,6 +20,8 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        debug!("{} chip - generate_main: BEGIN", self.name());
+
         let mut memory_events = match self.kind {
             MemoryChipType::Initialize => input.memory_initialize_events.clone(),
             MemoryChipType::Finalize => input.memory_finalize_events.clone(),
@@ -93,6 +96,12 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
         );
 
         pad_to_power_of_two::<NUM_MEMORY_INITIALIZE_FINALIZE_COLS, F>(&mut trace.values);
+
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
 
         trace
     }

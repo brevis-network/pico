@@ -6,7 +6,7 @@ use super::{
     ProgramChip,
 };
 use hashbrown::HashMap;
-use log::info;
+use log::{debug, info};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_compiler::program::Program;
@@ -26,7 +26,7 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
     }
 
     fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
-        info!("ProgramChip - generate_preprocessed: BEGIN");
+        debug!("{} chip - generate_preprocessed: BEGIN", self.name());
 
         debug_assert!(!program.instructions.is_empty(), "empty program");
 
@@ -56,14 +56,17 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
         // Pad the trace to a power of two.
         pad_to_power_of_two::<NUM_PROGRAM_PREPROCESSED_COLS, F>(&mut trace.values);
 
-        info!("ProgramChip - generate_preprocessed: END");
+        debug!(
+            "{} chip - generate_preprocessed: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
 
         Some(trace)
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        info!("ProgramChip - generate_main: BEGIN");
-
+        debug!("{} chip - generate_main: BEGIN", self.name());
         // Generate the trace rows for each event.
 
         // Collect the number of times each instruction is called from the cpu events.
@@ -105,7 +108,11 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
         // Pad the trace to a power of two.
         pad_to_power_of_two::<NUM_PROGRAM_MULT_COLS, F>(&mut trace.values);
 
-        info!("ProgramChip - generate_main: END");
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
 
         trace
     }
