@@ -25,31 +25,31 @@ pub struct PublicValues<W, T> {
     pub deferred_proofs_digest: [T; POSEIDON_NUM_WORDS],
 
     // didn't include deferred since currently no need
-    /// The shard's start program counter.
+    /// The chunk's start program counter.
     pub start_pc: T,
 
-    /// The expected start program counter for the next shard.
+    /// The expected start program counter for the next chunk.
     pub next_pc: T,
 
     /// The exit code of the program.  Only valid if halt has been executed.
     pub exit_code: T,
 
-    /// The shard number.
-    pub shard: T,
+    /// The chunk number.
+    pub chunk: T,
 
-    /// The execution shard number.
-    pub execution_shard: T,
+    /// The execution chunk number.
+    pub execution_chunk: T,
 
-    /// The bits of the largest address that is witnessed for initialization in the previous shard.
+    /// The bits of the largest address that is witnessed for initialization in the previous chunk.
     pub previous_init_addr_bits: [T; 32],
 
-    /// The largest address that is witnessed for initialization in the current shard.
+    /// The largest address that is witnessed for initialization in the current chunk.
     pub last_init_addr_bits: [T; 32],
 
-    /// The bits of the largest address that is witnessed for finalization in the previous shard.
+    /// The bits of the largest address that is witnessed for finalization in the previous chunk.
     pub previous_finalize_addr_bits: [T; 32],
 
-    /// The bits of the largest address that is witnessed for finalization in the current shard.
+    /// The bits of the largest address that is witnessed for finalization in the current chunk.
     pub last_finalize_addr_bits: [T; 32],
 }
 
@@ -96,8 +96,8 @@ impl<F: AbstractField> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F>
             start_pc,
             next_pc,
             exit_code,
-            shard,
-            execution_shard,
+            chunk,
+            execution_chunk,
             previous_init_addr_bits,
             last_init_addr_bits,
             previous_finalize_addr_bits,
@@ -113,8 +113,8 @@ impl<F: AbstractField> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F>
         let start_pc = F::from_canonical_u32(start_pc);
         let next_pc = F::from_canonical_u32(next_pc);
         let exit_code = F::from_canonical_u32(exit_code);
-        let shard = F::from_canonical_u32(shard);
-        let execution_shard = F::from_canonical_u32(execution_shard);
+        let chunk = F::from_canonical_u32(chunk);
+        let execution_chunk = F::from_canonical_u32(execution_chunk);
         let previous_init_addr_bits = previous_init_addr_bits.map(F::from_canonical_u32);
         let last_init_addr_bits = last_init_addr_bits.map(F::from_canonical_u32);
         let previous_finalize_addr_bits = previous_finalize_addr_bits.map(F::from_canonical_u32);
@@ -126,8 +126,8 @@ impl<F: AbstractField> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F>
             start_pc,
             next_pc,
             exit_code,
-            shard,
-            execution_shard,
+            chunk,
+            execution_chunk,
             previous_init_addr_bits,
             last_init_addr_bits,
             previous_finalize_addr_bits,

@@ -2,7 +2,7 @@ use crate::{
     chip::{ChipBehavior, MetaChip},
     folder::{ProverConstraintFolder, VerifierConstraintFolder},
     keys::{BaseProvingKey, BaseVerifyingKey},
-    proof::{BaseProof, ElementProof, MainTraceCommitments, MetaProof},
+    proof::{BaseProof, MainTraceCommitments, MetaProof, UnitProof},
     prover::BaseProver,
     utils::type_name_of,
     verifier::BaseVerifier,
@@ -102,7 +102,7 @@ where
     }
 
     /// Prove based on record and proving key.
-    pub fn prove_element(
+    pub fn prove_unit(
         &self,
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],
@@ -166,7 +166,7 @@ where
             .prove(config, chips, pk, challenger, main_commitments)
     }
 
-    pub fn verify_element(
+    pub fn verify_unit(
         &self,
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],

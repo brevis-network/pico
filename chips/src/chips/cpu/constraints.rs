@@ -39,7 +39,7 @@ where
             local.pc,
             local.instruction,
             local.opcode_selector,
-            local.shard,
+            local.chunk,
             local.is_real,
         );
 
@@ -76,7 +76,7 @@ where
             local.op_a_val(),
             local.op_b_val(),
             local.op_c_val(),
-            local.shard,
+            local.chunk,
             local.channel,
             CB::Expr::zero(), // local.nonce,
             is_alu_lookup_supported,
@@ -107,8 +107,8 @@ where
                 self.eval_halt_unimpl(builder, local, next, public_values);
         */
 
-        // Check that the shard and clk is updated correctly.
-        self.eval_shard_clk(builder, local, next);
+        // Check that the chunk and clk is updated correctly.
+        self.eval_chunk_clk(builder, local, next);
 
         // Check that the pc is updated correctly.
         self.eval_pc(builder, local, next, is_branch_instruction.clone());
@@ -227,16 +227,16 @@ impl<F: Field> CpuChip<F> {
         pc: impl Into<CB::Expr>,
         instruction: InstructionCols<impl Into<CB::Expr> + Copy>,
         selectors: OpcodeSelectorCols<impl Into<CB::Expr> + Copy>,
-        shard: impl Into<CB::Expr> + Copy,
+        chunk: impl Into<CB::Expr> + Copy,
         multiplicity: impl Into<CB::Expr>,
     ) {
         let values = once(pc.into())
             .chain(once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
-            // TODO: The shard number is populated from public values,
+            // TODO: The chunk number is populated from public values,
             // enable after adding public values.
-            // .chain(once(shard.into()))
+            // .chain(once(chunk.into()))
             .collect();
 
         builder.looking(SymbolicLookup::new(

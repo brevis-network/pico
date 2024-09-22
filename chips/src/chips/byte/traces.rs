@@ -43,11 +43,11 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
             vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS],
             NUM_BYTE_MULT_COLS,
         );
-        // TODO: We always have one shard for now, and the shard number starts from 1.
-        let shard = 1;
+        // TODO: We always have one chunk for now, and the chunk number starts from 1.
+        let chunk = 1;
         for (lookup, mult) in input
             .byte_lookups
-            .get(&shard)
+            .get(&chunk)
             .unwrap_or(&HashMap::new())
             .iter()
         {
@@ -61,7 +61,7 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
 
             let cols: &mut ByteMultCols<F> = trace.row_mut(row).borrow_mut();
             cols.mult_channels[channel].multiplicities[index] += F::from_canonical_usize(*mult);
-            cols.shard = F::from_canonical_u32(shard);
+            cols.chunk = F::from_canonical_u32(chunk);
         }
 
         info!("ByteChip - generate_main: END");

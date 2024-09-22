@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 /// Arithmetic Logic Unit (ALU) Event.
 ///
 /// This object encapsulated the information needed to prove an ALU operation. This includes its
-/// shard, channel, opcode, operands, and other relevant information.
+/// chunk, channel, opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct AluEvent {
     /// The lookup identifer.
     pub lookup_id: u128,
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The channel number.
     pub channel: u8,
     /// The clock cycle.
@@ -31,10 +31,10 @@ pub struct AluEvent {
 impl AluEvent {
     /// Create a new [`AluEvent`].
     #[must_use]
-    pub fn new(shard: u32, channel: u8, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32) -> Self {
+    pub fn new(chunk: u32, channel: u8, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32) -> Self {
         Self {
             lookup_id: 0,
-            shard,
+            chunk,
             channel,
             clk,
             opcode,

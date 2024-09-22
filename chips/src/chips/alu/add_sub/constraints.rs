@@ -31,7 +31,7 @@ where
             local.operand_1,
             local.operand_2,
             local.add_operation,
-            local.shard,
+            local.chunk,
             local.channel,
             local.is_add + local.is_sub,
         );
@@ -43,7 +43,7 @@ where
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
-            local.shard,
+            local.chunk,
             local.channel,
             CB::Expr::zero(), // local.nonce,
             local.is_lookup_supported,

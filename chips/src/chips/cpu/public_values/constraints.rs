@@ -16,10 +16,10 @@ impl<F: Field> CpuChip<F> {
         next: &CpuCols<CB::Var>,
         public_values: &PublicValues<Word<CB::Expr>, CB::Expr>,
     ) {
-        // Verify the public value's shard.
+        // Verify the public value's chunk.
         builder
             .when(local.is_real)
-            .assert_eq(public_values.emulation_shard.clone(), local.shard);
+            .assert_eq(public_values.emulation_chunk.clone(), local.chunk);
 
         // Verify the public value's start pc.
         builder

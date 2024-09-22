@@ -86,7 +86,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
                     .par_chunks(chunk_size)
                     .map(|ops: &[CpuEvent]| {
                         let mut alu = HashMap::new();
-                        // The blu map stores shard -> map(byte lookup event -> multiplicity).
+                        // The blu map stores chunk -> map(byte lookup event -> multiplicity).
                         let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
                         ops.iter().for_each(|op| {
                             let mut row = [F::zero(); NUM_CPU_COLS];
@@ -102,7 +102,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
                 for alu_events_chunk in alu_events.into_iter() {
                     output.add_alu_events(alu_events_chunk);
                 }
-                output.add_sharded_byte_lookup_events(blu_events.iter().collect_vec());
+                output.add_chunked_byte_lookup_events(blu_events.iter().collect_vec());
             }
         fn included(&self, input: &Self::Record) -> bool {
             !input.cpu_events.is_empty()
@@ -121,8 +121,8 @@ impl<F: PrimeField32> CpuChip<F> {
     ) -> HashMap<Opcode, Vec<AluEvent>> {
         let mut new_alu_events = HashMap::new();
 
-        // Populate shard and clk columns.
-        self.populate_shard_clk(cols, event, blu_events);
+        // Populate chunk and clk columns.
+        self.populate_chunk_clk(cols, event, blu_events);
 
         // Populate the nonce.
         cols.nonce = F::from_canonical_u32(
@@ -164,7 +164,7 @@ impl<F: PrimeField32> CpuChip<F> {
                     .map(|x| x.as_canonical_u32())
                     .collect::<Vec<_>>();
                 blu_events.add_byte_lookup_event(ByteLookupEvent {
-                    shard: event.shard,
+                    chunk: event.chunk,
                     channel: event.channel,
                     opcode: ByteOpcode::U8Range,
                     a1: 0,
@@ -173,7 +173,7 @@ impl<F: PrimeField32> CpuChip<F> {
                     c: a_bytes[1] as u8,
                 });
                 blu_events.add_byte_lookup_event(ByteLookupEvent {
-                    shard: event.shard,
+                    chunk: event.chunk,
                     channel: event.channel,
                     opcode: ByteOpcode::U8Range,
                     a1: 0,

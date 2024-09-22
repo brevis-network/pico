@@ -18,8 +18,8 @@ pub const CPU_COL_MAP: CpuCols<usize> = make_col_map();
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct CpuCols<T: Copy> {
-    /// The current shard.
-    pub shard: T,
+    /// The current chunk.
+    pub chunk: T,
     /// The channel value, used for byte lookup multiplicity.
     pub channel: T,
 

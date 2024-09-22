@@ -120,11 +120,11 @@ fn main() {
 
     info!("Generating proof");
     // Generate the proof.
-    let proof = base_machine.prove_element(&config, &chips, &pk, record);
+    let proof = base_machine.prove_unit(&config, &chips, &pk, record);
 
     // Verify the proof.
     info!("Verifying proof");
-    let result = base_machine.verify_element(&config, &chips, &vk, &proof);
+    let result = base_machine.verify_unit(&config, &chips, &vk, &proof);
     info!("The proof is verified: {}", result.is_ok());
     assert_eq!(result.is_ok(), true);
 }

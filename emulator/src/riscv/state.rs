@@ -15,14 +15,14 @@ use crate::riscv::{
 #[serde_as]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RiscvEmulationState {
-    /// The global clock keeps track of how many instrutions have been emulated through all shards.
+    /// The global clock keeps track of how many instrutions have been emulated through all chunks.
     pub global_clk: u64,
 
-    /// The shard clock keeps track of how many shards have been emulated.
-    pub current_shard: u32,
+    /// The chunk clock keeps track of how many chunks have been emulated.
+    pub current_chunk: u32,
 
     /// The clock increments by 4 (possibly more in syscalls) for each instruction that has been
-    /// emulated in this shard.
+    /// emulated in this chunk.
     pub clk: u32,
 
     /// The channel alternates between 0 and [crate::bytes::NUM_BYTE_LOOKUP_CHANNELS],
@@ -88,8 +88,8 @@ impl RiscvEmulationState {
     pub fn new(pc_start: u32) -> Self {
         Self {
             global_clk: 0,
-            // Start at shard 1 since shard 0 is reserved for memory initialization.
-            current_shard: 1,
+            // Start at chunk 1 since chunk 0 is reserved for memory initialization.
+            current_chunk: 1,
             clk: 0,
             channel: 0,
             pc: pc_start,

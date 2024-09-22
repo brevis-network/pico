@@ -3,14 +3,14 @@ use p3_field::Field;
 use pico_emulator::riscv::events::{ByteRecordBehavior, CpuEvent};
 
 impl<F: Field> CpuChip<F> {
-    /// Populates the shard, channel, and clk related rows.
-    pub(crate) fn populate_shard_clk(
+    /// Populates the chunk, channel, and clk related rows.
+    pub(crate) fn populate_chunk_clk(
         &self,
         cols: &mut CpuCols<F>,
         event: &CpuEvent,
         blu_events: &mut impl ByteRecordBehavior,
     ) {
-        cols.shard = F::from_canonical_u32(event.shard);
+        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.channel = F::from_canonical_u8(event.channel);
         cols.clk = F::from_canonical_u32(event.clk);
 
@@ -23,16 +23,16 @@ impl<F: Field> CpuChip<F> {
 
         /* TODO: Enable after adding the byte chip.
                 blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-                    event.shard,
+                    event.chunk,
                     event.channel,
                     U16Range,
-                    event.shard as u16,
+                    event.chunk as u16,
                     0,
                     0,
                     0,
                 ));
                 blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-                    event.shard,
+                    event.chunk,
                     event.channel,
                     U16Range,
                     clk_16bit_limb,
@@ -41,7 +41,7 @@ impl<F: Field> CpuChip<F> {
                     0,
                 ));
                 blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-                    event.shard,
+                    event.chunk,
                     event.channel,
                     ByteOpcode::U8Range,
                     0,

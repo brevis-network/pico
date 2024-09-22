@@ -20,7 +20,7 @@ impl<F: Field> AddOperation<F> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        shard: u32,
+        chunk: u32,
         channel: u8,
         a_u32: u32,
         b_u32: u32,
@@ -52,9 +52,9 @@ impl<F: Field> AddOperation<F> {
 
         // Range check
         {
-            record.add_u8_range_checks(shard, channel, &a);
-            record.add_u8_range_checks(shard, channel, &b);
-            record.add_u8_range_checks(shard, channel, &expected.to_le_bytes());
+            record.add_u8_range_checks(chunk, channel, &a);
+            record.add_u8_range_checks(chunk, channel, &b);
+            record.add_u8_range_checks(chunk, channel, &expected.to_le_bytes());
         }
         expected
     }
@@ -64,7 +64,7 @@ impl<F: Field> AddOperation<F> {
         a: Word<AB::Var>,
         b: Word<AB::Var>,
         cols: AddOperation<AB::Var>,
-        shard: AB::Var,
+        chunk: AB::Var,
         channel: impl Into<AB::Expr> + Clone,
         is_real: AB::Expr,
     ) {
@@ -102,9 +102,9 @@ impl<F: Field> AddOperation<F> {
 
         // Range check each byte.
         {
-            builder.slice_range_check_u8(&a.0, shard, channel.clone(), is_real.clone());
-            builder.slice_range_check_u8(&b.0, shard, channel.clone(), is_real.clone());
-            builder.slice_range_check_u8(&cols.value.0, shard, channel.clone(), is_real);
+            builder.slice_range_check_u8(&a.0, chunk, channel.clone(), is_real.clone());
+            builder.slice_range_check_u8(&b.0, chunk, channel.clone(), is_real.clone());
+            builder.slice_range_check_u8(&cols.value.0, chunk, channel.clone(), is_real);
         }
     }
 }

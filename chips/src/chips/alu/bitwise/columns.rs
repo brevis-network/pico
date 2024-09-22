@@ -9,8 +9,8 @@ pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
 #[derive(AlignedBorrow, Clone, Copy, Default)]
 #[repr(C)]
 pub struct BitwiseCols<T> {
-    /// The shard number, used for byte lookup table.
-    pub shard: T,
+    /// The chunk number, used for byte lookup table.
+    pub chunk: T,
 
     /// The channel number, used for byte lookup table.
     pub channel: T,

@@ -52,7 +52,7 @@ impl<F: Field> CpuChip<F> {
         // Add event to ALU check to check that addr == b + c
         let add_event = AluEvent {
             lookup_id: event.memory_add_lookup_id,
-            shard: event.shard,
+            chunk: event.chunk,
             channel: event.channel,
             clk: event.clk,
             opcode: Opcode::ADD,
@@ -127,7 +127,7 @@ impl<F: Field> CpuChip<F> {
                     let sub_event = AluEvent {
                         lookup_id: event.memory_sub_lookup_id,
                         channel: event.channel,
-                        shard: event.shard,
+                        chunk: event.chunk,
                         clk: event.clk,
                         opcode: Opcode::SUB,
                         a: event.a,
@@ -165,7 +165,7 @@ impl<F: Field> CpuChip<F> {
         let addr_bytes = memory_addr.to_le_bytes();
         for byte_pair in addr_bytes.chunks_exact(2) {
             blu_events.add_byte_lookup_event(ByteLookupEvent {
-                shard: event.shard,
+                chunk: event.chunk,
                 channel: event.channel,
                 opcode: ByteOpcode::U8Range,
                 a1: 0,

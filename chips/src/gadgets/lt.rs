@@ -6,11 +6,11 @@ use pico_derive::AlignedBorrow;
 use pico_emulator::riscv::events::{ByteLookupEvent, ByteRecordBehavior};
 use pico_machine::builder::ChipBuilder;
 
-/// Operation columns for verifying that an element is within the range `[0, modulus)`.
+/// Operation columns for verifying that an unit is within the range `[0, modulus)`.
 #[derive(Debug, Clone, Copy, AlignedBorrow)]
 #[repr(C)]
 pub struct AssertLtColsBytes<T, const N: usize> {
-    /// Boolean flags to indicate the first byte in which the element is smaller than the modulus.
+    /// Boolean flags to indicate the first byte in which the unit is smaller than the modulus.
     pub(crate) byte_flags: [T; N],
 
     pub(crate) a_comparison_byte: T,
@@ -21,7 +21,7 @@ impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        shard: u32,
+        chunk: u32,
         channel: u8,
         a: &[u8],
         b: &[u8],
@@ -38,7 +38,7 @@ impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
                 self.b_comparison_byte = F::from_canonical_u8(*b_byte);
                 record.add_byte_lookup_event(ByteLookupEvent {
                     opcode: ByteOpcode::LTU,
-                    shard,
+                    chunk,
                     channel,
                     a1: 1,
                     a2: 0,
@@ -66,7 +66,7 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
         builder: &mut CB,
         a: &[Ea],
         b: &[Eb],
-        shard: impl Into<CB::Expr> + Clone,
+        chunk: impl Into<CB::Expr> + Clone,
         channel: impl Into<CB::Expr> + Clone,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
@@ -136,7 +136,7 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
                     CB::F::one(),
                     self.a_comparison_byte,
                     self.b_comparison_byte,
-                    shard,
+                    chunk,
                     channel,
                     is_real,
                 )

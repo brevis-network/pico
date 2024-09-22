@@ -45,7 +45,7 @@ where
                 a,
                 b,
                 c,
-                local.shard,
+                local.chunk,
                 local.channel,
                 mult.clone(),
             );
@@ -63,7 +63,7 @@ where
                     local.a,
                     local.b,
                     local.c,
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.nonce,
                     local.is_xor + local.is_or + local.is_and,

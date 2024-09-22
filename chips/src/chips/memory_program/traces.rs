@@ -67,13 +67,13 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
             .collect::<Vec<_>>();
 
         /* TODO: Replace after we enable the public values.
-                let mult = if input.public_values.shard == 1 {
+                let mult = if input.public_values.chunk == 1 {
                     F::one()
                 } else {
                     F::zero()
                 };
         */
-        // We only have one shard for now.
+        // We only have one chunk for now.
         let mult = F::one();
 
         // Generate the trace rows for each event.
@@ -83,9 +83,9 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
                 let mut row = [F::zero(); NUM_MEMORY_PROGRAM_MULT_COLS];
                 let cols: &mut MemoryProgramMultCols<F> = row.as_mut_slice().borrow_mut();
                 cols.multiplicity = mult;
-                // We only have one shard for now.
-                // cols.is_first_shard.populate(input.public_values.shard - 1);
-                cols.is_first_shard.populate(0);
+                // We only have one chunk for now.
+                // cols.is_first_chunk.populate(input.public_values.chunk - 1);
+                cols.is_first_chunk.populate(0);
                 row
             })
             .collect::<Vec<_>>();

@@ -47,13 +47,13 @@ pub trait ProofBehavior<SC: StarkGenericConfig> {
 }
 
 /// Proof wrapper for an element (single chunk)
-pub struct ElementProof<SC: StarkGenericConfig> {
+pub struct UnitProof<SC: StarkGenericConfig> {
     pub proof: BaseProof<SC>,
 }
 
-impl<SC: StarkGenericConfig> ProofBehavior<SC> for ElementProof<SC> {
+impl<SC: StarkGenericConfig> ProofBehavior<SC> for UnitProof<SC> {
     fn name(&self) -> String {
-        "ElementProof".to_string()
+        "UnitProof".to_string()
     }
 
     fn proofs(&self) -> &[BaseProof<SC>] {
@@ -61,7 +61,7 @@ impl<SC: StarkGenericConfig> ProofBehavior<SC> for ElementProof<SC> {
     }
 }
 
-impl<SC: StarkGenericConfig> ElementProof<SC> {
+impl<SC: StarkGenericConfig> UnitProof<SC> {
     pub fn new(proof: BaseProof<SC>) -> Self {
         Self { proof }
     }

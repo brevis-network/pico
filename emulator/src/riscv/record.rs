@@ -3,7 +3,7 @@ use crate::{
     record::RecordBehavior,
     riscv::{
         events::{
-            add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, CpuEvent,
+            add_chunked_byte_lookup_events, AluEvent, ByteLookupEvent, CpuEvent,
             MemoryInitializeFinalizeEvent, MemoryRecordEnum,
         },
         public_values::PublicValues,
@@ -137,11 +137,11 @@ impl RecordBehavior for EmulationRecord {
             self.memory_finalize_events.len(),
         );
         if !self.cpu_events.is_empty() {
-            let shard = self.cpu_events[0].shard;
+            let chunk = self.cpu_events[0].chunk;
             stats.insert(
                 "byte_lookups".to_string(),
                 self.byte_lookups
-                    .get(&shard)
+                    .get(&chunk)
                     .map_or(0, hashbrown::HashMap::len),
             );
         }
@@ -169,7 +169,7 @@ impl RecordBehavior for EmulationRecord {
         if self.byte_lookups.is_empty() {
             self.byte_lookups = std::mem::take(&mut extra.byte_lookups);
         } else {
-            self.add_sharded_byte_lookup_events(vec![&extra.byte_lookups]);
+            self.add_chunked_byte_lookup_events(vec![&extra.byte_lookups]);
         }
     }
 
@@ -241,17 +241,17 @@ impl ByteRecordBehavior for EmulationRecord {
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
         *self
             .byte_lookups
-            .entry(blu_event.shard)
+            .entry(blu_event.chunk)
             .or_default()
             .entry(blu_event)
             .or_insert(0) += 1;
     }
 
     #[inline]
-    fn add_sharded_byte_lookup_events(
+    fn add_chunked_byte_lookup_events(
         &mut self,
         new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
     ) {
-        add_sharded_byte_lookup_events(&mut self.byte_lookups, new_events);
+        add_chunked_byte_lookup_events(&mut self.byte_lookups, new_events);
     }
 }

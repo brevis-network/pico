@@ -21,7 +21,7 @@ impl<F: Field> CpuChip<F> {
 
             let add_event = AluEvent {
                 lookup_id: event.auipc_lookup_id,
-                shard: event.shard,
+                chunk: event.chunk,
                 channel: event.channel,
                 clk: event.clk,
                 opcode: Opcode::ADD,

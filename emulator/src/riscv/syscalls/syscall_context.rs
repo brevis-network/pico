@@ -9,8 +9,8 @@ use pico_compiler::riscv::register::Register;
 /// runtime.
 #[allow(dead_code)]
 pub struct SyscallContext<'a: 'a> {
-    /// The current shard.
-    pub current_shard: u32,
+    /// The current chunk.
+    pub current_chunk: u32,
     /// The clock cycle.
     pub clk: u32,
     /// The next program counter.
@@ -26,10 +26,10 @@ pub struct SyscallContext<'a: 'a> {
 impl<'a> SyscallContext<'a> {
     /// Create a new [`SyscallContext`].
     pub fn new(runtime: &'a mut RiscvEmulator) -> Self {
-        let current_shard = runtime.shard();
+        let current_chunk = runtime.chunk();
         let clk = runtime.state.clk;
         Self {
-            current_shard,
+            current_chunk,
             clk,
             next_pc: runtime.state.pc.wrapping_add(4),
             exit_code: 0,
@@ -43,10 +43,10 @@ impl<'a> SyscallContext<'a> {
         &mut self.rt.record
     }
 
-    /// Get the current shard.
+    /// Get the current chunk.
     #[must_use]
-    pub fn current_shard(&self) -> u32 {
-        self.rt.state.current_shard
+    pub fn current_chunk(&self) -> u32 {
+        self.rt.state.current_chunk
     }
 
     /// Get the current channel.
@@ -57,7 +57,7 @@ impl<'a> SyscallContext<'a> {
 
     /// Read a word from memory.
     pub fn mr(&mut self, addr: u32) -> (MemoryReadRecord, u32) {
-        let record = self.rt.mr(addr, self.current_shard, self.clk);
+        let record = self.rt.mr(addr, self.current_chunk, self.clk);
         (record, record.value)
     }
 
@@ -75,7 +75,7 @@ impl<'a> SyscallContext<'a> {
 
     /// Write a word to memory.
     pub fn mw(&mut self, addr: u32, value: u32) -> MemoryWriteRecord {
-        self.rt.mw(addr, value, self.current_shard, self.clk)
+        self.rt.mw(addr, value, self.current_chunk, self.clk)
     }
 
     /// Write a slice of words to memory.

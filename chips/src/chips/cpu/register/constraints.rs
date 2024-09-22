@@ -21,7 +21,7 @@ impl<F: Field> CpuChip<F> {
 
                 // If they are not immediates, read `b` and `c` from memory.
                 builder.eval_memory_access(
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
                     local.instruction.op_b[0],
@@ -30,7 +30,7 @@ impl<F: Field> CpuChip<F> {
                 );
 
                 builder.eval_memory_access(
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
                     local.instruction.op_c[0],
@@ -46,7 +46,7 @@ impl<F: Field> CpuChip<F> {
                 // Write the `a` or the result to the first register described in the instruction unless
                 // we are performing a branch or a store.
                 builder.eval_memory_access(
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
                     local.instruction.op_a[0],
@@ -58,7 +58,7 @@ impl<F: Field> CpuChip<F> {
                 // an invalid word and write it to memory.
                 builder.slice_range_check_u8(
                     &local.op_a_access.access.value.0,
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.is_real,
                 );

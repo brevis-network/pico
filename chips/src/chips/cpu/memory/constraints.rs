@@ -72,7 +72,7 @@ impl<F: Field> CpuChip<F> {
                     memory_columns.addr_word,
                     local.op_b_val(),
                     local.op_c_val(),
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     memory_columns.addr_word_nonce,
                     is_memory_instruction.clone(),
@@ -90,7 +90,7 @@ impl<F: Field> CpuChip<F> {
         // Check that each addr_word element is a byte.
         builder.slice_range_check_u8(
             &memory_columns.addr_word.0,
-            local.shard,
+            local.chunk,
             local.channel,
             is_memory_instruction.clone(),
         );
@@ -139,7 +139,7 @@ impl<F: Field> CpuChip<F> {
                 // For operations that require reading from memory (not registers), we need to read the
                 // value into the memory columns.
                 builder.eval_memory_access(
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::Memory as u32),
                     memory_columns.addr_aligned,
@@ -198,7 +198,7 @@ impl<F: Field> CpuChip<F> {
                     local.op_a_val(),
                     local.unsigned_mem_val,
                     signed_value,
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.unsigned_mem_val_nonce,
                     local.mem_value_is_neg_not_x0,

@@ -51,7 +51,7 @@ impl<F: Field> CpuChip<F> {
 
         /* TODO: Enable after lookup integration.
                 builder.send_syscall(
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.clk,
                     ecall_cols.syscall_nonce,

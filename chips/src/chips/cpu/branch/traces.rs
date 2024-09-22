@@ -41,7 +41,7 @@ impl<F: Field> CpuChip<F> {
             // Add the ALU events for the comparisons
             let lt_comp_event = AluEvent {
                 lookup_id: event.branch_lt_lookup_id,
-                shard: event.shard,
+                chunk: event.chunk,
                 channel: event.channel,
                 clk: event.clk,
                 opcode: alu_op_code,
@@ -64,7 +64,7 @@ impl<F: Field> CpuChip<F> {
 
             let gt_comp_event = AluEvent {
                 lookup_id: event.branch_gt_lookup_id,
-                shard: event.shard,
+                chunk: event.chunk,
                 channel: event.channel,
                 clk: event.clk,
                 opcode: alu_op_code,
@@ -108,7 +108,7 @@ impl<F: Field> CpuChip<F> {
 
                 let add_event = AluEvent {
                     lookup_id: event.branch_add_lookup_id,
-                    shard: event.shard,
+                    chunk: event.chunk,
                     channel: event.channel,
                     clk: event.clk,
                     opcode: Opcode::ADD,

@@ -11,11 +11,11 @@ use std::hash::Hash;
 /// Byte Lookup Event.
 ///
 /// This object encapsulates the information needed to prove a byte lookup operation. This includes
-/// the shard, channel, opcode, operands, and other relevant information.
+/// the chunk, channel, opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct ByteLookupEvent {
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The channel number.
     pub channel: u8,
     /// The opcode.
@@ -35,10 +35,10 @@ pub trait ByteRecordBehavior {
     /// Adds a new [`ByteLookupEvent`] to the record.
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent);
 
-    /// Adds a list of sharded [`ByteLookupEvent`]s to the record.
-    fn add_sharded_byte_lookup_events(
+    /// Adds a list of chunked [`ByteLookupEvent`]s to the record.
+    fn add_chunked_byte_lookup_events(
         &mut self,
-        sharded_blu_events_vec: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
+        chunked_blu_events_vec: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
     );
 
     /// Adds a list of `ByteLookupEvent`s to the record.
@@ -49,10 +49,10 @@ pub trait ByteRecordBehavior {
         }
     }
 
-    /// Adds a `ByteLookupEvent` to verify `a` and `b` are indeed bytes to the shard.
-    fn add_u8_range_check(&mut self, shard: u32, channel: u8, a: u8, b: u8) {
+    /// Adds a `ByteLookupEvent` to verify `a` and `b` are indeed bytes to the chunk.
+    fn add_u8_range_check(&mut self, chunk: u32, channel: u8, a: u8, b: u8) {
         self.add_byte_lookup_event(ByteLookupEvent {
-            shard,
+            chunk,
             channel,
             opcode: ByteOpcode::U8Range,
             a1: 0,
@@ -63,9 +63,9 @@ pub trait ByteRecordBehavior {
     }
 
     /// Adds a `ByteLookupEvent` to verify `a` is indeed u16.
-    fn add_u16_range_check(&mut self, shard: u32, channel: u8, a: u16) {
+    fn add_u16_range_check(&mut self, chunk: u32, channel: u8, a: u16) {
         self.add_byte_lookup_event(ByteLookupEvent {
-            shard,
+            chunk,
             channel,
             opcode: ByteOpcode::U16Range,
             a1: a,
@@ -76,15 +76,15 @@ pub trait ByteRecordBehavior {
     }
 
     /// Adds `ByteLookupEvent`s to verify that all the bytes in the input slice are indeed bytes.
-    fn add_u8_range_checks(&mut self, shard: u32, channel: u8, bytes: &[u8]) {
+    fn add_u8_range_checks(&mut self, chunk: u32, channel: u8, bytes: &[u8]) {
         let mut index = 0;
         while index + 1 < bytes.len() {
-            self.add_u8_range_check(shard, channel, bytes[index], bytes[index + 1]);
+            self.add_u8_range_check(chunk, channel, bytes[index], bytes[index + 1]);
             index += 2;
         }
         if index < bytes.len() {
             // If the input slice's length is odd, we need to add a check for the last byte.
-            self.add_u8_range_check(shard, channel, bytes[index], 0);
+            self.add_u8_range_check(chunk, channel, bytes[index], 0);
         }
     }
 
@@ -92,12 +92,12 @@ pub trait ByteRecordBehavior {
     /// bytes.
     fn add_u8_range_checks_field<F: PrimeField32>(
         &mut self,
-        shard: u32,
+        chunk: u32,
         channel: u8,
         field_values: &[F],
     ) {
         self.add_u8_range_checks(
-            shard,
+            chunk,
             channel,
             &field_values
                 .iter()
@@ -107,15 +107,15 @@ pub trait ByteRecordBehavior {
     }
 
     /// Adds `ByteLookupEvent`s to verify that all the bytes in the input slice are indeed bytes.
-    fn add_u16_range_checks(&mut self, shard: u32, channel: u8, ls: &[u16]) {
+    fn add_u16_range_checks(&mut self, chunk: u32, channel: u8, ls: &[u16]) {
         ls.iter()
-            .for_each(|x| self.add_u16_range_check(shard, channel, *x));
+            .for_each(|x| self.add_u16_range_check(chunk, channel, *x));
     }
 
     /// Adds a `ByteLookupEvent` to compute the bitwise OR of the two input values.
-    fn lookup_or(&mut self, shard: u32, channel: u8, b: u8, c: u8) {
+    fn lookup_or(&mut self, chunk: u32, channel: u8, b: u8, c: u8) {
         self.add_byte_lookup_event(ByteLookupEvent {
-            shard,
+            chunk,
             channel,
             opcode: ByteOpcode::OR,
             a1: (b | c) as u16,
@@ -129,9 +129,9 @@ pub trait ByteRecordBehavior {
 impl ByteLookupEvent {
     /// Creates a new `ByteLookupEvent`.
     #[must_use]
-    pub fn new(shard: u32, channel: u8, opcode: ByteOpcode, a1: u16, a2: u8, b: u8, c: u8) -> Self {
+    pub fn new(chunk: u32, channel: u8, opcode: ByteOpcode, a1: u16, a2: u8, b: u8, c: u8) -> Self {
         Self {
-            shard,
+            chunk,
             channel,
             opcode,
             a1,
@@ -147,7 +147,7 @@ impl ByteRecordBehavior for Vec<ByteLookupEvent> {
         self.push(blu_event);
     }
 
-    fn add_sharded_byte_lookup_events(
+    fn add_chunked_byte_lookup_events(
         &mut self,
         _: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
     ) {
@@ -158,47 +158,47 @@ impl ByteRecordBehavior for Vec<ByteLookupEvent> {
 impl ByteRecordBehavior for HashMap<u32, HashMap<ByteLookupEvent, usize>> {
     #[inline]
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
-        self.entry(blu_event.shard)
+        self.entry(blu_event.chunk)
             .or_default()
             .entry(blu_event)
             .and_modify(|e| *e += 1)
             .or_insert(1);
     }
 
-    fn add_sharded_byte_lookup_events(
+    fn add_chunked_byte_lookup_events(
         &mut self,
         new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
     ) {
-        add_sharded_byte_lookup_events(self, new_events);
+        add_chunked_byte_lookup_events(self, new_events);
     }
 }
 
-pub fn add_sharded_byte_lookup_events(
-    sharded_blu_events: &mut HashMap<u32, HashMap<ByteLookupEvent, usize>>,
+pub fn add_chunked_byte_lookup_events(
+    chunked_blu_events: &mut HashMap<u32, HashMap<ByteLookupEvent, usize>>,
     new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
 ) {
-    // new_sharded_blu_map is a map of shard -> Vec<map of byte lookup event -> multiplicities>.
+    // new_chunked_blu_map is a map of chunk -> Vec<map of byte lookup event -> multiplicities>.
     // We want to collect the new events in this format so that we can do parallel aggregation
-    // per shard.
-    let mut new_sharded_blu_map: HashMap<u32, Vec<&HashMap<ByteLookupEvent, usize>>> =
+    // per chunk.
+    let mut new_chunked_blu_map: HashMap<u32, Vec<&HashMap<ByteLookupEvent, usize>>> =
         HashMap::new();
-    for new_sharded_blu_events in new_events {
-        for (shard, new_blu_map) in new_sharded_blu_events {
-            new_sharded_blu_map
-                .entry(*shard)
+    for new_chunked_blu_events in new_events {
+        for (chunk, new_blu_map) in new_chunked_blu_events {
+            new_chunked_blu_map
+                .entry(*chunk)
                 .or_insert(Vec::new())
                 .push(new_blu_map);
         }
     }
 
-    // Collect all the shard numbers.
-    let shards: Vec<u32> = new_sharded_blu_map.keys().copied().collect_vec();
+    // Collect all the chunk numbers.
+    let chunks: Vec<u32> = new_chunked_blu_map.keys().copied().collect_vec();
 
-    // Move ownership of self's per shard blu maps into a vec.  This is so that we
-    // can do parallel aggregation per shard.
+    // Move ownership of self's per chunk blu maps into a vec.  This is so that we
+    // can do parallel aggregation per chunk.
     let mut self_blu_maps: Vec<HashMap<ByteLookupEvent, usize>> = Vec::new();
-    for shard in &shards {
-        let blu = sharded_blu_events.remove(shard);
+    for chunk in &chunks {
+        let blu = chunked_blu_events.remove(chunk);
 
         match blu {
             Some(blu) => {
@@ -211,11 +211,11 @@ pub fn add_sharded_byte_lookup_events(
     }
 
     // Increment self's byte lookup events multiplicity.
-    shards
+    chunks
         .par_iter()
         .zip_eq(self_blu_maps.par_iter_mut())
-        .for_each(|(shard, self_blu_map)| {
-            let blu_map_vec = new_sharded_blu_map.get(shard).unwrap();
+        .for_each(|(chunk, self_blu_map)| {
+            let blu_map_vec = new_chunked_blu_map.get(chunk).unwrap();
             for blu_map in blu_map_vec.iter() {
                 for (blu_event, count) in blu_map.iter() {
                     *self_blu_map.entry(*blu_event).or_insert(0) += count;
@@ -224,7 +224,7 @@ pub fn add_sharded_byte_lookup_events(
         });
 
     // Move ownership of the blu maps back to self.
-    for (shard, blu) in shards.into_iter().zip(self_blu_maps.into_iter()) {
-        sharded_blu_events.insert(shard, blu);
+    for (chunk, blu) in chunks.into_iter().zip(self_blu_maps.into_iter()) {
+        chunked_blu_events.insert(chunk, blu);
     }
 }

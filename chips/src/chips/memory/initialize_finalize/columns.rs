@@ -10,8 +10,8 @@ pub(crate) const NUM_MEMORY_INITIALIZE_FINALIZE_COLS: usize =
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct MemoryInitializeFinalizeCols<T> {
-    /// The shard number of the memory access.
-    pub shard: T,
+    /// The chunk number of the memory access.
+    pub chunk: T,
 
     /// The timestamp of the memory access.
     pub timestamp: T,

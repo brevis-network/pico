@@ -7,11 +7,11 @@ use super::memory::MemoryRecordEnum;
 /// CPU Event.
 ///
 /// This object encapsulates the information needed to prove a CPU operation. This includes its
-/// shard, channel, opcode, operands, and other relevant information.
+/// chunk, channel, opcode, operands, and other relevant information.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct CpuEvent {
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The channel number.
     pub channel: u8,
     /// The clock cycle.

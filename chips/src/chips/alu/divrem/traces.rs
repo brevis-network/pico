@@ -57,7 +57,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                 cols.a = Word::from(event.a);
                 cols.b = Word::from(event.b);
                 cols.c = Word::from(event.c);
-                cols.shard = F::from_canonical_u32(event.shard);
+                cols.chunk = F::from_canonical_u32(event.chunk);
                 cols.channel = F::from_canonical_u8(event.channel);
                 cols.is_real = F::one();
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
@@ -118,7 +118,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                     for word in words.iter() {
                         let most_significant_byte = word.to_le_bytes()[WORD_SIZE - 1];
                         blu_events.push(ByteLookupEvent {
-                            shard: event.shard,
+                            chunk: event.chunk,
                             channel: event.channel,
                             opcode: ByteOpcode::MSB,
                             a1: get_msb(*word) as u16,
@@ -179,7 +179,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                         if cols.abs_c_alu_event == F::one() {
                             add_events.push(AluEvent {
                                 lookup_id: event.sub_lookups[4],
-                                shard: event.shard,
+                                chunk: event.chunk,
                                 channel: event.channel,
                                 clk: event.clk,
                                 opcode: Opcode::ADD,
@@ -192,7 +192,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                         if cols.abs_rem_alu_event == F::one() {
                             add_events.push(AluEvent {
                                 lookup_id: event.sub_lookups[5],
-                                shard: event.shard,
+                                chunk: event.chunk,
                                 channel: event.channel,
                                 clk: event.clk,
                                 opcode: Opcode::ADD,
@@ -219,7 +219,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
 
                     let lower_multiplication = AluEvent {
                         lookup_id: event.sub_lookups[0],
-                        shard: event.shard,
+                        chunk: event.chunk,
                         channel: event.channel,
                         clk: event.clk,
                         opcode: Opcode::MUL,
@@ -239,7 +239,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
 
                     let upper_multiplication = AluEvent {
                         lookup_id: event.sub_lookups[1],
-                        shard: event.shard,
+                        chunk: event.chunk,
                         channel: event.channel,
                         clk: event.clk,
                         opcode: {
@@ -272,7 +272,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                         );
                         AluEvent {
                             lookup_id: event.sub_lookups[2],
-                            shard: event.shard,
+                            chunk: event.chunk,
                             channel: event.channel,
                             opcode: Opcode::SLTU,
                             a: 1,
@@ -291,7 +291,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                         );
                         AluEvent {
                             lookup_id: event.sub_lookups[3],
-                            shard: event.shard,
+                            chunk: event.chunk,
                             channel: event.channel,
                             opcode: Opcode::SLTU,
                             a: 1,
@@ -309,13 +309,13 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
 
                 // Range check.
                 {
-                    output.add_u8_range_checks(event.shard, event.channel, &quotient.to_le_bytes());
+                    output.add_u8_range_checks(event.chunk, event.channel, &quotient.to_le_bytes());
                     output.add_u8_range_checks(
-                        event.shard,
+                        event.chunk,
                         event.channel,
                         &remainder.to_le_bytes(),
                     );
-                    output.add_u8_range_checks(event.shard, event.channel, &c_times_quotient);
+                    output.add_u8_range_checks(event.chunk, event.channel, &c_times_quotient);
                 }
             }
 

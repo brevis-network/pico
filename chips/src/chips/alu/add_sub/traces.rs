@@ -119,7 +119,7 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
                 })
                 .collect::<Vec<_>>();
 
-            extra.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+            extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
 
             info!("AddSubChip - extra_record: END");
         }
@@ -135,7 +135,7 @@ impl<F: Field> AddSubChip<F> {
         blu: &mut impl ByteRecordBehavior,
     ) {
         let is_add = event.opcode == Opcode::ADD;
-        cols.shard = F::from_canonical_u32(event.shard);
+        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.channel = F::from_canonical_u8(event.channel);
         cols.is_add = F::from_bool(is_add);
         cols.is_sub = F::from_bool(!is_add);
@@ -144,7 +144,7 @@ impl<F: Field> AddSubChip<F> {
         let operand_2 = event.c;
 
         cols.add_operation
-            .populate(blu, event.shard, event.channel, operand_1, operand_2);
+            .populate(blu, event.chunk, event.channel, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
 

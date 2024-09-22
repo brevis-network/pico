@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 /// Memory Record.
 ///
 /// This object encapsulates the information needed to prove a memory access operation. This
-/// includes the shard, timestamp, and value of the memory address.
+/// includes the chunk, timestamp, and value of the memory address.
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
 pub struct MemoryRecord {
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The timestamp.
     pub timestamp: u32,
     /// The value.
@@ -36,18 +36,18 @@ pub enum MemoryAccessPosition {
 /// Memory Read Record.
 ///
 /// This object encapsulates the information needed to prove a memory read operation. This
-/// includes the value, shard, timestamp, and previous shard and timestamp.
+/// includes the value, chunk, timestamp, and previous chunk and timestamp.
 #[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
 pub struct MemoryReadRecord {
     /// The value.
     pub value: u32,
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The timestamp.
     pub timestamp: u32,
-    /// The previous shard number.
-    pub prev_shard: u32,
+    /// The previous chunk number.
+    pub prev_chunk: u32,
     /// The previous timestamp.
     pub prev_timestamp: u32,
 }
@@ -55,20 +55,20 @@ pub struct MemoryReadRecord {
 /// Memory Write Record.
 ///
 /// This object encapsulates the information needed to prove a memory write operation. This
-/// includes the value, shard, timestamp, previous value, previous shard, and previous timestamp.
+/// includes the value, chunk, timestamp, previous value, previous chunk, and previous timestamp.
 #[allow(clippy::manual_non_exhaustive)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
 pub struct MemoryWriteRecord {
     /// The value.
     pub value: u32,
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The timestamp.
     pub timestamp: u32,
     /// The previous value.
     pub prev_value: u32,
-    /// The previous shard number.
-    pub prev_shard: u32,
+    /// The previous chunk number.
+    pub prev_chunk: u32,
     /// The previous timestamp.
     pub prev_timestamp: u32,
 }
@@ -88,7 +88,7 @@ pub enum MemoryRecordEnum {
 /// Memory Initialize/Finalize Event.
 ///
 /// This object encapsulates the information needed to prove a memory initialize or finalize
-/// operation. This includes the address, value, shard, timestamp, and whether the memory is
+/// operation. This includes the address, value, chunk, timestamp, and whether the memory is
 /// initialized or finalized.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryInitializeFinalizeEvent {
@@ -96,8 +96,8 @@ pub struct MemoryInitializeFinalizeEvent {
     pub addr: u32,
     /// The value.
     pub value: u32,
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The timestamp.
     pub timestamp: u32,
     /// The used flag.
@@ -109,17 +109,17 @@ impl MemoryReadRecord {
     #[must_use]
     pub const fn new(
         value: u32,
-        shard: u32,
+        chunk: u32,
         timestamp: u32,
-        prev_shard: u32,
+        prev_chunk: u32,
         prev_timestamp: u32,
     ) -> Self {
-        assert!(shard > prev_shard || ((shard == prev_shard) && (timestamp > prev_timestamp)));
+        assert!(chunk > prev_chunk || ((chunk == prev_chunk) && (timestamp > prev_timestamp)));
         Self {
             value,
-            shard,
+            chunk,
             timestamp,
-            prev_shard,
+            prev_chunk,
             prev_timestamp,
         }
     }
@@ -130,19 +130,19 @@ impl MemoryWriteRecord {
     #[must_use]
     pub const fn new(
         value: u32,
-        shard: u32,
+        chunk: u32,
         timestamp: u32,
         prev_value: u32,
-        prev_shard: u32,
+        prev_chunk: u32,
         prev_timestamp: u32,
     ) -> Self {
-        assert!(shard > prev_shard || ((shard == prev_shard) && (timestamp > prev_timestamp)),);
+        assert!(chunk > prev_chunk || ((chunk == prev_chunk) && (timestamp > prev_timestamp)),);
         Self {
             value,
-            shard,
+            chunk,
             timestamp,
             prev_value,
-            prev_shard,
+            prev_chunk,
             prev_timestamp,
         }
     }
@@ -166,7 +166,7 @@ impl MemoryInitializeFinalizeEvent {
         Self {
             addr,
             value,
-            shard: 1,
+            chunk: 1,
             timestamp: 1,
             used: if used { 1 } else { 0 },
         }
@@ -178,7 +178,7 @@ impl MemoryInitializeFinalizeEvent {
         Self {
             addr,
             value: record.value,
-            shard: record.shard,
+            chunk: record.chunk,
             timestamp: record.timestamp,
             used: 1,
         }

@@ -23,6 +23,6 @@ pub struct ProgramPreprocessedCols<T> {
 #[derive(AlignedBorrow, Clone, Copy, Default)]
 #[repr(C)]
 pub struct ProgramMultiplicityCols<T> {
-    pub shard: T,
+    pub chunk: T,
     pub multiplicity: T,
 }

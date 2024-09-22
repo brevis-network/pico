@@ -25,12 +25,12 @@ pub struct MemoryProgramMultCols<T> {
     /// This column is technically redundant with `is_real`, but it's included for clarity.
     pub multiplicity: T,
 
-    /// Whether the shard is the first shard.
-    pub is_first_shard: IsZeroOperation<T>,
+    /// Whether the chunk is the first chunk.
+    pub is_first_chunk: IsZeroOperation<T>,
 }
 
 /// Chip that initializes memory that is provided from the program. The table is preprocessed and
-/// receives each row in the first shard. This prevents any of these addresses from being
+/// receives each row in the first chunk. This prevents any of these addresses from being
 /// overwritten through the normal MemoryInit.
 #[derive(Default)]
 pub struct MemoryProgramChip;

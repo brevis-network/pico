@@ -79,7 +79,7 @@ pub trait ChipBuilder<F: Field>:
         a: Word<impl Into<Self::Expr>>,
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
-        shard: impl Into<Self::Expr>,
+        chunk: impl Into<Self::Expr>,
         channel: impl Into<Self::Expr>,
         nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
@@ -88,7 +88,7 @@ pub trait ChipBuilder<F: Field>:
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
-            .chain(once(shard.into()))
+            .chain(once(chunk.into()))
             .chain(once(channel.into()))
             .chain(once(nonce.into()))
             .collect();
@@ -108,7 +108,7 @@ pub trait ChipBuilder<F: Field>:
         a: Word<impl Into<Self::Expr>>,
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
-        shard: impl Into<Self::Expr>,
+        chunk: impl Into<Self::Expr>,
         channel: impl Into<Self::Expr>,
         nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
@@ -117,7 +117,7 @@ pub trait ChipBuilder<F: Field>:
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
-            .chain(once(shard.into()))
+            .chain(once(chunk.into()))
             .chain(once(channel.into()))
             .chain(once(nonce.into()))
             .collect();
@@ -183,7 +183,7 @@ pub trait ChipBuilder<F: Field>:
     fn slice_range_check_u8(
         &mut self,
         input: &[impl Into<Self::Expr> + Clone],
-        shard: impl Into<Self::Expr> + Clone,
+        chunk: impl Into<Self::Expr> + Clone,
         channel: impl Into<Self::Expr> + Clone,
         mult: impl Into<Self::Expr> + Clone,
     ) {
@@ -195,7 +195,7 @@ pub trait ChipBuilder<F: Field>:
                             Self::Expr::zero(),
                             input[index].clone(),
                             input[index + 1].clone(),
-                            shard.clone(),
+                            chunk.clone(),
                             channel.clone(),
                             mult.clone(),
                         );
@@ -209,7 +209,7 @@ pub trait ChipBuilder<F: Field>:
                             Self::Expr::zero(),
                             input[index].clone(),
                             Self::Expr::zero(),
-                            shard.clone(),
+                            chunk.clone(),
                             channel.clone(),
                             mult.clone(),
                         );
@@ -221,7 +221,7 @@ pub trait ChipBuilder<F: Field>:
     fn slice_range_check_u16(
         &mut self,
         input: &[impl Into<Self::Expr> + Copy],
-        shard: impl Into<Self::Expr> + Clone,
+        chunk: impl Into<Self::Expr> + Clone,
         channel: impl Into<Self::Expr> + Clone,
         mult: impl Into<Self::Expr> + Clone,
     ) {
@@ -231,7 +231,7 @@ pub trait ChipBuilder<F: Field>:
                 *limb,
                 Self::Expr::zero(),
                 Self::Expr::zero(),
-                shard.clone(),
+                chunk.clone(),
                 channel.clone(),
                 mult.clone(),
             );
@@ -246,7 +246,7 @@ pub trait ChipBuilder<F: Field>:
         a: impl Into<Self::Expr>,
         b: impl Into<Self::Expr>,
         c: impl Into<Self::Expr>,
-        shard: impl Into<Self::Expr>,
+        chunk: impl Into<Self::Expr>,
         channel: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
@@ -256,7 +256,7 @@ pub trait ChipBuilder<F: Field>:
             Self::Expr::zero(),
             b,
             c,
-            shard,
+            chunk,
             channel,
             multiplicity,
         );
@@ -271,7 +271,7 @@ pub trait ChipBuilder<F: Field>:
         a2: impl Into<Self::Expr>,
         b: impl Into<Self::Expr>,
         c: impl Into<Self::Expr>,
-        shard: impl Into<Self::Expr>,
+        chunk: impl Into<Self::Expr>,
         channel: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
@@ -282,7 +282,7 @@ pub trait ChipBuilder<F: Field>:
                 a2.into(),
                 b.into(),
                 c.into(),
-                shard.into(),
+                chunk.into(),
                 channel.into(),
             ],
             multiplicity.into(),

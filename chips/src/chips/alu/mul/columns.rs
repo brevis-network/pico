@@ -9,8 +9,8 @@ use super::PRODUCT_SIZE;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MulCols<T> {
-    /// The shard number, used for byte lookup table.
-    pub shard: T,
+    /// The chunk number, used for byte lookup table.
+    pub chunk: T,
 
     /// The channel number, used for byte lookup table.
     pub channel: T,

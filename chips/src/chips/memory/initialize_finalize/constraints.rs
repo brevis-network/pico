@@ -58,7 +58,7 @@ where
             ));
         } else {
             let mut values = vec![
-                local.shard.into(),
+                local.chunk.into(),
                 local.timestamp.into(),
                 local.addr.into(),
             ];
@@ -111,7 +111,7 @@ where
 
         // We want to constrain that the `adrr` in the first row is larger than the previous
         // initialized/finalized address, unless the previous address is zero. Since the previous
-        // address is either zero or constrained by a different shard, we know it's an element of
+        // address is either zero or constrained by a different chunk, we know it's an element of
         // the field, so we can get an element from the bit decomposition with no concern for
         // overflow.
 
@@ -128,7 +128,7 @@ where
                     MemoryChipType::Finalize => &public_values.previous_finalize_addr_bits,
                 };
 
-                // Since the previous address is either zero or constrained by a different shard, we know
+                // Since the previous address is either zero or constrained by a different chunk, we know
                 // it's an element of the field, so we can get an element from the bit decomposition with
                 // no concern for overflow.
                 let prev_addr = prev_addr_bits

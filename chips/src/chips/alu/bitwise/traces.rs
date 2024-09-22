@@ -80,7 +80,7 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
             })
             .collect::<Vec<_>>();
 
-        extra.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+        extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
 
         info!("BitwiseChip - extra_record: END");
     }
@@ -98,7 +98,7 @@ impl<F: Field> BitwiseChip<F> {
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 
-        cols.shard = F::from_canonical_u32(event.shard);
+        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.channel = F::from_canonical_u8(event.channel);
         cols.a = Word::from(event.a);
         cols.b = Word::from(event.b);
@@ -110,7 +110,7 @@ impl<F: Field> BitwiseChip<F> {
 
         for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
             let byte_event = ByteLookupEvent {
-                shard: event.shard,
+                chunk: event.chunk,
                 channel: event.channel,
                 opcode: ByteOpcode::from(event.opcode),
                 a1: b_a as u16,

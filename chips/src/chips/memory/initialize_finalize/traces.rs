@@ -37,7 +37,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                 let MemoryInitializeFinalizeEvent {
                     addr,
                     value,
-                    shard,
+                    chunk,
                     timestamp,
                     used,
                 } = memory_events[i];
@@ -46,7 +46,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                 let cols: &mut MemoryInitializeFinalizeCols<F> = row.as_mut_slice().borrow_mut();
                 cols.addr = F::from_canonical_u32(addr);
                 cols.addr_bits.populate(addr);
-                cols.shard = F::from_canonical_u32(shard);
+                cols.chunk = F::from_canonical_u32(chunk);
                 cols.timestamp = F::from_canonical_u32(timestamp);
                 cols.value = array::from_fn(|i| F::from_canonical_u32((value >> i) & 1));
                 cols.is_real = F::from_canonical_u32(used);

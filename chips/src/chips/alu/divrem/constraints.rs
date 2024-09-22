@@ -128,7 +128,7 @@ where
                 Word(lower_half),
                 local.quotient,
                 local.c,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.lower_nonce,
                 local.is_real,
@@ -154,7 +154,7 @@ where
                 Word(upper_half),
                 local.quotient,
                 local.c,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.upper_nonce,
                 local.is_real,
@@ -318,7 +318,7 @@ where
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.c,
                 local.abs_c,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.abs_c_alu_event_nonce,
                 local.abs_c_alu_event,
@@ -328,7 +328,7 @@ where
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.remainder,
                 local.abs_remainder,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.abs_rem_alu_event_nonce,
                 local.abs_rem_alu_event,
@@ -375,7 +375,7 @@ where
                 Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.abs_remainder,
                 local.max_abs_c_or_1,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.abs_nonce,
                 local.remainder_check_multiplicity,
@@ -398,7 +398,7 @@ where
                     msb,
                     byte,
                     zero.clone(),
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.is_real,
                 );
@@ -409,13 +409,13 @@ where
         {
             builder.slice_range_check_u8(
                 &local.quotient.0,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.is_real,
             );
             builder.slice_range_check_u8(
                 &local.remainder.0,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.is_real,
             );
@@ -426,7 +426,7 @@ where
 
             builder.slice_range_check_u8(
                 &local.c_times_quotient,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.is_real,
             );
@@ -481,7 +481,7 @@ where
                 local.a,
                 local.b,
                 local.c,
-                local.shard,
+                local.chunk,
                 local.channel,
                 local.nonce,
                 local.is_real,

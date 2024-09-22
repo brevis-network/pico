@@ -13,7 +13,7 @@
   - This could make the code much more modular and easy to maintain/extend.
   
 - [ ] Parallelism enhancement
-  - Operation-level, chip-level, shard-level parallelism check and enhancement. 
+  - Operation-level, chip-level, chunk-level parallelism check and enhancement. 
 
 ### Chips
 

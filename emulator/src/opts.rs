@@ -2,8 +2,8 @@ use std::env;
 
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_SHARD_SIZE: usize = 1 << 22;
-const DEFAULT_SHARD_BATCH_SIZE: usize = 16;
+const DEFAULT_CHUNK_SIZE: usize = 1 << 22;
+const DEFAULT_CHUNK_BATCH_SIZE: usize = 16;
 const DEFAULT_TRACE_GEN_WORKERS: usize = 1;
 const DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY: usize = 128;
 const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 1;
@@ -29,10 +29,10 @@ impl Default for PicoProverOpts {
 /// Options for the core prover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PicoCoreOpts {
-    /// The size of a shard in terms of cycles.
-    pub shard_size: usize,
-    /// The size of a batch of shards in terms of cycles.
-    pub shard_batch_size: usize,
+    /// The size of a chunk in terms of cycles.
+    pub chunk_size: usize,
+    /// The size of a batch of chunks in terms of cycles.
+    pub chunk_batch_size: usize,
     /// Options for splitting deferred events.
     pub split_opts: SplitOpts,
     /// Whether to reconstruct the commitments.
@@ -51,13 +51,13 @@ impl Default for PicoCoreOpts {
             .map(|s| s.parse::<usize>().unwrap_or(DEFERRED_SPLIT_THRESHOLD))
             .unwrap_or(DEFERRED_SPLIT_THRESHOLD);
         Self {
-            shard_size: env::var("SHARD_SIZE").map_or_else(
-                |_| DEFAULT_SHARD_SIZE,
-                |s| s.parse::<usize>().unwrap_or(DEFAULT_SHARD_SIZE),
+            chunk_size: env::var("CHUNK_SIZE").map_or_else(
+                |_| DEFAULT_CHUNK_SIZE,
+                |s| s.parse::<usize>().unwrap_or(DEFAULT_CHUNK_SIZE),
             ),
-            shard_batch_size: env::var("SHARD_BATCH_SIZE").map_or_else(
-                |_| DEFAULT_SHARD_BATCH_SIZE,
-                |s| s.parse::<usize>().unwrap_or(DEFAULT_SHARD_BATCH_SIZE),
+            chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
+                |_| DEFAULT_CHUNK_BATCH_SIZE,
+                |s| s.parse::<usize>().unwrap_or(DEFAULT_CHUNK_BATCH_SIZE),
             ),
             split_opts: SplitOpts::new(split_threshold),
             reconstruct_commitments: true,
@@ -90,7 +90,7 @@ impl PicoCoreOpts {
     pub fn recursion() -> Self {
         let mut opts = Self::default();
         opts.reconstruct_commitments = false;
-        opts.shard_size = DEFAULT_SHARD_SIZE;
+        opts.chunk_size = DEFAULT_CHUNK_SIZE;
         opts
     }
 }

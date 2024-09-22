@@ -4,33 +4,33 @@ use p3_field::Field;
 use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
-    /// Constraints related to the shard and clk.
+    /// Constraints related to the chunk and clk.
     ///
-    /// This method ensures that all of the shard values are the same and that the clk starts at 0
-    /// and is transitioned apporpriately.  It will also check that shard values are within 16 bits
+    /// This method ensures that all of the chunk values are the same and that the clk starts at 0
+    /// and is transitioned apporpriately.  It will also check that chunk values are within 16 bits
     /// and clk values are within 24 bits.  Those range checks are needed for the memory access
     /// timestamp check, which assumes those values are within 2^24.  See
     /// [`MemoryAirBuilder::verify_mem_access_ts`].
-    pub(crate) fn eval_shard_clk<CB: ChipBuilder<F>>(
+    pub(crate) fn eval_chunk_clk<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
         next: &CpuCols<CB::Var>,
     ) {
-        // Verify that all shard values are the same.
+        // Verify that all chunk values are the same.
         builder
             .when_transition()
             .when(next.is_real)
-            .assert_eq(local.shard, next.shard);
+            .assert_eq(local.chunk, next.chunk);
 
         /* TODO: Enable after lookup integration.
-                // Verify that the shard value is within 16 bits.
+                // Verify that the chunk value is within 16 bits.
                 builder.send_byte(
                     CB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
-                    local.shard,
+                    local.chunk,
                     CB::Expr::zero(),
                     CB::Expr::zero(),
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.is_real,
                 );
@@ -59,7 +59,7 @@ impl<F: Field> CpuChip<F> {
                     local.clk,
                     local.clk_16bit_limb,
                     local.clk_8bit_limb,
-                    local.shard,
+                    local.chunk,
                     local.channel,
                     local.is_real,
                 );

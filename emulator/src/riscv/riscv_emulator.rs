@@ -58,11 +58,11 @@ pub struct RiscvEmulator {
     /// The collected records, split by cpu cycles.
     pub records: Vec<EmulationRecord>,
 
-    /// The maximum size of each shard.
-    pub shard_size: u32,
+    /// The maximum size of each chunk.
+    pub chunk_size: u32,
 
-    /// The maximimum number of shards to emulate at once.
-    pub shard_batch_size: u32,
+    /// The maximimum number of chunks to emulate at once.
+    pub chunk_batch_size: u32,
 
     /// The mapping between syscall codes and their implementations.
     pub syscall_map: HashMap<SyscallCode, Arc<dyn Syscall>>,
@@ -70,7 +70,7 @@ pub struct RiscvEmulator {
     /// The memory accesses for the current cycle.
     pub memory_accesses: MemoryAccessRecord,
 
-    /// Memory addresses that were touched in this batch of shards. Used to minimize the size of
+    /// Memory addresses that were touched in this batch of chunks. Used to minimize the size of
     /// checkpoints.
     pub memory_checkpoint: HashMap<u32, Option<MemoryRecord>, BuildNoHashHasher<u32>>,
 
@@ -144,7 +144,7 @@ impl RiscvEmulator {
                 *addr,
                 MemoryRecord {
                     value: *value,
-                    shard: 0,
+                    chunk: 0,
                     timestamp: 0,
                 },
             );
@@ -177,8 +177,8 @@ impl RiscvEmulator {
         Self {
             syscall_map,
             memory_accesses: MemoryAccessRecord::default(),
-            shard_size: (opts.shard_size as u32) * 4,
-            shard_batch_size: opts.shard_batch_size as u32,
+            chunk_size: (opts.chunk_size as u32) * 4,
+            chunk_batch_size: opts.chunk_batch_size as u32,
             record,
             records: vec![],
             state: RiscvEmulationState::new(program.pc_start),
@@ -238,29 +238,29 @@ impl RiscvEmulator {
     }
 
     fn emulate(&mut self) -> Result<bool, EmulationError> {
-        // Get the current shard.
-        let start_shard = self.state.current_shard; // needed for public input
+        // Get the current chunk.
+        let start_chunk = self.state.current_chunk; // needed for public input
 
         // If it's the first cycle, initialize the program.
         if self.state.global_clk == 0 {
             self.initialize();
         }
 
-        // Loop until we've emulated `self.shard_batch_size` shards if `self.shard_batch_size` is
+        // Loop until we've emulated `self.chunk_batch_size` chunks if `self.chunk_batch_size` is
         // set.
         let mut done = false;
-        let mut current_shard = self.state.current_shard;
-        let mut num_shards_emulated = 0;
+        let mut current_chunk = self.state.current_chunk;
+        let mut num_chunks_emulated = 0;
         loop {
             if self.emulate_cycle()? {
                 done = true;
                 break;
             }
 
-            if self.shard_batch_size > 0 && current_shard != self.state.current_shard {
-                num_shards_emulated += 1;
-                current_shard = self.state.current_shard;
-                if num_shards_emulated == self.shard_batch_size {
+            if self.chunk_batch_size > 0 && current_chunk != self.state.current_chunk {
+                num_chunks_emulated += 1;
+                current_chunk = self.state.current_chunk;
+                if num_chunks_emulated == self.chunk_batch_size {
                     break;
                 }
             }
@@ -279,14 +279,14 @@ impl RiscvEmulator {
             self.bump_record();
         }
 
-        // Set the global public values for all shards.
+        // Set the global public values for all chunks.
         let mut last_next_pc = 0;
         let mut last_exit_code = 0;
         for (i, record) in self.records.iter_mut().enumerate() {
             record.public_values = public_values;
             record.public_values.committed_value_digest = public_values.committed_value_digest;
             record.public_values.deferred_proofs_digest = public_values.deferred_proofs_digest;
-            record.public_values.execution_shard = start_shard + i as u32;
+            record.public_values.execution_chunk = start_chunk + i as u32;
             if record.cpu_events.is_empty() {
                 record.public_values.start_pc = last_next_pc;
                 record.public_values.next_pc = last_next_pc;
@@ -687,7 +687,7 @@ impl RiscvEmulator {
         // Emit the CPU event for this cycle.
         if self.emulator_mode == EmulatorMode::Trace {
             self.emit_cpu(
-                self.shard(),
+                self.chunk(),
                 channel,
                 clk,
                 pc,
@@ -719,11 +719,11 @@ impl RiscvEmulator {
         self.state.clk + *position as u32
     }
 
-    /// Get the current shard.
+    /// Get the current chunk.
     #[must_use]
     #[inline]
-    pub fn shard(&self) -> u32 {
-        self.state.current_shard
+    pub fn chunk(&self) -> u32 {
+        self.state.current_chunk
     }
 
     /// Get the current channel.
@@ -734,7 +734,7 @@ impl RiscvEmulator {
     }
 
     /// Read a word from memory and create an access record.
-    pub fn mr(&mut self, addr: u32, shard: u32, timestamp: u32) -> MemoryReadRecord {
+    pub fn mr(&mut self, addr: u32, chunk: u32, timestamp: u32) -> MemoryReadRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
         if self.emulator_mode != EmulatorMode::Simple {
@@ -759,23 +759,23 @@ impl RiscvEmulator {
                 let value = self.state.uninitialized_memory.get(&addr).unwrap_or(&0);
                 entry.insert(MemoryRecord {
                     value: *value,
-                    shard: 0,
+                    chunk: 0,
                     timestamp: 0,
                 })
             }
         };
         let value = record.value;
-        let prev_shard = record.shard;
+        let prev_chunk = record.chunk;
         let prev_timestamp = record.timestamp;
-        record.shard = shard;
+        record.chunk = chunk;
         record.timestamp = timestamp;
 
         // Construct the memory read record.
-        MemoryReadRecord::new(value, shard, timestamp, prev_shard, prev_timestamp)
+        MemoryReadRecord::new(value, chunk, timestamp, prev_chunk, prev_timestamp)
     }
 
     /// Write a word to memory and create an access record.
-    pub fn mw(&mut self, addr: u32, value: u32, shard: u32, timestamp: u32) -> MemoryWriteRecord {
+    pub fn mw(&mut self, addr: u32, value: u32, chunk: u32, timestamp: u32) -> MemoryWriteRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
         if self.emulator_mode != EmulatorMode::Simple {
@@ -801,25 +801,25 @@ impl RiscvEmulator {
 
                 entry.insert(MemoryRecord {
                     value: *value,
-                    shard: 0,
+                    chunk: 0,
                     timestamp: 0,
                 })
             }
         };
         let prev_value = record.value;
-        let prev_shard = record.shard;
+        let prev_chunk = record.chunk;
         let prev_timestamp = record.timestamp;
         record.value = value;
-        record.shard = shard;
+        record.chunk = chunk;
         record.timestamp = timestamp;
 
         // Construct the memory write record.
         MemoryWriteRecord::new(
             value,
-            shard,
+            chunk,
             timestamp,
             prev_value,
-            prev_shard,
+            prev_chunk,
             prev_timestamp,
         )
     }
@@ -830,7 +830,7 @@ impl RiscvEmulator {
         assert_valid_memory_access!(addr, position);
 
         // Read the address from memory and create a memory read record.
-        let record = self.mr(addr, self.shard(), self.timestamp(&position));
+        let record = self.mr(addr, self.chunk(), self.timestamp(&position));
 
         // If we're not in unconstrained mode, record the access for the current cycle.
         if self.emulator_mode == EmulatorMode::Trace {
@@ -855,7 +855,7 @@ impl RiscvEmulator {
         assert_valid_memory_access!(addr, position);
 
         // Read the address from memory and create a memory read record.
-        let record = self.mw(addr, value, self.shard(), self.timestamp(&position));
+        let record = self.mw(addr, value, self.chunk(), self.timestamp(&position));
 
         // If we're not in unconstrained mode, record the access for the current cycle.
         if self.emulator_mode == EmulatorMode::Trace {
@@ -901,7 +901,7 @@ impl RiscvEmulator {
     #[allow(clippy::too_many_arguments)]
     fn emit_cpu(
         &mut self,
-        shard: u32,
+        chunk: u32,
         channel: u8,
         clk: u32,
         pc: u32,
@@ -917,7 +917,7 @@ impl RiscvEmulator {
         syscall_lookup_id: u128,
     ) {
         let cpu_event = CpuEvent {
-            shard,
+            chunk,
             channel,
             clk,
             pc,
@@ -951,7 +951,7 @@ impl RiscvEmulator {
     fn emit_alu(&mut self, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32, lookup_id: u128) {
         let event = AluEvent {
             lookup_id,
-            shard: self.shard(),
+            chunk: self.chunk(),
             clk,
             channel: self.channel(),
             opcode,
@@ -1179,7 +1179,7 @@ impl RiscvEmulator {
             Some(record) => record,
             None => &MemoryRecord {
                 value: 0,
-                shard: 0,
+                chunk: 0,
                 timestamp: 1,
             },
         };

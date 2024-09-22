@@ -41,19 +41,19 @@ where
             for (i, opcode) in ByteOpcode::all().iter().enumerate() {
                 let field_op = opcode.as_field::<CB::F>();
                 let mult = local_mult.mult_channels[channel].multiplicities[i];
-                let shard = local_mult.shard;
+                let chunk = local_mult.chunk;
                 match opcode {
                     ByteOpcode::AND => self.looked_byte(
-                        builder, field_op, local.and, local.b, local.c, shard, channel_f, mult,
+                        builder, field_op, local.and, local.b, local.c, chunk, channel_f, mult,
                     ),
                     ByteOpcode::OR => self.looked_byte(
-                        builder, field_op, local.or, local.b, local.c, shard, channel_f, mult,
+                        builder, field_op, local.or, local.b, local.c, chunk, channel_f, mult,
                     ),
                     ByteOpcode::XOR => self.looked_byte(
-                        builder, field_op, local.xor, local.b, local.c, shard, channel_f, mult,
+                        builder, field_op, local.xor, local.b, local.c, chunk, channel_f, mult,
                     ),
                     ByteOpcode::SLL => self.looked_byte(
-                        builder, field_op, local.sll, local.b, local.c, shard, channel_f, mult,
+                        builder, field_op, local.sll, local.b, local.c, chunk, channel_f, mult,
                     ),
                     ByteOpcode::U8Range => self.looked_byte(
                         builder,
@@ -61,7 +61,7 @@ where
                         CB::F::zero(),
                         local.b,
                         local.c,
-                        shard,
+                        chunk,
                         channel_f,
                         mult,
                     ),
@@ -72,12 +72,12 @@ where
                         local.shr_carry,
                         local.b,
                         local.c,
-                        shard,
+                        chunk,
                         channel_f,
                         mult,
                     ),
                     ByteOpcode::LTU => self.looked_byte(
-                        builder, field_op, local.ltu, local.b, local.c, shard, channel_f, mult,
+                        builder, field_op, local.ltu, local.b, local.c, chunk, channel_f, mult,
                     ),
                     ByteOpcode::MSB => self.looked_byte(
                         builder,
@@ -85,7 +85,7 @@ where
                         local.msb,
                         local.b,
                         CB::F::zero(),
-                        shard,
+                        chunk,
                         channel_f,
                         mult,
                     ),
@@ -95,7 +95,7 @@ where
                         local.value_u16,
                         CB::F::zero(),
                         CB::F::zero(),
-                        shard,
+                        chunk,
                         channel_f,
                         mult,
                     ),
@@ -115,7 +115,7 @@ impl<F: Field> ByteChip<F> {
         a: impl Into<CB::Expr>,
         b: impl Into<CB::Expr>,
         c: impl Into<CB::Expr>,
-        shard: impl Into<CB::Expr>,
+        chunk: impl Into<CB::Expr>,
         channel: impl Into<CB::Expr>,
         multiplicity: impl Into<CB::Expr>,
     ) {
@@ -126,7 +126,7 @@ impl<F: Field> ByteChip<F> {
             CB::Expr::zero(),
             b,
             c,
-            shard,
+            chunk,
             channel,
             multiplicity,
         );
@@ -142,7 +142,7 @@ impl<F: Field> ByteChip<F> {
         a2: impl Into<CB::Expr>,
         b: impl Into<CB::Expr>,
         c: impl Into<CB::Expr>,
-        shard: impl Into<CB::Expr>,
+        chunk: impl Into<CB::Expr>,
         channel: impl Into<CB::Expr>,
         multiplicity: impl Into<CB::Expr>,
     ) {
@@ -153,7 +153,7 @@ impl<F: Field> ByteChip<F> {
                 a2.into(),
                 b.into(),
                 c.into(),
-                shard.into(),
+                chunk.into(),
                 channel.into(),
             ],
             multiplicity.into(),

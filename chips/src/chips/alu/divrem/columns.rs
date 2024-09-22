@@ -10,8 +10,8 @@ pub(crate) const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct DivRemCols<T> {
-    /// The shard number, used for byte lookup table.
-    pub shard: T,
+    /// The chunk number, used for byte lookup table.
+    pub chunk: T,
 
     /// The channel number, used for byte lookup table.
     pub channel: T,

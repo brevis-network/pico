@@ -1,8 +1,8 @@
 | R0             | SP1                                          | Brevis                         |
 |----------------|----------------------------------------------|--------------------------------|
-| Segment        | Shard                                        | Element                        | 
+| Segment        | Shard                                        | Chunk                          | 
 | Session        |                                              | Ensemble                       | 
-| SegmentReceipt | ShardProof                                   | BaseProof                      | 
+| SegmentReceipt | ChunkProof                                   | BaseProof                      | 
 |                | MachineProof                                 | EnsembleProof                  | 
 |                | StarkMachine + MachineProver                 | BaseProver                     | 
 |                | Verifier                                     | BaseVerifier                   | 

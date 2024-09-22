@@ -87,9 +87,9 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
                 let pc = input.program.pc_base + (i as u32 * 4);
                 let mut row = [F::zero(); NUM_PROGRAM_MULT_COLS];
                 let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
-                // TODO: Set shard if it's added in record.
-                cols.shard = F::zero();
-                // cols.shard = F::from_canonical_u32(input.public_values.emulation_shard);
+                // TODO: Set chunk if it's added in record.
+                cols.chunk = F::zero();
+                // cols.chunk = F::from_canonical_u32(input.public_values.emulation_chunk);
                 cols.multiplicity =
                     F::from_canonical_usize(*instruction_counts.get(&pc).unwrap_or(&0));
                 row
