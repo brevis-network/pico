@@ -27,7 +27,7 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     /// Emulate record to extract extra record
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {}
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F>;
+    fn generate_main(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F>;
 
     fn preprocessed_width(&self) -> usize {
         0
@@ -153,8 +153,8 @@ where
         self.chip.extra_record(input, extra);
     }
 
-    fn generate_main(&self, input: &C::Record) -> RowMajorMatrix<F> {
-        self.chip.generate_main(input)
+    fn generate_main(&self, input: &C::Record, output: &mut C::Record) -> RowMajorMatrix<F> {
+        self.chip.generate_main(input, output)
     }
 
     fn preprocessed_width(&self) -> usize {

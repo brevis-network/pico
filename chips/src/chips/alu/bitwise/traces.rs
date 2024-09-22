@@ -14,7 +14,7 @@ use pico_compiler::{
     word::Word,
 };
 use pico_emulator::riscv::{
-    events::{AluEvent, ByteLookupEvent, ByteRecord},
+    events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
     record::EmulationRecord,
 };
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
@@ -26,7 +26,7 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
         "Bitwise".to_string()
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         info!("BitwiseChip - generate_main: BEGIN");
 
         let rows = input
@@ -88,7 +88,12 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
 
 impl<F: Field> BitwiseChip<F> {
     /// Create a row from an event.
-    fn event_to_row(&self, event: &AluEvent, cols: &mut BitwiseCols<F>, blu: &mut impl ByteRecord) {
+    fn event_to_row(
+        &self,
+        event: &AluEvent,
+        cols: &mut BitwiseCols<F>,
+        blu: &mut impl ByteRecordBehavior,
+    ) {
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();

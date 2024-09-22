@@ -12,4 +12,7 @@ pub trait RecordBehavior: Default {
     fn append(&mut self, extra: &mut Self);
 
     fn public_values<F: AbstractField>(&self) -> Vec<F>;
+
+    /// Registers the nonces of the record.
+    fn register_nonces(&mut self) {}
 }

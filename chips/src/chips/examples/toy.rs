@@ -57,7 +57,7 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
         Some(RowMajorMatrix::new(vec![F::zero(); 4096], 1))
     }
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         // Generate the rows for the trace.
         let merged_events = input
             .add_events

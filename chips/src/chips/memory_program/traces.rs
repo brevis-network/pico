@@ -56,7 +56,7 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
         Some(trace)
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         info!("MemoryProgramChip - generate_main: BEGIN");
 
         let program_memory_addrs = input

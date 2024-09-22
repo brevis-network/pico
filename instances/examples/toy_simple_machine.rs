@@ -39,9 +39,9 @@ impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
         }
     }
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
         match self {
-            Self::Toy(chip) => chip.generate_main(input),
+            Self::Toy(chip) => chip.generate_main(input, output),
         }
     }
 

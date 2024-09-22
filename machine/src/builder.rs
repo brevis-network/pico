@@ -7,7 +7,10 @@ use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder, PairCol, Permutat
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
-use pico_compiler::word::{Word, WORD_SIZE};
+use pico_compiler::{
+    opcode::ByteOpcode,
+    word::{Word, WORD_SIZE},
+};
 use pico_configs::config::{StarkGenericConfig, Val};
 use std::{array, iter::once};
 
@@ -223,17 +226,15 @@ pub trait ChipBuilder<F: Field>:
         mult: impl Into<Self::Expr> + Clone,
     ) {
         input.iter().for_each(|limb| {
-            /* TODO: Enable after adding byte chip.
-                        self.send_byte(
-                            Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
-                            *limb,
-                            Self::Expr::zero(),
-                            Self::Expr::zero(),
-                            shard.clone(),
-                            channel.clone(),
-                            mult.clone(),
-                        );
-            */
+            self.looking_byte(
+                Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+                *limb,
+                Self::Expr::zero(),
+                Self::Expr::zero(),
+                shard.clone(),
+                channel.clone(),
+                mult.clone(),
+            );
         });
     }
 

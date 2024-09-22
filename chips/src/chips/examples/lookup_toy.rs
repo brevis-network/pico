@@ -42,7 +42,7 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
         "Add Looking Chip".to_string()
     }
 
-    fn generate_main(&self, _: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, _: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         // because of just test lookup feature, hardcode test data instead of the inputs are not from emulation records
         let row_num = 8;
 
@@ -64,7 +64,7 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
 
     fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
         let record = EmulationRecord::new(Arc::new(Program::default()));
-        Some(self.generate_main(&record))
+        Some(self.generate_main(&record, &mut EmulationRecord::default()))
     }
     fn preprocessed_width(&self) -> usize {
         3
@@ -110,7 +110,7 @@ impl<F: Field> ChipBehavior<F> for AddLookedChip<F> {
         "Add Looked Chip".to_string()
     }
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         // because of just test lookup feature, hardcode test data instead of the inputs are not from emulation records
         let row_num = 8;
 

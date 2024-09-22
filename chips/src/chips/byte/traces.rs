@@ -32,12 +32,12 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
 
     fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
         info!("ByteChip - generate_preprocessed: BEGIN");
-        let trace = Self::preprocess();
+        let trace: p3_matrix::dense::DenseMatrix<F> = Self::preprocess();
         info!("ByteChip - generate_preprocessed: END");
         Some(trace)
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         info!("ByteChip - generate_main: BEGIN");
         let mut trace = RowMajorMatrix::new(
             vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS],

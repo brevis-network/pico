@@ -122,7 +122,12 @@ where
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         let mut chips_and_main = chips
             .iter()
-            .map(|chip| (chip.name(), chip.generate_main(record)))
+            .map(|chip| {
+                (
+                    chip.name(),
+                    chip.generate_main(record, &mut C::Record::default()),
+                )
+            })
             .collect::<Vec<_>>();
         chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
 

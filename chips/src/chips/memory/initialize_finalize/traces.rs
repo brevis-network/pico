@@ -18,7 +18,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
         }
     }
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         let mut memory_events = match self.kind {
             MemoryChipType::Initialize => input.memory_initialize_events.clone(),
             MemoryChipType::Finalize => input.memory_finalize_events.clone(),

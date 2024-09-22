@@ -41,6 +41,7 @@ where
                 chip.extra_record(record, &mut extra);
                 record.append(&mut extra);
             });
+            record.register_nonces();
         });
     }
 

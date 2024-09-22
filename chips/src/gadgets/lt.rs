@@ -3,7 +3,7 @@ use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::opcode::ByteOpcode;
 use pico_derive::AlignedBorrow;
-use pico_emulator::riscv::events::{ByteLookupEvent, ByteRecord};
+use pico_emulator::riscv::events::{ByteLookupEvent, ByteRecordBehavior};
 use pico_machine::builder::ChipBuilder;
 
 /// Operation columns for verifying that an element is within the range `[0, modulus)`.
@@ -20,7 +20,7 @@ pub struct AssertLtColsBytes<T, const N: usize> {
 impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
     pub fn populate(
         &mut self,
-        record: &mut impl ByteRecord,
+        record: &mut impl ByteRecordBehavior,
         shard: u32,
         channel: u8,
         a: &[u8],

@@ -3,7 +3,7 @@ use crate::chips::memory::read_write::columns::{
 };
 use p3_field::Field;
 use pico_emulator::riscv::events::{
-    ByteRecord, MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
+    ByteRecordBehavior, MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
 };
 
 impl<F: Field> MemoryWriteCols<F> {
@@ -11,7 +11,7 @@ impl<F: Field> MemoryWriteCols<F> {
         &mut self,
         channel: u8,
         record: MemoryWriteRecord,
-        output: &mut impl ByteRecord,
+        output: &mut impl ByteRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -34,7 +34,7 @@ impl<F: Field> MemoryReadCols<F> {
         &mut self,
         channel: u8,
         record: MemoryReadRecord,
-        output: &mut impl ByteRecord,
+        output: &mut impl ByteRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -56,7 +56,7 @@ impl<F: Field> MemoryReadWriteCols<F> {
         &mut self,
         channel: u8,
         record: MemoryRecordEnum,
-        output: &mut impl ByteRecord,
+        output: &mut impl ByteRecordBehavior,
     ) {
         match record {
             MemoryRecordEnum::Read(read_record) => self.populate_read(channel, read_record, output),
@@ -70,7 +70,7 @@ impl<F: Field> MemoryReadWriteCols<F> {
         &mut self,
         channel: u8,
         record: MemoryWriteRecord,
-        output: &mut impl ByteRecord,
+        output: &mut impl ByteRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -91,7 +91,7 @@ impl<F: Field> MemoryReadWriteCols<F> {
         &mut self,
         channel: u8,
         record: MemoryReadRecord,
-        output: &mut impl ByteRecord,
+        output: &mut impl ByteRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -115,7 +115,7 @@ impl<F: Field> MemoryAccessCols<F> {
         channel: u8,
         current_record: MemoryRecord,
         prev_record: MemoryRecord,
-        output: &mut impl ByteRecord,
+        output: &mut impl ByteRecordBehavior,
     ) {
         self.value = current_record.value.into();
 

@@ -2,7 +2,7 @@ use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::word::Word;
 use pico_derive::AlignedBorrow;
-use pico_emulator::riscv::events::ByteRecord;
+use pico_emulator::riscv::events::ByteRecordBehavior;
 use pico_machine::builder::ChipBuilder;
 
 /// A set of columns needed to compute the add of two words.
@@ -19,7 +19,7 @@ pub struct AddOperation<T> {
 impl<F: Field> AddOperation<F> {
     pub fn populate(
         &mut self,
-        record: &mut impl ByteRecord,
+        record: &mut impl ByteRecordBehavior,
         shard: u32,
         channel: u8,
         a_u32: u32,

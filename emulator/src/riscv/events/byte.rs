@@ -31,7 +31,7 @@ pub struct ByteLookupEvent {
 }
 
 /// A type that can record byte lookup events.
-pub trait ByteRecord {
+pub trait ByteRecordBehavior {
     /// Adds a new [`ByteLookupEvent`] to the record.
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent);
 
@@ -142,7 +142,7 @@ impl ByteLookupEvent {
     }
 }
 
-impl ByteRecord for Vec<ByteLookupEvent> {
+impl ByteRecordBehavior for Vec<ByteLookupEvent> {
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
         self.push(blu_event);
     }
@@ -155,7 +155,7 @@ impl ByteRecord for Vec<ByteLookupEvent> {
     }
 }
 
-impl ByteRecord for HashMap<u32, HashMap<ByteLookupEvent, usize>> {
+impl ByteRecordBehavior for HashMap<u32, HashMap<ByteLookupEvent, usize>> {
     #[inline]
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
         self.entry(blu_event.shard)

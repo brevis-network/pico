@@ -45,10 +45,10 @@ impl<F: Field> ChipBehavior<F> for LookupToyChipType<F> {
         }
     }
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
         match self {
-            Self::LookingChip(chip) => chip.generate_main(input),
-            Self::LookedChip(chip) => chip.generate_main(input),
+            Self::LookingChip(chip) => chip.generate_main(input, output),
+            Self::LookedChip(chip) => chip.generate_main(input, output),
         }
     }
 

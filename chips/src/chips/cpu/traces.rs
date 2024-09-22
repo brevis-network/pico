@@ -4,7 +4,7 @@ use crate::chips::{
         CpuChip,
     },
     memory::read_write::columns::MemoryCols,
-    SUPPORTTED_ALU_LOOKUP_OPCODES,
+    SUPPORTED_ALU_LOOKUP_OPCODES,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -15,7 +15,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::ParallelSlice;
 use pico_compiler::opcode::{ByteOpcode, Opcode};
 use pico_emulator::riscv::{
-    events::{AluEvent, ByteLookupEvent, ByteRecord, CpuEvent, MemoryRecordEnum},
+    events::{AluEvent, ByteRecordBehavior, CpuEvent, MemoryRecordEnum},
     record::EmulationRecord,
 };
 use pico_machine::chip::ChipBehavior;
@@ -40,7 +40,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         "Cpu".to_string()
     }
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         info!("CpuChip - generate_main: BEGIN");
         let mut values = vec![F::zero(); input.cpu_events.len() * NUM_CPU_COLS];
 
@@ -117,7 +117,7 @@ impl<F: PrimeField32> CpuChip<F> {
         event: &CpuEvent,
         nonce_lookup: &HashMap<u128, u32>,
         cols: &mut CpuCols<F>,
-        blu_events: &mut impl ByteRecord,
+        blu_events: &mut impl ByteRecordBehavior,
     ) -> HashMap<Opcode, Vec<AluEvent>> {
         let mut new_alu_events = HashMap::new();
 

@@ -61,7 +61,7 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
         Some(trace)
     }
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         info!("ProgramChip - generate_main: BEGIN");
 
         // Generate the trace rows for each event.

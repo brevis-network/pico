@@ -1,8 +1,9 @@
+use super::events::ByteRecordBehavior;
 use crate::{
     record::RecordBehavior,
     riscv::{
         events::{
-            add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent,
+            add_sharded_byte_lookup_events, AluEvent, ByteLookupEvent, CpuEvent,
             MemoryInitializeFinalizeEvent, MemoryRecordEnum,
         },
         public_values::PublicValues,
@@ -60,6 +61,16 @@ impl EmulationRecord {
             program,
             ..Default::default()
         }
+    }
+
+    /// Add a mul event to the execution record.
+    pub fn add_mul_event(&mut self, mul_event: AluEvent) {
+        self.mul_events.push(mul_event);
+    }
+
+    /// Add a lt event to the execution record.
+    pub fn add_lt_event(&mut self, lt_event: AluEvent) {
+        self.lt_events.push(lt_event);
     }
 
     /// Add a batch of alu events to the execution record.
@@ -125,6 +136,15 @@ impl RecordBehavior for EmulationRecord {
             "Memory Finalize Events".to_string(),
             self.memory_finalize_events.len(),
         );
+        if !self.cpu_events.is_empty() {
+            let shard = self.cpu_events[0].shard;
+            stats.insert(
+                "byte_lookups".to_string(),
+                self.byte_lookups
+                    .get(&shard)
+                    .map_or(0, hashbrown::HashMap::len),
+            );
+        }
 
         // Filter out the empty events.
         stats.retain(|_, v| *v != 0);
@@ -146,8 +166,58 @@ impl RecordBehavior for EmulationRecord {
             .append(&mut extra.memory_initialize_events);
         self.memory_finalize_events
             .append(&mut extra.memory_finalize_events);
-        self.byte_lookups
-            .add_sharded_byte_lookup_events(vec![&extra.byte_lookups]);
+        if self.byte_lookups.is_empty() {
+            self.byte_lookups = std::mem::take(&mut extra.byte_lookups);
+        } else {
+            self.add_sharded_byte_lookup_events(vec![&extra.byte_lookups]);
+        }
+    }
+
+    fn register_nonces(&mut self) {
+        self.add_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup.insert(event.lookup_id, i as u32);
+        });
+
+        self.sub_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup
+                .insert(event.lookup_id, (self.add_events.len() + i) as u32);
+        });
+
+        self.mul_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup.insert(event.lookup_id, i as u32);
+        });
+
+        self.bitwise_events
+            .iter()
+            .enumerate()
+            .for_each(|(i, event)| {
+                self.nonce_lookup.insert(event.lookup_id, i as u32);
+            });
+
+        self.shift_left_events
+            .iter()
+            .enumerate()
+            .for_each(|(i, event)| {
+                self.nonce_lookup.insert(event.lookup_id, i as u32);
+            });
+
+        self.shift_right_events
+            .iter()
+            .enumerate()
+            .for_each(|(i, event)| {
+                self.nonce_lookup.insert(event.lookup_id, i as u32);
+            });
+
+        self.divrem_events
+            .iter()
+            .enumerate()
+            .for_each(|(i, event)| {
+                self.nonce_lookup.insert(event.lookup_id, i as u32);
+            });
+
+        self.lt_events.iter().enumerate().for_each(|(i, event)| {
+            self.nonce_lookup.insert(event.lookup_id, i as u32);
+        });
     }
 
     fn public_values<F: AbstractField>(&self) -> Vec<F> {
@@ -167,7 +237,7 @@ pub struct MemoryAccessRecord {
     pub memory: Option<MemoryRecordEnum>,
 }
 
-impl ByteRecord for EmulationRecord {
+impl ByteRecordBehavior for EmulationRecord {
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
         *self
             .byte_lookups

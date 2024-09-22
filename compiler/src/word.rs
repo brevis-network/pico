@@ -8,6 +8,9 @@ use std::{
     ops::{Index, IndexMut},
 };
 
+/// The size of a byte in bits.
+pub const BYTE_SIZE: usize = 8;
+
 /// The size of a word in bytes.
 pub const WORD_SIZE: usize = 4;
 

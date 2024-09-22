@@ -7,7 +7,7 @@ use pico_compiler::{
     word::WORD_SIZE,
 };
 use pico_emulator::riscv::events::{
-    create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecord, CpuEvent,
+    create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecordBehavior, CpuEvent,
 };
 use std::array;
 
@@ -18,7 +18,7 @@ impl<F: Field> CpuChip<F> {
         cols: &mut CpuCols<F>,
         event: &CpuEvent,
         new_alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
-        blu_events: &mut impl ByteRecord,
+        blu_events: &mut impl ByteRecordBehavior,
         nonce_lookup: &HashMap<u128, u32>,
     ) {
         if !matches!(

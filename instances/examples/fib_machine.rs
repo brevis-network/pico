@@ -3,7 +3,7 @@ use p3_air::{Air, BaseAir};
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::{
-    alu::{add_sub::AddSubChip, bitwise::BitwiseChip},
+    alu::{add_sub::AddSubChip, bitwise::BitwiseChip, divrem::DivRemChip, mul::MulChip},
     byte::ByteChip,
     cpu::CpuChip,
     memory::initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
@@ -11,7 +11,7 @@ use pico_chips::chips::{
     program::ProgramChip,
 };
 use pico_compiler::{
-    compiler::{Compilable, Compiler, SourceType},
+    compiler::{Compiler, SourceType},
     program::Program,
 };
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
@@ -25,7 +25,6 @@ use pico_machine::{
     chip::{ChipBehavior, MetaChip},
     machine::MachineBehavior,
 };
-use std::path::Path;
 
 pub enum FibChipType<F: Field> {
     Byte(ByteChip<F>),
@@ -36,6 +35,8 @@ pub enum FibChipType<F: Field> {
     MemoryFinalize(MemoryInitializeFinalizeChip<F>),
     AddSub(AddSubChip<F>),
     Bitwise(BitwiseChip<F>),
+    DivRem(DivRemChip<F>),
+    Mul(MulChip<F>),
 }
 
 // NOTE: These trait implementations are used to save this `FibChipType` to `MetaChip`.
@@ -54,6 +55,8 @@ impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
             Self::MemoryFinalize(chip) => chip.name(),
             Self::AddSub(chip) => chip.name(),
             Self::Bitwise(chip) => chip.name(),
+            Self::DivRem(chip) => chip.name(),
+            Self::Mul(chip) => chip.name(),
         }
     }
 
@@ -67,19 +70,23 @@ impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
             Self::MemoryFinalize(chip) => chip.generate_preprocessed(program),
             Self::AddSub(chip) => chip.generate_preprocessed(program),
             Self::Bitwise(chip) => chip.generate_preprocessed(program),
+            Self::DivRem(chip) => chip.generate_preprocessed(program),
+            Self::Mul(chip) => chip.generate_preprocessed(program),
         }
     }
 
-    fn generate_main(&self, input: &Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
         match self {
-            Self::Byte(chip) => chip.generate_main(input),
-            Self::Program(chip) => chip.generate_main(input),
-            Self::Cpu(chip) => chip.generate_main(input),
-            Self::MemoryProgram(chip) => chip.generate_main(input),
-            Self::MemoryInitialize(chip) => chip.generate_main(input),
-            Self::MemoryFinalize(chip) => chip.generate_main(input),
-            Self::AddSub(chip) => chip.generate_main(input),
-            Self::Bitwise(chip) => chip.generate_main(input),
+            Self::Byte(chip) => chip.generate_main(input, output),
+            Self::Program(chip) => chip.generate_main(input, output),
+            Self::Cpu(chip) => chip.generate_main(input, output),
+            Self::MemoryProgram(chip) => chip.generate_main(input, output),
+            Self::MemoryInitialize(chip) => chip.generate_main(input, output),
+            Self::MemoryFinalize(chip) => chip.generate_main(input, output),
+            Self::AddSub(chip) => chip.generate_main(input, output),
+            Self::Bitwise(chip) => chip.generate_main(input, output),
+            Self::DivRem(chip) => chip.generate_main(input, output),
+            Self::Mul(chip) => chip.generate_main(input, output),
         }
     }
 
@@ -93,6 +100,8 @@ impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
             Self::MemoryFinalize(chip) => chip.preprocessed_width(),
             Self::AddSub(chip) => chip.preprocessed_width(),
             Self::Bitwise(chip) => chip.preprocessed_width(),
+            Self::DivRem(chip) => chip.preprocessed_width(),
+            Self::Mul(chip) => chip.preprocessed_width(),
         }
     }
 
@@ -106,6 +115,8 @@ impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
             Self::MemoryFinalize(chip) => chip.extra_record(input, extra),
             Self::AddSub(chip) => chip.extra_record(input, extra),
             Self::Bitwise(chip) => chip.extra_record(input, extra),
+            Self::DivRem(chip) => chip.extra_record(input, extra),
+            Self::Mul(chip) => chip.extra_record(input, extra),
         }
     }
 }
@@ -121,6 +132,8 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
             Self::MemoryFinalize(chip) => chip.width(),
             Self::AddSub(chip) => chip.width(),
             Self::Bitwise(chip) => chip.width(),
+            Self::DivRem(chip) => chip.width(),
+            Self::Mul(chip) => chip.width(),
         }
     }
 
@@ -135,6 +148,8 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
             Self::MemoryFinalize(chip) => chip.preprocessed_trace(),
             Self::AddSub(chip) => chip.preprocessed_trace(),
             Self::Bitwise(chip) => chip.preprocessed_trace(),
+            Self::DivRem(chip) => chip.preprocessed_trace(),
+            Self::Mul(chip) => chip.preprocessed_trace(),
         }
     }
 }
@@ -154,6 +169,8 @@ where
             Self::MemoryFinalize(chip) => chip.eval(b),
             Self::AddSub(chip) => chip.eval(b),
             Self::Bitwise(chip) => chip.eval(b),
+            Self::DivRem(chip) => chip.eval(b),
+            Self::Mul(chip) => chip.eval(b),
         }
     }
 }
@@ -172,6 +189,8 @@ impl<F: PrimeField32> FibChipType<F> {
             ))),
             MetaChip::new(Self::AddSub(AddSubChip::default())),
             MetaChip::new(Self::Bitwise(BitwiseChip::default())),
+            MetaChip::new(Self::DivRem(DivRemChip::default())),
+            MetaChip::new(Self::Mul(MulChip::default())),
             // NOTE: The byte chip must be initialized at the end, since we may add the new BLU
             // events during main trace generation in other chips.
             MetaChip::new(Self::Byte(ByteChip::default())),
