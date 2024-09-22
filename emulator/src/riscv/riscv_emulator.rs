@@ -266,6 +266,9 @@ impl RiscvEmulator {
             }
         }
 
+        // Get the final public values.
+        let public_values = self.record.public_values;
+
         if !self.record.cpu_events.is_empty() {
             self.bump_record();
         }
@@ -276,7 +279,26 @@ impl RiscvEmulator {
             self.bump_record();
         }
 
-        // TODO save public inputs in each record
+        // Set the global public values for all shards.
+        let mut last_next_pc = 0;
+        let mut last_exit_code = 0;
+        for (i, record) in self.records.iter_mut().enumerate() {
+            record.public_values = public_values;
+            record.public_values.committed_value_digest = public_values.committed_value_digest;
+            record.public_values.deferred_proofs_digest = public_values.deferred_proofs_digest;
+            record.public_values.execution_shard = start_shard + i as u32;
+            if record.cpu_events.is_empty() {
+                record.public_values.start_pc = last_next_pc;
+                record.public_values.next_pc = last_next_pc;
+                record.public_values.exit_code = last_exit_code;
+            } else {
+                record.public_values.start_pc = record.cpu_events[0].pc;
+                record.public_values.next_pc = record.cpu_events.last().unwrap().next_pc;
+                record.public_values.exit_code = record.cpu_events.last().unwrap().exit_code;
+                last_next_pc = record.public_values.next_pc;
+                last_exit_code = record.public_values.exit_code;
+            }
+        }
 
         Ok(done)
     }
@@ -1130,8 +1152,8 @@ impl RiscvEmulator {
     pub fn bump_record(&mut self) {
         let removed_record =
             std::mem::replace(&mut self.record, EmulationRecord::new(self.program.clone()));
-        //let public_values = removed_record.public_values;
-        //self.record.public_values = public_values;
+        let public_values = removed_record.public_values;
+        self.record.public_values = public_values;
         self.records.push(removed_record);
     }
 
