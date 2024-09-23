@@ -52,7 +52,7 @@ where
             local.chunk,
             local.channel,
             CB::Expr::zero(), // local.nonce,
-            local.is_add_lookup_supported,
+            local.is_add,
         );
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
         builder.looked_alu(
@@ -63,7 +63,7 @@ where
             local.chunk,
             local.channel,
             CB::Expr::zero(), // local.nonce,
-            local.is_sub_lookup_supported,
+            local.is_sub,
         );
 
         let is_real = local.is_add + local.is_sub;

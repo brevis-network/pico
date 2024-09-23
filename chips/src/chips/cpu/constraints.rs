@@ -8,7 +8,6 @@ use crate::chips::cpu::{
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::Matrix;
-use pico_compiler::word::Word;
 use pico_machine::{
     builder::ChipBuilder,
     lookup::{LookupType, SymbolicLookup},
@@ -69,8 +68,6 @@ where
         );
 
         // ALU instructions.
-        let is_alu_lookup_supported: CB::Expr =
-            self.is_alu_lookup_supported::<CB>(&local.opcode_selector);
         builder.looking_alu(
             local.instruction.opcode,
             local.op_a_val(),
@@ -79,7 +76,7 @@ where
             local.chunk,
             local.channel,
             CB::Expr::zero(), // local.nonce,
-            is_alu_lookup_supported,
+            is_alu_instruction,
         );
 
         // Branch instructions.
@@ -143,14 +140,6 @@ where
 }
 
 impl<F: Field> CpuChip<F> {
-    /// TODO: Delete after all ALU opcodes integration.
-    pub(crate) fn is_alu_lookup_supported<CB: ChipBuilder<F>>(
-        &self,
-        opcode_selectors: &OpcodeSelectorCols<CB::Var>,
-    ) -> CB::Expr {
-        opcode_selectors.is_alu_lookup_supported.into()
-    }
-
     /// Whether the instruction is an ALU instruction.
     pub(crate) fn is_alu_instruction<CB: ChipBuilder<F>>(
         &self,

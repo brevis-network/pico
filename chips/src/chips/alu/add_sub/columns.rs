@@ -33,10 +33,4 @@ pub struct AddSubCols<T> {
 
     /// Boolean to indicate whether the row is for a sub operation.
     pub is_sub: T,
-
-    /// TODO: Delete after all ALU opcodes integration.
-    /// Boolean to indicate whether lookup is supported.
-    /// Specially for ADD and SUB, since the lookup arguments are different.
-    pub is_add_lookup_supported: T,
-    pub is_sub_lookup_supported: T,
 }

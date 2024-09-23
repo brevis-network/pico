@@ -1,8 +1,8 @@
-use std::{borrow::BorrowMut, marker::PhantomData};
-
+use super::columns::{ShiftRightCols, LONG_WORD_SIZE, NUM_SLR_COLS};
+use crate::chips::byte::utils::shr_carry;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::{debug, info};
+use log::debug;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -16,10 +16,7 @@ use pico_emulator::riscv::{
 };
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
-
-use crate::chips::{byte::utils::shr_carry, SUPPORTTED_ALU_LOOKUP_OPCODES};
-
-use super::columns::{ShiftRightCols, LONG_WORD_SIZE, NUM_SLR_COLS};
+use std::{borrow::BorrowMut, marker::PhantomData};
 
 /// A chip that implements bitwise operations for the opcodes SRL and SRA.
 #[derive(Default)]
@@ -133,10 +130,6 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             cols.is_sra = F::from_bool(event.opcode == Opcode::SRA);
 
             cols.is_real = F::one();
-
-            if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
-                cols.is_lookup_supported = F::one();
-            }
 
             for i in 0..BYTE_SIZE {
                 cols.c_least_sig_byte[i] = F::from_canonical_u32((event.c >> i) & 1);

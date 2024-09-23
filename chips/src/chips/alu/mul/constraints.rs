@@ -207,7 +207,6 @@ where
         }
 
         // Receive the arguments.
-        // TODO: Modify
         builder.looked_alu(
             opcode,
             local.a,
@@ -215,8 +214,8 @@ where
             local.c,
             local.chunk,
             local.channel,
-            CB::Expr::zero(),          // local.nonce,
-            local.is_lookup_supported, // local.is_real,
+            CB::Expr::zero(), // local.nonce,
+            local.is_real,
         );
     }
 }

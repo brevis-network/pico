@@ -48,8 +48,6 @@ pub struct LtCols<T: Copy> {
     pub is_sign_bit_same: T,
     /// The comparison bytes to be looked up.
     pub cmp_bytes: [T; 2],
-    /// is lookup enabled
-    pub is_lookup_supported: T,
 }
 
 pub const NUM_LT_COLS: usize = size_of::<LtCols<u8>>();

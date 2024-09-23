@@ -1,9 +1,6 @@
-use crate::chips::{
-    alu::add_sub::{
-        columns::{AddSubCols, NUM_ADD_SUB_COLS},
-        AddSubChip,
-    },
-    SUPPORTTED_ALU_LOOKUP_OPCODES,
+use crate::chips::alu::add_sub::{
+    columns::{AddSubCols, NUM_ADD_SUB_COLS},
+    AddSubChip,
 };
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
@@ -36,7 +33,7 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
     fn generate_main(
         &self,
         input: &EmulationRecord,
-        output: &mut Self::Record,
+        _output: &mut Self::Record,
     ) -> RowMajorMatrix<F> {
         debug!("{} chip - generate_main: BEGIN", self.name());
 
@@ -151,17 +148,5 @@ impl<F: Field> AddSubChip<F> {
             .populate(blu, event.chunk, event.channel, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
-
-        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
-            match event.opcode {
-                Opcode::ADD => {
-                    cols.is_add_lookup_supported = F::one();
-                }
-                Opcode::SUB => {
-                    cols.is_sub_lookup_supported = F::one();
-                }
-                _ => unreachable!(),
-            }
-        }
     }
 }

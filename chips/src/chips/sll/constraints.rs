@@ -155,7 +155,7 @@ where
             local.chunk,
             local.channel,
             F::zero(),
-            local.is_lookup_supported,
+            local.is_real,
         );
     }
 }

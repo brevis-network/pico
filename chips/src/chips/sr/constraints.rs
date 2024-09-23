@@ -1,5 +1,7 @@
-use std::borrow::Borrow;
-
+use super::{
+    columns::{ShiftRightCols, LONG_WORD_SIZE},
+    trace::ShiftRightChip,
+};
 use p3_air::{Air, AirBuilder};
 use p3_field::Field;
 use p3_matrix::Matrix;
@@ -8,11 +10,7 @@ use pico_compiler::{
     word::{BYTE_SIZE, WORD_SIZE},
 };
 use pico_machine::builder::ChipBuilder;
-
-use super::{
-    columns::{ShiftRightCols, LONG_WORD_SIZE},
-    trace::ShiftRightChip,
-};
+use std::borrow::Borrow;
 
 impl<F: Field, CB> Air<CB> for ShiftRightChip<F>
 where
@@ -227,7 +225,7 @@ where
             local.chunk,
             local.channel,
             F::zero(),
-            local.is_lookup_supported,
+            local.is_real,
         );
     }
 }

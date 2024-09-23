@@ -179,7 +179,7 @@ where
             local.chunk,
             local.channel,
             F::zero(),
-            local.is_lookup_supported,
+            is_real,
         )
     }
 }

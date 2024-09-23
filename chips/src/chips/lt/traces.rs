@@ -1,11 +1,8 @@
-use crate::chips::{
-    lt::columns::{LtCols, NUM_LT_COLS},
-    SUPPORTTED_ALU_LOOKUP_OPCODES,
-};
+use crate::chips::lt::columns::{LtCols, NUM_LT_COLS};
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
-use log::{debug, info};
+use log::debug;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -174,10 +171,6 @@ impl<F: PrimeField32> LtChip<F> {
         } else {
             F::one()
         };
-
-        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
-            cols.is_lookup_supported = F::one();
-        }
 
         cols.is_slt = F::from_bool(event.opcode == Opcode::SLT);
         cols.is_slt_u = F::from_bool(event.opcode == Opcode::SLTU);

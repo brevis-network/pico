@@ -59,14 +59,6 @@ pub struct MulCols<T> {
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
-
-    /// TODO: Delete after all ALU opcodes integration.
-    /// Boolean to indicate whether lookup is supported.
-    pub is_lookup_supported: T,
-
-    /// TODO: Delete after all ALU opcodes integration.
-    /// Avoid `degree multiple is too high`.
-    pub opcode: T,
 }
 
 /// The number of main trace columns for `MulChip`.

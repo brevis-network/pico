@@ -17,10 +17,7 @@ use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::borrow::BorrowMut;
 
-use crate::chips::{
-    alu::mul::{columns::MulCols, utils::get_msb, BYTE_MASK, PRODUCT_SIZE},
-    SUPPORTTED_ALU_LOOKUP_OPCODES,
-};
+use crate::chips::alu::mul::{columns::MulCols, utils::get_msb, BYTE_MASK, PRODUCT_SIZE};
 
 use super::{columns::NUM_MUL_COLS, MulChip};
 
@@ -162,11 +159,6 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                             // );
                         }
 
-                        // TODO: Remove
-                        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
-                            cols.is_lookup_supported = F::one();
-                        }
-                        cols.opcode = event.opcode.as_field::<F>();
                         row
                     })
                     .collect::<Vec<_>>();

@@ -1,10 +1,7 @@
-use crate::chips::{
-    sll::columns::{ShiftLeftCols, NUM_SLL_COLS},
-    SUPPORTTED_ALU_LOOKUP_OPCODES,
-};
+use crate::chips::sll::columns::{ShiftLeftCols, NUM_SLL_COLS};
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::{debug, info};
+use log::debug;
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -115,10 +112,6 @@ impl<F: Field> SLLChip<F> {
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
         cols.is_real = F::one();
-
-        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
-            cols.is_lookup_supported = F::one();
-        }
 
         for i in 0..BYTE_SIZE {
             // get c least 8 bits (a byte)

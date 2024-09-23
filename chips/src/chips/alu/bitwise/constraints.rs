@@ -65,7 +65,7 @@ where
             local.chunk,
             local.channel,
             CB::Expr::zero(), // local.nonce,
-            local.is_lookup_supported,
+            local.is_and + local.is_or + local.is_xor,
         );
 
         let is_real = local.is_xor + local.is_or + local.is_and;

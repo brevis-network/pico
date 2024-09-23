@@ -46,8 +46,4 @@ pub struct ShiftLeftCols<T: Copy + Sized> {
     pub shift_by_n_bytes: [T; WORD_SIZE],
 
     pub is_real: T,
-
-    /// TODO: Delete after all ALU opcodes integration.
-    /// Boolean to indicate whether lookup is supported.
-    pub is_lookup_supported: T,
 }
