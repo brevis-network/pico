@@ -2,6 +2,7 @@ use super::{
     columns::{BitwiseCols, NUM_BITWISE_COLS},
     BitwiseChip,
 };
+use crate::chips::SUPPORTTED_ALU_LOOKUP_OPCODES;
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -111,6 +112,10 @@ impl<F: Field> BitwiseChip<F> {
         cols.is_xor = F::from_bool(event.opcode == Opcode::XOR);
         cols.is_or = F::from_bool(event.opcode == Opcode::OR);
         cols.is_and = F::from_bool(event.opcode == Opcode::AND);
+
+        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
+            cols.is_lookup_supported = F::one();
+        }
 
         for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
             let byte_event = ByteLookupEvent {

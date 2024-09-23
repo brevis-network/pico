@@ -153,8 +153,15 @@ impl<F: Field> AddSubChip<F> {
         cols.operand_2 = Word::from(operand_2);
 
         if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
-            cols.is_lookup_supported = F::one();
+            match event.opcode {
+                Opcode::ADD => {
+                    cols.is_add_lookup_supported = F::one();
+                }
+                Opcode::SUB => {
+                    cols.is_sub_lookup_supported = F::one();
+                }
+                _ => unreachable!(),
+            }
         }
-        cols.opcode = event.opcode.as_field::<F>();
     }
 }

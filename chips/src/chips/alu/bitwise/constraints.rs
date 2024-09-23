@@ -56,19 +56,17 @@ where
             + local.is_or * Opcode::OR.as_field::<CB::F>()
             + local.is_and * Opcode::AND.as_field::<CB::F>();
 
-        /* TODO: Enable after we have the full ALU chips.
-                // Looking the ALU arguments.
-                builder.looking_alu(
-                    cpu_opcode,
-                    local.a,
-                    local.b,
-                    local.c,
-                    local.chunk,
-                    local.channel,
-                    local.nonce,
-                    local.is_xor + local.is_or + local.is_and,
-                );
-        */
+        // Looked the ALU arguments.
+        builder.looked_alu(
+            cpu_opcode,
+            local.a,
+            local.b,
+            local.c,
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // local.nonce,
+            local.is_lookup_supported,
+        );
 
         let is_real = local.is_xor + local.is_or + local.is_and;
         builder.assert_bool(local.is_xor);

@@ -36,8 +36,7 @@ pub struct AddSubCols<T> {
 
     /// TODO: Delete after all ALU opcodes integration.
     /// Boolean to indicate whether lookup is supported.
-    pub is_lookup_supported: T,
-    /// TODO: Delete after all ALU opcodes integration.
-    /// Avoid `degree multiple is too high`.
-    pub opcode: T,
+    /// Specially for ADD and SUB, since the lookup arguments are different.
+    pub is_add_lookup_supported: T,
+    pub is_sub_lookup_supported: T,
 }

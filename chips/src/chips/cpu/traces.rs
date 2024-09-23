@@ -6,13 +6,11 @@ use crate::chips::{
     memory::read_write::columns::MemoryCols,
 };
 use hashbrown::HashMap;
-use itertools::Itertools;
-use log::{debug, info};
+use log::debug;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::ParallelSlice;
-use pico_compiler::opcode::{ByteOpcode, Opcode};
+use pico_compiler::opcode::Opcode;
 use pico_emulator::riscv::{
     events::{AluEvent, ByteRecordBehavior, CpuEvent, MemoryRecordEnum},
     record::EmulationRecord,

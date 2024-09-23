@@ -35,4 +35,8 @@ pub struct BitwiseCols<T> {
 
     /// If the opcode is AND.
     pub is_and: T,
+
+    /// TODO: Delete after all ALU opcodes integration.
+    /// Boolean to indicate whether lookup is supported.
+    pub is_lookup_supported: T,
 }

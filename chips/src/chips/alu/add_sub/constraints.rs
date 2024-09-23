@@ -1,5 +1,8 @@
 use crate::{
-    chips::alu::add_sub::{columns::AddSubCols, AddSubChip},
+    chips::{
+        alu::add_sub::{columns::AddSubCols, AddSubChip},
+        Opcode,
+    },
     gadgets::add::AddOperation,
 };
 use p3_air::{Air, AirBuilder};
@@ -36,17 +39,31 @@ where
             local.is_add + local.is_sub,
         );
 
+        let opcode = local.is_add * Opcode::ADD.as_field::<CB::F>()
+            + local.is_sub * Opcode::SUB.as_field::<CB::F>();
+
         // Receive the arguments.  There are seperate receives for ADD and SUB.
         // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
         builder.looked_alu(
-            local.opcode,
+            opcode.clone(),
             local.add_operation.value,
             local.operand_1,
             local.operand_2,
             local.chunk,
             local.channel,
             CB::Expr::zero(), // local.nonce,
-            local.is_lookup_supported,
+            local.is_add_lookup_supported,
+        );
+        // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
+        builder.looked_alu(
+            opcode,
+            local.operand_1,
+            local.add_operation.value,
+            local.operand_2,
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // local.nonce,
+            local.is_sub_lookup_supported,
         );
 
         let is_real = local.is_add + local.is_sub;
