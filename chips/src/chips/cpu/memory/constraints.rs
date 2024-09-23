@@ -7,10 +7,12 @@ use crate::{
         memory::read_write::columns::MemoryCols,
     },
     gadgets::baby_bear_word::BabyBearWordRangeChecker,
+    utils::memory::MemoryAirBuilder,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::word::Word;
+use pico_emulator::riscv::events::MemoryAccessPosition;
 use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
@@ -135,18 +137,16 @@ impl<F: Field> CpuChip<F> {
             .when(is_memory_instruction.clone())
             .assert_eq(memory_columns.addr_word[0] - offset, recomposed_byte);
 
-        /* TODO: Enable after adding memory read write chip.
-                // For operations that require reading from memory (not registers), we need to read the
-                // value into the memory columns.
-                builder.eval_memory_access(
-                    local.chunk,
-                    local.channel,
-                    local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::Memory as u32),
-                    memory_columns.addr_aligned,
-                    &memory_columns.memory_access,
-                    is_memory_instruction.clone(),
-                );
-        */
+        // For operations that require reading from memory (not registers), we need to read the
+        // value into the memory columns.
+        builder.eval_memory_access(
+            local.chunk,
+            local.channel,
+            local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::Memory as u32),
+            memory_columns.addr_aligned,
+            &memory_columns.memory_access,
+            is_memory_instruction.clone(),
+        );
 
         /* TODO: Enable after adding word gadget.
                 // On memory load instructions, make sure that the memory value is not changed.

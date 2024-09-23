@@ -27,12 +27,10 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
             MemoryChipType::Finalize => input.memory_finalize_events.clone(),
         };
 
-        /* TODO: Enable after adding public values.
-                let previous_addr_bits = match self.kind {
-                    MemoryChipType::Initialize => input.public_values.previous_init_addr_bits,
-                    MemoryChipType::Finalize => input.public_values.previous_finalize_addr_bits,
-                };
-        */
+        let previous_addr_bits = match self.kind {
+            MemoryChipType::Initialize => input.public_values.previous_init_addr_bits,
+            MemoryChipType::Finalize => input.public_values.previous_finalize_addr_bits,
+        };
 
         memory_events.sort_by_key(|event| event.addr);
         let rows: Vec<[F; NUM_MEMORY_INITIALIZE_FINALIZE_COLS]> = (0..memory_events.len()) // OPT: change this to par_iter
@@ -54,22 +52,20 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                 cols.value = array::from_fn(|i| F::from_canonical_u32((value >> i) & 1));
                 cols.is_real = F::from_canonical_u32(used);
 
-                /* TODO: Enable after adding public values.
-                                if i == 0 {
-                                    let prev_addr = previous_addr_bits
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(j, bit)| bit * (1 << j))
-                                        .sum::<u32>();
-                                    cols.is_prev_addr_zero.populate(prev_addr);
-                                    cols.is_first_comp = F::from_bool(prev_addr != 0);
-                                    if prev_addr != 0 {
-                                        debug_assert!(prev_addr < addr, "prev_addr {} < addr {}", prev_addr, addr);
-                                        let addr_bits: [_; 32] = array::from_fn(|i| (addr >> i) & 1);
-                                        cols.lt_cols.populate(&previous_addr_bits, &addr_bits);
-                                    }
-                                }
-                */
+                if i == 0 {
+                    let prev_addr = previous_addr_bits
+                        .iter()
+                        .enumerate()
+                        .map(|(j, bit)| bit * (1 << j))
+                        .sum::<u32>();
+                    cols.is_prev_addr_zero.populate(prev_addr);
+                    cols.is_first_comp = F::from_bool(prev_addr != 0);
+                    if prev_addr != 0 {
+                        debug_assert!(prev_addr < addr, "prev_addr {} < addr {}", prev_addr, addr);
+                        let addr_bits: [_; 32] = array::from_fn(|i| (addr >> i) & 1);
+                        cols.lt_cols.populate(&previous_addr_bits, &addr_bits);
+                    }
+                }
 
                 if i != 0 {
                     let prev_is_real = memory_events[i - 1].used;
