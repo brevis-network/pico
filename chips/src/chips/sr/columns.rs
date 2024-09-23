@@ -61,4 +61,8 @@ pub struct ShiftRightCols<T: Copy> {
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
+
+    /// TODO: Delete after all ALU opcodes integration.
+    /// Boolean to indicate whether lookup is supported.
+    pub is_lookup_supported: T,
 }

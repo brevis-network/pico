@@ -31,7 +31,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + zero.clone(), next.nonce);
+            .assert_eq(local.nonce + one.clone(), next.nonce);
 
         // Check that the MSB of most_significant_byte matches local.b_msb using lookup.
         {
@@ -195,19 +195,19 @@ where
             }
         }
 
-        // Range check bytes.
-        {
-            let long_words = [
-                local.byte_shift_result,
-                local.bit_shift_result,
-                local.shr_carry_output_carry,
-                local.shr_carry_output_shifted_byte,
-            ];
+        // todo: open this whenn Range check bytes is ready
+        // {
+        //     let long_words = [
+        //         local.byte_shift_result,
+        //         local.bit_shift_result,
+        //         local.shr_carry_output_carry,
+        //         local.shr_carry_output_shifted_byte,
+        //     ];
 
-            for long_word in long_words.iter() {
-                builder.slice_range_check_u8(long_word, local.chunk, local.channel, local.is_real);
-            }
-        }
+        //     for long_word in long_words.iter() {
+        //         builder.slice_range_check_u8(long_word, local.chunk, local.channel, local.is_real);
+        //     }
+        // }
 
         // Check that the operation flags are boolean.
         builder.assert_bool(local.is_srl);
@@ -226,8 +226,8 @@ where
             local.c,
             local.chunk,
             local.channel,
-            local.nonce,
-            local.is_real,
+            F::zero(),
+            local.is_lookup_supported,
         );
     }
 }

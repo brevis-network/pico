@@ -13,7 +13,7 @@ use pico_compiler::opcode::Opcode;
 
 // Mark the opcodes which support lookup Temporarily.
 // TODO: Finally we will support all.
-pub(crate) const SUPPORTTED_ALU_LOOKUP_OPCODES: [Opcode; 15] = [
+pub(crate) const SUPPORTTED_ALU_LOOKUP_OPCODES: [Opcode; 18] = [
     Opcode::ADD,
     Opcode::SUB,
     Opcode::MUL,
@@ -29,4 +29,7 @@ pub(crate) const SUPPORTTED_ALU_LOOKUP_OPCODES: [Opcode; 15] = [
     Opcode::XOR,
     Opcode::SLT,
     Opcode::SLTU,
+    Opcode::SLL,
+    Opcode::SRL,
+    Opcode::SRA,
 ];

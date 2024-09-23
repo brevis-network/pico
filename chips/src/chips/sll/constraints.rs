@@ -128,20 +128,24 @@ where
 
         builder.assert_bool(local.is_real);
 
-        // range check
-        builder.slice_range_check_u8(
-            &local.shift_result,
-            local.chunk,
-            local.channel,
-            local.is_real,
-        );
-        builder.slice_range_check_u8(
-            &local.shift_result_carry,
-            local.chunk,
-            local.channel,
-            local.is_real,
-        );
+        // TODO: open this block code when Range checks is ready
 
+        // range check
+        // {
+        //     builder.slice_range_check_u8(
+        //         &local.shift_result,
+        //         local.chunk,
+        //         local.channel,
+        //         local.is_real,
+        //     );
+        // builder.slice_range_check_u8(
+        //     &local.shift_result_carry,
+        //     local.chunk,
+        //     local.channel,
+        //     local.is_real,
+        // );
+
+        // }
         self.looked_sll(
             builder,
             F::from_canonical_u32(Opcode::SLL as u32),
@@ -150,8 +154,8 @@ where
             local.c,
             local.chunk,
             local.channel,
-            local.nonce,
-            local.is_real,
+            F::zero(),
+            local.is_lookup_supported,
         );
     }
 }

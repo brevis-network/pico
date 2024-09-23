@@ -17,7 +17,7 @@ use pico_emulator::riscv::{
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 
-use crate::chips::byte::utils::shr_carry;
+use crate::chips::{byte::utils::shr_carry, SUPPORTTED_ALU_LOOKUP_OPCODES};
 
 use super::columns::{ShiftRightCols, LONG_WORD_SIZE, NUM_SLR_COLS};
 
@@ -134,6 +134,10 @@ impl<F: PrimeField32> ShiftRightChip<F> {
 
             cols.is_real = F::one();
 
+            if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
+                cols.is_lookup_supported = F::one();
+            }
+
             for i in 0..BYTE_SIZE {
                 cols.c_least_sig_byte[i] = F::from_canonical_u32((event.c >> i) & 1);
             }
@@ -213,11 +217,11 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             for i in 0..WORD_SIZE {
                 debug_assert_eq!(cols.a[i], cols.bit_shift_result[i].clone());
             }
-            // Range checks.
-            blu.add_u8_range_checks(event.chunk, event.channel, &byte_shift_result);
-            blu.add_u8_range_checks(event.chunk, event.channel, &bit_shift_result);
-            blu.add_u8_range_checks(event.chunk, event.channel, &shr_carry_output_carry);
-            blu.add_u8_range_checks(event.chunk, event.channel, &shr_carry_output_shifted_byte);
+            // todo: open Range checks when range check is ready.
+            // blu.add_u8_range_checks(event.chunk, event.channel, &byte_shift_result);
+            // blu.add_u8_range_checks(event.chunk, event.channel, &bit_shift_result);
+            // blu.add_u8_range_checks(event.chunk, event.channel, &shr_carry_output_carry);
+            // blu.add_u8_range_checks(event.chunk, event.channel, &shr_carry_output_shifted_byte);
         }
     }
 }

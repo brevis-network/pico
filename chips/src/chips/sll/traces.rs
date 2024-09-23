@@ -1,4 +1,7 @@
-use crate::chips::sll::columns::{ShiftLeftCols, NUM_SLL_COLS};
+use crate::chips::{
+    sll::columns::{ShiftLeftCols, NUM_SLL_COLS},
+    SUPPORTTED_ALU_LOOKUP_OPCODES,
+};
 use hashbrown::HashMap;
 use itertools::Itertools;
 use log::{debug, info};
@@ -112,6 +115,11 @@ impl<F: Field> SLLChip<F> {
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
         cols.is_real = F::one();
+
+        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
+            cols.is_lookup_supported = F::one();
+        }
+
         for i in 0..BYTE_SIZE {
             // get c least 8 bits (a byte)
             cols.c_lsb[i] = F::from_canonical_u32((event.c >> i) & 1);
@@ -145,11 +153,11 @@ impl<F: Field> SLLChip<F> {
             cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
         }
 
-        // Range checks.
-        {
-            blu.add_u8_range_checks(event.chunk, event.channel, &shift_result);
-            blu.add_u8_range_checks(event.chunk, event.channel, &shift_result_carry);
-        }
+        // TODO: open this block code when Range checks is ready
+        // {
+        // blu.add_u8_range_checks(event.chunk, event.channel, &shift_result);
+        //     blu.add_u8_range_checks(event.chunk, event.channel, &shift_result_carry);
+        // }
 
         // Sanity check.
         for i in num_bytes_to_shift..WORD_SIZE {

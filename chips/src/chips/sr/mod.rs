@@ -1,3 +1,3 @@
-mod columns;
-mod constraints;
-mod trace;
+pub mod columns;
+pub mod constraints;
+pub mod trace;
