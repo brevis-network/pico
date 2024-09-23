@@ -2,6 +2,7 @@ use crate::chips::lt::columns::{LtCols, NUM_LT_COLS};
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
+use log::{debug, info};
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -31,10 +32,11 @@ impl<F: Field> BaseAir<F> for LtChip<F> {
 impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
     type Record = EmulationRecord;
     fn name(&self) -> String {
-        "LtChip".to_string()
+        "LessThan".to_string()
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        debug!("{} chip - generate_main: BEGIN", self.name());
         let mut trace = RowMajorMatrix::new(
             vec![F::zero(); NUM_LT_COLS * input.clone().lt_events.len()],
             NUM_LT_COLS,
@@ -58,10 +60,17 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
             cols.nonce = F::from_canonical_usize(i);
         }
 
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
+
         trace
     }
 
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+        debug!("{} chip - extra_record: BEGIN", self.name());
         let chunk_size = std::cmp::max(input.lt_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
@@ -79,6 +88,7 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
             .collect::<Vec<_>>();
 
         extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        debug!("{} chip - extra_record: END", self.name());
     }
 }
 

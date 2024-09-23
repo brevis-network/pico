@@ -1,6 +1,7 @@
 use crate::chips::sll::columns::{ShiftLeftCols, NUM_SLL_COLS};
 use hashbrown::HashMap;
 use itertools::Itertools;
+use log::{debug, info};
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -26,10 +27,11 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
     type Record = EmulationRecord;
 
     fn name(&self) -> String {
-        "Left Shift Chip".to_string()
+        "ShiftLeft".to_string()
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
+        debug!("{} chip - generate_main: BEGIN", self.name());
         let rows = input.shift_left_events.clone().len();
         let mut trace = RowMajorMatrix::new(vec![F::zero(); NUM_SLL_COLS * rows], NUM_SLL_COLS);
         trace
@@ -62,10 +64,17 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
                 trace.values[i * NUM_SLL_COLS..(i + 1) * NUM_SLL_COLS].borrow_mut();
             cols.nonce = F::from_canonical_usize(i);
         }
+
+        debug!(
+            "{} chip - generate_main: END - trace len {}",
+            self.name(),
+            trace.values.len()
+        );
         trace
     }
 
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+        debug!("{} chip - extra_record: BEGIN", self.name());
         let chunk_size = std::cmp::max(input.shift_left_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
@@ -83,6 +92,7 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
             .collect::<Vec<_>>();
 
         extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        debug!("{} chip - extra_record: END", self.name());
     }
 }
 
