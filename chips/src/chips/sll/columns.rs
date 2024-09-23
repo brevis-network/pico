@@ -7,8 +7,8 @@ pub const NUM_SLL_COLS: usize = size_of::<ShiftLeftCols<u8>>();
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Copy, Clone)]
 pub struct ShiftLeftCols<T: Copy + Sized> {
-    /// The shard number, used for byte lookup table.
-    pub shard: T,
+    /// The chunk number, used for byte lookup table.
+    pub chunk: T,
 
     /// The channel number, used for byte lookup table.
     pub channel: T,

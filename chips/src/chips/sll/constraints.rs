@@ -131,13 +131,13 @@ where
         // range check
         builder.slice_range_check_u8(
             &local.shift_result,
-            local.shard,
+            local.chunk,
             local.channel,
             local.is_real,
         );
         builder.slice_range_check_u8(
             &local.shift_result_carry,
-            local.shard,
+            local.chunk,
             local.channel,
             local.is_real,
         );
@@ -148,7 +148,7 @@ where
             local.a,
             local.b,
             local.c,
-            local.shard,
+            local.chunk,
             local.channel,
             local.nonce,
             local.is_real,
@@ -165,7 +165,7 @@ impl<F: Field> SLLChip<F> {
         a: Word<impl Into<CB::Expr>>,
         b: Word<impl Into<CB::Expr>>,
         c: Word<impl Into<CB::Expr>>,
-        shard: impl Into<CB::Expr>,
+        chunk: impl Into<CB::Expr>,
         channel: impl Into<CB::Expr>,
         nonce: impl Into<CB::Expr>,
         multiplicity: impl Into<CB::Expr>,
@@ -174,7 +174,7 @@ impl<F: Field> SLLChip<F> {
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
-            .chain(once(shard.into()))
+            .chain(once(chunk.into()))
             .chain(once(channel.into()))
             .chain(once(nonce.into()))
             .collect();

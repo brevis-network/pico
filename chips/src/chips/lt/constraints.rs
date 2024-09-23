@@ -139,7 +139,7 @@ where
             local.b_masked,
             local.b[3],
             CB::F::from_canonical_u8(0x7f),
-            local.shard,
+            local.chunk,
             local.channel,
             is_real.clone(),
         );
@@ -150,7 +150,7 @@ where
             local.c_masked,
             local.c[3],
             CB::F::from_canonical_u8(0x7f),
-            local.shard,
+            local.chunk,
             local.channel,
             is_real.clone(),
         );
@@ -161,7 +161,7 @@ where
             local.slt_u,
             b_comp_byte,
             c_comp_byte,
-            local.shard,
+            local.chunk,
             local.channel,
             is_real.clone(),
         );
@@ -175,7 +175,7 @@ where
             local.a,
             local.b,
             local.c,
-            local.shard,
+            local.chunk,
             local.channel,
             local.nonce,
             is_real,
@@ -192,7 +192,7 @@ impl<F: Field> LtChip<F> {
         a: Word<impl Into<CB::Expr>>,
         b: Word<impl Into<CB::Expr>>,
         c: Word<impl Into<CB::Expr>>,
-        shard: impl Into<CB::Expr>,
+        chunk: impl Into<CB::Expr>,
         channel: impl Into<CB::Expr>,
         nonce: impl Into<CB::Expr>,
         multiplicity: impl Into<CB::Expr>,
@@ -201,7 +201,7 @@ impl<F: Field> LtChip<F> {
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
-            .chain(once(shard.into()))
+            .chain(once(chunk.into()))
             .chain(once(channel.into()))
             .chain(once(nonce.into()))
             .collect();

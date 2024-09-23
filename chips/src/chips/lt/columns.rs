@@ -6,8 +6,8 @@ use std::mem::size_of;
 #[derive(AlignedBorrow, Default, Clone, Copy)]
 #[repr(C)]
 pub struct LtCols<T: Copy> {
-    /// The shard number, used for byte lookup table.
-    pub shard: T,
+    /// The chunk number, used for byte lookup table.
+    pub chunk: T,
     /// The channel number, used for byte lookup table.
     pub channel: T,
     /// The nonce of the operation.
