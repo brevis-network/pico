@@ -20,7 +20,7 @@ use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 
 use crate::chips::{
     alu::mul::{columns::MulCols, utils::get_msb, BYTE_MASK, PRODUCT_SIZE},
-    SUPPORTED_ALU_LOOKUP_OPCODES,
+    SUPPORTTED_ALU_LOOKUP_OPCODES,
 };
 
 use super::{columns::NUM_MUL_COLS, MulChip};
@@ -164,7 +164,7 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                         }
 
                         // TODO: Remove
-                        if SUPPORTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
+                        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
                             cols.is_lookup_supported = F::one();
                         }
                         cols.opcode = event.opcode.as_field::<F>();

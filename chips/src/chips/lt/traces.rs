@@ -9,8 +9,9 @@ use pico_compiler::{
     opcode::{ByteOpcode, Opcode},
     word::Word,
 };
+
 use pico_emulator::riscv::{
-    events::{AluEvent, ByteLookupEvent, ByteRecord},
+    events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
     record::EmulationRecord,
 };
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
@@ -33,7 +34,7 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
         "LtChip".to_string()
     }
 
-    fn generate_main(&self, input: &EmulationRecord) -> RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         let mut trace = RowMajorMatrix::new(
             vec![F::zero(); NUM_LT_COLS * input.clone().lt_events.len()],
             NUM_LT_COLS,
@@ -77,17 +78,22 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
             })
             .collect::<Vec<_>>();
 
-        extra.add_sharded_byte_lookup_events(blu_batches.iter().collect_vec());
+        extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
     }
 }
 
 impl<F: PrimeField32> LtChip<F> {
-    fn event_to_row(&self, event: &AluEvent, cols: &mut LtCols<F>, blu: &mut impl ByteRecord) {
+    fn event_to_row(
+        &self,
+        event: &AluEvent,
+        cols: &mut LtCols<F>,
+        blu: &mut impl ByteRecordBehavior,
+    ) {
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 
-        cols.shard = F::from_canonical_u32(event.shard);
+        cols.shard = F::from_canonical_u32(event.chunk);
         cols.channel = F::from_canonical_u8(event.channel);
         cols.a = Word(a.map(F::from_canonical_u8));
         cols.b = Word(b.map(F::from_canonical_u8));
@@ -101,7 +107,7 @@ impl<F: PrimeField32> LtChip<F> {
 
         // Send the masked interaction.
         blu.add_byte_lookup_event(ByteLookupEvent {
-            shard: event.shard,
+            chunk: event.chunk,
             channel: event.channel,
             opcode: ByteOpcode::AND,
             a1: masked_b as u16,
@@ -110,7 +116,7 @@ impl<F: PrimeField32> LtChip<F> {
             c: 0x7f,
         });
         blu.add_byte_lookup_event(ByteLookupEvent {
-            shard: event.shard,
+            chunk: event.chunk,
             channel: event.channel,
             opcode: ByteOpcode::AND,
             a1: masked_c as u16,
@@ -166,7 +172,7 @@ impl<F: PrimeField32> LtChip<F> {
         );
 
         blu.add_byte_lookup_event(ByteLookupEvent {
-            shard: event.shard,
+            chunk: event.chunk,
             channel: event.channel,
             opcode: ByteOpcode::LTU,
             a1: cols.slt_u.as_canonical_u32() as u16,

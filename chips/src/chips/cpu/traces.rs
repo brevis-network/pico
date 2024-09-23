@@ -4,7 +4,6 @@ use crate::chips::{
         CpuChip,
     },
     memory::read_write::columns::MemoryCols,
-    SUPPORTED_ALU_LOOKUP_OPCODES,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;

@@ -3,7 +3,7 @@ use crate::chips::{
         columns::{AddSubCols, NUM_ADD_SUB_COLS},
         AddSubChip,
     },
-    SUPPORTED_ALU_LOOKUP_OPCODES,
+    SUPPORTTED_ALU_LOOKUP_OPCODES,
 };
 use core::borrow::BorrowMut;
 use log::{debug, info};
@@ -152,7 +152,7 @@ impl<F: Field> AddSubChip<F> {
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
 
-        if SUPPORTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
+        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
             cols.is_lookup_supported = F::one();
         }
         cols.opcode = event.opcode.as_field::<F>();
