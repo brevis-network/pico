@@ -6,14 +6,16 @@ use crate::chips::{
     SUPPORTTED_ALU_LOOKUP_OPCODES,
 };
 use core::borrow::BorrowMut;
-use log::{debug, info};
+use hashbrown::HashMap;
+use itertools::Itertools;
+use log::debug;
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
+use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use pico_compiler::{opcode::Opcode, word::Word};
 use pico_emulator::riscv::{
-    events::{AluEvent, ByteRecordBehavior},
+    events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
     record::EmulationRecord,
 };
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
@@ -96,38 +98,36 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
         trace
     }
 
-    /*
-        fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
-            info!("AddSubChip - extra_record: BEGIN");
+    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+        debug!("AddSubChip - extra_record: BEGIN");
 
-            let chunk_size = std::cmp::max(
-                (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
-                1,
-            );
+        let chunk_size = std::cmp::max(
+            (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
+            1,
+        );
 
-            let event_iter = input
-                .add_events
-                .chunks(chunk_size)
-                .chain(input.sub_events.chunks(chunk_size));
+        let event_iter = input
+            .add_events
+            .chunks(chunk_size)
+            .chain(input.sub_events.chunks(chunk_size));
 
-            let blu_batches = event_iter
-                .par_bridge()
-                .map(|events| {
-                    let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
-                    events.iter().for_each(|event| {
-                        let mut row = [F::zero(); NUM_ADD_SUB_COLS];
-                        let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                        self.event_to_row(event, cols, &mut blu);
-                    });
-                    blu
-                })
-                .collect::<Vec<_>>();
+        let blu_batches = event_iter
+            .par_bridge()
+            .map(|events| {
+                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                events.iter().for_each(|event| {
+                    let mut row = [F::zero(); NUM_ADD_SUB_COLS];
+                    let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
+                    self.event_to_row(event, cols, &mut blu);
+                });
+                blu
+            })
+            .collect::<Vec<_>>();
 
-            extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
 
-            info!("AddSubChip - extra_record: END");
-        }
-    */
+        debug!("AddSubChip - extra_record: END");
+    }
 }
 
 impl<F: Field> AddSubChip<F> {

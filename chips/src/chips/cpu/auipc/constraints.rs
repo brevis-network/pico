@@ -30,18 +30,16 @@ impl<F: PrimeField32> CpuChip<F> {
             local.opcode_selector.is_auipc.into(),
         );
 
-        /* TODO: Enable after lookup integration.
-                // Verify that op_a == pc + op_b.
-                builder.send_alu(
-                    CB::Expr::from_canonical_u32(Opcode::ADD as u32),
-                    local.op_a_val(),
-                    auipc_columns.pc,
-                    local.op_b_val(),
-                    local.chunk,
-                    local.channel,
-                    auipc_columns.auipc_nonce,
-                    local.opcode_selector.is_auipc,
-                );
-        */
+        // Verify that op_a == pc + op_b.
+        builder.looking_alu(
+            CB::Expr::from_canonical_u32(Opcode::ADD as u32),
+            local.op_a_val(),
+            auipc_columns.pc,
+            local.op_b_val(),
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // auipc_columns.auipc_nonce,
+            local.opcode_selector.is_auipc,
+        );
     }
 }

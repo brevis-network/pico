@@ -2,7 +2,7 @@ use core::borrow::Borrow;
 
 use p3_air::{Air, BaseAir};
 use p3_field::{AbstractField, Field};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::Matrix;
 
 use pico_compiler::opcode::ByteOpcode;
 

@@ -6,18 +6,20 @@ use crate::chips::{
     memory::read_write::columns::MemoryCols,
 };
 use hashbrown::HashMap;
+use itertools::Itertools;
 use log::debug;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use pico_compiler::opcode::Opcode;
+use p3_maybe_rayon::prelude::ParallelSlice;
+use pico_compiler::opcode::{ByteOpcode::U8Range, Opcode};
 use pico_emulator::riscv::{
-    events::{AluEvent, ByteRecordBehavior, CpuEvent, MemoryRecordEnum},
+    events::{AluEvent, ByteLookupEvent, ByteRecordBehavior, CpuEvent, MemoryRecordEnum},
     record::EmulationRecord,
 };
 use pico_machine::chip::ChipBehavior;
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
-use std::borrow::BorrowMut;
+use std::{borrow::BorrowMut, os::unix::fs::OpenOptionsExt};
 
 impl<F: Field> BaseAir<F> for CpuChip<F> {
     fn width(&self) -> usize {
@@ -77,38 +79,35 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         trace
     }
 
-    /* TODO: Enable after lookup integration.
-            #[instrument(name = "generate cpu dependencies", level = "debug", skip_all)]
-            fn generate_dependencies(&self, input: &Self::Record, output: &mut Self::Record) {
-                // Generate the trace rows for each event.
-                let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
-                let (alu_events, blu_events): (Vec<_>, Vec<_>) = input
-                    .cpu_events
-                    .par_chunks(chunk_size)
-                    .map(|ops: &[CpuEvent]| {
-                        let mut alu = HashMap::new();
-                        // The blu map stores chunk -> map(byte lookup event -> multiplicity).
-                        let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
-                        ops.iter().for_each(|op| {
-                            let mut row = [F::zero(); NUM_CPU_COLS];
-                            let cols: &mut CpuCols<F> = row.as_mut_slice().borrow_mut();
-                            let alu_events = self.event_to_row::<F>(op, &HashMap::new(), cols, &mut blu);
-                            alu_events.into_iter().for_each(|(key, value)| {
-                                alu.entry(key).or_insert(Vec::default()).extend(value);
-                            });
-                        });
-                        (alu, blu)
-                    })
-                    .unzip();
-                for alu_events_chunk in alu_events.into_iter() {
-                    output.add_alu_events(alu_events_chunk);
-                }
-                output.add_chunked_byte_lookup_events(blu_events.iter().collect_vec());
-            }
-        fn included(&self, input: &Self::Record) -> bool {
-            !input.cpu_events.is_empty()
+    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+        debug!("{} chip - extra_record: BEGIN", self.name());
+        // Generate the trace rows for each event.
+        let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
+        let (alu_events, blu_events): (Vec<_>, Vec<_>) = input
+            .cpu_events
+            .par_chunks(chunk_size)
+            .map(|ops: &[CpuEvent]| {
+                let mut alu = HashMap::new();
+                // The blu map stores chunk -> map(byte lookup event -> multiplicity).
+                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                ops.iter().for_each(|op| {
+                    let mut row = [F::zero(); NUM_CPU_COLS];
+                    let cols: &mut CpuCols<F> = row.as_mut_slice().borrow_mut();
+                    let alu_events = self.event_to_row(op, &HashMap::new(), cols, &mut blu);
+                    alu_events.into_iter().for_each(|(key, value)| {
+                        alu.entry(key).or_insert(Vec::default()).extend(value);
+                    });
+                });
+                (alu, blu)
+            })
+            .unzip();
+        for alu_events_chunk in alu_events.into_iter() {
+            extra.add_alu_events(alu_events_chunk);
         }
-    */
+        // TODO: Enable after fixing range-check.
+        // extra.add_chunked_byte_lookup_events(blu_events.iter().collect_vec());
+        debug!("{} chip - extra_record: END", self.name());
+    }
 }
 
 impl<F: PrimeField32> CpuChip<F> {
@@ -154,35 +153,33 @@ impl<F: PrimeField32> CpuChip<F> {
             cols.op_c_access.populate(event.channel, record, blu_events);
         }
 
-        /* TODO: Enable after adding the byte chip.
-                // Populate range checks for a.
-                let a_bytes = cols
-                    .op_a_access
-                    .access
-                    .value
-                    .0
-                    .iter()
-                    .map(|x| x.as_canonical_u32())
-                    .collect::<Vec<_>>();
-                blu_events.add_byte_lookup_event(ByteLookupEvent {
-                    chunk: event.chunk,
-                    channel: event.channel,
-                    opcode: ByteOpcode::U8Range,
-                    a1: 0,
-                    a2: 0,
-                    b: a_bytes[0] as u8,
-                    c: a_bytes[1] as u8,
-                });
-                blu_events.add_byte_lookup_event(ByteLookupEvent {
-                    chunk: event.chunk,
-                    channel: event.channel,
-                    opcode: ByteOpcode::U8Range,
-                    a1: 0,
-                    a2: 0,
-                    b: a_bytes[2] as u8,
-                    c: a_bytes[3] as u8,
-                });
-        */
+        // Populate range checks for a.
+        let a_bytes = cols
+            .op_a_access
+            .access
+            .value
+            .0
+            .iter()
+            .map(|x| x.as_canonical_u32())
+            .collect::<Vec<_>>();
+        blu_events.add_byte_lookup_event(ByteLookupEvent {
+            chunk: event.chunk,
+            channel: event.channel,
+            opcode: U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[0] as u8,
+            c: a_bytes[1] as u8,
+        });
+        blu_events.add_byte_lookup_event(ByteLookupEvent {
+            chunk: event.chunk,
+            channel: event.channel,
+            opcode: U8Range,
+            a1: 0,
+            a2: 0,
+            b: a_bytes[2] as u8,
+            c: a_bytes[3] as u8,
+        });
 
         // Populate memory accesses for reading from memory.
         assert_eq!(event.memory_record.is_some(), event.memory.is_some());

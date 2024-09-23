@@ -1,6 +1,4 @@
-use std::borrow::BorrowMut;
-
-use log::{debug, info};
+use log::debug;
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -17,6 +15,7 @@ use pico_emulator::{
 };
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
+use std::borrow::BorrowMut;
 
 use crate::chips::{
     alu::mul::{columns::MulCols, utils::get_msb, BYTE_MASK, PRODUCT_SIZE},

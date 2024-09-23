@@ -11,7 +11,7 @@ use crate::{
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
-use pico_compiler::word::Word;
+use pico_compiler::{opcode::Opcode, word::Word};
 use pico_emulator::riscv::events::MemoryAccessPosition;
 use pico_machine::builder::ChipBuilder;
 
@@ -67,19 +67,17 @@ impl<F: Field> CpuChip<F> {
         // Get the memory specific columns.
         let memory_columns = local.opcode_specific.memory();
 
-        /* TODO: Enable after lookup integration.
-                // Send to the ALU table to verify correct calculation of addr_word.
-                builder.send_alu(
-                    CB::Expr::from_canonical_u32(Opcode::ADD as u32),
-                    memory_columns.addr_word,
-                    local.op_b_val(),
-                    local.op_c_val(),
-                    local.chunk,
-                    local.channel,
-                    memory_columns.addr_word_nonce,
-                    is_memory_instruction.clone(),
-                );
-        */
+        // Send to the ALU table to verify correct calculation of addr_word.
+        builder.looking_alu(
+            CB::Expr::from_canonical_u32(Opcode::ADD as u32),
+            memory_columns.addr_word,
+            local.op_b_val(),
+            local.op_c_val(),
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // memory_columns.addr_word_nonce,
+            is_memory_instruction.clone(),
+        );
 
         // Range check the addr_word to be a valid babybear word.
         BabyBearWordRangeChecker::<CB::F>::range_check(
@@ -192,18 +190,16 @@ impl<F: Field> CpuChip<F> {
             CB::Expr::zero(),
         ]);
 
-        /* TODO: Enable after lookup integration.
-                builder.send_alu(
-                    Opcode::SUB.as_field::<CB::F>(),
-                    local.op_a_val(),
-                    local.unsigned_mem_val,
-                    signed_value,
-                    local.chunk,
-                    local.channel,
-                    local.unsigned_mem_val_nonce,
-                    local.mem_value_is_neg_not_x0,
-                );
-        */
+        builder.looking_alu(
+            Opcode::SUB.as_field::<CB::F>(),
+            local.op_a_val(),
+            local.unsigned_mem_val,
+            signed_value,
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // local.unsigned_mem_val_nonce,
+            local.mem_value_is_neg_not_x0,
+        );
 
         // Assert that correct value of `mem_value_is_pos_not_x0`.
         let mem_value_is_pos = (local.opcode_selector.is_lb + local.opcode_selector.is_lh)

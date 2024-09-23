@@ -1,6 +1,7 @@
 use crate::chips::cpu::{columns::CpuCols, CpuChip};
 use p3_field::Field;
-use pico_emulator::riscv::events::{ByteRecordBehavior, CpuEvent};
+use pico_compiler::opcode::ByteOpcode::{U16Range, U8Range};
+use pico_emulator::riscv::events::{ByteLookupEvent, ByteRecordBehavior, CpuEvent};
 
 impl<F: Field> CpuChip<F> {
     /// Populates the chunk, channel, and clk related rows.
@@ -21,34 +22,32 @@ impl<F: Field> CpuChip<F> {
 
         cols.channel_selector.populate(event.channel);
 
-        /* TODO: Enable after adding the byte chip.
-                blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-                    event.chunk,
-                    event.channel,
-                    U16Range,
-                    event.chunk as u16,
-                    0,
-                    0,
-                    0,
-                ));
-                blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-                    event.chunk,
-                    event.channel,
-                    U16Range,
-                    clk_16bit_limb,
-                    0,
-                    0,
-                    0,
-                ));
-                blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-                    event.chunk,
-                    event.channel,
-                    ByteOpcode::U8Range,
-                    0,
-                    0,
-                    0,
-                    clk_8bit_limb as u8,
-                ));
-        */
+        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
+            event.chunk,
+            event.channel,
+            U16Range,
+            event.chunk as u16,
+            0,
+            0,
+            0,
+        ));
+        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
+            event.chunk,
+            event.channel,
+            U16Range,
+            clk_16bit_limb,
+            0,
+            0,
+            0,
+        ));
+        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
+            event.chunk,
+            event.channel,
+            U8Range,
+            0,
+            0,
+            0,
+            clk_8bit_limb,
+        ));
     }
 }

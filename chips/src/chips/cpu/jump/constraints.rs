@@ -3,7 +3,8 @@ use crate::{
     gadgets::baby_bear_word::BabyBearWordRangeChecker,
 };
 use p3_air::AirBuilder;
-use p3_field::Field;
+use p3_field::{AbstractField, Field};
+use pico_compiler::opcode::Opcode;
 use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
@@ -75,30 +76,28 @@ impl<F: Field> CpuChip<F> {
             is_jump_instruction.clone(),
         );
 
-        /* TODO: Enable after lookup integration.
-                // Verify that the new pc is calculated correctly for JAL instructions.
-                builder.send_alu(
-                    CB::Expr::from_canonical_u32(Opcode::ADD as u32),
-                    jump_columns.next_pc,
-                    jump_columns.pc,
-                    local.op_b_val(),
-                    local.chunk,
-                    local.channel,
-                    jump_columns.jal_nonce,
-                    local.opcode_selector.is_jal,
-                );
+        // Verify that the new pc is calculated correctly for JAL instructions.
+        builder.looking_alu(
+            CB::Expr::from_canonical_u32(Opcode::ADD as u32),
+            jump_columns.next_pc,
+            jump_columns.pc,
+            local.op_b_val(),
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // jump_columns.jal_nonce,
+            local.opcode_selector.is_jal,
+        );
 
-                // Verify that the new pc is calculated correctly for JALR instructions.
-                builder.send_alu(
-                    CB::Expr::from_canonical_u32(Opcode::ADD as u32),
-                    jump_columns.next_pc,
-                    local.op_b_val(),
-                    local.op_c_val(),
-                    local.chunk,
-                    local.channel,
-                    jump_columns.jalr_nonce,
-                    local.opcode_selector.is_jalr,
-                );
-        */
+        // Verify that the new pc is calculated correctly for JALR instructions.
+        builder.looking_alu(
+            CB::Expr::from_canonical_u32(Opcode::ADD as u32),
+            jump_columns.next_pc,
+            local.op_b_val(),
+            local.op_c_val(),
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // jump_columns.jalr_nonce,
+            local.opcode_selector.is_jalr,
+        );
     }
 }

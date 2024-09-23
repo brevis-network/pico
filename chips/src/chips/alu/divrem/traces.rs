@@ -4,7 +4,7 @@ use crate::chips::alu::divrem::{
 };
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
-use log::{debug, info};
+use log::debug;
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};

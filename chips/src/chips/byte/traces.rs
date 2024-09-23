@@ -1,11 +1,9 @@
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::{debug, info};
-use std::borrow::BorrowMut;
-
-use p3_air::BaseAir;
+use log::debug;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
+use std::borrow::BorrowMut;
 
 use pico_compiler::{opcode::ByteOpcode, program::Program};
 use pico_emulator::riscv::record::EmulationRecord;

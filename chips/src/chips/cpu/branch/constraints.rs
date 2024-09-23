@@ -4,6 +4,7 @@ use crate::{
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
+use pico_compiler::{opcode::Opcode, word::Word};
 use pico_machine::builder::ChipBuilder;
 
 impl<F: Field> CpuChip<F> {
@@ -73,19 +74,17 @@ impl<F: Field> CpuChip<F> {
                 is_branch_instruction.clone(),
             );
 
-            /* TODO: Enable after lookup integration.
-                        // When we are branching, calculate branch_cols.next_pc <==> branch_cols.pc + c.
-                        builder.send_alu(
-                            Opcode::ADD.as_field::<CB::F>(),
-                            branch_cols.next_pc,
-                            branch_cols.pc,
-                            local.op_c_val(),
-                            local.chunk,
-                            local.channel,
-                            branch_cols.next_pc_nonce,
-                            local.branching,
-                        );
-            */
+            // When we are branching, calculate branch_cols.next_pc <==> branch_cols.pc + c.
+            builder.looking_alu(
+                Opcode::ADD.as_field::<CB::F>(),
+                branch_cols.next_pc,
+                branch_cols.pc,
+                local.op_c_val(),
+                local.chunk,
+                local.channel,
+                CB::Expr::zero(), // branch_cols.next_pc_nonce,
+                local.branching,
+            );
 
             // When we are not branching, assert that local.pc + 4 <==> next.pc.
             builder
@@ -186,34 +185,32 @@ impl<F: Field> CpuChip<F> {
             .when_not(is_branch_instruction.clone())
             .assert_zero(local.branching);
 
-        /* TODO: Enable after lookup integration.
-                // Calculate a_lt_b <==> a < b (using appropriate signedness).
-                let use_signed_comparison = local.opcode_selector.is_blt + local.opcode_selector.is_bge;
-                builder.send_alu(
-                    use_signed_comparison.clone() * Opcode::SLT.as_field::<CB::F>()
-                        + (CB::Expr::one() - use_signed_comparison.clone())
-                            * Opcode::SLTU.as_field::<CB::F>(),
-                    Word::extend_var::<CB>(branch_cols.a_lt_b),
-                    local.op_a_val(),
-                    local.op_b_val(),
-                    local.chunk,
-                    local.channel,
-                    branch_cols.a_lt_b_nonce,
-                    is_branch_instruction.clone(),
-                );
+        // Calculate a_lt_b <==> a < b (using appropriate signedness).
+        let use_signed_comparison = local.opcode_selector.is_blt + local.opcode_selector.is_bge;
+        builder.looking_alu(
+            use_signed_comparison.clone() * Opcode::SLT.as_field::<CB::F>()
+                + (CB::Expr::one() - use_signed_comparison.clone())
+                    * Opcode::SLTU.as_field::<CB::F>(),
+            Word::extend_var::<CB>(branch_cols.a_lt_b),
+            local.op_a_val(),
+            local.op_b_val(),
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // branch_cols.a_lt_b_nonce,
+            is_branch_instruction.clone(),
+        );
 
-                // Calculate a_gt_b <==> a > b (using appropriate signedness).
-                builder.send_alu(
-                    use_signed_comparison.clone() * Opcode::SLT.as_field::<CB::F>()
-                        + (CB::Expr::one() - use_signed_comparison) * Opcode::SLTU.as_field::<CB::F>(),
-                    Word::extend_var::<CB>(branch_cols.a_gt_b),
-                    local.op_b_val(),
-                    local.op_a_val(),
-                    local.chunk,
-                    local.channel,
-                    branch_cols.a_gt_b_nonce,
-                    is_branch_instruction.clone(),
-                );
-        */
+        // Calculate a_gt_b <==> a > b (using appropriate signedness).
+        builder.looking_alu(
+            use_signed_comparison.clone() * Opcode::SLT.as_field::<CB::F>()
+                + (CB::Expr::one() - use_signed_comparison) * Opcode::SLTU.as_field::<CB::F>(),
+            Word::extend_var::<CB>(branch_cols.a_gt_b),
+            local.op_b_val(),
+            local.op_a_val(),
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // branch_cols.a_gt_b_nonce,
+            is_branch_instruction.clone(),
+        );
     }
 }
