@@ -1,3 +1,5 @@
+extern crate core;
+
 pub mod chips;
 pub mod gadgets;
 pub mod trace;
