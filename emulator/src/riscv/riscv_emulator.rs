@@ -1236,7 +1236,7 @@ mod tests {
     use crate::opts::PicoCoreOpts;
     use pico_compiler::compiler::{Compiler, SourceType};
 
-    const ELF: &[u8] = include_bytes!("../../../compiler/test_data/riscv32im-succinct-zkvm-elf");
+    const ELF: &[u8] = include_bytes!("../../../compiler/test_data/riscv32im-pico-fibonacci-elf");
 
     #[must_use]
     #[allow(clippy::unreadable_literal)]

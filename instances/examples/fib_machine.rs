@@ -202,7 +202,7 @@ fn main() {
     env_logger::init();
 
     info!("\n Creating Program..");
-    const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-succinct-zkvm-elf");
+    const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-pico-fibonacci-elf");
 
     let compiler = Compiler::new(SourceType::RiscV, ELF);
     let program = compiler.compile();
