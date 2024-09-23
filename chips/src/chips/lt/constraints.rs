@@ -46,25 +46,26 @@ where
 
         builder.assert_bool(local.is_sign_bit_same);
 
-        let sign_b = local.msb_b * local.is_slt;
-        let sign_c = local.msb_c * local.is_slt;
+        builder.assert_eq(local.bit_b, local.msb_b * local.is_slt);
+        builder.assert_eq(local.bit_c, local.msb_c * local.is_slt);
+
         // assert same sign
         builder
             .when(local.is_sign_bit_same)
-            .assert_eq(sign_b.clone(), sign_c.clone());
+            .assert_eq(local.bit_b, local.bit_c.clone());
 
         // assert 1 when b and c signs are not same
         builder
             .when(is_real.clone())
             .when_not(local.is_sign_bit_same)
-            .assert_one(sign_b.clone() + sign_c.clone());
+            .assert_one(local.bit_b + local.bit_c);
 
         // when case msb_b = 0; msb_c = 1(negative), a0 = 0;
         // when case msb_b = 1(negative); msg_c = 0, a0 = 1;
         // when case msb_b and msb_c both is 0 or 1, a0 depends on SLTU.
         builder.assert_eq(
             local.a[0],
-            sign_b * (CB::Expr::one() - sign_c) + local.is_sign_bit_same * local.slt_u,
+            local.bit_b * (CB::Expr::one() - local.bit_c) + local.is_sign_bit_same * local.slt_u,
         );
 
         // just keeping the b < c result to a0
@@ -177,8 +178,8 @@ where
             local.c,
             local.chunk,
             local.channel,
-            local.nonce,
-            is_real,
+            F::zero(),
+            local.is_lookup_supported,
         )
     }
 }

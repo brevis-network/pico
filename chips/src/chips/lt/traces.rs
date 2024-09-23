@@ -1,4 +1,7 @@
-use crate::chips::lt::columns::{LtCols, NUM_LT_COLS};
+use crate::chips::{
+    lt::columns::{LtCols, NUM_LT_COLS},
+    SUPPORTTED_ALU_LOOKUP_OPCODES,
+};
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
@@ -115,6 +118,9 @@ impl<F: PrimeField32> LtChip<F> {
         cols.b_masked = F::from_canonical_u8(masked_b);
         cols.c_masked = F::from_canonical_u8(masked_c);
 
+        cols.bit_b = cols.msb_b * cols.is_slt;
+        cols.bit_c = cols.msb_c * cols.is_slt;
+
         // Send the masked interaction.
         blu.add_byte_lookup_event(ByteLookupEvent {
             chunk: event.chunk,
@@ -168,6 +174,10 @@ impl<F: PrimeField32> LtChip<F> {
         } else {
             F::one()
         };
+
+        if SUPPORTTED_ALU_LOOKUP_OPCODES.contains(&event.opcode) {
+            cols.is_lookup_supported = F::one();
+        }
 
         cols.is_slt = F::from_bool(event.opcode == Opcode::SLT);
         cols.is_slt_u = F::from_bool(event.opcode == Opcode::SLTU);

@@ -29,6 +29,10 @@ pub struct LtCols<T: Copy> {
     pub b_masked: T,
     /// The masking c[3] & 0x7F.
     pub c_masked: T,
+    /// The multiplication msb_b * is_slt.
+    pub bit_b: T,
+    /// The multiplication msb_c * is_slt.
+    pub bit_c: T,
     /// An inverse of differing byte if c_comp != b_comp.
     pub not_eq_inv: T,
     /// The most significant bit of operand b.
@@ -44,6 +48,8 @@ pub struct LtCols<T: Copy> {
     pub is_sign_bit_same: T,
     /// The comparison bytes to be looked up.
     pub cmp_bytes: [T; 2],
+    /// is lookup enabled
+    pub is_lookup_supported: T,
 }
 
 pub const NUM_LT_COLS: usize = size_of::<LtCols<u8>>();

@@ -8,6 +8,7 @@ use crate::chips::cpu::{
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::Matrix;
+use pico_compiler::word::Word;
 use pico_machine::{
     builder::ChipBuilder,
     lookup::{LookupType, SymbolicLookup},
