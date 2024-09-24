@@ -50,12 +50,11 @@ impl<F: Field> AddOperation<F> {
             .wrapping_sub(expected.to_le_bytes()[0]) as u32;
         debug_assert_eq!(overflow.wrapping_mul(overflow.wrapping_sub(base)), 0);
 
-        // TODO: Enable after enabling range-check.
         // Range check
         {
-            // record.add_u8_range_checks(chunk, channel, &a);
-            // record.add_u8_range_checks(chunk, channel, &b);
-            // record.add_u8_range_checks(chunk, channel, &expected.to_le_bytes());
+            record.add_u8_range_checks(chunk, channel, &a);
+            record.add_u8_range_checks(chunk, channel, &b);
+            record.add_u8_range_checks(chunk, channel, &expected.to_le_bytes());
         }
         expected
     }
@@ -101,12 +100,11 @@ impl<F: Field> AddOperation<F> {
         builder_is_real.assert_bool(cols.carry[2]);
         builder_is_real.assert_bool(is_real.clone());
 
-        // TODO: Enable after enabling range-check.
         // Range check each byte.
         {
-            // builder.slice_range_check_u8(&a.0, chunk, channel.clone(), is_real.clone());
-            // builder.slice_range_check_u8(&b.0, chunk, channel.clone(), is_real.clone());
-            // builder.slice_range_check_u8(&cols.value.0, chunk, channel.clone(), is_real);
+            builder.slice_range_check_u8(&a.0, chunk, channel.clone(), is_real.clone());
+            builder.slice_range_check_u8(&b.0, chunk, channel.clone(), is_real.clone());
+            builder.slice_range_check_u8(&cols.value.0, chunk, channel.clone(), is_real);
         }
     }
 }

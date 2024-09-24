@@ -193,19 +193,16 @@ where
             }
         }
 
-        // todo: open this whenn Range check bytes is ready
-        // {
-        //     let long_words = [
-        //         local.byte_shift_result,
-        //         local.bit_shift_result,
-        //         local.shr_carry_output_carry,
-        //         local.shr_carry_output_shifted_byte,
-        //     ];
+        let long_words = [
+            local.byte_shift_result,
+            local.bit_shift_result,
+            local.shr_carry_output_carry,
+            local.shr_carry_output_shifted_byte,
+        ];
 
-        //     for long_word in long_words.iter() {
-        //         builder.slice_range_check_u8(long_word, local.chunk, local.channel, local.is_real);
-        //     }
-        // }
+        for long_word in long_words.iter() {
+            builder.slice_range_check_u8(long_word, local.chunk, local.channel, local.is_real);
+        }
 
         // Check that the operation flags are boolean.
         builder.assert_bool(local.is_srl);

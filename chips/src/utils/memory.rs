@@ -2,6 +2,7 @@ use crate::chips::memory::read_write::columns::{MemoryAccessCols, MemoryCols};
 use itertools::Itertools;
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
+use pico_compiler::opcode::ByteOpcode;
 use pico_machine::builder::ChipBuilder;
 use std::iter::once;
 
@@ -226,27 +227,24 @@ impl<F: Field, CB: ChipBuilder<F>> MemoryAirBuilder<F> for CB {
                 + limb_8.clone().into() * Self::Expr::from_canonical_u32(1 << 16),
         );
 
-        /* TODO: Enable after generating dependencies for memory.
-                // Send the range checks for the limbs.
-                self.send_byte(
-                    Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
-                    limb_16,
-                    Self::Expr::zero(),
-                    Self::Expr::zero(),
-                    chunk.clone(),
-                    channel.clone(),
-                    do_check.clone(),
-                );
-
-                self.send_byte(
-                    Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                    Self::Expr::zero(),
-                    Self::Expr::zero(),
-                    limb_8,
-                    chunk.clone(),
-                    channel.clone(),
-                    do_check,
-                )
-        */
+        // Send the range checks for the limbs.
+        self.looking_byte(
+            Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            limb_16,
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            chunk.clone(),
+            channel.clone(),
+            do_check.clone(),
+        );
+        self.looking_byte(
+            Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
+            Self::Expr::zero(),
+            Self::Expr::zero(),
+            limb_8,
+            chunk.clone(),
+            channel.clone(),
+            do_check,
+        )
     }
 }

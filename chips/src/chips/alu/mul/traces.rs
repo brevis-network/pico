@@ -151,12 +151,11 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                                 event.channel,
                                 &carry.map(|x| x as u16),
                             );
-                            // TODO: Enable after fixing other chips
-                            // record.add_u8_range_checks(
-                            //     event.chunk,
-                            //     event.channel,
-                            //     &product.map(|x| x as u8),
-                            // );
+                            record.add_u8_range_checks(
+                                event.chunk,
+                                event.channel,
+                                &product.map(|x| x as u8),
+                            );
                         }
 
                         row

@@ -189,31 +189,27 @@ pub trait ChipBuilder<F: Field>:
     ) {
         let mut index = 0;
         while index + 1 < input.len() {
-            /* TODO: Enable after adding byte chip.
-                        self.send_byte(
-                            Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                            Self::Expr::zero(),
-                            input[index].clone(),
-                            input[index + 1].clone(),
-                            chunk.clone(),
-                            channel.clone(),
-                            mult.clone(),
-                        );
-            */
+            self.looking_byte(
+                Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
+                Self::Expr::zero(),
+                input[index].clone(),
+                input[index + 1].clone(),
+                chunk.clone(),
+                channel.clone(),
+                mult.clone(),
+            );
             index += 2;
         }
         if index < input.len() {
-            /* TODO: Enable after adding byte chip.
-                        self.send_byte(
-                            Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                            Self::Expr::zero(),
-                            input[index].clone(),
-                            Self::Expr::zero(),
-                            chunk.clone(),
-                            channel.clone(),
-                            mult.clone(),
-                        );
-            */
+            self.looking_byte(
+                Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
+                Self::Expr::zero(),
+                input[index].clone(),
+                Self::Expr::zero(),
+                chunk.clone(),
+                channel.clone(),
+                mult.clone(),
+            );
         }
     }
 

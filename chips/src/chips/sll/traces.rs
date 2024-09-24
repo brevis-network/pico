@@ -146,11 +146,8 @@ impl<F: Field> SLLChip<F> {
             cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
         }
 
-        // TODO: open this block code when Range checks is ready
-        // {
-        // blu.add_u8_range_checks(event.chunk, event.channel, &shift_result);
-        //     blu.add_u8_range_checks(event.chunk, event.channel, &shift_result_carry);
-        // }
+        blu.add_u8_range_checks(event.chunk, event.channel, &shift_result);
+        blu.add_u8_range_checks(event.chunk, event.channel, &shift_result_carry);
 
         // Sanity check.
         for i in num_bytes_to_shift..WORD_SIZE {

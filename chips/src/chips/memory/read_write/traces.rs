@@ -147,7 +147,6 @@ impl<F: Field> MemoryAccessCols<F> {
 
         // Add a byte table lookup with the 16Range op.
         output.add_u16_range_check(chunk, channel, diff_16bit_limb);
-
         // Add a byte table lookup with the U8Range op.
         output.add_u8_range_check(chunk, channel, 0, diff_8bit_limb as u8);
     }

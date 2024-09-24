@@ -19,7 +19,7 @@ use pico_emulator::riscv::{
 };
 use pico_machine::chip::ChipBehavior;
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
-use std::{borrow::BorrowMut, os::unix::fs::OpenOptionsExt};
+use std::borrow::BorrowMut;
 
 impl<F: Field> BaseAir<F> for CpuChip<F> {
     fn width(&self) -> usize {
@@ -104,8 +104,8 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         for alu_events_chunk in alu_events.into_iter() {
             extra.add_alu_events(alu_events_chunk);
         }
-        // TODO: Enable after fixing range-check.
-        // extra.add_chunked_byte_lookup_events(blu_events.iter().collect_vec());
+        extra.add_chunked_byte_lookup_events(blu_events.iter().collect_vec());
+
         debug!("{} chip - extra_record: END", self.name());
     }
 }

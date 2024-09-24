@@ -222,15 +222,13 @@ impl<F: PrimeField32> FibChipType<F> {
             MetaChip::new(Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Finalize,
             ))),
-            MetaChip::new(Self::AddSub(AddSubChip::default())),
-            MetaChip::new(Self::Bitwise(BitwiseChip::default())),
             MetaChip::new(Self::DivRem(DivRemChip::default())),
             MetaChip::new(Self::Mul(MulChip::default())),
-            // NOTE: The byte chip must be initialized at the end, since we may add the new BLU
-            // events during main trace generation in other chips.
             MetaChip::new(Self::Lt(LtChip::default())),
             MetaChip::new(Self::SR(ShiftRightChip::default())),
             MetaChip::new(Self::SLL(SLLChip::default())),
+            MetaChip::new(Self::AddSub(AddSubChip::default())),
+            MetaChip::new(Self::Bitwise(BitwiseChip::default())),
             MetaChip::new(Self::Byte(ByteChip::default())),
         ]
     }

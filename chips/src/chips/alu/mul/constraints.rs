@@ -202,8 +202,7 @@ where
             // underflows enough to "wrap" around to create a second solution.
             builder.slice_range_check_u16(&local.carry, local.chunk, local.channel, local.is_real);
 
-            // TODO: Enable after fixing other chips
-            // builder.slice_range_check_u8(&local.product, local.chunk, local.channel, local.is_real);
+            builder.slice_range_check_u8(&local.product, local.chunk, local.channel, local.is_real);
         }
 
         // Receive the arguments.
