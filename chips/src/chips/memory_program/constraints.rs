@@ -70,12 +70,10 @@ where
         let mut values = vec![CB::Expr::zero(), CB::Expr::zero(), prep_local.addr.into()];
         values.extend(prep_local.value.map(Into::into));
 
-        /* TODO: Enable after adding memory read write.
-                builder.looked(SymbolicLookup::new(
-                    values,
-                    mult_local.multiplicity.into(),
-                    LookupType::Memory,
-                ));
-        */
+        builder.looked(SymbolicLookup::new(
+            values,
+            mult_local.multiplicity.into(),
+            LookupType::Memory,
+        ));
     }
 }

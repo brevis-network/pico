@@ -214,8 +214,8 @@ impl<F: PrimeField32> FibChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![
             MetaChip::new(Self::Program(ProgramChip::default())),
-            MetaChip::new(Self::Cpu(CpuChip::default())),
             MetaChip::new(Self::MemoryProgram(MemoryProgramChip::default())),
+            MetaChip::new(Self::Cpu(CpuChip::default())),
             MetaChip::new(Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Initialize,
             ))),
@@ -268,8 +268,26 @@ fn main() {
     let stdin = pars_args(env::args().collect());
     runtime.run_with_stdin(stdin).unwrap();
 
-    let record = &runtime.records[0];
-    let mut records = vec![record.clone()];
+    // TRICKY: We copy the memory initialize and finalize events from the seond (last)
+    // record to this record, since the memory lookups could only work if has the
+    // full lookups in the all records.
+    assert_eq!(
+        runtime.records.len(),
+        2,
+        "We could only test for one record for now and the last is the final one",
+    );
+    let mut record = runtime.records[0].clone();
+    assert!(record.memory_initialize_events.is_empty());
+    assert!(record.memory_finalize_events.is_empty());
+    runtime.records[1]
+        .memory_initialize_events
+        .clone_into(&mut record.memory_initialize_events);
+    runtime.records[1]
+        .memory_finalize_events
+        .clone_into(&mut record.memory_finalize_events);
+    let program = record.program.clone();
+
+    let mut records = vec![record];
 
     // Setup config and chips.
     info!(
@@ -288,7 +306,7 @@ fn main() {
         "\n Setup machine (at {} sec)..",
         start.elapsed().unwrap().as_secs()
     );
-    let (pk, vk) = simple_machine.setup_keys(&record.program);
+    let (pk, vk) = simple_machine.setup_keys(&program);
 
     info!(
         "\n Complement records (at {} sec)..",

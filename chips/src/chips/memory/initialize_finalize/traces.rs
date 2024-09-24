@@ -2,7 +2,7 @@ use crate::chips::memory::initialize_finalize::{
     columns::{MemoryInitializeFinalizeCols, NUM_MEMORY_INITIALIZE_FINALIZE_COLS},
     MemoryChipType, MemoryInitializeFinalizeChip,
 };
-use log::{debug, info};
+use log::debug;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_emulator::riscv::{events::MemoryInitializeFinalizeEvent, record::EmulationRecord};

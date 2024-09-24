@@ -3,7 +3,10 @@ use itertools::Itertools;
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::opcode::ByteOpcode;
-use pico_machine::builder::ChipBuilder;
+use pico_machine::{
+    builder::ChipBuilder,
+    lookup::{LookupType, SymbolicLookup},
+};
 use std::iter::once;
 
 pub trait MemoryAirBuilder<F: Field>: AirBuilder {
@@ -19,17 +22,6 @@ pub trait MemoryAirBuilder<F: Field>: AirBuilder {
         addr: impl Into<Self::Expr>,
         memory_access: &impl MemoryCols<E>,
         do_check: impl Into<Self::Expr>,
-    );
-
-    /// Constraints a memory read or write to a slice of `MemoryAccessCols`.
-    fn eval_memory_access_slice<E: Into<Self::Expr> + Copy>(
-        &mut self,
-        chunk: impl Into<Self::Expr> + Copy,
-        channel: impl Into<Self::Expr> + Clone,
-        clk: impl Into<Self::Expr> + Clone,
-        initial_addr: impl Into<Self::Expr> + Clone,
-        memory_access_slice: &[impl MemoryCols<E>],
-        verify_memory_access: impl Into<Self::Expr> + Copy,
     );
 
     /// Verifies the memory access timestamp.
@@ -109,43 +101,19 @@ impl<F: Field, CB: ChipBuilder<F>> MemoryAirBuilder<F> for CB {
             .chain(memory_access.value().clone().map(Into::into))
             .collect_vec();
 
-        /* TODO: Enable after generating dependencies for memory.
-                // The previous values get sent with multiplicity = 1, for "read".
-                self.send(AirInteraction::new(
-                    prev_values,
-                    do_check.clone(),
-                    InteractionKind::Memory,
-                ));
+        // The previous values get sent with multiplicity = 1, for "read".
+        self.looking(SymbolicLookup::new(
+            prev_values.clone(),
+            do_check.clone(),
+            LookupType::Memory,
+        ));
 
-                // The current values get "received", i.e. multiplicity = -1
-                self.receive(AirInteraction::new(
-                    current_values,
-                    do_check.clone(),
-                    InteractionKind::Memory,
-                ));
-        */
-    }
-
-    /// Constraints a memory read or write to a slice of `MemoryAccessCols`.
-    fn eval_memory_access_slice<E: Into<Self::Expr> + Copy>(
-        &mut self,
-        chunk: impl Into<Self::Expr> + Copy,
-        channel: impl Into<Self::Expr> + Clone,
-        clk: impl Into<Self::Expr> + Clone,
-        initial_addr: impl Into<Self::Expr> + Clone,
-        memory_access_slice: &[impl MemoryCols<E>],
-        verify_memory_access: impl Into<Self::Expr> + Copy,
-    ) {
-        for (i, access_slice) in memory_access_slice.iter().enumerate() {
-            self.eval_memory_access(
-                chunk,
-                channel.clone(),
-                clk.clone(),
-                initial_addr.clone().into() + Self::Expr::from_canonical_usize(i * 4),
-                access_slice,
-                verify_memory_access,
-            );
-        }
+        // The current values get "received", i.e. multiplicity = -1
+        self.looked(SymbolicLookup::new(
+            current_values,
+            do_check.clone(),
+            LookupType::Memory,
+        ));
     }
 
     /// Verifies the memory access timestamp.
