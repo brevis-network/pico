@@ -7,7 +7,7 @@ use p3_matrix::{
 };
 use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 use pico_configs::config::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
-
+use pico_emulator::record::MAX_NUM_PVS;
 use crate::{
     builder::ChipBuilder,
     lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
@@ -52,7 +52,7 @@ impl<F: Field> SymbolicConstraintFolder<F> {
             looking: vec![],
             looked: vec![],
             constraints: vec![],
-            public_values: vec![],
+            public_values: vec![F::zero(); MAX_NUM_PVS],
         }
     }
 
