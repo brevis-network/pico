@@ -1,4 +1,4 @@
-use log::info;
+use log::{debug, info};
 use p3_air::{Air, BaseAir};
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -27,6 +27,10 @@ use pico_machine::{
     builder::ChipBuilder,
     chip::{ChipBehavior, MetaChip},
     machine::MachineBehavior,
+};
+use std::{
+    env,
+    time::{Duration, SystemTime},
 };
 
 pub enum FibChipType<F: Field> {
@@ -231,8 +235,23 @@ impl<F: PrimeField32> FibChipType<F> {
     }
 }
 
+fn pars_args(args: Vec<String>) -> Vec<u8> {
+    let mut n = 2; // default fib seq num is 2
+    if args.len() > 1 {
+        n = args[1].parse::<u32>().unwrap();
+    }
+    let v0 = ((n << 24) >> 24) as u8;
+    let v1 = (((n >> 8) << 24) >> 24) as u8;
+    let v2 = (((n >> 16) << 24) >> 24) as u8;
+    let v3 = (((n >> 24) << 24) >> 24) as u8;
+
+    debug!("n={}, [{}, {}, {}, {}]", n, v0, v1, v2, v3);
+    vec![v0, v1, v2, v3]
+}
+
 fn main() {
     env_logger::init();
+    let start = SystemTime::now();
 
     info!("\n Creating Program..");
     const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-pico-fibonacci-elf");
@@ -240,16 +259,23 @@ fn main() {
     let compiler = Compiler::new(SourceType::RiscV, ELF);
     let program = compiler.compile();
 
-    info!("\n Creating Runtime..");
+    info!(
+        "\n Creating Runtime (at {} sec)..",
+        start.elapsed().unwrap().as_secs()
+    );
     let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
-    runtime.state.input_stream.push(vec![2, 0, 0, 0]);
+    let input = pars_args(env::args().collect());
+    runtime.state.input_stream.push(input);
     runtime.run().unwrap();
 
     let record = &runtime.records[0];
     let mut records = vec![record.clone()];
 
     // Setup config and chips.
-    info!("\n Creating BaseMachine..");
+    info!(
+        "\n Creating BaseMachine (at {} sec)..",
+        start.elapsed().unwrap().as_secs()
+    );
     let config = BabyBearPoseidon2::new();
     let chips = FibChipType::all_chips();
 
@@ -258,19 +284,32 @@ fn main() {
     info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.
-    info!("\n Setup machine..");
+    info!(
+        "\n Setup machine (at {} sec)..",
+        start.elapsed().unwrap().as_secs()
+    );
     let (pk, vk) = simple_machine.setup_keys(&record.program);
 
-    info!("\n Complement records..");
+    info!(
+        "\n Complement records (at {} sec)..",
+        start.elapsed().unwrap().as_secs()
+    );
     simple_machine.complement_record(&mut records);
 
     // Generate the proof.
-    info!("\n Generating proof..");
+    info!(
+        "\n Generating proof (at {} sec)..",
+        start.elapsed().unwrap().as_secs()
+    );
     let proof = simple_machine.prove(&pk, &records);
     info!("{} generated.", proof.name());
 
     // Verify the proof.
+    info!(
+        "\n Verifying proof (at {} sec)..",
+        start.elapsed().unwrap().as_secs()
+    );
     let result = simple_machine.verify(&vk, &proof);
-    info!("\n The proof is verified: {}", result.is_ok());
+    info!("The proof is verified: {}", result.is_ok());
     assert_eq!(result.is_ok(), true);
 }

@@ -1,12 +1,12 @@
+use hashbrown::{hash_map::Entry, HashMap};
+use log::{debug, info};
+use nohash_hasher::BuildNoHashHasher;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     io::{BufWriter, Write},
     sync::Arc,
 };
-
-use hashbrown::{hash_map::Entry, HashMap};
-use nohash_hasher::BuildNoHashHasher;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -207,7 +207,6 @@ impl RiscvEmulator {
 
         // Increment the clock.
         self.state.global_clk += 1;
-
         Ok(self.state.pc.wrapping_sub(self.program.pc_base)
             >= (self.program.instructions.len() * 4) as u32)
     }
@@ -239,6 +238,7 @@ impl RiscvEmulator {
 
     fn emulate(&mut self) -> Result<bool, EmulationError> {
         // Get the current chunk.
+        info!("emulate - BEGIN");
         let start_chunk = self.state.current_chunk; // needed for public input
 
         // If it's the first cycle, initialize the program.
@@ -248,6 +248,10 @@ impl RiscvEmulator {
 
         // Loop until we've emulated `self.chunk_batch_size` chunks if `self.chunk_batch_size` is
         // set.
+        debug!(
+            "emulate - current chunk {}, batch size {}",
+            self.state.current_chunk, self.chunk_batch_size
+        );
         let mut done = false;
         let mut current_chunk = self.state.current_chunk;
         let mut num_chunks_emulated = 0;
@@ -265,6 +269,7 @@ impl RiscvEmulator {
                 }
             }
         }
+        debug!("emulate - global clk {}", self.state.global_clk);
 
         // Get the final public values.
         let public_values = self.record.public_values;
@@ -299,7 +304,7 @@ impl RiscvEmulator {
                 last_exit_code = record.public_values.exit_code;
             }
         }
-
+        info!("emulate - END");
         Ok(done)
     }
 
