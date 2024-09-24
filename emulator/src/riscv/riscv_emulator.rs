@@ -1270,7 +1270,7 @@ mod tests {
         _assert_send::<RiscvEmulator>();
     }
 
-    const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 4u32;
+    const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 836789u32;
 
     #[test]
     #[allow(clippy::unreadable_literal)]

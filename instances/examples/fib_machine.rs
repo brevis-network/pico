@@ -21,6 +21,7 @@ use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{
     opts::PicoCoreOpts,
     riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
+    stdin::PicoStdin,
 };
 use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
@@ -235,18 +236,19 @@ impl<F: PrimeField32> FibChipType<F> {
     }
 }
 
-fn pars_args(args: Vec<String>) -> Vec<u8> {
+fn pars_args(args: Vec<String>) -> PicoStdin {
     let mut n = 2; // default fib seq num is 2
     if args.len() > 1 {
         n = args[1].parse::<u32>().unwrap();
     }
-    let v0 = ((n << 24) >> 24) as u8;
-    let v1 = (((n >> 8) << 24) >> 24) as u8;
-    let v2 = (((n >> 16) << 24) >> 24) as u8;
-    let v3 = (((n >> 24) << 24) >> 24) as u8;
+    let mut stdin = PicoStdin::new();
+    stdin.write(&n);
 
-    debug!("n={}, [{}, {}, {}, {}]", n, v0, v1, v2, v3);
-    vec![v0, v1, v2, v3]
+    let mut input = [0u8; 4];
+    stdin.read_slice(&mut input);
+
+    debug!("n={}, {:x?}", n, &input);
+    stdin
 }
 
 fn main() {
@@ -264,9 +266,9 @@ fn main() {
         start.elapsed().unwrap().as_secs()
     );
     let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
-    let input = pars_args(env::args().collect());
-    runtime.state.input_stream.push(input);
-    runtime.run().unwrap();
+
+    let stdin = pars_args(env::args().collect());
+    runtime.run_with_stdin(stdin).unwrap();
 
     let record = &runtime.records[0];
     let mut records = vec![record.clone()];

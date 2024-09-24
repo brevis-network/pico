@@ -25,4 +25,9 @@ impl PicoStdin {
         bincode::serialize_into(&mut tmp, data).expect("serialization failed");
         self.buffer.push(tmp);
     }
+
+    pub fn read_slice(&mut self, slice: &mut [u8]) {
+        slice.copy_from_slice(&self.buffer[self.cursor]);
+        self.cursor += 1;
+    }
 }
