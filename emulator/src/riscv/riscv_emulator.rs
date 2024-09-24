@@ -1238,15 +1238,27 @@ impl Default for EmulatorMode {
 
 mod tests {
     use super::{Program, RiscvEmulator};
-    use crate::opts::PicoCoreOpts;
+    use crate::{opts::PicoCoreOpts, stdin::PicoStdin};
     use pico_compiler::compiler::{Compiler, SourceType};
 
-    const ELF: &[u8] = include_bytes!("../../../compiler/test_data/riscv32im-pico-fibonacci-elf");
+    const FIBONACCI_ELF: &[u8] =
+        include_bytes!("../../../compiler/test_data/riscv32im-pico-fibonacci-elf");
+
+    const KECCAK_ELF: &[u8] =
+        include_bytes!("../../../compiler/test_data/riscv32im-pico-keccak-elf");
 
     #[must_use]
     #[allow(clippy::unreadable_literal)]
     pub fn simple_fibo_program() -> Program {
-        let compiler = Compiler::new(SourceType::RiscV, ELF);
+        let compiler = Compiler::new(SourceType::RiscV, FIBONACCI_ELF);
+
+        compiler.compile()
+    }
+
+    #[must_use]
+    #[allow(clippy::unreadable_literal)]
+    pub fn simple_keccak_program() -> Program {
+        let compiler = Compiler::new(SourceType::RiscV, KECCAK_ELF);
 
         compiler.compile()
     }
@@ -1258,14 +1270,29 @@ mod tests {
         _assert_send::<RiscvEmulator>();
     }
 
+    const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 4u32;
+
     #[test]
     #[allow(clippy::unreadable_literal)]
     fn test_simple_fib() {
         // just run a simple elf file in the compiler folder(test_data)
         let program = simple_fibo_program();
+        let mut stdin = PicoStdin::new();
+        stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);
+        let mut emulator = RiscvEmulator::new(program, PicoCoreOpts::default());
+        emulator.run_with_stdin(stdin).unwrap();
+        // println!("{:x?}", emulator.state.public_values_stream)
+    }
 
-        let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
-        runtime.state.input_stream.push(vec![2, 0, 0, 0]);
-        runtime.run().unwrap();
+    #[test]
+    #[allow(clippy::unreadable_literal)]
+    fn test_simple_keccak() {
+        let program = simple_keccak_program();
+        let n = "a"; // do keccak(b"abcdefg")
+        let mut stdin = PicoStdin::new();
+        stdin.write(&n);
+        let mut emulator = RiscvEmulator::new(program, PicoCoreOpts::default());
+        emulator.run_with_stdin(stdin).unwrap();
+        // println!("{:x?}", emulator.state.public_values_stream)
     }
 }
