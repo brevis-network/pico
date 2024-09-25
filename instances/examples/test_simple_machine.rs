@@ -31,9 +31,9 @@ use pico_machine::{
     machine::MachineBehavior,
 };
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use std::time::SystemTime;
+use std::{env, time::SystemTime};
 
-pub enum FibChipType<F: Field> {
+pub enum TestChipType<F: Field> {
     Byte(ByteChip<F>),
     Program(ProgramChip<F>),
     Cpu(CpuChip<F>),
@@ -49,10 +49,10 @@ pub enum FibChipType<F: Field> {
     SR(ShiftRightChip<F>),
 }
 
-// NOTE: These trait implementations are used to save this `FibChipType` to `MetaChip`.
+// NOTE: These trait implementations are used to save this `TestChipType` to `MetaChip`.
 // Since MetaChip has a generic parameter which is one type (cannot be two chip types).
 // This code is annoyed, we could refactor to use macro later (but less readable).
-impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
+impl<F: PrimeField32> ChipBehavior<F> for TestChipType<F> {
     type Record = EmulationRecord;
 
     fn name(&self) -> String {
@@ -146,7 +146,7 @@ impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
     }
 }
 
-impl<F: Field> BaseAir<F> for FibChipType<F> {
+impl<F: Field> BaseAir<F> for TestChipType<F> {
     fn width(&self) -> usize {
         match self {
             Self::Byte(chip) => chip.width(),
@@ -185,7 +185,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
     }
 }
 
-impl<F, CB> Air<CB> for FibChipType<F>
+impl<F, CB> Air<CB> for TestChipType<F>
 where
     F: PrimeField32,
     CB: ChipBuilder<F>,
@@ -209,7 +209,7 @@ where
     }
 }
 
-impl<F: PrimeField32> FibChipType<F> {
+impl<F: PrimeField32> TestChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![
             MetaChip::new(Self::Program(ProgramChip::default())),
@@ -233,101 +233,91 @@ impl<F: PrimeField32> FibChipType<F> {
     }
 }
 
-fn pars_args(args: Vec<String>) -> PicoStdin {
-    let mut n = 2; // default fib seq num is 2
-    if args.len() > 1 {
-        n = args[1].parse::<u32>().unwrap();
+fn pars_args(args: Vec<String>) -> (&'static [u8], PicoStdin) {
+    const ELF_FIB: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-sp1-fibonacci-elf");
+    const ELF_KECCAK: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-pico-keccak-elf");
+
+    if args.len() > 3 {
+        eprintln!("Invalid number of arguments");
+        std::process::exit(1);
     }
+    let mut test_case = String::from("fib"); // default test_case is fibonacci
+    let mut n = 0;
     let mut stdin = PicoStdin::new();
-    stdin.write(&n);
 
-    let mut input = [0u8; 4];
-    stdin.read_slice(&mut input);
+    if args.len() > 1 {
+        test_case = args[1].clone();
+        if args.len() > 2 {
+            n = args[2].parse::<u32>().unwrap();
+        }
+    }
 
-    debug!("n={}, {:x?}", n, &input);
-    stdin
-}
+    let mut elf: &[u8];
+    if test_case == "fibonacci" || test_case == "fib" || test_case == "f" {
+        elf = ELF_FIB;
+        if n == 0 {
+            n = 40000; // default fibonacci seq num
+        }
+        stdin.write(&n);
+        let mut input = [0u8; 4];
+        stdin.read_slice(&mut input);
+        info!("Test Fibonacci, sequence n={}, {:x?}", n, &input);
+    } else if test_case == "keccak" || test_case == "k" {
+        elf = ELF_KECCAK;
+        if n == 0 {
+            n = 100; // default keccak input str len
+        }
+        let input_str = (0..n).map(|_| "x").collect::<String>();
+        stdin.write(&input_str);
+        info!("Test Keccak, string len n={}", input_str.len());
+    } else {
+        eprintln!("Invalid test case. Accept: [ fibonacci | fib | f ], [ keccak | k ]\n");
+        std::process::exit(1);
+    }
 
-// Emulate the Fibonacci.
-fn emulate_fibonacci(n: u32) -> RiscvEmulator {
-    const FIBONACCI_ELF: &[u8] =
-        include_bytes!("../../compiler/test_data/riscv32im-sp1-fibonacci-elf");
-
-    info!("\n Creating Fibonacci Program..");
-    let compiler = Compiler::new(SourceType::RiscV, FIBONACCI_ELF);
-    let program = compiler.compile();
-
-    info!("\n Creating Fibonacci Runtime..");
-    let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
-
-    let mut stdin = PicoStdin::new();
-    stdin.write(&n);
-    runtime.run_with_stdin(stdin).unwrap();
-
-    runtime
-}
-
-// Emulate the Keccak.
-fn emulate_keccak(input_num: usize) -> RiscvEmulator {
-    const KECCAK_ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-pico-keccak-elf");
-
-    // Generate the random Keccak input.
-    let rng = &mut thread_rng();
-    let keccak_input: String = rng
-        .sample_iter(&Alphanumeric)
-        .take(input_num)
-        .map(char::from)
-        .collect();
-
-    info!("\n Creating Fibonacci Program..");
-    let compiler = Compiler::new(SourceType::RiscV, KECCAK_ELF);
-    let program = compiler.compile();
-
-    info!("\n Creating Runtime..");
-    let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
-
-    let mut stdin = PicoStdin::new();
-    stdin.write(&keccak_input);
-    runtime.run_with_stdin(stdin).unwrap();
-
-    runtime
+    (elf, stdin)
 }
 
 fn main() {
-    const FIBONACCI_INPUT: u32 = 40000;
-    // const KECCAK_INPUT_NUM: usize = 20000;
-    const KECCAK_INPUT_NUM: usize = 2;
-
     env_logger::init();
+    let (elf, stdin) = pars_args(env::args().collect());
     let start = SystemTime::now();
 
-    let runtime = emulate_fibonacci(FIBONACCI_INPUT);
-    // let runtime = emulate_keccak(KECCAK_INPUT_NUM);
+    info!("\n Creating Program..");
+    let compiler = Compiler::new(SourceType::RiscV, elf);
+    let program = compiler.compile();
 
-    // TRICKY: We copy the memory initialize and finalize events from the seond (last)
+    info!(
+        "\n Creating emulator (at {} ms)..",
+        start.elapsed().unwrap().as_millis()
+    );
+    let mut emulator = RiscvEmulator::new(program, PicoCoreOpts::default());
+    emulator.run_with_stdin(stdin).unwrap();
+
+    // TRICKY: We copy the memory initialize and finalize events from the second (last)
     // record to this record, since the memory lookups could only work if has the
     // full lookups in the all records.
     assert_eq!(
-        runtime.records.len(),
+        emulator.records.len(),
         2,
         "We could only test for one record for now and the last is the final one",
     );
-    let mut record = runtime.records[0].clone();
+    let mut record = emulator.records[0].clone();
     assert!(record.memory_initialize_events.is_empty());
     assert!(record.memory_finalize_events.is_empty());
-    runtime.records[1]
+    emulator.records[1]
         .memory_initialize_events
         .clone_into(&mut record.memory_initialize_events);
-    runtime.records[1]
+    emulator.records[1]
         .memory_finalize_events
         .clone_into(&mut record.memory_finalize_events);
     let program = record.program.clone();
 
     // for debugging emulator
-    for rcd in &runtime.records {
-        println!("record events: {:?}", rcd.stats());
-    }
-    println!("final record events: {:?}", record.stats());
+    //for rcd in &emulator.records {
+    //    debug!("record events: {:?}", rcd.stats());
+    //}
+    debug!("final record events: {:?}", record.stats());
 
     let mut records = vec![record];
 
@@ -337,7 +327,7 @@ fn main() {
         start.elapsed().unwrap().as_millis()
     );
     let config = BabyBearPoseidon2::new();
-    let chips = FibChipType::all_chips();
+    let chips = TestChipType::all_chips();
 
     // Create a new machine based on config and chips
     let simple_machine = SimpleMachine::new(config, chips);
