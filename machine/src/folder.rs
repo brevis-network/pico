@@ -1,4 +1,7 @@
-use crate::builder::{LookupBuilder, PermutationBuilder, PublicValuesBuilder};
+use crate::{
+    builder::{ChipBuilder, LookupBuilder, PermutationBuilder, PublicValuesBuilder},
+    lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
+};
 use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::{
@@ -8,10 +11,6 @@ use p3_matrix::{
 use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 use pico_configs::config::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 use pico_emulator::record::MAX_NUM_PVS;
-use crate::{
-    builder::ChipBuilder,
-    lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
-};
 
 // SymbolicConstraintFolder for lookup-related variables and constraints
 // It also impls functions for SymbolicAirBuilder, thus replacing it
@@ -46,13 +45,17 @@ impl<F: Field> SymbolicConstraintFolder<F> {
             })
             .collect();
 
+        // let public_values = (0..MAX_NUM_PVS)
+        //     .map(move |index| SymbolicVariable::new(Entry::Public, index))
+        //     .collect();
+
         Self {
             preprocessed: RowMajorMatrix::new(preprocessed_values, preprocessed_width),
             main: RowMajorMatrix::new(main_values, main_width),
             looking: vec![],
             looked: vec![],
             constraints: vec![],
-            public_values: vec![F::zero(); MAX_NUM_PVS],
+            public_values: vec![],
         }
     }
 
