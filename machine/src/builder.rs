@@ -29,8 +29,8 @@ pub trait ChipBuilder<F: Field>:
     /// Asserts that an iterator of expressions are all equal.
     fn assert_all_eq<I1: Into<Self::Expr>, I2: Into<Self::Expr>>(
         &mut self,
-        left: impl IntoIterator<Item=I1>,
-        right: impl IntoIterator<Item=I2>,
+        left: impl IntoIterator<Item = I1>,
+        right: impl IntoIterator<Item = I2>,
     ) {
         for (left, right) in left.into_iter().zip_eq(right) {
             self.assert_eq(left, right);
@@ -38,7 +38,7 @@ pub trait ChipBuilder<F: Field>:
     }
 
     /// Asserts that an iterator of expressions are all zero.
-    fn assert_all_zero<I: Into<Self::Expr>>(&mut self, iter: impl IntoIterator<Item=I>) {
+    fn assert_all_zero<I: Into<Self::Expr>>(&mut self, iter: impl IntoIterator<Item = I>) {
         iter.into_iter().for_each(|expr| self.assert_zero(expr));
     }
 
@@ -349,8 +349,6 @@ pub trait ChipWordBuilder<F: Field>: ChipBuilder<F> {
 // aggregation of chip-related builders
 impl<F: Field, CB: ChipBuilder<F>> ChipWordBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> ChipLookupBuilder<F> for CB {}
-
-
 
 impl<'a, F: Field, AB: AirBuilder<F = F> + PublicValuesBuilder> ChipBuilder<F>
     for FilteredAirBuilder<'a, AB>

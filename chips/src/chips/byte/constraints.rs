@@ -46,9 +46,8 @@ where
                     ByteOpcode::AND => builder.looked_byte(
                         field_op, local.and, local.b, local.c, chunk, channel_f, mult,
                     ),
-                    ByteOpcode::OR => builder.looked_byte(
-                        field_op, local.or, local.b, local.c, chunk, channel_f, mult,
-                    ),
+                    ByteOpcode::OR => builder
+                        .looked_byte(field_op, local.or, local.b, local.c, chunk, channel_f, mult),
                     ByteOpcode::XOR => builder.looked_byte(
                         field_op, local.xor, local.b, local.c, chunk, channel_f, mult,
                     ),
