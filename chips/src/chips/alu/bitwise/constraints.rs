@@ -7,7 +7,7 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
 use pico_compiler::opcode::{ByteOpcode, Opcode};
-use pico_machine::builder::ChipBuilder;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 
 impl<F: Field> BaseAir<F> for BitwiseChip<F> {
     fn width(&self) -> usize {

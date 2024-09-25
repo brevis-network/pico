@@ -5,7 +5,7 @@ use crate::{
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, PrimeField32};
 use pico_compiler::opcode::Opcode;
-use pico_machine::builder::ChipBuilder;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 
 impl<F: PrimeField32> CpuChip<F> {
     /// Constraints related to the AUIPC opcode.

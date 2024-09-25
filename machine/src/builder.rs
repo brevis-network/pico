@@ -29,8 +29,8 @@ pub trait ChipBuilder<F: Field>:
     /// Asserts that an iterator of expressions are all equal.
     fn assert_all_eq<I1: Into<Self::Expr>, I2: Into<Self::Expr>>(
         &mut self,
-        left: impl IntoIterator<Item = I1>,
-        right: impl IntoIterator<Item = I2>,
+        left: impl IntoIterator<Item=I1>,
+        right: impl IntoIterator<Item=I2>,
     ) {
         for (left, right) in left.into_iter().zip_eq(right) {
             self.assert_eq(left, right);
@@ -38,7 +38,7 @@ pub trait ChipBuilder<F: Field>:
     }
 
     /// Asserts that an iterator of expressions are all zero.
-    fn assert_all_zero<I: Into<Self::Expr>>(&mut self, iter: impl IntoIterator<Item = I>) {
+    fn assert_all_zero<I: Into<Self::Expr>>(&mut self, iter: impl IntoIterator<Item=I>) {
         iter.into_iter().for_each(|expr| self.assert_zero(expr));
     }
 
@@ -73,7 +73,9 @@ pub trait ChipBuilder<F: Field>:
     /// get preprocessed trace
     /// Originally from PaiBuilder in p3
     fn preprocessed(&self) -> Self::M;
+}
 
+pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
     /// Looking for  an ALU operation to be processed.
     #[allow(clippy::too_many_arguments)]
     fn looking_alu(
@@ -130,56 +132,6 @@ pub trait ChipBuilder<F: Field>:
             multiplicity.into(),
             LookupType::Alu,
         ));
-    }
-
-    /// Asserts that the two words are equal.
-    fn assert_word_eq(
-        &mut self,
-        left: Word<impl Into<Self::Expr>>,
-        right: Word<impl Into<Self::Expr>>,
-    ) {
-        for (left, right) in left.0.into_iter().zip(right.0) {
-            self.assert_eq(left, right);
-        }
-    }
-
-    /// Asserts that the word is zero.
-    fn assert_word_zero(&mut self, word: Word<impl Into<Self::Expr>>) {
-        for limb in word.0 {
-            self.assert_zero(limb);
-        }
-    }
-
-    /// Index an array of words using an index bitmap.
-    fn index_word_array(
-        &mut self,
-        array: &[Word<impl Into<Self::Expr> + Clone>],
-        index_bitmap: &[impl Into<Self::Expr> + Clone],
-    ) -> Word<Self::Expr> {
-        let mut result = Word::default();
-        for i in 0..WORD_SIZE {
-            result[i] = self.index_array(
-                array
-                    .iter()
-                    .map(|word| word[i].clone())
-                    .collect_vec()
-                    .as_slice(),
-                index_bitmap,
-            );
-        }
-        result
-    }
-
-    /// Same as `if_else` above, but arguments are `Word` instead of individual expressions.
-    fn select_word(
-        &mut self,
-        condition: impl Into<Self::Expr> + Clone,
-        a: Word<impl Into<Self::Expr> + Clone>,
-        b: Word<impl Into<Self::Expr> + Clone>,
-    ) -> Word<Self::Expr> {
-        Word(array::from_fn(|i| {
-            self.if_else(condition.clone(), a[i].clone(), b[i].clone())
-        }))
     }
 
     /// Check that each limb of the given slice is a u8.
@@ -288,7 +240,117 @@ pub trait ChipBuilder<F: Field>:
             LookupType::Byte,
         ));
     }
+
+    /// Receives a byte operation to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn looked_byte(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a: impl Into<Self::Expr>,
+        b: impl Into<Self::Expr>,
+        c: impl Into<Self::Expr>,
+        chunk: impl Into<Self::Expr>,
+        channel: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        self.looked_byte_pair(
+            opcode,
+            a,
+            Self::Expr::zero(),
+            b,
+            c,
+            chunk,
+            channel,
+            multiplicity,
+        );
+    }
+
+    /// Receives a byte operation with two outputs to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn looked_byte_pair(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a1: impl Into<Self::Expr>,
+        a2: impl Into<Self::Expr>,
+        b: impl Into<Self::Expr>,
+        c: impl Into<Self::Expr>,
+        chunk: impl Into<Self::Expr>,
+        channel: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        self.looked(SymbolicLookup::new(
+            vec![
+                opcode.into(),
+                a1.into(),
+                a2.into(),
+                b.into(),
+                c.into(),
+                chunk.into(),
+                channel.into(),
+            ],
+            multiplicity.into(),
+            LookupType::Byte,
+        ));
+    }
 }
+
+pub trait ChipWordBuilder<F: Field>: ChipBuilder<F> {
+    /// Asserts that the two words are equal.
+    fn assert_word_eq(
+        &mut self,
+        left: Word<impl Into<Self::Expr>>,
+        right: Word<impl Into<Self::Expr>>,
+    ) {
+        for (left, right) in left.0.into_iter().zip(right.0) {
+            self.assert_eq(left, right);
+        }
+    }
+
+    /// Asserts that the word is zero.
+    fn assert_word_zero(&mut self, word: Word<impl Into<Self::Expr>>) {
+        for limb in word.0 {
+            self.assert_zero(limb);
+        }
+    }
+
+    /// Index an array of words using an index bitmap.
+    fn index_word_array(
+        &mut self,
+        array: &[Word<impl Into<Self::Expr> + Clone>],
+        index_bitmap: &[impl Into<Self::Expr> + Clone],
+    ) -> Word<Self::Expr> {
+        let mut result = Word::default();
+        for i in 0..WORD_SIZE {
+            result[i] = self.index_array(
+                array
+                    .iter()
+                    .map(|word| word[i].clone())
+                    .collect_vec()
+                    .as_slice(),
+                index_bitmap,
+            );
+        }
+        result
+    }
+
+    /// Same as `if_else` above, but arguments are `Word` instead of individual expressions.
+    fn select_word(
+        &mut self,
+        condition: impl Into<Self::Expr> + Clone,
+        a: Word<impl Into<Self::Expr> + Clone>,
+        b: Word<impl Into<Self::Expr> + Clone>,
+    ) -> Word<Self::Expr> {
+        Word(array::from_fn(|i| {
+            self.if_else(condition.clone(), a[i].clone(), b[i].clone())
+        }))
+    }
+}
+
+// aggregation of chip-related builders
+impl<F: Field, CB: ChipBuilder<F>> ChipWordBuilder<F> for CB {}
+impl<F: Field, CB: ChipBuilder<F>> ChipLookupBuilder<F> for CB {}
+
+
 
 impl<'a, F: Field, AB: AirBuilder<F = F> + PublicValuesBuilder> ChipBuilder<F>
     for FilteredAirBuilder<'a, AB>

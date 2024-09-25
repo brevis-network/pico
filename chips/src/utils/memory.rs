@@ -4,7 +4,7 @@ use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::opcode::ByteOpcode;
 use pico_machine::{
-    builder::ChipBuilder,
+    builder::{ChipBuilder, ChipLookupBuilder},
     lookup::{LookupType, SymbolicLookup},
 };
 use std::iter::once;

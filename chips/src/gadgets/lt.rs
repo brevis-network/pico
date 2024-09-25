@@ -4,7 +4,7 @@ use p3_field::{AbstractField, Field};
 use pico_compiler::opcode::ByteOpcode;
 use pico_derive::AlignedBorrow;
 use pico_emulator::riscv::events::{ByteLookupEvent, ByteRecordBehavior};
-use pico_machine::builder::ChipBuilder;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 
 /// Operation columns for verifying that an unit is within the range `[0, modulus)`.
 #[derive(Debug, Clone, Copy, AlignedBorrow)]

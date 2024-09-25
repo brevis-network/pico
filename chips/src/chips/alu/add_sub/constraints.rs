@@ -8,7 +8,7 @@ use crate::{
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-use pico_machine::builder::ChipBuilder;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 use std::borrow::Borrow;
 
 impl<F: Field, CB: ChipBuilder<F>> Air<CB> for AddSubChip<F>

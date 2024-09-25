@@ -12,7 +12,7 @@ use super::{
 };
 
 use pico_machine::{
-    builder::ChipBuilder,
+    builder::{ChipBuilder, ChipLookupBuilder},
     lookup::{LookupType, SymbolicLookup},
 };
 
@@ -43,20 +43,19 @@ where
                 let mult = local_mult.mult_channels[channel].multiplicities[i];
                 let chunk = local_mult.chunk;
                 match opcode {
-                    ByteOpcode::AND => self.looked_byte(
-                        builder, field_op, local.and, local.b, local.c, chunk, channel_f, mult,
+                    ByteOpcode::AND => builder.looked_byte(
+                        field_op, local.and, local.b, local.c, chunk, channel_f, mult,
                     ),
-                    ByteOpcode::OR => self.looked_byte(
-                        builder, field_op, local.or, local.b, local.c, chunk, channel_f, mult,
+                    ByteOpcode::OR => builder.looked_byte(
+                        field_op, local.or, local.b, local.c, chunk, channel_f, mult,
                     ),
-                    ByteOpcode::XOR => self.looked_byte(
-                        builder, field_op, local.xor, local.b, local.c, chunk, channel_f, mult,
+                    ByteOpcode::XOR => builder.looked_byte(
+                        field_op, local.xor, local.b, local.c, chunk, channel_f, mult,
                     ),
-                    ByteOpcode::SLL => self.looked_byte(
-                        builder, field_op, local.sll, local.b, local.c, chunk, channel_f, mult,
+                    ByteOpcode::SLL => builder.looked_byte(
+                        field_op, local.sll, local.b, local.c, chunk, channel_f, mult,
                     ),
-                    ByteOpcode::U8Range => self.looked_byte(
-                        builder,
+                    ByteOpcode::U8Range => builder.looked_byte(
                         field_op,
                         CB::F::zero(),
                         local.b,
@@ -65,8 +64,7 @@ where
                         channel_f,
                         mult,
                     ),
-                    ByteOpcode::ShrCarry => self.looked_byte_pair(
-                        builder,
+                    ByteOpcode::ShrCarry => builder.looked_byte_pair(
                         field_op,
                         local.shr,
                         local.shr_carry,
@@ -76,11 +74,10 @@ where
                         channel_f,
                         mult,
                     ),
-                    ByteOpcode::LTU => self.looked_byte(
-                        builder, field_op, local.ltu, local.b, local.c, chunk, channel_f, mult,
+                    ByteOpcode::LTU => builder.looked_byte(
+                        field_op, local.ltu, local.b, local.c, chunk, channel_f, mult,
                     ),
-                    ByteOpcode::MSB => self.looked_byte(
-                        builder,
+                    ByteOpcode::MSB => builder.looked_byte(
                         field_op,
                         local.msb,
                         local.b,
@@ -89,8 +86,7 @@ where
                         channel_f,
                         mult,
                     ),
-                    ByteOpcode::U16Range => self.looked_byte(
-                        builder,
+                    ByteOpcode::U16Range => builder.looked_byte(
                         field_op,
                         local.value_u16,
                         CB::F::zero(),
@@ -102,62 +98,5 @@ where
                 }
             }
         }
-    }
-}
-
-impl<F: Field> ByteChip<F> {
-    /// Receives a byte operation to be processed.
-    #[allow(clippy::too_many_arguments)]
-    fn looked_byte<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        opcode: impl Into<CB::Expr>,
-        a: impl Into<CB::Expr>,
-        b: impl Into<CB::Expr>,
-        c: impl Into<CB::Expr>,
-        chunk: impl Into<CB::Expr>,
-        channel: impl Into<CB::Expr>,
-        multiplicity: impl Into<CB::Expr>,
-    ) {
-        self.looked_byte_pair(
-            builder,
-            opcode,
-            a,
-            CB::Expr::zero(),
-            b,
-            c,
-            chunk,
-            channel,
-            multiplicity,
-        );
-    }
-
-    /// Receives a byte operation with two outputs to be processed.
-    #[allow(clippy::too_many_arguments)]
-    fn looked_byte_pair<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        opcode: impl Into<CB::Expr>,
-        a1: impl Into<CB::Expr>,
-        a2: impl Into<CB::Expr>,
-        b: impl Into<CB::Expr>,
-        c: impl Into<CB::Expr>,
-        chunk: impl Into<CB::Expr>,
-        channel: impl Into<CB::Expr>,
-        multiplicity: impl Into<CB::Expr>,
-    ) {
-        builder.looked(SymbolicLookup::new(
-            vec![
-                opcode.into(),
-                a1.into(),
-                a2.into(),
-                b.into(),
-                c.into(),
-                chunk.into(),
-                channel.into(),
-            ],
-            multiplicity.into(),
-            LookupType::Byte,
-        ));
     }
 }

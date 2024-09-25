@@ -13,7 +13,7 @@ use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::{opcode::Opcode, word::Word};
 use pico_emulator::riscv::events::MemoryAccessPosition;
-use pico_machine::builder::ChipBuilder;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder, ChipWordBuilder};
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a memory instruction.

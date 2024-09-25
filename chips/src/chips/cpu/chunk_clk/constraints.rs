@@ -5,7 +5,7 @@ use crate::{
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::opcode::ByteOpcode;
-use pico_machine::builder::ChipBuilder;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 
 impl<F: Field> CpuChip<F> {
     /// Constraints related to the chunk and clk.

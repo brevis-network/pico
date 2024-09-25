@@ -37,7 +37,7 @@ use pico_compiler::{
     opcode::{ByteOpcode, Opcode},
     word::WORD_SIZE,
 };
-use pico_machine::builder::ChipBuilder;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 
 use super::{columns::MulCols, MulChip, BYTE_MASK, PRODUCT_SIZE};
 

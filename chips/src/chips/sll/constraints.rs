@@ -8,7 +8,7 @@ use pico_compiler::{
     word::{Word, BYTE_SIZE, WORD_SIZE},
 };
 use pico_machine::{
-    builder::ChipBuilder,
+    builder::{ChipBuilder, ChipLookupBuilder},
     lookup::{LookupType, SymbolicLookup},
 };
 

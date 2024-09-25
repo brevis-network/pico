@@ -9,7 +9,7 @@ use pico_compiler::{
     word::Word,
 };
 use pico_machine::{
-    builder::ChipBuilder,
+    builder::{ChipBuilder, ChipLookupBuilder},
     lookup::{LookupType, SymbolicLookup},
 };
 use std::iter::once;

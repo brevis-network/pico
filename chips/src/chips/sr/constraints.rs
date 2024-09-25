@@ -9,7 +9,7 @@ use pico_compiler::{
     opcode::{ByteOpcode, Opcode},
     word::{BYTE_SIZE, WORD_SIZE},
 };
-use pico_machine::builder::ChipBuilder;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 use std::borrow::Borrow;
 
 impl<F: Field, CB> Air<CB> for ShiftRightChip<F>
