@@ -91,7 +91,7 @@ where
         // ECALL instruction.
         self.eval_ecall(builder, local);
 
-        /* TODO: Enable after adding public values.
+        /* TODO: Enable after adding deferred.
                 // COMMIT/COMMIT_DEFERRED_PROOFS ecall instruction.
                 self.eval_commit(
                     builder,

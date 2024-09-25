@@ -20,19 +20,17 @@ impl<F: Field> CpuChip<F> {
 
         let is_jump_instruction = local.opcode_selector.is_jal + local.opcode_selector.is_jalr;
 
-        /* TODO: Enable after adding memory read write chip.
-                // Verify that the local.pc + 4 is saved in op_a for both jump instructions.
-                // When op_a is set to register X0, the RISC-V spec states that the jump instruction will
-                // not have a return destination address (it is effectively a GOTO command).  In this case,
-                // we shouldn't verify the return address.
-                builder
-                    .when(is_jump_instruction.clone())
-                    .when_not(local.instruction.op_a_0)
-                    .assert_eq(
-                        local.op_a_val().reduce::<CB>(),
-                        local.pc + CB::F::from_canonical_u8(4),
-                    );
-        */
+        // Verify that the local.pc + 4 is saved in op_a for both jump instructions.
+        // When op_a is set to register X0, the RISC-V spec states that the jump instruction will
+        // not have a return destination address (it is effectively a GOTO command).  In this case,
+        // we shouldn't verify the return address.
+        builder
+            .when(is_jump_instruction.clone())
+            .when_not(local.instruction.op_a_0)
+            .assert_eq(
+                local.op_a_val().reduce::<CB>(),
+                local.pc + CB::F::from_canonical_u8(4),
+            );
 
         // Verify that the word form of local.pc is correct for JAL instructions.
         builder

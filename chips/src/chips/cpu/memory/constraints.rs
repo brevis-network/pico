@@ -146,15 +146,13 @@ impl<F: Field> CpuChip<F> {
             is_memory_instruction.clone(),
         );
 
-        /* TODO: Enable after adding word gadget.
-                // On memory load instructions, make sure that the memory value is not changed.
-                builder
-                    .when(self.is_load_instruction::<CB>(&local.opcode_selector))
-                    .assert_word_eq(
-                        *memory_columns.memory_access.value(),
-                        *memory_columns.memory_access.prev_value(),
-                    );
-        */
+        // On memory load instructions, make sure that the memory value is not changed.
+        builder
+            .when(self.is_load_instruction::<CB>(&local.opcode_selector))
+            .assert_word_eq(
+                *memory_columns.memory_access.value(),
+                *memory_columns.memory_access.prev_value(),
+            );
     }
 
     /// Evaluates constraints related to loading from memory.
@@ -212,13 +210,11 @@ impl<F: Field> CpuChip<F> {
             mem_value_is_pos * (CB::Expr::one() - local.instruction.op_a_0),
         );
 
-        /* TODO: Enable after adding word gadget.
-                // When the memory value is not positive and not writing to x0, assert that op_a value is
-                // equal to the unsigned memory value.
-                builder
-                    .when(local.mem_value_is_pos_not_x0)
-                    .assert_word_eq(local.unsigned_mem_val, local.op_a_val());
-        */
+        // When the memory value is not positive and not writing to x0, assert that op_a value is
+        // equal to the unsigned memory value.
+        builder
+            .when(local.mem_value_is_pos_not_x0)
+            .assert_word_eq(local.unsigned_mem_val, local.op_a_val());
     }
 
     /// Evaluates constraints related to storing to memory.
@@ -255,11 +251,9 @@ impl<F: Field> CpuChip<F> {
                 + (one.clone() - memory_columns.offset_is_three) * prev_mem_val[3],
         ]);
 
-        /* TODO: Enable after adding word gadget.
-                builder
-                    .when(local.opcode_selector.is_sb)
-                    .assert_word_eq(mem_val.map(|x| x.into()), sb_expected_stored_value);
-        */
+        builder
+            .when(local.opcode_selector.is_sb)
+            .assert_word_eq(mem_val.map(|x| x.into()), sb_expected_stored_value);
 
         // When the instruction is SH, make sure both offset one and three are off.
         builder
@@ -282,16 +276,14 @@ impl<F: Field> CpuChip<F> {
             a_val[1] * a_is_upper_half + (one.clone() - a_is_upper_half) * prev_mem_val[3],
         ]);
 
-        /* TODO: Enable after adding word gadget.
-                builder
-                    .when(local.opcode_selector.is_sh)
-                    .assert_word_eq(mem_val.map(|x| x.into()), sh_expected_stored_value);
+        builder
+            .when(local.opcode_selector.is_sh)
+            .assert_word_eq(mem_val.map(|x| x.into()), sh_expected_stored_value);
 
-                // When the instruction is SW, just use the word without masking.
-                builder
-                    .when(local.opcode_selector.is_sw)
-                    .assert_word_eq(mem_val.map(|x| x.into()), a_val.map(|x| x.into()));
-        */
+        // When the instruction is SW, just use the word without masking.
+        builder
+            .when(local.opcode_selector.is_sw)
+            .assert_word_eq(mem_val.map(|x| x.into()), a_val.map(|x| x.into()));
     }
 
     /// This function is used to evaluate the unsigned memory value for the load memory
@@ -319,12 +311,10 @@ impl<F: Field> CpuChip<F> {
             + mem_val[3] * memory_columns.offset_is_three;
         let byte_value = Word::extend_expr::<CB>(mem_byte.clone());
 
-        /* TODO: Enable after adding word gadget.
-                // When the instruciton is LB or LBU, just use the lower byte.
-                builder
-                    .when(local.opcode_selector.is_lb + local.opcode_selector.is_lbu)
-                    .assert_word_eq(byte_value, local.unsigned_mem_val.map(|x| x.into()));
-        */
+        // When the instruciton is LB or LBU, just use the lower byte.
+        builder
+            .when(local.opcode_selector.is_lb + local.opcode_selector.is_lbu)
+            .assert_word_eq(byte_value, local.unsigned_mem_val.map(|x| x.into()));
 
         // When the instruction is LH or LHU, use the lower half.
         builder
@@ -345,16 +335,14 @@ impl<F: Field> CpuChip<F> {
             CB::Expr::zero(),
         ]);
 
-        /* TODO: Enable after adding word gadget.
-                builder
-                    .when(local.opcode_selector.is_lh + local.opcode_selector.is_lhu)
-                    .assert_word_eq(half_value, local.unsigned_mem_val.map(|x| x.into()));
+        builder
+            .when(local.opcode_selector.is_lh + local.opcode_selector.is_lhu)
+            .assert_word_eq(half_value, local.unsigned_mem_val.map(|x| x.into()));
 
-                // When the instruction is LW, just use the word.
-                builder
-                    .when(local.opcode_selector.is_lw)
-                    .assert_word_eq(mem_val, local.unsigned_mem_val);
-        */
+        // When the instruction is LW, just use the word.
+        builder
+            .when(local.opcode_selector.is_lw)
+            .assert_word_eq(mem_val, local.unsigned_mem_val);
     }
 
     /// Evaluates the decomposition of the most significant byte of the memory value.

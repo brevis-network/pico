@@ -129,18 +129,16 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
             .when(is_real.clone())
             .assert_eq(self.b_comparison_byte, b_comparison_byte);
 
-        /* TODO: Enable after lookup integration.
-                // Send the comparison interaction.
-                builder.send_byte(
-                    ByteOpcode::LTU.as_field::<CB::F>(),
-                    CB::F::one(),
-                    self.a_comparison_byte,
-                    self.b_comparison_byte,
-                    chunk,
-                    channel,
-                    is_real,
-                )
-        */
+        // Send the comparison interaction.
+        builder.looking_byte(
+            ByteOpcode::LTU.as_field::<CB::F>(),
+            CB::F::one(),
+            self.a_comparison_byte,
+            self.b_comparison_byte,
+            chunk,
+            channel,
+            is_real,
+        )
     }
 }
 

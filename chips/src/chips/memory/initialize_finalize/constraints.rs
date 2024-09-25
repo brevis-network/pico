@@ -216,25 +216,25 @@ where
             local.is_real * (CB::Expr::one() - next.is_real),
         );
 
-        /* TODO: Enable after adding public values.
-                // Make assertions for the final value. We need to connect the final valid address to the
-                // correspinding `last_addr` value.
-                let last_addr_bits = match self.kind {
-                    MemoryChipType::Initialize => &public_values.last_init_addr_bits,
-                    MemoryChipType::Finalize => &public_values.last_finalize_addr_bits,
-                };
+        // Make assertions for the final value. We need to connect the final valid address to the
+        // correspinding `last_addr` value.
+        let last_addr_bits = match self.kind {
+            MemoryChipType::Initialize => &public_values.last_init_addr_bits,
+            MemoryChipType::Finalize => &public_values.last_finalize_addr_bits,
+        };
 
-                // Constrain the last address bits to be equal to the corresponding `last_addr_bits` value.
-                for (local_bit, pub_bit) in local.addr_bits.bits.iter().zip(last_addr_bits.iter()) {
-                    builder
-                        .when_last_row()
-                        .when(local.is_real)
-                        .assert_eq(*local_bit, pub_bit.clone());
-                    builder
-                        .when_transition()
-                        .when(local.is_last_addr)
-                        .assert_eq(*local_bit, pub_bit.clone());
-                }
-        */
+        // Constrain the last address bits to be equal to the corresponding `last_addr_bits` value.
+        for (local_bit, pub_bit) in local.addr_bits.bits.iter().zip(last_addr_bits.iter()) {
+            builder
+                .when_last_row()
+                .when(local.is_real)
+                .assert_eq(*local_bit, pub_bit.clone());
+            /* TODO: Enable after adding deferred for the last addr.
+                        builder
+                            .when_transition()
+                            .when(local.is_last_addr)
+                            .assert_eq(*local_bit, pub_bit.clone());
+            */
+        }
     }
 }

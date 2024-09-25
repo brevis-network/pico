@@ -130,7 +130,7 @@ impl<F: Field> CpuChip<F> {
         // Get the ecall specific columns.
         let ecall_columns = local.opcode_specific.ecall();
 
-        /* TODO: Enable after adding public values.
+        /* TODO: Enable after adding precompile.
             // Verify the index bitmap.
             let mut bitmap_sum = CB::Expr::zero();
             // They should all be bools.
