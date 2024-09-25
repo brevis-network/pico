@@ -3,7 +3,10 @@ use crate::{
     lookup::{symbolic_to_virtual_pair, LookupType, SymbolicLookup, VirtualPairLookup},
 };
 use itertools::Itertools;
-use p3_air::{AirBuilder, ExtensionBuilder, FilteredAirBuilder, PairCol, PermutationAirBuilder};
+use p3_air::{
+    AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, FilteredAirBuilder, PairCol,
+    PermutationAirBuilder,
+};
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
@@ -16,7 +19,7 @@ use std::{array, iter::once};
 
 /// Chip builder
 pub trait ChipBuilder<F: Field>:
-    AirBuilder<F = F> + LookupBuilder<SymbolicLookup<Self::Expr>>
+    AirBuilder<F = F> + LookupBuilder<SymbolicLookup<Self::Expr>> + PublicValuesBuilder
 {
     /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
     fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<Self> {
@@ -287,9 +290,19 @@ pub trait ChipBuilder<F: Field>:
     }
 }
 
-impl<'a, F: Field, AB: AirBuilder<F = F>> ChipBuilder<F> for FilteredAirBuilder<'a, AB> {
+impl<'a, F: Field, AB: AirBuilder<F = F> + PublicValuesBuilder> ChipBuilder<F>
+    for FilteredAirBuilder<'a, AB>
+{
     fn preprocessed(&self) -> Self::M {
         panic!("Should not be called!")
+    }
+}
+
+impl<'a, AB: PublicValuesBuilder> PublicValuesBuilder for FilteredAirBuilder<'a, AB> {
+    type PublicVar = AB::PublicVar;
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.inner.public_values()
     }
 }
 

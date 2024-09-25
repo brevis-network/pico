@@ -10,11 +10,13 @@ use crate::{
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
+use pico_compiler::word::Word;
+use pico_emulator::{record::MAX_NUM_PVS, riscv::public_values::PublicValues};
 use pico_machine::{
     builder::ChipBuilder,
     lookup::{LookupType, SymbolicLookup},
 };
-use std::borrow::Borrow;
+use std::{array, borrow::Borrow};
 
 impl<F: Field> BaseAir<F> for MemoryProgramChip<F> {
     fn width(&self) -> usize {
@@ -36,13 +38,11 @@ where
         let mult_local = main.row_slice(0);
         let mult_local: &MemoryProgramMultCols<CB::Var> = (*mult_local).borrow();
 
-        /* TODO: Enable after adding public values.
-                // Get chunk from public values and evaluate whether it is the first chunk.
-                let public_values_slice: [CB::Expr; SP1_PROOF_NUM_PV_ELTS] =
-                    array::from_fn(|i| builder.public_values()[i].into());
-                let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
-                    public_values_slice.as_slice().borrow();
-        */
+        // Get chunk from public values and evaluate whether it is the first chunk.
+        let public_values_slice: [CB::Expr; MAX_NUM_PVS] =
+            array::from_fn(|i| builder.public_values()[i].into());
+        let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
+            public_values_slice.as_slice().borrow();
 
         // Constrain `is_first_chunk` to be 1 if and only if the chunk is the first chunk.
         IsZeroOperation::<CB::F>::eval(

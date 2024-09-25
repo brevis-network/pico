@@ -3,16 +3,19 @@ use crate::{
         columns::{MemoryInitializeFinalizeCols, NUM_MEMORY_INITIALIZE_FINALIZE_COLS},
         MemoryChipType, MemoryInitializeFinalizeChip,
     },
-    gadgets::baby_bear_range::BabyBearBitDecomposition,
+    gadgets::{baby_bear_range::BabyBearBitDecomposition, is_zero::IsZeroOperation},
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
+use pico_compiler::word::Word;
+use pico_emulator::{record::MAX_NUM_PVS, riscv::public_values::PublicValues};
 use pico_machine::{
     builder::ChipBuilder,
     lookup::{LookupType, SymbolicLookup},
 };
+use std::array;
 
 impl<F: Field> BaseAir<F> for MemoryInitializeFinalizeChip<F> {
     fn width(&self) -> usize {
@@ -117,45 +120,43 @@ where
 
         let local_addr_bits = local.addr_bits.bits;
 
-        /* TODO: Enable after adding public values.
-                let public_values_array: [CB::Expr; SP1_PROOF_NUM_PV_ELTS] =
-                    array::from_fn(|i| builder.public_values()[i].into());
-                let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
-                    public_values_array.as_slice().borrow();
+        let public_values_array: [CB::Expr; MAX_NUM_PVS] =
+            array::from_fn(|i| builder.public_values()[i].into());
+        let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
+            public_values_array.as_slice().borrow();
 
-                let prev_addr_bits = match self.kind {
-                    MemoryChipType::Initialize => &public_values.previous_init_addr_bits,
-                    MemoryChipType::Finalize => &public_values.previous_finalize_addr_bits,
-                };
+        let prev_addr_bits = match self.kind {
+            MemoryChipType::Initialize => &public_values.previous_init_addr_bits,
+            MemoryChipType::Finalize => &public_values.previous_finalize_addr_bits,
+        };
 
-                // Since the previous address is either zero or constrained by a different chunk, we know
-                // it's an element of the field, so we can get an element from the bit decomposition with
-                // no concern for overflow.
-                let prev_addr = prev_addr_bits
-                    .iter()
-                    .enumerate()
-                    .map(|(i, bit)| bit.clone() * CB::F::from_wrapped_u32(1 << i))
-                    .sum::<CB::Expr>();
+        // Since the previous address is either zero or constrained by a different chunk, we know
+        // it's an element of the field, so we can get an element from the bit decomposition with
+        // no concern for overflow.
+        let prev_addr = prev_addr_bits
+            .iter()
+            .enumerate()
+            .map(|(i, bit)| bit.clone() * CB::F::from_wrapped_u32(1 << i))
+            .sum::<CB::Expr>();
 
-                // Constrain the is_prev_addr_zero operation only in the first row.
-                let is_first_row = builder.is_first_row();
-                IsZeroOperation::<CB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
+        // Constrain the is_prev_addr_zero operation only in the first row.
+        let is_first_row = builder.is_first_row();
+        IsZeroOperation::<CB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
 
-                // Constrain the inequality assertion in the first row.
-                local.lt_cols.eval(
-                    builder,
-                    prev_addr_bits,
-                    &local_addr_bits,
-                    local.is_first_comp,
-                );
+        // Constrain the inequality assertion in the first row.
+        local.lt_cols.eval(
+            builder,
+            prev_addr_bits,
+            &local_addr_bits,
+            local.is_first_comp,
+        );
 
-                // Constrain the is_first_comp column.
-                builder.assert_bool(local.is_first_comp);
-                builder.when_first_row().assert_eq(
-                    local.is_first_comp,
-                    CB::Expr::one() - local.is_prev_addr_zero.result,
-                );
-        */
+        // Constrain the is_first_comp column.
+        builder.assert_bool(local.is_first_comp);
+        builder.when_first_row().assert_eq(
+            local.is_first_comp,
+            CB::Expr::one() - local.is_prev_addr_zero.result,
+        );
 
         // TODO: Enable after generating memory init and finalize events to emulation record.
         // Ensure at least one real row.

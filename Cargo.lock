@@ -1388,6 +1388,7 @@ dependencies = [
  "pico-configs",
  "pico-emulator",
  "pico-machine",
+ "rand",
  "rayon-scan",
  "serde",
 ]

@@ -29,10 +29,8 @@ use pico_machine::{
     chip::{ChipBehavior, MetaChip},
     machine::MachineBehavior,
 };
-use std::{
-    env,
-    time::{Duration, SystemTime},
-};
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use std::time::SystemTime;
 
 pub enum FibChipType<F: Field> {
     Byte(ByteChip<F>),
@@ -249,24 +247,61 @@ fn pars_args(args: Vec<String>) -> PicoStdin {
     stdin
 }
 
+// Emulate the Fibonacci.
+fn emulate_fibonacci(n: u32) -> RiscvEmulator {
+    const FIBONACCI_ELF: &[u8] =
+        include_bytes!("../../compiler/test_data/riscv32im-pico-fibonacci-elf");
+
+    info!("\n Creating Fibonacci Program..");
+    let compiler = Compiler::new(SourceType::RiscV, FIBONACCI_ELF);
+    let program = compiler.compile();
+
+    info!("\n Creating Fibonacci Runtime..");
+    let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
+
+    let mut stdin = PicoStdin::new();
+    stdin.write(&n);
+    runtime.run_with_stdin(stdin).unwrap();
+
+    runtime
+}
+
+// Emulate the Keccak.
+fn emulate_keccak(input_num: usize) -> RiscvEmulator {
+    const KECCAK_ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-pico-keccak-elf");
+
+    // Generate the random Keccak input.
+    let rng = &mut thread_rng();
+    let keccak_input: String = rng
+        .sample_iter(&Alphanumeric)
+        .take(input_num)
+        .map(char::from)
+        .collect();
+
+    info!("\n Creating Fibonacci Program..");
+    let compiler = Compiler::new(SourceType::RiscV, KECCAK_ELF);
+    let program = compiler.compile();
+
+    info!("\n Creating Runtime..");
+    let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
+
+    let mut stdin = PicoStdin::new();
+    stdin.write(&keccak_input);
+    runtime.run_with_stdin(stdin).unwrap();
+
+    runtime
+}
+
 fn main() {
+    const FIBONACCI_INPUT: u32 = 836789;
+    // const KECCAK_INPUT_NUM: usize = 20000;
+    const KECCAK_INPUT_NUM: usize = 2;
+
     env_logger::init();
     let start = SystemTime::now();
 
-    info!("\n Creating Program..");
-    const ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-pico-fibonacci-elf");
-
-    let compiler = Compiler::new(SourceType::RiscV, ELF);
-    let program = compiler.compile();
-
-    info!(
-        "\n Creating Runtime (at {} sec)..",
-        start.elapsed().unwrap().as_secs()
-    );
-    let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
-
-    let stdin = pars_args(env::args().collect());
-    runtime.run_with_stdin(stdin).unwrap();
+    // emulate_fibonacci(FIBONACCI_INPUT);
+    let runtime = emulate_keccak(KECCAK_INPUT_NUM);
 
     // TRICKY: We copy the memory initialize and finalize events from the seond (last)
     // record to this record, since the memory lookups could only work if has the

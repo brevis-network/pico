@@ -12,6 +12,7 @@ pub mod jump;
 pub mod memory;
 pub mod opcode_selector;
 pub mod opcode_specific;
+pub mod public_values;
 pub mod register;
 pub mod traces;
 pub mod utils;

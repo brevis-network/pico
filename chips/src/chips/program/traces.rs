@@ -6,7 +6,7 @@ use super::{
     ProgramChip,
 };
 use hashbrown::HashMap;
-use log::{debug, info};
+use log::debug;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_compiler::program::Program;
@@ -90,9 +90,7 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
                 let pc = input.program.pc_base + (i as u32 * 4);
                 let mut row = [F::zero(); NUM_PROGRAM_MULT_COLS];
                 let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
-                // TODO: Set chunk if it's added in record.
-                cols.chunk = F::zero();
-                // cols.chunk = F::from_canonical_u32(input.public_values.emulation_chunk);
+                cols.chunk = F::from_canonical_u32(input.public_values.execution_chunk);
                 cols.multiplicity =
                     F::from_canonical_usize(*instruction_counts.get(&pc).unwrap_or(&0));
                 row

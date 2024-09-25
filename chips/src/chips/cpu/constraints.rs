@@ -8,11 +8,13 @@ use crate::chips::cpu::{
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::Matrix;
+use pico_compiler::word::Word;
+use pico_emulator::{record::MAX_NUM_PVS, riscv::public_values::PublicValues};
 use pico_machine::{
     builder::ChipBuilder,
     lookup::{LookupType, SymbolicLookup},
 };
-use std::{borrow::Borrow, iter::once};
+use std::{array, borrow::Borrow, iter::once};
 
 impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for CpuChip<F>
 where
@@ -25,12 +27,10 @@ where
         let local: &CpuCols<CB::Var> = (*local).borrow();
         let next: &CpuCols<CB::Var> = (*next).borrow();
 
-        /* TODO: Enable after adding public values.
-                let public_values_slice: [CB::Expr; SP1_PROOF_NUM_PV_ELTS] =
-                    core::array::from_fn(|i| builder.public_values()[i].into());
-                let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
-                    public_values_slice.as_slice().borrow();
-        */
+        let public_values_slice: [CB::Expr; MAX_NUM_PVS] =
+            array::from_fn(|i| builder.public_values()[i].into());
+        let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
+            public_values_slice.as_slice().borrow();
 
         // Contrain the interaction with program table.
         self.looking_program(
@@ -111,7 +111,7 @@ where
         self.eval_pc(builder, local, next, is_branch_instruction.clone());
 
         // Check public values constraints.
-        // self.eval_public_values(builder, local, next, public_values);
+        self.eval_public_values(builder, local, next, public_values);
 
         // Check that the is_real flag is correct.
         self.eval_is_real(builder, local, next);

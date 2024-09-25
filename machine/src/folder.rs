@@ -45,9 +45,9 @@ impl<F: Field> SymbolicConstraintFolder<F> {
             })
             .collect();
 
-        // let public_values = (0..MAX_NUM_PVS)
-        //     .map(move |index| SymbolicVariable::new(Entry::Public, index))
-        //     .collect();
+        let public_values = (0..MAX_NUM_PVS)
+            .map(move |index| SymbolicVariable::new(Entry::Public, index))
+            .collect();
 
         Self {
             preprocessed: RowMajorMatrix::new(preprocessed_values, preprocessed_width),
@@ -55,7 +55,7 @@ impl<F: Field> SymbolicConstraintFolder<F> {
             looking: vec![],
             looked: vec![],
             constraints: vec![],
-            public_values: vec![],
+            public_values,
         }
     }
 

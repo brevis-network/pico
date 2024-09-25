@@ -1,12 +1,10 @@
-use crate::{
-    chips::cpu::{columns::CpuCols, CpuChip},
-    utils::word::Word,
-};
+use crate::chips::cpu::{columns::CpuCols, CpuChip};
 use p3_air::AirBuilder;
 use p3_field::Field;
+use pico_compiler::word::Word;
+use pico_emulator::riscv::public_values::PublicValues;
 use pico_machine::builder::ChipBuilder;
 
-/* TODO: Enable after adding public values.
 impl<F: Field> CpuChip<F> {
     /// Constraints related to the public values.
     pub(crate) fn eval_public_values<CB: ChipBuilder<F>>(
@@ -19,7 +17,7 @@ impl<F: Field> CpuChip<F> {
         // Verify the public value's chunk.
         builder
             .when(local.is_real)
-            .assert_eq(public_values.emulation_chunk.clone(), local.chunk);
+            .assert_eq(public_values.execution_chunk.clone(), local.chunk);
 
         // Verify the public value's start pc.
         builder
@@ -43,4 +41,3 @@ impl<F: Field> CpuChip<F> {
             .assert_eq(public_values.next_pc.clone(), local.next_pc);
     }
 }
-*/

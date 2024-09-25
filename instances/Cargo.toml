@@ -38,12 +38,12 @@ p3-bn254-fr = { workspace = true }
 
 # misc
 anyhow.workspace = true
-
 hashbrown.workspace = true
 itertools.workspace = true
 log.workspace = true
-rayon-scan = {workspace = true}
 pico-compiler.workspace = true
+rand.workspace = true
+rayon-scan.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
@@ -52,4 +52,3 @@ log.workspace = true
 # We only used the specific chips in the examples (and tests).
 # It could not be added to the dependencies, since the specific chips need to implement
 # the traits (as `ChipBehavior`), otherwise it causes the cyclic dependency.
-
