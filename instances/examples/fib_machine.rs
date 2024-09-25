@@ -20,6 +20,7 @@ use pico_compiler::{
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{
     opts::PicoCoreOpts,
+    record::RecordBehavior,
     riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
     stdin::PicoStdin,
 };
@@ -250,7 +251,7 @@ fn pars_args(args: Vec<String>) -> PicoStdin {
 // Emulate the Fibonacci.
 fn emulate_fibonacci(n: u32) -> RiscvEmulator {
     const FIBONACCI_ELF: &[u8] =
-        include_bytes!("../../compiler/test_data/riscv32im-pico-fibonacci-elf");
+        include_bytes!("../../compiler/test_data/riscv32im-sp1-fibonacci-elf");
 
     info!("\n Creating Fibonacci Program..");
     let compiler = Compiler::new(SourceType::RiscV, FIBONACCI_ELF);
@@ -293,15 +294,15 @@ fn emulate_keccak(input_num: usize) -> RiscvEmulator {
 }
 
 fn main() {
-    const FIBONACCI_INPUT: u32 = 836789;
+    const FIBONACCI_INPUT: u32 = 40000;
     // const KECCAK_INPUT_NUM: usize = 20000;
     const KECCAK_INPUT_NUM: usize = 2;
 
     env_logger::init();
     let start = SystemTime::now();
 
-    // emulate_fibonacci(FIBONACCI_INPUT);
-    let runtime = emulate_keccak(KECCAK_INPUT_NUM);
+    let runtime = emulate_fibonacci(FIBONACCI_INPUT);
+    // let runtime = emulate_keccak(KECCAK_INPUT_NUM);
 
     // TRICKY: We copy the memory initialize and finalize events from the seond (last)
     // record to this record, since the memory lookups could only work if has the
@@ -322,12 +323,18 @@ fn main() {
         .clone_into(&mut record.memory_finalize_events);
     let program = record.program.clone();
 
+    // for debugging emulator
+    for rcd in &runtime.records {
+        println!("record events: {:?}", rcd.stats());
+    }
+    println!("final record events: {:?}", record.stats());
+
     let mut records = vec![record];
 
     // Setup config and chips.
     info!(
-        "\n Creating BaseMachine (at {} sec)..",
-        start.elapsed().unwrap().as_secs()
+        "\n Creating BaseMachine (at {} ms)..",
+        start.elapsed().unwrap().as_millis()
     );
     let config = BabyBearPoseidon2::new();
     let chips = FibChipType::all_chips();
@@ -338,31 +345,35 @@ fn main() {
 
     // Setup machine prover, verifier, pk and vk.
     info!(
-        "\n Setup machine (at {} sec)..",
-        start.elapsed().unwrap().as_secs()
+        "\n Setup machine (at {} ms)..",
+        start.elapsed().unwrap().as_millis()
     );
     let (pk, vk) = simple_machine.setup_keys(&program);
 
     info!(
-        "\n Complement records (at {} sec)..",
-        start.elapsed().unwrap().as_secs()
+        "\n Complement records (at {} ms)..",
+        start.elapsed().unwrap().as_millis()
     );
     simple_machine.complement_record(&mut records);
 
     // Generate the proof.
     info!(
-        "\n Generating proof (at {} sec)..",
-        start.elapsed().unwrap().as_secs()
+        "\n Generating proof (at {} ms)..",
+        start.elapsed().unwrap().as_millis()
     );
     let proof = simple_machine.prove(&pk, &records);
     info!("{} generated.", proof.name());
 
     // Verify the proof.
     info!(
-        "\n Verifying proof (at {} sec)..",
-        start.elapsed().unwrap().as_secs()
+        "\n Verifying proof (at {} ms)..",
+        start.elapsed().unwrap().as_millis()
     );
     let result = simple_machine.verify(&vk, &proof);
-    info!("The proof is verified: {}", result.is_ok());
+    info!(
+        "The proof is verified: {} (at {} ms)..",
+        result.is_ok(),
+        start.elapsed().unwrap().as_millis()
+    );
     assert_eq!(result.is_ok(), true);
 }
