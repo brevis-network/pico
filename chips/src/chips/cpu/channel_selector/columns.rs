@@ -1,9 +1,5 @@
-use p3_field::Field;
+use crate::chips::byte::NUM_BYTE_LOOKUP_CHANNELS;
 use pico_derive::AlignedBorrow;
-
-// TODO: Replace with the constant in bytes chip.
-// use crate::bytes::NUM_BYTE_LOOKUP_CHANNELS;
-pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;
 
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
 #[repr(C)]

@@ -47,7 +47,7 @@ where
         // Constrain `is_first_chunk` to be 1 if and only if the chunk is the first chunk.
         IsZeroOperation::<CB::F>::eval(
             builder,
-            // TODO: We only have one chunk for now.
+            // TODO: The chunk should be 1 for the first chunk in public values, need to check.
             // public_values.chunk.clone() - CB::F::one(),
             CB::Expr::zero(),
             mult_local.is_first_chunk,

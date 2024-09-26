@@ -60,9 +60,7 @@ impl<F: Field> ProgramChip<F> {
             .chain(once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
-            // TODO: The chunk number is populated from public values,
-            // enable after adding public values.
-            // .chain(once(chunk.into()))
+            .chain(once(chunk.into()))
             .collect();
 
         builder.looked(SymbolicLookup::new(

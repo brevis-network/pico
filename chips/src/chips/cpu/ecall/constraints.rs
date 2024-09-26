@@ -8,8 +8,11 @@ use crate::{
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::word::Word;
-use pico_emulator::riscv::syscalls::SyscallCode;
-use pico_machine::builder::ChipBuilder;
+use pico_emulator::riscv::{
+    public_values::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
+    syscalls::SyscallCode,
+};
+use pico_machine::builder::{ChipBuilder, ChipWordBuilder};
 
 impl<F: Field> CpuChip<F> {
     /// Whether the instruction is an ECALL instruction.
@@ -49,7 +52,7 @@ impl<F: Field> CpuChip<F> {
             send_to_table * is_ecall_instruction.clone(),
         );
 
-        /* TODO: Enable after lookup integration.
+        /* TODO: Enable after adding precompiles.
                 builder.send_syscall(
                     local.chunk,
                     local.channel,
@@ -85,19 +88,17 @@ impl<F: Field> CpuChip<F> {
             ecall_cols.is_hint_len.result
         };
 
-        /* TODO: Enable after word eval integration.
-                // When syscall_id is ENTER_UNCONSTRAINED, the new value of op_a should be 0.
-                let zero_word = Word::<CB::F>::from(0);
-                builder
-                    .when(is_ecall_instruction.clone() * is_enter_unconstrained)
-                    .assert_word_eq(local.op_a_val(), zero_word);
+        // When syscall_id is ENTER_UNCONSTRAINED, the new value of op_a should be 0.
+        let zero_word = Word::<CB::F>::from(0);
+        builder
+            .when(is_ecall_instruction.clone() * is_enter_unconstrained)
+            .assert_word_eq(local.op_a_val(), zero_word);
 
-                // When the syscall is not one of ENTER_UNCONSTRAINED or HINT_LEN, op_a shouldn't change.
-                builder
-                    .when(is_ecall_instruction.clone())
-                    .when_not(is_enter_unconstrained + is_hint_len)
-                    .assert_word_eq(local.op_a_val(), local.op_a_access.prev_value);
-        */
+        // When the syscall is not one of ENTER_UNCONSTRAINED or HINT_LEN, op_a shouldn't change.
+        builder
+            .when(is_ecall_instruction.clone())
+            .when_not(is_enter_unconstrained + is_hint_len)
+            .assert_word_eq(local.op_a_val(), local.op_a_access.prev_value);
 
         // Verify value of ecall_range_check_operand column.
         builder.assert_eq(
@@ -120,9 +121,8 @@ impl<F: Field> CpuChip<F> {
         &self,
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
-        // TODO: Enable after adding public values.
-        // commit_digest: [Word<CB::Expr>; PV_DIGEST_NUM_WORDS],
-        // deferred_proofs_digest: [CB::Expr; POSEIDON_NUM_WORDS],
+        commit_digest: [Word<CB::Expr>; PV_DIGEST_NUM_WORDS],
+        deferred_proofs_digest: [CB::Expr; POSEIDON_NUM_WORDS],
     ) {
         let (is_commit, is_commit_deferred_proofs) =
             self.get_is_commit_related_syscall(builder, local);
@@ -130,41 +130,40 @@ impl<F: Field> CpuChip<F> {
         // Get the ecall specific columns.
         let ecall_columns = local.opcode_specific.ecall();
 
-        /* TODO: Enable after adding precompile.
-            // Verify the index bitmap.
-            let mut bitmap_sum = CB::Expr::zero();
-            // They should all be bools.
-            for bit in ecall_columns.index_bitmap.iter() {
-                builder
-                    .when(local.opcode_selector.is_ecall)
-                    .assert_bool(*bit);
-                bitmap_sum += (*bit).into();
-            }
-            // When the syscall is COMMIT or COMMIT_DEFERRED_PROOFS, there should be one set bit.
+        // Verify the index bitmap.
+        let mut bitmap_sum = CB::Expr::zero();
+        // They should all be bools.
+        for bit in ecall_columns.index_bitmap.iter() {
             builder
-                .when(
-                    local.opcode_selector.is_ecall
-                        * (is_commit.clone() + is_commit_deferred_proofs.clone()),
-                )
-                .assert_one(bitmap_sum.clone());
-            // When it's some other syscall, there should be no set bits.
-            builder
-                .when(
-                    local.opcode_selector.is_ecall
-                        * (CB::Expr::one() - (is_commit.clone() + is_commit_deferred_proofs.clone())),
-                )
-                .assert_zero(bitmap_sum);
+                .when(local.opcode_selector.is_ecall)
+                .assert_bool(*bit);
+            bitmap_sum += (*bit).into();
+        }
+        // When the syscall is COMMIT or COMMIT_DEFERRED_PROOFS, there should be one set bit.
+        builder
+            .when(
+                local.opcode_selector.is_ecall
+                    * (is_commit.clone() + is_commit_deferred_proofs.clone()),
+            )
+            .assert_one(bitmap_sum.clone());
+        // When it's some other syscall, there should be no set bits.
+        builder
+            .when(
+                local.opcode_selector.is_ecall
+                    * (CB::Expr::one() - (is_commit.clone() + is_commit_deferred_proofs.clone())),
+            )
+            .assert_zero(bitmap_sum);
 
-            // Verify that word_idx corresponds to the set bit in index bitmap.
-            for (i, bit) in ecall_columns.index_bitmap.iter().enumerate() {
-                builder
-                    .when(*bit * local.opcode_selector.is_ecall)
-                    .assert_eq(
-                        local.op_b_access.prev_value()[0],
-                        CB::Expr::from_canonical_u32(i as u32),
-                    );
-            }
-        */
+        // Verify that word_idx corresponds to the set bit in index bitmap.
+        for (i, bit) in ecall_columns.index_bitmap.iter().enumerate() {
+            builder
+                .when(*bit * local.opcode_selector.is_ecall)
+                .assert_eq(
+                    local.op_b_access.prev_value()[0],
+                    CB::Expr::from_canonical_u32(i as u32),
+                );
+        }
+
         // Verify that the 3 upper bytes of the word_idx are 0.
         for i in 0..3 {
             builder
@@ -178,37 +177,35 @@ impl<F: Field> CpuChip<F> {
                 );
         }
 
-        /* TODO: Enable after word eval integration.
-                // Retrieve the expected public values digest word to check against the one passed into the
-                // commit ecall. Note that for the interaction builder, it will not have any digest words,
-                // since it's used during AIR compilation time to parse for all send/receives. Since
-                // that interaction builder will ignore the other constraints of the air, it is safe
-                // to not include the verification check of the expected public values digest word.
-                let expected_pv_digest_word =
-                    builder.index_word_array(&commit_digest, &ecall_columns.index_bitmap);
+        // Retrieve the expected public values digest word to check against the one passed into the
+        // commit ecall. Note that for the interaction builder, it will not have any digest words,
+        // since it's used during AIR compilation time to parse for all send/receives. Since
+        // that interaction builder will ignore the other constraints of the air, it is safe
+        // to not include the verification check of the expected public values digest word.
+        let expected_pv_digest_word =
+            builder.index_word_array(&commit_digest, &ecall_columns.index_bitmap);
 
-                let digest_word = local.op_c_access.prev_value();
+        let digest_word = local.op_c_access.prev_value();
 
-                // Verify the public_values_digest_word.
-                builder
-                    .when(local.opcode_selector.is_ecall * is_commit)
-                    .assert_word_eq(expected_pv_digest_word, *digest_word);
+        // Verify the public_values_digest_word.
+        builder
+            .when(local.opcode_selector.is_ecall * is_commit)
+            .assert_word_eq(expected_pv_digest_word, *digest_word);
 
-                let expected_deferred_proofs_digest_element =
-                    builder.index_array(&deferred_proofs_digest, &ecall_columns.index_bitmap);
+        let expected_deferred_proofs_digest_element =
+            builder.index_array(&deferred_proofs_digest, &ecall_columns.index_bitmap);
 
-                // Verify that the operand that was range checked is digest_word.
-                builder
-                    .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs.clone())
-                    .assert_word_eq(*digest_word, ecall_columns.operand_to_check);
+        // Verify that the operand that was range checked is digest_word.
+        builder
+            .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs.clone())
+            .assert_word_eq(*digest_word, ecall_columns.operand_to_check);
 
-                builder
-                    .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs)
-                    .assert_eq(
-                        expected_deferred_proofs_digest_element,
-                        digest_word.reduce::<CB>(),
-                    );
-        */
+        builder
+            .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs)
+            .assert_eq(
+                expected_deferred_proofs_digest_element,
+                digest_word.reduce::<CB>(),
+            );
     }
 
     /// Constraint related to the halt and unimpl instruction.
@@ -217,8 +214,7 @@ impl<F: Field> CpuChip<F> {
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
         next: &CpuCols<CB::Var>,
-        // TODO: Enable after adding public values.
-        // public_values: &PublicValues<Word<CB::Expr>, CB::Expr>,
+        public_values: &PublicValues<Word<CB::Expr>, CB::Expr>,
     ) {
         let is_halt = self.get_is_halt_syscall(builder, local);
 
@@ -230,20 +226,16 @@ impl<F: Field> CpuChip<F> {
 
         builder.when(is_halt.clone()).assert_zero(local.next_pc);
 
-        /* TODO: Enable after word eval integration.
-                // Verify that the operand that was range checked is op_b.
-                let ecall_columns = local.opcode_specific.ecall();
-                builder
-                    .when(is_halt.clone())
-                    .assert_word_eq(local.op_b_val(), ecall_columns.operand_to_check);
-        */
+        // Verify that the operand that was range checked is op_b.
+        let ecall_columns = local.opcode_specific.ecall();
+        builder
+            .when(is_halt.clone())
+            .assert_word_eq(local.op_b_val(), ecall_columns.operand_to_check);
 
-        /* TODO: Enable after adding public values.
-                builder.when(is_halt.clone()).assert_eq(
-                    local.op_b_access.value().reduce::<CB>(),
-                    public_values.exit_code.clone(),
-                );
-        */
+        builder.when(is_halt.clone()).assert_eq(
+            local.op_b_access.value().reduce::<CB>(),
+            public_values.exit_code.clone(),
+        );
     }
 
     /// Returns a boolean expression indicating whether the instruction is a HALT instruction.

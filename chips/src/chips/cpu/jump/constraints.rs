@@ -51,15 +51,13 @@ impl<F: Field> CpuChip<F> {
             .when(is_jump_instruction.clone())
             .assert_eq(jump_columns.next_pc.reduce::<CB>(), local.next_pc);
 
-        /* TODO: Enable after adding memory read write chip.
-                // Range check op_a, pc, and next_pc.
-                BabyBearWordRangeChecker::<CB::F>::range_check(
-                    builder,
-                    local.op_a_val(),
-                    jump_columns.op_a_range_checker,
-                    is_jump_instruction.clone(),
-                );
-        */
+        // Range check op_a, pc, and next_pc.
+        BabyBearWordRangeChecker::<CB::F>::range_check(
+            builder,
+            local.op_a_val(),
+            jump_columns.op_a_range_checker,
+            is_jump_instruction.clone(),
+        );
 
         BabyBearWordRangeChecker::<CB::F>::range_check(
             builder,

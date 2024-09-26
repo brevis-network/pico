@@ -158,9 +158,8 @@ where
             CB::Expr::one() - local.is_prev_addr_zero.result,
         );
 
-        // TODO: Enable after generating memory init and finalize events to emulation record.
         // Ensure at least one real row.
-        // builder.when_first_row().assert_one(local.is_real);
+        builder.when_first_row().assert_one(local.is_real);
 
         // Insure that there are no duplicate initializations by assuring there is exactly one
         // initialization event of the zero address. This is done by assuring that when the previous
@@ -229,7 +228,7 @@ where
                 .when_last_row()
                 .when(local.is_real)
                 .assert_eq(*local_bit, pub_bit.clone());
-            /* TODO: Enable after adding deferred for the last addr.
+            /* TODO: Enable after adding deferred for the last addr (in the last shard).
                         builder
                             .when_transition()
                             .when(local.is_last_addr)

@@ -73,7 +73,6 @@ where
             for msb_pair in msb_pairs.iter() {
                 let msb = msb_pair.0;
                 let byte = msb_pair.1;
-                // TODO: Enable
                 builder.looking_byte(
                     opcode,
                     msb,

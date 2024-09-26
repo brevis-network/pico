@@ -5,7 +5,7 @@ use crate::{
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::{opcode::Opcode, word::Word};
-use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder, ChipWordBuilder};
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a branch instruction.
@@ -173,12 +173,10 @@ impl<F: Field> CpuChip<F> {
                 .assert_one(branch_cols.a_lt_b);
         }
 
-        /* TODO: Enable after adding memory read write chip.
-                // When it's a branch instruction and a_eq_b, assert that a == b.
-                builder
-                    .when(is_branch_instruction.clone() * branch_cols.a_eq_b)
-                    .assert_word_eq(local.op_a_val(), local.op_b_val());
-        */
+        // When it's a branch instruction and a_eq_b, assert that a == b.
+        builder
+            .when(is_branch_instruction.clone() * branch_cols.a_eq_b)
+            .assert_word_eq(local.op_a_val(), local.op_b_val());
 
         //  To prevent this ALU send to be arbitrarily large when is_branch_instruction is false.
         builder

@@ -91,18 +91,16 @@ where
         // ECALL instruction.
         self.eval_ecall(builder, local);
 
-        /* TODO: Enable after adding deferred.
-                // COMMIT/COMMIT_DEFERRED_PROOFS ecall instruction.
-                self.eval_commit(
-                    builder,
-                    local,
-                    public_values.committed_value_digest.clone(),
-                    public_values.deferred_proofs_digest.clone(),
-                );
+        // COMMIT/COMMIT_DEFERRED_PROOFS ecall instruction.
+        self.eval_commit(
+            builder,
+            local,
+            public_values.committed_value_digest.clone(),
+            public_values.deferred_proofs_digest.clone(),
+        );
 
-                // HALT ecall and UNIMPL instruction.
-                self.eval_halt_unimpl(builder, local, next, public_values);
-        */
+        // HALT ecall and UNIMPL instruction.
+        self.eval_halt_unimpl(builder, local, next, public_values);
 
         // Check that the chunk and clk is updated correctly.
         self.eval_chunk_clk(builder, local, next);
@@ -181,7 +179,6 @@ impl<F: Field> CpuChip<F> {
             .when(local.is_sequential_instr)
             .assert_eq(local.pc + CB::Expr::from_canonical_u8(4), next.pc);
 
-        // TODO: Enable when checking HALT.
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
         // <==> local.pc + 4
         builder
@@ -223,9 +220,7 @@ impl<F: Field> CpuChip<F> {
             .chain(once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
-            // TODO: The chunk number is populated from public values,
-            // enable after adding public values.
-            // .chain(once(chunk.into()))
+            .chain(once(chunk.into()))
             .collect();
 
         builder.looking(SymbolicLookup::new(

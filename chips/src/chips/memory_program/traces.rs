@@ -70,7 +70,7 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
             .copied()
             .collect::<Vec<_>>();
 
-        /* TODO: Replace after we enable the public values.
+        /* TODO: The chunk should be 1 for the first chunk in public values, need to check.
                 let mult = if input.public_values.chunk == 1 {
                     F::one()
                 } else {

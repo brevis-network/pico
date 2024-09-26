@@ -1,4 +1,6 @@
-use crate::chips::cpu::channel_selector::columns::{ChannelSelectorCols, NUM_BYTE_LOOKUP_CHANNELS};
+use crate::chips::{
+    byte::NUM_BYTE_LOOKUP_CHANNELS, cpu::channel_selector::columns::ChannelSelectorCols,
+};
 use p3_field::Field;
 
 impl<F: Field> ChannelSelectorCols<F> {
