@@ -3,7 +3,7 @@ use p3_field::{AbstractField, Field};
 use pico_compiler::word::Word;
 use pico_derive::AlignedBorrow;
 use pico_emulator::riscv::events::ByteRecordBehavior;
-use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder};
 
 /// A set of columns needed to compute the add of two words.
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]

@@ -14,9 +14,8 @@ use pico_machine::{
 };
 use std::iter::once;
 
-impl<F, CB> Air<CB> for LtChip<F>
+impl<F: Field, CB> Air<CB> for LtChip<F>
 where
-    F: Field,
     CB: ChipBuilder<F>,
 {
     fn eval(&self, builder: &mut CB) {
@@ -170,8 +169,7 @@ where
         // SLT looked
         let lt_op_code = local.is_slt * CB::F::from_canonical_u32(Opcode::SLT as u32)
             + local.is_slt_u * CB::F::from_canonical_u32(Opcode::SLTU as u32);
-        self.looked_lt(
-            builder,
+        builder.looked_alu(
             lt_op_code,
             local.a,
             local.b,
@@ -181,36 +179,5 @@ where
             F::zero(),
             is_real,
         )
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-impl<F: Field> LtChip<F> {
-    pub fn looked_lt<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        opcode: impl Into<CB::Expr>,
-        a: Word<impl Into<CB::Expr>>,
-        b: Word<impl Into<CB::Expr>>,
-        c: Word<impl Into<CB::Expr>>,
-        chunk: impl Into<CB::Expr>,
-        channel: impl Into<CB::Expr>,
-        nonce: impl Into<CB::Expr>,
-        multiplicity: impl Into<CB::Expr>,
-    ) {
-        let values = once(opcode.into())
-            .chain(a.0.into_iter().map(Into::into))
-            .chain(b.0.into_iter().map(Into::into))
-            .chain(c.0.into_iter().map(Into::into))
-            .chain(once(chunk.into()))
-            .chain(once(channel.into()))
-            .chain(once(nonce.into()))
-            .collect();
-
-        builder.looked(SymbolicLookup::new(
-            values,
-            multiplicity.into(),
-            LookupType::Alu,
-        ))
     }
 }

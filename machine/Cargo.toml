@@ -11,6 +11,7 @@ categories.workspace = true
 # pico
 pico-configs = { workspace = true }
 pico-emulator = { workspace = true }
+pico-derive = { workspace = true }
 
 # p3
 p3-air = { workspace = true }

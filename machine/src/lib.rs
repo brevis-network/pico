@@ -3,6 +3,7 @@ extern crate core;
 
 pub mod builder;
 pub mod chip;
+mod extension;
 pub mod folder;
 pub mod keys;
 pub mod lookup;

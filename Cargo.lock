@@ -1426,6 +1426,7 @@ dependencies = [
  "pico-chips",
  "pico-compiler",
  "pico-configs",
+ "pico-derive",
  "pico-emulator",
  "rayon-scan",
  "serde",

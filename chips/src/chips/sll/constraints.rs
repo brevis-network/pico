@@ -1,5 +1,6 @@
 use std::{borrow::Borrow, iter::once};
 
+use super::{columns::ShiftLeftCols, traces::SLLChip};
 use p3_air::{Air, AirBuilder};
 use p3_field::Field;
 use p3_matrix::Matrix;
@@ -8,11 +9,9 @@ use pico_compiler::{
     word::{Word, BYTE_SIZE, WORD_SIZE},
 };
 use pico_machine::{
-    builder::{ChipBuilder, ChipLookupBuilder},
+    builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
     lookup::{LookupType, SymbolicLookup},
 };
-
-use super::{columns::ShiftLeftCols, traces::SLLChip};
 
 impl<F: Field, CB> Air<CB> for SLLChip<F>
 where
@@ -142,8 +141,7 @@ where
             local.is_real,
         );
 
-        self.looked_sll(
-            builder,
+        builder.looked_alu(
             F::from_canonical_u32(Opcode::SLL as u32),
             local.a,
             local.b,
@@ -153,36 +151,5 @@ where
             F::zero(),
             local.is_real,
         );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-impl<F: Field> SLLChip<F> {
-    pub fn looked_sll<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        opcode: impl Into<CB::Expr>,
-        a: Word<impl Into<CB::Expr>>,
-        b: Word<impl Into<CB::Expr>>,
-        c: Word<impl Into<CB::Expr>>,
-        chunk: impl Into<CB::Expr>,
-        channel: impl Into<CB::Expr>,
-        nonce: impl Into<CB::Expr>,
-        multiplicity: impl Into<CB::Expr>,
-    ) {
-        let values = once(opcode.into())
-            .chain(a.0.into_iter().map(Into::into))
-            .chain(b.0.into_iter().map(Into::into))
-            .chain(c.0.into_iter().map(Into::into))
-            .chain(once(chunk.into()))
-            .chain(once(channel.into()))
-            .chain(once(nonce.into()))
-            .collect();
-
-        builder.looked(SymbolicLookup::new(
-            values,
-            multiplicity.into(),
-            LookupType::Alu,
-        ));
     }
 }

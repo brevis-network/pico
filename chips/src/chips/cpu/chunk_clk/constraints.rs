@@ -5,7 +5,7 @@ use crate::{
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::opcode::ByteOpcode;
-use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder};
 
 impl<F: Field> CpuChip<F> {
     /// Constraints related to the chunk and clk.
@@ -56,7 +56,7 @@ impl<F: Field> CpuChip<F> {
             .assert_eq(expected_next_clk.clone(), next.clk);
 
         // Range check that the clk is within 24 bits using it's limb values.
-        builder.eval_range_check_24bits(
+        builder.range_check_u24(
             local.clk,
             local.clk_16bit_limb,
             local.clk_8bit_limb,

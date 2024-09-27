@@ -4,7 +4,7 @@ use crate::{
 };
 use p3_field::{AbstractField, Field};
 use pico_emulator::riscv::events::MemoryAccessPosition;
-use pico_machine::builder::{ChipBuilder, ChipLookupBuilder, ChipWordBuilder};
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder};
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a branch instruction.

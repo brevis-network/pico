@@ -4,7 +4,7 @@ use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::opcode::ByteOpcode;
 use pico_machine::{
-    builder::{ChipBuilder, ChipLookupBuilder},
+    builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
     lookup::{LookupType, SymbolicLookup},
 };
 use std::iter::once;
@@ -37,22 +37,6 @@ pub trait MemoryAirBuilder<F: Field>: AirBuilder {
         chunk: impl Into<Self::Expr> + Clone,
         channel: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr>,
-    );
-
-    /// Verifies the inputted value is within 24 bits.
-    ///
-    /// This method verifies that the inputted is less than 2^24 by doing a 16 bit and 8 bit range
-    /// check on it's limbs.  It will also verify that the limbs are correct.  This method is needed
-    /// since the memory access timestamp check (see [Self::verify_mem_access_ts]) needs to assume
-    /// the clk is within 24 bits.
-    fn eval_range_check_24bits(
-        &mut self,
-        value: impl Into<Self::Expr>,
-        limb_16: impl Into<Self::Expr> + Clone,
-        limb_8: impl Into<Self::Expr> + Clone,
-        chunk: impl Into<Self::Expr> + Clone,
-        channel: impl Into<Self::Expr> + Clone,
-        do_check: impl Into<Self::Expr> + Clone,
     );
 }
 impl<F: Field, CB: ChipBuilder<F>> MemoryAirBuilder<F> for CB {
@@ -163,7 +147,7 @@ impl<F: Field, CB: ChipBuilder<F>> MemoryAirBuilder<F> for CB {
 
         // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
         // + mem_access.ts_diff_8bit_limb * 2^16.
-        self.eval_range_check_24bits(
+        self.range_check_u24(
             diff_minus_one,
             mem_access.diff_16bit_limb.clone(),
             mem_access.diff_8bit_limb.clone(),
@@ -171,48 +155,5 @@ impl<F: Field, CB: ChipBuilder<F>> MemoryAirBuilder<F> for CB {
             channel.clone(),
             do_check,
         );
-    }
-
-    /// Verifies the inputted value is within 24 bits.
-    ///
-    /// This method verifies that the inputted is less than 2^24 by doing a 16 bit and 8 bit range
-    /// check on it's limbs.  It will also verify that the limbs are correct.  This method is needed
-    /// since the memory access timestamp check (see [Self::verify_mem_access_ts]) needs to assume
-    /// the clk is within 24 bits.
-    fn eval_range_check_24bits(
-        &mut self,
-        value: impl Into<Self::Expr>,
-        limb_16: impl Into<Self::Expr> + Clone,
-        limb_8: impl Into<Self::Expr> + Clone,
-        chunk: impl Into<Self::Expr> + Clone,
-        channel: impl Into<Self::Expr> + Clone,
-        do_check: impl Into<Self::Expr> + Clone,
-    ) {
-        // Verify that value = limb_16 + limb_8 * 2^16.
-        self.when(do_check.clone()).assert_eq(
-            value,
-            limb_16.clone().into()
-                + limb_8.clone().into() * Self::Expr::from_canonical_u32(1 << 16),
-        );
-
-        // Send the range checks for the limbs.
-        self.looking_byte(
-            Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
-            limb_16,
-            Self::Expr::zero(),
-            Self::Expr::zero(),
-            chunk.clone(),
-            channel.clone(),
-            do_check.clone(),
-        );
-        self.looking_byte(
-            Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-            Self::Expr::zero(),
-            Self::Expr::zero(),
-            limb_8,
-            chunk.clone(),
-            channel.clone(),
-            do_check,
-        )
     }
 }
