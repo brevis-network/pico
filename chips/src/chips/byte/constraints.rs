@@ -1,19 +1,13 @@
 use core::borrow::Borrow;
-
 use p3_air::{Air, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-
 use pico_compiler::opcode::ByteOpcode;
+use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 
 use super::{
     columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS},
     ByteChip, NUM_BYTE_LOOKUP_CHANNELS,
-};
-
-use pico_machine::{
-    builder::{ChipBuilder, ChipLookupBuilder},
-    lookup::{LookupType, SymbolicLookup},
 };
 
 impl<F: Field> BaseAir<F> for ByteChip<F> {

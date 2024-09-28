@@ -35,8 +35,6 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
         input: &EmulationRecord,
         _output: &mut Self::Record,
     ) -> RowMajorMatrix<F> {
-        debug!("{} chip - generate_main: BEGIN", self.name());
-
         // Generate the rows for the trace.
         let chunk_size = std::cmp::max(
             (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
@@ -86,18 +84,10 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
             cols.nonce = F::from_canonical_usize(i);
         }
 
-        debug!(
-            "{} chip - generate_main: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
-
         trace
     }
 
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
-        debug!("AddSubChip - extra_record: BEGIN");
-
         let chunk_size = std::cmp::max(
             (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
             1,
@@ -123,7 +113,7 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
 
         extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
 
-        debug!("AddSubChip - extra_record: END");
+        debug!("{} chip - extra_record", self.name());
     }
 }
 

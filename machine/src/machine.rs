@@ -15,6 +15,7 @@ use p3_fri::FriConfig;
 use pico_compiler::program::Program;
 use pico_configs::config::{StarkGenericConfig, Val};
 use pico_emulator::record::RecordBehavior;
+use std::time::Instant;
 
 /// Functions that each machine instance should implement.
 pub trait MachineBehavior<SC, C, P>
@@ -35,6 +36,7 @@ where
 
     /// Complete the record after emulation.
     fn complement_record(&self, records: &mut [C::Record]) {
+        let begin = Instant::now();
         let chips = self.chips();
         records.iter_mut().for_each(|record| {
             chips.iter().for_each(|chip| {
@@ -44,6 +46,7 @@ where
             });
             record.register_nonces();
         });
+        debug!("complement record in {:?}", begin.elapsed());
     }
 
     /// setup prover, verifier and keys.

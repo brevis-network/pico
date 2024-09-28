@@ -27,8 +27,6 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        debug!("{} chip - generate_main: BEGIN", self.name());
-
         let rows = input
             .bitwise_events
             .par_iter()
@@ -56,18 +54,10 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
             cols.nonce = F::from_canonical_usize(i);
         }
 
-        debug!(
-            "{} chip - generate_main: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
-
         trace
     }
 
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
-        debug!("{} chip - extra_record: BEGIN", self.name());
-
         let chunk_size = std::cmp::max(input.bitwise_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input
@@ -86,7 +76,7 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
 
         extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
 
-        debug!("{} chip - extra_record: END", self.name());
+        debug!("{} chip - extra_record", self.name());
     }
 }
 

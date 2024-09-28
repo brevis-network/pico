@@ -9,9 +9,10 @@ use itertools::Itertools;
 use log::debug;
 use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder};
 use p3_field::{AbstractField, ExtensionField, Field};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_compiler::program::Program;
 use pico_emulator::record::RecordBehavior;
+use std::time::Instant;
 
 /// Chip behavior
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
@@ -58,10 +59,12 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
         let log_quotient_degree = get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width());
         debug!(
-            "{} chip preprocessed_width = {}, log_quotient_degree = {}",
+            "{:<14} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
             chip.name(),
             chip.preprocessed_width(),
-            log_quotient_degree
+            log_quotient_degree,
+            looking.len(),
+            looked.len()
         );
         Self {
             chip,
@@ -77,7 +80,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         main: &RowMajorMatrix<F>,
         perm_challenges: &[EF],
     ) -> RowMajorMatrix<EF> {
-        debug!("{} chip - generate_permutation: BEGIN", self.name());
+        let begin = Instant::now();
         let batch_size = 1 << self.log_quotient_degree;
 
         // Generate the RLC elements to uniquely identify each interaction.
@@ -96,11 +99,12 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
             batch_size,
         );
         debug!(
-            "{} chip - generate_permutation: END. looking {} looked {} trace len {}",
+            "generated permutation: {:<14} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
             self.name(),
-            self.looking.len(),
-            self.looked.len(),
-            trace.values.len()
+            trace.width(),
+            trace.height(),
+            trace.values.len(),
+            begin.elapsed()
         );
         trace
     }

@@ -39,7 +39,6 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
         input: &EmulationRecord,
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        debug!("{} chip - generate_main: BEGIN", self.name());
         let mul_events = input.mul_events.clone();
         // Compute the chunk size based on the number of events and the number of CPUs.
         let chunk_size = std::cmp::max(mul_events.len() / num_cpus::get(), 1);
@@ -185,12 +184,6 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                 trace.values[i * NUM_MUL_COLS..(i + 1) * NUM_MUL_COLS].borrow_mut();
             cols.nonce = F::from_canonical_usize(i);
         }
-
-        debug!(
-            "{} chip - generate_main: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
 
         trace
     }

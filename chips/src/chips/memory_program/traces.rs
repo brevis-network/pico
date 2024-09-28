@@ -8,7 +8,7 @@ use crate::chips::memory_program::{
 use core::borrow::BorrowMut;
 use log::{debug, info};
 use p3_field::Field;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_compiler::{program::Program, word::Word};
 use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::{chip::ChipBehavior, utils::pad_to_power_of_two};
@@ -25,8 +25,6 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
     }
 
     fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
-        debug!("{} chip - generate_preprocessed: BEGIN", self.name());
-
         let program_memory = program.memory_image.clone();
         // Note that BTreeMap is guaranteed to be sorted by key. This makes the row order
         // deterministic.
@@ -51,18 +49,10 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
         // Pad the trace to a power of two.
         pad_to_power_of_two::<NUM_MEMORY_PROGRAM_PREPROCESSED_COLS, F>(&mut trace.values);
 
-        debug!(
-            "{} chip - generate_preprocessed: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
-
         Some(trace)
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        debug!("{} chip - generate_main: BEGIN", self.name());
-
         let program_memory_addrs = input
             .program
             .memory_image
@@ -102,12 +92,6 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
 
         // Pad the trace to a power of two.
         pad_to_power_of_two::<NUM_MEMORY_PROGRAM_MULT_COLS, F>(&mut trace.values);
-
-        debug!(
-            "{} chip - generate_main: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
 
         trace
     }

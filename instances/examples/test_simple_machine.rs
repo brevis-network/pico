@@ -31,7 +31,7 @@ use pico_machine::{
     machine::MachineBehavior,
 };
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use std::{env, time::SystemTime};
+use std::{env, time::Instant};
 
 pub enum TestChipType<F: Field> {
     Byte(ByteChip<F>),
@@ -259,9 +259,7 @@ fn pars_args(args: Vec<String>) -> (&'static [u8], PicoStdin) {
             n = 40000; // default fibonacci seq num
         }
         stdin.write(&n);
-        let mut input = [0u8; 4];
-        stdin.read_slice(&mut input);
-        info!("Test Fibonacci, sequence n={}, {:x?}", n, &input);
+        info!("Test Fibonacci, sequence n={}", n);
     } else if test_case == "keccak" || test_case == "k" {
         elf = ELF_KECCAK;
         if n == 0 {
@@ -281,16 +279,13 @@ fn pars_args(args: Vec<String>) -> (&'static [u8], PicoStdin) {
 fn main() {
     env_logger::init();
     let (elf, stdin) = pars_args(env::args().collect());
-    let start = SystemTime::now();
+    let start = Instant::now();
 
     info!("\n Creating Program..");
     let compiler = Compiler::new(SourceType::RiscV, elf);
     let program = compiler.compile();
 
-    info!(
-        "\n Creating emulator (at {} ms)..",
-        start.elapsed().unwrap().as_millis()
-    );
+    info!("\n Creating emulator (at {:?})..", start.elapsed());
     let mut emulator = RiscvEmulator::new(program, PicoCoreOpts::default());
     emulator.run_with_stdin(stdin).unwrap();
 
@@ -314,18 +309,19 @@ fn main() {
     let program = record.program.clone();
 
     // for debugging emulator
-    //for rcd in &emulator.records {
-    //    debug!("record events: {:?}", rcd.stats());
-    //}
-    debug!("final record events: {:?}", record.stats());
+    // for rcd in &emulator.records {
+    //     debug!("record events: {:?}", rcd.stats());
+    // }
+    // debug!("final record events: {:?}", record.stats());
+    let stats = record.stats();
+    for (key, value) in &stats {
+        debug!("{:<25}: {}", key, value);
+    }
 
     let mut records = vec![record];
 
     // Setup config and chips.
-    info!(
-        "\n Creating BaseMachine (at {} ms)..",
-        start.elapsed().unwrap().as_millis()
-    );
+    info!("\n Creating BaseMachine (at {:?})..", start.elapsed());
     let config = BabyBearPoseidon2::new();
     let chips = TestChipType::all_chips();
 
@@ -334,36 +330,24 @@ fn main() {
     info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.
-    info!(
-        "\n Setup machine (at {} ms)..",
-        start.elapsed().unwrap().as_millis()
-    );
+    info!("\n Setup machine (at {:?})..", start.elapsed());
     let (pk, vk) = simple_machine.setup_keys(&program);
 
-    info!(
-        "\n Complement records (at {} ms)..",
-        start.elapsed().unwrap().as_millis()
-    );
+    info!("\n Complement records (at {:?})..", start.elapsed());
     simple_machine.complement_record(&mut records);
 
     // Generate the proof.
-    info!(
-        "\n Generating proof (at {} ms)..",
-        start.elapsed().unwrap().as_millis()
-    );
+    info!("\n Generating proof (at {:?})..", start.elapsed());
     let proof = simple_machine.prove(&pk, &records);
     info!("{} generated.", proof.name());
 
     // Verify the proof.
-    info!(
-        "\n Verifying proof (at {} ms)..",
-        start.elapsed().unwrap().as_millis()
-    );
+    info!("\n Verifying proof (at {:?})..", start.elapsed());
     let result = simple_machine.verify(&vk, &proof);
     info!(
-        "The proof is verified: {} (at {} ms)..",
+        "The proof is verified: {} (at {:?})..",
         result.is_ok(),
-        start.elapsed().unwrap().as_millis()
+        start.elapsed()
     );
     assert_eq!(result.is_ok(), true);
 }

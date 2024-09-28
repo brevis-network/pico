@@ -2,12 +2,11 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use log::debug;
 use p3_field::Field;
-use p3_matrix::dense::RowMajorMatrix;
-use std::borrow::BorrowMut;
-
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_compiler::{opcode::ByteOpcode, program::Program};
 use pico_emulator::riscv::record::EmulationRecord;
 use pico_machine::chip::ChipBehavior;
+use std::borrow::BorrowMut;
 
 use super::{
     columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS, NUM_BYTE_PREPROCESSED_COLS},
@@ -29,18 +28,11 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
     }
 
     fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
-        debug!("{} chip - generate_preprocessed: BEGIN", self.name());
         let trace: p3_matrix::dense::DenseMatrix<F> = Self::preprocess();
-        debug!(
-            "{} chip - generate_preprocessed: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
         Some(trace)
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        debug!("{} chip - generate_main: BEGIN", self.name());
         let mut trace = RowMajorMatrix::new(
             vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS],
             NUM_BYTE_MULT_COLS,
@@ -66,11 +58,6 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
             cols.chunk = F::from_canonical_u32(chunk);
         }
 
-        debug!(
-            "{} chip - generate_main: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
         trace
     }
 }

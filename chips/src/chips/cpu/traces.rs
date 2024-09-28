@@ -40,7 +40,6 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        debug!("{} chip - generate_main: BEGIN", self.name());
         let mut values = vec![F::zero(); input.cpu_events.len() * NUM_CPU_COLS];
 
         let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
@@ -70,17 +69,10 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         // Pad the trace to a power of two.
         Self::pad_to_power_of_two(&mut trace.values);
 
-        debug!(
-            "{} chip - generate_main: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
-
         trace
     }
 
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
-        debug!("{} chip - extra_record: BEGIN", self.name());
         // Generate the trace rows for each event.
         let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
         let (alu_events, blu_events): (Vec<_>, Vec<_>) = input
@@ -106,7 +98,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         }
         extra.add_chunked_byte_lookup_events(blu_events.iter().collect_vec());
 
-        debug!("{} chip - extra_record: END", self.name());
+        debug!("{} chip - extra_record", self.name());
     }
 }
 

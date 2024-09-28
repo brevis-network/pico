@@ -38,7 +38,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
         input: &EmulationRecord,
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        debug!("{} chip - generate_main: BEGIN", self.name());
         // Generate the trace rows for each event.
         let mut rows: Vec<[F; NUM_DIVREM_COLS]> = vec![];
         let divrem_events = input.divrem_events.clone();
@@ -358,11 +357,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
             cols.nonce = F::from_canonical_usize(i);
         }
 
-        debug!(
-            "{} chip - generate_main: END - trace len {}",
-            self.name(),
-            trace.values.len()
-        );
         trace
     }
 }

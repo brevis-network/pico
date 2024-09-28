@@ -6,6 +6,7 @@ use std::{
     fs::File,
     io::{BufWriter, Write},
     sync::Arc,
+    time::Instant,
 };
 use thiserror::Error;
 
@@ -239,6 +240,7 @@ impl RiscvEmulator {
     fn emulate(&mut self) -> Result<bool, EmulationError> {
         // Get the current chunk.
         info!("emulate - BEGIN");
+        let begin = Instant::now();
         let start_chunk = self.state.current_chunk; // needed for public input
 
         // If it's the first cycle, initialize the program.
@@ -304,7 +306,7 @@ impl RiscvEmulator {
                 last_exit_code = record.public_values.exit_code;
             }
         }
-        info!("emulate - END");
+        info!("emulate - END in {:?}", begin.elapsed());
         Ok(done)
     }
 
