@@ -5,7 +5,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use pico_chips::chips::examples::lookup_toy::{AddLookedChip, AddLookingChip};
 use pico_compiler::program::Program;
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
-use pico_emulator::riscv::record::EmulationRecord;
+use pico_emulator::riscv::{public_values::RISCV_NUM_PVS, record::EmulationRecord};
 use pico_instances::simple_machine::SimpleMachine;
 use pico_machine::{
     builder::ChipBuilder,
@@ -97,7 +97,7 @@ fn main() {
 
     let chips = LookupToyChipType::all_chips();
     // Create a new machine based on config and chips
-    let simple_machine = SimpleMachine::new(config, chips);
+    let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, chips);
     info!("{} created.", simple_machine.name());
 
     // Setup PK and VK.

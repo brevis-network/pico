@@ -20,10 +20,13 @@ where
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
+    /// Configuration of the machine.
     config: SC,
 
+    /// Chips of the machine.
     chips: Vec<MetaChip<Val<SC>, C>>,
 
+    /// Base proving machine
     base_machine: BaseMachine<SC, C>,
 }
 
@@ -42,6 +45,11 @@ where
     /// Get the configuration of the machine.
     fn config(&self) -> &SC {
         &self.config
+    }
+
+    /// Get the number of public values.
+    fn num_public_values(&self) -> usize {
+        self.base_machine.num_public_values
     }
 
     /// Get the chips of the machine.
@@ -88,11 +96,11 @@ where
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: SC, num_public_values: usize, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
         Self {
             config,
             chips,
-            base_machine: BaseMachine::<SC, C>::new(),
+            base_machine: BaseMachine::<SC, C>::new(num_public_values),
         }
     }
 }

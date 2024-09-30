@@ -13,7 +13,7 @@ use pico_machine::{
 };
 
 use pico_compiler::compiler::{Compiler, SourceType};
-use pico_emulator::opts::PicoCoreOpts;
+use pico_emulator::{opts::PicoCoreOpts, riscv::public_values::RISCV_NUM_PVS};
 use pico_instances::simple_machine::SimpleMachine;
 use std::any::type_name;
 
@@ -107,7 +107,7 @@ fn main() {
     let chips = ToyChipType::all_chips();
 
     // Create a new machine based on config and chips
-    let simple_machine = SimpleMachine::new(config, chips);
+    let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, chips);
     info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.

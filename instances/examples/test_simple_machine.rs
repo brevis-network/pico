@@ -21,7 +21,7 @@ use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{
     opts::PicoCoreOpts,
     record::RecordBehavior,
-    riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
+    riscv::{public_values::RISCV_NUM_PVS, record::EmulationRecord, riscv_emulator::RiscvEmulator},
     stdin::PicoStdin,
 };
 use pico_instances::simple_machine::SimpleMachine;
@@ -326,7 +326,7 @@ fn main() {
     let chips = TestChipType::all_chips();
 
     // Create a new machine based on config and chips
-    let simple_machine = SimpleMachine::new(config, chips);
+    let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, chips);
     info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.

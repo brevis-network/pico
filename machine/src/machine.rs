@@ -31,6 +31,9 @@ where
     /// Get the configuration of the machine.
     fn config(&self) -> &SC;
 
+    /// Get number of public values
+    fn num_public_values(&self) -> usize;
+
     /// Get the chips of the machine.
     fn chips(&self) -> &[MetaChip<Val<SC>, C>];
 
@@ -71,6 +74,8 @@ where
     pub prover: BaseProver<SC, C>,
 
     pub verifier: BaseVerifier<SC, C>,
+
+    pub num_public_values: usize,
 }
 
 impl<SC, C> BaseMachine<SC, C>
@@ -81,10 +86,11 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
     /// Create BaseMachine based on config and chip behavior.
-    pub fn new() -> Self {
+    pub fn new(num_public_values: usize) -> Self {
         Self {
             prover: BaseProver::<SC, C>::new(),
             verifier: BaseVerifier::<SC, C>::new(),
+            num_public_values,
         }
     }
 
@@ -122,9 +128,10 @@ where
                 .commit_main(config, record, self.prover.generate_main(chips, record));
 
         challenger.observe(main_commitment.commitment.clone());
-        challenger.observe_slice(&main_commitment.public_values);
+        challenger.observe_slice(&main_commitment.public_values[..self.num_public_values]);
 
-        self.prove(config, chips, pk, &mut challenger, main_commitment)
+        self.prover
+            .prove(config, chips, pk, &mut challenger, main_commitment)
     }
 
     pub fn prove_ensemble(
@@ -149,7 +156,7 @@ where
                     self.prover.generate_main(chips, record),
                 );
                 challenger.observe(commitment.commitment.clone());
-                challenger.observe_slice(&commitment.public_values);
+                challenger.observe_slice(&commitment.public_values[..self.num_public_values]);
                 commitment
             })
             .collect::<Vec<_>>();
@@ -157,20 +164,11 @@ where
         info!("iterate {} commitments and prove", main_commitments.len());
         main_commitments
             .into_iter()
-            .map(|commitment| self.prove(config, chips, pk, &mut challenger, commitment))
+            .map(|commitment| {
+                self.prover
+                    .prove(config, chips, pk, &mut challenger, commitment)
+            })
             .collect::<Vec<_>>()
-    }
-
-    pub fn prove(
-        &self,
-        config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
-        pk: &BaseProvingKey<SC>,
-        challenger: &mut SC::Challenger,
-        main_commitments: MainTraceCommitments<SC>,
-    ) -> BaseProof<SC> {
-        self.prover
-            .prove(config, chips, pk, challenger, main_commitments)
     }
 
     pub fn verify_unit(
@@ -184,9 +182,10 @@ where
 
         challenger.observe(vk.commit.clone());
         challenger.observe(proof.commitments.main_commit.clone());
-        challenger.observe_slice(&proof.public_values);
+        challenger.observe_slice(&proof.public_values[..self.num_public_values]);
 
-        self.verify(config, chips, vk, &mut challenger, proof)?;
+        self.verifier
+            .verify(config, chips, vk, &mut challenger, proof)?;
 
         Ok(())
     }
@@ -203,25 +202,13 @@ where
         challenger.observe(vk.commit.clone());
         proofs.iter().for_each(|proof| {
             challenger.observe(proof.commitments.main_commit.clone());
-            challenger.observe_slice(&proof.public_values);
+            challenger.observe_slice(&proof.public_values[..self.num_public_values]);
         });
 
         for proof in proofs {
-            self.verify(config, chips, vk, &mut challenger, proof)?;
+            self.verifier
+                .verify(config, chips, vk, &mut challenger, proof)?;
         }
-
-        Ok(())
-    }
-    /// Verify the proof based on verifying key.
-    pub fn verify(
-        &self,
-        config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
-        vk: &BaseVerifyingKey<SC>,
-        challenger: &mut SC::Challenger,
-        proof: &BaseProof<SC>,
-    ) -> Result<()> {
-        self.verifier.verify(config, chips, vk, challenger, proof)?;
 
         Ok(())
     }

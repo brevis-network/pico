@@ -10,7 +10,7 @@ use pico_compiler::{
 use pico_configs::bb_poseidon2::BabyBearPoseidon2;
 use pico_emulator::{
     opts::PicoCoreOpts,
-    riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
+    riscv::{public_values::RISCV_NUM_PVS, record::EmulationRecord, riscv_emulator::RiscvEmulator},
 };
 use pico_machine::{
     builder::ChipBuilder,
@@ -112,7 +112,7 @@ fn main() {
     let config = BabyBearPoseidon2::new();
 
     let chips = ToyChipType::all_chips();
-    let base_machine = BaseMachine::new();
+    let base_machine = BaseMachine::new(RISCV_NUM_PVS);
 
     // Setup PK and VK.
     info!("\n Setup PK and VK");
