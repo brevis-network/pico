@@ -1,21 +1,21 @@
-//! An operation to check if the input word is 0.
+//! A gadget to check if the input word is 0.
 //!
 //! This is bijective (i.e., returns 1 if and only if the input is 0). It is also worth noting that
 //! this operation doesn't do a range check.
+
+use crate::gadgets::is_zero::IsZeroGadget;
 use p3_air::AirBuilder;
 use p3_field::Field;
 use pico_compiler::word::{Word, WORD_SIZE};
 use pico_derive::AlignedBorrow;
 use pico_machine::builder::ChipBuilder;
 
-use crate::gadgets::is_zero::IsZeroOperation;
-
 /// A set of columns needed to compute whether the given word is 0.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct IsZeroWordOperation<T> {
-    /// `IsZeroOperation` to check if each byte in the input word is zero.
-    pub is_zero_byte: [IsZeroOperation<T>; WORD_SIZE],
+pub struct IsZeroWordGadget<T> {
+    /// `IsZeroGadget` to check if each byte in the input word is zero.
+    pub is_zero_byte: [IsZeroGadget<T>; WORD_SIZE],
 
     /// A boolean flag indicating whether the lower word (the bottom 16 bits of the input) is 0.
     /// This equals `is_zero_byte[0] * is_zero_byte[1]`.
@@ -30,7 +30,7 @@ pub struct IsZeroWordOperation<T> {
     pub result: T,
 }
 
-impl<F: Field> IsZeroWordOperation<F> {
+impl<F: Field> IsZeroWordGadget<F> {
     pub fn populate(&mut self, a_u32: u32) -> u32 {
         self.populate_from_field_element(Word::from(a_u32))
     }
@@ -49,12 +49,12 @@ impl<F: Field> IsZeroWordOperation<F> {
     pub fn eval<CB: ChipBuilder<F>>(
         builder: &mut CB,
         a: Word<CB::Expr>,
-        cols: IsZeroWordOperation<CB::Var>,
+        cols: IsZeroWordGadget<CB::Var>,
         is_real: CB::Expr,
     ) {
         // Calculate whether each byte is 0.
         for i in 0..WORD_SIZE {
-            IsZeroOperation::<CB::F>::eval(
+            IsZeroGadget::<CB::F>::eval(
                 builder,
                 a[i].clone(),
                 cols.is_zero_byte[i],

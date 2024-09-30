@@ -1,3 +1,5 @@
+//! Bytes less than gadget
+
 use itertools::izip;
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
@@ -6,7 +8,7 @@ use pico_derive::AlignedBorrow;
 use pico_emulator::riscv::events::{ByteLookupEvent, ByteRecordBehavior};
 use pico_machine::builder::{ChipBuilder, ChipLookupBuilder};
 
-/// Operation columns for verifying that an unit is within the range `[0, modulus)`.
+/// Gadget columns for verifying that an unit is within the range `[0, modulus)`.
 #[derive(Debug, Clone, Copy, AlignedBorrow)]
 #[repr(C)]
 pub struct AssertLtColsBytes<T, const N: usize> {
@@ -142,7 +144,7 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
     }
 }
 
-/// Operation columns for verifying that an element is within the range `[0, modulus)`.
+/// Gadget columns for verifying that an element is within the range `[0, modulus)`.
 #[derive(Debug, Clone, Copy, AlignedBorrow)]
 #[repr(C)]
 pub struct AssertLtColsBits<T, const N: usize> {

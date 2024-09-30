@@ -1,4 +1,4 @@
-use crate::gadgets::baby_bear_word::BabyBearWordRangeChecker;
+use crate::gadgets::baby_bear::word_range::BabyBearWordRangeChecker;
 use pico_compiler::word::Word;
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;

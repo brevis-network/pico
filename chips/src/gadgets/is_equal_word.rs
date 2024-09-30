@@ -1,22 +1,22 @@
+//! A gadget to check if the input words are equal.
+
+use crate::gadgets::is_zero_word::IsZeroWordGadget;
 use p3_field::Field;
 use pico_compiler::word::Word;
-
-use crate::gadgets::is_zero_word::IsZeroWordOperation;
-
 use pico_derive::AlignedBorrow;
 use pico_machine::builder::ChipBuilder;
 
 /// A set of columns needed to compute the equality of two words.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct IsEqualWordOperation<T> {
-    /// An operation to check whether the differences in limbs are all 0 (i.e., `a[0] - b[0]`,
-    /// `a[1] - b[1]`, `a[2] - b[2]`, `a[3] - b[3]]`). The result of `IsEqualWordOperation` is
+pub struct IsEqualWordGadget<T> {
+    /// A gadget to check whether the differences in limbs are all 0 (i.e., `a[0] - b[0]`,
+    /// `a[1] - b[1]`, `a[2] - b[2]`, `a[3] - b[3]]`). The result of `IsEqualWordGadget` is
     /// `is_diff_zero.result`.
-    pub is_diff_zero: IsZeroWordOperation<T>,
+    pub is_diff_zero: IsZeroWordGadget<T>,
 }
 
-impl<F: Field> IsEqualWordOperation<F> {
+impl<F: Field> IsEqualWordGadget<F> {
     pub fn populate(&mut self, a_u32: u32, b_u32: u32) -> u32 {
         let a = a_u32.to_le_bytes();
         let b = b_u32.to_le_bytes();
@@ -34,7 +34,7 @@ impl<F: Field> IsEqualWordOperation<F> {
         builder: &mut CB,
         a: Word<CB::Expr>,
         b: Word<CB::Expr>,
-        cols: IsEqualWordOperation<CB::Var>,
+        cols: IsEqualWordGadget<CB::Var>,
         is_real: CB::Expr,
     ) {
         builder.assert_bool(is_real.clone());
@@ -48,6 +48,6 @@ impl<F: Field> IsEqualWordOperation<F> {
         ]);
 
         // Check if the difference is 0.
-        IsZeroWordOperation::<CB::F>::eval(builder, diff, cols.is_diff_zero, is_real.clone());
+        IsZeroWordGadget::<CB::F>::eval(builder, diff, cols.is_diff_zero, is_real.clone());
     }
 }

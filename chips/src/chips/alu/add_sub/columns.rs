@@ -1,4 +1,4 @@
-use crate::gadgets::add::AddOperation;
+use crate::gadgets::add::AddGadget;
 use pico_compiler::word::Word;
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
@@ -18,9 +18,9 @@ pub struct AddSubCols<T> {
     /// The nonce of the operation.
     pub nonce: T,
 
-    /// Instance of `AddOperation` to handle addition logic in `AddSubChip`'s ALU operations.
+    /// Instance of `AddGadget` to handle addition logic in `AddSubChip`'s ALU operations.
     /// It's result will be `a` for the add operation and `b` for the sub operation.
-    pub add_operation: AddOperation<T>,
+    pub add_operation: AddGadget<T>,
 
     /// The first input operand.  This will be `b` for add operations and `c` for sub operations.
     pub operand_1: Word<T>,

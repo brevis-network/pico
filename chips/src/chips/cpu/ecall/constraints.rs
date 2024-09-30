@@ -3,7 +3,7 @@ use crate::{
         cpu::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCols, CpuChip},
         memory::read_write::columns::MemoryCols,
     },
-    gadgets::{baby_bear_word::BabyBearWordRangeChecker, is_zero::IsZeroOperation},
+    gadgets::{baby_bear::word_range::BabyBearWordRangeChecker, is_zero::IsZeroGadget},
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
@@ -67,7 +67,7 @@ impl<F: Field> CpuChip<F> {
 
         // Compute whether this ecall is ENTER_UNCONSTRAINED.
         let is_enter_unconstrained = {
-            IsZeroOperation::<CB::F>::eval(
+            IsZeroGadget::<CB::F>::eval(
                 builder,
                 syscall_id
                     - CB::Expr::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
@@ -79,7 +79,7 @@ impl<F: Field> CpuChip<F> {
 
         // Compute whether this ecall is HINT_LEN.
         let is_hint_len = {
-            IsZeroOperation::<CB::F>::eval(
+            IsZeroGadget::<CB::F>::eval(
                 builder,
                 syscall_id - CB::Expr::from_canonical_u32(SyscallCode::HINT_LEN.syscall_id()),
                 ecall_cols.is_hint_len,
@@ -254,7 +254,7 @@ impl<F: Field> CpuChip<F> {
 
         // Compute whether this ecall is HALT.
         let is_halt = {
-            IsZeroOperation::<CB::F>::eval(
+            IsZeroGadget::<CB::F>::eval(
                 builder,
                 syscall_id - CB::Expr::from_canonical_u32(SyscallCode::HALT.syscall_id()),
                 ecall_cols.is_halt,
@@ -284,7 +284,7 @@ impl<F: Field> CpuChip<F> {
 
         // Compute whether this ecall is COMMIT.
         let is_commit = {
-            IsZeroOperation::<CB::F>::eval(
+            IsZeroGadget::<CB::F>::eval(
                 builder,
                 syscall_id - CB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
                 ecall_cols.is_commit,
@@ -295,7 +295,7 @@ impl<F: Field> CpuChip<F> {
 
         // Compute whether this ecall is COMMIT_DEFERRED_PROOFS.
         let is_commit_deferred_proofs = {
-            IsZeroOperation::<CB::F>::eval(
+            IsZeroGadget::<CB::F>::eval(
                 builder,
                 syscall_id
                     - CB::Expr::from_canonical_u32(

@@ -1,6 +1,6 @@
 use crate::{
     chips::memory::read_write::columns::MemoryReadWriteCols,
-    gadgets::baby_bear_word::BabyBearWordRangeChecker,
+    gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
 };
 use pico_compiler::word::Word;
 use pico_derive::AlignedBorrow;

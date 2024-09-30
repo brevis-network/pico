@@ -1,9 +1,9 @@
-//! An operation to check if the input is 0.
+//! A gadget to check if the input is 0.
 //!
 //! This is guaranteed to return 1 if and only if the input is 0.
-//!
 //! The idea is that 1 - input * inverse is exactly the boolean value indicating whether the input
 //! is 0.
+
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_derive::AlignedBorrow;
@@ -11,7 +11,7 @@ use pico_derive::AlignedBorrow;
 /// A set of columns needed to compute whether the given word is 0.
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
 #[repr(C)]
-pub struct IsZeroOperation<T> {
+pub struct IsZeroGadget<T> {
     /// The inverse of the input.
     pub inverse: T,
 
@@ -19,7 +19,7 @@ pub struct IsZeroOperation<T> {
     pub result: T,
 }
 
-impl<F: Field> IsZeroOperation<F> {
+impl<F: Field> IsZeroGadget<F> {
     pub fn populate(&mut self, a: u32) -> u32 {
         self.populate_from_field_element(F::from_canonical_u32(a))
     }
@@ -40,7 +40,7 @@ impl<F: Field> IsZeroOperation<F> {
     pub fn eval<AB: AirBuilder>(
         builder: &mut AB,
         a: AB::Expr,
-        cols: IsZeroOperation<AB::Var>,
+        cols: IsZeroGadget<AB::Var>,
         is_real: AB::Expr,
     ) {
         let one: AB::Expr = AB::F::one().into();

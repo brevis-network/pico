@@ -1,4 +1,4 @@
-use crate::gadgets::{is_equal_word::IsEqualWordOperation, is_zero_word::IsZeroWordOperation};
+use crate::gadgets::{is_equal_word::IsEqualWordGadget, is_zero_word::IsZeroWordGadget};
 use pico_compiler::word::{Word, WORD_SIZE};
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
@@ -50,7 +50,7 @@ pub struct DivRemCols<T> {
     pub carry: [T; LONG_WORD_SIZE],
 
     /// Flag to indicate division by 0.
-    pub is_c_0: IsZeroWordOperation<T>,
+    pub is_c_0: IsZeroWordGadget<T>,
 
     /// Flag to indicate whether the opcode is DIV.
     pub is_div: T,
@@ -74,11 +74,11 @@ pub struct DivRemCols<T> {
 
     /// Flag for whether the value of `b` matches the unique overflow case `b = -2^31` and `c =
     /// -1`.
-    pub is_overflow_b: IsEqualWordOperation<T>,
+    pub is_overflow_b: IsEqualWordGadget<T>,
 
     /// Flag for whether the value of `c` matches the unique overflow case `b = -2^31` and `c =
     /// -1`.
-    pub is_overflow_c: IsEqualWordOperation<T>,
+    pub is_overflow_c: IsEqualWordGadget<T>,
 
     /// The most significant bit of `b`.
     pub b_msb: T,

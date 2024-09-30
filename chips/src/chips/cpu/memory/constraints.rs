@@ -6,7 +6,7 @@ use crate::{
         },
         memory::read_write::columns::MemoryCols,
     },
-    gadgets::baby_bear_word::BabyBearWordRangeChecker,
+    gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
     utils::memory::MemoryAirBuilder,
 };
 use p3_air::AirBuilder;

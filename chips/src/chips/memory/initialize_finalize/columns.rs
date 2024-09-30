@@ -1,5 +1,6 @@
 use crate::gadgets::{
-    baby_bear_range::BabyBearBitDecomposition, is_zero::IsZeroOperation, lt::AssertLtColsBits,
+    baby_bear::bit_decomposition::BabyBearBitDecomposition, is_zero::IsZeroGadget,
+    lt::AssertLtColsBits,
 };
 use core::mem::size_of;
 use pico_derive::AlignedBorrow;
@@ -35,7 +36,7 @@ pub struct MemoryInitializeFinalizeCols<T> {
     pub is_next_comp: T,
 
     /// A witness to assert whether or not we the previous address is zero.
-    pub is_prev_addr_zero: IsZeroOperation<T>,
+    pub is_prev_addr_zero: IsZeroGadget<T>,
 
     /// Auxilary column, equal to `(1 - is_prev_addr_zero.result) * is_first_row`.
     pub is_first_comp: T,

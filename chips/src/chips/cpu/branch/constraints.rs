@@ -1,6 +1,6 @@
 use crate::{
     chips::cpu::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCols, CpuChip},
-    gadgets::baby_bear_word::BabyBearWordRangeChecker,
+    gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

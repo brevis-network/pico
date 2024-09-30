@@ -1,4 +1,4 @@
-use crate::gadgets::is_zero::IsZeroOperation;
+use crate::gadgets::is_zero::IsZeroGadget;
 use core::mem::size_of;
 use pico_compiler::word::Word;
 use pico_derive::AlignedBorrow;
@@ -26,7 +26,7 @@ pub struct MemoryProgramMultCols<T> {
     pub multiplicity: T,
 
     /// Whether the chunk is the first chunk.
-    pub is_first_chunk: IsZeroOperation<T>,
+    pub is_first_chunk: IsZeroGadget<T>,
 }
 
 /// Chip that initializes memory that is provided from the program. The table is preprocessed and

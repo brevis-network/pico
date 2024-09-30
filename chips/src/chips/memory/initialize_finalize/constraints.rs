@@ -3,7 +3,7 @@ use crate::{
         columns::{MemoryInitializeFinalizeCols, NUM_MEMORY_INITIALIZE_FINALIZE_COLS},
         MemoryChipType, MemoryInitializeFinalizeChip,
     },
-    gadgets::{baby_bear_range::BabyBearBitDecomposition, is_zero::IsZeroOperation},
+    gadgets::{baby_bear::bit_decomposition::BabyBearBitDecomposition, is_zero::IsZeroGadget},
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
@@ -139,9 +139,9 @@ where
             .map(|(i, bit)| bit.clone() * CB::F::from_wrapped_u32(1 << i))
             .sum::<CB::Expr>();
 
-        // Constrain the is_prev_addr_zero operation only in the first row.
+        // Constrain the is_prev_addr_zero only in the first row.
         let is_first_row = builder.is_first_row();
-        IsZeroOperation::<CB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
+        IsZeroGadget::<CB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
 
         // Constrain the inequality assertion in the first row.
         local.lt_cols.eval(

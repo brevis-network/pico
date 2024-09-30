@@ -1,14 +1,16 @@
+//! The gadget for the addition of two words (Uint32)
+
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_compiler::word::Word;
 use pico_derive::AlignedBorrow;
 use pico_emulator::riscv::events::ByteRecordBehavior;
-use pico_machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder};
+use pico_machine::builder::{ChipBuilder, ChipRangeBuilder};
 
 /// A set of columns needed to compute the add of two words.
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
 #[repr(C)]
-pub struct AddOperation<T> {
+pub struct AddGadget<T> {
     /// The result of `a + b`.
     pub value: Word<T>,
 
@@ -16,7 +18,7 @@ pub struct AddOperation<T> {
     pub carry: [T; 3],
 }
 
-impl<F: Field> AddOperation<F> {
+impl<F: Field> AddGadget<F> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecordBehavior,
@@ -63,7 +65,7 @@ impl<F: Field> AddOperation<F> {
         builder: &mut AB,
         a: Word<AB::Var>,
         b: Word<AB::Var>,
-        cols: AddOperation<AB::Var>,
+        cols: AddGadget<AB::Var>,
         chunk: AB::Var,
         channel: impl Into<AB::Expr> + Clone,
         is_real: AB::Expr,

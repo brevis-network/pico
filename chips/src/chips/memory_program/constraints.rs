@@ -5,7 +5,7 @@ use crate::{
         },
         MemoryProgramChip,
     },
-    gadgets::is_zero::IsZeroOperation,
+    gadgets::is_zero::IsZeroGadget,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field};
@@ -45,7 +45,7 @@ where
             public_values_slice.as_slice().borrow();
 
         // Constrain `is_first_chunk` to be 1 if and only if the chunk is the first chunk.
-        IsZeroOperation::<CB::F>::eval(
+        IsZeroGadget::<CB::F>::eval(
             builder,
             // TODO: The chunk should be 1 for the first chunk in public values, need to check.
             // public_values.chunk.clone() - CB::F::one(),

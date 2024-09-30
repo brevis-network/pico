@@ -62,7 +62,7 @@
 
 use crate::{
     chips::alu::divrem::{columns::DivRemCols, DivRemChip},
-    gadgets::{is_equal_word::IsEqualWordOperation, is_zero_word::IsZeroWordOperation},
+    gadgets::{is_equal_word::IsEqualWordGadget, is_zero_word::IsZeroWordGadget},
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
@@ -163,7 +163,7 @@ where
 
         // Calculate is_overflow. is_overflow = is_equal(b, -2^{31}) * is_equal(c, -1) * is_signed
         {
-            IsEqualWordOperation::<CB::F>::eval(
+            IsEqualWordGadget::<CB::F>::eval(
                 builder,
                 local.b.map(|x| x.into()),
                 Word::from(i32::MIN as u32).map(|x: CB::F| x.into()),
@@ -171,7 +171,7 @@ where
                 local.is_real.into(),
             );
 
-            IsEqualWordOperation::<CB::F>::eval(
+            IsEqualWordGadget::<CB::F>::eval(
                 builder,
                 local.c.map(|x| x.into()),
                 Word::from(-1i32 as u32).map(|x: CB::F| x.into()),
@@ -283,7 +283,7 @@ where
         // When division by 0, quotient must be 0xffffffff per RISC-V spec.
         {
             // Calculate whether c is 0.
-            IsZeroWordOperation::<CB::F>::eval(
+            IsZeroWordGadget::<CB::F>::eval(
                 builder,
                 local.c.map(|x| x.into()),
                 local.is_c_0,

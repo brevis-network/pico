@@ -3,7 +3,7 @@ use crate::{
         alu::add_sub::{columns::AddSubCols, AddSubChip},
         Opcode,
     },
-    gadgets::add::AddOperation,
+    gadgets::add::AddGadget,
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
@@ -29,7 +29,7 @@ where
             .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
 
         // Evaluate the addition operation.
-        AddOperation::<CB::F>::eval(
+        AddGadget::<CB::F>::eval(
             builder,
             local.operand_1,
             local.operand_2,
