@@ -4,7 +4,7 @@ use p3_field::{AbstractField, Field};
 // set it temporarily for now
 pub const MAX_NUM_PVS: usize = 370;
 
-pub trait RecordBehavior: Default {
+pub trait RecordBehavior: Default + Sync {
     fn name(&self) -> String;
 
     fn stats(&self) -> HashMap<String, usize>;

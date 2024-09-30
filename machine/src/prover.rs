@@ -140,7 +140,7 @@ where
         info!("generate main traces: BEGIN");
         let start = Instant::now();
         let mut chips_and_main = chips
-            .iter()
+            .par_iter()
             .map(|chip| {
                 let begin = Instant::now();
                 let trace = chip.generate_main(record, &mut C::Record::default());
