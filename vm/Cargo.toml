@@ -7,7 +7,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-# pico - to be deleted
+# pico
 pico-derive.workspace = true
 
 # p3
