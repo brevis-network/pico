@@ -1191,141 +1191,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
-name = "pico-chips"
-version = "0.1.0"
-dependencies = [
- "arrayref",
- "hashbrown 0.14.5",
- "itertools 0.13.0",
- "log",
- "num_cpus",
- "p3-air",
- "p3-baby-bear",
- "p3-blake3",
- "p3-bn254-fr",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-fri",
- "p3-goldilocks",
- "p3-keccak",
- "p3-keccak-air",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-mds",
- "p3-merkle-tree",
- "p3-poseidon2",
- "p3-symmetric",
- "p3-uni-stark",
- "p3-util",
- "pico-compiler",
- "pico-derive",
- "pico-emulator",
- "pico-machine",
- "rand",
- "rayon",
- "serde",
- "static_assertions",
- "tracing",
-]
-
-[[package]]
-name = "pico-compiler"
-version = "0.1.0"
-dependencies = [
- "arrayref",
- "bincode",
- "bytemuck",
- "elf",
- "eyre",
- "generic-array 1.1.0",
- "hashbrown 0.14.5",
- "hex",
- "itertools 0.13.0",
- "log",
- "nohash-hasher",
- "num",
- "p3-air",
- "p3-field",
- "p3-maybe-rayon",
- "rand",
- "rrs-succinct",
- "serde",
- "serde_with",
- "strum",
- "strum_macros",
- "thiserror",
- "tiny-keccak",
- "tracing",
- "typenum",
-]
-
-[[package]]
-name = "pico-configs"
-version = "0.1.0"
-dependencies = [
- "p3-air",
- "p3-baby-bear",
- "p3-blake3",
- "p3-bn254-fr",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-fri",
- "p3-goldilocks",
- "p3-keccak",
- "p3-keccak-air",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-mds",
- "p3-merkle-tree",
- "p3-poseidon2",
- "p3-symmetric",
- "p3-uni-stark",
- "p3-util",
- "rand",
-]
-
-[[package]]
 name = "pico-derive"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "pico-emulator"
-version = "0.1.0"
-dependencies = [
- "arrayref",
- "bincode",
- "bytemuck",
- "elf",
- "eyre",
- "generic-array 1.1.0",
- "hashbrown 0.14.5",
- "hex",
- "itertools 0.13.0",
- "log",
- "nohash-hasher",
- "num",
- "p3-field",
- "p3-maybe-rayon",
- "pico-compiler",
- "rand",
- "rrs-succinct",
- "serde",
- "serde_with",
- "strum",
- "strum_macros",
- "thiserror",
- "tiny-keccak",
- "tracing",
- "typenum",
 ]
 
 [[package]]
@@ -1355,54 +1226,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "pico-instances"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "env_logger",
- "hashbrown 0.14.5",
- "itertools 0.13.0",
- "log",
- "p3-air",
- "p3-baby-bear",
- "p3-blake3",
- "p3-bn254-fr",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-fri",
- "p3-goldilocks",
- "p3-keccak",
- "p3-keccak-air",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-mds",
- "p3-merkle-tree",
- "p3-poseidon2",
- "p3-symmetric",
- "p3-uni-stark",
- "p3-util",
- "pico-chips",
- "pico-compiler",
- "pico-configs",
- "pico-emulator",
- "pico-machine",
- "rand",
- "rayon-scan",
- "serde",
-]
-
-[[package]]
-name = "pico-machine"
+name = "pico-vm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrayref",
+ "bincode",
+ "bytemuck",
+ "elf",
  "env_logger",
+ "eyre",
+ "generic-array 1.1.0",
  "hashbrown 0.14.5",
+ "hex",
  "itertools 0.13.0",
  "log",
+ "nohash-hasher",
+ "num",
+ "num_cpus",
  "p3-air",
  "p3-baby-bear",
  "p3-blake3",
@@ -1423,13 +1264,20 @@ dependencies = [
  "p3-symmetric",
  "p3-uni-stark",
  "p3-util",
- "pico-chips",
- "pico-compiler",
- "pico-configs",
  "pico-derive",
- "pico-emulator",
+ "rand",
+ "rayon",
  "rayon-scan",
+ "rrs-succinct",
  "serde",
+ "serde_with",
+ "static_assertions",
+ "strum",
+ "strum_macros",
+ "thiserror",
+ "tiny-keccak",
+ "tracing",
+ "typenum",
 ]
 
 [[package]]

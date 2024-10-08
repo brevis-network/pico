@@ -1,5 +1,5 @@
 [workspace]
-members = ["chips", "derive", "examples", "machine", "compiler", "configs", "emulator", "instances"]
+members = ["derive", "examples", "vm"]
 resolver = "2"
 
 [workspace.package]
@@ -24,13 +24,8 @@ debug-assertions = true
 
 [workspace.dependencies]
 # pico
-pico-configs = { path = "configs" }
-pico-machine = { path = "machine" }
-pico-chips = { path = "chips" }
-pico-compiler = { path = "compiler" }
 pico-derive = { path = "derive" }
-pico-emulator =  { path = "emulator" }
-pico-instances = { path = "instances" }
+pico-vm = { path = "vm" }
 
 # p3
 
@@ -57,19 +52,33 @@ p3-bn254-fr = { git = "https://github.com/Plonky3/Plonky3.git" , rev = "cf5f624"
 
 # misc
 anyhow = { version = "1.0.40", default-features = false }
-arrayref = "0.3"
+arrayref = "0.3.8"
+bincode = "1.3.3"
+bytemuck = "1.16.3"
+elf = "0.7.4"
 env_logger = "0.11"
+eyre = "0.6.12"
+generic-array = { version = "1.1.0", features = ["alloc", "serde"] }
 hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
 hex = "0.4.3"
 itertools = "0.13"
-rayon-scan = "0.1.1"
 log = "0.4.21"
+nohash-hasher = "0.2.0"
+num = { version = "0.4.3" }
 num_cpus = "1.16"
 proc-macro2 = "1.0"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10"
-serde = "1.0"
+rayon-scan = "0.1.1"
+rrs_lib = { package = "rrs-succinct", version = "0.1.0" }
+serde = { version = "1.0.205", features = ["derive", "rc"] }
+serde_with = "3.9.0"
 static_assertions = "1.1"
+strum = "0.26.3"
+strum_macros = "0.26.4"
 syn = { version = "1.0", features = ["full"] }
-tracing = "0.1"
+thiserror = "1.0.63"
+tiny-keccak = { version = "2.0.2", features = ["keccak"] }
+tracing = "0.1.40"
+typenum = "1.17.0"

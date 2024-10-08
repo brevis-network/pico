@@ -1,0 +1,63 @@
+[package]
+name = "pico-vm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# pico - to be deleted
+pico-derive.workspace = true
+
+# p3
+p3-air.workspace = true
+p3-field.workspace = true
+p3-commit.workspace = true
+p3-matrix.workspace = true
+p3-baby-bear.workspace = true
+p3-util.workspace = true
+p3-challenger.workspace = true
+p3-dft.workspace = true
+p3-fri.workspace = true
+p3-goldilocks.workspace = true
+p3-keccak.workspace = true
+p3-keccak-air.workspace = true
+p3-blake3.workspace = true
+p3-mds.workspace = true
+p3-merkle-tree.workspace = true
+p3-poseidon2.workspace = true
+p3-symmetric.workspace = true
+p3-uni-stark.workspace = true
+p3-maybe-rayon = { workspace = true, features = ["parallel"] }
+p3-bn254-fr.workspace = true
+
+# misc
+anyhow.workspace = true
+arrayref.workspace = true
+bincode.workspace = true
+bytemuck.workspace = true
+elf.workspace = true
+env_logger.workspace = true
+eyre.workspace = true
+generic-array.workspace = true
+hashbrown.workspace = true
+hex.workspace = true
+itertools.workspace = true
+log.workspace = true
+nohash-hasher.workspace = true
+num.workspace = true
+num_cpus.workspace = true
+rand.workspace = true
+rayon.workspace = true
+rayon-scan.workspace = true
+rrs_lib.workspace = true
+serde.workspace = true
+serde_with.workspace = true
+static_assertions.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+thiserror.workspace = true
+tiny-keccak.workspace = true
+tracing.workspace = true
+typenum.workspace = true
