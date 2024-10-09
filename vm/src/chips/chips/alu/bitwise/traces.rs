@@ -80,6 +80,11 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
 
         debug!("{} chip - extra_record", self.name());
     }
+
+    // flag reflecting whether chip is used in the record
+    fn is_active(&self, record: &Self::Record) -> bool {
+        !record.bitwise_events.is_empty()
+    }
 }
 
 impl<F: Field> BitwiseChip<F> {

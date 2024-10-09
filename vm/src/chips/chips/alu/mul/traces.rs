@@ -193,4 +193,8 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
         self.generate_main(input, extra);
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        !record.mul_events.is_empty()
+    }
 }

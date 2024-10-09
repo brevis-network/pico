@@ -95,4 +95,11 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
 
         trace
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        match self.kind {
+            MemoryChipType::Initialize => !record.memory_initialize_events.is_empty(),
+            MemoryChipType::Finalize => !record.memory_finalize_events.is_empty(),
+        }
+    }
 }

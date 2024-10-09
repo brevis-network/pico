@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 /// Wrapper for all proof types
 /// The top layer of abstraction (the most abstract layer)
+#[derive(Serialize)]
 pub struct MetaProof<'a, SC, P>
 where
     SC: StarkGenericConfig,
@@ -49,6 +50,7 @@ pub trait ProofBehavior<SC: StarkGenericConfig> {
 }
 
 /// Proof wrapper for an element (single chunk)
+#[derive(Serialize)]
 pub struct UnitProof<SC: StarkGenericConfig> {
     pub proof: BaseProof<SC>,
 }
@@ -70,6 +72,7 @@ impl<SC: StarkGenericConfig> UnitProof<SC> {
 }
 
 /// Proof wrapper for an ensemble (chunks)
+#[derive(Serialize)]
 pub struct EnsembleProof<SC: StarkGenericConfig> {
     pub proof: Vec<BaseProof<SC>>,
 }

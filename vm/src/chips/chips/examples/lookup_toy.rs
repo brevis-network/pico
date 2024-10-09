@@ -71,6 +71,10 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
     fn preprocessed_width(&self) -> usize {
         3
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        true
+    }
 }
 
 impl<F: Field> BaseAir<F> for AddLookingChip<F> {
@@ -130,6 +134,10 @@ impl<F: Field> ChipBehavior<F> for AddLookedChip<F> {
             row.result = F::from_canonical_u32(c);
         });
         trace
+    }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        true
     }
 }
 

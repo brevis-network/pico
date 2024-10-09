@@ -35,6 +35,8 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     fn preprocessed_width(&self) -> usize {
         0
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool;
 }
 
 /// Chip wrapper, includes interactions
@@ -59,7 +61,12 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         let (looking, looked) = builder.lookups();
 
         // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
-        let log_quotient_degree = get_log_quotient_degree::<F, C>(&chip, chip.preprocessed_width());
+        let log_quotient_degree = get_log_quotient_degree::<F, C>(
+            &chip,
+            chip.preprocessed_width(),
+            !(looking.is_empty() && looked.is_empty()),
+        );
+
         debug!(
             "{:<14} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
             chip.name(),
@@ -175,6 +182,10 @@ where
 
     fn preprocessed_width(&self) -> usize {
         self.chip.preprocessed_width()
+    }
+
+    fn is_active(&self, record: &C::Record) -> bool {
+        self.chip.is_active(record)
     }
 }
 

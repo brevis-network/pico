@@ -117,6 +117,10 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
 
         debug!("{} chip - extra_record", self.name());
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        !record.add_events.is_empty() || !record.sub_events.is_empty()
+    }
 }
 
 impl<F: Field> AddSubChip<F> {

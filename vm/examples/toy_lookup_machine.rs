@@ -60,6 +60,13 @@ impl<F: Field> ChipBehavior<F> for LookupToyChipType<F> {
             Self::LookedChip(chip) => chip.preprocessed_width(),
         }
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        match self {
+            Self::LookingChip(chip) => chip.is_active(record),
+            Self::LookedChip(chip) => chip.is_active(record),
+        }
+    }
 }
 impl<F: Field> BaseAir<F> for LookupToyChipType<F> {
     fn width(&self) -> usize {

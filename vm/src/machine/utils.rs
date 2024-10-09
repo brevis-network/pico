@@ -275,14 +275,16 @@ pub fn populate_permutation_row<F: Field, EF: ExtensionField<F>>(
 pub fn get_log_quotient_degree<F, A>(
     air: &A,
     preprocessed_width: usize,
+    has_lookup: bool,
     //num_public_values: usize,
 ) -> usize
 where
     F: Field,
     A: Air<SymbolicConstraintFolder<F>>,
 {
+    let base = if has_lookup { 3 } else { 2 };
     // We pad to at least degree 2, since a quotient argument doesn't make sense with smaller degrees.
-    let constraint_degree = get_max_constraint_degree(air, preprocessed_width).max(2);
+    let constraint_degree = get_max_constraint_degree(air, preprocessed_width).max(base);
 
     // The quotient's actual degree is approximately (max_constraint_degree - 1) n,
     // where subtracting 1 comes from division by the zerofier.

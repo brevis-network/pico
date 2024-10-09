@@ -101,4 +101,8 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
 
         trace
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        true
+    }
 }

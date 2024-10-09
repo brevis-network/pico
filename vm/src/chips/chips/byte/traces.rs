@@ -62,6 +62,10 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
 
         trace
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        true
+    }
 }
 
 impl<F: Field> ByteChip<F> {

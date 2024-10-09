@@ -111,6 +111,10 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
     fn preprocessed_width(&self) -> usize {
         0
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        true
+    }
 }
 
 impl<F: Field> BaseAir<F> for ToyChip<F> {

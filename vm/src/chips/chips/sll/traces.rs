@@ -89,6 +89,10 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
         extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
         debug!("{} chip - extra_record", self.name());
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        !record.shift_left_events.is_empty()
+    }
 }
 
 impl<F: Field> SLLChip<F> {

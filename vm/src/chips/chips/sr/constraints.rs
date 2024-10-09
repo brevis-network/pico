@@ -1,6 +1,6 @@
 use super::{
     columns::{ShiftRightCols, LONG_WORD_SIZE},
-    trace::ShiftRightChip,
+    traces::ShiftRightChip,
 };
 use crate::{
     compiler::{

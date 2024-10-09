@@ -102,6 +102,10 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
 
         debug!("{} chip - extra_record", self.name());
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        !record.cpu_events.is_empty()
+    }
 }
 
 impl<F: PrimeField32> CpuChip<F> {

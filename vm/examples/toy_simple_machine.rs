@@ -54,6 +54,12 @@ impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
             Self::Toy(chip) => chip.preprocessed_width(),
         }
     }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        match self {
+            Self::Toy(chip) => chip.is_active(record),
+        }
+    }
 }
 
 impl<F: Field> BaseAir<F> for ToyChipType<F> {

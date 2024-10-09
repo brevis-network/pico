@@ -9,7 +9,8 @@ use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 
 use crate::configs::config::StarkGenericConfig;
-use rand::thread_rng;
+use rand::{rngs::StdRng, thread_rng, SeedableRng};
+use serde::{Deserialize, Serialize};
 
 type Val = BabyBear;
 
@@ -31,12 +32,30 @@ pub struct BabyBearPoseidon2 {
     pcs: Pcs,
 }
 
+impl Serialize for BabyBearPoseidon2 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        std::marker::PhantomData::<BabyBearPoseidon2>.serialize(serializer)
+    }
+}
+
 impl BabyBearPoseidon2 {
     pub fn new() -> Self {
+        // Define a fixed seed (32 bytes for StdRng)
+        let seed: [u8; 32] = [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31,
+        ];
+
+        // Initialize the seeded RNG
+        let mut rng = StdRng::from_seed(seed);
+
         let perm = Perm::new_from_rng_128(
             Poseidon2ExternalMatrixGeneral,
             DiffusionMatrixBabyBear::default(),
-            &mut thread_rng(),
+            &mut rng,
         );
         let hash = MyHash::new(perm.clone());
         let compress = MyCompress::new(perm.clone());

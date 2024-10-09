@@ -143,7 +143,13 @@ where
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         info!("generate main traces: BEGIN");
         let start = Instant::now();
-        let mut chips_and_main = chips
+
+        let active_chips = chips
+            .iter()
+            .filter(|chip| chip.is_active(record))
+            .collect::<Vec<_>>();
+
+        let mut chips_and_main = active_chips
             .par_iter()
             .map(|chip| {
                 let begin = Instant::now();

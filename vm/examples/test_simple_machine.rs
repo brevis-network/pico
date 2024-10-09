@@ -12,7 +12,7 @@ use pico_vm::{
         memory_program::MemoryProgramChip,
         program::ProgramChip,
         sll::SLLChip,
-        sr::trace::ShiftRightChip,
+        sr::traces::ShiftRightChip,
     },
     compiler::{
         compiler::{Compiler, SourceType},
@@ -146,6 +146,24 @@ impl<F: PrimeField32> ChipBehavior<F> for TestChipType<F> {
             Self::Lt(chip) => chip.extra_record(input, extra),
             Self::SLL(chip) => chip.extra_record(input, extra),
             Self::SR(chip) => chip.extra_record(input, extra),
+        }
+    }
+
+    fn is_active(&self, record: &Self::Record) -> bool {
+        match self {
+            Self::Byte(chip) => chip.is_active(record),
+            Self::Program(chip) => chip.is_active(record),
+            Self::Cpu(chip) => chip.is_active(record),
+            Self::MemoryProgram(chip) => chip.is_active(record),
+            Self::MemoryInitialize(chip) => chip.is_active(record),
+            Self::MemoryFinalize(chip) => chip.is_active(record),
+            Self::AddSub(chip) => chip.is_active(record),
+            Self::Bitwise(chip) => chip.is_active(record),
+            Self::DivRem(chip) => chip.is_active(record),
+            Self::Mul(chip) => chip.is_active(record),
+            Self::Lt(chip) => chip.is_active(record),
+            Self::SLL(chip) => chip.is_active(record),
+            Self::SR(chip) => chip.is_active(record),
         }
     }
 }
@@ -344,6 +362,51 @@ fn main() {
     info!("\n Generating proof (at {:?})..", start.elapsed());
     let proof = simple_machine.prove(&pk, &records);
     info!("{} generated.", proof.name());
+
+    let proof_size = bincode::serialize(&proof).unwrap().len();
+    info!("Proof size: {}", proof_size);
+    debug!(
+        "|- Commitment size: {}",
+        bincode::serialize(&proof.proof.proof[0].commitments)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Opened values size: {}",
+        bincode::serialize(&proof.proof.proof[0].opened_values)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Opening proof size: {}",
+        bincode::serialize(&proof.proof.proof[0].opening_proof)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Log main degrees size: {}",
+        bincode::serialize(&proof.proof.proof[0].log_main_degrees)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Log quotient degrees size: {}",
+        bincode::serialize(&proof.proof.proof[0].log_quotient_degrees)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Chip ordering size: {}",
+        bincode::serialize(&proof.proof.proof[0].main_chip_ordering)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Public values size: {}",
+        bincode::serialize(&proof.proof.proof[0].public_values)
+            .unwrap()
+            .len()
+    );
 
     // Verify the proof.
     info!("\n Verifying proof (at {:?})..", start.elapsed());
