@@ -1,6 +1,8 @@
+use itertools::enumerate;
 use log::{debug, info};
 use p3_air::{Air, BaseAir};
-use p3_field::{Field, PrimeField32};
+use p3_baby_bear::BabyBear;
+use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     chips::chips::{
@@ -20,14 +22,17 @@ use pico_vm::{
     },
     configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::{
+        context::EmulatorContext,
         opts::EmulatorOpts,
         record::RecordBehavior,
         riscv::{
-            public_values::RISCV_NUM_PVS, record::EmulationRecord, riscv_emulator::RiscvEmulator,
+            public_values::RISCV_NUM_PVS,
+            record::EmulationRecord,
+            riscv_emulator::{EmulationError, EmulatorMode, RiscvEmulator},
         },
         stdin::EmulatorStdin,
     },
-    instances::simple_machine::SimpleMachine,
+    instances::{riscv_machine::RiscvMachine, simple_machine::SimpleMachine},
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -300,50 +305,15 @@ fn pars_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin) {
 
 fn main() {
     env_logger::init();
+
+    // run with default fibo, in which n = 40000
     let (elf, stdin) = pars_args(env::args().collect());
+
     let start = Instant::now();
 
     info!("\n Creating Program..");
     let compiler = Compiler::new(SourceType::RiscV, elf);
     let program = compiler.compile();
-
-    info!("\n Creating emulator (at {:?})..", start.elapsed());
-    let mut emulator = RiscvEmulator::new(program, EmulatorOpts::default());
-    emulator.run_with_stdin(stdin).unwrap();
-
-    // TRICKY: We copy the memory initialize and finalize events from the second (last)
-    // record to this record, since the memory lookups could only work if has the
-    // full lookups in the all records.
-    assert_eq!(
-        emulator.records.len(),
-        2,
-        "We could only test for one record for now and the last is the final one",
-    );
-    for record in &emulator.records {
-        debug!("record events: {:?}", record.stats());
-    }
-    let mut record = emulator.records[0].clone();
-    assert!(record.memory_initialize_events.is_empty());
-    assert!(record.memory_finalize_events.is_empty());
-    emulator.records[1]
-        .memory_initialize_events
-        .clone_into(&mut record.memory_initialize_events);
-    emulator.records[1]
-        .memory_finalize_events
-        .clone_into(&mut record.memory_finalize_events);
-    let program = record.program.clone();
-
-    // for debugging emulator
-    // for rcd in &emulator.records {
-    //     debug!("record events: {:?}", rcd.stats());
-    // }
-    // debug!("final record events: {:?}", record.stats());
-    let stats = record.stats();
-    for (key, value) in &stats {
-        debug!("{:<25}: {}", key, value);
-    }
-
-    let mut records = vec![record];
 
     // Setup config and chips.
     info!("\n Creating BaseMachine (at {:?})..", start.elapsed());
@@ -351,69 +321,30 @@ fn main() {
     let chips = TestChipType::all_chips();
 
     // Create a new machine based on config and chips
-    let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, chips);
-    info!("{} created.", simple_machine.name());
+    let riscv_machine = RiscvMachine::new(config, RISCV_NUM_PVS, chips);
+    info!("{} created.", riscv_machine.name());
 
     // Setup machine prover, verifier, pk and vk.
     info!("\n Setup machine (at {:?})..", start.elapsed());
-    let (pk, vk) = simple_machine.setup_keys(&program);
-
-    info!("\n Complement records (at {:?})..", start.elapsed());
-    simple_machine.complement_record(&mut records);
+    let (pk, vk) = riscv_machine.setup_keys(&program);
 
     // Generate the proof.
     info!("\n Generating proof (at {:?})..", start.elapsed());
-    let proof = simple_machine.prove(&pk, &records);
+    let proof = riscv_machine.emulate_and_prove(
+        &pk,
+        program,
+        &stdin,
+        EmulatorOpts::test_opts(),
+        EmulatorContext::default(),
+    );
     info!("{} generated.", proof.name());
 
     let proof_size = bincode::serialize(&proof).unwrap().len();
     info!("Proof size: {}", proof_size);
-    debug!(
-        "|- Commitment size: {}",
-        bincode::serialize(&proof.proof.proof[0].commitments)
-            .unwrap()
-            .len()
-    );
-    debug!(
-        "|- Opened values size: {}",
-        bincode::serialize(&proof.proof.proof[0].opened_values)
-            .unwrap()
-            .len()
-    );
-    debug!(
-        "|- Opening proof size: {}",
-        bincode::serialize(&proof.proof.proof[0].opening_proof)
-            .unwrap()
-            .len()
-    );
-    debug!(
-        "|- Log main degrees size: {}",
-        bincode::serialize(&proof.proof.proof[0].log_main_degrees)
-            .unwrap()
-            .len()
-    );
-    debug!(
-        "|- Log quotient degrees size: {}",
-        bincode::serialize(&proof.proof.proof[0].log_quotient_degrees)
-            .unwrap()
-            .len()
-    );
-    debug!(
-        "|- Chip ordering size: {}",
-        bincode::serialize(&proof.proof.proof[0].main_chip_ordering)
-            .unwrap()
-            .len()
-    );
-    debug!(
-        "|- Public values size: {}",
-        bincode::serialize(&proof.proof.proof[0].public_values)
-            .unwrap()
-            .len()
-    );
 
     // Verify the proof.
     info!("\n Verifying proof (at {:?})..", start.elapsed());
-    let result = simple_machine.verify(&vk, &proof);
+    let result = riscv_machine.verify(&vk, &proof);
     info!(
         "The proof is verified: {} (at {:?})..",
         result.is_ok(),

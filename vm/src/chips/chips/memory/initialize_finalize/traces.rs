@@ -16,7 +16,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
 
     fn name(&self) -> String {
         match self.kind {
-            MemoryChipType::Initialize => "MemoryInit".to_string(),
+            MemoryChipType::Initialize => "MemoryInitialize".to_string(),
             MemoryChipType::Finalize => "MemoryFinalize".to_string(),
         }
     }
@@ -28,7 +28,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
         };
 
         let previous_addr_bits = match self.kind {
-            MemoryChipType::Initialize => input.public_values.previous_init_addr_bits,
+            MemoryChipType::Initialize => input.public_values.previous_initialize_addr_bits,
             MemoryChipType::Finalize => input.public_values.previous_finalize_addr_bits,
         };
 

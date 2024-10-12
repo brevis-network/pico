@@ -16,7 +16,7 @@ use pico_vm::{
 
 use pico_vm::{
     compiler::compiler::{Compiler, SourceType},
-    emulator::{opts::PicoCoreOpts, riscv::public_values::RISCV_NUM_PVS},
+    emulator::{opts::EmulatorOpts, riscv::public_values::RISCV_NUM_PVS},
     instances::simple_machine::SimpleMachine,
 };
 use std::any::type_name;
@@ -104,7 +104,7 @@ fn main() {
     let program = compiler.compile();
 
     info!("\n Creating Runtime..");
-    let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
+    let mut runtime = RiscvEmulator::new(program, EmulatorOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
 

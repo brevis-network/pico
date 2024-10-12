@@ -40,10 +40,10 @@ pub struct PublicValues<W, T> {
     pub execution_chunk: T,
 
     /// The bits of the largest address that is witnessed for initialization in the previous chunk.
-    pub previous_init_addr_bits: [T; 32],
+    pub previous_initialize_addr_bits: [T; 32],
 
     /// The largest address that is witnessed for initialization in the current chunk.
-    pub last_init_addr_bits: [T; 32],
+    pub last_initialize_addr_bits: [T; 32],
 
     /// The bits of the largest address that is witnessed for finalization in the previous chunk.
     pub previous_finalize_addr_bits: [T; 32],
@@ -97,8 +97,8 @@ impl<F: AbstractField> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F>
             exit_code,
             chunk,
             execution_chunk,
-            previous_init_addr_bits,
-            last_init_addr_bits,
+            previous_initialize_addr_bits,
+            last_initialize_addr_bits,
             previous_finalize_addr_bits,
             last_finalize_addr_bits,
         } = value;
@@ -114,8 +114,9 @@ impl<F: AbstractField> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F>
         let exit_code = F::from_canonical_u32(exit_code);
         let chunk = F::from_canonical_u32(chunk);
         let execution_chunk = F::from_canonical_u32(execution_chunk);
-        let previous_init_addr_bits = previous_init_addr_bits.map(F::from_canonical_u32);
-        let last_init_addr_bits = last_init_addr_bits.map(F::from_canonical_u32);
+        let previous_initialize_addr_bits =
+            previous_initialize_addr_bits.map(F::from_canonical_u32);
+        let last_initialize_addr_bits = last_initialize_addr_bits.map(F::from_canonical_u32);
         let previous_finalize_addr_bits = previous_finalize_addr_bits.map(F::from_canonical_u32);
         let last_finalize_addr_bits = last_finalize_addr_bits.map(F::from_canonical_u32);
 
@@ -127,8 +128,8 @@ impl<F: AbstractField> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F>
             exit_code,
             chunk,
             execution_chunk,
-            previous_init_addr_bits,
-            last_init_addr_bits,
+            previous_initialize_addr_bits,
+            last_initialize_addr_bits,
             previous_finalize_addr_bits,
             last_finalize_addr_bits,
         }

@@ -87,9 +87,9 @@ where
         // first we ned to assert that the addr < addr' when the next row is real. Then we need to
         // make assertions with regards to public values.
         //
-        // If the chip is a `MemoryInit`:
-        // - In the first row, we need to assert that previous_init_addr < addr.
-        // - In the last real row, we need to assert that addr = last_init_addr.
+        // If the chip is a `MemoryInitialize`:
+        // - In the first row, we need to assert that previous_initialize_addr < addr.
+        // - In the last real row, we need to assert that addr = last_initialize_addr.
         //
         // If the chip is a `MemoryFinalize`:
         // - In the first row, we need to assert that previous_finalize_addr < addr.
@@ -128,7 +128,7 @@ where
             public_values_array.as_slice().borrow();
 
         let prev_addr_bits = match self.kind {
-            MemoryChipType::Initialize => &public_values.previous_init_addr_bits,
+            MemoryChipType::Initialize => &public_values.previous_initialize_addr_bits,
             MemoryChipType::Finalize => &public_values.previous_finalize_addr_bits,
         };
 
@@ -198,7 +198,7 @@ where
         // presence of this flag asserts the initialization/finalization of %x0 to zero.
         //
         // **Remark**: it is up to the verifier to ensure that this flag is set to zero exactly
-        // once, this can be constrained by the public values setting `previous_init_addr_bits` or
+        // once, this can be constrained by the public values setting `previous_initialize_addr_bits` or
         // `previous_finalize_addr_bits` to zero.
         for i in 0..32 {
             builder
@@ -220,7 +220,7 @@ where
         // Make assertions for the final value. We need to connect the final valid address to the
         // correspinding `last_addr` value.
         let last_addr_bits = match self.kind {
-            MemoryChipType::Initialize => &public_values.last_init_addr_bits,
+            MemoryChipType::Initialize => &public_values.last_initialize_addr_bits,
             MemoryChipType::Finalize => &public_values.last_finalize_addr_bits,
         };
 

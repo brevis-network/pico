@@ -41,6 +41,11 @@ impl Serialize for BabyBearPoseidon2 {
     }
 }
 
+impl Clone for BabyBearPoseidon2 {
+    fn clone(&self) -> Self {
+        Self::new()
+    }
+}
 impl BabyBearPoseidon2 {
     pub fn new() -> Self {
         // Define a fixed seed (32 bytes for StdRng)

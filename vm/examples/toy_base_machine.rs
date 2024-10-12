@@ -10,7 +10,7 @@ use pico_vm::{
     },
     configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::{
-        opts::PicoCoreOpts,
+        opts::EmulatorOpts,
         riscv::{
             public_values::RISCV_NUM_PVS, record::EmulationRecord, riscv_emulator::RiscvEmulator,
         },
@@ -111,7 +111,7 @@ fn main() {
     let program = compiler.compile();
 
     info!("\n Creating Runtime..");
-    let mut runtime = RiscvEmulator::new(program, PicoCoreOpts::default());
+    let mut runtime = RiscvEmulator::new(program, EmulatorOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
 

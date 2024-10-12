@@ -1,11 +1,11 @@
 use serde::Serialize;
 
-pub struct PicoStdin {
+pub struct EmulatorStdin {
     pub buffer: Vec<Vec<u8>>,
     pub cursor: usize,
 }
 
-impl PicoStdin {
+impl EmulatorStdin {
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),

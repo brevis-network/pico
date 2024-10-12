@@ -30,7 +30,7 @@ pub struct MemoryProgramMultCols<T> {
 
 /// Chip that initializes memory that is provided from the program. The table is preprocessed and
 /// receives each row in the first chunk. This prevents any of these addresses from being
-/// overwritten through the normal MemoryInit.
+/// overwritten through the normal MemoryInitialize.
 #[derive(Default)]
 pub struct MemoryProgramChip;
 

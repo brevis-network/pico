@@ -49,9 +49,7 @@ where
         // Constrain `is_first_chunk` to be 1 if and only if the chunk is the first chunk.
         IsZeroGadget::<CB::F>::eval(
             builder,
-            // TODO: The chunk should be 1 for the first chunk in public values, need to check.
-            // public_values.chunk.clone() - CB::F::one(),
-            CB::Expr::zero(),
+            public_values.chunk.clone() - CB::F::one(),
             mult_local.is_first_chunk,
             prep_local.is_real.into(),
         );

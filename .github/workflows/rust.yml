@@ -58,3 +58,6 @@ jobs:
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example toy_lookup_machine
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_simple_machine fib 10
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_simple_machine keccak 10
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_riscv_emulator
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_riscv_machine fib 10
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_riscv_machine keccak 10

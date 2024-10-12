@@ -3,20 +3,21 @@ use crate::{
         instruction::Instruction, opcode::Opcode, program::Program, riscv::register::Register,
     },
     emulator::{
-        context::PicoContext,
-        opts::PicoCoreOpts,
+        context::EmulatorContext,
+        opts::EmulatorOpts,
         riscv::{
             events::{
                 create_alu_lookup_id, create_alu_lookups, AluEvent, CpuEvent, MemoryAccessPosition,
                 MemoryInitializeFinalizeEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
             },
+            public_values::PublicValues,
             record::{EmulationRecord, MemoryAccessRecord},
             state::RiscvEmulationState,
             syscalls::{
                 default_syscall_map, syscall_context::SyscallContext, Syscall, SyscallCode,
             },
         },
-        stdin::PicoStdin,
+        stdin::EmulatorStdin,
     },
 };
 use hashbrown::{hash_map::Entry, HashMap};
@@ -42,7 +43,7 @@ pub struct RiscvEmulator {
     pub program: Arc<Program>,
 
     /// The options for the runtime.
-    pub opts: PicoCoreOpts,
+    pub opts: EmulatorOpts,
 
     /// The maximum number of cpu cycles to use for emulation.
     pub max_cycles: Option<u64>,
@@ -54,6 +55,18 @@ pub struct RiscvEmulator {
 
     /// The current trace of the emulation that is being collected.
     pub record: EmulationRecord,
+
+    /// The collected batch_chunk_size records last executed
+    pub batch_records: Vec<EmulationRecord>,
+
+    /// Current batch number
+    pub current_batch: u32,
+
+    pub last_batch_next_pc: u32,
+
+    pub last_batch_exit_code: u32,
+
+    pub public_values_buffer: PublicValues<u32, u32>,
 
     /// The collected records, split by cpu cycles.
     pub records: Vec<EmulationRecord>,
@@ -130,8 +143,8 @@ macro_rules! assert_valid_memory_access {
 
 impl RiscvEmulator {
     #[must_use]
-    pub fn new(program: Program, opts: PicoCoreOpts) -> Self {
-        Self::with_context(program, opts, PicoContext::default())
+    pub fn new(program: Program, opts: EmulatorOpts) -> Self {
+        Self::with_context(program, opts, EmulatorContext::default())
     }
 
     fn initialize(&mut self) {
@@ -157,7 +170,7 @@ impl RiscvEmulator {
     ///
     /// This function may panic if it fails to create the trace file if `TRACE_FILE` is set.
     #[must_use]
-    pub fn with_context(program: Program, opts: PicoCoreOpts, context: PicoContext) -> Self {
+    pub fn with_context(program: Program, opts: EmulatorOpts, context: EmulatorContext) -> Self {
         // Create a shared reference to the program.
         let program = Arc::new(program);
 
@@ -177,9 +190,14 @@ impl RiscvEmulator {
         Self {
             syscall_map,
             memory_accesses: MemoryAccessRecord::default(),
-            chunk_size: (opts.chunk_size as u32) * 4,
+            chunk_size: opts.chunk_size as u32,
             chunk_batch_size: opts.chunk_batch_size as u32,
             record,
+            batch_records: vec![],
+            current_batch: 0,
+            last_batch_next_pc: 0,
+            last_batch_exit_code: 0,
+            public_values_buffer: PublicValues::<u32, u32>::default(),
             records: vec![],
             state: RiscvEmulationState::new(program.pc_start),
             program,
@@ -207,8 +225,67 @@ impl RiscvEmulator {
 
         // Increment the clock.
         self.state.global_clk += 1;
-        Ok(self.state.pc.wrapping_sub(self.program.pc_base)
-            >= (self.program.instructions.len() * 4) as u32)
+
+        // Check if there's enough cycles or move to the next chunk.
+        if self.state.clk + self.max_syscall_cycles >= self.chunk_size * 4 {
+            self.state.current_chunk += 1;
+            self.state.clk = 0;
+            self.state.channel = 0;
+
+            self.bump_record();
+        }
+
+        if let Some(max_cycles) = self.max_cycles {
+            if self.state.global_clk >= max_cycles {
+                panic!("exceeded cycle limit of {}", max_cycles);
+            }
+        }
+
+        // TODO: check if pc is 0 at the end
+        let done = self.state.pc == 0
+            || self.state.pc.wrapping_sub(self.program.pc_base)
+                >= (self.program.instructions.len() * 4) as u32;
+
+        Ok(done)
+    }
+
+    #[inline]
+    fn emulate_cycle_to_batch(&mut self) -> Result<bool, EmulationError> {
+        // Fetch the instruction at the current program counter.
+        let instruction = self.fetch();
+
+        // Emulate the instruction.
+        self.emulate_instruction(&instruction)?;
+
+        // Increment the clock.
+        self.state.global_clk += 1;
+
+        // Check if there's enough cycles or move to the next chunk.
+        if self.state.clk + self.max_syscall_cycles >= self.chunk_size * 4 {
+            // update chunk and execution chunk
+            self.state.current_chunk += 1;
+            if !self.record.cpu_events.is_empty() {
+                self.state.current_execution_chunk += 1;
+            }
+            // reset clk and channel
+            self.state.clk = 0;
+            self.state.channel = 0;
+
+            self.bump_record_to_batch();
+        }
+
+        if let Some(max_cycles) = self.max_cycles {
+            if self.state.global_clk >= max_cycles {
+                panic!("exceeded cycle limit of {}", max_cycles);
+            }
+        }
+
+        // TODO: check if pc is 0 at the end
+        let done = self.state.pc == 0
+            || self.state.pc.wrapping_sub(self.program.pc_base)
+                >= (self.program.instructions.len() * 4) as u32;
+
+        Ok(done)
     }
 
     pub fn run_fast(&mut self) -> Result<(), EmulationError> {
@@ -228,7 +305,8 @@ impl RiscvEmulator {
         Ok(())
     }
 
-    pub fn run_with_stdin(&mut self, stdin: PicoStdin) -> Result<(), EmulationError> {
+    // todo: refactor
+    pub fn run_with_stdin(&mut self, stdin: EmulatorStdin) -> Result<(), EmulationError> {
         self.emulator_mode = EmulatorMode::Trace;
         for input in &stdin.buffer {
             self.state.input_stream.push(input.clone());
@@ -236,11 +314,13 @@ impl RiscvEmulator {
         self.run()
     }
 
+    // todo: refactor
     fn emulate(&mut self) -> Result<bool, EmulationError> {
         // Get the current chunk.
         info!("emulate - BEGIN");
         let begin = Instant::now();
         let start_chunk = self.state.current_chunk; // needed for public input
+        debug!("start_chunk: {}", start_chunk);
 
         // If it's the first cycle, initialize the program.
         if self.state.global_clk == 0 {
@@ -288,11 +368,13 @@ impl RiscvEmulator {
         // Set the global public values for all chunks.
         let mut last_next_pc = 0;
         let mut last_exit_code = 0;
+        println!("# records to be processed: {}", self.records.len());
         for (i, record) in self.records.iter_mut().enumerate() {
             record.public_values = public_values;
             record.public_values.committed_value_digest = public_values.committed_value_digest;
             record.public_values.deferred_proofs_digest = public_values.deferred_proofs_digest;
             record.public_values.execution_chunk = start_chunk + i as u32;
+            record.public_values.chunk = start_chunk + i as u32;
             if record.cpu_events.is_empty() {
                 record.public_values.start_pc = last_next_pc;
                 record.public_values.next_pc = last_next_pc;
@@ -306,6 +388,90 @@ impl RiscvEmulator {
             }
         }
         info!("emulate - END in {:?}", begin.elapsed());
+        Ok(done)
+    }
+
+    /// Emulate chunk_batch_size cycles and bump to self.batch_records.
+    pub fn emulate_to_batch(&mut self) -> Result<bool, EmulationError> {
+        self.batch_records.clear();
+
+        info!("emulate_to_batch - BEGIN");
+
+        let begin = Instant::now();
+
+        // Get the current chunk.
+        let start_chunk = self.state.current_chunk; // needed for public input
+        let start_execution_chunk = self.state.current_execution_chunk;
+
+        // If it's the first cycle, initialize the program.
+        if self.state.global_clk == 0 {
+            self.initialize();
+        }
+
+        // Loop until we've emulated `self.chunk_batch_size` chunks if `self.chunk_batch_size` is
+        // set.
+
+        let mut done = false;
+        let mut current_chunk = self.state.current_chunk;
+        let mut num_chunks_emulated = 0;
+        loop {
+            if self.emulate_cycle_to_batch()? {
+                done = true;
+                break;
+            }
+
+            if self.chunk_batch_size > 0 && current_chunk != self.state.current_chunk {
+                num_chunks_emulated += 1;
+                current_chunk = self.state.current_chunk;
+                if num_chunks_emulated == self.chunk_batch_size {
+                    break;
+                }
+            }
+        }
+        debug!("emulate - global clk {}", self.state.global_clk);
+
+        // Get the final public values.
+        let public_values = self.record.public_values;
+
+        if !self.record.cpu_events.is_empty() {
+            self.bump_record_to_batch();
+        }
+
+        if done {
+            self.postprocess();
+            // Push the remaining emulation record with memory initialize & finalize events.
+            self.bump_record_to_batch();
+        } else {
+            self.current_batch += 1;
+        }
+
+        // Set the global public values for all chunks.
+        // println!("# batch records to be processed: {}", self.batch_records.len());
+        for (i, record) in self.batch_records.iter_mut().enumerate() {
+            self.public_values_buffer.chunk += 1;
+            if !record.cpu_events.is_empty() {
+                self.public_values_buffer.execution_chunk += 1;
+                self.public_values_buffer.start_pc = record.cpu_events[0].pc;
+                self.public_values_buffer.next_pc = record.cpu_events.last().unwrap().next_pc;
+                self.public_values_buffer.exit_code = record.cpu_events.last().unwrap().exit_code;
+                self.public_values_buffer.committed_value_digest =
+                    record.public_values.committed_value_digest;
+            } else {
+                self.public_values_buffer.start_pc = self.public_values_buffer.next_pc;
+                self.public_values_buffer.previous_initialize_addr_bits =
+                    record.public_values.previous_initialize_addr_bits;
+                self.public_values_buffer.last_initialize_addr_bits =
+                    record.public_values.last_initialize_addr_bits;
+                self.public_values_buffer.previous_finalize_addr_bits =
+                    record.public_values.previous_finalize_addr_bits;
+                self.public_values_buffer.last_finalize_addr_bits =
+                    record.public_values.last_finalize_addr_bits;
+            }
+            record.public_values = self.public_values_buffer.clone();
+        }
+
+        info!("emulate_to_batch - END in {:?}", begin.elapsed());
+
         Ok(done)
     }
 
@@ -597,7 +763,7 @@ impl RiscvEmulator {
                 self.state.clk += precompile_cycles;
                 exit_code = returned_exit_code;
 
-                // Update the syscall counts.
+                // TODO: handle syscall counts
                 let syscall_for_count = syscall.count_map();
                 let syscall_count = self
                     .state
@@ -1068,7 +1234,7 @@ impl RiscvEmulator {
 
     /// Recover runtime state from a program and existing emulation state.
     #[must_use]
-    pub fn recover(program: Program, state: RiscvEmulationState, opts: PicoCoreOpts) -> Self {
+    pub fn recover(program: Program, state: RiscvEmulationState, opts: EmulatorOpts) -> Self {
         let mut runtime = Self::new(program, opts);
         runtime.state = state;
         runtime
@@ -1163,6 +1329,15 @@ impl RiscvEmulator {
         self.records.push(removed_record);
     }
 
+    /// Bump the records to self.batch_records.
+    pub fn bump_record_to_batch(&mut self) {
+        let removed_record =
+            std::mem::replace(&mut self.record, EmulationRecord::new(self.program.clone()));
+        let public_values = removed_record.public_values;
+        self.record.public_values = public_values;
+        self.batch_records.push(removed_record);
+    }
+
     fn postprocess(&mut self) {
         // Ensure that all proofs and input bytes were read, otherwise warn the user.
         // if self.state.proof_stream_ptr != self.state.proof_stream.len() {
@@ -1241,7 +1416,7 @@ mod tests {
     use super::{Program, RiscvEmulator};
     use crate::{
         compiler::compiler::{Compiler, SourceType},
-        emulator::{opts::PicoCoreOpts, stdin::PicoStdin},
+        emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     };
 
     const FIBONACCI_ELF: &[u8] =
@@ -1279,9 +1454,9 @@ mod tests {
     fn test_simple_fib() {
         // just run a simple elf file in the compiler folder(test_data)
         let program = simple_fibo_program();
-        let mut stdin = PicoStdin::new();
+        let mut stdin = EmulatorStdin::new();
         stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);
-        let mut emulator = RiscvEmulator::new(program, PicoCoreOpts::default());
+        let mut emulator = RiscvEmulator::new(program, EmulatorOpts::default());
         emulator.run_with_stdin(stdin).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
@@ -1291,9 +1466,9 @@ mod tests {
     fn test_simple_keccak() {
         let program = simple_keccak_program();
         let n = "a"; // do keccak(b"abcdefg")
-        let mut stdin = PicoStdin::new();
+        let mut stdin = EmulatorStdin::new();
         stdin.write(&n);
-        let mut emulator = RiscvEmulator::new(program, PicoCoreOpts::default());
+        let mut emulator = RiscvEmulator::new(program, EmulatorOpts::default());
         emulator.run_with_stdin(stdin).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }

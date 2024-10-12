@@ -1,7 +1,7 @@
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{ExtensionField, Field};
-
+use serde::{de::DeserializeOwned, Serialize};
 // Resembling Plonky3: https://github.com/Plonky3/Plonky3/blob/main/uni-stark/src/config.rs
 
 pub type Domain<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
@@ -39,7 +39,7 @@ pub type PcsError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenger,
 >>::Error;
 
-pub trait StarkGenericConfig: Sync {
+pub trait StarkGenericConfig: Sync + Clone {
     // type Val: Field;
     //
     // type Domain: PolynomialSpace<Val = Self::Val> + Sync;
@@ -55,7 +55,8 @@ pub trait StarkGenericConfig: Sync {
     /// The challenger (Fiat-Shamir) implementation used.
     type Challenger: FieldChallenger<Val<Self>>
         + CanObserve<<Self::Pcs as Pcs<Self::Challenge, Self::Challenger>>::Commitment>
-        + CanSample<Self::Challenge>;
+        + CanSample<Self::Challenge>
+        + Clone;
 
     /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;

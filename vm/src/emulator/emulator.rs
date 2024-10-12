@@ -1,6 +1,6 @@
 use crate::{
     compiler::program::Program,
-    emulator::{opts::PicoCoreOpts, riscv::riscv_emulator::RiscvEmulator, stdin::PicoStdin},
+    emulator::{opts::EmulatorOpts, riscv::riscv_emulator::RiscvEmulator, stdin::EmulatorStdin},
 };
 
 pub enum EmulatorType {
@@ -12,7 +12,7 @@ pub enum Emulatable {
 }
 
 impl Emulatable {
-    pub fn run(&mut self, stdin: PicoStdin) {
+    pub fn run(&mut self, stdin: EmulatorStdin) {
         match self {
             Self::Riscv(emulator) => emulator.run_with_stdin(stdin).unwrap(),
         }
@@ -25,7 +25,7 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn new(emulator_type: EmulatorType, program: Program, opts: PicoCoreOpts) -> Self {
+    pub fn new(emulator_type: EmulatorType, program: Program, opts: EmulatorOpts) -> Self {
         // create a new emulator based on the emulator type
         let emulator = match emulator_type {
             EmulatorType::Riscv => Emulatable::Riscv(RiscvEmulator::new(program, opts)),
@@ -37,7 +37,7 @@ impl Emulator {
         }
     }
 
-    pub fn run(&mut self, stdin: PicoStdin) {
+    pub fn run(&mut self, stdin: EmulatorStdin) {
         self.emulator.run(stdin);
     }
 }

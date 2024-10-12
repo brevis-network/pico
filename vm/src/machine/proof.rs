@@ -107,6 +107,30 @@ pub struct BaseProof<SC: StarkGenericConfig> {
     pub public_values: Vec<Val<SC>>,
 }
 
+impl<SC: StarkGenericConfig> BaseProof<SC> {
+    pub fn cumulative_sum(&self) -> SC::Challenge {
+        self.opened_values
+            .chips_opened_values
+            .iter()
+            .map(|v| v.cumulative_sum)
+            .sum()
+    }
+
+    // judge weather the proof contains the chip by name
+    pub fn includes_chip(&self, chip_name: &str) -> bool {
+        self.main_chip_ordering.contains_key(chip_name)
+    }
+
+    // get log degree of cpu chip
+    pub fn log_main_degree(&self) -> usize {
+        let idx = self
+            .main_chip_ordering
+            .get("Cpu")
+            .expect("Cpu chip not found");
+        self.opened_values.chips_opened_values[*idx].log_main_degree
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BaseCommitments<Com> {
     pub main_commit: Com,
@@ -137,4 +161,5 @@ pub struct ChipOpenedValues<Challenge> {
     pub permutation_next: Vec<Challenge>,
     pub quotient: Vec<Vec<Challenge>>,
     pub cumulative_sum: Challenge,
+    pub log_main_degree: usize,
 }

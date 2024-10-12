@@ -30,7 +30,7 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
     }
 
     fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
-        let trace: p3_matrix::dense::DenseMatrix<F> = Self::preprocess();
+        let trace = Self::preprocess();
         Some(trace)
     }
 
@@ -39,8 +39,8 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
             vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS],
             NUM_BYTE_MULT_COLS,
         );
-        // TODO: We always have one chunk for now, and the chunk number starts from 1.
-        let chunk = 1;
+
+        let chunk = input.public_values.chunk;
         for (lookup, mult) in input
             .byte_lookups
             .get(&chunk)

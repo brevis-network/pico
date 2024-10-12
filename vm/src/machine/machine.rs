@@ -16,6 +16,7 @@ use anyhow::Result;
 use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::CanObserve;
+use p3_field::Field;
 use p3_fri::FriConfig;
 use std::time::Instant;
 
@@ -123,7 +124,7 @@ where
     ) -> BaseProof<SC> {
         // observe preprocessed
         let mut challenger = config.challenger();
-        challenger.observe(pk.commit.clone());
+        pk.observed_by(&mut challenger);
 
         let main_commitment =
             self.prover
@@ -147,7 +148,7 @@ where
         let mut challenger = config.challenger();
         // observe preprocessed
         info!("challenger observe preprocessed");
-        challenger.observe(pk.commit.clone());
+        pk.observed_by(&mut challenger);
 
         info!("generate commitments for {} records", records.len());
         let main_commitments = records
@@ -169,7 +170,7 @@ where
             .into_iter()
             .map(|commitment| {
                 self.prover
-                    .prove(config, chips, pk, &mut challenger, commitment)
+                    .prove(config, chips, pk, &mut challenger.clone(), commitment)
             })
             .collect::<Vec<_>>()
     }
@@ -196,12 +197,16 @@ where
     ) -> Result<()> {
         let mut challenger = config.challenger();
 
-        challenger.observe(vk.commit.clone());
+        vk.observed_by(&mut challenger);
         challenger.observe(proof.commitments.main_commit.clone());
         challenger.observe_slice(&proof.public_values[..self.num_public_values]);
 
         self.verifier
             .verify(config, chips, vk, &mut challenger, proof)?;
+
+        if !proof.cumulative_sum().is_zero() {
+            panic!("verify_unit: lookup cumulative sum is not zero");
+        }
 
         Ok(())
     }
@@ -214,17 +219,37 @@ where
         vk: &BaseVerifyingKey<SC>,
         proofs: &[BaseProof<SC>],
     ) -> Result<()> {
+        // panic if proofs is empty
+        if proofs.is_empty() {
+            panic!("proofs is empty");
+        }
+
         let mut challenger = config.challenger();
 
-        challenger.observe(vk.commit.clone());
+        // observe all preprocessed and main commits and pv's
+        vk.observed_by(&mut challenger);
+
         proofs.iter().for_each(|proof| {
             challenger.observe(proof.commitments.main_commit.clone());
             challenger.observe_slice(&proof.public_values[..self.num_public_values]);
         });
 
-        for proof in proofs {
+        // verify all proofs
+        for (i, proof) in proofs.into_iter().enumerate() {
+            debug!("Verifying proof {}", i);
             self.verifier
-                .verify(config, chips, vk, &mut challenger, proof)?;
+                .verify(config, chips, vk, &mut challenger.clone(), proof)?;
+        }
+
+        // compute sum of each proof.cumulative_sum() and add them up and judge if it is zero
+        debug!("Verifying lookup");
+        let sum = proofs
+            .iter()
+            .map(|proof| proof.cumulative_sum())
+            .sum::<SC::Challenge>();
+
+        if !sum.is_zero() {
+            panic!("verify_ensemble:lookup cumulative sum is not zero");
         }
 
         Ok(())

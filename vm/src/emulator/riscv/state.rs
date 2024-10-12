@@ -20,6 +20,9 @@ pub struct RiscvEmulationState {
     /// The chunk clock keeps track of how many chunks have been emulated.
     pub current_chunk: u32,
 
+    /// The execution chunk clock keeps track of how many chunks with cpu events have been emulated.
+    pub current_execution_chunk: u32,
+
     /// The clock increments by 4 (possibly more in syscalls) for each instruction that has been
     /// emulated in this chunk.
     pub clk: u32,
@@ -89,6 +92,7 @@ impl RiscvEmulationState {
             global_clk: 0,
             // Start at chunk 1 since chunk 0 is reserved for memory initialization.
             current_chunk: 1,
+            current_execution_chunk: 1,
             clk: 0,
             channel: 0,
             pc: pc_start,

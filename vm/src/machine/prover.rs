@@ -1,7 +1,7 @@
 use crate::{
     compiler::program::Program,
     configs::config::{Com, Domain, PackedChallenge, PcsProof, StarkGenericConfig, Val},
-    emulator::record::RecordBehavior,
+    emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::ProverConstraintFolder,
@@ -77,16 +77,20 @@ where
             .map(|t| t.1)
             .collect::<Vec<_>>();
 
+        let pc_start = <Val<SC>>::from_canonical_u32(program.pc_start);
+
         info!("setup keys: END in {:?}", begin.elapsed());
         (
             BaseProvingKey {
                 commit: commit.clone(),
+                pc_start,
                 preprocessed_trace,
                 preprocessed_prover_data,
                 preprocessed_chip_ordering: preprocessed_chip_ordering.clone(),
             },
             BaseVerifyingKey {
                 commit,
+                pc_start,
                 preprocessed_info,
                 preprocessed_chip_ordering,
             },
@@ -255,7 +259,6 @@ where
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         main_commitments: MainTraceCommitments<SC>,
-        //public_values: &'a [Val<SC>]
     ) -> BaseProof<SC> {
         let begin = Instant::now();
         info!("core prove - BEGIN");
@@ -475,43 +478,34 @@ where
             .zip_eq(permutation_opened_values)
             .zip_eq(quotient_opened_values)
             .zip_eq(cumulative_sums.clone())
+            .zip_eq(log_main_degrees.clone())
             .enumerate()
-            .map(|(i, (((main, permutation), quotient), cumulative_sum))| {
-                let preprocessed = pk
-                    .preprocessed_chip_ordering
-                    .get(&ordered_chips[i].name())
-                    .map(|&index| preprocessed_opened_values[index].clone())
-                    .unwrap_or((vec![], vec![]));
+            .map(
+                |(i, ((((main, permutation), quotient), cumulative_sum), log_main_degree))| {
+                    let preprocessed = pk
+                        .preprocessed_chip_ordering
+                        .get(&ordered_chips[i].name())
+                        .map(|&index| preprocessed_opened_values[index].clone())
+                        .unwrap_or((vec![], vec![]));
 
-                let (preprocessed_local, preprocessed_next) = preprocessed;
-                let (main_local, main_next) = main;
-                let (permutation_local, permutation_next) = permutation;
-                ChipOpenedValues {
-                    preprocessed_local,
-                    preprocessed_next,
-                    main_local,
-                    main_next,
-                    permutation_local,
-                    permutation_next,
-                    quotient,
-                    cumulative_sum,
-                }
-            })
+                    let (preprocessed_local, preprocessed_next) = preprocessed;
+                    let (main_local, main_next) = main;
+                    let (permutation_local, permutation_next) = permutation;
+                    ChipOpenedValues {
+                        preprocessed_local,
+                        preprocessed_next,
+                        main_local,
+                        main_next,
+                        permutation_local,
+                        permutation_next,
+                        quotient,
+                        cumulative_sum,
+                        log_main_degree,
+                    }
+                },
+            )
             .collect::<Vec<_>>();
 
-        let mut cumulative_sum = SC::Challenge::zero();
-        cumulative_sum += cumulative_sums
-            .clone()
-            .iter()
-            .copied()
-            .sum::<SC::Challenge>();
-
-        debug!("core prove - cumulative sum: {cumulative_sum}");
-
-        // If the cumulative sum is not zero, debug the interactions.
-        if !cumulative_sum.is_zero() {
-            panic!("Lookup cumulative sum is not zero");
-        }
         info!("core prove - END in {:?}", begin.elapsed());
         // final base proof
         BaseProof::<SC> {
