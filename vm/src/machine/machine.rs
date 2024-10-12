@@ -113,7 +113,7 @@ where
         (pk, vk)
     }
 
-    /// Prove based on record and proving key.
+    /// Prove a single record.
     pub fn prove_unit(
         &self,
         config: &SC,
@@ -136,6 +136,7 @@ where
             .prove(config, chips, pk, &mut challenger, main_commitment)
     }
 
+    /// prove a batch of records
     pub fn prove_ensemble(
         &self,
         config: &SC,
@@ -173,6 +174,19 @@ where
             .collect::<Vec<_>>()
     }
 
+    /// Prove assuming that challenger has already observed pk & main commitments and pv's
+    pub fn prove_plain(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
+        pk: &BaseProvingKey<SC>,
+        challenger: &mut SC::Challenger,
+        commitment: MainTraceCommitments<SC>,
+    ) -> BaseProof<SC> {
+        self.prover.prove(config, chips, pk, challenger, commitment)
+    }
+
+    /// Verify a single BaseProof e2e
     pub fn verify_unit(
         &self,
         config: &SC,
@@ -192,6 +206,7 @@ where
         Ok(())
     }
 
+    /// Verify a batch of BaseProofs e2e
     pub fn verify_ensemble(
         &self,
         config: &SC,
@@ -213,5 +228,17 @@ where
         }
 
         Ok(())
+    }
+
+    /// Verify assuming that challenger has already observed vk & main commitments and pv's
+    pub fn verify_plain(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<Val<SC>, C>],
+        vk: &BaseVerifyingKey<SC>,
+        challenger: &mut SC::Challenger,
+        proof: &BaseProof<SC>,
+    ) -> Result<()> {
+        self.verifier.verify(config, chips, vk, challenger, proof)
     }
 }
