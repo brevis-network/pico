@@ -1,6 +1,6 @@
 use crate::{
     chips::trace::TraceBorrowMut,
-    compiler::program::Program,
+    compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
     machine::{
         builder::ChipBuilder,
@@ -39,6 +39,7 @@ pub struct AddLookingChip<F>(PhantomData<F>);
 
 impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "Add Looking Chip".to_string()
@@ -111,6 +112,7 @@ pub struct AddLookedChip<F>(PhantomData<F>);
 
 impl<F: Field> ChipBehavior<F> for AddLookedChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "Add Looked Chip".to_string()

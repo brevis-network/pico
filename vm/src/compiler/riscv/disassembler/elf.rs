@@ -1,4 +1,4 @@
-use crate::compiler::program::Program;
+use crate::compiler::riscv::{disassembler::transpile, program::Program};
 use elf::{
     abi::{EM_RISCV, ET_EXEC, PF_X, PT_LOAD},
     endian::LittleEndian,
@@ -6,8 +6,6 @@ use elf::{
     ElfBytes,
 };
 use std::{cmp::min, collections::BTreeMap};
-
-use crate::compiler::riscv::disassembler::transpile;
 
 /// The maximum size of the memory in bytes.
 pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;

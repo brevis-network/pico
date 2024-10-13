@@ -4,7 +4,10 @@ use super::{
 };
 use crate::{
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::{
+            opcode::{ByteOpcode, Opcode},
+            program::Program,
+        },
         word::Word,
     },
     emulator::riscv::{
@@ -23,6 +26,7 @@ use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, Paralle
 
 impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "Bitwise".to_string()

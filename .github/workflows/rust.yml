@@ -12,7 +12,7 @@ name: Check, Test, and Format
 
 jobs:
   fmt:
-    if: true # Disable for now
+    if: true
     name: Format
     runs-on: ubuntu-latest
     steps:
@@ -51,13 +51,15 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cargo Run examples
+      - name: Cargo build examples
+        run: RUSTFLAGS="-Awarnings" cargo build --examples --release
+      - name: Cargo run examples
         run: |
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example toy_base_machine
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example toy_simple_machine
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example toy_lookup_machine
-          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_simple_machine fib 10
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_simple_machine keccak 10
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_simple_recursion
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_riscv_emulator
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_riscv_machine fib 10
           RUST_LOG="info" RUSTFLAGS="-Awarnings" cargo run --release --example test_riscv_machine keccak 10

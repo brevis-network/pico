@@ -1,7 +1,7 @@
 //! Toy chip used for chip initialization tests
 
 use crate::{
-    compiler::{opcode::Opcode, program::Program},
+    compiler::riscv::{opcode::Opcode, program::Program},
     emulator::riscv::record::EmulationRecord,
     machine::{builder::ChipBuilder, chip::ChipBehavior, utils::pad_to_power_of_two},
 };
@@ -48,6 +48,7 @@ impl<'a, T: Clone> ToyCols<&'a T> {
 
 impl<F: Field> ChipBehavior<F> for ToyChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         TOY_CHIP_NAME.to_string()

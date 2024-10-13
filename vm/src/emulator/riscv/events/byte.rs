@@ -1,4 +1,4 @@
-use crate::compiler::opcode::ByteOpcode;
+use crate::compiler::riscv::opcode::ByteOpcode;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::PrimeField32;

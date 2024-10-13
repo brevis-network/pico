@@ -2,7 +2,7 @@
 |----------------|----------------------------------------------|--------------------------------|
 | Segment        | Shard                                        | Chunk                          | 
 | Session        |                                              | Ensemble                       | 
-| SegmentReceipt | ChunkProof                                   | BaseProof                      | 
+| SegmentReceipt | ShardProof                                   | BaseProof                      |
 |                | MachineProof                                 | EnsembleProof                  | 
 |                | StarkMachine + MachineProver                 | BaseProver                     | 
 |                | Verifier                                     | BaseVerifier                   | 
@@ -16,7 +16,7 @@
 |                | InteractionBuilder + SymbolicAirBuilder      | SymbolicConstraintFolder       | 
 |                | MessageBuilder                               | LookupBuilder                  | 
 |                | Message                                      | Lookup                         | 
-|                | PermutaiontAirBuilder + MultiTableAirBuilder | PermutationBuilder             | 
+|                | PermutationAirBuilder + MultiTableAirBuilder | PermutationBuilder             | 
 |                | BaseAirBuilder + PairBuilder                 | ChipBuilder                    | 
 |                | RiscvAir / RecursionAir                      | ChipType                       | 
 |                | Chip                                         | MetaChip                       | 

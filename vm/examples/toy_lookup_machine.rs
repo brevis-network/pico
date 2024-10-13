@@ -4,10 +4,10 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     chips::chips::examples::lookup_toy::{AddLookedChip, AddLookingChip},
-    compiler::program::Program,
+    compiler::riscv::program::Program,
     configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::riscv::{public_values::RISCV_NUM_PVS, record::EmulationRecord},
-    instances::simple_machine::SimpleMachine,
+    instances::machine::simple_machine::SimpleMachine,
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -32,6 +32,7 @@ impl<F: Field> LookupToyChipType<F> {
 
 impl<F: Field> ChipBehavior<F> for LookupToyChipType<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         match self {

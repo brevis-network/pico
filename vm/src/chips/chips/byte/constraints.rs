@@ -1,16 +1,15 @@
+use super::{
+    columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS},
+    ByteChip, NUM_BYTE_LOOKUP_CHANNELS,
+};
 use crate::{
-    compiler::opcode::ByteOpcode,
+    compiler::riscv::opcode::ByteOpcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use core::borrow::Borrow;
 use p3_air::{Air, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-
-use super::{
-    columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS},
-    ByteChip, NUM_BYTE_LOOKUP_CHANNELS,
-};
 
 impl<F: Field> BaseAir<F> for ByteChip<F> {
     fn width(&self) -> usize {

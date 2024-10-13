@@ -1,15 +1,12 @@
-use std::{borrow::Borrow, iter::once};
+use std::borrow::Borrow;
 
 use super::{columns::ShiftLeftCols, traces::SLLChip};
 use crate::{
     compiler::{
-        opcode::Opcode,
-        word::{Word, BYTE_SIZE, WORD_SIZE},
+        riscv::opcode::Opcode,
+        word::{BYTE_SIZE, WORD_SIZE},
     },
-    machine::{
-        builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
-        lookup::{LookupType, SymbolicLookup},
-    },
+    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::Field;

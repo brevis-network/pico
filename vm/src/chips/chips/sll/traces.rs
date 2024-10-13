@@ -1,6 +1,9 @@
 use crate::{
     chips::chips::sll::columns::{ShiftLeftCols, NUM_SLL_COLS},
-    compiler::word::{Word, BYTE_SIZE, WORD_SIZE},
+    compiler::{
+        riscv::program::Program,
+        word::{Word, BYTE_SIZE, WORD_SIZE},
+    },
     emulator::riscv::{
         events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
         record::EmulationRecord,
@@ -27,6 +30,7 @@ impl<F: Field> BaseAir<F> for SLLChip<F> {
 
 impl<F: Field> ChipBehavior<F> for SLLChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "ShiftLeft".to_string()

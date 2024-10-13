@@ -1,0 +1,165 @@
+use super::{
+    commit::PolynomialSpaceVariable,
+    fri::TwoAdicMultiplicativeCosetVariable,
+    stark::{RecursiveVerifierConstraintFolder, StarkVerifier},
+    types::{ChipOpenedValuesVariable, ChipOpening},
+};
+use crate::{
+    compiler::recursion::{
+        ir::{Array, Felt},
+        prelude::{Builder, Config, Ext, ExtConst, SymbolicExt},
+    },
+    configs::config::{StarkGenericConfig, Val},
+    emulator::record::MAX_NUM_PVS,
+    machine::chip::{ChipBehavior, MetaChip},
+};
+use p3_air::Air;
+use p3_commit::LagrangeSelectors;
+use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
+use p3_matrix::{
+    dense::{RowMajorMatrix, RowMajorMatrixView},
+    stack::VerticalPair,
+};
+
+impl<C: Config, SC: StarkGenericConfig> StarkVerifier<C, SC>
+where
+    SC: StarkGenericConfig<Val = C::F, Challenge = C::EF>,
+    C::F: TwoAdicField,
+{
+    fn eval_constrains<A>(
+        builder: &mut Builder<C>,
+        chip: &MetaChip<SC::Val, A>,
+        opening: &ChipOpening<C>,
+        public_values: Array<C, Felt<C::F>>,
+        selectors: &LagrangeSelectors<Ext<C::F, C::EF>>,
+        alpha: Ext<C::F, C::EF>,
+        permutation_challenges: &[Ext<C::F, C::EF>],
+    ) -> Ext<C::F, C::EF>
+    where
+        A: for<'b> Air<RecursiveVerifierConstraintFolder<'b, C>>,
+    {
+        let mut unflatten = |v: &[Ext<C::F, C::EF>]| {
+            v.chunks_exact(SC::Challenge::D)
+                .map(|chunk| {
+                    builder.eval(
+                        chunk
+                            .iter()
+                            .enumerate()
+                            .map(|(e_i, &x)| x * C::EF::monomial(e_i).cons())
+                            .sum::<SymbolicExt<_, _>>(),
+                    )
+                })
+                .collect::<Vec<Ext<_, _>>>()
+        };
+
+        let permutation_opening_local = unflatten(&opening.permutation_local);
+        let permutation_opening_next = unflatten(&opening.permutation_next);
+
+        let mut folder_pv = Vec::new();
+        for i in 0..MAX_NUM_PVS {
+            folder_pv.push(builder.get(&public_values, i));
+        }
+
+        let mut folder = RecursiveVerifierConstraintFolder::<C> {
+            preprocessed: VerticalPair::new(
+                RowMajorMatrixView::new_row(&opening.preprocessed_local),
+                RowMajorMatrixView::new_row(&opening.preprocessed_next),
+            ),
+            main: VerticalPair::new(
+                RowMajorMatrixView::new_row(&opening.main_local),
+                RowMajorMatrixView::new_row(&opening.main_next),
+            ),
+            perm: VerticalPair::new(
+                RowMajorMatrixView::new_row(&permutation_opening_local),
+                RowMajorMatrixView::new_row(&permutation_opening_next),
+            ),
+            perm_challenges: permutation_challenges,
+            cumulative_sum: opening.cumulative_sum,
+            public_values: &folder_pv,
+            is_first_row: selectors.is_first_row,
+            is_last_row: selectors.is_last_row,
+            is_transition: selectors.is_transition,
+            alpha,
+            accumulator: SymbolicExt::zero(),
+            _marker: std::marker::PhantomData,
+        };
+
+        chip.eval(&mut folder);
+        builder.eval(folder.accumulator)
+    }
+
+    fn recompute_quotient(
+        builder: &mut Builder<C>,
+        opening: &ChipOpening<C>,
+        qc_domains: Vec<TwoAdicMultiplicativeCosetVariable<C>>,
+        zeta: Ext<C::F, C::EF>,
+    ) -> Ext<C::F, C::EF> {
+        let zps = qc_domains
+            .iter()
+            .enumerate()
+            .map(|(i, domain)| {
+                qc_domains
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| *j != i)
+                    .map(|(_, other_domain)| {
+                        let first_point: Ext<_, _> = builder.eval(domain.first_point());
+                        other_domain.zp_at_point(builder, zeta)
+                            * other_domain.zp_at_point(builder, first_point).inverse()
+                    })
+                    .product::<SymbolicExt<_, _>>()
+            })
+            .collect::<Vec<SymbolicExt<_, _>>>()
+            .into_iter()
+            .map(|x| builder.eval(x))
+            .collect::<Vec<Ext<_, _>>>();
+
+        builder.eval(
+            opening
+                .quotient
+                .iter()
+                .enumerate()
+                .map(|(ch_i, ch)| {
+                    assert_eq!(ch.len(), C::EF::D);
+                    ch.iter()
+                        .enumerate()
+                        .map(|(e_i, &c)| zps[ch_i] * C::EF::monomial(e_i) * c)
+                        .sum::<SymbolicExt<_, _>>()
+                })
+                .sum::<SymbolicExt<_, _>>(),
+        )
+    }
+
+    /// Reference: [pico_machine::stark::Verifier::verify_constraints]
+    pub fn verify_constraints<A>(
+        builder: &mut Builder<C>,
+        chip: &MetaChip<Val<SC>, A>,
+        opening: &ChipOpenedValuesVariable<C>,
+        public_values: Array<C, Felt<C::F>>,
+        trace_domain: TwoAdicMultiplicativeCosetVariable<C>,
+        qc_domains: Vec<TwoAdicMultiplicativeCosetVariable<C>>,
+        zeta: Ext<C::F, C::EF>,
+        alpha: Ext<C::F, C::EF>,
+        permutation_challenges: &[Ext<C::F, C::EF>],
+    ) where
+        A: ChipBehavior<C::F> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    {
+        let opening = ChipOpening::from_variable(builder, chip, opening);
+        let sels = trace_domain.selectors_at_point(builder, zeta);
+
+        let folded_constraints = Self::eval_constrains(
+            builder,
+            chip,
+            &opening,
+            public_values,
+            &sels,
+            alpha,
+            permutation_challenges,
+        );
+
+        let quotient: Ext<_, _> = Self::recompute_quotient(builder, &opening, qc_domains, zeta);
+
+        // Assert that the quotient times the zerofier is equal to the folded constraints.
+        builder.assert_ext_eq(folded_constraints * sels.inv_zeroifier, quotient);
+    }
+}

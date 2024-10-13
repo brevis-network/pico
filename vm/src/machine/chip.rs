@@ -1,17 +1,20 @@
 use crate::{
-    compiler::program::Program,
+    compiler::{program::ProgramBehavior, riscv::program::Program},
     emulator::record::RecordBehavior,
     machine::{
         builder::{ChipBuilder, LookupBuilder, PermutationBuilder},
+        builder_orig::PicoAirBuilder,
         folder::SymbolicConstraintFolder,
         lookup::{SymbolicLookup, VirtualPairLookup},
-        permutation::{eval_permutation_constraints, generate_permutation_trace},
+        permutation::{
+            eval_permutation_constraints, generate_permutation_trace, permutation_trace_width,
+        },
         utils::get_log_quotient_degree,
     },
 };
 use itertools::Itertools;
 use log::debug;
-use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder};
+use p3_air::{Air, AirBuilder, BaseAir, ExtensionBuilder, FilteredAirBuilder, PairBuilder};
 use p3_field::{AbstractField, ExtensionField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::time::Instant;
@@ -20,10 +23,12 @@ use std::time::Instant;
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     type Record: RecordBehavior;
 
+    type Program: ProgramBehavior<F>;
+
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
-    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         None
     }
 
@@ -68,7 +73,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         );
 
         debug!(
-            "{:<14} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
+            "{:<17} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
             chip.name(),
             chip.preprocessed_width(),
             log_quotient_degree,
@@ -108,7 +113,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
             batch_size,
         );
         debug!(
-            "generated permutation: {:<14} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
+            "generated permutation: {:<17} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
             self.name(),
             trace.width(),
             trace.height(),
@@ -116,6 +121,21 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
             begin.elapsed()
         );
         trace
+    }
+
+    /// Returns the width of the permutation trace.
+    #[inline]
+    pub fn permutation_width(&self) -> usize {
+        permutation_trace_width(
+            self.looking.len() + self.looked.len(),
+            self.logup_batch_size(),
+        )
+    }
+
+    /// Returns the log2 of the batch size.
+    #[inline]
+    pub const fn logup_batch_size(&self) -> usize {
+        1 << self.log_quotient_degree
     }
 
     pub fn get_log_quotient_degree(&self) -> usize {
@@ -163,12 +183,13 @@ where
     C: ChipBehavior<F>,
 {
     type Record = C::Record;
+    type Program = C::Program;
 
     fn name(&self) -> String {
         self.chip.name()
     }
 
-    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         self.chip.generate_preprocessed(program)
     }
 

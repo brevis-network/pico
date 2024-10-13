@@ -3,7 +3,7 @@ use crate::{
         chips::alu::add_sub::{columns::AddSubCols, AddSubChip},
         gadgets::add::AddGadget,
     },
-    compiler::opcode::Opcode,
+    compiler::riscv::opcode::Opcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use p3_air::{Air, AirBuilder};

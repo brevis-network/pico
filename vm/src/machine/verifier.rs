@@ -19,11 +19,7 @@ use p3_field::{AbstractExtensionField, AbstractField, Field};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 
 /// struct of BaseVerifier where SC specifies type of config and C is not used
-pub struct BaseVerifier<SC, C>
-// where
-//     SC: StarkGenericConfig,
-//     C: Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
-{
+pub struct BaseVerifier<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
 }
 

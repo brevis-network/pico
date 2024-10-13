@@ -1,20 +1,16 @@
 use crate::{
     chips::chips::lt::{columns::LtCols, traces::LtChip},
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::opcode::{ByteOpcode, Opcode},
         word::Word,
     },
-    machine::{
-        builder::{ChipBuilder, ChipLookupBuilder},
-        lookup::{LookupType, SymbolicLookup},
-    },
+    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
 };
 use core::borrow::Borrow;
 use itertools::izip;
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-use std::iter::once;
 
 impl<F: Field, CB> Air<CB> for LtChip<F>
 where

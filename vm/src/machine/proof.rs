@@ -4,7 +4,10 @@ use crate::{
 };
 use alloc::vec::Vec;
 use hashbrown::HashMap;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{
+    dense::{RowMajorMatrix, RowMajorMatrixView},
+    stack::VerticalPair,
+};
 use serde::{Deserialize, Serialize};
 
 /// Wrapper for all proof types

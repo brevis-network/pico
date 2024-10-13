@@ -1,15 +1,23 @@
 use crate::machine::{
     builder::{ChipBuilder, PermutationBuilder},
+    builder_orig::PicoAirBuilder,
     lookup::VirtualPairLookup,
     utils::populate_permutation_row,
 };
 use itertools::Itertools;
-use p3_air::ExtensionBuilder;
+use p3_air::{ExtensionBuilder, PairBuilder};
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use rayon_scan::ScanParallelIterator;
 use std::borrow::Borrow;
+
+/// Computes the width of the permutation trace.
+#[inline]
+#[must_use]
+pub const fn permutation_trace_width(num_interactions: usize, batch_size: usize) -> usize {
+    num_interactions.div_ceil(batch_size) + 1
+}
 
 pub fn generate_permutation_trace<F: Field, EF: ExtensionField<F>>(
     looking: &[VirtualPairLookup<F>],

@@ -48,7 +48,7 @@
   - [ ] ShiftRight
 - [x] `preprocessed`
   - Preprocessed trace of chips and its involvement in the proving procedure;
-  - Partially done, need to complete by adding it to the production of `ChunkProof`
+  - Partially done, need to complete by adding it to the production of `BaseProof`
 - [ ] public values
 - [x] dependencies 
 - [x] lookups (need to be carefully handled)

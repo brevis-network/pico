@@ -1,9 +1,9 @@
 //! Bytes less than gadget
 
 use crate::{
-    compiler::opcode::ByteOpcode,
+    compiler::riscv::opcode::ByteOpcode,
     emulator::riscv::events::{ByteLookupEvent, ByteRecordBehavior},
-    machine::builder::{ChipBuilder, ChipLookupBuilder},
+    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
 };
 use itertools::izip;
 use p3_air::AirBuilder;

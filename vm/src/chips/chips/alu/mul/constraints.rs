@@ -30,9 +30,10 @@
 
 use std::borrow::Borrow;
 
+use super::{columns::MulCols, MulChip, BYTE_MASK, PRODUCT_SIZE};
 use crate::{
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::opcode::{ByteOpcode, Opcode},
         word::WORD_SIZE,
     },
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
@@ -40,8 +41,6 @@ use crate::{
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
-
-use super::{columns::MulCols, MulChip, BYTE_MASK, PRODUCT_SIZE};
 
 impl<F: Field, CB> Air<CB> for MulChip<F>
 where

@@ -17,6 +17,7 @@ pub struct BaseProvingKey<SC: StarkGenericConfig> {
 }
 
 impl<SC: StarkGenericConfig> BaseProvingKey<SC> {
+    /// Observes the values of the proving key into the challenger.
     pub fn observed_by(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
@@ -35,6 +36,7 @@ pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
 }
 
 impl<SC: StarkGenericConfig> BaseVerifyingKey<SC> {
+    /// Observes the values of the verifying key into the challenger.
     pub fn observed_by(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);

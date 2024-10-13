@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::compiler::instruction::Instruction;
+use crate::compiler::riscv::instruction::Instruction;
 
 use super::memory::MemoryRecordEnum;
 

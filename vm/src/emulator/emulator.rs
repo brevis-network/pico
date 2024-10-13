@@ -1,5 +1,5 @@
 use crate::{
-    compiler::program::Program,
+    compiler::riscv::program::Program,
     emulator::{opts::EmulatorOpts, riscv::riscv_emulator::RiscvEmulator, stdin::EmulatorStdin},
 };
 

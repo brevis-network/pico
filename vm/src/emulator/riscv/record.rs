@@ -1,6 +1,6 @@
 use super::events::ByteRecordBehavior;
 use crate::{
-    compiler::{opcode::Opcode, program::Program},
+    compiler::riscv::{opcode::Opcode, program::Program},
     emulator::{
         record::RecordBehavior,
         riscv::{

@@ -1,10 +1,13 @@
 pub mod alu;
 pub mod byte;
-pub mod cpu;
 pub mod examples;
 pub mod lt;
-pub mod memory;
 pub mod memory_program;
-pub mod program;
+pub mod recursion_cpu;
+pub mod recursion_memory;
+pub mod recursion_program;
+pub mod riscv_cpu;
+pub mod riscv_memory;
+pub mod riscv_program;
 pub mod sll;
 pub mod sr;

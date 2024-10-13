@@ -2,7 +2,10 @@ use super::columns::{ShiftRightCols, LONG_WORD_SIZE, NUM_SLR_COLS};
 use crate::{
     chips::chips::byte::utils::shr_carry,
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::{
+            opcode::{ByteOpcode, Opcode},
+            program::Program,
+        },
         word::{Word, BYTE_SIZE, WORD_SIZE},
     },
     emulator::riscv::{
@@ -32,6 +35,7 @@ impl<F: Field> BaseAir<F> for ShiftRightChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "ShiftRight".to_string()

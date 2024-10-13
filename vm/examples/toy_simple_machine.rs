@@ -4,9 +4,18 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     chips::chips::examples::toy::ToyChip,
-    compiler::program::Program,
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
+    },
     configs::bb_poseidon2::BabyBearPoseidon2,
-    emulator::riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
+    emulator::{
+        opts::EmulatorOpts,
+        riscv::{
+            public_values::RISCV_NUM_PVS, record::EmulationRecord, riscv_emulator::RiscvEmulator,
+        },
+    },
+    instances::machine::simple_machine::SimpleMachine,
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -14,11 +23,6 @@ use pico_vm::{
     },
 };
 
-use pico_vm::{
-    compiler::compiler::{Compiler, SourceType},
-    emulator::{opts::EmulatorOpts, riscv::public_values::RISCV_NUM_PVS},
-    instances::simple_machine::SimpleMachine,
-};
 use std::any::type_name;
 
 pub enum ToyChipType<F: Field> {
@@ -30,6 +34,7 @@ pub enum ToyChipType<F: Field> {
 // This code is annoyed, we could refactor to use macro later (but less readable).
 impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         match self {

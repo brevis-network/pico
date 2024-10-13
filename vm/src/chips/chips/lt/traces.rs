@@ -1,9 +1,17 @@
 use crate::{
     chips::chips::lt::columns::{LtCols, NUM_LT_COLS},
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::{
+            opcode::{ByteOpcode, Opcode},
+            program::Program,
+        },
         word::Word,
     },
+    emulator::riscv::{
+        events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
+        record::EmulationRecord,
+    },
+    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
@@ -12,14 +20,6 @@ use log::debug;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-
-use crate::{
-    emulator::riscv::{
-        events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
-        record::EmulationRecord,
-    },
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
-};
 use rayon::prelude::*;
 use std::marker::PhantomData;
 
@@ -35,6 +35,8 @@ impl<F: Field> BaseAir<F> for LtChip<F> {
 
 impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
+
     fn name(&self) -> String {
         "LessThan".to_string()
     }

@@ -60,13 +60,14 @@
 //!    # b = 0 * quotient + b is satisfied by any quotient.
 //!    assert quotient = 0xffffffff
 
+use super::columns::LONG_WORD_SIZE;
 use crate::{
     chips::{
         chips::alu::divrem::{columns::DivRemCols, DivRemChip},
         gadgets::{is_equal_word::IsEqualWordGadget, is_zero_word::IsZeroWordGadget},
     },
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::opcode::{ByteOpcode, Opcode},
         word::{Word, WORD_SIZE},
     },
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
@@ -75,8 +76,6 @@ use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
-
-use super::columns::LONG_WORD_SIZE;
 
 impl<F: Field, CB: ChipBuilder<F>> Air<CB> for DivRemChip<F>
 where

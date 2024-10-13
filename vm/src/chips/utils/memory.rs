@@ -1,8 +1,7 @@
 use crate::{
-    chips::chips::memory::read_write::columns::{MemoryAccessCols, MemoryCols},
-    compiler::opcode::ByteOpcode,
+    chips::chips::riscv_memory::read_write::columns::{MemoryAccessCols, MemoryCols},
     machine::{
-        builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
+        builder::{ChipBuilder, ChipRangeBuilder},
         lookup::{LookupType, SymbolicLookup},
     },
 };

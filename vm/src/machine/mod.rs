@@ -1,7 +1,9 @@
 pub mod builder;
+pub mod builder_orig;
 pub mod chip;
-mod extension;
+pub mod extension;
 pub mod folder;
+pub mod generic_folder;
 pub mod keys;
 pub mod lookup;
 pub mod machine;

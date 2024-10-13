@@ -3,7 +3,10 @@ use crate::{
         columns::{AddSubCols, NUM_ADD_SUB_COLS},
         AddSubChip,
     },
-    compiler::{opcode::Opcode, word::Word},
+    compiler::{
+        riscv::{opcode::Opcode, program::Program},
+        word::Word,
+    },
     emulator::riscv::{
         events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
         record::EmulationRecord,
@@ -27,6 +30,7 @@ impl<F: Field> BaseAir<F> for AddSubChip<F> {
 
 impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "AddSub".to_string()

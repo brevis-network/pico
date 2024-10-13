@@ -6,7 +6,7 @@ use crate::{
         lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
     },
 };
-use p3_air::{AirBuilder, ExtensionBuilder};
+use p3_air::{AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, PairBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
@@ -146,6 +146,12 @@ impl<F: Field> ChipBuilder<F> for SymbolicConstraintFolder<F> {
     }
 }
 
+impl<F: Field> PairBuilder for SymbolicConstraintFolder<F> {
+    fn preprocessed(&self) -> Self::M {
+        self.preprocessed.clone()
+    }
+}
+
 /// Prover Constraint Folder
 #[derive(Debug)]
 pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
@@ -238,6 +244,12 @@ impl<'a, SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<'a,
 }
 
 impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for ProverConstraintFolder<'a, SC> {
+    fn preprocessed(&self) -> Self::M {
+        self.preprocessed.clone()
+    }
+}
+
+impl<'a, SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<'a, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }
@@ -337,6 +349,12 @@ impl<'a, SC: StarkGenericConfig> PublicValuesBuilder for VerifierConstraintFolde
 }
 
 impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for VerifierConstraintFolder<'a, SC> {
+    fn preprocessed(&self) -> Self::M {
+        self.preprocessed.clone()
+    }
+}
+
+impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }

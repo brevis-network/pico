@@ -1,6 +1,4 @@
-pub mod compiler;
-pub mod instruction;
-pub mod opcode;
 pub mod program;
+pub mod recursion;
 pub mod riscv;
 pub mod word;

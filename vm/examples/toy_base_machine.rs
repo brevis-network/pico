@@ -4,7 +4,7 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     chips::chips::examples::toy::ToyChip,
-    compiler::{
+    compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
@@ -34,6 +34,7 @@ pub enum ToyChipType<F: Field> {
 // This code is annoyed, we could refactor to use macro later (but less readable).
 impl<F: Field> ChipBehavior<F> for ToyChipType<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         match self {

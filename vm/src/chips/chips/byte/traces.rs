@@ -1,25 +1,24 @@
-use crate::{
-    compiler::{opcode::ByteOpcode, program::Program},
-    emulator::riscv::record::EmulationRecord,
-    machine::chip::ChipBehavior,
-};
-use hashbrown::HashMap;
-use itertools::Itertools;
-use log::debug;
-use p3_field::Field;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use std::borrow::BorrowMut;
-
 use super::{
     columns::{ByteMultCols, BytePreprocessedCols, NUM_BYTE_MULT_COLS, NUM_BYTE_PREPROCESSED_COLS},
     utils::shr_carry,
     ByteChip,
 };
+use crate::{
+    compiler::riscv::{opcode::ByteOpcode, program::Program},
+    emulator::riscv::record::EmulationRecord,
+    machine::chip::ChipBehavior,
+};
+use hashbrown::HashMap;
+use itertools::Itertools;
+use p3_field::Field;
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use std::borrow::BorrowMut;
 
 pub const NUM_ROWS: usize = 1 << 16;
 
 impl<F: Field> ChipBehavior<F> for ByteChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "Byte".to_string()

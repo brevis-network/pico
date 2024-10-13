@@ -1,2 +1,3 @@
-pub mod riscv_machine;
-pub mod simple_machine;
+pub mod chiptype;
+pub mod compiler;
+pub mod machine;

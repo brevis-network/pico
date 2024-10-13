@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::opcode::{ByteOpcode, Opcode},
         word::{BYTE_SIZE, WORD_SIZE},
     },
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},

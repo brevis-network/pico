@@ -1,10 +1,14 @@
+use super::{columns::NUM_DIVREM_COLS, DivRemChip};
 use crate::{
     chips::chips::alu::divrem::{
         columns::{DivRemCols, LONG_WORD_SIZE},
         utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
     },
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::{
+            opcode::{ByteOpcode, Opcode},
+            program::Program,
+        },
         word::{Word, BYTE_SIZE, WORD_SIZE},
     },
     emulator::riscv::{
@@ -19,8 +23,6 @@ use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 
-use super::{columns::NUM_DIVREM_COLS, DivRemChip};
-
 impl<F: Field> BaseAir<F> for DivRemChip<F> {
     fn width(&self) -> usize {
         NUM_DIVREM_COLS
@@ -29,6 +31,7 @@ impl<F: Field> BaseAir<F> for DivRemChip<F> {
 
 impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "DivRem".to_string()

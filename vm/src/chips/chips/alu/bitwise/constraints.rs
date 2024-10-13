@@ -3,7 +3,7 @@ use super::{
     BitwiseChip,
 };
 use crate::{
-    compiler::opcode::{ByteOpcode, Opcode},
+    compiler::riscv::opcode::{ByteOpcode, Opcode},
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use core::borrow::Borrow;

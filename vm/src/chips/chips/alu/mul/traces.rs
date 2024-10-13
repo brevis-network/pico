@@ -1,6 +1,11 @@
+use super::{columns::NUM_MUL_COLS, MulChip};
 use crate::{
+    chips::chips::alu::mul::{columns::MulCols, utils::get_msb, BYTE_MASK, PRODUCT_SIZE},
     compiler::{
-        opcode::{ByteOpcode, Opcode},
+        riscv::{
+            opcode::{ByteOpcode, Opcode},
+            program::Program,
+        },
         word::{Word, BYTE_SIZE, WORD_SIZE},
     },
     emulator::{
@@ -12,16 +17,11 @@ use crate::{
     },
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
-use log::debug;
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::borrow::BorrowMut;
-
-use crate::chips::chips::alu::mul::{columns::MulCols, utils::get_msb, BYTE_MASK, PRODUCT_SIZE};
-
-use super::{columns::NUM_MUL_COLS, MulChip};
 
 impl<F: Field> BaseAir<F> for MulChip<F> {
     fn width(&self) -> usize {
@@ -31,6 +31,7 @@ impl<F: Field> BaseAir<F> for MulChip<F> {
 
 impl<F: Field> ChipBehavior<F> for MulChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "Mul".to_string()

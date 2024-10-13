@@ -1,5 +1,5 @@
 use crate::{
-    compiler::program::Program,
+    compiler::{program::ProgramBehavior, riscv::program::Program},
     configs::config::{Com, Domain, PackedChallenge, PcsProof, StarkGenericConfig, Val},
     emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     machine::{
@@ -18,7 +18,7 @@ use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::{AbstractField, Field, PackedValue};
+use p3_field::{AbstractField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
@@ -42,7 +42,7 @@ where
         &self,
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],
-        program: &Program,
+        program: &C::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         info!("setup keys: BEGIN");
         let begin = Instant::now();
@@ -77,7 +77,7 @@ where
             .map(|t| t.1)
             .collect::<Vec<_>>();
 
-        let pc_start = <Val<SC>>::from_canonical_u32(program.pc_start);
+        let pc_start = program.pc_start();
 
         info!("setup keys: END in {:?}", begin.elapsed());
         (
@@ -101,7 +101,7 @@ where
     pub fn generate_preprocessed(
         &self,
         chips: &[MetaChip<Val<SC>, C>],
-        program: &Program,
+        program: &C::Program,
     ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
         let mut durations = HashMap::new();
         let mut chips_and_preprocessed = chips
@@ -159,7 +159,7 @@ where
                 let begin = Instant::now();
                 let trace = chip.generate_main(record, &mut C::Record::default());
                 debug!(
-                    "generated main: {:<14} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
+                    "generated main: {:<17} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
                     chip.name(),
                     trace.width(),
                     trace.height(),
@@ -190,7 +190,12 @@ where
             .map(|(name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
             .collect::<Vec<_>>();
 
+        let pcs_commit_main_start = Instant::now();
         let (commitment, data) = pcs.commit(domains_and_traces);
+        debug!(
+            "pcs commit main trace in {:?}",
+            pcs_commit_main_start.elapsed()
+        );
 
         let main_chip_ordering = chips_and_main
             .iter()
@@ -320,7 +325,13 @@ where
             .collect::<Vec<_>>();
 
         let pcs = config.pcs();
+        let pcs_commit_permutation_start = Instant::now();
         let (permutation_commit, permutation_data) = pcs.commit(perm_domain);
+        debug!(
+            "pcs commit permutation trace in {:?}",
+            pcs_commit_permutation_start.elapsed()
+        );
+
         challenger.observe(permutation_commit.clone());
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
@@ -406,7 +417,12 @@ where
             })
             .collect::<Vec<_>>();
 
+        let pcs_commit_quotient_start = Instant::now();
         let (quotient_commit, quotient_data) = pcs.commit(quotient_domains_and_values);
+        debug!(
+            "pcs commit quotient trace in {:?}",
+            pcs_commit_quotient_start.elapsed()
+        );
 
         challenger.observe(quotient_commit.clone());
 

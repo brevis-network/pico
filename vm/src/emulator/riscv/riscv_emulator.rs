@@ -1,6 +1,6 @@
 use crate::{
-    compiler::{
-        instruction::Instruction, opcode::Opcode, program::Program, riscv::register::Register,
+    compiler::riscv::{
+        instruction::Instruction, opcode::Opcode, program::Program, register::Register,
     },
     emulator::{
         context::EmulatorContext,
@@ -150,7 +150,6 @@ impl RiscvEmulator {
     fn initialize(&mut self) {
         self.state.clk = 0;
         self.state.channel = 0;
-
         tracing::debug!("loading memory image");
         for (addr, value) in &self.program.memory_image {
             self.state.memory.insert(
@@ -1415,7 +1414,7 @@ impl Default for EmulatorMode {
 mod tests {
     use super::{Program, RiscvEmulator};
     use crate::{
-        compiler::compiler::{Compiler, SourceType},
+        compiler::riscv::compiler::{Compiler, SourceType},
         emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     };
 

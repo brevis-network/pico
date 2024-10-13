@@ -1,5 +1,5 @@
 use crate::{
-    compiler::program::Program,
+    compiler::riscv::program::Program,
     configs::config::{StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
     machine::{
@@ -15,9 +15,12 @@ use crate::{
 use anyhow::Result;
 use log::{debug, info};
 use p3_air::Air;
-use p3_challenger::CanObserve;
+use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
+use p3_challenger::{CanObserve, DuplexChallenger};
+use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::Field;
 use p3_fri::FriConfig;
+use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use std::time::Instant;
 
 /// Functions that each machine instance should implement.
@@ -56,7 +59,10 @@ where
     }
 
     /// setup prover, verifier and keys.
-    fn setup_keys(&self, program: &Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
+    fn setup_keys(
+        &self,
+        program: &<C as ChipBehavior<<SC as StarkGenericConfig>::Val>>::Program,
+    ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
 
     /// Get the prover of the machine.
     fn prove(&self, pk: &BaseProvingKey<SC>, records: &[C::Record]) -> MetaProof<SC, P>;
@@ -107,7 +113,7 @@ where
         &self,
         config: &SC,
         chips: &[MetaChip<Val<SC>, C>],
-        program: &Program,
+        program: &C::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let (pk, vk) = self.prover.setup_keys(config, chips, program);
 

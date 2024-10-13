@@ -6,16 +6,17 @@ use crate::{
         },
         MemoryProgramChip,
     },
-    compiler::{program::Program, word::Word},
+    compiler::{riscv::program::Program, word::Word},
     emulator::riscv::record::EmulationRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use core::borrow::BorrowMut;
 use p3_field::Field;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 
 impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
     type Record = EmulationRecord;
+    type Program = Program;
 
     fn name(&self) -> String {
         "MemoryProgram".to_string()

@@ -35,15 +35,18 @@ p3-bn254-fr.workspace = true
 # misc
 anyhow.workspace = true
 arrayref.workspace = true
+backtrace.workspace = true
 bincode.workspace = true
 bytemuck.workspace = true
 elf.workspace = true
 env_logger.workspace = true
 eyre.workspace = true
+ff.workspace = true
 generic-array.workspace = true
 hashbrown.workspace = true
 hex.workspace = true
 itertools.workspace = true
+lazy_static.workspace = true
 log.workspace = true
 nohash-hasher.workspace = true
 num.workspace = true
@@ -54,6 +57,7 @@ rayon-scan.workspace = true
 rrs_lib.workspace = true
 serde.workspace = true
 serde_with.workspace = true
+stacker.workspace = true
 static_assertions.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
@@ -61,3 +65,8 @@ thiserror.workspace = true
 tiny-keccak.workspace = true
 tracing.workspace = true
 typenum.workspace = true
+vec_map.workspace = true
+zkhash.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.5.1", features = ["html_reports"] }

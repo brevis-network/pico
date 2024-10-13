@@ -1,4 +1,4 @@
-use crate::compiler::opcode::Opcode;
+use crate::compiler::riscv::opcode::Opcode;
 
 /// Returns `true` if the given `opcode` is a signed operation.
 pub fn is_signed_operation(opcode: Opcode) -> bool {

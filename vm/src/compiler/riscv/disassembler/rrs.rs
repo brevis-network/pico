@@ -1,4 +1,4 @@
-use crate::compiler::{instruction::Instruction, opcode::Opcode, riscv::register::Register};
+use crate::compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register};
 use rrs_lib::{
     instruction_formats::{BType, IType, ITypeCSR, ITypeShamt, JType, RType, SType, UType},
     process_instruction, InstructionProcessor,
