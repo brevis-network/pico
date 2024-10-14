@@ -1,7 +1,7 @@
 use super::{columns::NUM_DIVREM_COLS, DivRemChip};
 use crate::{
     chips::chips::alu::divrem::{
-        columns::{DivRemCols, LONG_WORD_SIZE},
+        columns::DivRemCols,
         utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
     },
     compiler::{
@@ -9,13 +9,14 @@ use crate::{
             opcode::{ByteOpcode, Opcode},
             program::Program,
         },
-        word::{Word, BYTE_SIZE, WORD_SIZE},
+        word::Word,
     },
     emulator::riscv::{
         events::{create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecordBehavior},
         record::EmulationRecord,
     },
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
 };
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;

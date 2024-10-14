@@ -18,6 +18,7 @@ impl<F: Field> VirtualPairLookup<F> {
     }
 }
 
+// todo: cleanup
 /// message type enum for lookups
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LookupType {

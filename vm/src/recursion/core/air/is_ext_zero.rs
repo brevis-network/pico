@@ -6,10 +6,8 @@
 //! is 0.
 use crate::{
     machine::{builder::ChipBuilder, builder_orig::PicoAirBuilder, extension::BinomialExtension},
-    recursion::core::{
-        air::{extension::BinomialExtensionUtils, Block},
-        runtime::EXTENSION_DEGREE,
-    },
+    primitives::consts::EXTENSION_DEGREE,
+    recursion::core::air::{extension::BinomialExtensionUtils, Block},
 };
 use p3_air::AirBuilder;
 use p3_field::{

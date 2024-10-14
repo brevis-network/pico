@@ -1,7 +1,8 @@
 use super::RecursionProgram;
 use crate::{
     chips::chips::recursion_cpu::CpuEvent,
-    emulator::record::{RecordBehavior, MAX_NUM_PVS},
+    emulator::record::RecordBehavior,
+    primitives::consts::MAX_NUM_PVS,
     recursion::core::{
         air::Block,
         exp_reverse_bits::ExpReverseBitsLenEvent,

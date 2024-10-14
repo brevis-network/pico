@@ -2,7 +2,7 @@ use p3_field::PrimeField32;
 use serde::{Deserialize, Serialize};
 
 use super::opcode::Opcode;
-use crate::recursion::core::{air::Block, runtime::EXTENSION_DEGREE};
+use crate::{primitives::consts::EXTENSION_DEGREE, recursion::core::air::Block};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instruction<F> {

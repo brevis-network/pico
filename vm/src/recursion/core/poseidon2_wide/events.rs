@@ -2,8 +2,8 @@ use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
 
 use crate::{
-    chips::chips::recursion_memory::MemoryRecord,
-    recursion::core::{poseidon2_wide::WIDTH, runtime::DIGEST_SIZE},
+    chips::chips::recursion_memory::MemoryRecord, primitives::consts::DIGEST_SIZE,
+    recursion::core::poseidon2_wide::WIDTH,
 };
 
 use super::RATE;

@@ -11,9 +11,7 @@ use pico_vm::{
     configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::{
         opts::EmulatorOpts,
-        riscv::{
-            public_values::RISCV_NUM_PVS, record::EmulationRecord, riscv_emulator::RiscvEmulator,
-        },
+        riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
     },
     instances::machine::simple_machine::SimpleMachine,
     machine::{
@@ -21,6 +19,7 @@ use pico_vm::{
         chip::{ChipBehavior, MetaChip},
         machine::{BaseMachine, MachineBehavior},
     },
+    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 
 use std::any::type_name;

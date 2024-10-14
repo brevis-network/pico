@@ -14,7 +14,6 @@ use pico_vm::{
         opts::EmulatorOpts,
         record::RecordBehavior,
         riscv::{
-            public_values::RISCV_NUM_PVS,
             record::EmulationRecord,
             riscv_emulator::{EmulationError, EmulatorMode, RiscvEmulator},
         },
@@ -26,6 +25,7 @@ use pico_vm::{
         chip::{ChipBehavior, MetaChip},
         machine::MachineBehavior,
     },
+    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use std::{env, time::Instant};

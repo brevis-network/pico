@@ -28,12 +28,12 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     /// Returns the name of the chip.
     fn name(&self) -> String;
 
-    fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, _program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         None
     }
 
     /// Emulate record to extract extra record
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {}
+    fn extra_record(&self, _input: &mut Self::Record, _extra: &mut Self::Record) {}
 
     fn generate_main(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F>;
 

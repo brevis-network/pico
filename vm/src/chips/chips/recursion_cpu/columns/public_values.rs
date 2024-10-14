@@ -1,7 +1,7 @@
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
-use crate::recursion::core::runtime::DIGEST_SIZE;
+use crate::primitives::consts::DIGEST_SIZE;
 
 #[allow(dead_code)]
 pub const NUM_PUBLIC_VALUES_COLS: usize = size_of::<PublicValuesCols<u8>>();

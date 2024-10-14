@@ -1,13 +1,8 @@
-use super::{
-    columns::{ShiftRightCols, LONG_WORD_SIZE},
-    traces::ShiftRightChip,
-};
+use super::{columns::ShiftRightCols, traces::ShiftRightChip};
 use crate::{
-    compiler::{
-        riscv::opcode::{ByteOpcode, Opcode},
-        word::{BYTE_SIZE, WORD_SIZE},
-    },
+    compiler::riscv::opcode::{ByteOpcode, Opcode},
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
+    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::Field;

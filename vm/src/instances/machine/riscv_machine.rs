@@ -1,6 +1,6 @@
 use crate::{
     compiler::{riscv::program::Program, word::Word},
-    configs::config::{StarkGenericConfig, Val},
+    configs::config::StarkGenericConfig,
     emulator::{
         context::EmulatorContext,
         opts::EmulatorOpts,
@@ -32,13 +32,13 @@ const MAX_LOG_CHUNK_SIZE: i32 = 22;
 pub struct RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
     config: SC,
 
-    chips: Vec<MetaChip<Val<SC>, C>>,
+    chips: Vec<MetaChip<SC::Val, C>>,
 
     base_machine: BaseMachine<SC, C>,
 }
@@ -46,7 +46,7 @@ where
 impl<SC, C> MachineBehavior<SC, C, EnsembleProof<SC>> for RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
@@ -62,11 +62,11 @@ where
 
     /// Get the number of public values
     fn num_public_values(&self) -> usize {
-        self.base_machine.num_public_values
+        self.base_machine.num_public_values()
     }
 
     /// Get the chips of the machine.
-    fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
+    fn chips(&self) -> &[MetaChip<SC::Val, C>] {
         &self.chips
     }
 
@@ -75,7 +75,6 @@ where
         &self,
         program: &<C as ChipBehavior<<SC as StarkGenericConfig>::Val>>::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        // todo: implement specific key setup logic here
         self.base_machine
             .setup_keys(self.config(), self.chips(), program)
     }
@@ -96,11 +95,11 @@ where
         proof: &MetaProof<SC, EnsembleProof<SC>>,
     ) -> Result<()> {
         // initialize bookkeeping
-        let mut proof_count = <Val<SC>>::zero();
-        let mut execution_proof_count = <Val<SC>>::zero();
+        let mut proof_count = <SC::Val>::zero();
+        let mut execution_proof_count = <SC::Val>::zero();
         let mut prev_next_pc = vk.pc_start;
-        let mut prev_last_initialize_addr_bits = [<Val<SC>>::zero(); 32];
-        let mut prev_last_finalize_addr_bits = [<Val<SC>>::zero(); 32];
+        let mut prev_last_initialize_addr_bits = [<SC::Val>::zero(); 32];
+        let mut prev_last_finalize_addr_bits = [<SC::Val>::zero(); 32];
 
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -114,15 +113,15 @@ where
             }
 
             // conditional constraints
-            proof_count += <Val<SC>>::one();
+            proof_count += <SC::Val>::one();
             if each_proof.includes_chip("Cpu") {
-                execution_proof_count += <Val<SC>>::one();
+                execution_proof_count += <SC::Val>::one();
 
                 if each_proof.log_main_degree() > MAX_LOG_CHUNK_SIZE as usize {
                     panic!("Cpu log degree too large");
                 }
 
-                if public_values.start_pc == <Val<SC>>::zero() {
+                if public_values.start_pc == <SC::Val>::zero() {
                     panic!("First proof start_pc is zero");
                 }
             } else {
@@ -147,7 +146,7 @@ where
 
             // ending constraints
             if i == proof.proofs().len() - 1 {
-                if public_values.next_pc != <Val<SC>>::zero() {
+                if public_values.next_pc != <SC::Val>::zero() {
                     panic!("Last proof next_pc is not zero");
                 }
             }
@@ -162,7 +161,7 @@ where
             if public_values.execution_chunk != execution_proof_count {
                 panic!("Execution chunk number mismatch");
             }
-            if public_values.exit_code != <Val<SC>>::zero() {
+            if public_values.exit_code != <SC::Val>::zero() {
                 panic!("Exit code is not zero");
             }
             if public_values.previous_initialize_addr_bits != prev_last_initialize_addr_bits {
@@ -190,11 +189,11 @@ where
 impl<SC, C> RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>, Record = EmulationRecord>
+    C: ChipBehavior<SC::Val, Record = EmulationRecord>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    pub fn new(config: SC, num_public_values: usize, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: SC, num_public_values: usize, chips: Vec<MetaChip<SC::Val, C>>) -> Self {
         Self {
             config,
             chips,
@@ -244,11 +243,12 @@ where
                 }
 
                 debug!("phase 1 generate commitments for batch records");
-                let commitment = self.base_machine.prover.commit_main(
-                    self.config(),
-                    record,
-                    self.base_machine.prover.generate_main(&self.chips, record),
-                );
+                let commitment = self.base_machine.commit(self.config(), &self.chips, record);
+                // let commitment = self.base_machine.prover.commit_main(
+                //     self.config(),
+                //     record,
+                //     self.base_machine.prover.generate_main(&self.chips, record),
+                // );
                 challenger.observe(commitment.commitment.clone());
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
             }
@@ -286,11 +286,7 @@ where
                 .iter()
                 .map(|record| {
                     // generate and commit main trace
-                    self.base_machine.prover.commit_main(
-                        self.config(),
-                        record,
-                        self.base_machine.prover.generate_main(&self.chips, record),
-                    )
+                    self.base_machine.commit(self.config(), &self.chips, record)
                 })
                 .collect::<Vec<_>>();
 

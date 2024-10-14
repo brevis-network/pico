@@ -1,7 +1,7 @@
 //! Word associating builder functions
 
 use super::ChipBuilder;
-use crate::compiler::word::{Word, WORD_SIZE};
+use crate::{compiler::word::Word, primitives::consts::WORD_SIZE};
 use itertools::Itertools;
 use p3_field::Field;
 use std::array;

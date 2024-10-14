@@ -14,8 +14,7 @@ use crate::{
     compiler::recursion::ir::{
         Array, Builder, Config, Ext, ExtensionOperand, Felt, Ptr, SymbolicVar, Usize, Var,
     },
-    primitives::types::RecursionProgramType,
-    recursion::core::runtime::DIGEST_SIZE,
+    primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
 };
 pub use domain::*;
 use p3_field::{AbstractField, Field, TwoAdicField};

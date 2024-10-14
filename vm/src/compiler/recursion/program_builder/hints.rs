@@ -29,10 +29,8 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         proof::{BaseCommitments, BaseOpenedValues, ChipOpenedValues},
     },
-    recursion::core::{
-        air::{Block, PV_DIGEST_NUM_WORDS},
-        runtime::PERMUTATION_WIDTH,
-    },
+    primitives::consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
+    recursion::core::{air::Block, runtime::PERMUTATION_WIDTH},
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;

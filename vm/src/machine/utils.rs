@@ -1,4 +1,4 @@
-use crate::configs::config::{Domain, PackedChallenge, PackedVal, StarkGenericConfig, Val};
+use crate::configs::config::{PackedChallenge, PackedVal, StarkGenericConfig};
 use core::iter;
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -31,12 +31,12 @@ pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<
 }
 
 pub fn order_chips<SC, C>(
-    chips: &[MetaChip<Val<SC>, C>],
+    chips: &[MetaChip<SC::Val, C>],
     chip_ordering: HashMap<String, usize>,
-) -> impl Iterator<Item = &MetaChip<Val<SC>, C>>
+) -> impl Iterator<Item = &MetaChip<SC::Val, C>>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>,
+    C: ChipBehavior<SC::Val>,
 {
     chips
         .iter()
@@ -102,10 +102,10 @@ pub fn eval_symbolic_to_virtual_pair<F: Field>(
 
 /// Compute quotient values for opening proof
 pub fn compute_quotient_values<'a, SC, C, Mat>(
-    chip: &MetaChip<Val<SC>, C>,
-    public_values: &'a [Val<SC>],
-    trace_domain: Domain<SC>,
-    quotient_domain: Domain<SC>,
+    chip: &MetaChip<SC::Val, C>,
+    public_values: &'a [SC::Val],
+    trace_domain: SC::Domain,
+    quotient_domain: SC::Domain,
     preprocessed_on_quotient_domain: Mat,
     main_trace_on_quotient_domain: Mat,
     permutation_trace_on_quotient_domain: Mat,
@@ -115,8 +115,8 @@ pub fn compute_quotient_values<'a, SC, C, Mat>(
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
-    C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
-    Mat: Matrix<Val<SC>> + Sync,
+    C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
+    Mat: Matrix<SC::Val> + Sync,
 {
     let quotient_size = quotient_domain.size();
     let preprocessed_width = preprocessed_on_quotient_domain.width();
@@ -128,10 +128,10 @@ where
     let next_step = 1 << qdb;
 
     for _ in quotient_size..PackedVal::<SC>::WIDTH {
-        sels.is_first_row.push(Val::<SC>::default());
-        sels.is_last_row.push(Val::<SC>::default());
-        sels.is_transition.push(Val::<SC>::default());
-        sels.inv_zeroifier.push(Val::<SC>::default());
+        sels.is_first_row.push(SC::Val::default());
+        sels.is_last_row.push(SC::Val::default());
+        sels.is_transition.push(SC::Val::default());
+        sels.inv_zeroifier.push(SC::Val::default());
     }
     let ext_degree = SC::Challenge::D;
 
@@ -218,56 +218,13 @@ where
 
             // todo: need to check this in detail
             (0..core::cmp::min(quotient_size, PackedVal::<SC>::WIDTH)).map(move |idx_in_packing| {
-                let quotient_value = (0..<SC::Challenge as AbstractExtensionField<Val<SC>>>::D)
+                let quotient_value = (0..<SC::Challenge as AbstractExtensionField<SC::Val>>::D)
                     .map(|coeff_idx| quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing])
                     .collect::<Vec<_>>();
                 SC::Challenge::from_base_slice(&quotient_value)
             })
         })
         .collect()
-}
-
-#[inline]
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::needless_pass_by_value)]
-pub fn populate_permutation_row<F: Field, EF: ExtensionField<F>>(
-    row: &mut [EF],
-    preprocessed_row: &[F],
-    main_row: &[F],
-    looking: &[VirtualPairLookup<F>],
-    looked: &[VirtualPairLookup<F>],
-    alpha: EF,
-    betas: Powers<EF>,
-    batch_size: usize,
-) {
-    let message_chunks = &looking
-        .iter()
-        .map(|int| (int, true))
-        .chain(looked.iter().map(|int| (int, false)))
-        .chunks(batch_size);
-
-    // Compute the denominators \prod_{i\in B} row_fingerprint(alpha, beta).
-    for (value, chunk) in row.iter_mut().zip(message_chunks) {
-        *value = chunk
-            .into_iter()
-            .map(|(message, is_send)| {
-                let mut denominator = alpha;
-                let mut betas = betas.clone();
-                denominator +=
-                    betas.next().unwrap() * EF::from_canonical_usize(message.kind as usize);
-                for (columns, beta) in message.values.iter().zip(betas) {
-                    denominator += beta * columns.apply::<F, F>(preprocessed_row, main_row);
-                }
-                let mut mult = message.mult.apply::<F, F>(preprocessed_row, main_row);
-
-                if !is_send {
-                    mult = -mult;
-                }
-
-                EF::from_base(mult) / denominator
-            })
-            .sum();
-    }
 }
 
 // Infer log of constraint degree

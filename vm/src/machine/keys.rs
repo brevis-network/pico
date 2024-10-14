@@ -1,4 +1,4 @@
-use crate::configs::config::{Com, Domain, PcsProverData, StarkGenericConfig, Val};
+use crate::configs::config::{Com, PcsProverData, StarkGenericConfig};
 use hashbrown::HashMap;
 use p3_challenger::CanObserve;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
@@ -7,9 +7,9 @@ pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// The commitment to the named traces.
     pub commit: Com<SC>,
     /// start pc of program
-    pub pc_start: Val<SC>,
+    pub pc_start: SC::Val,
     /// named preprocessed traces.
-    pub preprocessed_trace: Vec<RowMajorMatrix<Val<SC>>>,
+    pub preprocessed_trace: Vec<RowMajorMatrix<SC::Val>>,
     /// The pcs data for the preprocessed traces.
     pub preprocessed_prover_data: PcsProverData<SC>,
     /// the index of for chips, chip name for key
@@ -28,9 +28,9 @@ pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     /// The commitment to the preprocessed traces.
     pub commit: Com<SC>,
     /// start pc of program
-    pub pc_start: Val<SC>,
+    pub pc_start: SC::Val,
     /// The preprocessed information.
-    pub preprocessed_info: Vec<(String, Domain<SC>, Dimensions)>,
+    pub preprocessed_info: Vec<(String, SC::Domain, Dimensions)>,
     /// the index of for chips, chip name for key
     pub preprocessed_chip_ordering: HashMap<String, usize>,
 }

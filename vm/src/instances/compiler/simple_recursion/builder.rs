@@ -27,10 +27,10 @@ use crate::{
     },
     configs::{
         bb_poseidon2::BabyBearPoseidon2,
-        config::{Com, StarkGenericConfig, Val},
+        config::{Com, StarkGenericConfig},
     },
-    emulator::riscv::public_values::{PublicValues, POSEIDON_NUM_WORDS},
-    instances::{chiptype::fib_chiptype::FibChipType, machine::simple_machine::SimpleMachine},
+    emulator::riscv::public_values::PublicValues,
+    instances::{chiptype::riscv_chiptype::FibChipType, machine::simple_machine::SimpleMachine},
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -38,20 +38,20 @@ use crate::{
         machine::MachineBehavior,
         proof::BaseProof,
     },
-    primitives::{consts::WORD_SIZE, types::RecursionProgramType},
-    recursion::core::{
-        air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
-        runtime::DIGEST_SIZE,
+    primitives::{
+        consts::{
+            DIGEST_SIZE, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS, RISCV_NUM_PVS,
+            WORD_SIZE,
+        },
+        types::RecursionProgramType,
     },
+    recursion::core::air::RecursionPublicValues,
 };
 use itertools::Itertools;
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractField, PrimeField32, TwoAdicField};
-
-// TODO: Move
-const MAX_CPU_LOG_DEGREE: usize = 22;
 
 /// A program for recursively verifying a batch of Pico proofs.
 #[derive(Debug, Clone, Copy)]
@@ -62,7 +62,7 @@ pub struct SimpleMachineRecursiveVerifier<C: Config, SC: StarkGenericConfig> {
 pub struct SimpleMachineRecursionMemoryLayout<'a, SC: StarkGenericConfig, A: ChipBehavior<SC::Val>>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<Val<SC>>
+    A: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -118,32 +118,6 @@ where
     >,
     Com<SC>: Into<[SC::Val; DIGEST_SIZE]>,
 {
-    /// Verify a batch of Pico chunk proofs and aggregate their public values.
-    ///
-    /// This program represents a first recursive step in the verification of a Pico proof
-    /// consisting of one or more chunks. Each chunk proof is verified and its public values are
-    /// aggregated into a single set representing the start and end state of the program execution
-    /// across all chunks.
-    ///
-    /// # Constraints
-    ///
-    /// ## Verifying the STARK proofs.
-    /// For each chunk, the verifier asserts the correctness of the STARK proof which is composed
-    /// of verifying the FRI proof for openings and verifying the constraints.
-    ///
-    /// ## Aggregating the chunk public values.
-    /// See [PicoProver::verify] for the verification algorithm of a complete Pico proof. In this
-    /// function, we are aggregating several chunk proofs and attesting to an aggregated state which
-    /// represents all the chunks.
-    ///
-    /// ## The leaf challenger.
-    /// A key difference between the recursive tree verification and the complete one in
-    /// [PicoProver::verify] is that the recursive verifier has no way of reconstructing the
-    /// challenger only from a part of the chunk proof. Therefore, the value of the leaf challenger
-    /// is witnessed in the program and the verifier asserts correctness given this challenger.
-    /// In the course of the recursive verification, the challenger is reconstructed by observing
-    /// the commitments one by one, and in the final step, the challenger is asserted to be the same
-    /// as the one witnessed here.
     pub fn build_verifier_circuit(
         builder: &mut Builder<C>,
         pcs: &TwoAdicFriPcsVariable<C>,
@@ -574,7 +548,7 @@ where
             let is_complete_felt = var2felt(builder, is_complete);
 
             // Initialize the public values we will commit to.
-            let mut recursion_public_values_stream = [zero; RECURSIVE_PROOF_NUM_PV_ELTS];
+            let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
             let recursion_public_values: &mut RecursionPublicValues<_> =
                 recursion_public_values_stream.as_mut_slice().borrow_mut();
             // recursion_public_values.committed_value_digest = committed_value_digest;

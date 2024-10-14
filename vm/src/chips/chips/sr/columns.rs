@@ -1,9 +1,10 @@
 use std::mem::size_of;
 
-use crate::compiler::word::{Word, BYTE_SIZE, WORD_SIZE};
+use crate::{
+    compiler::word::Word,
+    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
+};
 use pico_derive::AlignedBorrow;
-
-pub(crate) const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
 
 pub(crate) const NUM_SLR_COLS: usize = size_of::<ShiftRightCols<u8>>();
 

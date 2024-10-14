@@ -3,15 +3,12 @@ use super::fri::{
     TwoAdicMultiplicativeCosetVariable,
 };
 use crate::{
-    compiler::{
-        recursion::prelude::*,
-        word::{Word, WORD_SIZE},
-    },
-    emulator::riscv::public_values::PV_DIGEST_NUM_WORDS,
+    compiler::{recursion::prelude::*, word::Word},
     machine::{
         chip::{ChipBehavior, MetaChip},
         proof::ChipOpenedValues,
     },
+    primitives::consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, WORD_SIZE},
 };
 use p3_air::BaseAir;
 use p3_field::{AbstractExtensionField, AbstractField};

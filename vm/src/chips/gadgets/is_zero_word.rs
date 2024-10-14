@@ -4,9 +4,8 @@
 //! this operation doesn't do a range check.
 
 use crate::{
-    chips::gadgets::is_zero::IsZeroGadget,
-    compiler::word::{Word, WORD_SIZE},
-    machine::builder::ChipBuilder,
+    chips::gadgets::is_zero::IsZeroGadget, compiler::word::Word, machine::builder::ChipBuilder,
+    primitives::consts::WORD_SIZE,
 };
 use p3_air::AirBuilder;
 use p3_field::Field;

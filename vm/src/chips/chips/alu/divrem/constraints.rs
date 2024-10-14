@@ -60,7 +60,6 @@
 //!    # b = 0 * quotient + b is satisfied by any quotient.
 //!    assert quotient = 0xffffffff
 
-use super::columns::LONG_WORD_SIZE;
 use crate::{
     chips::{
         chips::alu::divrem::{columns::DivRemCols, DivRemChip},
@@ -68,9 +67,10 @@ use crate::{
     },
     compiler::{
         riscv::opcode::{ByteOpcode, Opcode},
-        word::{Word, WORD_SIZE},
+        word::Word,
     },
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
+    primitives::consts::{LONG_WORD_SIZE, WORD_SIZE},
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};

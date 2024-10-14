@@ -1,59 +1,45 @@
-/// The maximum size of the memory in bytes.
-pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;
+// todo: further cleanup since these might be repetitive
+/*
+For word and bytes
+ */
+use crate::{
+    compiler::word::Word, emulator::riscv::public_values::PublicValues,
+    recursion::core::air::RecursionPublicValues,
+};
+use std::mem::size_of;
+
+/// The size of a byte in bits.
+pub const BYTE_SIZE: usize = 8;
 
 /// The size of a word in bytes.
 pub const WORD_SIZE: usize = 4;
 
-/// Converts a slice of words to a byte vector in little endian.
-pub fn words_to_bytes_le_vec(words: &[u32]) -> Vec<u8> {
-    words
-        .iter()
-        .flat_map(|word| word.to_le_bytes().to_vec())
-        .collect::<Vec<_>>()
-}
+/// The size of a long word in bytes.
+pub const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
 
-/// Converts a slice of words to a slice of bytes in little endian.
-pub fn words_to_bytes_le<const B: usize>(words: &[u32]) -> [u8; B] {
-    debug_assert_eq!(words.len() * 4, B);
-    words
-        .iter()
-        .flat_map(|word| word.to_le_bytes().to_vec())
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
-}
+/*
+For public values
+ */
 
-/// Converts a byte array in little endian to a slice of words.
-pub fn bytes_to_words_le<const W: usize>(bytes: &[u8]) -> [u32; W] {
-    debug_assert_eq!(bytes.len(), W * 4);
-    bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap()
-}
+pub const MAX_NUM_PVS: usize = 370;
 
-/// Converts a byte array in little endian to a vector of words.
-pub fn bytes_to_words_le_vec(bytes: &[u8]) -> Vec<u32> {
-    bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
-        .collect::<Vec<_>>()
-}
+pub const RISCV_NUM_PVS: usize = size_of::<PublicValues<Word<u8>, u8>>();
 
-// Converts a num to a string with commas every 3 digits.
-pub fn num_to_comma_separated<T: ToString>(value: T) -> String {
-    value
-        .to_string()
-        .chars()
-        .rev()
-        .collect::<Vec<_>>()
-        .chunks(3)
-        .map(|chunk| chunk.iter().collect::<String>())
-        .collect::<Vec<_>>()
-        .join(",")
-        .chars()
-        .rev()
-        .collect()
-}
+pub const RECURSION_NUM_PVS: usize = size_of::<RecursionPublicValues<u8>>();
+
+/*
+For Extensions
+ */
+
+pub const EXTENSION_DEGREE: usize = 4;
+
+/*
+For digests
+ */
+
+pub const DIGEST_SIZE: usize = 8;
+
+pub const PV_DIGEST_NUM_WORDS: usize = 8;
+
+/// The number of field elements in the poseidon2 digest.
+pub const POSEIDON_NUM_WORDS: usize = 8;

@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{StarkGenericConfig, Val},
+    configs::config::StarkGenericConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::VerifierConstraintFolder,
@@ -26,7 +26,7 @@ pub struct BaseVerifier<SC, C> {
 impl<SC, C> BaseVerifier<SC, C>
 where
     SC: StarkGenericConfig,
-    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
 {
     /// Initialize verifier with the same config and chips as prover.
     pub fn new() -> Self {
@@ -35,10 +35,12 @@ where
         }
     }
 
+    /// Verify the proof.
+    /// Assumes that challenger has already observed vk, main commits and pvs
     pub fn verify(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,
@@ -58,21 +60,11 @@ where
 
         let pcs = config.pcs();
 
-        // observe preprocessed traces
-        // challenger.observe(vk.commit.clone());
-
-        // log_main_degrees.iter().for_each(|log_main_degree| {
-        //     challenger.observe(Val::<SC>::from_canonical_usize(*log_main_degree))
-        // });
-
         let BaseCommitments {
             main_commit,
             permutation_commit,
             quotient_commit,
         } = commitments;
-
-        // main commitment observation
-        // challenger.observe(main_commit.clone());
 
         // get permutation challenges
         let permutation_challenges = (0..2)
@@ -193,7 +185,7 @@ where
                 && values
                     .quotient
                     .iter()
-                    .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<Val<SC>>>::D);
+                    .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<SC::Val>>::D);
 
             if !valid_shape {
                 panic!("Invalid proof shape");
@@ -259,7 +251,6 @@ where
                 RowMajorMatrixView::new_row(&perm_next_ext),
             );
 
-            // todo: public values to be added later
             let mut folder = VerifierConstraintFolder {
                 preprocessed,
                 main,

@@ -1,5 +1,5 @@
 use super::Block;
-use crate::{machine::extension::BinomialExtension, recursion::core::runtime::EXTENSION_DEGREE};
+use crate::{machine::extension::BinomialExtension, primitives::consts::EXTENSION_DEGREE};
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
     AbstractExtensionField, Field,

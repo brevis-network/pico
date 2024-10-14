@@ -23,10 +23,8 @@ use crate::{
         keys::BaseVerifyingKey,
         machine::MachineBehavior,
     },
-    recursion::core::{
-        air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH, RECURSIVE_PROOF_NUM_PV_ELTS},
-        runtime::DIGEST_SIZE,
-    },
+    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    recursion::core::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
 };
 
 /// Assertions on the public values describing a complete recursive proof state.
@@ -128,7 +126,7 @@ fn calculate_public_values_digest<C: Config>(
     builder: &mut Builder<C>,
     public_values: &RecursionPublicValues<Felt<C::F>>,
 ) -> Array<C, Felt<C::F>> {
-    let pv_elements: [Felt<_>; RECURSIVE_PROOF_NUM_PV_ELTS] = unsafe { transmute(*public_values) };
+    let pv_elements: [Felt<_>; RECURSION_NUM_PVS] = unsafe { transmute(*public_values) };
     let mut poseidon_inputs = builder.array(NUM_PV_ELMS_TO_HASH);
     for (i, elm) in pv_elements[0..NUM_PV_ELMS_TO_HASH].iter().enumerate() {
         builder.set(&mut poseidon_inputs, i, *elm);
@@ -159,7 +157,7 @@ pub fn commit_public_values<C: Config>(
     builder: &mut Builder<C>,
     public_values: &RecursionPublicValues<Felt<C::F>>,
 ) {
-    let pv_elements: [Felt<_>; RECURSIVE_PROOF_NUM_PV_ELTS] = unsafe { transmute(*public_values) };
+    let pv_elements: [Felt<_>; RECURSION_NUM_PVS] = unsafe { transmute(*public_values) };
     let pv_elms_no_digest = &pv_elements[0..NUM_PV_ELMS_TO_HASH];
 
     for value in pv_elms_no_digest.iter() {

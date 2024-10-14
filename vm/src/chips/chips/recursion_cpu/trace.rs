@@ -2,12 +2,10 @@ use crate::{
     chips::chips::recursion_memory::MemoryCols,
     compiler::recursion::{opcode::Opcode, program::RecursionProgram},
     machine::{chip::ChipBehavior, extension::BinomialExtension},
+    primitives::consts::EXTENSION_DEGREE,
     recursion::core::{
         air::BinomialExtensionUtils,
-        runtime::{
-            get_heap_size_range_check_events, instruction_is_heap_expand, RecursionRecord,
-            EXTENSION_DEGREE,
-        },
+        runtime::{get_heap_size_range_check_events, instruction_is_heap_expand, RecursionRecord},
         stark::utils::{next_power_of_two, par_for_each_row},
     },
 };

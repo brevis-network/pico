@@ -3,7 +3,7 @@ use crate::{
         builder_orig::{ExtensionAirBuilder, PicoAirBuilder},
         extension::BinomialExtension,
     },
-    recursion::core::runtime::EXTENSION_DEGREE,
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, ExtensionField, Field};

@@ -1,10 +1,10 @@
 use crate::{
-    configs::config::{PackedChallenge, PackedVal, StarkGenericConfig, Val},
-    emulator::record::MAX_NUM_PVS,
+    configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
     machine::{
         builder::{ChipBuilder, LookupBuilder, PermutationBuilder, PublicValuesBuilder},
         lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
     },
+    primitives::consts::MAX_NUM_PVS,
 };
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, PairBuilder};
 use p3_field::{AbstractField, Field};
@@ -158,7 +158,7 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub preprocessed: RowMajorMatrix<PackedVal<SC>>,
     pub main: RowMajorMatrix<PackedVal<SC>>,
     pub perm: RowMajorMatrix<PackedChallenge<SC>>,
-    pub public_values: &'a [Val<SC>],
+    pub public_values: &'a [SC::Val],
     pub perm_challenges: &'a [PackedChallenge<SC>],
     pub cumulative_sum: SC::Challenge,
     pub is_first_row: PackedVal<SC>,
@@ -169,7 +169,7 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
 }
 
 impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
-    type F = Val<SC>;
+    type F = SC::Val;
     type Expr = PackedVal<SC>;
     type Var = PackedVal<SC>;
     type M = RowMajorMatrix<PackedVal<SC>>;
@@ -243,7 +243,7 @@ impl<'a, SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<'a,
     }
 }
 
-impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for ProverConstraintFolder<'a, SC> {
+impl<'a, SC: StarkGenericConfig> ChipBuilder<SC::Val> for ProverConstraintFolder<'a, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }
@@ -265,7 +265,7 @@ pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
     pub perm: ViewPair<'a, SC::Challenge>,
     pub perm_challenges: &'a [SC::Challenge],
     pub cumulative_sum: SC::Challenge,
-    pub public_values: &'a [Val<SC>],
+    pub public_values: &'a [SC::Val],
     pub is_first_row: SC::Challenge,
     pub is_last_row: SC::Challenge,
     pub is_transition: SC::Challenge,
@@ -274,7 +274,7 @@ pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
 }
 
 impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC> {
-    type F = Val<SC>;
+    type F = SC::Val;
     type Expr = SC::Challenge;
     type Var = SC::Challenge;
     type M = ViewPair<'a, SC::Challenge>;
@@ -348,7 +348,7 @@ impl<'a, SC: StarkGenericConfig> PublicValuesBuilder for VerifierConstraintFolde
     }
 }
 
-impl<'a, SC: StarkGenericConfig> ChipBuilder<Val<SC>> for VerifierConstraintFolder<'a, SC> {
+impl<'a, SC: StarkGenericConfig> ChipBuilder<SC::Val> for VerifierConstraintFolder<'a, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }

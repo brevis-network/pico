@@ -6,7 +6,7 @@ use crate::{
             opcode::{ByteOpcode, Opcode},
             program::Program,
         },
-        word::{Word, BYTE_SIZE, WORD_SIZE},
+        word::Word,
     },
     emulator::{
         record::RecordBehavior,
@@ -16,6 +16,7 @@ use crate::{
         },
     },
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };
 use p3_air::BaseAir;
 use p3_field::Field;

@@ -1,4 +1,4 @@
-use super::columns::{ShiftRightCols, LONG_WORD_SIZE, NUM_SLR_COLS};
+use super::columns::{ShiftRightCols, NUM_SLR_COLS};
 use crate::{
     chips::chips::byte::utils::shr_carry,
     compiler::{
@@ -6,13 +6,14 @@ use crate::{
             opcode::{ByteOpcode, Opcode},
             program::Program,
         },
-        word::{Word, BYTE_SIZE, WORD_SIZE},
+        word::Word,
     },
     emulator::riscv::{
         events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
         record::EmulationRecord,
     },
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
 };
 use hashbrown::HashMap;
 use itertools::Itertools;

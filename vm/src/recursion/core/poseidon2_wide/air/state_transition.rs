@@ -1,15 +1,13 @@
 use crate::{
     chips::chips::recursion_memory::MemoryCols,
     machine::builder::{ChipBaseBuilder, ChipBuilder},
-    recursion::core::{
-        poseidon2_wide::{
-            columns::{
-                control_flow::ControlFlow, memory::Memory, opcode_workspace::OpcodeWorkspace,
-                permutation::Permutation,
-            },
-            Poseidon2WideChip, WIDTH,
+    primitives::consts::DIGEST_SIZE,
+    recursion::core::poseidon2_wide::{
+        columns::{
+            control_flow::ControlFlow, memory::Memory, opcode_workspace::OpcodeWorkspace,
+            permutation::Permutation,
         },
-        runtime::DIGEST_SIZE,
+        Poseidon2WideChip, WIDTH,
     },
 };
 use p3_air::AirBuilder;

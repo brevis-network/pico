@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{StarkGenericConfig, Val},
+    configs::config::StarkGenericConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -17,7 +17,7 @@ use std::any::type_name;
 pub struct SimpleMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
@@ -25,7 +25,7 @@ where
     config: SC,
 
     /// Chips of the machine.
-    chips: Vec<MetaChip<Val<SC>, C>>,
+    chips: Vec<MetaChip<SC::Val, C>>,
 
     /// Base proving machine
     base_machine: BaseMachine<SC, C>,
@@ -34,7 +34,7 @@ where
 impl<SC, C> MachineBehavior<SC, C, EnsembleProof<SC>> for SimpleMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
@@ -50,11 +50,11 @@ where
 
     /// Get the number of public values.
     fn num_public_values(&self) -> usize {
-        self.base_machine.num_public_values
+        self.base_machine.num_public_values()
     }
 
     /// Get the chips of the machine.
-    fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
+    fn chips(&self) -> &[MetaChip<SC::Val, C>] {
         &self.chips
     }
 
@@ -96,11 +96,11 @@ where
 impl<SC, C> SimpleMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    pub fn new(config: SC, num_public_values: usize, chips: Vec<MetaChip<Val<SC>, C>>) -> Self {
+    pub fn new(config: SC, num_public_values: usize, chips: Vec<MetaChip<SC::Val, C>>) -> Self {
         Self {
             config,
             chips,

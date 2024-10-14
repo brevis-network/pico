@@ -2,11 +2,9 @@ use std::borrow::Borrow;
 
 use super::{columns::ShiftLeftCols, traces::SLLChip};
 use crate::{
-    compiler::{
-        riscv::opcode::Opcode,
-        word::{BYTE_SIZE, WORD_SIZE},
-    },
+    compiler::riscv::opcode::Opcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
+    primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::Field;

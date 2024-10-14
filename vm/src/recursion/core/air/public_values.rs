@@ -1,8 +1,10 @@
 use crate::{
     chips::utils::common::indices_arr,
     compiler::word::Word,
-    emulator::{record::MAX_NUM_PVS, riscv::public_values::POSEIDON_NUM_WORDS},
-    recursion::core::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH},
+    primitives::consts::{
+        DIGEST_SIZE, MAX_NUM_PVS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
+    },
+    recursion::core::runtime::{HASH_RATE, PERMUTATION_WIDTH},
 };
 use core::fmt::Debug;
 use p3_challenger::DuplexChallenger;
@@ -16,17 +18,11 @@ use std::{
     mem::{size_of, transmute},
 };
 
-pub const PV_DIGEST_NUM_WORDS: usize = 8;
-
 pub const CHALLENGER_STATE_NUM_ELTS: usize = 50;
 
-pub const RECURSIVE_PROOF_NUM_PV_ELTS: usize = size_of::<RecursionPublicValues<u8>>();
-
 const fn make_col_map() -> RecursionPublicValues<usize> {
-    let indices_arr = indices_arr::<RECURSIVE_PROOF_NUM_PV_ELTS>();
-    unsafe {
-        transmute::<[usize; RECURSIVE_PROOF_NUM_PV_ELTS], RecursionPublicValues<usize>>(indices_arr)
-    }
+    let indices_arr = indices_arr::<RECURSION_NUM_PVS>();
+    unsafe { transmute::<[usize; RECURSION_NUM_PVS], RecursionPublicValues<usize>>(indices_arr) }
 }
 
 pub const RECURSION_PUBLIC_VALUES_COL_MAP: RecursionPublicValues<usize> = make_col_map();
@@ -35,8 +31,8 @@ pub const RECURSION_PUBLIC_VALUES_COL_MAP: RecursionPublicValues<usize> = make_c
 pub const NUM_PV_ELMS_TO_HASH: usize = RECURSION_PUBLIC_VALUES_COL_MAP.digest[0];
 
 // Recursive proof has more public values than core proof, so the max number constant defined in
-// pico_core should be set to `RECURSIVE_PROOF_NUM_PV_ELTS`.
-const_assert_eq!(RECURSIVE_PROOF_NUM_PV_ELTS, MAX_NUM_PVS);
+// pico_core should be set to `RECURSION_NUM_PVS`.
+const_assert_eq!(RECURSION_NUM_PVS, MAX_NUM_PVS);
 
 #[derive(AlignedBorrow, Serialize, Deserialize, Clone, Copy, Default, Debug)]
 #[repr(C)]
@@ -64,6 +60,7 @@ impl<T: Clone + Debug> ChallengerPublicValues<T> {
     }
 }
 
+// todo: refactor
 /// The PublicValues struct is used to store all of a reduce proof's public values.
 #[derive(AlignedBorrow, Serialize, Deserialize, Clone, Copy, Default, Debug)]
 #[repr(C)]
@@ -141,8 +138,8 @@ pub struct RecursionPublicValues<T> {
 
 /// Converts the public values to an array of elements.
 impl<F: Default + Copy> RecursionPublicValues<F> {
-    pub fn to_vec(&self) -> [F; RECURSIVE_PROOF_NUM_PV_ELTS] {
-        let mut ret = [F::default(); RECURSIVE_PROOF_NUM_PV_ELTS];
+    pub fn to_vec(&self) -> [F; RECURSION_NUM_PVS] {
+        let mut ret = [F::default(); RECURSION_NUM_PVS];
         let pv: &mut RecursionPublicValues<F> = ret.as_mut_slice().borrow_mut();
 
         *pv = *self;

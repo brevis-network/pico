@@ -32,11 +32,9 @@ use std::borrow::Borrow;
 
 use super::{columns::MulCols, MulChip, BYTE_MASK, PRODUCT_SIZE};
 use crate::{
-    compiler::{
-        riscv::opcode::{ByteOpcode, Opcode},
-        word::WORD_SIZE,
-    },
+    compiler::riscv::opcode::{ByteOpcode, Opcode},
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
+    primitives::consts::WORD_SIZE,
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};

@@ -1,15 +1,13 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    compiler::{
-        riscv::{
-            opcode::{ByteOpcode, Opcode},
-            register::Register::X0,
-        },
-        word::WORD_SIZE,
+    compiler::riscv::{
+        opcode::{ByteOpcode, Opcode},
+        register::Register::X0,
     },
     emulator::riscv::events::{
         create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecordBehavior, CpuEvent,
     },
+    primitives::consts::WORD_SIZE,
 };
 use hashbrown::HashMap;
 use p3_field::Field;

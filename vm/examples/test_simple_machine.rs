@@ -11,13 +11,12 @@ use pico_vm::{
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
-        riscv::{
-            public_values::RISCV_NUM_PVS, record::EmulationRecord, riscv_emulator::RiscvEmulator,
-        },
+        riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
         stdin::EmulatorStdin,
     },
-    instances::{chiptype::fib_chiptype::FibChipType, machine::simple_machine::SimpleMachine},
+    instances::{chiptype::riscv_chiptype::FibChipType, machine::simple_machine::SimpleMachine},
     machine::machine::MachineBehavior,
+    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use std::{env, time::Instant};

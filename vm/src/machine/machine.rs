@@ -1,6 +1,6 @@
 use crate::{
     compiler::riscv::program::Program,
-    configs::config::{StarkGenericConfig, Val},
+    configs::config::StarkGenericConfig,
     emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -27,7 +27,7 @@ use std::time::Instant;
 pub trait MachineBehavior<SC, C, P>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
@@ -41,7 +41,7 @@ where
     fn num_public_values(&self) -> usize;
 
     /// Get the chips of the machine.
-    fn chips(&self) -> &[MetaChip<Val<SC>, C>];
+    fn chips(&self) -> &[MetaChip<SC::Val, C>];
 
     /// Complete the record after emulation.
     fn complement_record(&self, records: &mut [C::Record]) {
@@ -76,21 +76,21 @@ where
 pub struct BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    pub prover: BaseProver<SC, C>,
+    prover: BaseProver<SC, C>,
 
-    pub verifier: BaseVerifier<SC, C>,
+    verifier: BaseVerifier<SC, C>,
 
-    pub num_public_values: usize,
+    num_public_values: usize,
 }
 
 impl<SC, C> BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
@@ -104,15 +104,19 @@ where
     }
 
     /// Name of BaseMachine with config.
-    fn name(&self) -> String {
+    pub fn name(&self) -> String {
         "BaseMachine".to_string()
     }
 
+    /// Get the number of public values.
+    pub fn num_public_values(&self) -> usize {
+        self.num_public_values
+    }
     /// setup proving and verifying keys.
     pub fn setup_keys(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         program: &C::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let (pk, vk) = self.prover.setup_keys(config, chips, program);
@@ -120,11 +124,21 @@ where
         (pk, vk)
     }
 
+    pub fn commit(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<SC::Val, C>],
+        record: &C::Record,
+    ) -> MainTraceCommitments<SC> {
+        self.prover
+            .commit_main(config, record, self.prover.generate_main(chips, record))
+    }
+
     /// Prove a single record.
     pub fn prove_unit(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
         record: &C::Record,
     ) -> BaseProof<SC> {
@@ -147,7 +161,7 @@ where
     pub fn prove_ensemble(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
         records: &[C::Record],
     ) -> Vec<BaseProof<SC>> {
@@ -185,7 +199,7 @@ where
     pub fn prove_plain(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         commitment: MainTraceCommitments<SC>,
@@ -197,7 +211,7 @@ where
     pub fn verify_unit(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         vk: &BaseVerifyingKey<SC>,
         proof: &BaseProof<SC>,
     ) -> Result<()> {
@@ -221,7 +235,7 @@ where
     pub fn verify_ensemble(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         vk: &BaseVerifyingKey<SC>,
         proofs: &[BaseProof<SC>],
     ) -> Result<()> {
@@ -265,7 +279,7 @@ where
     pub fn verify_plain(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,

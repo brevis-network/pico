@@ -2,11 +2,10 @@ use crate::machine::{
     builder::{ChipBuilder, PermutationBuilder},
     builder_orig::PicoAirBuilder,
     lookup::VirtualPairLookup,
-    utils::populate_permutation_row,
 };
 use itertools::Itertools;
 use p3_air::{ExtensionBuilder, PairBuilder};
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, PrimeField};
+use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, Powers, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use rayon_scan::ScanParallelIterator;
@@ -242,4 +241,47 @@ pub fn eval_permutation_constraints<F, AB>(
     builder
         .when_last_row()
         .assert_eq_ext(*perm_local.last().unwrap(), cumulative_sum);
+}
+
+#[inline]
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_pass_by_value)]
+pub fn populate_permutation_row<F: Field, EF: ExtensionField<F>>(
+    row: &mut [EF],
+    preprocessed_row: &[F],
+    main_row: &[F],
+    looking: &[VirtualPairLookup<F>],
+    looked: &[VirtualPairLookup<F>],
+    alpha: EF,
+    betas: Powers<EF>,
+    batch_size: usize,
+) {
+    let message_chunks = &looking
+        .iter()
+        .map(|int| (int, true))
+        .chain(looked.iter().map(|int| (int, false)))
+        .chunks(batch_size);
+
+    // Compute the denominators \prod_{i\in B} row_fingerprint(alpha, beta).
+    for (value, chunk) in row.iter_mut().zip(message_chunks) {
+        *value = chunk
+            .into_iter()
+            .map(|(message, is_send)| {
+                let mut denominator = alpha;
+                let mut betas = betas.clone();
+                denominator +=
+                    betas.next().unwrap() * EF::from_canonical_usize(message.kind as usize);
+                for (columns, beta) in message.values.iter().zip(betas) {
+                    denominator += beta * columns.apply::<F, F>(preprocessed_row, main_row);
+                }
+                let mut mult = message.mult.apply::<F, F>(preprocessed_row, main_row);
+
+                if !is_send {
+                    mult = -mult;
+                }
+
+                EF::from_base(mult) / denominator
+            })
+            .sum();
+    }
 }

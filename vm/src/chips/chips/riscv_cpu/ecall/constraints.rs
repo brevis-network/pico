@@ -5,11 +5,9 @@ use crate::{
         gadgets::{baby_bear::word_range::BabyBearWordRangeChecker, is_zero::IsZeroGadget},
     },
     compiler::word::Word,
-    emulator::riscv::{
-        public_values::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-        syscalls::SyscallCode,
-    },
+    emulator::riscv::{public_values::PublicValues, syscalls::SyscallCode},
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipWordBuilder},
+    primitives::consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

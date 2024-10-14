@@ -17,7 +17,8 @@ use crate::{
         InnerBatchOpening, InnerChallenge, InnerCommitPhaseStep, InnerDigest, InnerFriProof,
         InnerPcsProof, InnerQueryProof, InnerVal,
     },
-    recursion::core::{air::Block, runtime::DIGEST_SIZE},
+    primitives::consts::DIGEST_SIZE,
+    recursion::core::air::Block,
 };
 
 type C = InnerConfig;

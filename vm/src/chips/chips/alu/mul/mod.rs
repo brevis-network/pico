@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::compiler::word::WORD_SIZE;
+use crate::primitives::consts::WORD_SIZE;
 
 pub mod columns;
 pub mod constraints;

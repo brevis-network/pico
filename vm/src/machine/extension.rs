@@ -1,13 +1,12 @@
-// todo: refactor to use p3 BionmialExtensionField
+// TODO-Alan: refactor to use p3 BionmialExtensionField
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
+use crate::primitives::consts::EXTENSION_DEGREE;
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
     AbstractExtensionField, AbstractField, Field,
 };
 use pico_derive::AlignedBorrow;
-
-const EXTENSION_DEGREE: usize = 4;
 
 /// A binomial extension element represented over a generic type `T`.
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

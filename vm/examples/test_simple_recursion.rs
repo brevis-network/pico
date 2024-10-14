@@ -7,17 +7,10 @@ use pico_vm::{
         recursion::{config::InnerConfig, program_builder::hints::Hintable},
         riscv::compiler::{Compiler, SourceType},
     },
-    configs::{
-        bb_poseidon2::BabyBearPoseidon2,
-        config::{Challenge, Challenger, StarkGenericConfig, Val},
-    },
-    emulator::{
-        opts::EmulatorOpts,
-        record::{RecordBehavior, MAX_NUM_PVS},
-        riscv::{public_values::RISCV_NUM_PVS, riscv_emulator::RiscvEmulator},
-    },
+    configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
+    emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator},
     instances::{
-        chiptype::{fib_chiptype::FibChipType, recursion_chiptype::RecursionChipType},
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::FibChipType},
         compiler::simple_recursion::{
             SimpleMachineRecursionMemoryLayout, SimpleMachineRecursiveVerifier,
         },
@@ -26,6 +19,7 @@ use pico_vm::{
         },
     },
     machine::{keys::BaseVerifyingKey, machine::MachineBehavior, proof::BaseProof},
+    primitives::consts::{MAX_NUM_PVS, RECURSION_NUM_PVS, RISCV_NUM_PVS},
     recursion::core::runtime::Runtime as RecursionRuntime,
 };
 use std::{
@@ -39,9 +33,9 @@ mod parse_args;
 
 pub fn get_recursion_core_input<'a, SC: StarkGenericConfig>(
     machine: &'a SimpleMachine<BabyBearPoseidon2, FibChipType<BabyBear>>,
-    reconstruct_challenger: &mut Challenger<BabyBearPoseidon2>,
+    reconstruct_challenger: &mut <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
     vk: &'a BaseVerifyingKey<BabyBearPoseidon2>,
-    leaf_challenger: &'a mut Challenger<BabyBearPoseidon2>,
+    leaf_challenger: &'a mut <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
     base_proof: BaseProof<BabyBearPoseidon2>,
 ) -> SimpleMachineRecursionMemoryLayout<'a, BabyBearPoseidon2, FibChipType<BabyBear>> {
     let num_public_values = machine.num_public_values();
@@ -179,11 +173,11 @@ fn main() {
         let mut witness_stream = Vec::new();
         witness_stream.extend(recursion_input.write());
 
-        let mut runtime =
-            RecursionRuntime::<Val<BabyBearPoseidon2>, Challenge<BabyBearPoseidon2>, _>::new(
-                &recursion_program,
-                simple_machine.config().perm.clone(),
-            );
+        let mut runtime = RecursionRuntime::<
+            <BabyBearPoseidon2 as StarkGenericConfig>::Val,
+            <BabyBearPoseidon2 as StarkGenericConfig>::Challenge,
+            _,
+        >::new(&recursion_program, simple_machine.config().perm.clone());
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
         runtime.record

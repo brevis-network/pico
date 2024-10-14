@@ -1,17 +1,13 @@
-use crate::{compiler::word::Word, emulator::record::MAX_NUM_PVS};
+use crate::{
+    compiler::word::Word,
+    primitives::consts::{MAX_NUM_PVS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
+};
 use p3_field::AbstractField;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
-
-pub const RISCV_NUM_PVS: usize = size_of::<PublicValues<Word<u8>, u8>>();
-
-pub const PV_DIGEST_NUM_WORDS: usize = 8;
-
-/// The number of field elements in the poseidon2 digest.
-pub const POSEIDON_NUM_WORDS: usize = 8;
 
 #[derive(Clone, Copy, Default, Debug, Serialize, Deserialize)]
 #[repr(C)]

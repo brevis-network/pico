@@ -1,2 +1,2 @@
-pub mod fib_chiptype;
 pub mod recursion_chiptype;
+pub mod riscv_chiptype;

@@ -13,7 +13,8 @@ use super::{columns::SELECTOR_COL_MAP, CpuChip, CpuCols};
 use crate::{
     chips::chips::recursion_memory::MemoryCols,
     machine::builder::{ChipBaseBuilder, ChipBuilder, RecursionLookupBuilder},
-    recursion::core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
+    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    recursion::core::air::RecursionPublicValues,
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};
@@ -29,8 +30,7 @@ where
         let local: &CpuCols<AB::Var> = (*local).borrow();
         let next: &CpuCols<AB::Var> = (*next).borrow();
         let pv = builder.public_values();
-        let pv_elms: [AB::Expr; RECURSIVE_PROOF_NUM_PV_ELTS] =
-            core::array::from_fn(|i| pv[i].into());
+        let pv_elms: [AB::Expr; RECURSION_NUM_PVS] = core::array::from_fn(|i| pv[i].into());
         let public_values: &RecursionPublicValues<AB::Expr> = pv_elms.as_slice().borrow();
         // let public_values: &RecursionPublicValues<AB::Expr> = &RecursionPublicValues::default();
 

@@ -9,10 +9,7 @@ use crate::{
         asm::AsmConfig,
         ir::{Array, Builder, Config, Felt, MemVariable, Var},
     },
-    configs::{
-        bb_poseidon2::BabyBearPoseidon2,
-        config::{Dom, StarkGenericConfig},
-    },
+    configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
     instances::machine::simple_machine::SimpleMachine,
     machine::{
         chip::ChipBehavior,
@@ -22,10 +19,8 @@ use crate::{
         proof::BaseProof,
         utils::order_chips,
     },
-    recursion::core::{
-        air::ChallengerPublicValues,
-        runtime::{DIGEST_SIZE, PERMUTATION_WIDTH},
-    },
+    primitives::consts::DIGEST_SIZE,
+    recursion::core::{air::ChallengerPublicValues, runtime::PERMUTATION_WIDTH},
 };
 use p3_air::Air;
 use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
@@ -218,13 +213,14 @@ pub fn hash_vkey<C: Config>(
     builder.poseidon2_hash(&inputs)
 }
 
+// TODO-Alan: generalize these 3 functions
 pub(crate) fn get_sorted_indices<SC, A>(
     machine: &SimpleMachine<SC, A>,
     proof: &BaseProof<SC>,
 ) -> Vec<usize>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<crate::configs::config::Val<SC>>
+    A: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -240,10 +236,10 @@ where
 pub(crate) fn get_preprocessed_data<SC, A>(
     machine: &SimpleMachine<SC, A>,
     vk: &BaseVerifyingKey<SC>,
-) -> (Vec<usize>, Vec<Dom<SC>>)
+) -> (Vec<usize>, Vec<SC::Domain>)
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<crate::configs::config::Val<SC>>
+    A: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -266,7 +262,7 @@ pub(crate) fn get_chip_quotient_data<SC, C>(
 ) -> Vec<QuotientDataValues>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<crate::configs::config::Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {

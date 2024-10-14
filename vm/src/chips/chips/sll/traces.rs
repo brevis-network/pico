@@ -1,14 +1,12 @@
 use crate::{
     chips::chips::sll::columns::{ShiftLeftCols, NUM_SLL_COLS},
-    compiler::{
-        riscv::program::Program,
-        word::{Word, BYTE_SIZE, WORD_SIZE},
-    },
+    compiler::{riscv::program::Program, word::Word},
     emulator::riscv::{
         events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
         record::EmulationRecord,
     },
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };
 use hashbrown::HashMap;
 use itertools::Itertools;

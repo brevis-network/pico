@@ -7,7 +7,6 @@ pub mod commit;
 pub mod constraints;
 pub mod fri;
 pub mod hints;
-pub mod recursion_machine;
 pub mod stark;
 pub mod types;
 pub mod utils;

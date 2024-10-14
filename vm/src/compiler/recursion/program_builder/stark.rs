@@ -9,7 +9,6 @@ use super::{
         types::{TwoAdicPcsMatsVariable, TwoAdicPcsRoundVariable},
         TwoAdicFriPcsVariable, TwoAdicMultiplicativeCosetVariable,
     },
-    recursion_machine::RecursionMachine,
     types::{BaseCommitmentsVariable, BaseProofVariable, QuotientData, VerifyingKeyVariable},
 };
 use crate::{
@@ -17,7 +16,7 @@ use crate::{
         ir::{Array, Builder, Config, Ext, ExtConst, SymbolicExt, SymbolicVar, Usize, Var},
         prelude::Felt,
     },
-    configs::config::{Com, StarkGenericConfig, Val},
+    configs::config::{Com, StarkGenericConfig},
     instances::machine::simple_machine::SimpleMachine,
     machine::{
         chip::ChipBehavior,
@@ -28,7 +27,7 @@ use crate::{
         permutation,
         proof::{BaseProof, ProofBehavior},
     },
-    recursion::core::runtime::DIGEST_SIZE,
+    primitives::consts::DIGEST_SIZE,
 };
 
 pub const EMPTY: usize = 0x_1111_1111;
@@ -41,7 +40,7 @@ pub struct StarkVerifier<C: Config, SC: StarkGenericConfig> {
 pub struct BaseProofHint<'a, SC, A>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<Val<SC>>
+    A: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -52,7 +51,7 @@ where
 impl<'a, SC, A> BaseProofHint<'a, SC, A>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<Val<SC>>
+    A: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -64,7 +63,7 @@ where
 pub struct VerifyingKeyHint<'a, SC, A>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<Val<SC>>
+    A: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -75,7 +74,7 @@ where
 impl<'a, SC, A> VerifyingKeyHint<'a, SC, A>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<Val<SC>>
+    A: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {

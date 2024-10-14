@@ -16,7 +16,12 @@ use crate::configs::config::StarkGenericConfig;
 use rand::{rngs::StdRng, thread_rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 
+// TODO-Alan: refactor
+
 type Val = BabyBear;
+type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
+type Challenge = BinomialExtensionField<Val, 4>;
+type Challenger = DuplexChallenger<Val, Perm, 16, 8>;
 
 pub type Perm = Poseidon2<Val, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>;
 pub type MyHash = PaddingFreeSponge<Perm, 16, 8, 8>;
@@ -24,14 +29,12 @@ pub type MyCompress = TruncatedPermutation<Perm, 2, 8, 16>;
 
 pub type ValMmcs =
     FieldMerkleTreeMmcs<<Val as Field>::Packing, <Val as Field>::Packing, MyHash, MyCompress, 8>;
-type Challenge = BinomialExtensionField<Val, 4>;
+
 pub type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
-type Challenger = DuplexChallenger<Val, Perm, 16, 8>;
 
 type Dft = Radix2DitParallel;
-type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
 
-pub const DIGEST_SIZE: usize = 8;
+use crate::primitives::consts::DIGEST_SIZE;
 
 /// A configuration for inner recursion.
 pub type InnerVal = BabyBear;

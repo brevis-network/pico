@@ -1,4 +1,7 @@
-use crate::recursion::core::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH};
+use crate::{
+    primitives::consts::DIGEST_SIZE,
+    recursion::core::runtime::{HASH_RATE, PERMUTATION_WIDTH},
+};
 use p3_field::AbstractField;
 
 use super::{Array, Builder, Config, DslIr, Ext, Felt, Usize, Var};

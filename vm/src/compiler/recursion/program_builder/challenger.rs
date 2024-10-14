@@ -4,7 +4,8 @@ use crate::{
         Array, Builder, Config, DslVariable, Ext, Felt, MemIndex, MemVariable, Ptr, Usize, Var,
         Variable,
     },
-    recursion::core::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH},
+    primitives::consts::DIGEST_SIZE,
+    recursion::core::runtime::{HASH_RATE, PERMUTATION_WIDTH},
 };
 use p3_field::AbstractField;
 

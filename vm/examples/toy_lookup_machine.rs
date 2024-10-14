@@ -6,13 +6,14 @@ use pico_vm::{
     chips::chips::examples::lookup_toy::{AddLookedChip, AddLookingChip},
     compiler::riscv::program::Program,
     configs::bb_poseidon2::BabyBearPoseidon2,
-    emulator::riscv::{public_values::RISCV_NUM_PVS, record::EmulationRecord},
+    emulator::riscv::record::EmulationRecord,
     instances::machine::simple_machine::SimpleMachine,
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
         machine::MachineBehavior,
     },
+    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 use std::sync::Arc;
 

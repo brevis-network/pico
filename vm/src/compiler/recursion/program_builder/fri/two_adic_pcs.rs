@@ -11,8 +11,8 @@ use super::{
     TwoAdicMultiplicativeCosetVariable,
 };
 use crate::{
-    compiler::recursion::prelude::*, primitives::types::RecursionProgramType,
-    recursion::core::runtime::DIGEST_SIZE,
+    compiler::recursion::prelude::*,
+    primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
 };
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractField, TwoAdicField};

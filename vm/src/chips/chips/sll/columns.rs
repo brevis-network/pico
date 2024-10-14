@@ -1,4 +1,7 @@
-use crate::compiler::word::{Word, BYTE_SIZE, WORD_SIZE};
+use crate::{
+    compiler::word::Word,
+    primitives::consts::{BYTE_SIZE, WORD_SIZE},
+};
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 

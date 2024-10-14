@@ -7,11 +7,12 @@ use crate::{
         baby_bear::bit_decomposition::BabyBearBitDecomposition, is_zero::IsZeroGadget,
     },
     compiler::word::Word,
-    emulator::{record::MAX_NUM_PVS, riscv::public_values::PublicValues},
+    emulator::riscv::public_values::PublicValues,
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder},
         lookup::{LookupType, SymbolicLookup},
     },
+    primitives::consts::MAX_NUM_PVS,
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};

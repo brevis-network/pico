@@ -1,12 +1,10 @@
 use crate::{
     chips::gadgets::{is_equal_word::IsEqualWordGadget, is_zero_word::IsZeroWordGadget},
-    compiler::word::{Word, WORD_SIZE},
+    compiler::word::Word,
+    primitives::consts::LONG_WORD_SIZE,
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
-
-/// The size of a 64-bit in bytes.
-pub(crate) const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
 
 /// The column layout for the chip.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

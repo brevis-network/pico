@@ -1,6 +1,6 @@
 use crate::{
     compiler::{program::ProgramBehavior, riscv::program::Program},
-    configs::config::{Com, Domain, PackedChallenge, PcsProof, StarkGenericConfig, Val},
+    configs::config::{Com, PackedChallenge, PcsProof, StarkGenericConfig},
     emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -28,9 +28,9 @@ pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
 }
 
-impl<SC: StarkGenericConfig, C: ChipBehavior<Val<SC>>> BaseProver<SC, C>
+impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C>
 where
-    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<Val<SC>>,
+    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
 {
     pub fn new() -> Self {
         Self {
@@ -41,7 +41,7 @@ where
     pub fn setup_keys(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         program: &C::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         info!("setup keys: BEGIN");
@@ -100,9 +100,9 @@ where
     /// generate ordered preprocessed traces with chip names
     pub fn generate_preprocessed(
         &self,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         program: &C::Program,
-    ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
+    ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
         let mut durations = HashMap::new();
         let mut chips_and_preprocessed = chips
             .iter()
@@ -131,7 +131,7 @@ where
 
     /// emulate to generate extra events
     /// should only be called after first emulator run and before generate_main
-    pub fn complement_record(&self, chips: &[MetaChip<Val<SC>, C>], input: &mut C::Record) {
+    pub fn complement_record(&self, chips: &[MetaChip<SC::Val, C>], input: &mut C::Record) {
         chips.iter().for_each(|chip| {
             let mut extra = C::Record::default();
             chip.extra_record(input, &mut extra);
@@ -142,9 +142,9 @@ where
     /// generate ordered main traces with chip names
     pub fn generate_main(
         &self,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         record: &C::Record,
-    ) -> Vec<(String, RowMajorMatrix<Val<SC>>)> {
+    ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
         info!("generate main traces: BEGIN");
         let start = Instant::now();
 
@@ -178,7 +178,7 @@ where
         &self,
         config: &SC,
         record: &C::Record,
-        chips_and_main: Vec<(String, RowMajorMatrix<Val<SC>>)>,
+        chips_and_main: Vec<(String, RowMajorMatrix<SC::Val>)>,
     ) -> MainTraceCommitments<SC> {
         let begin = Instant::now();
         info!("commit main: BEGIN");
@@ -221,7 +221,7 @@ where
     /// generate chips permutation traces and cumulative sums
     pub fn generate_permutation(
         &self,
-        ordered_chips: &[&MetaChip<Val<SC>, C>],
+        ordered_chips: &[&MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
         main_trace_commitments: &MainTraceCommitments<SC>,
         perm_challenges: &[SC::Challenge],
@@ -255,12 +255,11 @@ where
     }
 
     /// core proving function in BaseProver
-    /// Note that it assumes preprocessed and main have already been
-    /// generated and observed by challenger
+    /// Assumes pk, main and pvs have already been observed by challenger
     pub fn prove(
         &self,
         config: &SC,
-        chips: &[MetaChip<Val<SC>, C>],
+        chips: &[MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         main_commitments: MainTraceCommitments<SC>,
@@ -293,12 +292,6 @@ where
             .iter()
             .map(|degree| pcs.natural_domain_for_degree(*degree))
             .collect::<Vec<_>>();
-
-        // observation. is the first step necessary?
-        // log_main_degrees.iter().for_each(|log_degree| {
-        //     challenger.observe(Val::<SC>::from_canonical_usize(*log_degree))
-        // });
-        // challenger.observe(main_commitments.commitment.clone());
 
         let mut permutation_challenges: Vec<SC::Challenge> = Vec::new();
         for _ in 0..2 {
@@ -375,7 +368,7 @@ where
                         .to_row_major_matrix()
                     })
                     .unwrap_or_else(|| {
-                        RowMajorMatrix::new_col(vec![<Val<SC>>::zero(); quotient_domain.size()])
+                        RowMajorMatrix::new_col(vec![<SC::Val>::zero(); quotient_domain.size()])
                     });
                 let main_on_quotient_domain = pcs
                     .get_evaluations_on_domain(&main_commitments.data, i, *quotient_domain)

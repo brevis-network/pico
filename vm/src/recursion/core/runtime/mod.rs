@@ -8,8 +8,9 @@ use crate::{
     },
     compiler::recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
     emulator::riscv::events::MemoryAccessPosition,
+    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
     recursion::core::{
-        air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP, RECURSIVE_PROOF_NUM_PV_ELTS},
+        air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
         exp_reverse_bits::ExpReverseBitsLenEvent,
         fri_fold::FriFoldEvent,
         poseidon2_wide::events::{
@@ -43,11 +44,8 @@ pub const HASH_RATE: usize = 8;
 
 /// The current verifier implementation assumes that we are using a 256-bit hash with 32-bit
 /// elements.
-pub const DIGEST_SIZE: usize = 8;
 
 pub const NUM_BITS: usize = 31;
-
-pub const EXTENSION_DEGREE: usize = 4;
 
 #[derive(Debug, Clone, Default)]
 pub struct CpuRecord<F> {
@@ -642,7 +640,7 @@ where
                 Opcode::TRAP => {
                     self.record
                         .public_values
-                        .resize(RECURSIVE_PROOF_NUM_PV_ELTS, F::zero());
+                        .resize(RECURSION_NUM_PVS, F::zero());
                     self.record.public_values[RECURSION_PUBLIC_VALUES_COL_MAP.exit_code] = F::one();
 
                     let trap_pc = self.pc.as_canonical_u32() as usize;
@@ -667,7 +665,7 @@ where
                 Opcode::HALT => {
                     self.record
                         .public_values
-                        .resize(RECURSIVE_PROOF_NUM_PV_ELTS, F::zero());
+                        .resize(RECURSION_NUM_PVS, F::zero());
                     self.record.public_values[RECURSION_PUBLIC_VALUES_COL_MAP.exit_code] =
                         F::zero();
 
