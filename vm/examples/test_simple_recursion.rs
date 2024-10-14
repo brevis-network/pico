@@ -154,7 +154,7 @@ fn main() {
     serialized_program.hash(&mut hasher);
     let hash = hasher.finish();
     info!("recursion program hash: {}", hash);
-    assert_eq!(hash, 4438945249844702620);
+    assert_eq!(hash, 8512193551523565668);
 
     // Get recursion input
     let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());

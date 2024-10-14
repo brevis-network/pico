@@ -5,7 +5,6 @@ use crate::primitives::consts::WORD_SIZE;
 pub mod columns;
 pub mod constraints;
 pub mod traces;
-mod utils;
 
 /// The number of digits in the product is at most the sum of the number of digits in the
 /// multiplicands.

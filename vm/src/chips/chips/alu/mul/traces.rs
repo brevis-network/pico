@@ -1,6 +1,9 @@
 use super::{columns::NUM_MUL_COLS, MulChip};
 use crate::{
-    chips::chips::alu::mul::{columns::MulCols, utils::get_msb, BYTE_MASK, PRODUCT_SIZE},
+    chips::{
+        chips::alu::mul::{columns::MulCols, BYTE_MASK, PRODUCT_SIZE},
+        utils::common::get_msb,
+    },
     compiler::{
         riscv::{
             opcode::{ByteOpcode, Opcode},

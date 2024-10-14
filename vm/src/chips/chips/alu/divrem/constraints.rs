@@ -196,53 +196,58 @@ where
             let mut c_times_quotient_plus_remainder: Vec<CB::Expr> =
                 vec![CB::F::zero().into(); LONG_WORD_SIZE];
 
-            // Add remainder to c_times_quotient and propagate carry.
-            for i in 0..LONG_WORD_SIZE {
-                c_times_quotient_plus_remainder[i] = local.c_times_quotient[i].into();
+            c_times_quotient_plus_remainder
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, quotient_plus_remainder_times)| {
+                    // Add remainder to c_times_quotient and propagate carry.
+                    {
+                        *quotient_plus_remainder_times = local.c_times_quotient[i].into();
 
-                // Add remainder.
-                if i < WORD_SIZE {
-                    c_times_quotient_plus_remainder[i] += local.remainder[i].into();
-                } else {
-                    // If rem is negative, add 0xff to the upper 4 bytes.
-                    c_times_quotient_plus_remainder[i] += sign_extension.clone();
-                }
+                        // Add remainder.
+                        if i < WORD_SIZE {
+                            *quotient_plus_remainder_times += local.remainder[i].into();
+                        } else {
+                            // If rem is negative, add 0xff to the upper 4 bytes.
+                            *quotient_plus_remainder_times += sign_extension.clone();
+                        }
 
-                // Propagate carry.
-                c_times_quotient_plus_remainder[i] -= local.carry[i] * base;
-                if i > 0 {
-                    c_times_quotient_plus_remainder[i] += local.carry[i - 1].into();
-                }
-            }
+                        // Propagate carry.
+                        *quotient_plus_remainder_times -= local.carry[i] * base;
+                        if i > 0 {
+                            *quotient_plus_remainder_times += local.carry[i - 1].into();
+                        }
+                    }
 
-            // Compare c_times_quotient_plus_remainder to b by checking each limb.
-            for i in 0..LONG_WORD_SIZE {
-                if i < WORD_SIZE {
-                    // The lower 4 bytes of the result must match the corresponding bytes in b.
-                    builder.assert_eq(local.b[i], c_times_quotient_plus_remainder[i].clone());
-                } else {
-                    // The upper 4 bytes must reflect the sign of b in two's complement:
-                    // - All 1s (0xff) for negative b.
-                    // - All 0s for non-negative b.
-                    let not_overflow = one.clone() - local.is_overflow;
-                    builder
-                        .when(not_overflow.clone())
-                        .when(local.b_neg)
-                        .assert_eq(
-                            c_times_quotient_plus_remainder[i].clone(),
-                            CB::F::from_canonical_u8(u8::MAX),
-                        );
-                    builder
-                        .when(not_overflow.clone())
-                        .when_ne(one.clone(), local.b_neg)
-                        .assert_zero(c_times_quotient_plus_remainder[i].clone());
+                    // Compare c_times_quotient_plus_remainder to b by checking each limb.
+                    {
+                        if i < WORD_SIZE {
+                            // The lower 4 bytes of the result must match the corresponding bytes in b.
+                            builder.assert_eq(local.b[i], quotient_plus_remainder_times.clone());
+                        } else {
+                            // The upper 4 bytes must reflect the sign of b in two's complement:
+                            // - All 1s (0xff) for negative b.
+                            // - All 0s for non-negative b.
+                            let not_overflow = one.clone() - local.is_overflow;
+                            builder
+                                .when(not_overflow.clone())
+                                .when(local.b_neg)
+                                .assert_eq(
+                                    quotient_plus_remainder_times.clone(),
+                                    CB::F::from_canonical_u8(u8::MAX),
+                                );
+                            builder
+                                .when(not_overflow.clone())
+                                .when_ne(one.clone(), local.b_neg)
+                                .assert_zero(quotient_plus_remainder_times.clone());
 
-                    // The only exception to the upper-4-byte check is the overflow case.
-                    builder
-                        .when(local.is_overflow)
-                        .assert_zero(c_times_quotient_plus_remainder[i].clone());
-                }
-            }
+                            // The only exception to the upper-4-byte check is the overflow case.
+                            builder
+                                .when(local.is_overflow)
+                                .assert_zero(quotient_plus_remainder_times.clone());
+                        }
+                    }
+                });
         }
 
         // a must equal remainder or quotient depending on the opcode.
@@ -435,7 +440,7 @@ where
 
         // Check that the flags are boolean.
         {
-            let bool_flags = [
+            [
                 local.is_div,
                 local.is_divu,
                 local.is_rem,
@@ -450,11 +455,9 @@ where
                 local.is_real,
                 local.abs_c_alu_event,
                 local.abs_rem_alu_event,
-            ];
-
-            for flag in bool_flags.iter() {
-                builder.assert_bool(*flag);
-            }
+            ]
+            .iter()
+            .for_each(|flag| builder.assert_bool(*flag));
         }
 
         // Receive the arguments.

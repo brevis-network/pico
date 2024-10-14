@@ -8,7 +8,7 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::{Air, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::Field;
 use p3_matrix::Matrix;
 
 impl<F: Field> BaseAir<F> for ByteChip<F> {

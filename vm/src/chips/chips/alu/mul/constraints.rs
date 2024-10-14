@@ -152,7 +152,7 @@ where
 
         // Check that the boolean values are indeed boolean values.
         {
-            let booleans = [
+            [
                 local.b_msb,
                 local.c_msb,
                 local.b_sign_extend,
@@ -162,10 +162,9 @@ where
                 local.is_mulhu,
                 local.is_mulhsu,
                 local.is_real,
-            ];
-            for boolean in booleans.iter() {
-                builder.assert_bool(*boolean);
-            }
+            ]
+            .iter()
+            .for_each(|flag| builder.assert_bool(*flag));
         }
 
         // If signed extended, the MSB better be 1.

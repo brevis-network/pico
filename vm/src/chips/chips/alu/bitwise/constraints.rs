@@ -39,8 +39,7 @@ where
             + local.is_or * ByteOpcode::OR.as_field::<CB::F>()
             + local.is_and * ByteOpcode::AND.as_field::<CB::F>();
 
-        // Get a multiplicity of `1` only for a true row.
-        let mult = local.is_xor + local.is_or + local.is_and;
+        let is_real = local.is_xor + local.is_or + local.is_and;
         for ((a, b), c) in local.a.into_iter().zip(local.b).zip(local.c) {
             builder.looking_byte(
                 opcode.clone(),
@@ -49,7 +48,7 @@ where
                 c,
                 local.chunk,
                 local.channel,
-                mult.clone(),
+                is_real.clone(),
             );
         }
 
@@ -67,10 +66,9 @@ where
             local.chunk,
             local.channel,
             CB::Expr::zero(), // local.nonce,
-            local.is_and + local.is_or + local.is_xor,
+            is_real.clone(),
         );
 
-        let is_real = local.is_xor + local.is_or + local.is_and;
         builder.assert_bool(local.is_xor);
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
