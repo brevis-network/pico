@@ -18,7 +18,9 @@ use pico_vm::{
             simple_machine::SimpleMachine, simple_recursion_machine::SimpleRecursionMachine,
         },
     },
-    machine::{keys::BaseVerifyingKey, machine::MachineBehavior, proof::BaseProof},
+    machine::{
+        keys::BaseVerifyingKey, machine::MachineBehavior, proof::BaseProof, witness::ProvingWitness,
+    },
     primitives::consts::{MAX_NUM_PVS, RECURSION_NUM_PVS, RISCV_NUM_PVS},
     recursion::runtime::Runtime as RecursionRuntime,
 };
@@ -129,9 +131,12 @@ fn main() {
     info!("\n Complement records (at {:?})..", start.elapsed());
     simple_machine.complement_record(&mut records);
 
+    info!("\n Construct proving witness..");
+    let witness = ProvingWitness::new_with_records(records);
+
     // Generate the proof.
     info!("\n Generating proof (at {:?})..", start.elapsed());
-    let proof = simple_machine.prove(&pk, &records);
+    let proof = simple_machine.prove(&pk, &witness);
     let base_proof = proof.proofs()[0].clone();
     let base_proof_size = bincode::serialize(&base_proof).unwrap().len();
     info!("base_proof_size {}", base_proof_size);
@@ -239,9 +244,12 @@ fn main() {
     let mut recursion_records = vec![recursion_record.clone()];
     simple_recursion_machine.complement_record(&mut recursion_records);
 
+    info!("\n Construct proving witness..");
+    let recursion_witness = ProvingWitness::new_with_records(recursion_records);
+
     // Generate the proof.
     info!("\n Generating recursion proof (at {:?})..", start.elapsed());
-    let recursion_proof = simple_recursion_machine.prove(&recursion_pk, &recursion_records);
+    let recursion_proof = simple_recursion_machine.prove(&recursion_pk, &recursion_witness);
     info!("{} generated.", recursion_proof.name());
 
     // Verify the proof.

@@ -45,3 +45,21 @@ pub const PV_DIGEST_NUM_WORDS: usize = 8;
 
 /// The number of field elements in the poseidon2 digest.
 pub const POSEIDON_NUM_WORDS: usize = 8;
+
+/*
+For chunks
+ */
+
+pub const MAX_LOG_CHUNK_SIZE: i32 = 22;
+
+pub const DEFAULT_CHUNK_SIZE: usize = 1 << MAX_LOG_CHUNK_SIZE;
+
+pub const DEFAULT_CHUNK_BATCH_SIZE: usize = 16;
+/// The threshold for splitting deferred events.
+pub const DEFERRED_SPLIT_THRESHOLD: usize = 1 << 19;
+
+pub const TEST_CHUNK_SIZE: usize = 1 << 16;
+
+pub const TEST_CHUNK_BATCH_SIZE: usize = 2;
+
+pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 5;

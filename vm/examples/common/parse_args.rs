@@ -13,7 +13,7 @@ pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin, String, u
     }
     let mut test_case = String::from("fibonacci"); // default test_case is fibonacci
     let mut n = 0;
-    let mut stdin = EmulatorStdin::new();
+    let mut stdin = EmulatorStdin::default();
 
     if args.len() > 1 {
         test_case = args[1].clone();

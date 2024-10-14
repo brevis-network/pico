@@ -40,4 +40,22 @@ impl<F: Field> ProgramBehavior<F> for Program {
     fn pc_start(&self) -> F {
         F::from_canonical_u32(self.pc_start)
     }
+
+    fn default() -> Self {
+        Self {
+            instructions: Vec::new(),
+            pc_start: 0,
+            pc_base: 0,
+            memory_image: BTreeMap::new(),
+        }
+    }
+
+    fn clone(&self) -> Self {
+        Self {
+            instructions: self.instructions.clone(),
+            pc_start: self.pc_start,
+            pc_base: self.pc_base,
+            memory_image: self.memory_image.clone(),
+        }
+    }
 }

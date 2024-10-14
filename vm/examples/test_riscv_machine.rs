@@ -28,6 +28,7 @@ use pico_vm::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
         machine::MachineBehavior,
+        witness::ProvingWitness,
     },
     primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
@@ -62,15 +63,17 @@ fn main() {
     info!("\n Setup machine (at {:?})..", start.elapsed());
     let (pk, vk) = riscv_machine.setup_keys(&program);
 
-    // Generate the proof.
-    info!("\n Generating proof (at {:?})..", start.elapsed());
-    let proof = riscv_machine.emulate_and_prove(
-        &pk,
+    info!("\n Construct proving witness..");
+    let witness = ProvingWitness::new_with_program(
         program,
-        &stdin,
+        stdin,
         EmulatorOpts::test_opts(),
         EmulatorContext::default(),
     );
+
+    // Generate the proof.
+    info!("\n Generating proof (at {:?})..", start.elapsed());
+    let proof = riscv_machine.prove(&pk, &witness);
     info!("{} generated.", proof.name());
 
     let proof_size = bincode::serialize(&proof).unwrap().len();

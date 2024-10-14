@@ -6,6 +6,7 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, EnsembleProof, MetaProof},
+        witness::ProvingWitness,
     },
 };
 use anyhow::Result;
@@ -71,14 +72,26 @@ where
     fn prove(
         &self,
         pk: &BaseProvingKey<SC>,
-        records: &[C::Record],
+        witness: &ProvingWitness<SC::Val, C>,
     ) -> MetaProof<SC, EnsembleProof<SC>> {
-        let proofs = self
-            .base_machine
-            .prove_ensemble(self.config(), self.chips(), pk, records);
+        let proofs =
+            self.base_machine
+                .prove_ensemble(self.config(), self.chips(), pk, witness.records());
 
         MetaProof::new(self.config(), EnsembleProof::new(proofs))
     }
+
+    // fn prove(
+    //     &self,
+    //     pk: &BaseProvingKey<SC>,
+    //     records: &[C::Record],
+    // ) -> MetaProof<SC, EnsembleProof<SC>> {
+    //     let proofs = self
+    //         .base_machine
+    //         .prove_ensemble(self.config(), self.chips(), pk, records);
+    //
+    //     MetaProof::new(self.config(), EnsembleProof::new(proofs))
+    // }
 
     /// Verify the proof.
     fn verify(

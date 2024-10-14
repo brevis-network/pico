@@ -1453,7 +1453,7 @@ mod tests {
     fn test_simple_fib() {
         // just run a simple elf file in the compiler folder(test_data)
         let program = simple_fibo_program();
-        let mut stdin = EmulatorStdin::new();
+        let mut stdin = EmulatorStdin::default();
         stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);
         let mut emulator = RiscvEmulator::new(program, EmulatorOpts::default());
         emulator.run_with_stdin(stdin).unwrap();
@@ -1465,7 +1465,7 @@ mod tests {
     fn test_simple_keccak() {
         let program = simple_keccak_program();
         let n = "a"; // do keccak(b"abcdefg")
-        let mut stdin = EmulatorStdin::new();
+        let mut stdin = EmulatorStdin::default();
         stdin.write(&n);
         let mut emulator = RiscvEmulator::new(program, EmulatorOpts::default());
         emulator.run_with_stdin(stdin).unwrap();

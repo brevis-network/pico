@@ -22,6 +22,7 @@ use pico_vm::{
     primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 
+use pico_vm::machine::witness::ProvingWitness;
 use std::any::type_name;
 
 pub enum ToyChipType<F: Field> {
@@ -131,9 +132,12 @@ fn main() {
     info!("\n Complement records..");
     simple_machine.complement_record(&mut records);
 
+    info!("\n Construct proving witness..");
+    let witness = ProvingWitness::new_with_records(records);
+
     // Generate the proof.
     info!("\n Generating proof..");
-    let proof = simple_machine.prove(&pk, &records);
+    let proof = simple_machine.prove(&pk, &witness);
     info!("{} generated.", proof.name());
 
     // Verify the proof.

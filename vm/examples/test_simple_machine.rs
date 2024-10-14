@@ -15,7 +15,7 @@ use pico_vm::{
         stdin::EmulatorStdin,
     },
     instances::{chiptype::riscv_chiptype::FibChipType, machine::simple_machine::SimpleMachine},
-    machine::machine::MachineBehavior,
+    machine::{machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
@@ -83,9 +83,12 @@ fn main() {
     info!("\n Complement records (at {:?})..", start.elapsed());
     simple_machine.complement_record(&mut records);
 
+    info!("\n Construct proving witness..");
+    let witness = ProvingWitness::new_with_records(records);
+
     // Generate the proof.
     info!("\n Generating proof (at {:?})..", start.elapsed());
-    let proof = simple_machine.prove(&pk, &records);
+    let proof = simple_machine.prove(&pk, &witness);
     info!("{} generated.", proof.name());
 
     let proof_size = bincode::serialize(&proof).unwrap().len();

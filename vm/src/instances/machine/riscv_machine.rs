@@ -18,7 +18,9 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{EnsembleProof, MetaProof},
+        witness::ProvingWitness,
     },
+    primitives::consts::MAX_LOG_CHUNK_SIZE,
 };
 use anyhow::Result;
 use log::{debug, info};
@@ -26,8 +28,6 @@ use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
 use std::{any::type_name, borrow::Borrow};
-
-const MAX_LOG_CHUNK_SIZE: i32 = 22;
 
 pub struct RiscvMachine<SC, C>
 where
@@ -46,13 +46,13 @@ where
 impl<SC, C> MachineBehavior<SC, C, EnsembleProof<SC>> for RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
+    C: ChipBehavior<SC::Val, Program = Program, Record = EmulationRecord>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!("RiscvMachine<{}>", type_name::<SC>())
+        format!("Riscv Machine<{}>", type_name::<SC>())
     }
 
     /// Get the configuration of the machine.
@@ -71,10 +71,7 @@ where
     }
 
     /// setup prover, verifier and keys.
-    fn setup_keys(
-        &self,
-        program: &<C as ChipBehavior<<SC as StarkGenericConfig>::Val>>::Program,
-    ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+    fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         self.base_machine
             .setup_keys(self.config(), self.chips(), program)
     }
@@ -82,10 +79,117 @@ where
     /// Get the prover of the machine.
     fn prove(
         &self,
-        _pk: &BaseProvingKey<SC>,
-        _records: &[C::Record],
+        pk: &BaseProvingKey<SC>,
+        witness: &ProvingWitness<SC::Val, C>,
     ) -> MetaProof<SC, EnsembleProof<SC>> {
-        panic!("should not be called!")
+        let ProvingWitness {
+            program,
+            stdin,
+            opts,
+            context,
+            records,
+        } = witness;
+
+        info!("challenger observe pk");
+        let mut challenger = self.config().challenger();
+        pk.observed_by(&mut challenger);
+
+        // First phase
+        // Generate batch records and commit to challenger
+        info!("phase 1 - BEGIN");
+        let mut emulator = RiscvEmulator::new(witness.program.clone(), *opts);
+        emulator.emulator_mode = EmulatorMode::Trace;
+        for input in &stdin.buffer {
+            emulator.state.input_stream.push(input.clone());
+        }
+
+        let mut done = false;
+
+        loop {
+            if emulator.emulate_to_batch().unwrap() {
+                done = true;
+            }
+
+            // println!("emulater batch: {:?}", emulator.batch_records);
+
+            debug!("phase 1 complement records");
+            self.complement_record(emulator.batch_records.as_mut_slice());
+
+            for (i, record) in emulator.batch_records.iter().enumerate() {
+                debug!("record {} stats", i);
+                let stats = record.stats();
+                for (key, value) in &stats {
+                    debug!("{:<25}: {}", key, value);
+                }
+
+                debug!("phase 1 generate commitments for batch records");
+                let commitment = self.base_machine.commit(self.config(), &self.chips, record);
+
+                challenger.observe(commitment.commitment.clone());
+                challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
+            }
+
+            if done {
+                break;
+            }
+        }
+        info!("phase 1 - END");
+
+        // Second phase
+        // Generate batch records and generate proofs
+        info!("phase 2 - BEGIN");
+        let mut emulator = RiscvEmulator::new(witness.program.clone(), *opts);
+        emulator.emulator_mode = EmulatorMode::Trace;
+        for input in &stdin.buffer {
+            emulator.state.input_stream.push(input.clone());
+        }
+        let mut done = false;
+
+        // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
+        let mut all_proofs = vec![];
+        loop {
+            if emulator.emulate_to_batch().unwrap() {
+                done = true;
+            }
+
+            debug!("phase 2 complement records");
+            self.complement_record(&mut emulator.batch_records);
+
+            info!("phase 2 generate commitments for batch records");
+            let batch_main_commitments = emulator
+                .batch_records
+                .iter()
+                .map(|record| {
+                    // generate and commit main trace
+                    self.base_machine.commit(self.config(), &self.chips, record)
+                })
+                .collect::<Vec<_>>();
+
+            info!("phase 2 prove batch records");
+            let batch_proofs = batch_main_commitments
+                .into_iter()
+                .map(|commitment| {
+                    self.base_machine.prove_plain(
+                        self.config(),
+                        &self.chips,
+                        pk,
+                        &mut challenger.clone(),
+                        commitment,
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            // extend all_proofs to include batch_proofs
+            all_proofs.extend(batch_proofs);
+
+            if done {
+                break;
+            }
+        }
+        info!("phase 2 - END");
+
+        // construct meta proof
+        MetaProof::new(self.config(), EnsembleProof::new(all_proofs))
     }
 
     /// Verify the proof.
@@ -189,7 +293,7 @@ where
 impl<SC, C> RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val, Record = EmulationRecord>
+    C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
@@ -199,121 +303,5 @@ where
             chips,
             base_machine: BaseMachine::<SC, C>::new(num_public_values),
         }
-    }
-
-    // TODO: consider refactor or merge with prove()
-    pub fn emulate_and_prove(
-        &self,
-        pk: &BaseProvingKey<SC>,
-        program: Program,
-        stdin: &EmulatorStdin,
-        opts: EmulatorOpts,
-        context: EmulatorContext,
-    ) -> MetaProof<SC, EnsembleProof<SC>> {
-        info!("challenger observe pk");
-        let mut challenger = self.config().challenger();
-        pk.observed_by(&mut challenger);
-
-        // First phase
-        // Generate batch records and commit to challenger
-        info!("phase 1 - BEGIN");
-        let mut emulator = RiscvEmulator::new(program.clone(), opts);
-        emulator.emulator_mode = EmulatorMode::Trace;
-        for input in &stdin.buffer {
-            emulator.state.input_stream.push(input.clone());
-        }
-
-        let mut done = false;
-
-        loop {
-            if emulator.emulate_to_batch().unwrap() {
-                done = true;
-            }
-
-            // println!("emulater batch: {:?}", emulator.batch_records);
-
-            debug!("phase 1 complement records");
-            self.complement_record(&mut emulator.batch_records);
-
-            for (i, record) in emulator.batch_records.iter().enumerate() {
-                debug!("record {} stats", i);
-                let stats = record.stats();
-                for (key, value) in &stats {
-                    debug!("{:<25}: {}", key, value);
-                }
-
-                debug!("phase 1 generate commitments for batch records");
-                let commitment = self.base_machine.commit(self.config(), &self.chips, record);
-                // let commitment = self.base_machine.prover.commit_main(
-                //     self.config(),
-                //     record,
-                //     self.base_machine.prover.generate_main(&self.chips, record),
-                // );
-                challenger.observe(commitment.commitment.clone());
-                challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
-            }
-
-            if done {
-                break;
-            }
-        }
-        info!("phase 1 - END");
-
-        // Second phase
-        // Generate batch records and generate proofs
-        info!("phase 2 - BEGIN");
-        let mut emulator = RiscvEmulator::new(program, opts);
-        emulator.emulator_mode = EmulatorMode::Trace;
-        for input in &stdin.buffer {
-            emulator.state.input_stream.push(input.clone());
-        }
-        let mut done = false;
-
-        // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
-        let mut all_proofs = vec![];
-        let mut proof_num = 0;
-        loop {
-            if emulator.emulate_to_batch().unwrap() {
-                done = true;
-            }
-
-            debug!("phase 2 complement records");
-            self.complement_record(&mut emulator.batch_records);
-
-            info!("phase 2 generate commitments for batch records");
-            let batch_main_commitments = emulator
-                .batch_records
-                .iter()
-                .map(|record| {
-                    // generate and commit main trace
-                    self.base_machine.commit(self.config(), &self.chips, record)
-                })
-                .collect::<Vec<_>>();
-
-            info!("phase 2 prove batch records");
-            let batch_proofs = batch_main_commitments
-                .into_iter()
-                .map(|commitment| {
-                    self.base_machine.prove_plain(
-                        self.config(),
-                        &self.chips,
-                        pk,
-                        &mut challenger.clone(),
-                        commitment,
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            // extend all_proofs to include batch_proofs
-            all_proofs.extend(batch_proofs);
-
-            if done {
-                break;
-            }
-        }
-        info!("phase 2 - END");
-
-        // construct meta proof
-        MetaProof::new(self.config(), EnsembleProof::new(all_proofs))
     }
 }

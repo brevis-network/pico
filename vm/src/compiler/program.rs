@@ -2,4 +2,8 @@
 pub trait ProgramBehavior<F>: Send + Sync {
     /// Gets the starting program counter.
     fn pc_start(&self) -> F;
+
+    fn default() -> Self;
+
+    fn clone(&self) -> Self;
 }

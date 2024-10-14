@@ -10,6 +10,7 @@ use crate::{
         prover::BaseProver,
         utils::type_name_of,
         verifier::BaseVerifier,
+        witness::ProvingWitness,
     },
 };
 use anyhow::Result;
@@ -59,13 +60,14 @@ where
     }
 
     /// setup prover, verifier and keys.
-    fn setup_keys(
-        &self,
-        program: &<C as ChipBehavior<<SC as StarkGenericConfig>::Val>>::Program,
-    ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
+    fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>);
 
     /// Get the prover of the machine.
-    fn prove(&self, pk: &BaseProvingKey<SC>, records: &[C::Record]) -> MetaProof<SC, P>;
+    fn prove(
+        &self,
+        pk: &BaseProvingKey<SC>,
+        witness: &ProvingWitness<SC::Val, C>,
+    ) -> MetaProof<SC, P>;
 
     /// Verify the proof.
     fn verify(&self, vk: &BaseVerifyingKey<SC>, proof: &MetaProof<SC, P>) -> Result<()>;

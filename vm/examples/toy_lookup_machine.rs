@@ -12,6 +12,7 @@ use pico_vm::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
         machine::MachineBehavior,
+        witness::ProvingWitness,
     },
     primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
@@ -120,8 +121,11 @@ fn main() {
     info!("\n Complement records..");
     simple_machine.complement_record(&mut records);
 
+    info!("\n Construct proving witness..");
+    let witness = ProvingWitness::new_with_records(records);
+
     info!("Generating proof..");
-    let proof = simple_machine.prove(&pk, &records);
+    let proof = simple_machine.prove(&pk, &witness);
     info!("{} generated.", proof.name());
 
     // Verify the proof.

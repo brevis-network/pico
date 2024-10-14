@@ -2,14 +2,10 @@ use std::env;
 
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_CHUNK_SIZE: usize = 1 << 22;
-const DEFAULT_CHUNK_BATCH_SIZE: usize = 16;
-/// The threshold for splitting deferred events.
-pub const DEFERRED_SPLIT_THRESHOLD: usize = 1 << 19;
-
-const TEST_CHUNK_SIZE: usize = 1 << 16;
-const TEST_CHUNK_BATCH_SIZE: usize = 2;
-const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 5;
+use crate::primitives::consts::{
+    DEFAULT_CHUNK_BATCH_SIZE, DEFAULT_CHUNK_SIZE, DEFERRED_SPLIT_THRESHOLD, TEST_CHUNK_BATCH_SIZE,
+    TEST_CHUNK_SIZE, TEST_DEFERRED_SPLIT_THRESHOLD,
+};
 
 /// Options for the core prover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

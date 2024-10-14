@@ -6,6 +6,7 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{EnsembleProof, MetaProof},
+        witness::ProvingWitness,
     },
 };
 use p3_air::Air;
@@ -64,15 +65,15 @@ where
             .setup_keys(self.config(), self.chips(), program)
     }
 
-    /// Get the prover of the machine.
+    /// Prove and generate the proof.
     fn prove(
         &self,
         pk: &BaseProvingKey<SC>,
-        records: &[C::Record],
+        witness: &ProvingWitness<SC::Val, C>,
     ) -> MetaProof<SC, EnsembleProof<SC>> {
-        let proofs = self
-            .base_machine
-            .prove_ensemble(self.config(), self.chips(), pk, records);
+        let proofs =
+            self.base_machine
+                .prove_ensemble(self.config(), self.chips(), pk, witness.records());
 
         MetaProof::new(self.config(), EnsembleProof::new(proofs))
     }

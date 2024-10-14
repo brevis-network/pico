@@ -6,7 +6,7 @@ pub struct EmulatorStdin {
 }
 
 impl EmulatorStdin {
-    pub fn new() -> Self {
+    pub fn default() -> Self {
         Self {
             buffer: Vec::new(),
             cursor: 0,
