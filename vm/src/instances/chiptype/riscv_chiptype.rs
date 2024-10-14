@@ -1,14 +1,14 @@
 use crate::{
     chips::chips::{
-        alu::{add_sub::AddSubChip, bitwise::BitwiseChip, divrem::DivRemChip, mul::MulChip},
+        alu::{
+            add_sub::AddSubChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip,
+            mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip,
+        },
         byte::ByteChip,
-        lt::LtChip,
         memory_program::MemoryProgramChip,
         riscv_cpu::CpuChip,
         riscv_memory::initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
         riscv_program::ProgramChip,
-        sll::SLLChip,
-        sr::traces::ShiftRightChip,
     },
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,

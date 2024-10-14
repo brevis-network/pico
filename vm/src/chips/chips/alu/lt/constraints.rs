@@ -1,5 +1,5 @@
+use super::{columns::LtCols, traces::LtChip};
 use crate::{
-    chips::chips::lt::{columns::LtCols, traces::LtChip},
     compiler::{
         riscv::opcode::{ByteOpcode, Opcode},
         word::Word,

@@ -1,5 +1,5 @@
+use super::columns::{ShiftLeftCols, NUM_SLL_COLS};
 use crate::{
-    chips::chips::sll::columns::{ShiftLeftCols, NUM_SLL_COLS},
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::{
         events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
