@@ -2,7 +2,7 @@ use super::super::{CpuChip, CpuCols};
 use crate::{
     chips::chips::recursion_memory::MemoryCols,
     machine::builder::{ChipBuilder, RecursionMemoryBuilder},
-    recursion::core::runtime::HEAP_START_ADDRESS,
+    recursion::runtime::HEAP_START_ADDRESS,
 };
 use p3_field::{AbstractField, Field};
 

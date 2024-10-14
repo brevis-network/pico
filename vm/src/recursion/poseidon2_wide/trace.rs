@@ -1,10 +1,14 @@
 use std::borrow::Borrow;
 
+use super::{
+    events::{Poseidon2AbsorbEvent, Poseidon2CompressEvent, Poseidon2FinalizeEvent},
+    internal_linear_layer, Poseidon2WideChip, NUM_INTERNAL_ROUNDS, RATE,
+};
 use crate::{
     compiler::recursion::program::RecursionProgram,
     machine::chip::ChipBehavior,
     primitives::RC_16_30_U32,
-    recursion::core::{
+    recursion::{
         poseidon2_wide::{
             columns::permutation::permutation_mut, events::Poseidon2HashEvent,
             external_linear_layer, NUM_EXTERNAL_ROUNDS, WIDTH,
@@ -19,11 +23,6 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 use tracing::instrument;
-
-use super::{
-    events::{Poseidon2AbsorbEvent, Poseidon2CompressEvent, Poseidon2FinalizeEvent},
-    internal_linear_layer, Poseidon2WideChip, NUM_INTERNAL_ROUNDS, RATE,
-};
 
 impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for Poseidon2WideChip<DEGREE, F> {
     type Record = RecursionRecord<F>;

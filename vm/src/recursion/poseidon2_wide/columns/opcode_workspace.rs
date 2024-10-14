@@ -1,7 +1,7 @@
 use crate::{
     chips::{chips::recursion_memory::MemoryReadWriteSingleCols, gadgets::is_zero::IsZeroGadget},
     machine::builder::ChipBuilder,
-    recursion::core::poseidon2_wide::{RATE, WIDTH},
+    recursion::poseidon2_wide::{RATE, WIDTH},
 };
 use p3_field::{AbstractField, Field};
 use pico_derive::AlignedBorrow;

@@ -4,7 +4,7 @@ use super::{ChipBuilder, ChipRangeBuilder};
 use crate::{
     chips::chips::recursion_memory::{MemoryAccessTimestampCols, MemoryCols},
     machine::lookup::{LookupType, SymbolicLookup},
-    recursion::core::{air::Block, range_check::RangeCheckOpcode},
+    recursion::{air::Block, range_check::RangeCheckOpcode},
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

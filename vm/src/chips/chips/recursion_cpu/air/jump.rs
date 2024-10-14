@@ -2,7 +2,7 @@ use super::super::{CpuChip, CpuCols};
 use crate::{
     chips::chips::recursion_memory::MemoryCols,
     machine::builder::ChipBuilder,
-    recursion::core::{
+    recursion::{
         air::{Block, BlockBuilder},
         runtime::STACK_SIZE,
     },

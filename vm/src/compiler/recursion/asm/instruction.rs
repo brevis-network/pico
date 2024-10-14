@@ -1,12 +1,11 @@
+use super::A0;
 use crate::{
     compiler::recursion::{instruction::Instruction, opcode::Opcode},
-    recursion::core::runtime::{canonical_i32_to_field, PERMUTATION_WIDTH},
+    recursion::runtime::{canonical_i32_to_field, PERMUTATION_WIDTH},
 };
 use alloc::{collections::BTreeMap, format};
 use core::fmt;
 use p3_field::{ExtensionField, PrimeField32};
-
-use super::A0;
 
 #[derive(Debug, Clone)]
 pub enum AsmInstruction<F, EF> {

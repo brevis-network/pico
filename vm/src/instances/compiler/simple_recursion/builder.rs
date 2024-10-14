@@ -16,11 +16,9 @@ use crate::{
                 challenger::{CanObserveVariable, DuplexChallengerVariable},
                 fri::TwoAdicFriPcsVariable,
                 hints::Hintable,
-                stark::{StarkVerifier, EMPTY},
+                stark::StarkVerifier,
                 types::{BaseProofVariable, VerifyingKeyVariable},
-                utils::{
-                    const_fri_config, felt2var, get_challenger_public_values, hash_vkey, var2felt,
-                },
+                utils::{const_fri_config, get_challenger_public_values, hash_vkey, var2felt},
             },
         },
         word::Word,
@@ -39,13 +37,10 @@ use crate::{
         proof::BaseProof,
     },
     primitives::{
-        consts::{
-            DIGEST_SIZE, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS, RISCV_NUM_PVS,
-            WORD_SIZE,
-        },
+        consts::{DIGEST_SIZE, POSEIDON_NUM_WORDS, RECURSION_NUM_PVS},
         types::RecursionProgramType,
     },
-    recursion::core::air::RecursionPublicValues,
+    recursion::air::RecursionPublicValues,
 };
 use itertools::Itertools;
 use p3_air::Air;

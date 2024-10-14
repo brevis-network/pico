@@ -1,7 +1,7 @@
 use super::super::{CpuChip, CpuCols};
 use crate::{
     machine::builder::{ChipBaseBuilder, ChipBuilder},
-    recursion::core::air::RecursionPublicValues,
+    recursion::air::RecursionPublicValues,
 };
 use p3_air::AirBuilder;
 use p3_field::Field;

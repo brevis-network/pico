@@ -1,9 +1,10 @@
+use super::{CpuChip, CpuCols, NUM_CPU_COLS};
 use crate::{
     chips::chips::recursion_memory::MemoryCols,
     compiler::recursion::{opcode::Opcode, program::RecursionProgram},
     machine::{chip::ChipBehavior, extension::BinomialExtension},
     primitives::consts::EXTENSION_DEGREE,
-    recursion::core::{
+    recursion::{
         air::BinomialExtensionUtils,
         runtime::{get_heap_size_range_check_events, instruction_is_heap_expand, RecursionRecord},
         stark::utils::{next_power_of_two, par_for_each_row},
@@ -14,8 +15,6 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 use std::borrow::BorrowMut;
 use tracing::instrument;
-
-use super::{CpuChip, CpuCols, NUM_CPU_COLS};
 
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const L: usize> ChipBehavior<F>
     for CpuChip<F, L>

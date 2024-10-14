@@ -20,7 +20,7 @@ use pico_vm::{
     },
     machine::{keys::BaseVerifyingKey, machine::MachineBehavior, proof::BaseProof},
     primitives::consts::{MAX_NUM_PVS, RECURSION_NUM_PVS, RISCV_NUM_PVS},
-    recursion::core::runtime::Runtime as RecursionRuntime,
+    recursion::runtime::Runtime as RecursionRuntime,
 };
 use std::{
     env,

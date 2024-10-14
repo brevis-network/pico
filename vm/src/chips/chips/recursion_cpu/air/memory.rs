@@ -3,7 +3,7 @@ use crate::{
     chips::chips::recursion_memory::MemoryCols,
     emulator::riscv::events::MemoryAccessPosition,
     machine::builder::{ChipBuilder, RecursionMemoryBuilder},
-    recursion::core::air::BlockBuilder,
+    recursion::air::BlockBuilder,
 };
 use p3_air::AirBuilder;
 use p3_field::Field;

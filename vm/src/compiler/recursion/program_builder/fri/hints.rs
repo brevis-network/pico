@@ -18,7 +18,7 @@ use crate::{
         InnerPcsProof, InnerQueryProof, InnerVal,
     },
     primitives::consts::DIGEST_SIZE,
-    recursion::core::air::Block,
+    recursion::air::Block,
 };
 
 type C = InnerConfig;

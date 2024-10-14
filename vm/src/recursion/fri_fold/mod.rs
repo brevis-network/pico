@@ -10,7 +10,7 @@ use crate::{
         chip::ChipBehavior,
         extension::BinomialExtension,
     },
-    recursion::core::{
+    recursion::{
         runtime::RecursionRecord,
         stark::utils::{next_power_of_two, par_for_each_row},
     },

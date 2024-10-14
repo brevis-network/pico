@@ -13,8 +13,8 @@ use super::{columns::SELECTOR_COL_MAP, CpuChip, CpuCols};
 use crate::{
     chips::chips::recursion_memory::MemoryCols,
     machine::builder::{ChipBaseBuilder, ChipBuilder, RecursionLookupBuilder},
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
-    recursion::core::air::RecursionPublicValues,
+    primitives::consts::RECURSION_NUM_PVS,
+    recursion::air::RecursionPublicValues,
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field};

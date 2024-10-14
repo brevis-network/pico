@@ -5,7 +5,7 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder},
         extension::BinomialExtension,
     },
-    recursion::core::air::BinomialExtensionUtils,
+    recursion::air::BinomialExtensionUtils,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

@@ -5,7 +5,7 @@ use crate::{
         builder::{ChipBuilder, RecursionLookupBuilder},
         chip::ChipBehavior,
     },
-    recursion::core::{runtime::RecursionRecord, stark::utils::pad_rows_fixed},
+    recursion::{runtime::RecursionRecord, stark::utils::pad_rows_fixed},
 };
 use core::{
     borrow::{Borrow, BorrowMut},

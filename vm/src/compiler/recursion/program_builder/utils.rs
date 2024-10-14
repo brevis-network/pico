@@ -20,7 +20,7 @@ use crate::{
         utils::order_chips,
     },
     primitives::consts::DIGEST_SIZE,
-    recursion::core::{air::ChallengerPublicValues, runtime::PERMUTATION_WIDTH},
+    recursion::{air::ChallengerPublicValues, runtime::PERMUTATION_WIDTH},
 };
 use p3_air::Air;
 use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};

@@ -4,7 +4,7 @@ use crate::{
     primitives::consts::{
         DIGEST_SIZE, MAX_NUM_PVS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
     },
-    recursion::core::runtime::{HASH_RATE, PERMUTATION_WIDTH},
+    recursion::runtime::{HASH_RATE, PERMUTATION_WIDTH},
 };
 use core::fmt::Debug;
 use p3_challenger::DuplexChallenger;
@@ -13,10 +13,7 @@ use p3_symmetric::CryptographicPermutation;
 use pico_derive::AlignedBorrow;
 use serde::{Deserialize, Serialize};
 use static_assertions::const_assert_eq;
-use std::{
-    borrow::BorrowMut,
-    mem::{size_of, transmute},
-};
+use std::{borrow::BorrowMut, mem::transmute};
 
 pub const CHALLENGER_STATE_NUM_ELTS: usize = 50;
 

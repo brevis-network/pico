@@ -8,7 +8,7 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
     },
     primitives::consts::EXTENSION_DEGREE,
-    recursion::core::{
+    recursion::{
         exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip, multi::MultiChip,
         poseidon2_wide::Poseidon2WideChip, range_check::RangeCheckChip, runtime::RecursionRecord,
     },

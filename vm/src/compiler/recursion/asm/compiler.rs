@@ -7,7 +7,7 @@ use crate::{
         prelude::TracedVec,
         program::RecursionProgram,
     },
-    recursion::core::runtime::{HEAP_PTR, HEAP_START_ADDRESS},
+    recursion::runtime::{HEAP_PTR, HEAP_START_ADDRESS},
 };
 use alloc::{collections::BTreeMap, vec};
 use backtrace::Backtrace;

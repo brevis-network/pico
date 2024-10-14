@@ -6,7 +6,7 @@ use crate::{
         chip::ChipBehavior,
         lookup::{LookupType, SymbolicLookup},
     },
-    recursion::core::{
+    recursion::{
         air::Block,
         runtime::RecursionRecord,
         stark::utils::{next_power_of_two, par_for_each_row},

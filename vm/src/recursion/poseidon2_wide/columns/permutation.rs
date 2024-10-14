@@ -2,7 +2,7 @@ use std::{borrow::BorrowMut, mem::size_of};
 
 use pico_derive::AlignedBorrow;
 
-use crate::recursion::core::poseidon2_wide::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
+use crate::recursion::poseidon2_wide::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 
 use super::{POSEIDON2_DEGREE3_COL_MAP, POSEIDON2_DEGREE9_COL_MAP};
 

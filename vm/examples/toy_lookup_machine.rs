@@ -3,7 +3,7 @@ use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
-    chips::chips::examples::lookup_toy::{AddLookedChip, AddLookingChip},
+    chips::chips::toys::lookup_toy::{AddLookedChip, AddLookingChip},
     compiler::riscv::program::Program,
     configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::riscv::record::EmulationRecord,

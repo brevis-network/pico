@@ -1,10 +1,9 @@
+use super::{Array, Builder, Config, DslIr, Ext, Felt, Usize, Var};
 use crate::{
     primitives::consts::DIGEST_SIZE,
-    recursion::core::runtime::{HASH_RATE, PERMUTATION_WIDTH},
+    recursion::runtime::{HASH_RATE, PERMUTATION_WIDTH},
 };
 use p3_field::AbstractField;
-
-use super::{Array, Builder, Config, DslIr, Ext, Felt, Usize, Var};
 
 impl<C: Config> Builder<C> {
     /// Applies the Poseidon2 permutation to the given array.

@@ -5,7 +5,7 @@ use crate::{
         Variable,
     },
     primitives::consts::DIGEST_SIZE,
-    recursion::core::runtime::{HASH_RATE, PERMUTATION_WIDTH},
+    recursion::runtime::{HASH_RATE, PERMUTATION_WIDTH},
 };
 use p3_field::AbstractField;
 

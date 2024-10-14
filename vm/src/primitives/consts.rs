@@ -2,11 +2,13 @@
 /*
 For word and bytes
  */
-use crate::{
-    compiler::word::Word, emulator::riscv::public_values::PublicValues,
-    recursion::core::air::RecursionPublicValues,
-};
+use crate::{compiler::word::Word, emulator::riscv::public_values::PublicValues};
 use std::mem::size_of;
+// todo: further cleanup since these might be repetitive
+/*
+For word and bytes
+ */
+use crate::recursion::air::RecursionPublicValues;
 
 /// The size of a byte in bits.
 pub const BYTE_SIZE: usize = 8;

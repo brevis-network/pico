@@ -1,7 +1,7 @@
 use crate::{
     compiler::recursion::opcode::Opcode,
     machine::builder::{ChipBaseBuilder, ChipBuilder, RecursionLookupBuilder},
-    recursion::core::poseidon2_wide::{
+    recursion::poseidon2_wide::{
         columns::{control_flow::ControlFlow, syscall_params::SyscallParams},
         Poseidon2WideChip,
     },

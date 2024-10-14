@@ -15,7 +15,7 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 
 use self::columns::{RangeCheckPreprocessedCols, NUM_RANGE_CHECK_PREPROCESSED_COLS};
-use crate::recursion::core::range_check::trace::NUM_ROWS;
+use crate::recursion::range_check::trace::NUM_ROWS;
 
 /// The number of different range check operations.
 pub const NUM_RANGE_CHECK_OPS: usize = 2;

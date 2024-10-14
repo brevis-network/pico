@@ -4,7 +4,7 @@ mod columns;
 use p3_field::PrimeField32;
 use std::marker::PhantomData;
 
-use crate::recursion::core::air::Block;
+use crate::recursion::air::Block;
 pub use air::compute_addr_diff;
 pub use columns::*;
 

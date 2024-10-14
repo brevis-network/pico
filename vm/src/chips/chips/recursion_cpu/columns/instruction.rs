@@ -1,4 +1,4 @@
-use crate::{compiler::recursion::instruction::Instruction, recursion::core::air::Block};
+use crate::{compiler::recursion::instruction::Instruction, recursion::air::Block};
 use p3_field::PrimeField;
 use pico_derive::AlignedBorrow;
 use std::{iter::once, vec::IntoIter};

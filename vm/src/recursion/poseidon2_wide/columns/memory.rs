@@ -1,6 +1,5 @@
 use crate::{
-    chips::chips::recursion_memory::MemoryReadWriteSingleCols,
-    recursion::core::poseidon2_wide::WIDTH,
+    chips::chips::recursion_memory::MemoryReadWriteSingleCols, recursion::poseidon2_wide::WIDTH,
 };
 use pico_derive::AlignedBorrow;
 

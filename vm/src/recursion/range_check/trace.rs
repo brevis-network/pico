@@ -8,9 +8,7 @@ use super::{
     columns::{RangeCheckMultCols, NUM_RANGE_CHECK_MULT_COLS, NUM_RANGE_CHECK_PREPROCESSED_COLS},
     RangeCheckChip,
 };
-use crate::{
-    compiler::recursion::program::RecursionProgram, recursion::core::runtime::RecursionRecord,
-};
+use crate::{compiler::recursion::program::RecursionProgram, recursion::runtime::RecursionRecord};
 
 pub const NUM_ROWS: usize = 1 << 16;
 

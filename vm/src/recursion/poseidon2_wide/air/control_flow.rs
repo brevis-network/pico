@@ -1,7 +1,7 @@
 use crate::{
     chips::gadgets::is_zero::IsZeroGadget,
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipRangeBuilder},
-    recursion::core::{
+    recursion::{
         poseidon2_wide::{
             columns::{
                 control_flow::ControlFlow, opcode_workspace::OpcodeWorkspace,

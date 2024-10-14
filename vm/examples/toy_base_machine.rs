@@ -3,7 +3,7 @@ use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
-    chips::chips::examples::toy::ToyChip,
+    chips::chips::toys::toy::ToyChip,
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,

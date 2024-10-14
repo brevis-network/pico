@@ -1,4 +1,4 @@
-use crate::recursion::core::air::RecursionPublicValues;
+use crate::recursion::air::RecursionPublicValues;
 
 use super::{
     Array, CircuitV2FriFoldInput, CircuitV2FriFoldOutput, Config, Ext, Felt, FriFoldInput,

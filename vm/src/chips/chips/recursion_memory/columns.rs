@@ -1,7 +1,7 @@
 use p3_field::PrimeField32;
 use pico_derive::AlignedBorrow;
 
-use crate::recursion::core::air::Block;
+use crate::recursion::air::Block;
 
 #[derive(AlignedBorrow, Default, Debug, Clone)]
 #[repr(C)]

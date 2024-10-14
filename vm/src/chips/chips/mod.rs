@@ -1,6 +1,5 @@
 pub mod alu;
 pub mod byte;
-pub mod examples;
 pub mod memory_program;
 pub mod recursion_cpu;
 pub mod recursion_memory;
@@ -8,3 +7,4 @@ pub mod recursion_program;
 pub mod riscv_cpu;
 pub mod riscv_memory;
 pub mod riscv_program;
+pub mod toys;

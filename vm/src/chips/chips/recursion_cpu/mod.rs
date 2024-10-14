@@ -4,9 +4,9 @@ mod trace;
 
 use crate::{
     chips::chips::recursion_memory::MemoryRecord, compiler::recursion::instruction::Instruction,
-    recursion::core::air::Block,
 };
 
+use crate::recursion::air::Block;
 pub use columns::*;
 
 #[derive(Debug, Clone)]

@@ -1,6 +1,6 @@
 use crate::{
     compiler::recursion::{instruction::Instruction, opcode::Opcode},
-    recursion::core::runtime::instruction_is_heap_expand,
+    recursion::runtime::instruction_is_heap_expand,
 };
 use p3_field::PrimeField32;
 use p3_util::indices_arr;

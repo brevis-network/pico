@@ -4,7 +4,7 @@ use crate::{
     chips::chips::recursion_memory::MemoryCols,
     machine::builder::ChipBuilder,
     primitives::RC_16_30_U32,
-    recursion::core::poseidon2_wide::{
+    recursion::poseidon2_wide::{
         columns::{
             control_flow::ControlFlow, memory::Memory, opcode_workspace::OpcodeWorkspace,
             permutation::Permutation,

@@ -1,4 +1,4 @@
-use crate::recursion::core::runtime::NUM_BITS;
+use crate::recursion::runtime::NUM_BITS;
 use p3_field::{AbstractField, Field};
 
 use super::{Array, Builder, Config, DslIr, Felt, Usize, Var};

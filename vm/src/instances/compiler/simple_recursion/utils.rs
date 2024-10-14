@@ -23,8 +23,8 @@ use crate::{
         keys::BaseVerifyingKey,
         machine::MachineBehavior,
     },
-    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
-    recursion::core::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
+    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
+    recursion::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
 };
 
 /// Assertions on the public values describing a complete recursive proof state.

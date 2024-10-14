@@ -13,7 +13,7 @@ use crate::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
     },
-    recursion::core::air::Block,
+    recursion::air::Block,
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;

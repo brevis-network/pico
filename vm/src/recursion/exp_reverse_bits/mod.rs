@@ -9,7 +9,7 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder, RecursionLookupBuilder, RecursionMemoryBuilder},
         chip::ChipBehavior,
     },
-    recursion::core::{
+    recursion::{
         air::{Block, IsZeroOperation},
         runtime::RecursionRecord,
         stark::utils::{next_power_of_two, par_for_each_row},

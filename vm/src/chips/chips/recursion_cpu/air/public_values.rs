@@ -1,7 +1,7 @@
 use super::super::{CpuChip, CpuCols};
 use crate::{
     chips::chips::recursion_memory::MemoryCols, machine::builder::ChipBuilder,
-    primitives::consts::DIGEST_SIZE, recursion::core::air::BlockBuilder,
+    primitives::consts::DIGEST_SIZE, recursion::air::BlockBuilder,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

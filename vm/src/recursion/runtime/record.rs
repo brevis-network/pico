@@ -1,9 +1,9 @@
-use super::RecursionProgram;
 use crate::{
     chips::chips::recursion_cpu::CpuEvent,
+    compiler::recursion::program::RecursionProgram,
     emulator::record::RecordBehavior,
     primitives::consts::MAX_NUM_PVS,
-    recursion::core::{
+    recursion::{
         air::Block,
         exp_reverse_bits::ExpReverseBitsLenEvent,
         fri_fold::FriFoldEvent,

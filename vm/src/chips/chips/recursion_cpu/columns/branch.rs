@@ -1,4 +1,4 @@
-use crate::{machine::extension::BinomialExtension, recursion::core::air::IsExtZeroOperation};
+use crate::{machine::extension::BinomialExtension, recursion::air::IsExtZeroOperation};
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 

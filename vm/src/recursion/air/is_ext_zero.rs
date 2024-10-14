@@ -5,9 +5,9 @@
 //! The idea is that 1 - input * inverse is exactly the boolean value indicating whether the input
 //! is 0.
 use crate::{
-    machine::{builder::ChipBuilder, builder_orig::PicoAirBuilder, extension::BinomialExtension},
+    machine::{builder_orig::PicoAirBuilder, extension::BinomialExtension},
     primitives::consts::EXTENSION_DEGREE,
-    recursion::core::air::{extension::BinomialExtensionUtils, Block},
+    recursion::air::{extension::BinomialExtensionUtils, Block},
 };
 use p3_air::AirBuilder;
 use p3_field::{

@@ -9,7 +9,7 @@ use crate::{
     compiler::recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
     emulator::riscv::events::MemoryAccessPosition,
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
-    recursion::core::{
+    recursion::{
         air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
         exp_reverse_bits::ExpReverseBitsLenEvent,
         fri_fold::FriFoldEvent,

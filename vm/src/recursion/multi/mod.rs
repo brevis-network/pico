@@ -12,7 +12,7 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder},
         chip::ChipBehavior,
     },
-    recursion::core::{
+    recursion::{
         air::MultiBuilder,
         fri_fold::{FriFoldChip, FriFoldCols},
         poseidon2_wide::{columns::Poseidon2, Poseidon2WideChip, WIDTH},
