@@ -12,6 +12,7 @@ use crate::{
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        machine::MachineBehavior,
     },
     recursion::air::Block,
 };
@@ -50,12 +51,16 @@ where
     fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
         let mut stream = Vec::new();
 
-        let vk_hint = VerifyingKeyHint::<'a, BabyBearPoseidon2, _>::new(self.machine, self.vk);
+        let vk_hint = VerifyingKeyHint::<'a, BabyBearPoseidon2, _>::new(
+            self.machine.chips(),
+            self.machine.preprocessed_chip_ids(),
+            self.vk,
+        );
 
         let proof_hints = self
             .base_proofs
             .iter()
-            .map(|proof| BaseProofHint::<BabyBearPoseidon2, A>::new(self.machine, proof))
+            .map(|proof| BaseProofHint::<BabyBearPoseidon2, A>::new(self.machine.chips(), proof))
             .collect::<Vec<_>>();
 
         stream.extend(vk_hint.write());

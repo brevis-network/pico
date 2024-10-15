@@ -19,7 +19,7 @@ use crate::{
     configs::config::{Com, StarkGenericConfig},
     instances::machine::simple_machine::SimpleMachine,
     machine::{
-        chip::ChipBehavior,
+        chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         generic_folder::GenericVerifierConstraintFolder,
         keys::BaseVerifyingKey,
@@ -32,54 +32,64 @@ use crate::{
 
 pub const EMPTY: usize = 0x_1111_1111;
 
+// TODO-Alan: refactor to make it more general
 #[derive(Debug, Clone, Copy)]
-pub struct StarkVerifier<C: Config, SC: StarkGenericConfig> {
-    _phantom: std::marker::PhantomData<(C, SC)>,
+pub struct StarkVerifier<CF: Config, SC: StarkGenericConfig> {
+    _phantom: std::marker::PhantomData<(CF, SC)>,
 }
 
-pub struct BaseProofHint<'a, SC, A>
+pub struct BaseProofHint<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<SC::Val>
+    C: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub machine: &'a SimpleMachine<SC, A>,
+    pub chips: &'a [MetaChip<SC::Val, C>],
     pub proof: &'a BaseProof<SC>,
 }
 
-impl<'a, SC, A> BaseProofHint<'a, SC, A>
+impl<'a, SC, C> BaseProofHint<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<SC::Val>
+    C: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub const fn new(machine: &'a SimpleMachine<SC, A>, proof: &'a BaseProof<SC>) -> Self {
-        Self { machine, proof }
+    pub const fn new(chips: &'a [MetaChip<SC::Val, C>], proof: &'a BaseProof<SC>) -> Self {
+        Self { chips, proof }
     }
 }
 
-pub struct VerifyingKeyHint<'a, SC, A>
+pub struct VerifyingKeyHint<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<SC::Val>
+    C: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub machine: &'a SimpleMachine<SC, A>,
+    pub chips: &'a [MetaChip<SC::Val, C>],
+    pub preprocessed_chip_ids: Vec<usize>,
     pub vk: &'a BaseVerifyingKey<SC>,
 }
 
-impl<'a, SC, A> VerifyingKeyHint<'a, SC, A>
+impl<'a, SC, C> VerifyingKeyHint<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<SC::Val>
+    C: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub const fn new(machine: &'a SimpleMachine<SC, A>, vk: &'a BaseVerifyingKey<SC>) -> Self {
-        Self { machine, vk }
+    pub const fn new(
+        chips: &'a [MetaChip<SC::Val, C>],
+        preprocessed_chip_ids: Vec<usize>,
+        vk: &'a BaseVerifyingKey<SC>,
+    ) -> Self {
+        Self {
+            chips,
+            preprocessed_chip_ids,
+            vk,
+        }
     }
 }
 
@@ -92,30 +102,31 @@ pub type RecursiveVerifierConstraintFolder<'a, C> = GenericVerifierConstraintFol
     SymbolicExt<<C as Config>::F, <C as Config>::EF>,
 >;
 
-impl<C: Config, SC: StarkGenericConfig> StarkVerifier<C, SC>
+impl<CF: Config, SC: StarkGenericConfig> StarkVerifier<CF, SC>
 where
-    C::F: TwoAdicField,
+    CF::F: TwoAdicField,
     SC: StarkGenericConfig<
-        Val = C::F,
-        Challenge = C::EF,
-        Domain = TwoAdicMultiplicativeCoset<C::F>,
+        Val = CF::F,
+        Challenge = CF::EF,
+        Domain = TwoAdicMultiplicativeCoset<CF::F>,
     >,
 {
     pub fn verify_chunk<A>(
-        builder: &mut Builder<C>,
-        vk: &VerifyingKeyVariable<C>,
-        pcs: &TwoAdicFriPcsVariable<C>,
-        machine: &SimpleMachine<SC, A>,
-        challenger: &mut DuplexChallengerVariable<C>,
-        proof: &BaseProofVariable<C>,
+        builder: &mut Builder<CF>,
+        vk: &VerifyingKeyVariable<CF>,
+        pcs: &TwoAdicFriPcsVariable<CF>,
+        chips: &[MetaChip<CF::F, A>],
+        preprocessed_chip_ids: &[usize],
+        challenger: &mut DuplexChallengerVariable<CF>,
+        proof: &BaseProofVariable<CF>,
         check_cumulative_sum: bool,
     ) where
-        A: ChipBehavior<C::F>
+        A: ChipBehavior<CF::F>
             + for<'a> Air<ProverConstraintFolder<'a, SC>>
             + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-            + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
-        C::F: TwoAdicField,
-        C::EF: TwoAdicField,
+            + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CF>>,
+        CF::F: TwoAdicField,
+        CF::EF: TwoAdicField,
         Com<SC>: Into<[SC::Val; DIGEST_SIZE]>,
     {
         builder.cycle_tracker("stage-c-verify-chunk-setup");
@@ -150,14 +161,14 @@ where
         let mut quotient_domains =
             builder.dyn_array::<TwoAdicMultiplicativeCosetVariable<_>>(num_chunk_chips);
 
-        let num_preprocessed_chips = machine.preprocessed_chip_ids().len();
+        let num_preprocessed_chips = preprocessed_chip_ids.len();
 
         let mut prep_mats: Array<_, TwoAdicPcsMatsVariable<_>> =
             builder.dyn_array(num_preprocessed_chips);
         let mut main_mats: Array<_, TwoAdicPcsMatsVariable<_>> = builder.dyn_array(num_chunk_chips);
         let mut perm_mats: Array<_, TwoAdicPcsMatsVariable<_>> = builder.dyn_array(num_chunk_chips);
 
-        let num_quotient_mats: Var<_> = builder.eval(C::N::zero());
+        let num_quotient_mats: Var<_> = builder.eval(CF::N::zero());
         builder.range(0, num_chunk_chips).for_each(|i, builder| {
             let num_quotient_chunks = builder.get(&proof.quotient_data, i).quotient_size;
             builder.assign(num_quotient_mats, num_quotient_mats + num_quotient_chunks);
@@ -170,7 +181,7 @@ where
         builder.set_value(&mut qc_points, 0, zeta);
 
         // Iterate through machine.chips filtered for preprocessed chips.
-        for (preprocessed_id, chip_id) in machine.preprocessed_chip_ids().into_iter().enumerate() {
+        for (preprocessed_id, &chip_id) in preprocessed_chip_ids.into_iter().enumerate() {
             // Get index within sorted preprocessed chips.
             let preprocessed_sorted_id = builder.get(&vk.preprocessed_sorted_idxs, preprocessed_id);
             // Get domain from witnessed domains. Array is ordered by machine.chips ordering.
@@ -187,10 +198,10 @@ where
             builder.set_value(&mut trace_points, 0, zeta);
             builder.set_value(&mut trace_points, 1, zeta_next);
 
-            let mut prep_values = builder.dyn_array::<Array<C, _>>(2);
+            let mut prep_values = builder.dyn_array::<Array<CF, _>>(2);
             builder.set_value(&mut prep_values, 0, opening.preprocessed_local);
             builder.set_value(&mut prep_values, 1, opening.preprocessed_next);
-            let main_mat = TwoAdicPcsMatsVariable::<C> {
+            let main_mat = TwoAdicPcsMatsVariable::<CF> {
                 domain: domain.clone(),
                 values: prep_values,
                 points: trace_points.clone(),
@@ -198,7 +209,7 @@ where
             builder.set_value(&mut prep_mats, preprocessed_sorted_id, main_mat);
         }
 
-        let qc_index: Var<_> = builder.eval(C::N::zero());
+        let qc_index: Var<_> = builder.eval(CF::N::zero());
         builder.range(0, num_chunk_chips).for_each(|i, builder| {
             let opening = builder.get(&opened_values.chips, i);
             let QuotientData {
@@ -222,10 +233,10 @@ where
             builder.set_value(&mut trace_points, 1, zeta_next);
 
             // Get the main matrix.
-            let mut main_values = builder.dyn_array::<Array<C, _>>(2);
+            let mut main_values = builder.dyn_array::<Array<CF, _>>(2);
             builder.set_value(&mut main_values, 0, opening.main_local);
             builder.set_value(&mut main_values, 1, opening.main_next);
-            let main_mat = TwoAdicPcsMatsVariable::<C> {
+            let main_mat = TwoAdicPcsMatsVariable::<CF> {
                 domain: domain.clone(),
                 values: main_values,
                 points: trace_points.clone(),
@@ -233,10 +244,10 @@ where
             builder.set_value(&mut main_mats, i, main_mat);
 
             // Get the permutation matrix.
-            let mut perm_values = builder.dyn_array::<Array<C, _>>(2);
+            let mut perm_values = builder.dyn_array::<Array<CF, _>>(2);
             builder.set_value(&mut perm_values, 0, opening.permutation_local);
             builder.set_value(&mut perm_values, 1, opening.permutation_next);
-            let perm_mat = TwoAdicPcsMatsVariable::<C> {
+            let perm_mat = TwoAdicPcsMatsVariable::<CF> {
                 domain: domain.clone(),
                 values: perm_values,
                 points: trace_points,
@@ -250,15 +261,15 @@ where
             builder.range(0, qc_domains.len()).for_each(|j, builder| {
                 let qc_dom = builder.get(&qc_domains, j);
                 let qc_vals_array = builder.get(&opening.quotient, j);
-                let mut qc_values = builder.dyn_array::<Array<C, _>>(1);
+                let mut qc_values = builder.dyn_array::<Array<CF, _>>(1);
                 builder.set_value(&mut qc_values, 0, qc_vals_array);
-                let qc_mat = TwoAdicPcsMatsVariable::<C> {
+                let qc_mat = TwoAdicPcsMatsVariable::<CF> {
                     domain: qc_dom,
                     values: qc_values,
                     points: qc_points.clone(),
                 };
                 builder.set_value(&mut quotient_mats, qc_index, qc_mat);
-                builder.assign(qc_index, qc_index + C::N::one());
+                builder.assign(qc_index, qc_index + CF::N::one());
             });
         });
 
@@ -294,17 +305,17 @@ where
 
         builder.cycle_tracker("stage-e-verify-constraints");
 
-        let num_chunk_chips_enabled: Var<_> = builder.eval(C::N::zero());
-        for (i, chip) in machine.chips().iter().enumerate() {
+        let num_chunk_chips_enabled: Var<_> = builder.eval(CF::N::zero());
+        for (i, chip) in chips.iter().enumerate() {
             tracing::debug!("verifying constraints for chip: {}", chip.name());
             let index = builder.get(&proof.sorted_idxs, i);
 
             if chip.preprocessed_width() > 0 {
-                builder.assert_var_ne(index, C::N::from_canonical_usize(EMPTY));
+                builder.assert_var_ne(index, CF::N::from_canonical_usize(EMPTY));
             }
 
             builder
-                .if_ne(index, C::N::from_canonical_usize(EMPTY))
+                .if_ne(index, CF::N::from_canonical_usize(EMPTY))
                 .then(|builder| {
                     let values = builder.get(&opened_values.chips, index);
                     let trace_domain = builder.get(&trace_domains, index);
@@ -344,7 +355,7 @@ where
                     // Increment the number of chunk chips that are enabled.
                     builder.assign(
                         num_chunk_chips_enabled,
-                        num_chunk_chips_enabled + C::N::one(),
+                        num_chunk_chips_enabled + CF::N::one(),
                     );
                 });
         }
@@ -355,14 +366,14 @@ where
 
         // If we're checking the cumulative sum, assert that the sum of the cumulative sums is zero.
         if check_cumulative_sum {
-            let sum: Ext<_, _> = builder.eval(C::EF::zero().cons());
+            let sum: Ext<_, _> = builder.eval(CF::EF::zero().cons());
             builder
                 .range(0, proof.opened_values.chips.len())
                 .for_each(|i, builder| {
                     let cumulative_sum = builder.get(&proof.opened_values.chips, i).cumulative_sum;
                     builder.assign(sum, sum + cumulative_sum);
                 });
-            builder.assert_ext_eq(sum, C::EF::zero().cons());
+            builder.assert_ext_eq(sum, CF::EF::zero().cons());
         }
 
         builder.cycle_tracker("stage-e-verify-constraints");

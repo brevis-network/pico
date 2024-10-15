@@ -1,4 +1,13 @@
-use crate::configs::config::{PackedChallenge, PackedVal, StarkGenericConfig};
+use crate::{
+    configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
+    machine::{
+        chip::{ChipBehavior, MetaChip},
+        folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
+        keys::BaseVerifyingKey,
+        lookup::VirtualPairLookup,
+        proof::BaseProof,
+    },
+};
 use core::iter;
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -10,12 +19,6 @@ use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use std::any::type_name;
-
-use crate::machine::{
-    chip::{ChipBehavior, MetaChip},
-    folder::{ProverConstraintFolder, SymbolicConstraintFolder},
-    lookup::VirtualPairLookup,
-};
 
 pub fn type_name_of<T>(_: &T) -> String {
     type_name::<T>().to_string()

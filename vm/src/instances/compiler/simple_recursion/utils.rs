@@ -94,7 +94,8 @@ where
     }
     let pc_start: Felt<_> = builder.eval(vk.pc_start);
 
-    let (prep_sorted_indices_val, prep_domains_val) = get_preprocessed_data(machine, vk);
+    let (prep_sorted_indices_val, prep_domains_val) =
+        get_preprocessed_data(machine.chips(), &machine.preprocessed_chip_ids(), vk);
 
     let mut prep_sorted_indices = builder.dyn_array::<Var<_>>(prep_sorted_indices_val.len());
     let mut prep_domains =

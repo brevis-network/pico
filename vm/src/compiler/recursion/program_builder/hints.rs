@@ -27,6 +27,7 @@ use crate::{
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        machine::MachineBehavior,
         proof::{BaseCommitments, BaseOpenedValues, ChipOpenedValues},
     },
     primitives::consts::PV_DIGEST_NUM_WORDS,
@@ -467,7 +468,8 @@ where
     }
 
     fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
-        let (preprocessed_sorted_idxs, prep_domains) = get_preprocessed_data(self.machine, self.vk);
+        let (preprocessed_sorted_idxs, prep_domains) =
+            get_preprocessed_data(self.chips, &self.preprocessed_chip_ids, self.vk);
 
         let mut stream = Vec::new();
         let h: InnerDigest = self.vk.commit.into();
@@ -507,8 +509,8 @@ where
     }
 
     fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
-        let quotient_data = get_chip_quotient_data(self.machine, self.proof);
-        let sorted_indices = get_sorted_indices(self.machine, self.proof);
+        let quotient_data = get_chip_quotient_data(self.chips, self.proof);
+        let sorted_indices = get_sorted_indices(self.chips, self.proof);
 
         [
             self.proof.commitments.write(),

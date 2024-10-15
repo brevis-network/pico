@@ -12,7 +12,7 @@ use crate::{
     configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
     instances::machine::simple_machine::SimpleMachine,
     machine::{
-        chip::ChipBehavior,
+        chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
         machine::MachineBehavior,
@@ -213,19 +213,15 @@ pub fn hash_vkey<C: Config>(
     builder.poseidon2_hash(&inputs)
 }
 
-// TODO-Alan: generalize these 3 functions
-pub(crate) fn get_sorted_indices<SC, A>(
-    machine: &SimpleMachine<SC, A>,
+pub(crate) fn get_sorted_indices<SC, C>(
+    chips: &[MetaChip<SC::Val, C>],
     proof: &BaseProof<SC>,
 ) -> Vec<usize>
 where
     SC: StarkGenericConfig,
-    A: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<SC::Val>,
 {
-    machine
-        .chips()
+    chips
         .iter()
         .map(|chip| proof.main_chip_ordering.get(&chip.name()).copied())
         .into_iter()
@@ -234,7 +230,8 @@ where
 }
 
 pub(crate) fn get_preprocessed_data<SC, A>(
-    machine: &SimpleMachine<SC, A>,
+    chips: &[MetaChip<SC::Val, A>],
+    preprocessed_chip_ids: &[usize],
     vk: &BaseVerifyingKey<SC>,
 ) -> (Vec<usize>, Vec<SC::Domain>)
 where
@@ -243,11 +240,9 @@ where
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    let chips = machine.chips();
-    let (prep_sorted_indices, prep_domains) = machine
-        .preprocessed_chip_ids()
+    let (prep_sorted_indices, prep_domains) = preprocessed_chip_ids
         .into_iter()
-        .map(|chip_idx| {
+        .map(|&chip_idx| {
             let name = chips[chip_idx].name().clone();
             let prep_sorted_idx = vk.preprocessed_chip_ordering[&name];
             (prep_sorted_idx, vk.preprocessed_info[prep_sorted_idx].1)
@@ -257,7 +252,7 @@ where
 }
 
 pub(crate) fn get_chip_quotient_data<SC, C>(
-    machine: &SimpleMachine<SC, C>,
+    chips: &[MetaChip<SC::Val, C>],
     proof: &BaseProof<SC>,
 ) -> Vec<QuotientDataValues>
 where
@@ -266,7 +261,7 @@ where
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    order_chips::<SC, C>(machine.chips(), proof.main_chip_ordering.clone())
+    order_chips::<SC, C>(chips, proof.main_chip_ordering.clone())
         .into_iter()
         .map(|chip| {
             let log_quotient_degree = chip.get_log_quotient_degree();
