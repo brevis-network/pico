@@ -1,10 +1,10 @@
+use super::super::{
+    columns::{control_flow::ControlFlow, syscall_params::SyscallParams},
+    Poseidon2WideChip,
+};
 use crate::{
     compiler::recursion::opcode::Opcode,
     machine::builder::{ChipBaseBuilder, ChipBuilder, RecursionLookupBuilder},
-    recursion::poseidon2_wide::{
-        columns::{control_flow::ControlFlow, syscall_params::SyscallParams},
-        Poseidon2WideChip,
-    },
 };
 use p3_air::AirBuilder;
 use p3_field::Field;

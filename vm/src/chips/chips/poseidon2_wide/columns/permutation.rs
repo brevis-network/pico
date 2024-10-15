@@ -1,10 +1,9 @@
-use std::{borrow::BorrowMut, mem::size_of};
-
+use super::{
+    super::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
+    POSEIDON2_DEGREE3_COL_MAP, POSEIDON2_DEGREE9_COL_MAP,
+};
 use pico_derive::AlignedBorrow;
-
-use crate::recursion::poseidon2_wide::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
-
-use super::{POSEIDON2_DEGREE3_COL_MAP, POSEIDON2_DEGREE9_COL_MAP};
+use std::{borrow::BorrowMut, mem::size_of};
 
 /// Trait that describes getter functions for the permutation columns.
 pub trait Permutation<T: Copy> {

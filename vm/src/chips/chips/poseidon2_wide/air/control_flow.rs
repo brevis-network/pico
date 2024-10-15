@@ -1,16 +1,14 @@
+use super::super::{
+    columns::{
+        control_flow::ControlFlow, opcode_workspace::OpcodeWorkspace,
+        syscall_params::SyscallParams, Poseidon2,
+    },
+    Poseidon2WideChip, RATE,
+};
 use crate::{
     chips::gadgets::is_zero::IsZeroGadget,
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipRangeBuilder},
-    recursion::{
-        poseidon2_wide::{
-            columns::{
-                control_flow::ControlFlow, opcode_workspace::OpcodeWorkspace,
-                syscall_params::SyscallParams, Poseidon2,
-            },
-            Poseidon2WideChip, RATE,
-        },
-        range_check::RangeCheckOpcode,
-    },
+    recursion::range_check::RangeCheckOpcode,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

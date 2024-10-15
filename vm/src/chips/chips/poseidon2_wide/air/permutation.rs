@@ -1,19 +1,17 @@
-use std::array;
-
-use crate::{
-    chips::chips::recursion_memory::MemoryCols,
-    machine::builder::ChipBuilder,
-    primitives::RC_16_30_U32,
-    recursion::poseidon2_wide::{
-        columns::{
-            control_flow::ControlFlow, memory::Memory, opcode_workspace::OpcodeWorkspace,
-            permutation::Permutation,
-        },
-        external_linear_layer, internal_linear_layer, Poseidon2WideChip, NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS, WIDTH,
+use super::super::{
+    columns::{
+        control_flow::ControlFlow, memory::Memory, opcode_workspace::OpcodeWorkspace,
+        permutation::Permutation,
     },
+    external_linear_layer, internal_linear_layer, Poseidon2WideChip, NUM_EXTERNAL_ROUNDS,
+    NUM_INTERNAL_ROUNDS, WIDTH,
+};
+use crate::{
+    chips::chips::recursion_memory::MemoryCols, machine::builder::ChipBuilder,
+    primitives::RC_16_30_U32,
 };
 use p3_field::{AbstractField, Field};
+use std::array;
 
 impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
     pub(crate) fn eval_perm<AB: ChipBuilder<F>>(

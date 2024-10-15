@@ -3,20 +3,20 @@ mod utils;
 
 use crate::{
     chips::chips::{
-        recursion_cpu::CpuEvent,
-        recursion_memory::{compute_addr_diff, MemoryRecord},
-    },
-    compiler::recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
-    emulator::riscv::events::MemoryAccessPosition,
-    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
-    recursion::{
-        air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
-        exp_reverse_bits::ExpReverseBitsLenEvent,
         fri_fold::FriFoldEvent,
         poseidon2_wide::events::{
             Poseidon2AbsorbEvent, Poseidon2CompressEvent, Poseidon2FinalizeEvent,
             Poseidon2HashEvent,
         },
+        recursion_cpu::CpuEvent,
+        recursion_memory::{compute_addr_diff, MemoryRecord},
+    },
+    compiler::recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
+    emulator::riscv::events::MemoryAccessPosition,
+    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
+    recursion::{
+        air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
+        exp_reverse_bits::ExpReverseBitsLenEvent,
         range_check::{RangeCheckEvent, RangeCheckOpcode},
     },
 };
@@ -27,7 +27,6 @@ use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{CryptographicPermutation, Permutation};
 pub use record::*;
 use std::{array, collections::VecDeque, fmt, marker::PhantomData, sync::Arc};
-use tracing::info;
 pub use utils::*;
 
 /// The heap pointer address.

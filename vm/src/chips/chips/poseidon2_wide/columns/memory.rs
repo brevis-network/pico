@@ -1,6 +1,5 @@
-use crate::{
-    chips::chips::recursion_memory::MemoryReadWriteSingleCols, recursion::poseidon2_wide::WIDTH,
-};
+use super::super::WIDTH;
+use crate::chips::chips::recursion_memory::MemoryReadWriteSingleCols;
 use pico_derive::AlignedBorrow;
 
 /// This struct is the columns for the WIDTH/2 sequential memory slots.

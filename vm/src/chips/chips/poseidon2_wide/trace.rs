@@ -1,18 +1,16 @@
-use std::borrow::Borrow;
-
 use super::{
-    events::{Poseidon2AbsorbEvent, Poseidon2CompressEvent, Poseidon2FinalizeEvent},
-    internal_linear_layer, Poseidon2WideChip, NUM_INTERNAL_ROUNDS, RATE,
+    columns::permutation::permutation_mut,
+    events::{
+        Poseidon2AbsorbEvent, Poseidon2CompressEvent, Poseidon2FinalizeEvent, Poseidon2HashEvent,
+    },
+    external_linear_layer, internal_linear_layer, Poseidon2WideChip, NUM_EXTERNAL_ROUNDS,
+    NUM_INTERNAL_ROUNDS, RATE, WIDTH,
 };
 use crate::{
     compiler::recursion::program::RecursionProgram,
     machine::chip::ChipBehavior,
     primitives::RC_16_30_U32,
     recursion::{
-        poseidon2_wide::{
-            columns::permutation::permutation_mut, events::Poseidon2HashEvent,
-            external_linear_layer, NUM_EXTERNAL_ROUNDS, WIDTH,
-        },
         range_check::{RangeCheckEvent, RangeCheckOpcode},
         runtime::RecursionRecord,
         stark::utils::{next_power_of_two, par_for_each_row},
@@ -22,6 +20,7 @@ use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
+use std::borrow::Borrow;
 use tracing::instrument;
 
 impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for Poseidon2WideChip<DEGREE, F> {

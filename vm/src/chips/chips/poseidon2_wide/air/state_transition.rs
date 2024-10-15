@@ -1,14 +1,14 @@
+use super::super::{
+    columns::{
+        control_flow::ControlFlow, memory::Memory, opcode_workspace::OpcodeWorkspace,
+        permutation::Permutation,
+    },
+    Poseidon2WideChip, WIDTH,
+};
 use crate::{
     chips::chips::recursion_memory::MemoryCols,
     machine::builder::{ChipBaseBuilder, ChipBuilder},
     primitives::consts::DIGEST_SIZE,
-    recursion::poseidon2_wide::{
-        columns::{
-            control_flow::ControlFlow, memory::Memory, opcode_workspace::OpcodeWorkspace,
-            permutation::Permutation,
-        },
-        Poseidon2WideChip, WIDTH,
-    },
 };
 use p3_air::AirBuilder;
 use p3_field::Field;

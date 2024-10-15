@@ -1,3 +1,18 @@
+use super::fri_fold::{FriFoldChip, FriFoldCols};
+use crate::{
+    chips::chips::poseidon2_wide::{columns::Poseidon2, Poseidon2WideChip, WIDTH},
+    compiler::recursion::program::RecursionProgram,
+    machine::{
+        builder::{ChipBaseBuilder, ChipBuilder},
+        chip::ChipBehavior,
+    },
+    recursion::{air::MultiBuilder, runtime::RecursionRecord, stark::utils::pad_rows_fixed},
+};
+use itertools::Itertools;
+use p3_air::{Air, AirBuilder, BaseAir};
+use p3_field::{AbstractField, Field, PrimeField32};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use pico_derive::AlignedBorrow;
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
@@ -5,26 +20,6 @@ use std::{
     marker::PhantomData,
     ops::Deref,
 };
-
-use crate::{
-    compiler::recursion::program::RecursionProgram,
-    machine::{
-        builder::{ChipBaseBuilder, ChipBuilder},
-        chip::ChipBehavior,
-    },
-    recursion::{
-        air::MultiBuilder,
-        fri_fold::{FriFoldChip, FriFoldCols},
-        poseidon2_wide::{columns::Poseidon2, Poseidon2WideChip, WIDTH},
-        runtime::RecursionRecord,
-        stark::utils::pad_rows_fixed,
-    },
-};
-use itertools::Itertools;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use pico_derive::AlignedBorrow;
 
 pub const NUM_MULTI_COLS: usize = core::mem::size_of::<MultiCols<u8>>();
 

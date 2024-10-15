@@ -1,5 +1,6 @@
 use crate::{
     chips::chips::{
+        fri_fold::FriFoldChip, multi::MultiChip, poseidon2_wide::Poseidon2WideChip,
         recursion_cpu::CpuChip, recursion_memory::MemoryGlobalChip, recursion_program::ProgramChip,
     },
     compiler::recursion::program::RecursionProgram,
@@ -9,8 +10,8 @@ use crate::{
     },
     primitives::consts::EXTENSION_DEGREE,
     recursion::{
-        exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip, multi::MultiChip,
-        poseidon2_wide::Poseidon2WideChip, range_check::RangeCheckChip, runtime::RecursionRecord,
+        exp_reverse_bits::ExpReverseBitsLenChip, range_check::RangeCheckChip,
+        runtime::RecursionRecord,
     },
 };
 use p3_air::{Air, AirBuilder, BaseAir};
