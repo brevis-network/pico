@@ -6,9 +6,8 @@ use super::super::{
     Poseidon2WideChip, RATE,
 };
 use crate::{
-    chips::gadgets::is_zero::IsZeroGadget,
+    chips::{chips::recursion_range_check::RangeCheckOpcode, gadgets::is_zero::IsZeroGadget},
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipRangeBuilder},
-    recursion::range_check::RangeCheckOpcode,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

@@ -1,6 +1,5 @@
-use serde::{Deserialize, Serialize};
-
 use super::RangeCheckOpcode;
+use serde::{Deserialize, Serialize};
 
 /// A byte lookup event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

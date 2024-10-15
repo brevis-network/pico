@@ -3,13 +3,12 @@ use crate::{
         fri_fold::FriFoldEvent,
         poseidon2_wide::events::{Poseidon2CompressEvent, Poseidon2HashEvent},
         recursion_cpu::CpuEvent,
+        recursion_range_check::RangeCheckEvent,
     },
     compiler::recursion::program::RecursionProgram,
     emulator::record::RecordBehavior,
     primitives::consts::MAX_NUM_PVS,
-    recursion::{
-        air::Block, exp_reverse_bits::ExpReverseBitsLenEvent, range_check::RangeCheckEvent,
-    },
+    recursion::{air::Block, exp_reverse_bits::ExpReverseBitsLenEvent},
 };
 use hashbrown::HashMap;
 use p3_field::{AbstractField, PrimeField32};

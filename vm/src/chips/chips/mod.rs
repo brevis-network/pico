@@ -7,6 +7,7 @@ pub mod poseidon2_wide;
 pub mod recursion_cpu;
 pub mod recursion_memory;
 pub mod recursion_program;
+pub mod recursion_range_check;
 pub mod riscv_cpu;
 pub mod riscv_memory;
 pub mod riscv_program;

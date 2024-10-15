@@ -10,6 +10,7 @@ use crate::{
         },
         recursion_cpu::CpuEvent,
         recursion_memory::{compute_addr_diff, MemoryRecord},
+        recursion_range_check::{RangeCheckEvent, RangeCheckOpcode},
     },
     compiler::recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
     emulator::riscv::events::MemoryAccessPosition,
@@ -17,7 +18,6 @@ use crate::{
     recursion::{
         air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
         exp_reverse_bits::ExpReverseBitsLenEvent,
-        range_check::{RangeCheckEvent, RangeCheckOpcode},
     },
 };
 use hashbrown::HashMap;

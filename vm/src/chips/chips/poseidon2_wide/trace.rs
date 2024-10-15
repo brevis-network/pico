@@ -7,11 +7,11 @@ use super::{
     NUM_INTERNAL_ROUNDS, RATE, WIDTH,
 };
 use crate::{
+    chips::chips::recursion_range_check::{RangeCheckEvent, RangeCheckOpcode},
     compiler::recursion::program::RecursionProgram,
     machine::chip::ChipBehavior,
     primitives::RC_16_30_U32,
     recursion::{
-        range_check::{RangeCheckEvent, RangeCheckOpcode},
         runtime::RecursionRecord,
         stark::utils::{next_power_of_two, par_for_each_row},
     },

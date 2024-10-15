@@ -2,9 +2,12 @@
 
 use super::{ChipBuilder, ChipRangeBuilder};
 use crate::{
-    chips::chips::recursion_memory::{MemoryAccessTimestampCols, MemoryCols},
+    chips::chips::{
+        recursion_memory::{MemoryAccessTimestampCols, MemoryCols},
+        recursion_range_check::RangeCheckOpcode,
+    },
     machine::lookup::{LookupType, SymbolicLookup},
-    recursion::{air::Block, range_check::RangeCheckOpcode},
+    recursion::air::Block,
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

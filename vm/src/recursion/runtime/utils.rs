@@ -1,6 +1,6 @@
 use p3_field::PrimeField32;
 
-use crate::recursion::range_check::{RangeCheckEvent, RangeCheckOpcode};
+use crate::chips::chips::recursion_range_check::{RangeCheckEvent, RangeCheckOpcode};
 
 use super::{Instruction, Opcode, HEAP_PTR, HEAP_START_ADDRESS};
 

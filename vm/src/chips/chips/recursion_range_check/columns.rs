@@ -1,7 +1,6 @@
+use super::NUM_RANGE_CHECK_OPS;
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
-
-use super::NUM_RANGE_CHECK_OPS;
 
 /// The number of main trace columns for `RangeCheckChip`.
 pub const NUM_RANGE_CHECK_PREPROCESSED_COLS: usize = size_of::<RangeCheckPreprocessedCols<u8>>();

@@ -1,37 +1,71 @@
-pub mod air;
-pub mod columns;
-pub mod event;
-pub mod opcode;
-pub mod trace;
-
-pub use event::RangeCheckEvent;
-pub use opcode::*;
-
-use alloc::collections::BTreeMap;
-use core::borrow::BorrowMut;
-use std::marker::PhantomData;
-
-use p3_field::Field;
+use super::{
+    columns::{
+        RangeCheckMultCols, RangeCheckPreprocessedCols, NUM_RANGE_CHECK_MULT_COLS,
+        NUM_RANGE_CHECK_PREPROCESSED_COLS,
+    },
+    RangeCheckChip, RangeCheckEvent, RangeCheckOpcode,
+};
+use crate::{
+    compiler::recursion::program::RecursionProgram, machine::chip::ChipBehavior,
+    recursion::runtime::RecursionRecord,
+};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+use std::{borrow::BorrowMut, collections::BTreeMap};
 
-use self::columns::{RangeCheckPreprocessedCols, NUM_RANGE_CHECK_PREPROCESSED_COLS};
-use crate::recursion::range_check::trace::NUM_ROWS;
+pub const NUM_ROWS: usize = 1 << 16;
 
-/// The number of different range check operations.
-pub const NUM_RANGE_CHECK_OPS: usize = 2;
+impl<F: PrimeField32> ChipBehavior<F> for RangeCheckChip<F> {
+    type Record = RecursionRecord<F>;
+    type Program = RecursionProgram<F>;
 
-/// A chip for computing range check operations.
-///
-/// The chip contains a preprocessed table of all possible range check operations. Other chips can
-/// then use lookups into this table to range check their values.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct RangeCheckChip<F>(PhantomData<F>);
+    fn name(&self) -> String {
+        "RangeCheck".to_string()
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_RANGE_CHECK_PREPROCESSED_COLS
+    }
+
+    fn generate_preprocessed(&self, _program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        let (trace, _) = Self::trace_and_map();
+
+        Some(trace)
+    }
+
+    fn generate_main(
+        &self,
+        input: &RecursionRecord<F>,
+        _: &mut RecursionRecord<F>,
+    ) -> RowMajorMatrix<F> {
+        let (_, event_map) = Self::trace_and_map();
+
+        let mut trace = RowMajorMatrix::new(
+            vec![F::zero(); NUM_RANGE_CHECK_MULT_COLS * NUM_ROWS],
+            NUM_RANGE_CHECK_MULT_COLS,
+        );
+
+        for (lookup, mult) in input.range_check_events.iter() {
+            let (row, index) = event_map[lookup];
+            let cols: &mut RangeCheckMultCols<F> = trace.row_mut(row).borrow_mut();
+
+            // Update the trace multiplicity
+            cols.multiplicities[index] += F::from_canonical_usize(*mult);
+        }
+
+        trace
+    }
+
+    fn is_active(&self, _: &Self::Record) -> bool {
+        true
+    }
+}
 
 impl<F: Field> RangeCheckChip<F> {
     /// Creates the preprocessed range check trace and event map.
     ///
     /// This function returns a pair `(trace, map)`, where:
-    ///  - `trace` is a matrix containing all possible range check values.
+    /// - `trace` is a matrix containing all possible range check values.
     /// - `map` is a map from a range check lookup to the value's corresponding row it appears in
     ///   the table and
     /// the index of the result in the array of multiplicities.

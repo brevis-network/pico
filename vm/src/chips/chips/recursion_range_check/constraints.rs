@@ -1,13 +1,12 @@
-use core::borrow::Borrow;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::Field;
-use p3_matrix::Matrix;
-
 use super::{
     columns::{RangeCheckMultCols, RangeCheckPreprocessedCols, NUM_RANGE_CHECK_MULT_COLS},
     RangeCheckChip, RangeCheckOpcode,
 };
 use crate::machine::builder::{ChipBuilder, ChipRangeBuilder};
+use core::borrow::Borrow;
+use p3_air::{Air, AirBuilder, BaseAir};
+use p3_field::Field;
+use p3_matrix::Matrix;
 
 impl<F: Field> BaseAir<F> for RangeCheckChip<F> {
     fn width(&self) -> usize {
@@ -16,7 +15,6 @@ impl<F: Field> BaseAir<F> for RangeCheckChip<F> {
 }
 
 impl<F: Field, AB: ChipBuilder<F>> Air<AB> for RangeCheckChip<F> {
-    /// Eval's the range check chip.
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local_mult = main.row_slice(0);
@@ -31,7 +29,7 @@ impl<F: Field, AB: ChipBuilder<F>> Air<AB> for RangeCheckChip<F> {
             let field_op = opcode.as_field::<AB::F>();
             let mult = local_mult.multiplicities[i];
 
-            // Ensure that all U12 range check lookups are not outside of the U12 range.
+            // Ensure that all U12 range check lookups are not outside the U12 range.
             if *opcode == RangeCheckOpcode::U12 {
                 builder.when(local.u12_out_range).assert_zero(mult);
             }
