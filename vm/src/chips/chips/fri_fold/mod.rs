@@ -326,16 +326,16 @@ impl<const DEGREE: usize, F: Field> FriFoldChip<DEGREE, F> {
         );
 
         // 2. Constrain new_value = old_value * alpha.
-        let alpha = local.alpha.access.value.as_extension::<AB>();
+        let alpha = local.alpha.access.value.as_extension::<F, AB>();
         let alpha_pow_at_log_height = local
             .alpha_pow_at_log_height
             .prev_value
-            .as_extension::<AB>();
+            .as_extension::<F, AB>();
         let new_alpha_pow_at_log_height = local
             .alpha_pow_at_log_height
             .access
             .value
-            .as_extension::<AB>();
+            .as_extension::<F, AB>();
 
         builder.assert_ext_eq(
             alpha_pow_at_log_height.clone() * alpha,
@@ -354,13 +354,13 @@ impl<const DEGREE: usize, F: Field> FriFoldChip<DEGREE, F> {
         // 2. Constrain new_value = old_alpha_pow_at_log_height * quotient + old_value,
         // where quotient = (p_at_x - p_at_z) / (x - z)
         // <=> (new_value - old_value) * (z - x) = old_alpha_pow_at_log_height * (p_at_x - p_at_z)
-        let p_at_z = local.p_at_z.access.value.as_extension::<AB>();
-        let p_at_x = local.p_at_x.access.value.as_extension::<AB>();
-        let z = local.z.access.value.as_extension::<AB>();
+        let p_at_z = local.p_at_z.access.value.as_extension::<F, AB>();
+        let p_at_x = local.p_at_x.access.value.as_extension::<F, AB>();
+        let z = local.z.access.value.as_extension::<F, AB>();
         let x = local.x.access.value.into();
 
-        let ro_at_log_height = local.ro_at_log_height.prev_value.as_extension::<AB>();
-        let new_ro_at_log_height = local.ro_at_log_height.access.value.as_extension::<AB>();
+        let ro_at_log_height = local.ro_at_log_height.prev_value.as_extension::<F, AB>();
+        let new_ro_at_log_height = local.ro_at_log_height.access.value.as_extension::<F, AB>();
         builder.assert_ext_eq(
             (new_ro_at_log_height - ro_at_log_height) * (BinomialExtension::from_base(x) - z),
             (p_at_x - p_at_z) * alpha_pow_at_log_height,

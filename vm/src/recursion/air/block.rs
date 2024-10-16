@@ -1,8 +1,5 @@
 use crate::{
-    machine::{
-        builder_orig::{ExtensionAirBuilder, PicoAirBuilder},
-        extension::BinomialExtension,
-    },
+    machine::{builder::ChipBuilder, extension::BinomialExtension},
     primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::AirBuilder;
@@ -50,12 +47,14 @@ impl<T> Block<T> {
 }
 
 impl<T: Clone> Block<T> {
-    pub fn as_extension<AB: ExtensionAirBuilder<Var = T>>(&self) -> BinomialExtension<AB::Expr> {
+    pub fn as_extension<F: Field, AB: ChipBuilder<F, Var = T>>(
+        &self,
+    ) -> BinomialExtension<AB::Expr> {
         let arr: [AB::Expr; 4] = self.0.clone().map(|x| AB::Expr::zero() + x);
         BinomialExtension(arr)
     }
 
-    pub fn as_extension_from_base<AB: PicoAirBuilder<Var = T>>(
+    pub fn as_extension_from_base<F: Field, AB: ChipBuilder<F, Var = T>>(
         &self,
         base: AB::Expr,
     ) -> BinomialExtension<AB::Expr> {

@@ -1,21 +1,19 @@
 use crate::{
-    compiler::{program::ProgramBehavior, riscv::program::Program},
+    compiler::program::ProgramBehavior,
     emulator::record::RecordBehavior,
     machine::{
         builder::{ChipBuilder, LookupBuilder, PermutationBuilder},
-        builder_orig::PicoAirBuilder,
         folder::SymbolicConstraintFolder,
-        lookup::{SymbolicLookup, VirtualPairLookup},
+        lookup::VirtualPairLookup,
         permutation::{
             eval_permutation_constraints, generate_permutation_trace, permutation_trace_width,
         },
         utils::get_log_quotient_degree,
     },
 };
-use itertools::Itertools;
 use log::debug;
-use p3_air::{Air, AirBuilder, BaseAir, ExtensionBuilder, FilteredAirBuilder, PairBuilder};
-use p3_field::{AbstractField, ExtensionField, Field};
+use p3_air::{Air, BaseAir};
+use p3_field::{ExtensionField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::time::Instant;
 

@@ -5,11 +5,13 @@ use super::super::{
 use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::MemoryCols,
-        gadgets::baby_bear::word_range::BabyBearWordRangeChecker, utils::memory::MemoryAirBuilder,
+        gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
     emulator::riscv::events::MemoryAccessPosition,
-    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder},
+    machine::builder::{
+        ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+    },
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};

@@ -1,6 +1,5 @@
 use crate::machine::{
     builder::{ChipBuilder, PermutationBuilder},
-    builder_orig::PicoAirBuilder,
     lookup::VirtualPairLookup,
 };
 use itertools::Itertools;

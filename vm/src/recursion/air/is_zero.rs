@@ -4,7 +4,7 @@
 //!
 //! The idea is that 1 - input * inverse is exactly the boolean value indicating whether the input
 //! is 0.
-use crate::machine::{builder::ChipBuilder, builder_orig::PicoAirBuilder};
+use crate::machine::builder::ChipBuilder;
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_derive::AlignedBorrow;
@@ -39,7 +39,7 @@ impl<F: Field> IsZeroOperation<F> {
 }
 
 impl<F: Field> IsZeroOperation<F> {
-    pub fn eval<AB: PicoAirBuilder>(
+    pub fn eval<AB: ChipBuilder<F>>(
         builder: &mut AB,
         a: AB::Expr,
         cols: IsZeroOperation<AB::Var>,

@@ -5,7 +5,7 @@
 //! The idea is that 1 - input * inverse is exactly the boolean value indicating whether the input
 //! is 0.
 use crate::{
-    machine::{builder_orig::PicoAirBuilder, extension::BinomialExtension},
+    machine::{builder::ChipBuilder, extension::BinomialExtension},
     primitives::consts::EXTENSION_DEGREE,
     recursion::air::{extension::BinomialExtensionUtils, Block},
 };
@@ -50,7 +50,7 @@ impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>> IsExtZeroOperation<F> {
 }
 
 impl<F: Field> IsExtZeroOperation<F> {
-    pub fn eval<AB: PicoAirBuilder>(
+    pub fn eval<AB: ChipBuilder<F>>(
         builder: &mut AB,
         a: BinomialExtension<AB::Expr>,
         cols: IsExtZeroOperation<AB::Var>,
@@ -73,7 +73,7 @@ impl<F: Field> IsExtZeroOperation<F> {
         // is correctly set, then the product is 1.
         let one_ext = BinomialExtension::<AB::Expr>::from_base(AB::Expr::one());
 
-        let inverse = cols.inverse.as_extension::<AB>();
+        let inverse = cols.inverse.as_extension::<F, AB>();
 
         let is_zero = one_ext.clone() - inverse * a.clone();
         let result_ext = BinomialExtension::<AB::Expr>::from_base(cols.result.into());

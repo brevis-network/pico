@@ -2,7 +2,7 @@ use super::{columns::NUM_MUL_COLS, MulChip};
 use crate::{
     chips::{
         chips::alu::mul::{columns::MulCols, BYTE_MASK, PRODUCT_SIZE},
-        utils::common::get_msb,
+        utils::get_msb,
     },
     compiler::{
         riscv::{

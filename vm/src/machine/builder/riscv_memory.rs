@@ -10,7 +10,7 @@ use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use std::iter::once;
 
-pub trait MemoryAirBuilder<F: Field>: AirBuilder {
+pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
     /// Constrain a memory read or write.
     ///
     /// This method verifies that a memory access timestamp (chunk, clk) is greater than the
@@ -21,36 +21,6 @@ pub trait MemoryAirBuilder<F: Field>: AirBuilder {
         channel: impl Into<Self::Expr>,
         clk: impl Into<Self::Expr>,
         addr: impl Into<Self::Expr>,
-        memory_access: &impl MemoryCols<E>,
-        do_check: impl Into<Self::Expr>,
-    );
-
-    /// Verifies the memory access timestamp.
-    ///
-    /// This method verifies that the current memory access happened after the previous one's.
-    /// Specifically it will ensure that if the current and previous access are in the same chunk,
-    /// then the current's clk val is greater than the previous's.  If they are not in the same
-    /// chunk, then it will ensure that the current's chunk val is greater than the previous's.
-    fn eval_memory_access_timestamp(
-        &mut self,
-        mem_access: &MemoryAccessCols<impl Into<Self::Expr> + Clone>,
-        do_check: impl Into<Self::Expr>,
-        chunk: impl Into<Self::Expr> + Clone,
-        channel: impl Into<Self::Expr> + Clone,
-        clk: impl Into<Self::Expr>,
-    );
-}
-impl<F: Field, CB: ChipBuilder<F>> MemoryAirBuilder<F> for CB {
-    /// Constrain a memory read or write.
-    ///
-    /// This method verifies that a memory access timestamp (chunk, clk) is greater than the
-    /// previous access's timestamp.  It will also add to the memory argument.
-    fn eval_memory_access<E: Into<CB::Expr> + Clone>(
-        &mut self,
-        chunk: impl Into<CB::Expr>,
-        channel: impl Into<CB::Expr>,
-        clk: impl Into<CB::Expr>,
-        addr: impl Into<CB::Expr>,
         memory_access: &impl MemoryCols<E>,
         do_check: impl Into<Self::Expr>,
     ) {

@@ -1,6 +1,6 @@
 use std::mem::{size_of, transmute};
 
-use crate::chips::utils::common::indices_arr;
+use crate::chips::utils::indices_arr;
 use pico_derive::AlignedBorrow;
 
 use self::{

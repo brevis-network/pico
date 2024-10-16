@@ -1,15 +1,14 @@
 //! Recursion lookup associating builder functions
 
+use super::ChipBuilder;
 use crate::{
     chips::chips::recursion_cpu::{InstructionCols, OpcodeSelectorCols},
-    machine::{
-        builder_orig::BaseAirBuilder,
-        lookup::{LookupType, SymbolicLookup},
-    },
+    machine::lookup::{LookupType, SymbolicLookup},
 };
+use p3_field::Field;
 use std::iter::once;
 
-pub trait RecursionLookupBuilder<F>: BaseAirBuilder {
+pub trait RecursionLookupBuilder<F: Field>: ChipBuilder<F> {
     fn recursion_looking_program<E: Into<Self::Expr> + Copy>(
         &mut self,
         pc: impl Into<Self::Expr>,

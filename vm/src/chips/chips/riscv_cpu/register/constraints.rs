@@ -1,8 +1,7 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    chips::utils::memory::MemoryAirBuilder,
     emulator::riscv::events::MemoryAccessPosition,
-    machine::builder::{ChipBuilder, ChipRangeBuilder, ChipWordBuilder},
+    machine::builder::{ChipBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder},
 };
 use p3_field::{AbstractField, Field};
 

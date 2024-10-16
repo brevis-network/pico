@@ -1,5 +1,5 @@
 use crate::{
-    chips::utils::common::indices_arr,
+    chips::utils::indices_arr,
     compiler::word::Word,
     primitives::consts::{
         DIGEST_SIZE, MAX_NUM_PVS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,

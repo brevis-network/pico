@@ -1,6 +1,5 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    chips::utils::memory::MemoryAirBuilder,
     compiler::riscv::opcode::ByteOpcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
 };
