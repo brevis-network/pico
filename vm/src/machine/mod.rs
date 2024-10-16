@@ -4,6 +4,7 @@ pub mod extension;
 pub mod folder;
 pub mod generic_folder;
 pub mod keys;
+pub mod logger;
 pub mod lookup;
 pub mod machine;
 pub mod permutation;

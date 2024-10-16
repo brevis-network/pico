@@ -17,7 +17,8 @@ use pico_vm::{
         },
     },
     machine::{
-        keys::BaseVerifyingKey, machine::MachineBehavior, proof::BaseProof, witness::ProvingWitness,
+        keys::BaseVerifyingKey, logger::setup_logger, machine::MachineBehavior, proof::BaseProof,
+        witness::ProvingWitness,
     },
     primitives::consts::{MAX_NUM_PVS, RECURSION_NUM_PVS, RISCV_NUM_PVS},
     recursion::runtime::Runtime as RecursionRuntime,
@@ -59,7 +60,8 @@ pub fn get_recursion_stdin<'a, SC: StarkGenericConfig>(
 }
 
 fn main() {
-    env_logger::init();
+    setup_logger();
+
     let (elf, stdin, test_case, input_n) = parse_args::parse_args(env::args().collect());
     let start = Instant::now();
 

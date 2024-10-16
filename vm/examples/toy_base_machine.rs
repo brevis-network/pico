@@ -16,11 +16,10 @@ use pico_vm::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
+        logger::setup_logger,
         machine::BaseMachine,
-        prover::BaseProver,
-        verifier::BaseVerifier,
     },
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    primitives::consts::RISCV_NUM_PVS,
 };
 use std::any::type_name;
 
@@ -103,7 +102,7 @@ fn print_type_of<T>(_: &T) {
 }
 
 fn main() {
-    env_logger::init();
+    setup_logger();
 
     info!("\n Creating Program..");
     const ELF: &[u8] = include_bytes!("../src/compiler/test_data/riscv32im-pico-fibonacci-elf");

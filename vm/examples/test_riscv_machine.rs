@@ -27,6 +27,7 @@ use pico_vm::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
+        logger::setup_logger,
         machine::MachineBehavior,
         witness::ProvingWitness,
     },
@@ -39,7 +40,7 @@ use std::{env, time::Instant};
 mod parse_args;
 
 fn main() {
-    env_logger::init();
+    setup_logger();
 
     // run with default fibo, in which n = 40000
     let (elf, stdin, _, _) = parse_args::parse_args(env::args().collect());

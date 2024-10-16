@@ -17,6 +17,7 @@ use pico_vm::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
+        logger::setup_logger,
         machine::{BaseMachine, MachineBehavior},
     },
     primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
@@ -101,7 +102,7 @@ impl<F: Field> ToyChipType<F> {
 }
 
 fn main() {
-    env_logger::init();
+    setup_logger();
 
     info!("\n Creating Program..");
     const ELF: &[u8] = include_bytes!("../src/compiler/test_data/riscv32im-pico-fibonacci-elf");

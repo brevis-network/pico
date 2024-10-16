@@ -11,6 +11,7 @@ use pico_vm::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
+        logger::setup_logger,
         machine::MachineBehavior,
         witness::ProvingWitness,
     },
@@ -101,7 +102,7 @@ where
 }
 
 fn main() {
-    env_logger::init();
+    setup_logger();
 
     // Create the prover.
     info!("\n Creating prover");

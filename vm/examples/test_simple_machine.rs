@@ -1,31 +1,20 @@
 use log::{debug, info};
-use p3_air::{Air, BaseAir};
-use p3_field::{Field, PrimeField32};
-use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     configs::bb_poseidon2::BabyBearPoseidon2,
-    emulator::{
-        opts::EmulatorOpts,
-        record::RecordBehavior,
-        riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
-        stdin::EmulatorStdin,
-    },
+    emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator},
     instances::{chiptype::riscv_chiptype::RiscvChipType, machine::simple_machine::SimpleMachine},
-    machine::{machine::MachineBehavior, witness::ProvingWitness},
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
+    primitives::consts::RISCV_NUM_PVS,
 };
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use std::{env, time::Instant};
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
 fn main() {
-    env_logger::init();
+    setup_logger();
+
     let (elf, stdin, _, _) = parse_args::parse_args(env::args().collect());
     let start = Instant::now();
 
@@ -144,5 +133,5 @@ fn main() {
         result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(result.is_ok(), true);
+    assert!(result.is_ok());
 }
