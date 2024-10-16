@@ -1,12 +1,19 @@
 use crate::{
+    compiler::recursion::{
+        ir::Config as RecursionConfig,
+        prelude::{
+            Ext as RecursionExt, Felt as RecursionFelt, SymbolicExt as RecursionSymbolicExt,
+        },
+    },
     configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
     machine::{
         builder::{ChipBuilder, LookupBuilder, PermutationBuilder, PublicValuesBuilder},
+        generic_folder::GenericVerifierConstraintFolder,
         lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
     },
     primitives::consts::MAX_NUM_PVS,
 };
-use p3_air::{AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, PairBuilder};
+use p3_air::{AirBuilder, ExtensionBuilder, PairBuilder};
 use p3_field::{AbstractField, Field};
 use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
@@ -359,3 +366,12 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC
         self.preprocessed.clone()
     }
 }
+
+pub type RecursiveVerifierConstraintFolder<'a, C> = GenericVerifierConstraintFolder<
+    'a,
+    <C as RecursionConfig>::F,
+    <C as RecursionConfig>::EF,
+    RecursionFelt<<C as RecursionConfig>::F>,
+    RecursionExt<<C as RecursionConfig>::F, <C as RecursionConfig>::EF>,
+    RecursionSymbolicExt<<C as RecursionConfig>::F, <C as RecursionConfig>::EF>,
+>;

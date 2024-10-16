@@ -1,7 +1,7 @@
 use super::{
     commit::PolynomialSpaceVariable,
     fri::TwoAdicMultiplicativeCosetVariable,
-    stark::{RecursiveVerifierConstraintFolder, StarkVerifier},
+    stark::StarkVerifier,
     types::{ChipOpenedValuesVariable, ChipOpening},
 };
 use crate::{
@@ -10,16 +10,16 @@ use crate::{
         prelude::{Builder, Config, Ext, ExtConst, SymbolicExt},
     },
     configs::config::StarkGenericConfig,
-    machine::chip::{ChipBehavior, MetaChip},
+    machine::{
+        chip::{ChipBehavior, MetaChip},
+        folder::RecursiveVerifierConstraintFolder,
+    },
     primitives::consts::MAX_NUM_PVS,
 };
 use p3_air::Air;
 use p3_commit::LagrangeSelectors;
 use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
-use p3_matrix::{
-    dense::{RowMajorMatrix, RowMajorMatrixView},
-    stack::VerticalPair,
-};
+use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 
 impl<CF: Config, SC: StarkGenericConfig> StarkVerifier<CF, SC>
 where

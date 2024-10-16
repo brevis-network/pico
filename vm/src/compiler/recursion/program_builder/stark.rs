@@ -12,20 +12,15 @@ use super::{
     types::{BaseCommitmentsVariable, BaseProofVariable, QuotientData, VerifyingKeyVariable},
 };
 use crate::{
-    compiler::recursion::{
-        ir::{Array, Builder, Config, Ext, ExtConst, SymbolicExt, SymbolicVar, Usize, Var},
-        prelude::Felt,
-    },
+    compiler::recursion::ir::{Array, Builder, Config, Ext, ExtConst, Usize, Var},
     configs::config::{Com, StarkGenericConfig},
-    instances::machine::simple_machine::SimpleMachine,
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        generic_folder::GenericVerifierConstraintFolder,
+        folder::{
+            ProverConstraintFolder, RecursiveVerifierConstraintFolder, VerifierConstraintFolder,
+        },
         keys::BaseVerifyingKey,
-        machine::MachineBehavior,
-        permutation,
-        proof::{BaseProof, ProofBehavior},
+        proof::BaseProof,
     },
     primitives::consts::DIGEST_SIZE,
 };
@@ -92,15 +87,6 @@ where
         }
     }
 }
-
-pub type RecursiveVerifierConstraintFolder<'a, C> = GenericVerifierConstraintFolder<
-    'a,
-    <C as Config>::F,
-    <C as Config>::EF,
-    Felt<<C as Config>::F>,
-    Ext<<C as Config>::F, <C as Config>::EF>,
-    SymbolicExt<<C as Config>::F, <C as Config>::EF>,
->;
 
 impl<CF: Config, SC: StarkGenericConfig> StarkVerifier<CF, SC>
 where
