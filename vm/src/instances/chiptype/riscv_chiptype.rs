@@ -21,7 +21,7 @@ use p3_air::{Air, BaseAir};
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 
-pub enum FibChipType<F: Field> {
+pub enum RiscvChipType<F: Field> {
     Byte(ByteChip<F>),
     Program(ProgramChip<F>),
     Cpu(CpuChip<F>),
@@ -40,7 +40,7 @@ pub enum FibChipType<F: Field> {
 // NOTE: These trait implementations are used to save this `TestChipType` to `MetaChip`.
 // Since MetaChip has a generic parameter which is one type (cannot be two chip types).
 // This code is annoyed, we could refactor to use macro later (but less readable).
-impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
+impl<F: PrimeField32> ChipBehavior<F> for RiscvChipType<F> {
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -153,7 +153,7 @@ impl<F: PrimeField32> ChipBehavior<F> for FibChipType<F> {
     }
 }
 
-impl<F: Field> BaseAir<F> for FibChipType<F> {
+impl<F: Field> BaseAir<F> for RiscvChipType<F> {
     fn width(&self) -> usize {
         match self {
             Self::Byte(chip) => chip.width(),
@@ -192,7 +192,7 @@ impl<F: Field> BaseAir<F> for FibChipType<F> {
     }
 }
 
-impl<F, CB> Air<CB> for FibChipType<F>
+impl<F, CB> Air<CB> for RiscvChipType<F>
 where
     F: PrimeField32,
     CB: ChipBuilder<F>,
@@ -216,7 +216,7 @@ where
     }
 }
 
-impl<F: PrimeField32> FibChipType<F> {
+impl<F: PrimeField32> RiscvChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![
             MetaChip::new(Self::Program(ProgramChip::default())),

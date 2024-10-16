@@ -21,7 +21,7 @@ use pico_vm::{
         stdin::EmulatorStdin,
     },
     instances::{
-        chiptype::riscv_chiptype::FibChipType,
+        chiptype::riscv_chiptype::RiscvChipType,
         machine::{riscv_machine::RiscvMachine, simple_machine::SimpleMachine},
     },
     machine::{
@@ -53,7 +53,7 @@ fn main() {
     // Setup config and chips.
     info!("\n Creating BaseMachine (at {:?})..", start.elapsed());
     let config = BabyBearPoseidon2::new();
-    let chips = FibChipType::all_chips();
+    let chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips
     let riscv_machine = RiscvMachine::new(config, RISCV_NUM_PVS, chips);

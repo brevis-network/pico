@@ -81,24 +81,16 @@ where
         MetaProof::new(self.config(), EnsembleProof::new(proofs))
     }
 
-    // fn prove(
-    //     &self,
-    //     pk: &BaseProvingKey<SC>,
-    //     records: &[C::Record],
-    // ) -> MetaProof<SC, EnsembleProof<SC>> {
-    //     let proofs = self
-    //         .base_machine
-    //         .prove_ensemble(self.config(), self.chips(), pk, records);
-    //
-    //     MetaProof::new(self.config(), EnsembleProof::new(proofs))
-    // }
-
     /// Verify the proof.
     fn verify(
         &self,
         vk: &BaseVerifyingKey<SC>,
         proof: &MetaProof<SC, EnsembleProof<SC>>,
     ) -> Result<()> {
+        // panic if proofs is empty
+        if proof.proofs().is_empty() {
+            panic!("proofs is empty");
+        }
         self.base_machine
             .verify_ensemble(self.config(), self.chips(), vk, proof.proofs())?;
 

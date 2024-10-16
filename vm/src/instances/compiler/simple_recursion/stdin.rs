@@ -1,37 +1,67 @@
-use super::{SimpleMachineRecursionMemoryLayout, SimpleMachineRecursionMemoryLayoutVariable};
 use crate::{
     compiler::recursion::{
         config::InnerConfig,
-        ir::{Builder, Config},
+        ir::{Array, Builder, Config, Var},
         program_builder::{
+            challenger::DuplexChallengerVariable,
             hints::Hintable,
             stark::{BaseProofHint, VerifyingKeyHint},
+            types::{BaseProofVariable, VerifyingKeyVariable},
         },
     },
-    configs::bb_poseidon2::{BabyBearPoseidon2, InnerPerm, InnerVal},
+    configs::{
+        bb_poseidon2::{BabyBearPoseidon2, InnerPerm, InnerVal},
+        config::StarkGenericConfig,
+    },
+    instances::machine::simple_machine::SimpleMachine,
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        keys::BaseVerifyingKey,
         machine::MachineBehavior,
+        proof::BaseProof,
     },
     recursion::air::Block,
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
-use p3_field::AbstractField;
 
-type C = InnerConfig;
+use crate::compiler::recursion::prelude::{DslVariable, *};
 
-impl<'a, A> Hintable<C> for SimpleMachineRecursionMemoryLayout<'a, BabyBearPoseidon2, A>
+pub struct SimpleRecursionStdin<'a, SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<SC::Val>
+        + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+{
+    pub vk: &'a BaseVerifyingKey<SC>,
+    pub machine: &'a SimpleMachine<SC, C>,
+    pub base_proofs: Vec<BaseProof<SC>>,
+    pub leaf_challenger: &'a SC::Challenger,
+    pub initial_reconstruct_challenger: SC::Challenger,
+    pub is_complete: bool,
+}
+
+#[derive(DslVariable, Clone)]
+pub struct SimpleRecursionStdinVariable<C: Config> {
+    pub vk: VerifyingKeyVariable<C>,
+    pub base_proofs: Array<C, BaseProofVariable<C>>,
+    pub leaf_challenger: DuplexChallengerVariable<C>,
+    pub initial_reconstruct_challenger: DuplexChallengerVariable<C>,
+    pub is_complete: Var<C::N>,
+}
+
+impl<'a, A> Hintable<InnerConfig> for SimpleRecursionStdin<'a, BabyBearPoseidon2, A>
 where
     A: ChipBehavior<BabyBear>
         + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
         + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
 {
-    type HintVariable = SimpleMachineRecursionMemoryLayoutVariable<C>;
+    type HintVariable = SimpleRecursionStdinVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let vk = VerifyingKeyHint::<'a, BabyBearPoseidon2, A>::read(builder);
         let base_proofs = Vec::<BaseProofHint<'a, BabyBearPoseidon2, A>>::read(builder);
         let leaf_challenger = DuplexChallenger::<InnerVal, InnerPerm, 16, 8>::read(builder);
@@ -39,7 +69,7 @@ where
             DuplexChallenger::<InnerVal, InnerPerm, 16, 8>::read(builder);
         let is_complete = builder.hint_var();
 
-        SimpleMachineRecursionMemoryLayoutVariable {
+        SimpleRecursionStdinVariable {
             vk,
             base_proofs,
             leaf_challenger,
@@ -48,7 +78,7 @@ where
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut stream = Vec::new();
 
         let vk_hint = VerifyingKeyHint::<'a, BabyBearPoseidon2, _>::new(

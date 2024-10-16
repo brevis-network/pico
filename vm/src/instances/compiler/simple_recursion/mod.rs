@@ -1,5 +1,5 @@
 mod builder;
-mod hints;
+pub mod stdin;
 mod utils;
 
 pub use builder::*;

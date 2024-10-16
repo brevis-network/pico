@@ -241,11 +241,6 @@ where
         vk: &BaseVerifyingKey<SC>,
         proofs: &[BaseProof<SC>],
     ) -> Result<()> {
-        // panic if proofs is empty
-        if proofs.is_empty() {
-            panic!("proofs is empty");
-        }
-
         let mut challenger = config.challenger();
 
         // observe all preprocessed and main commits and pv's

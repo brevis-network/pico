@@ -10,10 +10,8 @@ use pico_vm::{
     configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
     emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator},
     instances::{
-        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::FibChipType},
-        compiler::simple_recursion::{
-            SimpleMachineRecursionMemoryLayout, SimpleMachineRecursiveVerifier,
-        },
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler::simple_recursion::{stdin::SimpleRecursionStdin, SimpleVerifierCircuit},
         machine::{
             simple_machine::SimpleMachine, simple_recursion_machine::SimpleRecursionMachine,
         },
@@ -33,13 +31,13 @@ use std::{
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
-pub fn get_recursion_core_input<'a, SC: StarkGenericConfig>(
-    machine: &'a SimpleMachine<BabyBearPoseidon2, FibChipType<BabyBear>>,
+pub fn get_recursion_stdin<'a, SC: StarkGenericConfig>(
+    machine: &'a SimpleMachine<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
     reconstruct_challenger: &mut <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
     vk: &'a BaseVerifyingKey<BabyBearPoseidon2>,
     leaf_challenger: &'a mut <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
     base_proof: BaseProof<BabyBearPoseidon2>,
-) -> SimpleMachineRecursionMemoryLayout<'a, BabyBearPoseidon2, FibChipType<BabyBear>> {
+) -> SimpleRecursionStdin<'a, BabyBearPoseidon2, RiscvChipType<BabyBear>> {
     let num_public_values = machine.num_public_values();
 
     vk.observed_by(reconstruct_challenger);
@@ -48,7 +46,7 @@ pub fn get_recursion_core_input<'a, SC: StarkGenericConfig>(
     leaf_challenger.observe(base_proof.commitments.main_commit);
     leaf_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
 
-    let memory_layout = SimpleMachineRecursionMemoryLayout {
+    let memory_layout = SimpleRecursionStdin {
         vk,
         machine,
         base_proofs: vec![base_proof.clone()],
@@ -57,22 +55,6 @@ pub fn get_recursion_core_input<'a, SC: StarkGenericConfig>(
         is_complete: true,
     };
 
-    reconstruct_challenger.observe(base_proof.commitments.main_commit);
-    reconstruct_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
-
-    // Check that the leaf challenger is the same as the reconstruct challenger.
-    assert_eq!(
-        reconstruct_challenger.sponge_state,
-        leaf_challenger.sponge_state
-    );
-    assert_eq!(
-        reconstruct_challenger.input_buffer,
-        leaf_challenger.input_buffer
-    );
-    assert_eq!(
-        reconstruct_challenger.output_buffer,
-        leaf_challenger.output_buffer
-    );
     memory_layout
 }
 
@@ -118,7 +100,7 @@ fn main() {
     // Setup config and chips.
     info!("\n Creating BaseMachine (at {:?})..", start.elapsed());
     let config = BabyBearPoseidon2::new();
-    let fib_chips = FibChipType::all_chips();
+    let fib_chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips
     let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, fib_chips);
@@ -151,21 +133,20 @@ fn main() {
     // Get recursion program
     // Note that simple_machine is used as input for recursive verifier to build the program
     info!("\n Build recursion program (at {:?})..", start.elapsed());
-    let recursion_program =
-        SimpleMachineRecursiveVerifier::<InnerConfig, _>::build(&simple_machine);
+    let recursion_program = SimpleVerifierCircuit::<InnerConfig, _>::build(&simple_machine);
 
     let serialized_program = bincode::serialize(&recursion_program).unwrap();
     let mut hasher = DefaultHasher::new();
     serialized_program.hash(&mut hasher);
     let hash = hasher.finish();
     info!("recursion program hash: {}", hash);
-    assert_eq!(hash, 8512193551523565668);
+    assert_eq!(hash, 17681091745762186680);
 
     // Get recursion input
     let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
     let mut leaf_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
 
-    let recursion_input = get_recursion_core_input::<BabyBearPoseidon2>(
+    let recursion_input = get_recursion_stdin::<BabyBearPoseidon2>(
         &simple_machine,
         &mut reconstruct_challenger,
         &vk,
