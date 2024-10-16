@@ -5,17 +5,17 @@ use crate::{
 };
 use p3_field::AbstractField;
 
-impl<C: Config> Builder<C> {
+impl<CF: Config> Builder<CF> {
     /// Applies the Poseidon2 permutation to the given array.
     ///
     /// Reference: [p3_poseidon2::Poseidon2]
-    pub fn poseidon2_permute(&mut self, array: &Array<C, Felt<C::F>>) -> Array<C, Felt<C::F>> {
+    pub fn poseidon2_permute(&mut self, array: &Array<CF, Felt<CF::F>>) -> Array<CF, Felt<CF::F>> {
         let output = match array {
             Array::Fixed(values) => {
                 assert_eq!(values.len(), PERMUTATION_WIDTH);
-                self.array::<Felt<C::F>>(Usize::Const(PERMUTATION_WIDTH))
+                self.array::<Felt<CF::F>>(Usize::Const(PERMUTATION_WIDTH))
             }
-            Array::Dyn(_, len) => self.array::<Felt<C::F>>(*len),
+            Array::Dyn(_, len) => self.array::<Felt<CF::F>>(*len),
         };
         self.operations
             .push(DslIr::Poseidon2PermuteBabyBear(Box::new((
@@ -28,7 +28,7 @@ impl<C: Config> Builder<C> {
     /// Applies the Poseidon2 permutation to the given array.
     ///
     /// Reference: [p3_poseidon2::Poseidon2]
-    pub fn poseidon2_permute_mut(&mut self, array: &Array<C, Felt<C::F>>) {
+    pub fn poseidon2_permute_mut(&mut self, array: &Array<CF, Felt<CF::F>>) {
         self.operations
             .push(DslIr::Poseidon2PermuteBabyBear(Box::new((
                 array.clone(),
@@ -41,8 +41,8 @@ impl<C: Config> Builder<C> {
     /// Reference: [p3_symmetric::PaddingFreeSponge]
     pub fn poseidon2_absorb(
         &mut self,
-        p2_hash_and_absorb_num: Var<C::N>,
-        input: &Array<C, Felt<C::F>>,
+        p2_hash_and_absorb_num: Var<CF::N>,
+        input: &Array<CF, Felt<CF::F>>,
     ) {
         self.operations.push(DslIr::Poseidon2AbsorbBabyBear(
             p2_hash_and_absorb_num,
@@ -55,8 +55,8 @@ impl<C: Config> Builder<C> {
     /// Reference: [p3_symmetric::PaddingFreeSponge]
     pub fn poseidon2_finalize_mut(
         &mut self,
-        p2_hash_num: Var<C::N>,
-        output: &Array<C, Felt<C::F>>,
+        p2_hash_num: Var<CF::N>,
+        output: &Array<CF, Felt<CF::F>>,
     ) {
         self.operations.push(DslIr::Poseidon2FinalizeBabyBear(
             p2_hash_num,
@@ -69,9 +69,9 @@ impl<C: Config> Builder<C> {
     /// Reference: [p3_symmetric::TruncatedPermutation]
     pub fn poseidon2_compress(
         &mut self,
-        left: &Array<C, Felt<C::F>>,
-        right: &Array<C, Felt<C::F>>,
-    ) -> Array<C, Felt<C::F>> {
+        left: &Array<CF, Felt<CF::F>>,
+        right: &Array<CF, Felt<CF::F>>,
+    ) -> Array<CF, Felt<CF::F>> {
         let mut input = self.dyn_array(PERMUTATION_WIDTH);
         for i in 0..DIGEST_SIZE {
             let a = self.get(left, i);
@@ -88,9 +88,9 @@ impl<C: Config> Builder<C> {
     /// Reference: [p3_symmetric::TruncatedPermutation]
     pub fn poseidon2_compress_x(
         &mut self,
-        result: &mut Array<C, Felt<C::F>>,
-        left: &Array<C, Felt<C::F>>,
-        right: &Array<C, Felt<C::F>>,
+        result: &mut Array<CF, Felt<CF::F>>,
+        left: &Array<CF, Felt<CF::F>>,
+        right: &Array<CF, Felt<CF::F>>,
     ) {
         self.operations
             .push(DslIr::Poseidon2CompressBabyBear(Box::new((
@@ -103,15 +103,15 @@ impl<C: Config> Builder<C> {
     /// Applies the Poseidon2 permutation to the given array.
     ///
     /// Reference: [p3_symmetric::PaddingFreeSponge]
-    pub fn poseidon2_hash(&mut self, array: &Array<C, Felt<C::F>>) -> Array<C, Felt<C::F>> {
-        let mut state: Array<C, Felt<C::F>> = self.dyn_array(PERMUTATION_WIDTH);
+    pub fn poseidon2_hash(&mut self, array: &Array<CF, Felt<CF::F>>) -> Array<CF, Felt<CF::F>> {
+        let mut state: Array<CF, Felt<CF::F>> = self.dyn_array(PERMUTATION_WIDTH);
 
-        let break_flag: Var<_> = self.eval(C::N::zero());
+        let break_flag: Var<_> = self.eval(CF::N::zero());
         let last_index: Usize<_> = self.eval(array.len() - 1);
         self.range(0, array.len())
             .step_by(HASH_RATE)
             .for_each(|i, builder| {
-                builder.if_eq(break_flag, C::N::one()).then(|builder| {
+                builder.if_eq(break_flag, CF::N::one()).then(|builder| {
                     builder.break_loop();
                 });
                 // Insert elements of the chunk.
@@ -120,7 +120,7 @@ impl<C: Config> Builder<C> {
                     let element = builder.get(array, index);
                     builder.set_value(&mut state, j, element);
                     builder.if_eq(index, last_index).then(|builder| {
-                        builder.assign(break_flag, C::N::one());
+                        builder.assign(break_flag, CF::N::one());
                         builder.break_loop();
                     });
                 });
@@ -134,12 +134,12 @@ impl<C: Config> Builder<C> {
 
     pub fn poseidon2_hash_x(
         &mut self,
-        array: &Array<C, Array<C, Felt<C::F>>>,
-    ) -> Array<C, Felt<C::F>> {
+        array: &Array<CF, Array<CF, Felt<CF::F>>>,
+    ) -> Array<CF, Felt<CF::F>> {
         self.cycle_tracker("poseidon2-hash");
 
         let p2_hash_num = self.p2_hash_num;
-        let two_power_12: Var<_> = self.eval(C::N::from_canonical_u32(1 << 12));
+        let two_power_12: Var<_> = self.eval(CF::N::from_canonical_u32(1 << 12));
 
         self.range(0, array.len()).for_each(|i, builder| {
             let subarray = builder.get(array, i);
@@ -148,10 +148,10 @@ impl<C: Config> Builder<C> {
             builder.poseidon2_absorb(p2_hash_and_absorb_num, &subarray);
         });
 
-        let output: Array<C, Felt<C::F>> = self.dyn_array(DIGEST_SIZE);
+        let output: Array<CF, Felt<CF::F>> = self.dyn_array(DIGEST_SIZE);
         self.poseidon2_finalize_mut(self.p2_hash_num, &output);
 
-        self.assign(self.p2_hash_num, self.p2_hash_num + C::N::one());
+        self.assign(self.p2_hash_num, self.p2_hash_num + CF::N::one());
 
         self.cycle_tracker("poseidon2-hash");
         output
@@ -159,12 +159,12 @@ impl<C: Config> Builder<C> {
 
     pub fn poseidon2_hash_ext(
         &mut self,
-        array: &Array<C, Array<C, Ext<C::F, C::EF>>>,
-    ) -> Array<C, Felt<C::F>> {
+        array: &Array<CF, Array<CF, Ext<CF::F, CF::EF>>>,
+    ) -> Array<CF, Felt<CF::F>> {
         self.cycle_tracker("poseidon2-hash-ext");
-        let mut state: Array<C, Felt<C::F>> = self.dyn_array(PERMUTATION_WIDTH);
+        let mut state: Array<CF, Felt<CF::F>> = self.dyn_array(PERMUTATION_WIDTH);
 
-        let idx: Var<_> = self.eval(C::N::zero());
+        let idx: Var<_> = self.eval(CF::N::zero());
         self.range(0, array.len()).for_each(|i, builder| {
             let subarray = builder.get(array, i);
             builder.range(0, subarray.len()).for_each(|j, builder| {
@@ -173,18 +173,18 @@ impl<C: Config> Builder<C> {
                 for i in 0..4 {
                     let felt = builder.get(&felts, i);
                     builder.set_value(&mut state, idx, felt);
-                    builder.assign(idx, idx + C::N::one());
+                    builder.assign(idx, idx + CF::N::one());
                     builder
-                        .if_eq(idx, C::N::from_canonical_usize(HASH_RATE))
+                        .if_eq(idx, CF::N::from_canonical_usize(HASH_RATE))
                         .then(|builder| {
                             builder.poseidon2_permute_mut(&state);
-                            builder.assign(idx, C::N::zero());
+                            builder.assign(idx, CF::N::zero());
                         });
                 }
             });
         });
 
-        self.if_ne(idx, C::N::zero()).then(|builder| {
+        self.if_ne(idx, CF::N::zero()).then(|builder| {
             builder.poseidon2_permute_mut(&state);
         });
 

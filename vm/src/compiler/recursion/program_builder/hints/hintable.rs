@@ -1,19 +1,23 @@
 use super::{
-    challenger::DuplexChallengerVariable,
-    fri::TwoAdicMultiplicativeCosetVariable,
-    stark::{BaseProofHint, VerifyingKeyHint},
-    types::{
-        /*AirOpenedValuesVariable,*/ BaseCommitmentsVariable, BaseOpenedValuesVariable,
-        BaseProofVariable, ChipOpenedValuesVariable, QuotientData, QuotientDataValues,
-        Sha256DigestVariable, VerifyingKeyVariable,
+    super::{
+        keys::BaseVerifyingKeyVariable,
+        p3::fri::{types::Sha256DigestVariable, TwoAdicMultiplicativeCosetVariable},
+        proof::{
+            BaseCommitmentsVariable, BaseOpenedValuesVariable, BaseProofVariable,
+            ChipOpenedValuesVariable, QuotientDataVariable,
+        },
+        utils::{get_chip_quotient_data, get_preprocessed_data, get_sorted_indices},
     },
-    utils::{get_chip_quotient_data, get_preprocessed_data, get_sorted_indices},
+    keys::VerifyingKeyHint,
 };
 use crate::{
     compiler::{
         recursion::{
             config::InnerConfig,
             ir::{Array, Builder, Config, Ext, Felt, MemVariable, Var, Variable},
+            program_builder::{
+                hints::proof::BaseProofHint, p3::challenger::DuplexChallengerVariable,
+            },
         },
         word::Word,
     },
@@ -25,10 +29,11 @@ use crate::{
         config::{Com, StarkGenericConfig},
     },
     machine::{
-        chip::ChipBehavior,
+        chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        keys::BaseVerifyingKey,
         machine::MachineBehavior,
-        proof::{BaseCommitments, BaseOpenedValues, ChipOpenedValues},
+        proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, QuotientData},
     },
     primitives::consts::PV_DIGEST_NUM_WORDS,
     recursion::{air::Block, runtime::PERMUTATION_WIDTH},
@@ -40,25 +45,23 @@ use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
 
 // TODO: Walkthrough
-pub trait Hintable<C: Config> {
-    type HintVariable: Variable<C>;
+pub trait Hintable<CF: Config> {
+    type HintVariable: Variable<CF>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable;
+    fn read(builder: &mut Builder<CF>) -> Self::HintVariable;
 
-    fn write(&self) -> Vec<Vec<Block<C::F>>>;
+    fn write(&self) -> Vec<Vec<Block<CF::F>>>;
 
-    fn witness(variable: &Self::HintVariable, builder: &mut Builder<C>) {
+    fn witness(variable: &Self::HintVariable, builder: &mut Builder<CF>) {
         let target = Self::read(builder);
         builder.assign(variable.clone(), target);
     }
 }
 
-type C = InnerConfig;
-
-impl Hintable<C> for usize {
+impl Hintable<InnerConfig> for usize {
     type HintVariable = Var<InnerVal>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         builder.hint_var()
     }
 
@@ -67,39 +70,39 @@ impl Hintable<C> for usize {
     }
 }
 
-impl Hintable<C> for InnerVal {
+impl Hintable<InnerConfig> for InnerVal {
     type HintVariable = Felt<InnerVal>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         builder.hint_felt()
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         vec![vec![Block::from(*self)]]
     }
 }
 
-impl Hintable<C> for InnerChallenge {
+impl Hintable<InnerConfig> for InnerChallenge {
     type HintVariable = Ext<InnerVal, InnerChallenge>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         builder.hint_ext()
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         vec![vec![Block::from((*self).as_base_slice())]]
     }
 }
 
-impl Hintable<C> for [Word<BabyBear>; PV_DIGEST_NUM_WORDS] {
-    type HintVariable = Sha256DigestVariable<C>;
+impl Hintable<InnerConfig> for [Word<BabyBear>; PV_DIGEST_NUM_WORDS] {
+    type HintVariable = Sha256DigestVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let bytes = builder.hint_felts();
         Sha256DigestVariable { bytes }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         vec![self
             .iter()
             .flat_map(|w| w.0.iter().map(|f| Block::from(*f)))
@@ -107,20 +110,20 @@ impl Hintable<C> for [Word<BabyBear>; PV_DIGEST_NUM_WORDS] {
     }
 }
 
-impl Hintable<C> for QuotientDataValues {
-    type HintVariable = QuotientData<C>;
+impl Hintable<InnerConfig> for QuotientData {
+    type HintVariable = QuotientDataVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let log_quotient_degree = usize::read(builder);
         let quotient_size = usize::read(builder);
 
-        QuotientData {
+        QuotientDataVariable {
             log_quotient_degree,
             quotient_size,
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut buffer = Vec::new();
         buffer.extend(usize::write(&self.log_quotient_degree));
         buffer.extend(usize::write(&self.quotient_size));
@@ -129,17 +132,17 @@ impl Hintable<C> for QuotientDataValues {
     }
 }
 
-impl Hintable<C> for TwoAdicMultiplicativeCoset<InnerVal> {
-    type HintVariable = TwoAdicMultiplicativeCosetVariable<C>;
+impl Hintable<InnerConfig> for TwoAdicMultiplicativeCoset<InnerVal> {
+    type HintVariable = TwoAdicMultiplicativeCosetVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let log_n = usize::read(builder);
         let shift = InnerVal::read(builder);
         let g_val = InnerVal::read(builder);
         let size = usize::read(builder);
 
         // Initialize a domain.
-        TwoAdicMultiplicativeCosetVariable::<C> {
+        TwoAdicMultiplicativeCosetVariable::<InnerConfig> {
             log_n,
             size,
             shift,
@@ -147,7 +150,7 @@ impl Hintable<C> for TwoAdicMultiplicativeCoset<InnerVal> {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut vec = Vec::new();
         vec.extend(usize::write(&self.log_n));
         vec.extend(InnerVal::write(&self.shift));
@@ -157,41 +160,41 @@ impl Hintable<C> for TwoAdicMultiplicativeCoset<InnerVal> {
     }
 }
 
-trait VecAutoHintable<C: Config>: Hintable<C> {}
+trait VecAutoHintable<CF: Config>: Hintable<InnerConfig> {}
 
-impl<'a, A> VecAutoHintable<C> for BaseProofHint<'a, BabyBearPoseidon2, A> where
+impl<'a, A> VecAutoHintable<InnerConfig> for BaseProofHint<'a, BabyBearPoseidon2, A> where
     A: ChipBehavior<BabyBear>
         + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
         + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>
 {
 }
-impl VecAutoHintable<C> for TwoAdicMultiplicativeCoset<InnerVal> {}
-impl VecAutoHintable<C> for Vec<usize> {}
-impl VecAutoHintable<C> for QuotientDataValues {}
-impl VecAutoHintable<C> for Vec<QuotientDataValues> {}
-impl VecAutoHintable<C> for Vec<InnerVal> {}
+impl VecAutoHintable<InnerConfig> for TwoAdicMultiplicativeCoset<InnerVal> {}
+impl VecAutoHintable<InnerConfig> for Vec<usize> {}
+impl VecAutoHintable<InnerConfig> for QuotientData {}
+impl VecAutoHintable<InnerConfig> for Vec<QuotientData> {}
+impl VecAutoHintable<InnerConfig> for Vec<InnerVal> {}
 
-impl<I: VecAutoHintable<C>> VecAutoHintable<C> for &I {}
+impl<I: VecAutoHintable<InnerConfig>> VecAutoHintable<InnerConfig> for &I {}
 
-impl<H: Hintable<C>> Hintable<C> for &H {
+impl<H: Hintable<InnerConfig>> Hintable<InnerConfig> for &H {
     type HintVariable = H::HintVariable;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         H::read(builder)
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         H::write(self)
     }
 }
 
-impl<I: VecAutoHintable<C>> Hintable<C> for Vec<I>
+impl<I: VecAutoHintable<InnerConfig>> Hintable<InnerConfig> for Vec<I>
 where
-    <I as Hintable<C>>::HintVariable: MemVariable<C>,
+    <I as Hintable<InnerConfig>>::HintVariable: MemVariable<InnerConfig>,
 {
-    type HintVariable = Array<C, I::HintVariable>;
+    type HintVariable = Array<InnerConfig, I::HintVariable>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -201,7 +204,7 @@ where
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut stream = Vec::new();
 
         let len = InnerVal::from_canonical_usize(self.len());
@@ -216,10 +219,10 @@ where
     }
 }
 
-impl Hintable<C> for Vec<usize> {
-    type HintVariable = Array<C, Var<InnerVal>>;
+impl Hintable<InnerConfig> for Vec<usize> {
+    type HintVariable = Array<InnerConfig, Var<InnerVal>>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         builder.hint_vars()
     }
 
@@ -231,26 +234,26 @@ impl Hintable<C> for Vec<usize> {
     }
 }
 
-impl Hintable<C> for Vec<InnerVal> {
-    type HintVariable = Array<C, Felt<InnerVal>>;
+impl Hintable<InnerConfig> for Vec<InnerVal> {
+    type HintVariable = Array<InnerConfig, Felt<InnerVal>>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         builder.hint_felts()
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         vec![self.iter().map(|x| Block::from(*x)).collect()]
     }
 }
 
-impl Hintable<C> for Vec<InnerChallenge> {
-    type HintVariable = Array<C, Ext<InnerVal, InnerChallenge>>;
+impl Hintable<InnerConfig> for Vec<InnerChallenge> {
+    type HintVariable = Array<InnerConfig, Ext<InnerVal, InnerChallenge>>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         builder.hint_exts()
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         vec![self
             .iter()
             .map(|x| Block::from((*x).as_base_slice()))
@@ -258,27 +261,10 @@ impl Hintable<C> for Vec<InnerChallenge> {
     }
 }
 
-// impl Hintable<C> for AirOpenedValues<InnerChallenge> {
-//     type HintVariable = AirOpenedValuesVariable<C>;
+impl Hintable<InnerConfig> for Vec<Vec<InnerChallenge>> {
+    type HintVariable = Array<InnerConfig, Array<InnerConfig, Ext<InnerVal, InnerChallenge>>>;
 
-//     fn read(builder: &mut Builder<C>) -> Self::HintVariable {
-//         let local = Vec::<InnerChallenge>::read(builder);
-//         let next = Vec::<InnerChallenge>::read(builder);
-//         AirOpenedValuesVariable { local, next }
-//     }
-
-//     fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
-//         let mut stream = Vec::new();
-//         stream.extend(self.local.write());
-//         stream.extend(self.next.write());
-//         stream
-//     }
-// }
-
-impl Hintable<C> for Vec<Vec<InnerChallenge>> {
-    type HintVariable = Array<C, Array<C, Ext<InnerVal, InnerChallenge>>>;
-
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -288,7 +274,7 @@ impl Hintable<C> for Vec<Vec<InnerChallenge>> {
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut stream = Vec::new();
 
         let len = InnerVal::from_canonical_usize(self.len());
@@ -303,10 +289,10 @@ impl Hintable<C> for Vec<Vec<InnerChallenge>> {
     }
 }
 
-impl Hintable<C> for ChipOpenedValues<InnerChallenge> {
-    type HintVariable = ChipOpenedValuesVariable<C>;
+impl Hintable<InnerConfig> for ChipOpenedValues<InnerChallenge> {
+    type HintVariable = ChipOpenedValuesVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let preprocessed_local = Vec::<InnerChallenge>::read(builder);
         let preprocessed_next = Vec::<InnerChallenge>::read(builder);
         let main_local = Vec::<InnerChallenge>::read(builder);
@@ -329,7 +315,7 @@ impl Hintable<C> for ChipOpenedValues<InnerChallenge> {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut stream = Vec::new();
         stream.extend(self.preprocessed_local.write());
         stream.extend(self.preprocessed_next.write());
@@ -344,10 +330,10 @@ impl Hintable<C> for ChipOpenedValues<InnerChallenge> {
     }
 }
 
-impl Hintable<C> for Vec<ChipOpenedValues<InnerChallenge>> {
-    type HintVariable = Array<C, ChipOpenedValuesVariable<C>>;
+impl Hintable<InnerConfig> for Vec<ChipOpenedValues<InnerChallenge>> {
+    type HintVariable = Array<InnerConfig, ChipOpenedValuesVariable<InnerConfig>>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -357,7 +343,7 @@ impl Hintable<C> for Vec<ChipOpenedValues<InnerChallenge>> {
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut stream = Vec::new();
 
         let len = InnerVal::from_canonical_usize(self.len());
@@ -372,25 +358,27 @@ impl Hintable<C> for Vec<ChipOpenedValues<InnerChallenge>> {
     }
 }
 
-impl Hintable<C> for BaseOpenedValues<InnerChallenge> {
-    type HintVariable = BaseOpenedValuesVariable<C>;
+impl Hintable<InnerConfig> for BaseOpenedValues<InnerChallenge> {
+    type HintVariable = BaseOpenedValuesVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
-        let chips = Vec::<ChipOpenedValues<InnerChallenge>>::read(builder);
-        BaseOpenedValuesVariable { chips }
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+        let chips_opened_values = Vec::<ChipOpenedValues<InnerChallenge>>::read(builder);
+        BaseOpenedValuesVariable {
+            chips_opened_values,
+        }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut stream = Vec::new();
         stream.extend(self.chips_opened_values.write());
         stream
     }
 }
 
-impl Hintable<C> for BaseCommitments<InnerDigestHash> {
-    type HintVariable = BaseCommitmentsVariable<C>;
+impl Hintable<InnerConfig> for BaseCommitments<InnerDigestHash> {
+    type HintVariable = BaseCommitmentsVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let main_commit = InnerDigest::read(builder);
         let permutation_commit = InnerDigest::read(builder);
         let quotient_commit = InnerDigest::read(builder);
@@ -401,7 +389,7 @@ impl Hintable<C> for BaseCommitments<InnerDigestHash> {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut stream = Vec::new();
         let h: InnerDigest = self.main_commit.into();
         stream.extend(h.write());
@@ -413,10 +401,10 @@ impl Hintable<C> for BaseCommitments<InnerDigestHash> {
     }
 }
 
-impl Hintable<C> for DuplexChallenger<InnerVal, InnerPerm, 16, 8> {
-    type HintVariable = DuplexChallengerVariable<C>;
+impl Hintable<InnerConfig> for DuplexChallenger<InnerVal, InnerPerm, 16, 8> {
+    type HintVariable = DuplexChallengerVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let sponge_state = builder.hint_felts();
         let nb_inputs = builder.hint_var();
         let input_buffer = builder.hint_felts();
@@ -431,7 +419,7 @@ impl Hintable<C> for DuplexChallenger<InnerVal, InnerPerm, 16, 8> {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let mut stream = Vec::new();
         stream.extend(self.sponge_state.to_vec().write());
         stream.extend(self.input_buffer.len().write());
@@ -446,28 +434,29 @@ impl Hintable<C> for DuplexChallenger<InnerVal, InnerPerm, 16, 8> {
     }
 }
 
-impl<'a, A: ChipBehavior<BabyBear>> Hintable<C> for VerifyingKeyHint<'a, BabyBearPoseidon2, A>
+impl<'a, A: ChipBehavior<BabyBear>> Hintable<InnerConfig>
+    for VerifyingKeyHint<'a, BabyBearPoseidon2, A>
 where
     A: ChipBehavior<BabyBear>
         + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
         + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
 {
-    type HintVariable = VerifyingKeyVariable<C>;
+    type HintVariable = BaseVerifyingKeyVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let commitment = InnerDigest::read(builder);
         let pc_start = InnerVal::read(builder);
         let preprocessed_sorted_idxs = Vec::<usize>::read(builder);
         let prep_domains = Vec::<TwoAdicMultiplicativeCoset<InnerVal>>::read(builder);
-        VerifyingKeyVariable {
+        BaseVerifyingKeyVariable {
             commitment,
             pc_start,
             preprocessed_sorted_idxs,
-            prep_domains,
+            preprocessed_domains: prep_domains,
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let (preprocessed_sorted_idxs, prep_domains) =
             get_preprocessed_data(self.chips, &self.preprocessed_chip_ids, self.vk);
 
@@ -482,21 +471,21 @@ where
 }
 
 // Implement Hintable<C> for BaseProof where SC is equivalent to BabyBearPoseidon2
-impl<'a, A> Hintable<C> for BaseProofHint<'a, BabyBearPoseidon2, A>
+impl<'a, A> Hintable<InnerConfig> for BaseProofHint<'a, BabyBearPoseidon2, A>
 where
     A: ChipBehavior<BabyBear>
         + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
         + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
-    BaseCommitments<Com<BabyBearPoseidon2>>: Hintable<C>,
+    BaseCommitments<Com<BabyBearPoseidon2>>: Hintable<InnerConfig>,
 {
-    type HintVariable = BaseProofVariable<C>;
+    type HintVariable = BaseProofVariable<InnerConfig>;
 
-    fn read(builder: &mut Builder<C>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let commitment = BaseCommitments::read(builder);
         let opened_values = BaseOpenedValues::read(builder);
         let opening_proof = InnerPcsProof::read(builder);
         let public_values = Vec::<InnerVal>::read(builder);
-        let quotient_data = Vec::<QuotientDataValues>::read(builder);
+        let quotient_data = Vec::<QuotientData>::read(builder);
         let sorted_idxs = Vec::<usize>::read(builder);
         BaseProofVariable {
             commitment,
@@ -508,7 +497,7 @@ where
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<C as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
         let quotient_data = get_chip_quotient_data(self.chips, self.proof);
         let sorted_indices = get_sorted_indices(self.chips, self.proof);
 

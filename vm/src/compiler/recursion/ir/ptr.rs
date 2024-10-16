@@ -14,42 +14,42 @@ pub struct SymbolicPtr<N: Field> {
     pub address: SymbolicVar<N>,
 }
 
-impl<C: Config> Builder<C> {
+impl<CF: Config> Builder<CF> {
     /// Allocates an array on the heap.
-    pub(crate) fn alloc(&mut self, len: Usize<C::N>, size: usize) -> Ptr<C::N> {
+    pub(crate) fn alloc(&mut self, len: Usize<CF::N>, size: usize) -> Ptr<CF::N> {
         let ptr = Ptr::uninit(self);
         self.push(DslIr::Alloc(ptr, len, size));
         ptr
     }
 
     /// Loads a value from memory.
-    pub fn load<V: MemVariable<C>>(&mut self, var: V, ptr: Ptr<C::N>, index: MemIndex<C::N>) {
+    pub fn load<V: MemVariable<CF>>(&mut self, var: V, ptr: Ptr<CF::N>, index: MemIndex<CF::N>) {
         var.load(ptr, index, self);
     }
 
     /// Stores a value to memory.
-    pub fn store<V: MemVariable<C>>(&mut self, ptr: Ptr<C::N>, index: MemIndex<C::N>, value: V) {
+    pub fn store<V: MemVariable<CF>>(&mut self, ptr: Ptr<CF::N>, index: MemIndex<CF::N>, value: V) {
         value.store(ptr, index, self);
     }
 }
 
-impl<C: Config> Variable<C> for Ptr<C::N> {
-    type Expression = SymbolicPtr<C::N>;
+impl<CF: Config> Variable<CF> for Ptr<CF::N> {
+    type Expression = SymbolicPtr<CF::N>;
 
-    fn uninit(builder: &mut Builder<C>) -> Self {
+    fn uninit(builder: &mut Builder<CF>) -> Self {
         Ptr {
             address: Var::uninit(builder),
         }
     }
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<C>) {
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<CF>) {
         self.address.assign(src.address, builder);
     }
 
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<C>,
+        builder: &mut Builder<CF>,
     ) {
         Var::assert_eq(lhs.into().address, rhs.into().address, builder);
     }
@@ -57,22 +57,27 @@ impl<C: Config> Variable<C> for Ptr<C::N> {
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<C>,
+        builder: &mut Builder<CF>,
     ) {
         Var::assert_ne(lhs.into().address, rhs.into().address, builder);
     }
 }
 
-impl<C: Config> MemVariable<C> for Ptr<C::N> {
+impl<CF: Config> MemVariable<CF> for Ptr<CF::N> {
     fn size_of() -> usize {
         1
     }
 
-    fn load(&self, ptr: Ptr<C::N>, index: MemIndex<C::N>, builder: &mut Builder<C>) {
+    fn load(&self, ptr: Ptr<CF::N>, index: MemIndex<CF::N>, builder: &mut Builder<CF>) {
         self.address.load(ptr, index, builder);
     }
 
-    fn store(&self, ptr: Ptr<<C as Config>::N>, index: MemIndex<C::N>, builder: &mut Builder<C>) {
+    fn store(
+        &self,
+        ptr: Ptr<<CF as Config>::N>,
+        index: MemIndex<CF::N>,
+        builder: &mut Builder<CF>,
+    ) {
         self.address.store(ptr, index, builder);
     }
 }

@@ -166,3 +166,9 @@ pub struct ChipOpenedValues<Challenge> {
     pub cumulative_sum: Challenge,
     pub log_main_degree: usize,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotientData {
+    pub log_quotient_degree: usize,
+    pub quotient_size: usize,
+}

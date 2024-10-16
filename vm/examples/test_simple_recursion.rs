@@ -4,7 +4,7 @@ use p3_baby_bear::BabyBear;
 use p3_challenger::{CanObserve, DuplexChallenger};
 use pico_vm::{
     compiler::{
-        recursion::{config::InnerConfig, program_builder::hints::Hintable},
+        recursion::{config::InnerConfig, program_builder::hints::hintable::Hintable},
         riscv::compiler::{Compiler, SourceType},
     },
     configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},

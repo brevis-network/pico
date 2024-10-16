@@ -11,17 +11,18 @@ use super::{
 use crate::{
     compiler::recursion::{
         config::InnerConfig,
-        ir::{Array, Builder, Config, Ext, ExtConst, Felt, Var},
-        prelude::{DslVariable, *},
+        ir::{Builder, Config, Ext, ExtConst, Felt},
+        prelude::*,
         program::RecursionProgram,
         program_builder::{
-            challenger::{CanObserveVariable, DuplexChallengerVariable},
-            fri::TwoAdicFriPcsVariable,
-            hints::Hintable,
+            hints::hintable::Hintable,
+            p3::{
+                challenger::{CanObserveVariable, DuplexChallengerVariable},
+                fri::TwoAdicFriPcsVariable,
+            },
             stark::StarkVerifier,
             utils::{
-                assert_challenger_eq_pv, const_fri_config, get_challenger_public_values, hash_vkey,
-                var2felt,
+                assert_challenger_eq_pv, const_fri_config, get_challenger_public_values, var2felt,
             },
         },
     },
@@ -45,8 +46,8 @@ use p3_field::{AbstractField, PrimeField32, TwoAdicField};
 
 /// A program for recursively verifying a batch of Pico proofs.
 #[derive(Debug, Clone, Copy)]
-pub struct SimpleVerifierCircuit<C: Config, SC: StarkGenericConfig> {
-    _phantom: PhantomData<(C, SC)>,
+pub struct SimpleVerifierCircuit<CF: Config, SC: StarkGenericConfig> {
+    _phantom: PhantomData<(CF, SC)>,
 }
 
 impl SimpleVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
@@ -70,21 +71,21 @@ impl SimpleVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
     }
 }
 
-impl<C: Config, SC: StarkGenericConfig> SimpleVerifierCircuit<C, SC>
+impl<CF: Config, SC: StarkGenericConfig> SimpleVerifierCircuit<CF, SC>
 where
-    C::F: PrimeField32 + TwoAdicField,
+    CF::F: PrimeField32 + TwoAdicField,
     SC: StarkGenericConfig<
-        Val = C::F,
-        Challenge = C::EF,
-        Domain = TwoAdicMultiplicativeCoset<C::F>,
+        Val = CF::F,
+        Challenge = CF::EF,
+        Domain = TwoAdicMultiplicativeCoset<CF::F>,
     >,
     Com<SC>: Into<[SC::Val; DIGEST_SIZE]>,
 {
     pub fn build_verifier(
-        builder: &mut Builder<C>,
-        pcs: &TwoAdicFriPcsVariable<C>,
+        builder: &mut Builder<CF>,
+        pcs: &TwoAdicFriPcsVariable<CF>,
         machine: &SimpleMachine<SC, RiscvChipType<SC::Val>>,
-        input: SimpleRecursionStdinVariable<C>,
+        input: SimpleRecursionStdinVariable<CF>,
     ) {
         // Read input.
         let SimpleRecursionStdinVariable {
@@ -101,7 +102,7 @@ where
             initial_reconstruct_challenger.copy(builder);
 
         // Initialize the cumulative sum.
-        let cumulative_sum: Ext<_, _> = builder.eval(C::EF::zero().cons());
+        let cumulative_sum: Ext<_, _> = builder.eval(CF::EF::zero().cons());
 
         // Assert that the number of proofs is not zero.
         // builder.assert_usize_eq(base_proofs.len(), 1);
@@ -115,7 +116,7 @@ where
             // Verify each chunk
             let mut challenger = leaf_challenger.copy(builder);
 
-            StarkVerifier::<C, SC>::verify_chunk(
+            StarkVerifier::<CF, SC>::verify_chunk(
                 builder,
                 &vk,
                 pcs,
@@ -134,7 +135,7 @@ where
             }
 
             // Cumulative sum is updated by sums of all chips.
-            let opened_values = proof.opened_values.chips;
+            let opened_values = proof.opened_values.chips_opened_values;
             builder
                 .range(0, opened_values.len())
                 .for_each(|k, builder| {
@@ -154,7 +155,7 @@ where
             let is_complete_felt = var2felt(builder, is_complete);
 
             // Initialize the public values we will commit to.
-            let zero: Felt<_> = builder.eval(C::F::zero());
+            let zero: Felt<_> = builder.eval(CF::F::zero());
 
             let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
             let recursion_public_values: &mut RecursionPublicValues<_> =
@@ -165,7 +166,7 @@ where
             recursion_public_values.is_complete = is_complete_felt;
 
             // Assert complete
-            builder.if_eq(is_complete, C::N::one()).then(|builder| {
+            builder.if_eq(is_complete, CF::N::one()).then(|builder| {
                 Self::assert_simple_complete(
                     builder,
                     recursion_public_values,
@@ -177,7 +178,7 @@ where
         }
     }
 
-    pub(crate) fn assert_simple_complete<CF: Config>(
+    pub(crate) fn assert_simple_complete(
         builder: &mut Builder<CF>,
         public_values: &RecursionPublicValues<Felt<CF::F>>,
         end_reconstruct_challenger: &DuplexChallengerVariable<CF>,

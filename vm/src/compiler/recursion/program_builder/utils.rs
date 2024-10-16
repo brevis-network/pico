@@ -1,22 +1,21 @@
 use super::{
-    challenger::DuplexChallengerVariable,
-    fri::{types::FriConfigVariable, TwoAdicMultiplicativeCosetVariable},
+    keys::BaseVerifyingKeyVariable,
+    p3::fri::{types::FriConfigVariable, TwoAdicMultiplicativeCosetVariable},
     stark::EMPTY,
-    types::{QuotientDataValues, VerifyingKeyVariable},
 };
 use crate::{
     compiler::recursion::{
         asm::AsmConfig,
         ir::{Array, Builder, Config, Felt, MemVariable, Var},
+        program_builder::p3::challenger::DuplexChallengerVariable,
     },
     configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
-    instances::machine::simple_machine::SimpleMachine,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
         machine::MachineBehavior,
-        proof::BaseProof,
+        proof::{BaseProof, QuotientData},
         utils::order_chips,
     },
     primitives::consts::DIGEST_SIZE,
@@ -34,7 +33,6 @@ use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 type SC = BabyBearPoseidon2;
 type F = <SC as StarkGenericConfig>::Val;
 type EF = <SC as StarkGenericConfig>::Challenge;
-type C = AsmConfig<F, EF>;
 type Val = BabyBear;
 type Challenge = BinomialExtensionField<Val, 4>;
 type Perm = Poseidon2<Val, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>;
@@ -74,16 +72,16 @@ pub fn const_fri_config(
     }
 }
 
-pub fn clone<T: MemVariable<C>>(builder: &mut RecursionBuilder, var: &T) -> T {
+pub fn clone<T: MemVariable<AsmConfig<F, EF>>>(builder: &mut RecursionBuilder, var: &T) -> T {
     let mut arr = builder.dyn_array(1);
     builder.set(&mut arr, 0, var.clone());
     builder.get(&arr, 0)
 }
 
-pub fn clone_array<T: MemVariable<C>>(
+pub fn clone_array<T: MemVariable<AsmConfig<F, EF>>>(
     builder: &mut RecursionBuilder,
-    arr: &Array<C, T>,
-) -> Array<C, T> {
+    arr: &Array<AsmConfig<F, EF>, T>,
+) -> Array<AsmConfig<F, EF>, T> {
     let mut new_arr = builder.dyn_array(arr.len());
     builder.range(0, arr.len()).for_each(|i, builder| {
         let var = builder.get(arr, i);
@@ -93,21 +91,21 @@ pub fn clone_array<T: MemVariable<C>>(
 }
 
 // OPT: this can be done much more efficiently, but in the meantime this should work
-pub fn felt2var<C: Config>(builder: &mut Builder<C>, felt: Felt<C::F>) -> Var<C::N> {
+pub fn felt2var<CF: Config>(builder: &mut Builder<CF>, felt: Felt<CF::F>) -> Var<CF::N> {
     let bits = builder.num2bits_f(felt);
     builder.bits2num_v(&bits)
 }
 
-pub fn var2felt<C: Config>(builder: &mut Builder<C>, var: Var<C::N>) -> Felt<C::F> {
+pub fn var2felt<CF: Config>(builder: &mut Builder<CF>, var: Var<CF::N>) -> Felt<CF::F> {
     let bits = builder.num2bits_v(var);
     builder.bits2num_f(&bits)
 }
 
 /// Asserts that the challenger variable is equal to a challenger in public values.
-pub fn assert_challenger_eq_pv<C: Config>(
-    builder: &mut Builder<C>,
-    var: &DuplexChallengerVariable<C>,
-    values: ChallengerPublicValues<Felt<C::F>>,
+pub fn assert_challenger_eq_pv<CF: Config>(
+    builder: &mut Builder<CF>,
+    var: &DuplexChallengerVariable<CF>,
+    values: ChallengerPublicValues<Felt<CF::F>>,
 ) {
     for i in 0..PERMUTATION_WIDTH {
         let element = builder.get(&var.sponge_state, i);
@@ -138,10 +136,10 @@ pub fn assert_challenger_eq_pv<C: Config>(
 }
 
 /// Assigns a challenger variable from a challenger in public values.
-pub fn assign_challenger_from_pv<C: Config>(
-    builder: &mut Builder<C>,
-    dst: &mut DuplexChallengerVariable<C>,
-    values: ChallengerPublicValues<Felt<C::F>>,
+pub fn assign_challenger_from_pv<CF: Config>(
+    builder: &mut Builder<CF>,
+    dst: &mut DuplexChallengerVariable<CF>,
+    values: ChallengerPublicValues<Felt<CF::F>>,
 ) {
     for i in 0..PERMUTATION_WIDTH {
         builder.set(&mut dst.sponge_state, i, values.sponge_state[i]);
@@ -158,10 +156,10 @@ pub fn assign_challenger_from_pv<C: Config>(
     }
 }
 
-pub fn get_challenger_public_values<C: Config>(
-    builder: &mut Builder<C>,
-    var: &DuplexChallengerVariable<C>,
-) -> ChallengerPublicValues<Felt<C::F>> {
+pub fn get_challenger_public_values<CF: Config>(
+    builder: &mut Builder<CF>,
+    var: &DuplexChallengerVariable<CF>,
+) -> ChallengerPublicValues<Felt<CF::F>> {
     let sponge_state = core::array::from_fn(|i| builder.get(&var.sponge_state, i));
     let num_inputs = var2felt(builder, var.nb_inputs);
     let input_buffer = core::array::from_fn(|i| builder.get(&var.input_buffer, i));
@@ -179,12 +177,12 @@ pub fn get_challenger_public_values<C: Config>(
 
 /// Hash the verifying key + prep domains into a single digest.
 /// poseidon2( commit[0..8] || pc_start || prep_domains[N].{log_n, .size, .shift, .g})
-pub fn hash_vkey<C: Config>(
-    builder: &mut Builder<C>,
-    vk: &VerifyingKeyVariable<C>,
-) -> Array<C, Felt<C::F>> {
-    let domain_slots: Var<_> = builder.eval(vk.prep_domains.len() * 4);
-    let vkey_slots: Var<_> = builder.constant(C::N::from_canonical_usize(DIGEST_SIZE + 1));
+pub fn hash_vkey<CF: Config>(
+    builder: &mut Builder<CF>,
+    vk: &BaseVerifyingKeyVariable<CF>,
+) -> Array<CF, Felt<CF::F>> {
+    let domain_slots: Var<_> = builder.eval(vk.preprocessed_domains.len() * 4);
+    let vkey_slots: Var<_> = builder.constant(CF::N::from_canonical_usize(DIGEST_SIZE + 1));
     let total_slots: Var<_> = builder.eval(vkey_slots + domain_slots);
     let mut inputs = builder.dyn_array(total_slots);
     builder.range(0, DIGEST_SIZE).for_each(|i, builder| {
@@ -192,13 +190,13 @@ pub fn hash_vkey<C: Config>(
         builder.set(&mut inputs, i, element);
     });
     builder.set(&mut inputs, DIGEST_SIZE, vk.pc_start);
-    let four: Var<_> = builder.constant(C::N::from_canonical_usize(4));
-    let one: Var<_> = builder.constant(C::N::one());
+    let four: Var<_> = builder.constant(CF::N::from_canonical_usize(4));
+    let one: Var<_> = builder.constant(CF::N::one());
     builder
-        .range(0, vk.prep_domains.len())
+        .range(0, vk.preprocessed_domains.len())
         .for_each(|i, builder| {
             let sorted_index = builder.get(&vk.preprocessed_sorted_idxs, i);
-            let domain = builder.get(&vk.prep_domains, i);
+            let domain = builder.get(&vk.preprocessed_domains, i);
             let log_n_index: Var<_> = builder.eval(vkey_slots + sorted_index * four);
             let size_index: Var<_> = builder.eval(log_n_index + one);
             let shift_index: Var<_> = builder.eval(size_index + one);
@@ -254,7 +252,7 @@ where
 pub(crate) fn get_chip_quotient_data<SC, C>(
     chips: &[MetaChip<SC::Val, C>],
     proof: &BaseProof<SC>,
-) -> Vec<QuotientDataValues>
+) -> Vec<QuotientData>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>
@@ -265,7 +263,7 @@ where
         .into_iter()
         .map(|chip| {
             let log_quotient_degree = chip.get_log_quotient_degree();
-            QuotientDataValues {
+            QuotientData {
                 log_quotient_degree,
                 quotient_size: 1 << log_quotient_degree,
             }

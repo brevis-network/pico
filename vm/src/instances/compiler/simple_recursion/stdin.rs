@@ -3,10 +3,9 @@ use crate::{
         config::InnerConfig,
         ir::{Array, Builder, Config, Var},
         program_builder::{
-            challenger::DuplexChallengerVariable,
-            hints::Hintable,
-            stark::{BaseProofHint, VerifyingKeyHint},
-            types::{BaseProofVariable, VerifyingKeyVariable},
+            hints::{hintable::Hintable, keys::VerifyingKeyHint, proof::BaseProofHint},
+            keys::BaseVerifyingKeyVariable,
+            proof::BaseProofVariable,
         },
     },
     configs::{
@@ -27,7 +26,10 @@ use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 
-use crate::compiler::recursion::prelude::{DslVariable, *};
+use crate::compiler::recursion::{
+    prelude::{DslVariable, *},
+    program_builder::p3::challenger::DuplexChallengerVariable,
+};
 
 pub struct SimpleRecursionStdin<'a, SC, C>
 where
@@ -45,12 +47,12 @@ where
 }
 
 #[derive(DslVariable, Clone)]
-pub struct SimpleRecursionStdinVariable<C: Config> {
-    pub vk: VerifyingKeyVariable<C>,
-    pub base_proofs: Array<C, BaseProofVariable<C>>,
-    pub leaf_challenger: DuplexChallengerVariable<C>,
-    pub initial_reconstruct_challenger: DuplexChallengerVariable<C>,
-    pub is_complete: Var<C::N>,
+pub struct SimpleRecursionStdinVariable<CF: Config> {
+    pub vk: BaseVerifyingKeyVariable<CF>,
+    pub base_proofs: Array<CF, BaseProofVariable<CF>>,
+    pub leaf_challenger: DuplexChallengerVariable<CF>,
+    pub initial_reconstruct_challenger: DuplexChallengerVariable<CF>,
+    pub is_complete: Var<CF::N>,
 }
 
 impl<'a, A> Hintable<InnerConfig> for SimpleRecursionStdin<'a, BabyBearPoseidon2, A>

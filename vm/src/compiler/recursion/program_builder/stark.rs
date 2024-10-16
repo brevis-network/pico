@@ -3,16 +3,21 @@ use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractField, TwoAdicField};
 
 use super::{
-    challenger::{CanObserveVariable, DuplexChallengerVariable, FeltChallenger},
-    commit::{PcsVariable, PolynomialSpaceVariable},
-    fri::{
+    keys::BaseVerifyingKeyVariable,
+    p3::fri::{
         types::{TwoAdicPcsMatsVariable, TwoAdicPcsRoundVariable},
         TwoAdicFriPcsVariable, TwoAdicMultiplicativeCosetVariable,
     },
-    types::{BaseCommitmentsVariable, BaseProofVariable, QuotientData, VerifyingKeyVariable},
+    proof::{BaseCommitmentsVariable, BaseProofVariable, QuotientDataVariable},
 };
 use crate::{
-    compiler::recursion::ir::{Array, Builder, Config, Ext, ExtConst, Usize, Var},
+    compiler::recursion::{
+        ir::{Array, Builder, Config, Ext, ExtConst, Usize, Var},
+        program_builder::p3::{
+            challenger::{CanObserveVariable, DuplexChallengerVariable, FeltChallenger},
+            commit::{PcsVariable, PolynomialSpaceVariable},
+        },
+    },
     configs::config::{Com, StarkGenericConfig},
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -33,61 +38,6 @@ pub struct StarkVerifier<CF: Config, SC: StarkGenericConfig> {
     _phantom: std::marker::PhantomData<(CF, SC)>,
 }
 
-pub struct BaseProofHint<'a, SC, C>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
-{
-    pub chips: &'a [MetaChip<SC::Val, C>],
-    pub proof: &'a BaseProof<SC>,
-}
-
-impl<'a, SC, C> BaseProofHint<'a, SC, C>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
-{
-    pub const fn new(chips: &'a [MetaChip<SC::Val, C>], proof: &'a BaseProof<SC>) -> Self {
-        Self { chips, proof }
-    }
-}
-
-pub struct VerifyingKeyHint<'a, SC, C>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
-{
-    pub chips: &'a [MetaChip<SC::Val, C>],
-    pub preprocessed_chip_ids: Vec<usize>,
-    pub vk: &'a BaseVerifyingKey<SC>,
-}
-
-impl<'a, SC, C> VerifyingKeyHint<'a, SC, C>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
-{
-    pub const fn new(
-        chips: &'a [MetaChip<SC::Val, C>],
-        preprocessed_chip_ids: Vec<usize>,
-        vk: &'a BaseVerifyingKey<SC>,
-    ) -> Self {
-        Self {
-            chips,
-            preprocessed_chip_ids,
-            vk,
-        }
-    }
-}
-
 impl<CF: Config, SC: StarkGenericConfig> StarkVerifier<CF, SC>
 where
     CF::F: TwoAdicField,
@@ -99,7 +49,7 @@ where
 {
     pub fn verify_chunk<A>(
         builder: &mut Builder<CF>,
-        vk: &VerifyingKeyVariable<CF>,
+        vk: &BaseVerifyingKeyVariable<CF>,
         pcs: &TwoAdicFriPcsVariable<CF>,
         chips: &[MetaChip<CF::F, A>],
         preprocessed_chip_ids: &[usize],
@@ -141,7 +91,7 @@ where
 
         let zeta = challenger.sample_ext(builder);
 
-        let num_chunk_chips = opened_values.chips.len();
+        let num_chunk_chips = opened_values.chips_opened_values.len();
         let mut trace_domains =
             builder.dyn_array::<TwoAdicMultiplicativeCosetVariable<_>>(num_chunk_chips);
         let mut quotient_domains =
@@ -171,12 +121,12 @@ where
             // Get index within sorted preprocessed chips.
             let preprocessed_sorted_id = builder.get(&vk.preprocessed_sorted_idxs, preprocessed_id);
             // Get domain from witnessed domains. Array is ordered by machine.chips ordering.
-            let domain = builder.get(&vk.prep_domains, preprocessed_id);
+            let domain = builder.get(&vk.preprocessed_domains, preprocessed_id);
 
             // Get index within all sorted chips.
             let chip_sorted_id = builder.get(&proof.sorted_idxs, chip_id);
             // Get opening from proof.
-            let opening = builder.get(&opened_values.chips, chip_sorted_id);
+            let opening = builder.get(&opened_values.chips_opened_values, chip_sorted_id);
 
             let mut trace_points = builder.dyn_array::<Ext<_, _>>(2);
             let zeta_next = domain.next_point(builder, zeta);
@@ -197,8 +147,8 @@ where
 
         let qc_index: Var<_> = builder.eval(CF::N::zero());
         builder.range(0, num_chunk_chips).for_each(|i, builder| {
-            let opening = builder.get(&opened_values.chips, i);
-            let QuotientData {
+            let opening = builder.get(&opened_values.chips_opened_values, i);
+            let QuotientDataVariable {
                 log_quotient_degree,
                 quotient_size,
             } = builder.get(&proof.quotient_data, i);
@@ -303,7 +253,7 @@ where
             builder
                 .if_ne(index, CF::N::from_canonical_usize(EMPTY))
                 .then(|builder| {
-                    let values = builder.get(&opened_values.chips, index);
+                    let values = builder.get(&opened_values.chips_opened_values, index);
                     let trace_domain = builder.get(&trace_domains, index);
                     let quotient_domain: TwoAdicMultiplicativeCosetVariable<_> =
                         builder.get(&quotient_domains, index);
@@ -354,9 +304,11 @@ where
         if check_cumulative_sum {
             let sum: Ext<_, _> = builder.eval(CF::EF::zero().cons());
             builder
-                .range(0, proof.opened_values.chips.len())
+                .range(0, proof.opened_values.chips_opened_values.len())
                 .for_each(|i, builder| {
-                    let cumulative_sum = builder.get(&proof.opened_values.chips, i).cumulative_sum;
+                    let cumulative_sum = builder
+                        .get(&proof.opened_values.chips_opened_values, i)
+                        .cumulative_sum;
                     builder.assign(sum, sum + cumulative_sum);
                 });
             builder.assert_ext_eq(sum, CF::EF::zero().cons());
