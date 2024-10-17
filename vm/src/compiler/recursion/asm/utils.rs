@@ -1,6 +1,5 @@
-use p3_field::PrimeField32;
-
 use crate::compiler::recursion::prelude::{MemIndex, Usize};
+use p3_field::PrimeField32;
 
 /// Represents a memory index triple.
 pub enum IndexTriple<F> {

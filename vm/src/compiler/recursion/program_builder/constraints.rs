@@ -1,5 +1,5 @@
 use super::{
-    p3::fri::TwoAdicMultiplicativeCosetVariable,
+    p3::{commit::PolynomialSpaceVariable, fri::TwoAdicMultiplicativeCosetVariable},
     proof::{ChipOpenedValuesVariable, ChipOpening},
     stark::StarkVerifier,
 };
@@ -7,7 +7,6 @@ use crate::{
     compiler::recursion::{
         ir::{Array, Felt},
         prelude::{Builder, Config, Ext, ExtConst, SymbolicExt},
-        program_builder::p3::commit::PolynomialSpaceVariable,
     },
     configs::config::StarkGenericConfig,
     machine::{

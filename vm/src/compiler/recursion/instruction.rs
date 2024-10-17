@@ -1,8 +1,7 @@
-use p3_field::PrimeField32;
-use serde::{Deserialize, Serialize};
-
 use super::opcode::Opcode;
 use crate::{primitives::consts::EXTENSION_DEGREE, recursion::air::Block};
+use p3_field::PrimeField32;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instruction<F> {

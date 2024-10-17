@@ -1,23 +1,17 @@
-use p3_air::Air;
-use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{AbstractField, TwoAdicField};
-
 use super::{
     keys::BaseVerifyingKeyVariable,
-    p3::fri::{
-        types::{TwoAdicPcsMatsVariable, TwoAdicPcsRoundVariable},
-        TwoAdicFriPcsVariable, TwoAdicMultiplicativeCosetVariable,
+    p3::{
+        challenger::{CanObserveVariable, DuplexChallengerVariable, FeltChallenger},
+        commit::{PcsVariable, PolynomialSpaceVariable},
+        fri::{
+            types::{TwoAdicPcsMatsVariable, TwoAdicPcsRoundVariable},
+            TwoAdicFriPcsVariable, TwoAdicMultiplicativeCosetVariable,
+        },
     },
     proof::{BaseCommitmentsVariable, BaseProofVariable, QuotientDataVariable},
 };
 use crate::{
-    compiler::recursion::{
-        ir::{Array, Builder, Config, Ext, ExtConst, Usize, Var},
-        program_builder::p3::{
-            challenger::{CanObserveVariable, DuplexChallengerVariable, FeltChallenger},
-            commit::{PcsVariable, PolynomialSpaceVariable},
-        },
-    },
+    compiler::recursion::ir::{Array, Builder, Config, Ext, ExtConst, Usize, Var},
     configs::config::{Com, StarkGenericConfig},
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -29,6 +23,9 @@ use crate::{
     },
     primitives::consts::DIGEST_SIZE,
 };
+use p3_air::Air;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{AbstractField, TwoAdicField};
 
 pub const EMPTY: usize = 0x_1111_1111;
 

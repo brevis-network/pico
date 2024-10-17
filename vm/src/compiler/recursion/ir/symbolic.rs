@@ -1,8 +1,10 @@
+use super::{Ext, Felt, Usize, Var};
 use alloc::rc::Rc;
 use core::{
     any::Any,
     ops::{Add, Div, Mul, Neg, Sub},
 };
+use p3_field::{AbstractField, ExtensionField, Field, FieldArray};
 use std::{
     any::TypeId,
     hash::Hash,
@@ -10,10 +12,6 @@ use std::{
     mem,
     ops::{AddAssign, DivAssign, MulAssign, SubAssign},
 };
-
-use p3_field::{AbstractField, ExtensionField, Field, FieldArray};
-
-use super::{Ext, Felt, Usize, Var};
 
 const NUM_RANDOM_ELEMENTS: usize = 4;
 

@@ -1,7 +1,6 @@
+use super::{Array, Builder, Config, DslIr, Felt, Usize, Var};
 use crate::recursion::runtime::NUM_BITS;
 use p3_field::{AbstractField, Field};
-
-use super::{Array, Builder, Config, DslIr, Felt, Usize, Var};
 
 impl<CF: Config> Builder<CF> {
     /// Converts a variable to LE bits.

@@ -1,9 +1,8 @@
-use crate::recursion::air::RecursionPublicValues;
-
 use super::{
     Array, CircuitV2FriFoldInput, CircuitV2FriFoldOutput, Config, Ext, Felt, FriFoldInput,
     MemIndex, Ptr, TracedVec, Usize, Var,
 };
+use crate::recursion::air::RecursionPublicValues;
 
 /// An intermeddiate instruction set for implementing programs.
 ///

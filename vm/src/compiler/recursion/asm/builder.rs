@@ -1,4 +1,4 @@
-use super::{config::AsmConfig, AsmCompiler, AssemblyCode};
+use super::{config::AsmConfig, AsmCompiler};
 use crate::compiler::recursion::{prelude::Builder, program::RecursionProgram};
 use p3_field::{ExtensionField, PrimeField32, TwoAdicField};
 

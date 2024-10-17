@@ -1,9 +1,5 @@
+use super::{Array, Builder, Config, Ext, Felt, MemIndex, MemVariable, Ptr, Var, Variable};
 use pico_derive::DslVariable;
-
-use super::{Ext, Felt, Var};
-use crate::compiler::recursion::ir::{
-    Array, Builder, Config, MemIndex, MemVariable, Ptr, Variable,
-};
 
 #[derive(DslVariable, Debug, Clone)]
 pub struct FriFoldInput<CF: Config> {

@@ -1,9 +1,8 @@
-use super::p3::fri::types::DigestVariable;
+use super::p3::fri::types::{DigestVariable, PcsProofVariable};
 use crate::{
     compiler::recursion::{
         ir::{Array, Builder, Config, Ext, ExtConst, Felt, FromConstant, Var},
         prelude::*,
-        program_builder::p3::fri::types::PcsProofVariable,
     },
     machine::{
         chip::{ChipBehavior, MetaChip},

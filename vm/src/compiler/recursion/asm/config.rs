@@ -1,8 +1,6 @@
-use std::marker::PhantomData;
-
-use p3_field::{ExtensionField, PrimeField, TwoAdicField};
-
 use crate::compiler::recursion::prelude::Config;
+use p3_field::{ExtensionField, PrimeField, TwoAdicField};
+use std::marker::PhantomData;
 
 /// An assembly code configuration given a field and an extension field.
 #[derive(Debug, Clone, Default)]

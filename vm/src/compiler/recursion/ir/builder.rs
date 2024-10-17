@@ -1,13 +1,11 @@
-use std::{iter::Zip, vec::IntoIter};
-
-use crate::primitives::types::RecursionProgramType;
-use backtrace::Backtrace;
-use p3_field::AbstractField;
-
 use super::{
     Array, Config, DslIr, Ext, Felt, FromConstant, SymbolicExt, SymbolicFelt, SymbolicUsize,
     SymbolicVar, Usize, Var, Variable,
 };
+use crate::primitives::types::RecursionProgramType;
+use backtrace::Backtrace;
+use p3_field::AbstractField;
+use std::{iter::Zip, vec::IntoIter};
 
 /// TracedVec is a Vec wrapper that records a trace whenever an element is pushed. When extending
 /// from another TracedVec, the traces are copied over.

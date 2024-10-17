@@ -1,22 +1,20 @@
-use super::{
-    super::{
-        keys::BaseVerifyingKeyVariable,
-        p3::fri::{types::Sha256DigestVariable, TwoAdicMultiplicativeCosetVariable},
-        proof::{
-            BaseCommitmentsVariable, BaseOpenedValuesVariable, BaseProofVariable,
-            ChipOpenedValuesVariable, QuotientDataVariable,
-        },
-        utils::{get_chip_quotient_data, get_preprocessed_data, get_sorted_indices},
-    },
-    keys::VerifyingKeyHint,
-};
+use super::{keys::VerifyingKeyHint, proof::BaseProofHint};
 use crate::{
     compiler::{
         recursion::{
             config::InnerConfig,
             ir::{Array, Builder, Config, Ext, Felt, MemVariable, Var, Variable},
             program_builder::{
-                hints::proof::BaseProofHint, p3::challenger::DuplexChallengerVariable,
+                keys::BaseVerifyingKeyVariable,
+                p3::{
+                    challenger::DuplexChallengerVariable,
+                    fri::{types::Sha256DigestVariable, TwoAdicMultiplicativeCosetVariable},
+                },
+                proof::{
+                    BaseCommitmentsVariable, BaseOpenedValuesVariable, BaseProofVariable,
+                    ChipOpenedValuesVariable, QuotientDataVariable,
+                },
+                utils::{get_chip_quotient_data, get_preprocessed_data, get_sorted_indices},
             },
         },
         word::Word,
@@ -29,11 +27,10 @@ use crate::{
         config::{Com, StarkGenericConfig},
     },
     machine::{
-        chip::{ChipBehavior, MetaChip},
+        chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
         machine::MachineBehavior,
-        proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, QuotientData},
+        proof::{BaseCommitments, BaseOpenedValues, ChipOpenedValues, QuotientData},
     },
     primitives::consts::PV_DIGEST_NUM_WORDS,
     recursion::{air::Block, runtime::PERMUTATION_WIDTH},

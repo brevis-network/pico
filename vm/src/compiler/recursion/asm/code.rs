@@ -1,10 +1,9 @@
+use super::AsmInstruction;
 use crate::compiler::recursion::program::RecursionProgram;
 use alloc::{collections::BTreeMap, format};
 use backtrace::Backtrace;
 use core::{fmt, fmt::Display};
 use p3_field::{ExtensionField, PrimeField32};
-
-use super::AsmInstruction;
 
 /// A basic block of assembly instructions.
 #[derive(Debug, Clone, Default)]

@@ -1,8 +1,6 @@
-use core::ops::{Add, Sub};
-
-use p3_field::Field;
-
 use super::{Builder, Config, DslIr, MemIndex, MemVariable, SymbolicVar, Usize, Var, Variable};
+use core::ops::{Add, Sub};
+use p3_field::Field;
 
 /// A point to a location in memory.
 #[derive(Debug, Clone, Copy)]

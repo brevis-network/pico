@@ -1,13 +1,15 @@
 use super::{
     keys::BaseVerifyingKeyVariable,
-    p3::fri::{types::FriConfigVariable, TwoAdicMultiplicativeCosetVariable},
+    p3::{
+        challenger::DuplexChallengerVariable,
+        fri::{types::FriConfigVariable, TwoAdicMultiplicativeCosetVariable},
+    },
     stark::EMPTY,
 };
 use crate::{
     compiler::recursion::{
         asm::AsmConfig,
         ir::{Array, Builder, Config, Felt, MemVariable, Var},
-        program_builder::p3::challenger::DuplexChallengerVariable,
     },
     configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
     machine::{

@@ -1,8 +1,4 @@
 use super::{
-    super::{
-        challenger::{DuplexChallengerVariable, FeltChallenger},
-        commit::PcsVariable,
-    },
     types::{
         DigestVariable, DimensionsVariable, FriConfigVariable, PcsProofVariable,
         TwoAdicPcsMatsVariable, TwoAdicPcsRoundVariable,
@@ -11,7 +7,13 @@ use super::{
     TwoAdicMultiplicativeCosetVariable,
 };
 use crate::{
-    compiler::recursion::prelude::*,
+    compiler::recursion::{
+        prelude::*,
+        program_builder::p3::{
+            challenger::{DuplexChallengerVariable, FeltChallenger},
+            commit::PcsVariable,
+        },
+    },
     primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
 };
 use p3_commit::TwoAdicMultiplicativeCoset;

@@ -1,7 +1,6 @@
+use super::{Builder, Config, FromConstant, MemIndex, MemVariable, Ptr, Usize, Var, Variable};
 use itertools::Itertools;
 use p3_field::AbstractField;
-
-use super::{Builder, Config, FromConstant, MemIndex, MemVariable, Ptr, Usize, Var, Variable};
 
 /// An array that is either of static or dynamic size.
 #[derive(Debug, Clone)]

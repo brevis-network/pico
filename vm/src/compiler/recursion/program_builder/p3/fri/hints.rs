@@ -1,18 +1,13 @@
-use p3_field::{AbstractExtensionField, AbstractField};
-
-use super::{
-    super::super::hints::hintable::Hintable,
-    types::{
-        BatchOpeningVariable, DigestVariable, FriCommitPhaseProofStepVariable, FriProofVariable,
-        FriQueryProofVariable,
-    },
+use super::types::{
+    BatchOpeningVariable, DigestVariable, FriCommitPhaseProofStepVariable, FriProofVariable,
+    FriQueryProofVariable, PcsProofVariable,
 };
 use crate::{
     compiler::recursion::{
         asm::AsmConfig,
         config::InnerConfig,
         ir::{Array, Builder, Config},
-        program_builder::p3::fri::types::PcsProofVariable,
+        program_builder::hints::hintable::Hintable,
     },
     configs::bb_poseidon2::{
         InnerBatchOpening, InnerChallenge, InnerCommitPhaseStep, InnerDigest, InnerFriProof,
@@ -21,6 +16,7 @@ use crate::{
     primitives::consts::DIGEST_SIZE,
     recursion::air::Block,
 };
+use p3_field::{AbstractExtensionField, AbstractField};
 
 impl Hintable<InnerConfig> for InnerDigest {
     type HintVariable = DigestVariable<InnerConfig>;

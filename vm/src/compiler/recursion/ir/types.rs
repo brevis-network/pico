@@ -1,14 +1,12 @@
-use alloc::format;
-use core::marker::PhantomData;
-use std::{collections::HashMap, hash::Hash};
-
-use p3_field::{AbstractField, ExtensionField, Field};
-use serde::{Deserialize, Serialize};
-
 use super::{
     Builder, Config, DslIr, ExtConst, FromConstant, MemIndex, MemVariable, Ptr, SymbolicExt,
     SymbolicFelt, SymbolicUsize, SymbolicVar, Variable,
 };
+use alloc::format;
+use core::marker::PhantomData;
+use p3_field::{AbstractField, ExtensionField, Field};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, hash::Hash};
 
 /// A variable that represents a native field element.
 ///
