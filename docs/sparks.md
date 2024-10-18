@@ -107,7 +107,7 @@
 - [ ] `AirBuilder` and `Air` should be defined out of core since these are also shared with recursion chips
 - [ ] Necessity for all files in `recursion/core/src/cpu/air/`? Or just implement them in one place? This is a new way of implementation of CpuChip, but it should bring lots of overhead\! Might be able to improve
 - [x] Why `Block` only exist in recursion but not core? Shouldn’t it be used in both cases, or is it redundant?
-- Recursion VM is handling both 32bits and 128bits (extension field), as opposed to Core VM where only 32bits are handled.
+- Recursion VM is handling both 32bits and 128bits (extension field), as opposed to Riscv VM where only 32bits are handled.
 - [ ] `CpuChip` same name redefined in recursion. Should specify a new name.
 - [ ] `Poseidon2CompressEvent` and `Poseidon2HashEvent` both in `EmulationRecord`?
 - [ ] `EmulationRecord` in recursion should be renamed

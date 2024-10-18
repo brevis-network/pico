@@ -279,6 +279,7 @@ where
             prev_next_pc = public_values.next_pc;
             prev_last_initialize_addr_bits = public_values.last_initialize_addr_bits;
             prev_last_finalize_addr_bits = public_values.last_finalize_addr_bits;
+            // println!("public values: {:?}", public_values);
         }
 
         // TODO: add committed_value_digest support
@@ -303,5 +304,15 @@ where
             chips,
             base_machine: BaseMachine::<SC, C>::new(num_public_values),
         }
+    }
+
+    /// Returns the id of all chips in the machine that have preprocessed columns.
+    pub fn preprocessed_chip_ids(&self) -> Vec<usize> {
+        self.chips
+            .iter()
+            .enumerate()
+            .filter(|(_, chip)| chip.preprocessed_width() > 0)
+            .map(|(i, _)| i)
+            .collect()
     }
 }

@@ -117,13 +117,13 @@ pub struct RecursionPublicValues<T> {
     pub compress_vk_digest: [T; DIGEST_SIZE],
 
     /// The leaf challenger containing the entropy from the main trace commitment.
-    pub leaf_challenger: ChallengerPublicValues<T>,
+    pub base_challenger: ChallengerPublicValues<T>,
 
     /// Current cumulative sum of lookup bus.
     pub cumulative_sum: [T; 4],
 
     /// Whether the proof completely proves the program execution.
-    pub is_complete: T,
+    pub flag_complete: T,
 
     /// The digest of all the previous public values elements.
     pub digest: [T; DIGEST_SIZE],

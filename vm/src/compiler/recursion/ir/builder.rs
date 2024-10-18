@@ -94,7 +94,7 @@ pub struct Builder<CF: Config> {
 
 impl<CF: Config> Default for Builder<CF> {
     fn default() -> Self {
-        Self::new(RecursionProgramType::Core)
+        Self::new(RecursionProgramType::Riscv)
     }
 }
 

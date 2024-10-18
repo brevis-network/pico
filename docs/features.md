@@ -22,7 +22,7 @@
 - [x] `ToyMachine`
   - A simple machine that only proves the addition program;
   - This is the final target for this stage
-- [x] Core `Emulator`
+- [x] Riscv `Emulator`
   - [x] Migration of the core emulator to the `compiler` folder;
   - [x] Integration with current `toy_machine` and `toy_prover`
 

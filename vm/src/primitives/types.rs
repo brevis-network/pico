@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, Copy)]
 pub enum RecursionProgramType {
-    Core,
+    Riscv,
     Deferred,
     Compress,
     Shrink,

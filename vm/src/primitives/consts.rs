@@ -50,7 +50,7 @@ pub const POSEIDON_NUM_WORDS: usize = 8;
 For chunks
  */
 
-pub const MAX_LOG_CHUNK_SIZE: i32 = 22;
+pub const MAX_LOG_CHUNK_SIZE: usize = 22;
 
 pub const DEFAULT_CHUNK_SIZE: usize = 1 << MAX_LOG_CHUNK_SIZE;
 
@@ -63,3 +63,13 @@ pub const TEST_CHUNK_SIZE: usize = 1 << 16;
 pub const TEST_CHUNK_BATCH_SIZE: usize = 2;
 
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 5;
+
+/*
+For recursion
+ */
+
+pub const COMBINE_SIZE: usize = 2;
+
+pub const EMPTY: usize = 0x_1111_1111;
+
+pub const ADDR_NUM_BITS: usize = 32;

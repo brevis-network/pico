@@ -21,7 +21,7 @@ pub struct BaseProofVariable<CF: Config> {
     pub opening_proof: PcsProofVariable<CF>,
     pub public_values: Array<CF, Felt<CF::F>>,
     pub quotient_data: Array<CF, QuotientDataVariable<CF>>,
-    pub sorted_idxs: Array<CF, Var<CF::N>>,
+    pub sorted_indices: Array<CF, Var<CF::N>>,
     // todo: public values?
 }
 

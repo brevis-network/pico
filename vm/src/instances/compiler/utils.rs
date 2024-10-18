@@ -41,7 +41,7 @@ pub(crate) fn assert_complete<CF: Config>(
         start_execution_chunk,
         next_execution_chunk,
         cumulative_sum,
-        leaf_challenger,
+        base_challenger,
         ..
     } = public_values;
 
@@ -63,7 +63,7 @@ pub(crate) fn assert_complete<CF: Config>(
     // builder.assert_felt_ne(*next_execution_chunk, CF::F::one());
 
     // Assert that the end reconstruct challenger is equal to the leaf challenger.
-    assert_challenger_eq_pv(builder, end_reconstruct_challenger, *leaf_challenger);
+    assert_challenger_eq_pv(builder, end_reconstruct_challenger, *base_challenger);
 
     // Assert that the cumulative sum is zero.
     for b in cumulative_sum.iter() {

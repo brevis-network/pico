@@ -27,6 +27,7 @@ use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractField, TwoAdicField};
 
+// todo: move and unify
 pub const EMPTY: usize = 0x_1111_1111;
 
 // TODO-Alan: refactor to make it more general
@@ -121,7 +122,7 @@ where
             let domain = builder.get(&vk.preprocessed_domains, preprocessed_id);
 
             // Get index within all sorted chips.
-            let chip_sorted_id = builder.get(&proof.sorted_idxs, chip_id);
+            let chip_sorted_id = builder.get(&proof.sorted_indices, chip_id);
             // Get opening from proof.
             let opening = builder.get(&opened_values.chips_opened_values, chip_sorted_id);
 
@@ -241,7 +242,7 @@ where
         let num_chunk_chips_enabled: Var<_> = builder.eval(CF::N::zero());
         for (i, chip) in chips.iter().enumerate() {
             tracing::debug!("verifying constraints for chip: {}", chip.name());
-            let index = builder.get(&proof.sorted_idxs, i);
+            let index = builder.get(&proof.sorted_indices, i);
 
             if chip.preprocessed_width() > 0 {
                 builder.assert_var_ne(index, CF::N::from_canonical_usize(EMPTY));

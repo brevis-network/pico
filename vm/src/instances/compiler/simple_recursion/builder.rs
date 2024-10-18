@@ -4,10 +4,7 @@ use std::{
     marker::PhantomData,
 };
 
-use super::{
-    stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable},
-    utils::commit_public_values,
-};
+use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
     compiler::recursion::{
         config::InnerConfig,
@@ -30,7 +27,10 @@ use crate::{
         bb_poseidon2::BabyBearPoseidon2,
         config::{Com, StarkGenericConfig},
     },
-    instances::{chiptype::riscv_chiptype::RiscvChipType, machine::simple_machine::SimpleMachine},
+    instances::{
+        chiptype::riscv_chiptype::RiscvChipType, compiler::utils::commit_public_values,
+        machine::simple_machine::SimpleMachine,
+    },
     machine::machine::MachineBehavior,
     primitives::{
         consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
@@ -55,7 +55,7 @@ impl SimpleVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
     pub fn build(
         machine: &SimpleMachine<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
     ) -> RecursionProgram<BabyBear> {
-        let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Core);
+        let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Riscv);
 
         let input: SimpleRecursionStdinVariable<_> = builder.uninit();
         SimpleRecursionStdin::<BabyBearPoseidon2, RiscvChipType<_>>::witness(&input, &mut builder);
@@ -91,13 +91,13 @@ where
         let SimpleRecursionStdinVariable {
             vk,
             base_proofs,
-            leaf_challenger,
+            base_challenger,
             initial_reconstruct_challenger,
-            is_complete,
+            flag_complete,
         } = input;
 
         // Initialize the challenger variables.
-        let leaf_challenger_public_values = get_challenger_public_values(builder, &leaf_challenger);
+        let leaf_challenger_public_values = get_challenger_public_values(builder, &base_challenger);
         let mut reconstruct_challenger: DuplexChallengerVariable<_> =
             initial_reconstruct_challenger.copy(builder);
 
@@ -114,7 +114,7 @@ where
             let proof = builder.get(&base_proofs, i);
 
             // Verify each chunk
-            let mut challenger = leaf_challenger.copy(builder);
+            let mut challenger = base_challenger.copy(builder);
 
             StarkVerifier::<CF, SC>::verify_chunk(
                 builder,
@@ -151,8 +151,8 @@ where
             let cumulative_sum_array = builder.ext2felt(cumulative_sum);
             let cumulative_sum_array = array::from_fn(|i| builder.get(&cumulative_sum_array, i));
 
-            // Collect the is_complete flag.
-            let is_complete_felt = var2felt(builder, is_complete);
+            // Collect the flag_complete flag.
+            let is_complete_felt = var2felt(builder, flag_complete);
 
             // Initialize the public values we will commit to.
             let zero: Felt<_> = builder.eval(CF::F::zero());
@@ -161,12 +161,12 @@ where
             let recursion_public_values: &mut RecursionPublicValues<_> =
                 recursion_public_values_stream.as_mut_slice().borrow_mut();
 
-            recursion_public_values.leaf_challenger = leaf_challenger_public_values;
+            recursion_public_values.base_challenger = leaf_challenger_public_values;
             recursion_public_values.cumulative_sum = cumulative_sum_array;
-            recursion_public_values.is_complete = is_complete_felt;
+            recursion_public_values.flag_complete = is_complete_felt;
 
             // Assert complete
-            builder.if_eq(is_complete, CF::N::one()).then(|builder| {
+            builder.if_eq(flag_complete, CF::N::one()).then(|builder| {
                 Self::assert_simple_complete(
                     builder,
                     recursion_public_values,
@@ -185,12 +185,12 @@ where
     ) {
         let RecursionPublicValues {
             cumulative_sum,
-            leaf_challenger,
+            base_challenger,
             ..
         } = public_values;
 
         // Assert that the end reconstruct challenger is equal to the leaf challenger.
-        assert_challenger_eq_pv(builder, end_reconstruct_challenger, *leaf_challenger);
+        assert_challenger_eq_pv(builder, end_reconstruct_challenger, *base_challenger);
 
         // Assert that the cumulative sum is zero.
         for b in cumulative_sum.iter() {

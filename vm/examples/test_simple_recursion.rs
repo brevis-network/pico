@@ -32,31 +32,33 @@ use std::{
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
-pub fn get_recursion_stdin<'a, SC: StarkGenericConfig>(
+// todo: refactor the whole test
+
+pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
     machine: &'a SimpleMachine<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
     reconstruct_challenger: &mut <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
     vk: &'a BaseVerifyingKey<BabyBearPoseidon2>,
-    leaf_challenger: &'a mut <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
+    base_challenger: &'a mut <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
     base_proof: BaseProof<BabyBearPoseidon2>,
 ) -> SimpleRecursionStdin<'a, BabyBearPoseidon2, RiscvChipType<BabyBear>> {
     let num_public_values = machine.num_public_values();
 
     vk.observed_by(reconstruct_challenger);
-    vk.observed_by(leaf_challenger);
+    vk.observed_by(base_challenger);
 
-    leaf_challenger.observe(base_proof.commitments.main_commit);
-    leaf_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
+    base_challenger.observe(base_proof.commitments.main_commit);
+    base_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
 
-    let memory_layout = SimpleRecursionStdin {
+    let stdin = SimpleRecursionStdin {
         vk,
         machine,
         base_proofs: vec![base_proof.clone()],
-        leaf_challenger,
+        base_challenger,
         initial_reconstruct_challenger: reconstruct_challenger.clone(),
-        is_complete: true,
+        flag_complete: true,
     };
 
-    memory_layout
+    stdin
 }
 
 fn main() {
@@ -146,20 +148,20 @@ fn main() {
 
     // Get recursion input
     let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
-    let mut leaf_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
+    let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
 
-    let recursion_input = get_recursion_stdin::<BabyBearPoseidon2>(
+    let recursion_stdin = SimpleRecursionStdin::construct(
         &simple_machine,
         &mut reconstruct_challenger,
         &vk,
-        &mut leaf_challenger,
+        &mut base_challenger,
         base_proof,
     );
 
     // Execute the runtime.
     let recursion_record = tracing::debug_span!("execute runtime").in_scope(|| {
         let mut witness_stream = Vec::new();
-        witness_stream.extend(recursion_input.write());
+        witness_stream.extend(recursion_stdin.write());
 
         let mut runtime = RecursionRuntime::<
             <BabyBearPoseidon2 as StarkGenericConfig>::Val,

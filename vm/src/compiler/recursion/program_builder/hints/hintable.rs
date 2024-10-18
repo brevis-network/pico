@@ -431,10 +431,10 @@ impl Hintable<InnerConfig> for DuplexChallenger<InnerVal, InnerPerm, 16, 8> {
     }
 }
 
-impl<'a, A: ChipBehavior<BabyBear>> Hintable<InnerConfig>
-    for VerifyingKeyHint<'a, BabyBearPoseidon2, A>
+impl<'a, C: ChipBehavior<BabyBear>> Hintable<InnerConfig>
+    for VerifyingKeyHint<'a, BabyBearPoseidon2, C>
 where
-    A: ChipBehavior<BabyBear>
+    C: ChipBehavior<BabyBear>
         + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
         + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
 {
@@ -483,14 +483,14 @@ where
         let opening_proof = InnerPcsProof::read(builder);
         let public_values = Vec::<InnerVal>::read(builder);
         let quotient_data = Vec::<QuotientData>::read(builder);
-        let sorted_idxs = Vec::<usize>::read(builder);
+        let sorted_indices = Vec::<usize>::read(builder);
         BaseProofVariable {
             commitment,
             opened_values,
             opening_proof,
             public_values,
             quotient_data,
-            sorted_idxs,
+            sorted_indices,
         }
     }
 
