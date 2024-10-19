@@ -8,13 +8,13 @@ use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     compiler::{
-        recursion::{config::InnerConfig, program_builder::hints::hintable::Hintable},
+        recursion::program_builder::hints::hintable::Hintable,
         riscv::{
             compiler::{Compiler, SourceType},
             program::Program,
         },
     },
-    configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
+    configs::config::StarkGenericConfig,
     emulator::{
         context::EmulatorContext,
         opts::EmulatorOpts,
@@ -28,6 +28,7 @@ use pico_vm::{
     instances::{
         chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler::riscv_recursion::{builder::RiscvVerifierCircuit, stdin::RiscvRecursionStdin},
+        configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
         machine::{riscv_machine::RiscvMachine, simple_recursion_machine::SimpleRecursionMachine},
     },
     machine::{
@@ -67,7 +68,7 @@ fn main() {
 
     // Setup config and chips.
     info!("\n Creating BaseMachine (at {:?})..", start.elapsed());
-    let config = BabyBearPoseidon2::new();
+    let config = RiscvSC::new();
     let chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips
@@ -110,7 +111,7 @@ fn main() {
 
     info!("Build recursion program (at {:?})..", start.elapsed());
     let recursion_program =
-        RiscvVerifierCircuit::<InnerConfig, BabyBearPoseidon2>::build(&riscv_machine);
+        RiscvVerifierCircuit::<rcf::RecursionConfig, RiscvSC>::build(&riscv_machine);
 
     let serialized_program = bincode::serialize(&recursion_program).unwrap();
     let mut hasher = DefaultHasher::new();
@@ -136,8 +137,8 @@ fn main() {
         witness_stream.extend(recursion_stdin[0].write());
 
         let mut runtime = RecursionRuntime::<
-            <BabyBearPoseidon2 as StarkGenericConfig>::Val,
-            <BabyBearPoseidon2 as StarkGenericConfig>::Challenge,
+            <rcf::StarkConfig as StarkGenericConfig>::Val,
+            <rcf::StarkConfig as StarkGenericConfig>::Challenge,
             _,
         >::new(&recursion_program, riscv_machine.config().perm.clone());
         runtime.witness_stream = witness_stream.into();
@@ -183,7 +184,7 @@ fn main() {
     // Setup recursion machine
     info!("\n Setup recursion machine (at {:?})..", start.elapsed());
     let riscv_recursion_machine = SimpleRecursionMachine::new(
-        BabyBearPoseidon2::new(),
+        rcf::StarkConfig::new(),
         RECURSION_NUM_PVS,
         RecursionChipType::<BabyBear, 3>::all_chips(),
     );

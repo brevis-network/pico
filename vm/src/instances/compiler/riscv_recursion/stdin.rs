@@ -1,7 +1,6 @@
 use crate::{
     compiler::{
         recursion::{
-            config::InnerConfig,
             prelude::*,
             program_builder::{
                 hints::{hintable::Hintable, keys::VerifyingKeyHint, proof::BaseProofHint},
@@ -12,19 +11,18 @@ use crate::{
         },
         riscv::program::Program,
     },
-    configs::{
-        bb_poseidon2::{BabyBearPoseidon2, InnerPerm, InnerVal},
-        config::StarkGenericConfig,
-    },
+    configs::config::{RecursionGenericConfig, StarkGenericConfig},
     emulator::riscv::record::EmulationRecord,
-    instances::machine::riscv_machine::RiscvMachine,
+    instances::{
+        configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
+        machine::riscv_machine::RiscvMachine,
+    },
     machine::{
-        chip::{ChipBehavior, MetaChip},
+        chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey},
-        machine::{BaseMachine, MachineBehavior},
-        proof::{BaseProof, EnsembleProof, MetaProof},
-        witness::ProvingWitness,
+        keys::BaseVerifyingKey,
+        machine::MachineBehavior,
+        proof::BaseProof,
     },
     recursion::air::Block,
 };
@@ -49,27 +47,27 @@ where
 }
 
 #[derive(DslVariable, Clone)]
-pub struct RiscvRecursionStdinVariable<CF: Config> {
-    pub vk: BaseVerifyingKeyVariable<CF>,
-    pub proofs: Array<CF, BaseProofVariable<CF>>,
-    pub base_challenger: DuplexChallengerVariable<CF>,
-    pub reconstruct_challenger: DuplexChallengerVariable<CF>,
-    pub flag_complete: Var<CF::N>,
+pub struct RiscvRecursionStdinVariable<RC: RecursionGenericConfig> {
+    pub vk: BaseVerifyingKeyVariable<RC>,
+    pub proofs: Array<RC, BaseProofVariable<RC>>,
+    pub base_challenger: DuplexChallengerVariable<RC>,
+    pub reconstruct_challenger: DuplexChallengerVariable<RC>,
+    pub flag_complete: Var<RC::N>,
 }
 
-impl<'a, C> RiscvRecursionStdin<'a, BabyBearPoseidon2, C>
+impl<'a, C> RiscvRecursionStdin<'a, RiscvSC, C>
 where
     C: ChipBehavior<BabyBear, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
+        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
 {
     /// Construct the recursion stdin.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     pub fn construct(
-        vk: &'a BaseVerifyingKey<BabyBearPoseidon2>,
-        machine: &'a RiscvMachine<BabyBearPoseidon2, C>,
-        proofs: &[BaseProof<BabyBearPoseidon2>],
-        base_challenger: &'a mut <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
+        vk: &'a BaseVerifyingKey<RiscvSC>,
+        machine: &'a RiscvMachine<RiscvSC, C>,
+        proofs: &[BaseProof<RiscvSC>],
+        base_challenger: &'a mut <RiscvSC as StarkGenericConfig>::Challenger,
         batch_size: usize,
     ) -> Vec<Self> {
         let num_public_values = machine.num_public_values();
@@ -115,19 +113,19 @@ where
     }
 }
 
-impl<'a, C> Hintable<InnerConfig> for RiscvRecursionStdin<'a, BabyBearPoseidon2, C>
+impl<'a, C> Hintable<rcf::RecursionConfig> for RiscvRecursionStdin<'a, RiscvSC, C>
 where
     C: ChipBehavior<BabyBear, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
+        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
 {
-    type HintVariable = RiscvRecursionStdinVariable<InnerConfig>;
+    type HintVariable = RiscvRecursionStdinVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let vk = VerifyingKeyHint::<'a, BabyBearPoseidon2, C>::read(builder);
-        let proofs = Vec::<BaseProofHint<'a, BabyBearPoseidon2, C>>::read(builder);
-        let base_challenger = DuplexChallenger::<InnerVal, InnerPerm, 16, 8>::read(builder);
-        let reconstruct_challenger = DuplexChallenger::<InnerVal, InnerPerm, 16, 8>::read(builder);
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+        let vk = VerifyingKeyHint::<'a, RiscvSC, C>::read(builder);
+        let proofs = Vec::<BaseProofHint<'a, RiscvSC, C>>::read(builder);
+        let base_challenger = DuplexChallenger::<rcf::Val, rcf::Perm, 16, 8>::read(builder);
+        let reconstruct_challenger = DuplexChallenger::<rcf::Val, rcf::Perm, 16, 8>::read(builder);
         let flag_complete = builder.hint_var();
 
         RiscvRecursionStdinVariable {
@@ -139,10 +137,10 @@ where
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let vk_hint = VerifyingKeyHint::<'a, BabyBearPoseidon2, _>::new(
+        let vk_hint = VerifyingKeyHint::<'a, RiscvSC, _>::new(
             self.machine.chips(),
             self.machine.preprocessed_chip_ids(),
             self.vk,
@@ -151,7 +149,7 @@ where
         let proof_hints = self
             .proofs
             .iter()
-            .map(|proof| BaseProofHint::<BabyBearPoseidon2, C>::new(self.machine.chips(), proof))
+            .map(|proof| BaseProofHint::<RiscvSC, C>::new(self.machine.chips(), proof))
             .collect::<Vec<_>>();
 
         stream.extend(vk_hint.write());

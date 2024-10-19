@@ -8,12 +8,13 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
-    configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
     },
-    instances::machine::simple_machine::SimpleMachine,
+    instances::{
+        configs::riscv_config::StarkConfig as RiscvSC, machine::simple_machine::SimpleMachine,
+    },
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -119,7 +120,7 @@ fn main() {
 
     // Setup config and chips.
     info!("\n Creating BaseMachine..");
-    let config = BabyBearPoseidon2::new();
+    let config = RiscvSC::new();
     let chips = ToyChipType::all_chips();
 
     // Create a new machine based on config and chips

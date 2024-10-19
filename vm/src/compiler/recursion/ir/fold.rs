@@ -1,31 +1,32 @@
-use super::{Array, Builder, Config, Ext, Felt, MemIndex, MemVariable, Ptr, Var, Variable};
+use super::{Array, Builder, Ext, Felt, MemIndex, MemVariable, Ptr, Var, Variable};
+use crate::configs::config::RecursionGenericConfig;
 use pico_derive::DslVariable;
 
 #[derive(DslVariable, Debug, Clone)]
-pub struct FriFoldInput<CF: Config> {
-    pub z: Ext<CF::F, CF::EF>,
-    pub alpha: Ext<CF::F, CF::EF>,
-    pub x: Felt<CF::F>,
-    pub log_height: Var<CF::N>,
-    pub mat_opening: Array<CF, Ext<CF::F, CF::EF>>,
-    pub ps_at_z: Array<CF, Ext<CF::F, CF::EF>>,
-    pub alpha_pow: Array<CF, Ext<CF::F, CF::EF>>,
-    pub ro: Array<CF, Ext<CF::F, CF::EF>>,
+pub struct FriFoldInput<RC: RecursionGenericConfig> {
+    pub z: Ext<RC::F, RC::EF>,
+    pub alpha: Ext<RC::F, RC::EF>,
+    pub x: Felt<RC::F>,
+    pub log_height: Var<RC::N>,
+    pub mat_opening: Array<RC, Ext<RC::F, RC::EF>>,
+    pub ps_at_z: Array<RC, Ext<RC::F, RC::EF>>,
+    pub alpha_pow: Array<RC, Ext<RC::F, RC::EF>>,
+    pub ro: Array<RC, Ext<RC::F, RC::EF>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct CircuitV2FriFoldInput<CF: Config> {
-    pub z: Ext<CF::F, CF::EF>,
-    pub alpha: Ext<CF::F, CF::EF>,
-    pub x: Felt<CF::F>,
-    pub mat_opening: Vec<Ext<CF::F, CF::EF>>,
-    pub ps_at_z: Vec<Ext<CF::F, CF::EF>>,
-    pub alpha_pow_input: Vec<Ext<CF::F, CF::EF>>,
-    pub ro_input: Vec<Ext<CF::F, CF::EF>>,
+pub struct CircuitV2FriFoldInput<RC: RecursionGenericConfig> {
+    pub z: Ext<RC::F, RC::EF>,
+    pub alpha: Ext<RC::F, RC::EF>,
+    pub x: Felt<RC::F>,
+    pub mat_opening: Vec<Ext<RC::F, RC::EF>>,
+    pub ps_at_z: Vec<Ext<RC::F, RC::EF>>,
+    pub alpha_pow_input: Vec<Ext<RC::F, RC::EF>>,
+    pub ro_input: Vec<Ext<RC::F, RC::EF>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct CircuitV2FriFoldOutput<CF: Config> {
-    pub alpha_pow_output: Vec<Ext<CF::F, CF::EF>>,
-    pub ro_output: Vec<Ext<CF::F, CF::EF>>,
+pub struct CircuitV2FriFoldOutput<RC: RecursionGenericConfig> {
+    pub alpha_pow_output: Vec<Ext<RC::F, RC::EF>>,
+    pub ro_output: Vec<Ext<RC::F, RC::EF>>,
 }

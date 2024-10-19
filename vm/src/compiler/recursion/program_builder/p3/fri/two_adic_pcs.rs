@@ -14,21 +14,22 @@ use crate::{
             commit::PcsVariable,
         },
     },
+    configs::config::RecursionGenericConfig,
     primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
 };
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractField, TwoAdicField};
 use p3_symmetric::Hash;
 
-pub fn verify_two_adic_pcs<CF: Config>(
-    builder: &mut Builder<CF>,
-    config: &FriConfigVariable<CF>,
-    rounds: Array<CF, TwoAdicPcsRoundVariable<CF>>,
-    proof: PcsProofVariable<CF>,
-    challenger: &mut DuplexChallengerVariable<CF>,
+pub fn verify_two_adic_pcs<RC: RecursionGenericConfig>(
+    builder: &mut Builder<RC>,
+    config: &FriConfigVariable<RC>,
+    rounds: Array<RC, TwoAdicPcsRoundVariable<RC>>,
+    proof: PcsProofVariable<RC>,
+    challenger: &mut DuplexChallengerVariable<RC>,
 ) where
-    CF::F: TwoAdicField,
-    CF::EF: TwoAdicField,
+    RC::F: TwoAdicField,
+    RC::EF: TwoAdicField,
 {
     let mut input_ptr = builder.array::<FriFoldInput<_>>(1);
     let g = builder.generator();
@@ -49,7 +50,7 @@ pub fn verify_two_adic_pcs<CF: Config>(
         .materialize(builder);
     let log_global_max_height: Var<_> = builder.eval(commit_phase_commits_len + log_blowup);
 
-    let mut reduced_openings: Array<CF, Array<CF, Ext<CF::F, CF::EF>>> =
+    let mut reduced_openings: Array<RC, Array<RC, Ext<RC::F, RC::EF>>> =
         builder.array(proof.query_openings.len());
 
     builder.cycle_tracker("stage-d-2-fri-fold");
@@ -59,13 +60,13 @@ pub fn verify_two_adic_pcs<CF: Config>(
             let query_opening = builder.get(&proof.query_openings, i);
             let index_bits = builder.get(&fri_challenges.query_indices, i);
 
-            let mut ro: Array<CF, Ext<CF::F, CF::EF>> = builder.array(32);
-            let mut alpha_pow: Array<CF, Ext<CF::F, CF::EF>> = builder.array(32);
-            let zero_ef = builder.eval(CF::EF::zero().cons());
+            let mut ro: Array<RC, Ext<RC::F, RC::EF>> = builder.array(32);
+            let mut alpha_pow: Array<RC, Ext<RC::F, RC::EF>> = builder.array(32);
+            let zero_ef = builder.eval(RC::EF::zero().cons());
             for j in 0..32 {
                 builder.set_value(&mut ro, j, zero_ef);
             }
-            let one_ef = builder.eval(CF::EF::one().cons());
+            let one_ef = builder.eval(RC::EF::one().cons());
             for j in 0..32 {
                 builder.set_value(&mut alpha_pow, j, one_ef);
             }
@@ -76,16 +77,16 @@ pub fn verify_two_adic_pcs<CF: Config>(
                 let batch_commit = round.batch_commit;
                 let mats = round.mats;
 
-                let mut batch_heights_log2: Array<CF, Var<CF::N>> = builder.array(mats.len());
+                let mut batch_heights_log2: Array<RC, Var<RC::N>> = builder.array(mats.len());
                 builder.range(0, mats.len()).for_each(|k, builder| {
                     let mat = builder.get(&mats, k);
                     let height_log2: Var<_> = builder.eval(mat.domain.log_n + log_blowup);
                     builder.set_value(&mut batch_heights_log2, k, height_log2);
                 });
-                let mut batch_dims: Array<CF, DimensionsVariable<CF>> = builder.array(mats.len());
+                let mut batch_dims: Array<RC, DimensionsVariable<RC>> = builder.array(mats.len());
                 builder.range(0, mats.len()).for_each(|k, builder| {
                     let mat = builder.get(&mats, k);
-                    let dim = DimensionsVariable::<CF> {
+                    let dim = DimensionsVariable::<RC> {
                         height: builder.eval(mat.domain.size() * blowup),
                     };
                     builder.set_value(&mut batch_dims, k, dim);
@@ -95,7 +96,7 @@ pub fn verify_two_adic_pcs<CF: Config>(
                 let bits_reduced: Var<_> =
                     builder.eval(log_global_max_height - log_batch_max_height);
                 let index_bits_shifted_v1 = index_bits.shift(builder, bits_reduced);
-                verify_batch::<CF, 1>(
+                verify_batch::<RC, 1>(
                     builder,
                     &batch_commit,
                     batch_dims,
@@ -113,16 +114,16 @@ pub fn verify_two_adic_pcs<CF: Config>(
                         let mat_values = mat.values;
 
                         let log2_domain_size = mat.domain.log_n;
-                        let log_height: Var<CF::N> = builder.eval(log2_domain_size + log_blowup);
+                        let log_height: Var<RC::N> = builder.eval(log2_domain_size + log_blowup);
 
-                        let bits_reduced: Var<CF::N> =
+                        let bits_reduced: Var<RC::N> =
                             builder.eval(log_global_max_height - log_height);
                         let index_bits_shifted = index_bits.shift(builder, bits_reduced);
 
                         let two_adic_generator = config.get_two_adic_generator(builder, log_height);
                         builder.cycle_tracker("exp_reverse_bits_len");
 
-                        let two_adic_generator_exp: Felt<CF::F> =
+                        let two_adic_generator_exp: Felt<RC::F> =
                             if matches!(builder.program_type, RecursionProgramType::Wrap) {
                                 builder.exp_reverse_bits_len(
                                     two_adic_generator,
@@ -138,12 +139,17 @@ pub fn verify_two_adic_pcs<CF: Config>(
                             };
 
                         builder.cycle_tracker("exp_reverse_bits_len");
-                        let x: Felt<CF::F> = builder.eval(two_adic_generator_exp * g);
+                        let x: Felt<RC::F> = builder.eval(two_adic_generator_exp * g);
 
                         builder.range(0, mat_points.len()).for_each(|l, builder| {
-                            let z: Ext<CF::F, CF::EF> = builder.get(&mat_points, l);
-                            let ps_at_z: Array<CF, Ext<<CF as Config>::F, <CF as Config>::EF>> =
-                                builder.get(&mat_values, l);
+                            let z: Ext<RC::F, RC::EF> = builder.get(&mat_points, l);
+                            let ps_at_z: Array<
+                                RC,
+                                Ext<
+                                    <RC as RecursionGenericConfig>::F,
+                                    <RC as RecursionGenericConfig>::EF,
+                                >,
+                            > = builder.get(&mat_values, l);
                             let input = FriFoldInput {
                                 z,
                                 alpha,
@@ -177,30 +183,30 @@ pub fn verify_two_adic_pcs<CF: Config>(
     builder.cycle_tracker("stage-d-3-verify-challenges");
 }
 
-impl<CF: Config> FromConstant<CF> for TwoAdicPcsRoundVariable<CF>
+impl<RC: RecursionGenericConfig> FromConstant<RC> for TwoAdicPcsRoundVariable<RC>
 where
-    CF::F: TwoAdicField,
+    RC::F: TwoAdicField,
 {
     type Constant = (
-        Hash<CF::F, CF::F, DIGEST_SIZE>,
+        Hash<RC::F, RC::F, DIGEST_SIZE>,
         Vec<(
-            TwoAdicMultiplicativeCoset<CF::F>,
-            Vec<(CF::EF, Vec<CF::EF>)>,
+            TwoAdicMultiplicativeCoset<RC::F>,
+            Vec<(RC::EF, Vec<RC::EF>)>,
         )>,
     );
 
-    fn constant(value: Self::Constant, builder: &mut Builder<CF>) -> Self {
+    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
         let (commit_val, domains_and_openings_val) = value;
 
         // Allocate the commitment.
         let mut commit = builder.dyn_array::<Felt<_>>(DIGEST_SIZE);
-        let commit_val: [CF::F; DIGEST_SIZE] = commit_val.into();
+        let commit_val: [RC::F; DIGEST_SIZE] = commit_val.into();
         for (i, f) in commit_val.into_iter().enumerate() {
             builder.set(&mut commit, i, f);
         }
 
         let mut mats =
-            builder.dyn_array::<TwoAdicPcsMatsVariable<CF>>(domains_and_openings_val.len());
+            builder.dyn_array::<TwoAdicPcsMatsVariable<RC>>(domains_and_openings_val.len());
 
         for (i, (domain, openning)) in domains_and_openings_val.into_iter().enumerate() {
             let domain = builder.constant::<TwoAdicMultiplicativeCosetVariable<_>>(domain);
@@ -238,35 +244,36 @@ where
 }
 
 #[derive(DslVariable, Clone)]
-pub struct TwoAdicFriPcsVariable<CF: Config> {
-    pub config: FriConfigVariable<CF>,
+pub struct TwoAdicFriPcsVariable<RC: RecursionGenericConfig> {
+    pub config: FriConfigVariable<RC>,
 }
 
-impl<CF: Config> PcsVariable<CF, DuplexChallengerVariable<CF>> for TwoAdicFriPcsVariable<CF>
+impl<RC: RecursionGenericConfig> PcsVariable<RC, DuplexChallengerVariable<RC>>
+    for TwoAdicFriPcsVariable<RC>
 where
-    CF::F: TwoAdicField,
-    CF::EF: TwoAdicField,
+    RC::F: TwoAdicField,
+    RC::EF: TwoAdicField,
 {
-    type Domain = TwoAdicMultiplicativeCosetVariable<CF>;
+    type Domain = TwoAdicMultiplicativeCosetVariable<RC>;
 
-    type Commitment = DigestVariable<CF>;
+    type Commitment = DigestVariable<RC>;
 
-    type Proof = PcsProofVariable<CF>;
+    type Proof = PcsProofVariable<RC>;
 
     fn natural_domain_for_log_degree(
         &self,
-        builder: &mut Builder<CF>,
-        log_degree: Usize<CF::N>,
+        builder: &mut Builder<RC>,
+        log_degree: Usize<RC::N>,
     ) -> Self::Domain {
         self.config.get_subgroup(builder, log_degree)
     }
 
     fn verify(
         &self,
-        builder: &mut Builder<CF>,
-        rounds: Array<CF, TwoAdicPcsRoundVariable<CF>>,
+        builder: &mut Builder<RC>,
+        rounds: Array<RC, TwoAdicPcsRoundVariable<RC>>,
         proof: Self::Proof,
-        challenger: &mut DuplexChallengerVariable<CF>,
+        challenger: &mut DuplexChallengerVariable<RC>,
     ) {
         verify_two_adic_pcs(builder, &self.config, rounds, proof, challenger)
     }

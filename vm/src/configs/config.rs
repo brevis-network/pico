@@ -1,6 +1,7 @@
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::{ExtensionField, Field};
+use p3_field::{ExtensionField, Field, PrimeField, TwoAdicField};
+use std::marker::PhantomData;
 
 // Resembling Plonky3: https://github.com/Plonky3/Plonky3/blob/main/uni-stark/src/config.rs
 pub type PackedVal<SC> = <<SC as StarkGenericConfig>::Val as Field>::Packing;
@@ -30,6 +31,15 @@ pub type PcsError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenger,
 >>::Error;
 
+// shorthand for types used in the StarkGenericConfig
+pub type Val<SC> = <SC as StarkGenericConfig>::Val;
+
+pub type Domain<SC> = <SC as StarkGenericConfig>::Domain;
+
+pub type Challenge<SC> = <SC as StarkGenericConfig>::Challenge;
+
+pub type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
+
 /// A generic config for machines
 pub trait StarkGenericConfig: Sync + Clone {
     type Val: Field;
@@ -56,4 +66,21 @@ pub trait StarkGenericConfig: Sync + Clone {
 
     /// Name of config
     fn name(&self) -> String;
+}
+
+pub trait RecursionGenericConfig: Clone + Default {
+    type N: PrimeField;
+    type F: PrimeField + TwoAdicField;
+    type EF: ExtensionField<Self::F> + TwoAdicField;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RecursionSimpleConfig<F, EF>(PhantomData<(F, EF)>);
+
+impl<F: PrimeField + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> RecursionGenericConfig
+    for RecursionSimpleConfig<F, EF>
+{
+    type N = F;
+    type F = F;
+    type EF = EF;
 }

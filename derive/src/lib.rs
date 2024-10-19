@@ -106,7 +106,7 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                         }
                     } else {
                         quote! {
-                            #fname: <#ftype as Variable<CF>>::uninit(builder),
+                            #fname: <#ftype as Variable<RC>>::uninit(builder),
                         }
                     }
                 });
@@ -122,7 +122,7 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                     let fname = &f.ident;
                     let ftype = &f.ty;
                     quote! {
-                        <#ftype as Variable<CF>>::assert_eq(lhs.#fname, rhs.#fname, builder);
+                        <#ftype as Variable<RC>>::assert_eq(lhs.#fname, rhs.#fname, builder);
                     }
                 });
 
@@ -130,14 +130,14 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                     let fname = &f.ident;
                     let ftype = &f.ty;
                     quote! {
-                        <#ftype as Variable<CF>>::assert_ne(lhs.#fname, rhs.#fname, builder);
+                        <#ftype as Variable<RC>>::assert_ne(lhs.#fname, rhs.#fname, builder);
                     }
                 });
 
                 let field_sizes = fields.named.iter().map(|f| {
                     let ftype = &f.ty;
                     quote! {
-                        <#ftype as MemVariable<CF>>::size_of()
+                        <#ftype as MemVariable<RC>>::size_of()
                     }
                 });
 
@@ -148,7 +148,7 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                         {
                             // let address = builder.eval(ptr + Usize::Const(offset));
                             self.#fname.load(ptr, index, builder);
-                            index.offset += <#ftype as MemVariable<CF>>::size_of();
+                            index.offset += <#ftype as MemVariable<RC>>::size_of();
                         }
                     }
                 });
@@ -160,29 +160,29 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                         {
                             // let address = builder.eval(ptr + Usize::Const(offset));
                             self.#fname.store(ptr, index, builder);
-                            index.offset += <#ftype as MemVariable<CF>>::size_of();
+                            index.offset += <#ftype as MemVariable<RC>>::size_of();
                         }
                     }
                 });
 
                 quote! {
-                    impl<CF: Config> Variable<CF> for #name<CF> {
+                    impl<RC: RecursionGenericConfig> Variable<RC> for #name<RC> {
                         type Expression = Self;
 
-                        fn uninit(builder: &mut Builder<CF>) -> Self {
+                        fn uninit(builder: &mut Builder<RC>) -> Self {
                             Self {
                                 #(#fields_init)*
                             }
                         }
 
-                        fn assign(&self, src: Self::Expression, builder: &mut Builder<CF>) {
+                        fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>) {
                             #(#fields_assign)*
                         }
 
                         fn assert_eq(
                             lhs: impl Into<Self::Expression>,
                             rhs: impl Into<Self::Expression>,
-                            builder: &mut Builder<CF>,
+                            builder: &mut Builder<RC>,
                         ) {
                             let lhs = lhs.into();
                             let rhs = rhs.into();
@@ -192,7 +192,7 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                         fn assert_ne(
                             lhs: impl Into<Self::Expression>,
                             rhs: impl Into<Self::Expression>,
-                            builder: &mut Builder<CF>,
+                            builder: &mut Builder<RC>,
                         ) {
                             let lhs = lhs.into();
                             let rhs = rhs.into();
@@ -200,23 +200,23 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                         }
                     }
 
-                    impl<CF: Config> MemVariable<CF> for #name<CF> {
+                    impl<RC: RecursionGenericConfig> MemVariable<RC> for #name<RC> {
                         fn size_of() -> usize {
                             let mut size = 0;
                             #(size += #field_sizes;)*
                             size
                         }
 
-                        fn load(&self, ptr: Ptr<<CF as Config>::N>,
-                            index: MemIndex<<CF as Config>::N>,
-                            builder: &mut Builder<CF>) {
+                        fn load(&self, ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+                            index: MemIndex<<RC as RecursionGenericConfig>::N>,
+                            builder: &mut Builder<RC>) {
                             let mut index = index;
                             #(#field_loads)*
                         }
 
-                        fn store(&self, ptr: Ptr<<CF as Config>::N>,
-                                 index: MemIndex<<CF as Config>::N>,
-                                builder: &mut Builder<CF>) {
+                        fn store(&self, ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+                                 index: MemIndex<<RC as RecursionGenericConfig>::N>,
+                                builder: &mut Builder<RC>) {
                             let mut index = index;
                             #(#field_stores)*
                         }

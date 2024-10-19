@@ -1,7 +1,8 @@
 use super::{
-    Builder, Config, DslIr, ExtConst, FromConstant, MemIndex, MemVariable, Ptr, SymbolicExt,
-    SymbolicFelt, SymbolicUsize, SymbolicVar, Variable,
+    Builder, DslIr, ExtConst, FromConstant, MemIndex, MemVariable, Ptr, SymbolicExt, SymbolicFelt,
+    SymbolicUsize, SymbolicVar, Variable,
 };
+use crate::configs::config::RecursionGenericConfig;
 use alloc::format;
 use core::marker::PhantomData;
 use p3_field::{AbstractField, ExtensionField, Field};
@@ -34,25 +35,25 @@ pub enum Usize<N> {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Witness<CF: Config> {
-    pub vars: Vec<CF::N>,
-    pub felts: Vec<CF::F>,
-    pub exts: Vec<CF::EF>,
-    pub vkey_hash: CF::N,
-    pub commited_values_digest: CF::N,
+pub struct Witness<RC: RecursionGenericConfig> {
+    pub vars: Vec<RC::N>,
+    pub felts: Vec<RC::F>,
+    pub exts: Vec<RC::EF>,
+    pub vkey_hash: RC::N,
+    pub commited_values_digest: RC::N,
 }
 
-impl<CF: Config> Witness<CF> {
+impl<RC: RecursionGenericConfig> Witness<RC> {
     pub fn size(&self) -> usize {
         self.vars.len() + self.felts.len() + self.exts.len() + 2
     }
 
-    pub fn write_vkey_hash(&mut self, vkey_hash: CF::N) {
+    pub fn write_vkey_hash(&mut self, vkey_hash: RC::N) {
         self.vars.push(vkey_hash);
         self.vkey_hash = vkey_hash;
     }
 
-    pub fn write_commited_values_digest(&mut self, commited_values_digest: CF::N) {
+    pub fn write_commited_values_digest(&mut self, commited_values_digest: RC::N) {
         self.vars.push(commited_values_digest);
         self.commited_values_digest = commited_values_digest
     }
@@ -66,9 +67,12 @@ impl<N: Field> Usize<N> {
         }
     }
 
-    pub fn materialize<CF: Config<N = N>>(&self, builder: &mut Builder<CF>) -> Var<CF::N> {
+    pub fn materialize<RC: RecursionGenericConfig<N = N>>(
+        &self,
+        builder: &mut Builder<RC>,
+    ) -> Var<RC::N> {
         match self {
-            Usize::Const(c) => builder.eval(CF::N::from_canonical_usize(*c)),
+            Usize::Const(c) => builder.eval(RC::N::from_canonical_usize(*c)),
             Usize::Var(v) => *v,
         }
     }
@@ -143,21 +147,21 @@ impl<F, EF> Ext<F, EF> {
     }
 }
 
-impl<CF: Config> Variable<CF> for Usize<CF::N> {
-    type Expression = SymbolicUsize<CF::N>;
+impl<RC: RecursionGenericConfig> Variable<RC> for Usize<RC::N> {
+    type Expression = SymbolicUsize<RC::N>;
 
-    fn uninit(builder: &mut Builder<CF>) -> Self {
-        builder.uninit::<Var<CF::N>>().into()
+    fn uninit(builder: &mut Builder<RC>) -> Self {
+        builder.uninit::<Var<RC::N>>().into()
     }
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<CF>) {
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>) {
         match self {
             Usize::Const(_) => {
                 panic!("cannot assign to a constant usize")
             }
             Usize::Var(v) => match src {
                 SymbolicUsize::Const(src) => {
-                    builder.assign(*v, CF::N::from_canonical_usize(src));
+                    builder.assign(*v, RC::N::from_canonical_usize(src));
                 }
                 SymbolicUsize::Var(src) => {
                     builder.assign(*v, src);
@@ -169,7 +173,7 @@ impl<CF: Config> Variable<CF> for Usize<CF::N> {
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -179,10 +183,10 @@ impl<CF: Config> Variable<CF> for Usize<CF::N> {
                 assert_eq!(lhs, rhs, "constant usizes do not match");
             }
             (SymbolicUsize::Const(lhs), SymbolicUsize::Var(rhs)) => {
-                builder.assert_var_eq(CF::N::from_canonical_usize(lhs), rhs);
+                builder.assert_var_eq(RC::N::from_canonical_usize(lhs), rhs);
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Const(rhs)) => {
-                builder.assert_var_eq(lhs, CF::N::from_canonical_usize(rhs));
+                builder.assert_var_eq(lhs, RC::N::from_canonical_usize(rhs));
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Var(rhs)) => builder.assert_var_eq(lhs, rhs),
         }
@@ -191,7 +195,7 @@ impl<CF: Config> Variable<CF> for Usize<CF::N> {
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -201,10 +205,10 @@ impl<CF: Config> Variable<CF> for Usize<CF::N> {
                 assert_ne!(lhs, rhs, "constant usizes do not match");
             }
             (SymbolicUsize::Const(lhs), SymbolicUsize::Var(rhs)) => {
-                builder.assert_var_ne(CF::N::from_canonical_usize(lhs), rhs);
+                builder.assert_var_ne(RC::N::from_canonical_usize(lhs), rhs);
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Const(rhs)) => {
-                builder.assert_var_ne(lhs, CF::N::from_canonical_usize(rhs));
+                builder.assert_var_ne(lhs, RC::N::from_canonical_usize(rhs));
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Var(rhs)) => {
                 builder.assert_var_ne(lhs, rhs);
@@ -214,16 +218,16 @@ impl<CF: Config> Variable<CF> for Usize<CF::N> {
 }
 
 impl<N: Field> Var<N> {
-    fn assign_with_cache<CF: Config<N = N>>(
+    fn assign_with_cache<RC: RecursionGenericConfig<N = N>>(
         &self,
         src: SymbolicVar<N>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
         cache: &mut HashMap<SymbolicVar<N>, Self>,
     ) {
         if let Some(v) = cache.get(&src) {
             builder
                 .operations
-                .push(DslIr::AddVI(*self, *v, CF::N::zero()));
+                .push(DslIr::AddVI(*self, *v, RC::N::zero()));
             return;
         }
         match src {
@@ -233,7 +237,7 @@ impl<N: Field> Var<N> {
             SymbolicVar::Val(v, _) => {
                 builder
                     .operations
-                    .push(DslIr::AddVI(*self, v, CF::N::zero()));
+                    .push(DslIr::AddVI(*self, v, RC::N::zero()));
             }
             SymbolicVar::Add(lhs, rhs, _) => match (&*lhs, &*rhs) {
                 (SymbolicVar::Const(lhs, _), SymbolicVar::Const(rhs, _)) => {
@@ -381,36 +385,36 @@ impl<N: Field> Var<N> {
                     builder.push(DslIr::ImmV(*self, negated));
                 }
                 SymbolicVar::Val(operand, _) => {
-                    builder.push(DslIr::SubVIN(*self, CF::N::zero(), *operand));
+                    builder.push(DslIr::SubVIN(*self, RC::N::zero(), *operand));
                 }
                 operand => {
                     let operand_value = Self::uninit(builder);
                     operand_value.assign_with_cache(operand.clone(), builder, cache);
                     cache.insert(operand.clone(), operand_value);
-                    builder.push(DslIr::SubVIN(*self, CF::N::zero(), operand_value));
+                    builder.push(DslIr::SubVIN(*self, RC::N::zero(), operand_value));
                 }
             },
         }
     }
 }
 
-impl<CF: Config> Variable<CF> for Var<CF::N> {
-    type Expression = SymbolicVar<CF::N>;
+impl<RC: RecursionGenericConfig> Variable<RC> for Var<RC::N> {
+    type Expression = SymbolicVar<RC::N>;
 
-    fn uninit(builder: &mut Builder<CF>) -> Self {
+    fn uninit(builder: &mut Builder<RC>) -> Self {
         let var = Var(builder.variable_count, PhantomData);
         builder.variable_count += 1;
         var
     }
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<CF>) {
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>) {
         self.assign_with_cache(src, builder, &mut HashMap::new());
     }
 
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -451,7 +455,7 @@ impl<CF: Config> Variable<CF> for Var<CF::N> {
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -490,36 +494,36 @@ impl<CF: Config> Variable<CF> for Var<CF::N> {
     }
 }
 
-impl<CF: Config> MemVariable<CF> for Var<CF::N> {
+impl<RC: RecursionGenericConfig> MemVariable<RC> for Var<RC::N> {
     fn size_of() -> usize {
         1
     }
 
-    fn load(&self, ptr: Ptr<CF::N>, index: MemIndex<CF::N>, builder: &mut Builder<CF>) {
+    fn load(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>) {
         builder.push(DslIr::LoadV(*self, ptr, index));
     }
 
     fn store(
         &self,
-        ptr: Ptr<<CF as Config>::N>,
-        index: MemIndex<CF::N>,
-        builder: &mut Builder<CF>,
+        ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+        index: MemIndex<RC::N>,
+        builder: &mut Builder<RC>,
     ) {
         builder.push(DslIr::StoreV(*self, ptr, index));
     }
 }
 
 impl<F: Field> Felt<F> {
-    fn assign_with_cache<CF: Config<F = F>>(
+    fn assign_with_cache<RC: RecursionGenericConfig<F = F>>(
         &self,
         src: SymbolicFelt<F>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
         cache: &mut HashMap<SymbolicFelt<F>, Self>,
     ) {
         if let Some(v) = cache.get(&src) {
             builder
                 .operations
-                .push(DslIr::AddFI(*self, *v, CF::F::zero()));
+                .push(DslIr::AddFI(*self, *v, RC::F::zero()));
             return;
         }
         match src {
@@ -529,7 +533,7 @@ impl<F: Field> Felt<F> {
             SymbolicFelt::Val(v, _) => {
                 builder
                     .operations
-                    .push(DslIr::AddFI(*self, v, CF::F::zero()));
+                    .push(DslIr::AddFI(*self, v, RC::F::zero()));
             }
             SymbolicFelt::Add(lhs, rhs, _) => match (&*lhs, &*rhs) {
                 (SymbolicFelt::Const(lhs, _), SymbolicFelt::Const(rhs, _)) => {
@@ -729,36 +733,36 @@ impl<F: Field> Felt<F> {
                     builder.push(DslIr::ImmF(*self, negated));
                 }
                 SymbolicFelt::Val(operand, _) => {
-                    builder.push(DslIr::SubFIN(*self, CF::F::zero(), *operand));
+                    builder.push(DslIr::SubFIN(*self, RC::F::zero(), *operand));
                 }
                 operand => {
                     let operand_value = Self::uninit(builder);
                     operand_value.assign_with_cache(operand.clone(), builder, cache);
                     cache.insert(operand.clone(), operand_value);
-                    builder.push(DslIr::SubFIN(*self, CF::F::zero(), operand_value));
+                    builder.push(DslIr::SubFIN(*self, RC::F::zero(), operand_value));
                 }
             },
         }
     }
 }
 
-impl<CF: Config> Variable<CF> for Felt<CF::F> {
-    type Expression = SymbolicFelt<CF::F>;
+impl<RC: RecursionGenericConfig> Variable<RC> for Felt<RC::F> {
+    type Expression = SymbolicFelt<RC::F>;
 
-    fn uninit(builder: &mut Builder<CF>) -> Self {
+    fn uninit(builder: &mut Builder<RC>) -> Self {
         let felt = Felt(builder.variable_count, PhantomData);
         builder.variable_count += 1;
         felt
     }
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<CF>) {
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>) {
         self.assign_with_cache(src, builder, &mut HashMap::new());
     }
 
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -799,7 +803,7 @@ impl<CF: Config> Variable<CF> for Felt<CF::F> {
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -838,37 +842,37 @@ impl<CF: Config> Variable<CF> for Felt<CF::F> {
     }
 }
 
-impl<CF: Config> MemVariable<CF> for Felt<CF::F> {
+impl<RC: RecursionGenericConfig> MemVariable<RC> for Felt<RC::F> {
     fn size_of() -> usize {
         1
     }
 
-    fn load(&self, ptr: Ptr<CF::N>, index: MemIndex<CF::N>, builder: &mut Builder<CF>) {
+    fn load(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>) {
         builder.push(DslIr::LoadF(*self, ptr, index));
     }
 
     fn store(
         &self,
-        ptr: Ptr<<CF as Config>::N>,
-        index: MemIndex<CF::N>,
-        builder: &mut Builder<CF>,
+        ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+        index: MemIndex<RC::N>,
+        builder: &mut Builder<RC>,
     ) {
         builder.push(DslIr::StoreF(*self, ptr, index));
     }
 }
 
 impl<F: Field, EF: ExtensionField<F>> Ext<F, EF> {
-    fn assign_with_caches<CF: Config<F = F, EF = EF>>(
+    fn assign_with_caches<RC: RecursionGenericConfig<F = F, EF = EF>>(
         &self,
         src: SymbolicExt<F, EF>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
         ext_cache: &mut HashMap<SymbolicExt<F, EF>, Ext<F, EF>>,
         base_cache: &mut HashMap<SymbolicFelt<F>, Felt<F>>,
     ) {
         if let Some(v) = ext_cache.get(&src) {
             builder
                 .operations
-                .push(DslIr::AddEI(*self, *v, CF::EF::zero()));
+                .push(DslIr::AddEI(*self, *v, RC::EF::zero()));
             return;
         }
         match src {
@@ -876,17 +880,17 @@ impl<F: Field, EF: ExtensionField<F>> Ext<F, EF> {
                 SymbolicFelt::Const(c, _) => {
                     builder
                         .operations
-                        .push(DslIr::ImmE(*self, CF::EF::from_base(*c)));
+                        .push(DslIr::ImmE(*self, RC::EF::from_base(*c)));
                 }
                 SymbolicFelt::Val(v, _) => {
                     builder
                         .operations
-                        .push(DslIr::AddEFFI(*self, *v, CF::EF::zero()));
+                        .push(DslIr::AddEFFI(*self, *v, RC::EF::zero()));
                 }
                 v => {
                     let v_value = Felt::uninit(builder);
                     v_value.assign(v.clone(), builder);
-                    builder.push(DslIr::AddEFFI(*self, v_value, CF::EF::zero()));
+                    builder.push(DslIr::AddEFFI(*self, v_value, RC::EF::zero()));
                 }
             },
             SymbolicExt::Const(c, _) => {
@@ -895,7 +899,7 @@ impl<F: Field, EF: ExtensionField<F>> Ext<F, EF> {
             SymbolicExt::Val(v, _) => {
                 builder
                     .operations
-                    .push(DslIr::AddEI(*self, v, CF::EF::zero()));
+                    .push(DslIr::AddEI(*self, v, RC::EF::zero()));
             }
             SymbolicExt::Add(lhs, rhs, _) => match (&*lhs, &*rhs) {
                 (SymbolicExt::Const(lhs, _), SymbolicExt::Const(rhs, _)) => {
@@ -907,7 +911,7 @@ impl<F: Field, EF: ExtensionField<F>> Ext<F, EF> {
                 }
                 (SymbolicExt::Const(lhs, _), SymbolicExt::Base(rhs, _)) => match rhs.as_ref() {
                     SymbolicFelt::Const(rhs, _) => {
-                        let sum = *lhs + CF::EF::from_base(*rhs);
+                        let sum = *lhs + RC::EF::from_base(*rhs);
                         builder.operations.push(DslIr::ImmE(*self, sum));
                     }
                     SymbolicFelt::Val(rhs, _) => {
@@ -1141,23 +1145,23 @@ impl<F: Field, EF: ExtensionField<F>> Ext<F, EF> {
     }
 }
 
-impl<CF: Config> Variable<CF> for Ext<CF::F, CF::EF> {
-    type Expression = SymbolicExt<CF::F, CF::EF>;
+impl<RC: RecursionGenericConfig> Variable<RC> for Ext<RC::F, RC::EF> {
+    type Expression = SymbolicExt<RC::F, RC::EF>;
 
-    fn uninit(builder: &mut Builder<CF>) -> Self {
+    fn uninit(builder: &mut Builder<RC>) -> Self {
         let ext = Ext(builder.variable_count, PhantomData);
         builder.variable_count += 1;
         ext
     }
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<CF>) {
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>) {
         self.assign_with_caches(src, builder, &mut HashMap::new(), &mut HashMap::new());
     }
 
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -1198,7 +1202,7 @@ impl<CF: Config> Variable<CF> for Ext<CF::F, CF::EF> {
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -1237,45 +1241,45 @@ impl<CF: Config> Variable<CF> for Ext<CF::F, CF::EF> {
     }
 }
 
-impl<CF: Config> MemVariable<CF> for Ext<CF::F, CF::EF> {
+impl<RC: RecursionGenericConfig> MemVariable<RC> for Ext<RC::F, RC::EF> {
     fn size_of() -> usize {
         1
     }
 
-    fn load(&self, ptr: Ptr<CF::N>, index: MemIndex<CF::N>, builder: &mut Builder<CF>) {
+    fn load(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>) {
         builder.push(DslIr::LoadE(*self, ptr, index));
     }
 
     fn store(
         &self,
-        ptr: Ptr<<CF as Config>::N>,
-        index: MemIndex<CF::N>,
-        builder: &mut Builder<CF>,
+        ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+        index: MemIndex<RC::N>,
+        builder: &mut Builder<RC>,
     ) {
         builder.push(DslIr::StoreE(*self, ptr, index));
     }
 }
 
-impl<CF: Config> FromConstant<CF> for Var<CF::N> {
-    type Constant = CF::N;
+impl<RC: RecursionGenericConfig> FromConstant<RC> for Var<RC::N> {
+    type Constant = RC::N;
 
-    fn constant(value: Self::Constant, builder: &mut Builder<CF>) -> Self {
+    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
         builder.eval(value)
     }
 }
 
-impl<CF: Config> FromConstant<CF> for Felt<CF::F> {
-    type Constant = CF::F;
+impl<RC: RecursionGenericConfig> FromConstant<RC> for Felt<RC::F> {
+    type Constant = RC::F;
 
-    fn constant(value: Self::Constant, builder: &mut Builder<CF>) -> Self {
+    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
         builder.eval(value)
     }
 }
 
-impl<CF: Config> FromConstant<CF> for Ext<CF::F, CF::EF> {
-    type Constant = CF::EF;
+impl<RC: RecursionGenericConfig> FromConstant<RC> for Ext<RC::F, RC::EF> {
+    type Constant = RC::EF;
 
-    fn constant(value: Self::Constant, builder: &mut Builder<CF>) -> Self {
+    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
         builder.eval(value.cons())
     }
 }

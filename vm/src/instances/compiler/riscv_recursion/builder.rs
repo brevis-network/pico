@@ -1,7 +1,6 @@
 use crate::{
     compiler::{
         recursion::{
-            config::InnerConfig,
             prelude::*,
             program::RecursionProgram,
             program_builder::{
@@ -19,7 +18,7 @@ use crate::{
         },
         word::Word,
     },
-    configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
+    configs::config::{RecursionGenericConfig, StarkGenericConfig},
     emulator::riscv::public_values::PublicValues,
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -27,6 +26,7 @@ use crate::{
             riscv_recursion::stdin::{RiscvRecursionStdin, RiscvRecursionStdinVariable},
             utils::commit_public_values,
         },
+        configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
         machine::riscv_machine::RiscvMachine,
     },
     machine::{chip::ChipBehavior, machine::MachineBehavior},
@@ -45,21 +45,18 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy)]
-pub struct RiscvVerifierCircuit<CF: Config, SC: StarkGenericConfig> {
-    _phantom: PhantomData<(CF, SC)>,
+pub struct RiscvVerifierCircuit<RC: RecursionGenericConfig, SC: StarkGenericConfig> {
+    _phantom: PhantomData<(RC, SC)>,
 }
 
-impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
+impl RiscvVerifierCircuit<rcf::RecursionConfig, RiscvSC> {
     pub fn build(
-        machine: &RiscvMachine<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
+        machine: &RiscvMachine<RiscvSC, RiscvChipType<BabyBear>>,
     ) -> RecursionProgram<BabyBear> {
-        let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Riscv);
+        let mut builder = Builder::<rcf::RecursionConfig>::new(RecursionProgramType::Riscv);
 
         let stdin: RiscvRecursionStdinVariable<_> = builder.uninit();
-        RiscvRecursionStdin::<BabyBearPoseidon2, RiscvChipType<BabyBear>>::witness(
-            &stdin,
-            &mut builder,
-        );
+        RiscvRecursionStdin::<RiscvSC, RiscvChipType<BabyBear>>::witness(&stdin, &mut builder);
 
         let pcs = TwoAdicFriPcsVariable {
             config: const_fri_config(&mut builder, machine.config().pcs().fri_config()),
@@ -72,10 +69,10 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
 
     // Non-recursion version: vm/src/instances/machine/riscv_machine.rs
     pub fn build_verifier(
-        builder: &mut Builder<InnerConfig>,
-        pcs: &TwoAdicFriPcsVariable<InnerConfig>,
-        machine: &RiscvMachine<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
-        stdin: RiscvRecursionStdinVariable<InnerConfig>,
+        builder: &mut Builder<rcf::RecursionConfig>,
+        pcs: &TwoAdicFriPcsVariable<rcf::RecursionConfig>,
+        machine: &RiscvMachine<RiscvSC, RiscvChipType<BabyBear>>,
+        stdin: RiscvRecursionStdinVariable<rcf::RecursionConfig>,
     ) {
         let RiscvRecursionStdinVariable {
             vk,
@@ -119,7 +116,8 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
         let mut current_reconstruct_challenger: DuplexChallengerVariable<_> =
             reconstruct_challenger.copy(builder);
 
-        let cumulative_sum: Ext<_, _> = builder.eval(<InnerConfig as Config>::EF::zero().cons());
+        let cumulative_sum: Ext<_, _> =
+            builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::EF::zero().cons());
 
         let exit_code: Felt<_> = builder.uninit();
 
@@ -132,7 +130,7 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
 
             let mut challenger = base_challenger.copy(builder);
 
-            StarkVerifier::<InnerConfig, BabyBearPoseidon2>::verify_chunk(
+            StarkVerifier::<rcf::RecursionConfig, RiscvSC>::verify_chunk(
                 builder,
                 &vk,
                 pcs,
@@ -156,20 +154,27 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
             /*
             Flags
              */
-            let flag_cpu: Var<_> = builder.eval(<InnerConfig as Config>::N::zero());
-            let index_cpu: Var<_> = builder.eval(<InnerConfig as Config>::N::zero());
-            let flag_memory_initialize: Var<_> = builder.eval(<InnerConfig as Config>::N::zero());
-            let flag_memory_finalize: Var<_> = builder.eval(<InnerConfig as Config>::N::zero());
-            let flag_starting_chunk: Var<_> = builder.eval(<InnerConfig as Config>::N::zero());
-            let flag_first_in_batch: Var<_> = builder.eval(<InnerConfig as Config>::N::zero());
+            let flag_cpu: Var<_> = builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::N::zero());
+            let index_cpu: Var<_> = builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::N::zero());
+            let flag_memory_initialize: Var<_> =
+                builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::N::zero());
+            let flag_memory_finalize: Var<_> =
+                builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::N::zero());
+            let flag_starting_chunk: Var<_> =
+                builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::N::zero());
+            let flag_first_in_batch: Var<_> =
+                builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::N::zero());
 
             /*
             Initialize when on the first proof in the batch
              */
             builder
-                .if_eq(i, <InnerConfig as Config>::N::zero())
+                .if_eq(i, <rcf::RecursionConfig as RecursionGenericConfig>::N::zero())
                 .then(|builder| {
-                    builder.assign(flag_first_in_batch, <InnerConfig as Config>::N::one());
+                    builder.assign(
+                        flag_first_in_batch,
+                        <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+                    );
 
                     builder.assign(start_pc, public_values.start_pc);
                     builder.assign(current_pc, public_values.start_pc);
@@ -209,10 +214,10 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
                     builder
                         .if_ne(
                             index,
-                            <InnerConfig as Config>::N::from_canonical_usize(EMPTY),
+                            <rcf::RecursionConfig as RecursionGenericConfig>::N::from_canonical_usize(EMPTY),
                         )
                         .then(|builder| {
-                            builder.assign(flag_cpu, <InnerConfig as Config>::N::one());
+                            builder.assign(flag_cpu, <rcf::RecursionConfig as RecursionGenericConfig>::N::one());
                             builder.assign(index_cpu, index);
                         });
                 }
@@ -220,52 +225,63 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
                     builder
                         .if_ne(
                             index,
-                            <InnerConfig as Config>::N::from_canonical_usize(EMPTY),
+                            <rcf::RecursionConfig as RecursionGenericConfig>::N::from_canonical_usize(EMPTY),
                         )
                         .then(|builder| {
-                            builder
-                                .assign(flag_memory_initialize, <InnerConfig as Config>::N::one());
+                            builder.assign(
+                                flag_memory_initialize,
+                                <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+                            );
                         });
                 }
                 if chip.name() == "MemoryFinalize" {
                     builder
                         .if_ne(
                             index,
-                            <InnerConfig as Config>::N::from_canonical_usize(EMPTY),
+                            <rcf::RecursionConfig as RecursionGenericConfig>::N::from_canonical_usize(EMPTY),
                         )
                         .then(|builder| {
-                            builder.assign(flag_memory_finalize, <InnerConfig as Config>::N::one());
+                            builder.assign(
+                                flag_memory_finalize,
+                                <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+                            );
                         });
                 }
             }
             let chunk = felt2var(builder, public_values.chunk);
             builder
-                .if_eq(chunk, <InnerConfig as Config>::F::one())
+                .if_eq(chunk, <rcf::RecursionConfig as RecursionGenericConfig>::F::one())
                 .then(|builder| {
-                    builder.assign(flag_starting_chunk, <InnerConfig as Config>::N::one());
+                    builder.assign(
+                        flag_starting_chunk,
+                        <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+                    );
                 });
 
             /*
             Beginning constraints
              */
             builder
-                .if_eq(flag_starting_chunk, <InnerConfig as Config>::N::one())
+                .if_eq(
+                    flag_starting_chunk,
+                    <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+                )
                 .then(|builder| {
                     // first chunk start_pc should be vk.start_pc
                     builder.assert_felt_eq(public_values.start_pc, vk.pc_start);
 
                     // first chunk should include cpu
-                    builder.assert_var_eq(flag_cpu, <InnerConfig as Config>::N::one());
+                    builder.assert_var_eq(flag_cpu, <rcf::RecursionConfig as RecursionGenericConfig>::N::one());
 
                     // initialize and finalize addr bits should be zero
                     for i in 0..ADDR_NUM_BITS {
                         builder.assert_felt_eq(
                             current_previous_initialize_addr_bits[i],
-                            <InnerConfig as Config>::F::zero(),
+                            <rcf::RecursionConfig as RecursionGenericConfig>::F::zero(),
                         );
                         builder.assert_felt_eq(
                             current_previous_finalize_addr_bits[i],
-                            <InnerConfig as Config>::F::zero(),
+                            <rcf::RecursionConfig as RecursionGenericConfig>::F::zero(),
                         );
                     }
 
@@ -280,7 +296,10 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
             First chunk constraints
              */
             builder
-                .if_eq(flag_first_in_batch, <InnerConfig as Config>::N::one())
+                .if_eq(
+                    flag_first_in_batch,
+                    <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+                )
                 .then(|builder| {});
 
             /*
@@ -290,16 +309,16 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
             builder.assert_felt_eq(current_chunk, public_values.chunk);
             builder.assign(
                 current_chunk,
-                current_chunk + <InnerConfig as Config>::F::one(),
+                current_chunk + <rcf::RecursionConfig as RecursionGenericConfig>::F::one(),
             );
 
             builder
-                .if_eq(flag_cpu, <InnerConfig as Config>::N::one())
+                .if_eq(flag_cpu, <rcf::RecursionConfig as RecursionGenericConfig>::N::one())
                 .then(|builder| {
                     builder.assert_felt_eq(current_execution_chunk, public_values.execution_chunk);
                     builder.assign(
                         current_execution_chunk,
-                        current_execution_chunk + <InnerConfig as Config>::F::one(),
+                        current_execution_chunk + <rcf::RecursionConfig as RecursionGenericConfig>::F::one(),
                     );
                 });
 
@@ -308,7 +327,7 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
              */
 
             builder
-                .if_eq(flag_cpu, <InnerConfig as Config>::N::one())
+                .if_eq(flag_cpu, <rcf::RecursionConfig as RecursionGenericConfig>::N::one())
                 .then_or_else(
                     |builder| {
                         // assert log_main_degree is in [0, MAX_LOG_CHUNK_SIZE]
@@ -316,20 +335,27 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
                             .get(&proof.opened_values.chips_opened_values, index_cpu)
                             .log_main_degree;
 
-                        let degree_match: Var<_> = builder.eval(<InnerConfig as Config>::N::zero());
+                        let degree_match: Var<_> =
+                            builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::N::zero());
                         builder
                             .range(0, MAX_LOG_CHUNK_SIZE + 1)
                             .for_each(|j, builder| {
                                 builder.if_eq(log_main_degree, j).then(|builder| {
-                                    builder.assign(degree_match, <InnerConfig as Config>::N::one());
+                                    builder.assign(
+                                        degree_match,
+                                        <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+                                    );
                                 });
                             });
-                        builder.assert_var_eq(degree_match, <InnerConfig as Config>::N::one());
+                        builder.assert_var_eq(
+                            degree_match,
+                            <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+                        );
 
                         // start_pc should not be zero
                         builder.assert_felt_ne(
                             public_values.start_pc,
-                            <InnerConfig as Config>::F::zero(),
+                            <rcf::RecursionConfig as RecursionGenericConfig>::F::zero(),
                         );
                     },
                     |builder| {
@@ -353,7 +379,10 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
             }
 
             builder
-                .if_eq(flag_memory_initialize, <InnerConfig as Config>::N::zero())
+                .if_eq(
+                    flag_memory_initialize,
+                    <rcf::RecursionConfig as RecursionGenericConfig>::N::zero(),
+                )
                 .then(|builder| {
                     for i in 0..ADDR_NUM_BITS {
                         builder.assert_felt_eq(
@@ -364,7 +393,10 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
                 });
 
             builder
-                .if_eq(flag_memory_finalize, <InnerConfig as Config>::N::zero())
+                .if_eq(
+                    flag_memory_finalize,
+                    <rcf::RecursionConfig as RecursionGenericConfig>::N::zero(),
+                )
                 .then(|builder| {
                     for i in 0..ADDR_NUM_BITS {
                         builder.assert_felt_eq(
@@ -379,7 +411,10 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
              */
 
             // all exit codes should be zeros
-            builder.assert_felt_eq(public_values.exit_code, <InnerConfig as Config>::F::zero());
+            builder.assert_felt_eq(
+                public_values.exit_code,
+                <rcf::RecursionConfig as RecursionGenericConfig>::F::zero(),
+            );
 
             // current_pc should be start_pc
             builder.assert_felt_eq(current_pc, public_values.start_pc);
@@ -444,10 +479,16 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
         let cumulative_sum = array::from_fn(|i| builder.get(&cumulative_sum, i));
 
         builder
-            .if_eq(flag_complete, <InnerConfig as Config>::N::one())
+            .if_eq(
+                flag_complete,
+                <rcf::RecursionConfig as RecursionGenericConfig>::N::one(),
+            )
             .then(|builder| {
                 // last pc should be zero
-                builder.assert_felt_eq(current_pc, <InnerConfig as Config>::F::zero());
+                builder.assert_felt_eq(
+                    current_pc,
+                    <rcf::RecursionConfig as RecursionGenericConfig>::F::zero(),
+                );
 
                 assert_challenger_eq_pv(
                     builder,
@@ -456,7 +497,10 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
                 );
 
                 for each in cumulative_sum.iter() {
-                    builder.assert_felt_eq(*each, <InnerConfig as Config>::F::zero());
+                    builder.assert_felt_eq(
+                        *each,
+                        <rcf::RecursionConfig as RecursionGenericConfig>::F::zero(),
+                    );
                 }
             });
 
@@ -468,7 +512,8 @@ impl RiscvVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
         let vk_digest: [Felt<_>; DIGEST_SIZE] = array::from_fn(|i| builder.get(&vk_digest, i));
 
         // Update public values
-        let zero: Felt<_> = builder.eval(<InnerConfig as Config>::F::zero());
+        let zero: Felt<_> =
+            builder.eval(<rcf::RecursionConfig as RecursionGenericConfig>::F::zero());
         let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
         let recursion_public_values: &mut RecursionPublicValues<_> =
             recursion_public_values_stream.as_mut_slice().borrow_mut();

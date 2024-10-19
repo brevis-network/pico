@@ -1,10 +1,7 @@
-use super::{
-    config::AsmConfig, AsmInstruction, AssemblyCode, BasicBlock, IndexTriple, ValueOrConst,
-};
+use super::{AsmConfig, AsmInstruction, AssemblyCode, BasicBlock, IndexTriple, ValueOrConst};
 use crate::{
     compiler::recursion::{
-        ir::{Array, DslIr, Ext, Felt, Ptr, Usize, Var},
-        prelude::TracedVec,
+        ir::{Array, DslIr, Ext, Felt, Ptr, TracedVec, Usize, Var},
         program::RecursionProgram,
     },
     recursion::runtime::{HEAP_PTR, HEAP_START_ADDRESS},

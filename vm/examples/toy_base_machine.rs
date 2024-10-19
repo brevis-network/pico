@@ -8,11 +8,11 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
-    configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
     },
+    instances::configs::riscv_config::StarkConfig as RiscvSC,
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -118,7 +118,7 @@ fn main() {
 
     // Create the prover.
     info!("\n Creating Base Machine");
-    let config = BabyBearPoseidon2::new();
+    let config = RiscvSC::new();
 
     let chips = ToyChipType::all_chips();
     let base_machine = BaseMachine::new(RISCV_NUM_PVS);

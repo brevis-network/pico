@@ -1,4 +1,4 @@
-use crate::compiler::recursion::prelude::{MemIndex, Usize};
+use crate::compiler::recursion::ir::{MemIndex, Usize};
 use p3_field::PrimeField32;
 
 /// Represents a memory index triple.

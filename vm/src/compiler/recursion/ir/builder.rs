@@ -1,8 +1,8 @@
 use super::{
-    Array, Config, DslIr, Ext, Felt, FromConstant, SymbolicExt, SymbolicFelt, SymbolicUsize,
-    SymbolicVar, Usize, Var, Variable,
+    Array, DslIr, Ext, Felt, FromConstant, SymbolicExt, SymbolicFelt, SymbolicUsize, SymbolicVar,
+    Usize, Var, Variable,
 };
-use crate::primitives::types::RecursionProgramType;
+use crate::{configs::config::RecursionGenericConfig, primitives::types::RecursionProgramType};
 use backtrace::Backtrace;
 use p3_field::AbstractField;
 use std::{iter::Zip, vec::IntoIter};
@@ -79,26 +79,26 @@ impl<T> IntoIterator for TracedVec<T> {
 ///
 /// Can compile to both assembly and a set of constraints.
 #[derive(Debug, Clone)]
-pub struct Builder<CF: Config> {
+pub struct Builder<RC: RecursionGenericConfig> {
     pub(crate) variable_count: u32,
-    pub operations: TracedVec<DslIr<CF>>,
-    pub(crate) nb_public_values: Option<Var<CF::N>>,
+    pub operations: TracedVec<DslIr<RC>>,
+    pub(crate) nb_public_values: Option<Var<RC::N>>,
     pub(crate) witness_var_count: u32,
     pub(crate) witness_felt_count: u32,
     pub(crate) witness_ext_count: u32,
-    pub(crate) p2_hash_num: Var<CF::N>,
+    pub(crate) p2_hash_num: Var<RC::N>,
     pub(crate) debug: bool,
     pub(crate) is_sub_builder: bool,
     pub program_type: RecursionProgramType,
 }
 
-impl<CF: Config> Default for Builder<CF> {
+impl<RC: RecursionGenericConfig> Default for Builder<RC> {
     fn default() -> Self {
         Self::new(RecursionProgramType::Riscv)
     }
 }
 
-impl<CF: Config> Builder<CF> {
+impl<RC: RecursionGenericConfig> Builder<RC> {
     pub fn new(program_type: RecursionProgramType) -> Self {
         // We need to create a temporary placeholder for the p2_hash_num variable.
         let placeholder_p2_hash_num = Var::new(0);
@@ -123,8 +123,8 @@ impl<CF: Config> Builder<CF> {
     /// Creates a new builder with a given number of counts for each type.
     pub fn new_sub_builder(
         variable_count: u32,
-        nb_public_values: Option<Var<CF::N>>,
-        p2_hash_num: Var<CF::N>,
+        nb_public_values: Option<Var<RC::N>>,
+        p2_hash_num: Var<RC::N>,
         debug: bool,
         program_type: RecursionProgramType,
     ) -> Self {
@@ -146,39 +146,39 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Pushes an operation to the builder.
-    pub fn push(&mut self, op: DslIr<CF>) {
+    pub fn push(&mut self, op: DslIr<RC>) {
         self.operations.push(op);
     }
 
     /// Pushes an operation to the builder.
-    pub fn trace_push(&mut self, op: DslIr<CF>) {
+    pub fn trace_push(&mut self, op: DslIr<RC>) {
         self.operations.trace_push(op);
     }
 
     /// Creates an uninitialized variable.
-    pub fn uninit<V: Variable<CF>>(&mut self) -> V {
+    pub fn uninit<V: Variable<RC>>(&mut self) -> V {
         V::uninit(self)
     }
 
     /// Evaluates an expression and returns a variable.
-    pub fn eval<V: Variable<CF>, E: Into<V::Expression>>(&mut self, expr: E) -> V {
+    pub fn eval<V: Variable<RC>, E: Into<V::Expression>>(&mut self, expr: E) -> V {
         let dst = V::uninit(self);
         dst.assign(expr.into(), self);
         dst
     }
 
     /// Evaluates a constant expression and returns a variable.
-    pub fn constant<V: FromConstant<CF>>(&mut self, value: V::Constant) -> V {
+    pub fn constant<V: FromConstant<RC>>(&mut self, value: V::Constant) -> V {
         V::constant(value, self)
     }
 
     /// Assigns an expression to a variable.
-    pub fn assign<V: Variable<CF>, E: Into<V::Expression>>(&mut self, dst: V, expr: E) {
+    pub fn assign<V: Variable<RC>, E: Into<V::Expression>>(&mut self, dst: V, expr: E) {
         dst.assign(expr.into(), self);
     }
 
     /// Asserts that two expressions are equal.
-    pub fn assert_eq<V: Variable<CF>>(
+    pub fn assert_eq<V: Variable<RC>>(
         &mut self,
         lhs: impl Into<V::Expression>,
         rhs: impl Into<V::Expression>,
@@ -187,7 +187,7 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Asserts that two expressions are not equal.
-    pub fn assert_ne<V: Variable<CF>>(
+    pub fn assert_ne<V: Variable<RC>>(
         &mut self,
         lhs: impl Into<V::Expression>,
         rhs: impl Into<V::Expression>,
@@ -196,104 +196,104 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Assert that two vars are equal.
-    pub fn assert_var_eq<LhsExpr: Into<SymbolicVar<CF::N>>, RhsExpr: Into<SymbolicVar<CF::N>>>(
+    pub fn assert_var_eq<LhsExpr: Into<SymbolicVar<RC::N>>, RhsExpr: Into<SymbolicVar<RC::N>>>(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) {
-        self.assert_eq::<Var<CF::N>>(lhs, rhs);
+        self.assert_eq::<Var<RC::N>>(lhs, rhs);
     }
 
     /// Assert that two vars are not equal.
-    pub fn assert_var_ne<LhsExpr: Into<SymbolicVar<CF::N>>, RhsExpr: Into<SymbolicVar<CF::N>>>(
+    pub fn assert_var_ne<LhsExpr: Into<SymbolicVar<RC::N>>, RhsExpr: Into<SymbolicVar<RC::N>>>(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) {
-        self.assert_ne::<Var<CF::N>>(lhs, rhs);
+        self.assert_ne::<Var<RC::N>>(lhs, rhs);
     }
 
     /// Assert that two felts are equal.
     pub fn assert_felt_eq<
-        LhsExpr: Into<SymbolicFelt<CF::F>>,
-        RhsExpr: Into<SymbolicFelt<CF::F>>,
+        LhsExpr: Into<SymbolicFelt<RC::F>>,
+        RhsExpr: Into<SymbolicFelt<RC::F>>,
     >(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) {
-        self.assert_eq::<Felt<CF::F>>(lhs, rhs);
+        self.assert_eq::<Felt<RC::F>>(lhs, rhs);
     }
 
     /// Assert that two felts are not equal.
     pub fn assert_felt_ne<
-        LhsExpr: Into<SymbolicFelt<CF::F>>,
-        RhsExpr: Into<SymbolicFelt<CF::F>>,
+        LhsExpr: Into<SymbolicFelt<RC::F>>,
+        RhsExpr: Into<SymbolicFelt<RC::F>>,
     >(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) {
-        self.assert_ne::<Felt<CF::F>>(lhs, rhs);
+        self.assert_ne::<Felt<RC::F>>(lhs, rhs);
     }
 
     /// Assert that two usizes are equal.
     pub fn assert_usize_eq<
-        LhsExpr: Into<SymbolicUsize<CF::N>>,
-        RhsExpr: Into<SymbolicUsize<CF::N>>,
+        LhsExpr: Into<SymbolicUsize<RC::N>>,
+        RhsExpr: Into<SymbolicUsize<RC::N>>,
     >(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) {
-        self.assert_eq::<Usize<CF::N>>(lhs, rhs);
+        self.assert_eq::<Usize<RC::N>>(lhs, rhs);
     }
 
     /// Assert that two usizes are not equal.
     pub fn assert_usize_ne(
         &mut self,
-        lhs: impl Into<SymbolicUsize<CF::N>>,
-        rhs: impl Into<SymbolicUsize<CF::N>>,
+        lhs: impl Into<SymbolicUsize<RC::N>>,
+        rhs: impl Into<SymbolicUsize<RC::N>>,
     ) {
-        self.assert_ne::<Usize<CF::N>>(lhs, rhs);
+        self.assert_ne::<Usize<RC::N>>(lhs, rhs);
     }
 
     /// Assert that two exts are equal.
     pub fn assert_ext_eq<
-        LhsExpr: Into<SymbolicExt<CF::F, CF::EF>>,
-        RhsExpr: Into<SymbolicExt<CF::F, CF::EF>>,
+        LhsExpr: Into<SymbolicExt<RC::F, RC::EF>>,
+        RhsExpr: Into<SymbolicExt<RC::F, RC::EF>>,
     >(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) {
-        self.assert_eq::<Ext<CF::F, CF::EF>>(lhs, rhs);
+        self.assert_eq::<Ext<RC::F, RC::EF>>(lhs, rhs);
     }
 
     /// Assert that two exts are not equal.
     pub fn assert_ext_ne<
-        LhsExpr: Into<SymbolicExt<CF::F, CF::EF>>,
-        RhsExpr: Into<SymbolicExt<CF::F, CF::EF>>,
+        LhsExpr: Into<SymbolicExt<RC::F, RC::EF>>,
+        RhsExpr: Into<SymbolicExt<RC::F, RC::EF>>,
     >(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
     ) {
-        self.assert_ne::<Ext<CF::F, CF::EF>>(lhs, rhs);
+        self.assert_ne::<Ext<RC::F, RC::EF>>(lhs, rhs);
     }
 
-    pub fn lt(&mut self, lhs: Var<CF::N>, rhs: Var<CF::N>) -> Var<CF::N> {
+    pub fn lt(&mut self, lhs: Var<RC::N>, rhs: Var<RC::N>) -> Var<RC::N> {
         let result = self.uninit();
         self.operations.push(DslIr::LessThan(result, lhs, rhs));
         result
     }
 
     /// Evaluate a block of operations if two expressions are equal.
-    pub fn if_eq<LhsExpr: Into<SymbolicVar<CF::N>>, RhsExpr: Into<SymbolicVar<CF::N>>>(
+    pub fn if_eq<LhsExpr: Into<SymbolicVar<RC::N>>, RhsExpr: Into<SymbolicVar<RC::N>>>(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
-    ) -> IfBuilder<CF> {
+    ) -> IfBuilder<RC> {
         IfBuilder {
             lhs: lhs.into(),
             rhs: rhs.into(),
@@ -303,11 +303,11 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Evaluate a block of operations if two expressions are not equal.
-    pub fn if_ne<LhsExpr: Into<SymbolicVar<CF::N>>, RhsExpr: Into<SymbolicVar<CF::N>>>(
+    pub fn if_ne<LhsExpr: Into<SymbolicVar<RC::N>>, RhsExpr: Into<SymbolicVar<RC::N>>>(
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
-    ) -> IfBuilder<CF> {
+    ) -> IfBuilder<RC> {
         IfBuilder {
             lhs: lhs.into(),
             rhs: rhs.into(),
@@ -319,9 +319,9 @@ impl<CF: Config> Builder<CF> {
     /// Evaluate a block of operations over a range from start to end.
     pub fn range(
         &mut self,
-        start: impl Into<Usize<CF::N>>,
-        end: impl Into<Usize<CF::N>>,
-    ) -> RangeBuilder<CF> {
+        start: impl Into<Usize<RC::N>>,
+        end: impl Into<Usize<RC::N>>,
+    ) -> RangeBuilder<RC> {
         RangeBuilder {
             start: start.into(),
             end: end.into(),
@@ -336,34 +336,34 @@ impl<CF: Config> Builder<CF> {
     }
 
     pub fn print_debug(&mut self, val: usize) {
-        let constant = self.eval(CF::N::from_canonical_usize(val));
+        let constant = self.eval(RC::N::from_canonical_usize(val));
         self.print_v(constant);
     }
 
     /// Print a variable.
-    pub fn print_v(&mut self, dst: Var<CF::N>) {
+    pub fn print_v(&mut self, dst: Var<RC::N>) {
         self.operations.push(DslIr::PrintV(dst));
     }
 
     /// Print a felt.
-    pub fn print_f(&mut self, dst: Felt<CF::F>) {
+    pub fn print_f(&mut self, dst: Felt<RC::F>) {
         self.operations.push(DslIr::PrintF(dst));
     }
 
     /// Print an ext.
-    pub fn print_e(&mut self, dst: Ext<CF::F, CF::EF>) {
+    pub fn print_e(&mut self, dst: Ext<RC::F, RC::EF>) {
         self.operations.push(DslIr::PrintE(dst));
     }
 
     /// Hint the length of the next vector of variables.
-    pub fn hint_len(&mut self) -> Var<CF::N> {
+    pub fn hint_len(&mut self) -> Var<RC::N> {
         let len = self.uninit();
         self.operations.push(DslIr::HintLen(len));
         len
     }
 
     /// Hint a single variable.
-    pub fn hint_var(&mut self) -> Var<CF::N> {
+    pub fn hint_var(&mut self) -> Var<RC::N> {
         let len = self.hint_len();
         let arr = self.dyn_array(len);
         self.operations.push(DslIr::HintVars(arr.clone()));
@@ -371,7 +371,7 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Hint a single felt.
-    pub fn hint_felt(&mut self) -> Felt<CF::F> {
+    pub fn hint_felt(&mut self) -> Felt<RC::F> {
         let len = self.hint_len();
         let arr = self.dyn_array(len);
         self.operations.push(DslIr::HintFelts(arr.clone()));
@@ -379,7 +379,7 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Hint a single ext.
-    pub fn hint_ext(&mut self) -> Ext<CF::F, CF::EF> {
+    pub fn hint_ext(&mut self) -> Ext<RC::F, RC::EF> {
         let len = self.hint_len();
         let arr = self.dyn_array(len);
         self.operations.push(DslIr::HintExts(arr.clone()));
@@ -387,7 +387,7 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Hint a vector of variables.
-    pub fn hint_vars(&mut self) -> Array<CF, Var<CF::N>> {
+    pub fn hint_vars(&mut self) -> Array<RC, Var<RC::N>> {
         let len = self.hint_len();
         let arr = self.dyn_array(len);
         self.operations.push(DslIr::HintVars(arr.clone()));
@@ -395,7 +395,7 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Hint a vector of felts.
-    pub fn hint_felts(&mut self) -> Array<CF, Felt<CF::F>> {
+    pub fn hint_felts(&mut self) -> Array<RC, Felt<RC::F>> {
         let len = self.hint_len();
         let arr = self.dyn_array(len);
         self.operations.push(DslIr::HintFelts(arr.clone()));
@@ -403,14 +403,14 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Hint a vector of exts.
-    pub fn hint_exts(&mut self) -> Array<CF, Ext<CF::F, CF::EF>> {
+    pub fn hint_exts(&mut self) -> Array<RC, Ext<RC::F, RC::EF>> {
         let len = self.hint_len();
         let arr = self.dyn_array(len);
         self.operations.push(DslIr::HintExts(arr.clone()));
         arr
     }
 
-    pub fn witness_var(&mut self) -> Var<CF::N> {
+    pub fn witness_var(&mut self) -> Var<RC::N> {
         assert!(
             !self.is_sub_builder,
             "Cannot create a witness var with a sub builder"
@@ -422,7 +422,7 @@ impl<CF: Config> Builder<CF> {
         witness
     }
 
-    pub fn witness_felt(&mut self) -> Felt<CF::F> {
+    pub fn witness_felt(&mut self) -> Felt<RC::F> {
         assert!(
             !self.is_sub_builder,
             "Cannot create a witness felt with a sub builder"
@@ -434,7 +434,7 @@ impl<CF: Config> Builder<CF> {
         witness
     }
 
-    pub fn witness_ext(&mut self) -> Ext<CF::F, CF::EF> {
+    pub fn witness_ext(&mut self) -> Ext<RC::F, RC::EF> {
         assert!(
             !self.is_sub_builder,
             "Cannot create a witness ext with a sub builder"
@@ -452,35 +452,35 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Materializes a usize into a variable.
-    pub fn materialize(&mut self, num: Usize<CF::N>) -> Var<CF::N> {
+    pub fn materialize(&mut self, num: Usize<RC::N>) -> Var<RC::N> {
         match num {
-            Usize::Const(num) => self.eval(CF::N::from_canonical_usize(num)),
+            Usize::Const(num) => self.eval(RC::N::from_canonical_usize(num)),
             Usize::Var(num) => num,
         }
     }
 
     /// Register a felt as public value.  This is append to the proof's public values buffer.
-    pub fn register_public_value(&mut self, val: Felt<CF::F>) {
+    pub fn register_public_value(&mut self, val: Felt<RC::F>) {
         self.operations.push(DslIr::RegisterPublicValue(val));
     }
 
     /// Register and commits a felt as public value.  This value will be constrained when verified.
-    pub fn commit_public_value(&mut self, val: Felt<CF::F>) {
+    pub fn commit_public_value(&mut self, val: Felt<RC::F>) {
         assert!(
             !self.is_sub_builder,
             "Cannot commit to a public value with a sub builder"
         );
         if self.nb_public_values.is_none() {
-            self.nb_public_values = Some(self.eval(CF::N::zero()));
+            self.nb_public_values = Some(self.eval(RC::N::zero()));
         }
         let nb_public_values = *self.nb_public_values.as_ref().unwrap();
 
         self.operations.push(DslIr::Commit(val, nb_public_values));
-        self.assign(nb_public_values, nb_public_values + CF::N::one());
+        self.assign(nb_public_values, nb_public_values + RC::N::one());
     }
 
     /// Commits an array of felts in public values.
-    pub fn commit_public_values(&mut self, vals: &Array<CF, Felt<CF::F>>) {
+    pub fn commit_public_values(&mut self, vals: &Array<RC, Felt<RC::F>>) {
         assert!(
             !self.is_sub_builder,
             "Cannot commit to public values with a sub builder"
@@ -492,20 +492,20 @@ impl<CF: Config> Builder<CF> {
         });
     }
 
-    pub fn commit_vkey_hash_circuit(&mut self, var: Var<CF::N>) {
+    pub fn commit_vkey_hash_circuit(&mut self, var: Var<RC::N>) {
         self.operations.push(DslIr::CircuitCommitVkeyHash(var));
     }
 
-    pub fn commit_commited_values_digest_circuit(&mut self, var: Var<CF::N>) {
+    pub fn commit_commited_values_digest_circuit(&mut self, var: Var<RC::N>) {
         self.operations
             .push(DslIr::CircuitCommitCommitedValuesDigest(var));
     }
 
-    pub fn reduce_e(&mut self, ext: Ext<CF::F, CF::EF>) {
+    pub fn reduce_e(&mut self, ext: Ext<RC::F, RC::EF>) {
         self.operations.push(DslIr::ReduceE(ext));
     }
 
-    pub fn felt2var_circuit(&mut self, felt: Felt<CF::F>) -> Var<CF::N> {
+    pub fn felt2var_circuit(&mut self, felt: Felt<RC::F>) -> Var<RC::N> {
         let var = self.uninit();
         self.operations.push(DslIr::CircuitFelt2Var(felt, var));
         var
@@ -521,11 +521,11 @@ impl<CF: Config> Builder<CF> {
 }
 
 /// A builder for the DSL that handles if statements.
-pub struct IfBuilder<'a, CF: Config> {
-    lhs: SymbolicVar<CF::N>,
-    rhs: SymbolicVar<CF::N>,
+pub struct IfBuilder<'a, RC: RecursionGenericConfig> {
+    lhs: SymbolicVar<RC::N>,
+    rhs: SymbolicVar<RC::N>,
     is_eq: bool,
-    pub(crate) builder: &'a mut Builder<CF>,
+    pub(crate) builder: &'a mut Builder<RC>,
 }
 
 /// A set of conditions that if statements can be based on.
@@ -538,13 +538,13 @@ enum IfCondition<N> {
     NeI(Var<N>, N),
 }
 
-impl<'a, CF: Config> IfBuilder<'a, CF> {
-    pub fn then(mut self, mut f: impl FnMut(&mut Builder<CF>)) {
+impl<'a, RC: RecursionGenericConfig> IfBuilder<'a, RC> {
+    pub fn then(mut self, mut f: impl FnMut(&mut Builder<RC>)) {
         // Get the condition reduced from the expressions for lhs and rhs.
         let condition = self.condition();
 
         // Execute the `then` block and collect the instructions.
-        let mut f_builder = Builder::<CF>::new_sub_builder(
+        let mut f_builder = Builder::<RC>::new_sub_builder(
             self.builder.variable_count,
             self.builder.nb_public_values,
             self.builder.p2_hash_num,
@@ -589,12 +589,12 @@ impl<'a, CF: Config> IfBuilder<'a, CF> {
 
     pub fn then_or_else(
         mut self,
-        mut then_f: impl FnMut(&mut Builder<CF>),
-        mut else_f: impl FnMut(&mut Builder<CF>),
+        mut then_f: impl FnMut(&mut Builder<RC>),
+        mut else_f: impl FnMut(&mut Builder<RC>),
     ) {
         // Get the condition reduced from the expressions for lhs and rhs.
         let condition = self.condition();
-        let mut then_builder = Builder::<CF>::new_sub_builder(
+        let mut then_builder = Builder::<RC>::new_sub_builder(
             self.builder.variable_count,
             self.builder.nb_public_values,
             self.builder.p2_hash_num,
@@ -608,7 +608,7 @@ impl<'a, CF: Config> IfBuilder<'a, CF> {
 
         let then_instructions = then_builder.operations;
 
-        let mut else_builder = Builder::<CF>::new_sub_builder(
+        let mut else_builder = Builder::<RC>::new_sub_builder(
             self.builder.variable_count,
             self.builder.nb_public_values,
             self.builder.p2_hash_num,
@@ -655,7 +655,7 @@ impl<'a, CF: Config> IfBuilder<'a, CF> {
         }
     }
 
-    fn condition(&mut self) -> IfCondition<CF::N> {
+    fn condition(&mut self) -> IfCondition<RC::N> {
         match (self.lhs.clone(), self.rhs.clone(), self.is_eq) {
             (SymbolicVar::Const(lhs, _), SymbolicVar::Const(rhs, _), true) => {
                 IfCondition::EqConst(lhs, rhs)
@@ -670,27 +670,27 @@ impl<'a, CF: Config> IfBuilder<'a, CF> {
                 IfCondition::NeI(rhs, lhs)
             }
             (SymbolicVar::Const(lhs, _), rhs, true) => {
-                let rhs: Var<CF::N> = self.builder.eval(rhs);
+                let rhs: Var<RC::N> = self.builder.eval(rhs);
                 IfCondition::EqI(rhs, lhs)
             }
             (SymbolicVar::Const(lhs, _), rhs, false) => {
-                let rhs: Var<CF::N> = self.builder.eval(rhs);
+                let rhs: Var<RC::N> = self.builder.eval(rhs);
                 IfCondition::NeI(rhs, lhs)
             }
             (SymbolicVar::Val(lhs, _), SymbolicVar::Const(rhs, _), true) => {
-                let lhs: Var<CF::N> = self.builder.eval(lhs);
+                let lhs: Var<RC::N> = self.builder.eval(lhs);
                 IfCondition::EqI(lhs, rhs)
             }
             (SymbolicVar::Val(lhs, _), SymbolicVar::Const(rhs, _), false) => {
-                let lhs: Var<CF::N> = self.builder.eval(lhs);
+                let lhs: Var<RC::N> = self.builder.eval(lhs);
                 IfCondition::NeI(lhs, rhs)
             }
             (lhs, SymbolicVar::Const(rhs, _), true) => {
-                let lhs: Var<CF::N> = self.builder.eval(lhs);
+                let lhs: Var<RC::N> = self.builder.eval(lhs);
                 IfCondition::EqI(lhs, rhs)
             }
             (lhs, SymbolicVar::Const(rhs, _), false) => {
-                let lhs: Var<CF::N> = self.builder.eval(lhs);
+                let lhs: Var<RC::N> = self.builder.eval(lhs);
                 IfCondition::NeI(lhs, rhs)
             }
             (SymbolicVar::Val(lhs, _), SymbolicVar::Val(rhs, _), true) => IfCondition::Eq(lhs, rhs),
@@ -698,29 +698,29 @@ impl<'a, CF: Config> IfBuilder<'a, CF> {
                 IfCondition::Ne(lhs, rhs)
             }
             (SymbolicVar::Val(lhs, _), rhs, true) => {
-                let rhs: Var<CF::N> = self.builder.eval(rhs);
+                let rhs: Var<RC::N> = self.builder.eval(rhs);
                 IfCondition::Eq(lhs, rhs)
             }
             (SymbolicVar::Val(lhs, _), rhs, false) => {
-                let rhs: Var<CF::N> = self.builder.eval(rhs);
+                let rhs: Var<RC::N> = self.builder.eval(rhs);
                 IfCondition::Ne(lhs, rhs)
             }
             (lhs, SymbolicVar::Val(rhs, _), true) => {
-                let lhs: Var<CF::N> = self.builder.eval(lhs);
+                let lhs: Var<RC::N> = self.builder.eval(lhs);
                 IfCondition::Eq(lhs, rhs)
             }
             (lhs, SymbolicVar::Val(rhs, _), false) => {
-                let lhs: Var<CF::N> = self.builder.eval(lhs);
+                let lhs: Var<RC::N> = self.builder.eval(lhs);
                 IfCondition::Ne(lhs, rhs)
             }
             (lhs, rhs, true) => {
-                let lhs: Var<CF::N> = self.builder.eval(lhs);
-                let rhs: Var<CF::N> = self.builder.eval(rhs);
+                let lhs: Var<RC::N> = self.builder.eval(lhs);
+                let rhs: Var<RC::N> = self.builder.eval(rhs);
                 IfCondition::Eq(lhs, rhs)
             }
             (lhs, rhs, false) => {
-                let lhs: Var<CF::N> = self.builder.eval(lhs);
-                let rhs: Var<CF::N> = self.builder.eval(rhs);
+                let lhs: Var<RC::N> = self.builder.eval(lhs);
+                let rhs: Var<RC::N> = self.builder.eval(rhs);
                 IfCondition::Ne(lhs, rhs)
             }
         }
@@ -728,23 +728,23 @@ impl<'a, CF: Config> IfBuilder<'a, CF> {
 }
 
 /// A builder for the DSL that handles for loops.
-pub struct RangeBuilder<'a, CF: Config> {
-    start: Usize<CF::N>,
-    end: Usize<CF::N>,
+pub struct RangeBuilder<'a, RC: RecursionGenericConfig> {
+    start: Usize<RC::N>,
+    end: Usize<RC::N>,
     step_size: usize,
-    builder: &'a mut Builder<CF>,
+    builder: &'a mut Builder<RC>,
 }
 
-impl<'a, CF: Config> RangeBuilder<'a, CF> {
+impl<'a, RC: RecursionGenericConfig> RangeBuilder<'a, RC> {
     pub const fn step_by(mut self, step_size: usize) -> Self {
         self.step_size = step_size;
         self
     }
 
-    pub fn for_each(self, mut f: impl FnMut(Var<CF::N>, &mut Builder<CF>)) {
-        let step_size = CF::N::from_canonical_usize(self.step_size);
-        let loop_variable: Var<CF::N> = self.builder.uninit();
-        let mut loop_body_builder = Builder::<CF>::new_sub_builder(
+    pub fn for_each(self, mut f: impl FnMut(Var<RC::N>, &mut Builder<RC>)) {
+        let step_size = RC::N::from_canonical_usize(self.step_size);
+        let loop_variable: Var<RC::N> = self.builder.uninit();
+        let mut loop_body_builder = Builder::<RC>::new_sub_builder(
             self.builder.variable_count,
             self.builder.nb_public_values,
             self.builder.p2_hash_num,

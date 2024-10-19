@@ -1,11 +1,8 @@
 use crate::{
-    compiler::recursion::{
-        ir::Config as RecursionConfig,
-        prelude::{
-            Ext as RecursionExt, Felt as RecursionFelt, SymbolicExt as RecursionSymbolicExt,
-        },
+    compiler::recursion::ir::{
+        Ext as RecursionExt, Felt as RecursionFelt, SymbolicExt as RecursionSymbolicExt,
     },
-    configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
+    configs::config::{PackedChallenge, PackedVal, RecursionGenericConfig, StarkGenericConfig},
     machine::{
         builder::{ChipBuilder, LookupBuilder, PermutationBuilder, PublicValuesBuilder},
         generic_folder::GenericVerifierConstraintFolder,
@@ -369,9 +366,9 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC
 
 pub type RecursiveVerifierConstraintFolder<'a, C> = GenericVerifierConstraintFolder<
     'a,
-    <C as RecursionConfig>::F,
-    <C as RecursionConfig>::EF,
-    RecursionFelt<<C as RecursionConfig>::F>,
-    RecursionExt<<C as RecursionConfig>::F, <C as RecursionConfig>::EF>,
-    RecursionSymbolicExt<<C as RecursionConfig>::F, <C as RecursionConfig>::EF>,
+    <C as RecursionGenericConfig>::F,
+    <C as RecursionGenericConfig>::EF,
+    RecursionFelt<<C as RecursionGenericConfig>::F>,
+    RecursionExt<<C as RecursionGenericConfig>::F, <C as RecursionGenericConfig>::EF>,
+    RecursionSymbolicExt<<C as RecursionGenericConfig>::F, <C as RecursionGenericConfig>::EF>,
 >;

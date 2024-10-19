@@ -1,21 +1,21 @@
-use super::{Array, Builder, Config, DslIr, Felt, Usize, Var};
-use crate::recursion::runtime::NUM_BITS;
+use super::{Array, Builder, DslIr, Felt, Usize, Var};
+use crate::{configs::config::RecursionGenericConfig, recursion::runtime::NUM_BITS};
 use p3_field::{AbstractField, Field};
 
-impl<CF: Config> Builder<CF> {
+impl<RC: RecursionGenericConfig> Builder<RC> {
     /// Converts a variable to LE bits.
-    pub fn num2bits_v(&mut self, num: Var<CF::N>) -> Array<CF, Var<CF::N>> {
+    pub fn num2bits_v(&mut self, num: Var<RC::N>) -> Array<RC, Var<RC::N>> {
         // This function is only used when the native field is Babybear.
-        assert!(CF::N::bits() == NUM_BITS);
+        assert!(RC::N::bits() == NUM_BITS);
 
         let output = self.dyn_array::<Var<_>>(NUM_BITS);
         self.push(DslIr::HintBitsV(output.clone(), num));
 
-        let sum: Var<_> = self.eval(CF::N::zero());
+        let sum: Var<_> = self.eval(RC::N::zero());
         for i in 0..NUM_BITS {
             let bit = self.get(&output, i);
-            self.assert_var_eq(bit * (bit - CF::N::one()), CF::N::zero());
-            self.assign(sum, sum + bit * CF::N::from_canonical_u32(1 << i));
+            self.assert_var_eq(bit * (bit - RC::N::one()), RC::N::zero());
+            self.assign(sum, sum + bit * RC::N::from_canonical_u32(1 << i));
         }
 
         self.assert_var_eq(sum, num);
@@ -26,16 +26,16 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Range checks a variable to a certain number of bits.
-    pub fn range_check_v(&mut self, num: Var<CF::N>, num_bits: usize) {
+    pub fn range_check_v(&mut self, num: Var<RC::N>, num_bits: usize) {
         let bits = self.num2bits_v(num);
         self.range(num_bits, bits.len()).for_each(|i, builder| {
             let bit = builder.get(&bits, i);
-            builder.assert_var_eq(bit, CF::N::zero());
+            builder.assert_var_eq(bit, RC::N::zero());
         });
     }
 
     /// Converts a variable to bits inside a circuit.
-    pub fn num2bits_v_circuit(&mut self, num: Var<CF::N>, bits: usize) -> Vec<Var<CF::N>> {
+    pub fn num2bits_v_circuit(&mut self, num: Var<RC::N>, bits: usize) -> Vec<Var<RC::N>> {
         let mut output = Vec::new();
         for _ in 0..bits {
             output.push(self.uninit());
@@ -47,25 +47,25 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Range checks a felt to a certain number of bits.
-    pub fn range_check_f(&mut self, num: Felt<CF::F>, num_bits: usize) {
+    pub fn range_check_f(&mut self, num: Felt<RC::F>, num_bits: usize) {
         let bits = self.num2bits_f(num);
         self.range(num_bits, bits.len()).for_each(|i, builder| {
             let bit = builder.get(&bits, i);
-            builder.assert_var_eq(bit, CF::N::zero());
+            builder.assert_var_eq(bit, RC::N::zero());
         });
     }
 
     /// Converts a felt to bits.
-    pub fn num2bits_f(&mut self, num: Felt<CF::F>) -> Array<CF, Var<CF::N>> {
+    pub fn num2bits_f(&mut self, num: Felt<RC::F>) -> Array<RC, Var<RC::N>> {
         let output = self.dyn_array::<Var<_>>(NUM_BITS);
         self.push(DslIr::HintBitsF(output.clone(), num));
 
-        let sum: Felt<_> = self.eval(CF::F::zero());
+        let sum: Felt<_> = self.eval(RC::F::zero());
         for i in 0..NUM_BITS {
             let bit = self.get(&output, i);
-            self.assert_var_eq(bit * (bit - CF::N::one()), CF::N::zero());
-            self.if_eq(bit, CF::N::one()).then(|builder| {
-                builder.assign(sum, sum + CF::F::from_canonical_u32(1 << i));
+            self.assert_var_eq(bit * (bit - RC::N::one()), RC::N::zero());
+            self.if_eq(bit, RC::N::one()).then(|builder| {
+                builder.assign(sum, sum + RC::F::from_canonical_u32(1 << i));
             });
         }
 
@@ -77,7 +77,7 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Converts a felt to bits inside a circuit.
-    pub fn num2bits_f_circuit(&mut self, num: Felt<CF::F>) -> Vec<Var<CF::N>> {
+    pub fn num2bits_f_circuit(&mut self, num: Felt<RC::F>) -> Vec<Var<RC::N>> {
         let mut output = Vec::new();
         for _ in 0..NUM_BITS {
             output.push(self.uninit());
@@ -92,34 +92,34 @@ impl<CF: Config> Builder<CF> {
     }
 
     /// Convert bits to a variable.
-    pub fn bits2num_v(&mut self, bits: &Array<CF, Var<CF::N>>) -> Var<CF::N> {
-        let num: Var<_> = self.eval(CF::N::zero());
-        let power: Var<_> = self.eval(CF::N::one());
+    pub fn bits2num_v(&mut self, bits: &Array<RC, Var<RC::N>>) -> Var<RC::N> {
+        let num: Var<_> = self.eval(RC::N::zero());
+        let power: Var<_> = self.eval(RC::N::one());
         self.range(0, bits.len()).for_each(|i, builder| {
             let bit = builder.get(bits, i);
             builder.assign(num, num + bit * power);
-            builder.assign(power, power * CF::N::from_canonical_u32(2));
+            builder.assign(power, power * RC::N::from_canonical_u32(2));
         });
         num
     }
 
     /// Convert bits to a variable inside a circuit.
-    pub fn bits2num_v_circuit(&mut self, bits: &[Var<CF::N>]) -> Var<CF::N> {
-        let result: Var<_> = self.eval(CF::N::zero());
+    pub fn bits2num_v_circuit(&mut self, bits: &[Var<RC::N>]) -> Var<RC::N> {
+        let result: Var<_> = self.eval(RC::N::zero());
         for i in 0..bits.len() {
-            self.assign(result, result + bits[i] * CF::N::from_canonical_u32(1 << i));
+            self.assign(result, result + bits[i] * RC::N::from_canonical_u32(1 << i));
         }
         result
     }
 
     /// Convert bits to a felt.
-    pub fn bits2num_f(&mut self, bits: &Array<CF, Var<CF::N>>) -> Felt<CF::F> {
-        let num: Felt<_> = self.eval(CF::F::zero());
+    pub fn bits2num_f(&mut self, bits: &Array<RC, Var<RC::N>>) -> Felt<RC::F> {
+        let num: Felt<_> = self.eval(RC::F::zero());
         for i in 0..NUM_BITS {
             let bit = self.get(bits, i);
             // Add `bit * 2^i` to the sum.
-            self.if_eq(bit, CF::N::one()).then(|builder| {
-                builder.assign(num, num + CF::F::from_canonical_u32(1 << i));
+            self.if_eq(bit, RC::N::one()).then(|builder| {
+                builder.assign(num, num + RC::F::from_canonical_u32(1 << i));
             });
         }
         num
@@ -133,19 +133,19 @@ impl<CF: Config> Builder<CF> {
     /// Reference: [p3_util::reverse_bits_len]
     pub fn reverse_bits_len(
         &mut self,
-        index_bits: &Array<CF, Var<CF::N>>,
-        bit_len: impl Into<Usize<CF::N>>,
-    ) -> Array<CF, Var<CF::N>> {
+        index_bits: &Array<RC, Var<RC::N>>,
+        bit_len: impl Into<Usize<RC::N>>,
+    ) -> Array<RC, Var<RC::N>> {
         let bit_len = bit_len.into();
 
         let mut result_bits = self.dyn_array::<Var<_>>(NUM_BITS);
         self.range(0, bit_len).for_each(|i, builder| {
-            let index: Var<CF::N> = builder.eval(bit_len - i - CF::N::one());
+            let index: Var<RC::N> = builder.eval(bit_len - i - RC::N::one());
             let entry = builder.get(index_bits, index);
             builder.set_value(&mut result_bits, i, entry);
         });
 
-        let zero = self.eval(CF::N::zero());
+        let zero = self.eval(RC::N::zero());
         self.range(bit_len, NUM_BITS).for_each(|i, builder| {
             builder.set_value(&mut result_bits, i, zero);
         });
@@ -161,9 +161,9 @@ impl<CF: Config> Builder<CF> {
     /// Reference: [p3_util::reverse_bits_len]
     pub fn reverse_bits_len_circuit(
         &mut self,
-        index_bits: Vec<Var<CF::N>>,
+        index_bits: Vec<Var<RC::N>>,
         bit_len: usize,
-    ) -> Vec<Var<CF::N>> {
+    ) -> Vec<Var<RC::N>> {
         assert!(bit_len <= NUM_BITS);
         let mut result_bits = Vec::new();
         for i in 0..bit_len {
@@ -180,9 +180,9 @@ impl<CF: Config> Builder<CF> {
     /// The babybear modulus in LE bits is: 100_000_000_000_000_000_000_000_000_111_1.
     /// To check that the num_bits array is less than that value, we first check if the most
     /// significant bits are all 1.  If it is, then we assert that the other bits are all 0.
-    fn less_than_bb_modulus(&mut self, num_bits: Array<CF, Var<CF::N>>) {
-        let one: Var<_> = self.eval(CF::N::one());
-        let zero: Var<_> = self.eval(CF::N::zero());
+    fn less_than_bb_modulus(&mut self, num_bits: Array<RC, Var<RC::N>>) {
+        let one: Var<_> = self.eval(RC::N::one());
+        let zero: Var<_> = self.eval(RC::N::zero());
 
         let mut most_sig_4_bits = one;
         for i in (NUM_BITS - 4)..NUM_BITS {

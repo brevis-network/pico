@@ -1,4 +1,5 @@
-use super::{Builder, Config, DslIr, MemIndex, MemVariable, SymbolicVar, Usize, Var, Variable};
+use super::{Builder, DslIr, MemIndex, MemVariable, SymbolicVar, Usize, Var, Variable};
+use crate::configs::config::RecursionGenericConfig;
 use core::ops::{Add, Sub};
 use p3_field::Field;
 
@@ -12,42 +13,42 @@ pub struct SymbolicPtr<N: Field> {
     pub address: SymbolicVar<N>,
 }
 
-impl<CF: Config> Builder<CF> {
+impl<RC: RecursionGenericConfig> Builder<RC> {
     /// Allocates an array on the heap.
-    pub(crate) fn alloc(&mut self, len: Usize<CF::N>, size: usize) -> Ptr<CF::N> {
+    pub(crate) fn alloc(&mut self, len: Usize<RC::N>, size: usize) -> Ptr<RC::N> {
         let ptr = Ptr::uninit(self);
         self.push(DslIr::Alloc(ptr, len, size));
         ptr
     }
 
     /// Loads a value from memory.
-    pub fn load<V: MemVariable<CF>>(&mut self, var: V, ptr: Ptr<CF::N>, index: MemIndex<CF::N>) {
+    pub fn load<V: MemVariable<RC>>(&mut self, var: V, ptr: Ptr<RC::N>, index: MemIndex<RC::N>) {
         var.load(ptr, index, self);
     }
 
     /// Stores a value to memory.
-    pub fn store<V: MemVariable<CF>>(&mut self, ptr: Ptr<CF::N>, index: MemIndex<CF::N>, value: V) {
+    pub fn store<V: MemVariable<RC>>(&mut self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, value: V) {
         value.store(ptr, index, self);
     }
 }
 
-impl<CF: Config> Variable<CF> for Ptr<CF::N> {
-    type Expression = SymbolicPtr<CF::N>;
+impl<RC: RecursionGenericConfig> Variable<RC> for Ptr<RC::N> {
+    type Expression = SymbolicPtr<RC::N>;
 
-    fn uninit(builder: &mut Builder<CF>) -> Self {
+    fn uninit(builder: &mut Builder<RC>) -> Self {
         Ptr {
             address: Var::uninit(builder),
         }
     }
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<CF>) {
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>) {
         self.address.assign(src.address, builder);
     }
 
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         Var::assert_eq(lhs.into().address, rhs.into().address, builder);
     }
@@ -55,26 +56,26 @@ impl<CF: Config> Variable<CF> for Ptr<CF::N> {
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<CF>,
+        builder: &mut Builder<RC>,
     ) {
         Var::assert_ne(lhs.into().address, rhs.into().address, builder);
     }
 }
 
-impl<CF: Config> MemVariable<CF> for Ptr<CF::N> {
+impl<RC: RecursionGenericConfig> MemVariable<RC> for Ptr<RC::N> {
     fn size_of() -> usize {
         1
     }
 
-    fn load(&self, ptr: Ptr<CF::N>, index: MemIndex<CF::N>, builder: &mut Builder<CF>) {
+    fn load(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>) {
         self.address.load(ptr, index, builder);
     }
 
     fn store(
         &self,
-        ptr: Ptr<<CF as Config>::N>,
-        index: MemIndex<CF::N>,
-        builder: &mut Builder<CF>,
+        ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+        index: MemIndex<RC::N>,
+        builder: &mut Builder<RC>,
     ) {
         self.address.store(ptr, index, builder);
     }

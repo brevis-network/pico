@@ -1,9 +1,11 @@
 use log::{debug, info};
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
-    configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator},
-    instances::{chiptype::riscv_chiptype::RiscvChipType, machine::simple_machine::SimpleMachine},
+    instances::{
+        chiptype::riscv_chiptype::RiscvChipType, configs::riscv_config::StarkConfig as RiscvSC,
+        machine::simple_machine::SimpleMachine,
+    },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::RISCV_NUM_PVS,
 };
@@ -58,7 +60,7 @@ fn main() {
 
     // Setup config and chips.
     info!("\n Creating BaseMachine (at {:?})..", start.elapsed());
-    let config = BabyBearPoseidon2::new();
+    let config = RiscvSC::new();
     let chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips

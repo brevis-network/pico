@@ -5,9 +5,10 @@ use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     chips::chips::toys::lookup_toy::{AddLookedChip, AddLookingChip},
     compiler::riscv::program::Program,
-    configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::riscv::record::EmulationRecord,
-    instances::machine::simple_machine::SimpleMachine,
+    instances::{
+        configs::riscv_config::StarkConfig as RiscvSC, machine::simple_machine::SimpleMachine,
+    },
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -106,7 +107,7 @@ fn main() {
 
     // Create the prover.
     info!("\n Creating prover");
-    let config = BabyBearPoseidon2::new();
+    let config = RiscvSC::new();
 
     let chips = LookupToyChipType::all_chips();
     // Create a new machine based on config and chips

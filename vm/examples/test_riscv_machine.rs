@@ -9,7 +9,6 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
-    configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::{
         context::EmulatorContext,
         opts::EmulatorOpts,
@@ -22,6 +21,7 @@ use pico_vm::{
     },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
+        configs::riscv_config::StarkConfig as RiscvSC,
         machine::{riscv_machine::RiscvMachine, simple_machine::SimpleMachine},
     },
     machine::{
@@ -42,7 +42,6 @@ mod parse_args;
 fn main() {
     setup_logger();
 
-    // run with default fibo, in which n = 40000
     let (elf, stdin, _, _) = parse_args::parse_args(env::args().collect());
 
     let start = Instant::now();
@@ -53,7 +52,7 @@ fn main() {
 
     // Setup config and chips.
     info!("\n Creating BaseMachine (at {:?})..", start.elapsed());
-    let config = BabyBearPoseidon2::new();
+    let config = RiscvSC::new();
     let chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips

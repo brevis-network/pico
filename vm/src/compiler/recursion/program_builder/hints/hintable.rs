@@ -2,8 +2,7 @@ use super::{keys::VerifyingKeyHint, proof::BaseProofHint};
 use crate::{
     compiler::{
         recursion::{
-            config::InnerConfig,
-            ir::{Array, Builder, Config, Ext, Felt, MemVariable, Var, Variable},
+            ir::{Array, Builder, Ext, Felt, MemVariable, Var, Variable},
             program_builder::{
                 keys::BaseVerifyingKeyVariable,
                 p3::{
@@ -19,13 +18,8 @@ use crate::{
         },
         word::Word,
     },
-    configs::{
-        bb_poseidon2::{
-            BabyBearPoseidon2, InnerChallenge, InnerDigest, InnerDigestHash, InnerPcsProof,
-            InnerPerm, InnerVal,
-        },
-        config::{Com, StarkGenericConfig},
-    },
+    configs::config::{Com, RecursionGenericConfig},
+    instances::configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -42,64 +36,64 @@ use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
 
 // TODO: Walkthrough
-pub trait Hintable<CF: Config> {
-    type HintVariable: Variable<CF>;
+pub trait Hintable<RC: RecursionGenericConfig> {
+    type HintVariable: Variable<RC>;
 
-    fn read(builder: &mut Builder<CF>) -> Self::HintVariable;
+    fn read(builder: &mut Builder<RC>) -> Self::HintVariable;
 
-    fn write(&self) -> Vec<Vec<Block<CF::F>>>;
+    fn write(&self) -> Vec<Vec<Block<RC::F>>>;
 
-    fn witness(variable: &Self::HintVariable, builder: &mut Builder<CF>) {
+    fn witness(variable: &Self::HintVariable, builder: &mut Builder<RC>) {
         let target = Self::read(builder);
         builder.assign(variable.clone(), target);
     }
 }
 
-impl Hintable<InnerConfig> for usize {
-    type HintVariable = Var<InnerVal>;
+impl Hintable<rcf::RecursionConfig> for usize {
+    type HintVariable = Var<rcf::Val>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         builder.hint_var()
     }
 
-    fn write(&self) -> Vec<Vec<Block<InnerVal>>> {
-        vec![vec![Block::from(InnerVal::from_canonical_usize(*self))]]
+    fn write(&self) -> Vec<Vec<Block<rcf::Val>>> {
+        vec![vec![Block::from(rcf::Val::from_canonical_usize(*self))]]
     }
 }
 
-impl Hintable<InnerConfig> for InnerVal {
-    type HintVariable = Felt<InnerVal>;
+impl Hintable<rcf::RecursionConfig> for rcf::Val {
+    type HintVariable = Felt<rcf::Val>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         builder.hint_felt()
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         vec![vec![Block::from(*self)]]
     }
 }
 
-impl Hintable<InnerConfig> for InnerChallenge {
-    type HintVariable = Ext<InnerVal, InnerChallenge>;
+impl Hintable<rcf::RecursionConfig> for rcf::Challenge {
+    type HintVariable = Ext<rcf::Val, rcf::Challenge>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         builder.hint_ext()
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         vec![vec![Block::from((*self).as_base_slice())]]
     }
 }
 
-impl Hintable<InnerConfig> for [Word<BabyBear>; PV_DIGEST_NUM_WORDS] {
-    type HintVariable = Sha256DigestVariable<InnerConfig>;
+impl Hintable<rcf::RecursionConfig> for [Word<BabyBear>; PV_DIGEST_NUM_WORDS] {
+    type HintVariable = Sha256DigestVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         let bytes = builder.hint_felts();
         Sha256DigestVariable { bytes }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         vec![self
             .iter()
             .flat_map(|w| w.0.iter().map(|f| Block::from(*f)))
@@ -107,10 +101,10 @@ impl Hintable<InnerConfig> for [Word<BabyBear>; PV_DIGEST_NUM_WORDS] {
     }
 }
 
-impl Hintable<InnerConfig> for QuotientData {
-    type HintVariable = QuotientDataVariable<InnerConfig>;
+impl Hintable<rcf::RecursionConfig> for QuotientData {
+    type HintVariable = QuotientDataVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         let log_quotient_degree = usize::read(builder);
         let quotient_size = usize::read(builder);
 
@@ -120,7 +114,7 @@ impl Hintable<InnerConfig> for QuotientData {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut buffer = Vec::new();
         buffer.extend(usize::write(&self.log_quotient_degree));
         buffer.extend(usize::write(&self.quotient_size));
@@ -129,17 +123,17 @@ impl Hintable<InnerConfig> for QuotientData {
     }
 }
 
-impl Hintable<InnerConfig> for TwoAdicMultiplicativeCoset<InnerVal> {
-    type HintVariable = TwoAdicMultiplicativeCosetVariable<InnerConfig>;
+impl Hintable<rcf::RecursionConfig> for TwoAdicMultiplicativeCoset<rcf::Val> {
+    type HintVariable = TwoAdicMultiplicativeCosetVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         let log_n = usize::read(builder);
-        let shift = InnerVal::read(builder);
-        let g_val = InnerVal::read(builder);
+        let shift = rcf::Val::read(builder);
+        let g_val = rcf::Val::read(builder);
         let size = usize::read(builder);
 
         // Initialize a domain.
-        TwoAdicMultiplicativeCosetVariable::<InnerConfig> {
+        TwoAdicMultiplicativeCosetVariable::<rcf::RecursionConfig> {
             log_n,
             size,
             shift,
@@ -147,51 +141,51 @@ impl Hintable<InnerConfig> for TwoAdicMultiplicativeCoset<InnerVal> {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut vec = Vec::new();
         vec.extend(usize::write(&self.log_n));
-        vec.extend(InnerVal::write(&self.shift));
-        vec.extend(InnerVal::write(&InnerVal::two_adic_generator(self.log_n)));
+        vec.extend(rcf::Val::write(&self.shift));
+        vec.extend(rcf::Val::write(&rcf::Val::two_adic_generator(self.log_n)));
         vec.extend(usize::write(&(1usize << (self.log_n))));
         vec
     }
 }
 
-trait VecAutoHintable<CF: Config>: Hintable<InnerConfig> {}
+trait VecAutoHintable<RC: RecursionGenericConfig>: Hintable<rcf::RecursionConfig> {}
 
-impl<'a, A> VecAutoHintable<InnerConfig> for BaseProofHint<'a, BabyBearPoseidon2, A> where
+impl<'a, A> VecAutoHintable<rcf::RecursionConfig> for BaseProofHint<'a, RiscvSC, A> where
     A: ChipBehavior<BabyBear>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>
+        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>
 {
 }
-impl VecAutoHintable<InnerConfig> for TwoAdicMultiplicativeCoset<InnerVal> {}
-impl VecAutoHintable<InnerConfig> for Vec<usize> {}
-impl VecAutoHintable<InnerConfig> for QuotientData {}
-impl VecAutoHintable<InnerConfig> for Vec<QuotientData> {}
-impl VecAutoHintable<InnerConfig> for Vec<InnerVal> {}
+impl VecAutoHintable<rcf::RecursionConfig> for TwoAdicMultiplicativeCoset<rcf::Val> {}
+impl VecAutoHintable<rcf::RecursionConfig> for Vec<usize> {}
+impl VecAutoHintable<rcf::RecursionConfig> for QuotientData {}
+impl VecAutoHintable<rcf::RecursionConfig> for Vec<QuotientData> {}
+impl VecAutoHintable<rcf::RecursionConfig> for Vec<rcf::Val> {}
 
-impl<I: VecAutoHintable<InnerConfig>> VecAutoHintable<InnerConfig> for &I {}
+impl<I: VecAutoHintable<rcf::RecursionConfig>> VecAutoHintable<rcf::RecursionConfig> for &I {}
 
-impl<H: Hintable<InnerConfig>> Hintable<InnerConfig> for &H {
+impl<H: Hintable<rcf::RecursionConfig>> Hintable<rcf::RecursionConfig> for &H {
     type HintVariable = H::HintVariable;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         H::read(builder)
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         H::write(self)
     }
 }
 
-impl<I: VecAutoHintable<InnerConfig>> Hintable<InnerConfig> for Vec<I>
+impl<I: VecAutoHintable<rcf::RecursionConfig>> Hintable<rcf::RecursionConfig> for Vec<I>
 where
-    <I as Hintable<InnerConfig>>::HintVariable: MemVariable<InnerConfig>,
+    <I as Hintable<rcf::RecursionConfig>>::HintVariable: MemVariable<rcf::RecursionConfig>,
 {
-    type HintVariable = Array<InnerConfig, I::HintVariable>;
+    type HintVariable = Array<rcf::RecursionConfig, I::HintVariable>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -201,10 +195,10 @@ where
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let len = InnerVal::from_canonical_usize(self.len());
+        let len = rcf::Val::from_canonical_usize(self.len());
         stream.push(vec![len.into()]);
 
         self.iter().for_each(|i| {
@@ -216,41 +210,41 @@ where
     }
 }
 
-impl Hintable<InnerConfig> for Vec<usize> {
-    type HintVariable = Array<InnerConfig, Var<InnerVal>>;
+impl Hintable<rcf::RecursionConfig> for Vec<usize> {
+    type HintVariable = Array<rcf::RecursionConfig, Var<rcf::Val>>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         builder.hint_vars()
     }
 
-    fn write(&self) -> Vec<Vec<Block<InnerVal>>> {
+    fn write(&self) -> Vec<Vec<Block<rcf::Val>>> {
         vec![self
             .iter()
-            .map(|x| Block::from(InnerVal::from_canonical_usize(*x)))
+            .map(|x| Block::from(rcf::Val::from_canonical_usize(*x)))
             .collect()]
     }
 }
 
-impl Hintable<InnerConfig> for Vec<InnerVal> {
-    type HintVariable = Array<InnerConfig, Felt<InnerVal>>;
+impl Hintable<rcf::RecursionConfig> for Vec<rcf::Val> {
+    type HintVariable = Array<rcf::RecursionConfig, Felt<rcf::Val>>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         builder.hint_felts()
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         vec![self.iter().map(|x| Block::from(*x)).collect()]
     }
 }
 
-impl Hintable<InnerConfig> for Vec<InnerChallenge> {
-    type HintVariable = Array<InnerConfig, Ext<InnerVal, InnerChallenge>>;
+impl Hintable<rcf::RecursionConfig> for Vec<rcf::Challenge> {
+    type HintVariable = Array<rcf::RecursionConfig, Ext<rcf::Val, rcf::Challenge>>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         builder.hint_exts()
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         vec![self
             .iter()
             .map(|x| Block::from((*x).as_base_slice()))
@@ -258,27 +252,28 @@ impl Hintable<InnerConfig> for Vec<InnerChallenge> {
     }
 }
 
-impl Hintable<InnerConfig> for Vec<Vec<InnerChallenge>> {
-    type HintVariable = Array<InnerConfig, Array<InnerConfig, Ext<InnerVal, InnerChallenge>>>;
+impl Hintable<rcf::RecursionConfig> for Vec<Vec<rcf::Challenge>> {
+    type HintVariable =
+        Array<rcf::RecursionConfig, Array<rcf::RecursionConfig, Ext<rcf::Val, rcf::Challenge>>>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
-            let hint = Vec::<InnerChallenge>::read(builder);
+            let hint = Vec::<rcf::Challenge>::read(builder);
             builder.set(&mut arr, i, hint);
         });
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let len = InnerVal::from_canonical_usize(self.len());
+        let len = rcf::Val::from_canonical_usize(self.len());
         stream.push(vec![len.into()]);
 
         self.iter().for_each(|arr| {
-            let comm = Vec::<InnerChallenge>::write(arr);
+            let comm = Vec::<rcf::Challenge>::write(arr);
             stream.extend(comm);
         });
 
@@ -286,18 +281,18 @@ impl Hintable<InnerConfig> for Vec<Vec<InnerChallenge>> {
     }
 }
 
-impl Hintable<InnerConfig> for ChipOpenedValues<InnerChallenge> {
-    type HintVariable = ChipOpenedValuesVariable<InnerConfig>;
+impl Hintable<rcf::RecursionConfig> for ChipOpenedValues<rcf::Challenge> {
+    type HintVariable = ChipOpenedValuesVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let preprocessed_local = Vec::<InnerChallenge>::read(builder);
-        let preprocessed_next = Vec::<InnerChallenge>::read(builder);
-        let main_local = Vec::<InnerChallenge>::read(builder);
-        let main_next = Vec::<InnerChallenge>::read(builder);
-        let permutation_local = Vec::<InnerChallenge>::read(builder);
-        let permutation_next = Vec::<InnerChallenge>::read(builder);
-        let quotient = Vec::<Vec<InnerChallenge>>::read(builder);
-        let cumulative_sum = InnerChallenge::read(builder);
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+        let preprocessed_local = Vec::<rcf::Challenge>::read(builder);
+        let preprocessed_next = Vec::<rcf::Challenge>::read(builder);
+        let main_local = Vec::<rcf::Challenge>::read(builder);
+        let main_next = Vec::<rcf::Challenge>::read(builder);
+        let permutation_local = Vec::<rcf::Challenge>::read(builder);
+        let permutation_next = Vec::<rcf::Challenge>::read(builder);
+        let quotient = Vec::<Vec<rcf::Challenge>>::read(builder);
+        let cumulative_sum = rcf::Challenge::read(builder);
         let log_main_degree = builder.hint_var();
         ChipOpenedValuesVariable {
             preprocessed_local,
@@ -312,7 +307,7 @@ impl Hintable<InnerConfig> for ChipOpenedValues<InnerChallenge> {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut stream = Vec::new();
         stream.extend(self.preprocessed_local.write());
         stream.extend(self.preprocessed_next.write());
@@ -327,27 +322,27 @@ impl Hintable<InnerConfig> for ChipOpenedValues<InnerChallenge> {
     }
 }
 
-impl Hintable<InnerConfig> for Vec<ChipOpenedValues<InnerChallenge>> {
-    type HintVariable = Array<InnerConfig, ChipOpenedValuesVariable<InnerConfig>>;
+impl Hintable<rcf::RecursionConfig> for Vec<ChipOpenedValues<rcf::Challenge>> {
+    type HintVariable = Array<rcf::RecursionConfig, ChipOpenedValuesVariable<rcf::RecursionConfig>>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
-            let hint = ChipOpenedValues::<InnerChallenge>::read(builder);
+            let hint = ChipOpenedValues::<rcf::Challenge>::read(builder);
             builder.set(&mut arr, i, hint);
         });
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let len = InnerVal::from_canonical_usize(self.len());
+        let len = rcf::Val::from_canonical_usize(self.len());
         stream.push(vec![len.into()]);
 
         self.iter().for_each(|arr| {
-            let comm = ChipOpenedValues::<InnerChallenge>::write(arr);
+            let comm = ChipOpenedValues::<rcf::Challenge>::write(arr);
             stream.extend(comm);
         });
 
@@ -355,30 +350,30 @@ impl Hintable<InnerConfig> for Vec<ChipOpenedValues<InnerChallenge>> {
     }
 }
 
-impl Hintable<InnerConfig> for BaseOpenedValues<InnerChallenge> {
-    type HintVariable = BaseOpenedValuesVariable<InnerConfig>;
+impl Hintable<rcf::RecursionConfig> for BaseOpenedValues<rcf::Challenge> {
+    type HintVariable = BaseOpenedValuesVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let chips_opened_values = Vec::<ChipOpenedValues<InnerChallenge>>::read(builder);
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+        let chips_opened_values = Vec::<ChipOpenedValues<rcf::Challenge>>::read(builder);
         BaseOpenedValuesVariable {
             chips_opened_values,
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut stream = Vec::new();
         stream.extend(self.chips_opened_values.write());
         stream
     }
 }
 
-impl Hintable<InnerConfig> for BaseCommitments<InnerDigestHash> {
-    type HintVariable = BaseCommitmentsVariable<InnerConfig>;
+impl Hintable<rcf::RecursionConfig> for BaseCommitments<rcf::DigestHash> {
+    type HintVariable = BaseCommitmentsVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let main_commit = InnerDigest::read(builder);
-        let permutation_commit = InnerDigest::read(builder);
-        let quotient_commit = InnerDigest::read(builder);
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+        let main_commit = rcf::Digest::read(builder);
+        let permutation_commit = rcf::Digest::read(builder);
+        let quotient_commit = rcf::Digest::read(builder);
         BaseCommitmentsVariable {
             main_commit,
             permutation_commit,
@@ -386,22 +381,22 @@ impl Hintable<InnerConfig> for BaseCommitments<InnerDigestHash> {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut stream = Vec::new();
-        let h: InnerDigest = self.main_commit.into();
+        let h: rcf::Digest = self.main_commit.into();
         stream.extend(h.write());
-        let h: InnerDigest = self.permutation_commit.into();
+        let h: rcf::Digest = self.permutation_commit.into();
         stream.extend(h.write());
-        let h: InnerDigest = self.quotient_commit.into();
+        let h: rcf::Digest = self.quotient_commit.into();
         stream.extend(h.write());
         stream
     }
 }
 
-impl Hintable<InnerConfig> for DuplexChallenger<InnerVal, InnerPerm, 16, 8> {
-    type HintVariable = DuplexChallengerVariable<InnerConfig>;
+impl Hintable<rcf::RecursionConfig> for DuplexChallenger<rcf::Val, rcf::Perm, 16, 8> {
+    type HintVariable = DuplexChallengerVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         let sponge_state = builder.hint_felts();
         let nb_inputs = builder.hint_var();
         let input_buffer = builder.hint_felts();
@@ -416,35 +411,35 @@ impl Hintable<InnerConfig> for DuplexChallenger<InnerVal, InnerPerm, 16, 8> {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let mut stream = Vec::new();
         stream.extend(self.sponge_state.to_vec().write());
         stream.extend(self.input_buffer.len().write());
         let mut input_padded = self.input_buffer.to_vec();
-        input_padded.resize(PERMUTATION_WIDTH, InnerVal::zero());
+        input_padded.resize(PERMUTATION_WIDTH, rcf::Val::zero());
         stream.extend(input_padded.write());
         stream.extend(self.output_buffer.len().write());
         let mut output_padded = self.output_buffer.to_vec();
-        output_padded.resize(PERMUTATION_WIDTH, InnerVal::zero());
+        output_padded.resize(PERMUTATION_WIDTH, rcf::Val::zero());
         stream.extend(output_padded.write());
         stream
     }
 }
 
-impl<'a, C: ChipBehavior<BabyBear>> Hintable<InnerConfig>
-    for VerifyingKeyHint<'a, BabyBearPoseidon2, C>
+impl<'a, C: ChipBehavior<BabyBear>> Hintable<rcf::RecursionConfig>
+    for VerifyingKeyHint<'a, RiscvSC, C>
 where
     C: ChipBehavior<BabyBear>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
+        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
 {
-    type HintVariable = BaseVerifyingKeyVariable<InnerConfig>;
+    type HintVariable = BaseVerifyingKeyVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let commitment = InnerDigest::read(builder);
-        let pc_start = InnerVal::read(builder);
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+        let commitment = rcf::Digest::read(builder);
+        let pc_start = rcf::Val::read(builder);
         let preprocessed_sorted_idxs = Vec::<usize>::read(builder);
-        let prep_domains = Vec::<TwoAdicMultiplicativeCoset<InnerVal>>::read(builder);
+        let prep_domains = Vec::<TwoAdicMultiplicativeCoset<rcf::Val>>::read(builder);
         BaseVerifyingKeyVariable {
             commitment,
             pc_start,
@@ -453,12 +448,12 @@ where
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let (preprocessed_sorted_idxs, prep_domains) =
             get_preprocessed_data(self.chips, &self.preprocessed_chip_ids, self.vk);
 
         let mut stream = Vec::new();
-        let h: InnerDigest = self.vk.commit.into();
+        let h: rcf::Digest = self.vk.commit.into();
         stream.extend(h.write());
         stream.extend(self.vk.pc_start.write());
         stream.extend(preprocessed_sorted_idxs.write());
@@ -467,21 +462,21 @@ where
     }
 }
 
-// Implement Hintable<C> for BaseProof where SC is equivalent to BabyBearPoseidon2
-impl<'a, A> Hintable<InnerConfig> for BaseProofHint<'a, BabyBearPoseidon2, A>
+// Implement Hintable<C> for BaseProof where SC is equivalent to RiscvSC
+impl<'a, A> Hintable<rcf::RecursionConfig> for BaseProofHint<'a, RiscvSC, A>
 where
     A: ChipBehavior<BabyBear>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
-    BaseCommitments<Com<BabyBearPoseidon2>>: Hintable<InnerConfig>,
+        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
+    BaseCommitments<Com<RiscvSC>>: Hintable<rcf::RecursionConfig>,
 {
-    type HintVariable = BaseProofVariable<InnerConfig>;
+    type HintVariable = BaseProofVariable<rcf::RecursionConfig>;
 
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
         let commitment = BaseCommitments::read(builder);
         let opened_values = BaseOpenedValues::read(builder);
-        let opening_proof = InnerPcsProof::read(builder);
-        let public_values = Vec::<InnerVal>::read(builder);
+        let opening_proof = rcf::PcsProof::read(builder);
+        let public_values = Vec::<rcf::Val>::read(builder);
         let quotient_data = Vec::<QuotientData>::read(builder);
         let sorted_indices = Vec::<usize>::read(builder);
         BaseProofVariable {
@@ -494,7 +489,7 @@ where
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<InnerConfig as Config>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
         let quotient_data = get_chip_quotient_data(self.chips, self.proof);
         let sorted_indices = get_sorted_indices(self.chips, self.proof);
 

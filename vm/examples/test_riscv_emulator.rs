@@ -9,7 +9,6 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
-    configs::bb_poseidon2::BabyBearPoseidon2,
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
@@ -19,7 +18,9 @@ use pico_vm::{
         },
         stdin::EmulatorStdin,
     },
-    instances::machine::simple_machine::SimpleMachine,
+    instances::{
+        configs::riscv_config::StarkConfig as RiscvSC, machine::simple_machine::SimpleMachine,
+    },
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -37,7 +38,6 @@ mod parse_args;
 fn main() {
     setup_logger();
 
-    // run with default fibo, in which n = 40000
     let (elf, stdin, _, _) = parse_args::parse_args(env::args().collect());
 
     let start = Instant::now();

@@ -7,11 +7,9 @@ use super::{
     stark::EMPTY,
 };
 use crate::{
-    compiler::recursion::{
-        asm::AsmConfig,
-        ir::{Array, Builder, Config, Felt, MemVariable, Var},
-    },
-    configs::{bb_poseidon2::BabyBearPoseidon2, config::StarkGenericConfig},
+    compiler::recursion::ir::{Array, Builder, Felt, Var},
+    configs::config::{RecursionGenericConfig, StarkGenericConfig},
+    instances::configs::recur_config as rcf,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -24,42 +22,25 @@ use crate::{
     recursion::{air::ChallengerPublicValues, runtime::PERMUTATION_WIDTH},
 };
 use p3_air::Air;
-use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
-use p3_commit::{ExtensionMmcs, TwoAdicMultiplicativeCoset};
-use p3_field::{extension::BinomialExtensionField, AbstractField, Field, TwoAdicField};
+use p3_baby_bear::BabyBear;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{AbstractField, TwoAdicField};
 use p3_fri::FriConfig;
-use p3_merkle_tree::FieldMerkleTreeMmcs;
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
-use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
-
-type SC = BabyBearPoseidon2;
-type F = <SC as StarkGenericConfig>::Val;
-type EF = <SC as StarkGenericConfig>::Challenge;
-type Val = BabyBear;
-type Challenge = BinomialExtensionField<Val, 4>;
-type Perm = Poseidon2<Val, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>;
-type Hash = PaddingFreeSponge<Perm, 16, 8, 8>;
-type Compress = TruncatedPermutation<Perm, 2, 8, 16>;
-type ValMmcs =
-    FieldMerkleTreeMmcs<<Val as Field>::Packing, <Val as Field>::Packing, Hash, Compress, 8>;
-type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
-type RecursionConfig = AsmConfig<Val, Challenge>;
-type RecursionBuilder = Builder<RecursionConfig>;
 
 pub fn const_fri_config(
-    builder: &mut RecursionBuilder,
-    config: &FriConfig<ChallengeMmcs>,
-) -> FriConfigVariable<RecursionConfig> {
-    let two_addicity = Val::TWO_ADICITY;
+    builder: &mut Builder<rcf::RecursionConfig>,
+    config: &FriConfig<rcf::ChallengeMmcs>,
+) -> FriConfigVariable<rcf::RecursionConfig> {
+    let two_addicity = rcf::Val::TWO_ADICITY;
     let mut generators = builder.dyn_array(two_addicity);
     let mut subgroups = builder.dyn_array(two_addicity);
     for i in 0..two_addicity {
-        let constant_generator = Val::two_adic_generator(i);
+        let constant_generator = rcf::Val::two_adic_generator(i);
         builder.set(&mut generators, i, constant_generator);
 
         let constant_domain = TwoAdicMultiplicativeCoset {
             log_n: i,
-            shift: Val::one(),
+            shift: rcf::Val::one(),
         };
         let domain_value: TwoAdicMultiplicativeCosetVariable<_> = builder.constant(constant_domain);
         builder.set(&mut subgroups, i, domain_value);
@@ -74,40 +55,28 @@ pub fn const_fri_config(
     }
 }
 
-pub fn clone<T: MemVariable<AsmConfig<F, EF>>>(builder: &mut RecursionBuilder, var: &T) -> T {
-    let mut arr = builder.dyn_array(1);
-    builder.set(&mut arr, 0, var.clone());
-    builder.get(&arr, 0)
-}
-
-pub fn clone_array<T: MemVariable<AsmConfig<F, EF>>>(
-    builder: &mut RecursionBuilder,
-    arr: &Array<AsmConfig<F, EF>, T>,
-) -> Array<AsmConfig<F, EF>, T> {
-    let mut new_arr = builder.dyn_array(arr.len());
-    builder.range(0, arr.len()).for_each(|i, builder| {
-        let var = builder.get(arr, i);
-        builder.set(&mut new_arr, i, var);
-    });
-    new_arr
-}
-
 // OPT: this can be done much more efficiently, but in the meantime this should work
-pub fn felt2var<CF: Config>(builder: &mut Builder<CF>, felt: Felt<CF::F>) -> Var<CF::N> {
+pub fn felt2var<RC: RecursionGenericConfig>(
+    builder: &mut Builder<RC>,
+    felt: Felt<RC::F>,
+) -> Var<RC::N> {
     let bits = builder.num2bits_f(felt);
     builder.bits2num_v(&bits)
 }
 
-pub fn var2felt<CF: Config>(builder: &mut Builder<CF>, var: Var<CF::N>) -> Felt<CF::F> {
+pub fn var2felt<RC: RecursionGenericConfig>(
+    builder: &mut Builder<RC>,
+    var: Var<RC::N>,
+) -> Felt<RC::F> {
     let bits = builder.num2bits_v(var);
     builder.bits2num_f(&bits)
 }
 
 /// Asserts that the challenger variable is equal to a challenger in public values.
-pub fn assert_challenger_eq_pv<CF: Config>(
-    builder: &mut Builder<CF>,
-    var: &DuplexChallengerVariable<CF>,
-    values: ChallengerPublicValues<Felt<CF::F>>,
+pub fn assert_challenger_eq_pv<RC: RecursionGenericConfig>(
+    builder: &mut Builder<RC>,
+    var: &DuplexChallengerVariable<RC>,
+    values: ChallengerPublicValues<Felt<RC::F>>,
 ) {
     for i in 0..PERMUTATION_WIDTH {
         let element = builder.get(&var.sponge_state, i);
@@ -138,10 +107,10 @@ pub fn assert_challenger_eq_pv<CF: Config>(
 }
 
 /// Assigns a challenger variable from a challenger in public values.
-pub fn assign_challenger_from_pv<CF: Config>(
-    builder: &mut Builder<CF>,
-    dst: &mut DuplexChallengerVariable<CF>,
-    values: ChallengerPublicValues<Felt<CF::F>>,
+pub fn assign_challenger_from_pv<RC: RecursionGenericConfig>(
+    builder: &mut Builder<RC>,
+    dst: &mut DuplexChallengerVariable<RC>,
+    values: ChallengerPublicValues<Felt<RC::F>>,
 ) {
     for i in 0..PERMUTATION_WIDTH {
         builder.set(&mut dst.sponge_state, i, values.sponge_state[i]);
@@ -158,10 +127,10 @@ pub fn assign_challenger_from_pv<CF: Config>(
     }
 }
 
-pub fn get_challenger_public_values<CF: Config>(
-    builder: &mut Builder<CF>,
-    var: &DuplexChallengerVariable<CF>,
-) -> ChallengerPublicValues<Felt<CF::F>> {
+pub fn get_challenger_public_values<RC: RecursionGenericConfig>(
+    builder: &mut Builder<RC>,
+    var: &DuplexChallengerVariable<RC>,
+) -> ChallengerPublicValues<Felt<RC::F>> {
     let sponge_state = core::array::from_fn(|i| builder.get(&var.sponge_state, i));
     let num_inputs = var2felt(builder, var.nb_inputs);
     let input_buffer = core::array::from_fn(|i| builder.get(&var.input_buffer, i));
@@ -179,12 +148,12 @@ pub fn get_challenger_public_values<CF: Config>(
 
 /// Hash the verifying key + prep domains into a single digest.
 /// poseidon2( commit[0..8] || pc_start || prep_domains[N].{log_n, .size, .shift, .g})
-pub fn hash_vkey<CF: Config>(
-    builder: &mut Builder<CF>,
-    vk: &BaseVerifyingKeyVariable<CF>,
-) -> Array<CF, Felt<CF::F>> {
+pub fn hash_vkey<RC: RecursionGenericConfig>(
+    builder: &mut Builder<RC>,
+    vk: &BaseVerifyingKeyVariable<RC>,
+) -> Array<RC, Felt<RC::F>> {
     let domain_slots: Var<_> = builder.eval(vk.preprocessed_domains.len() * 4);
-    let vkey_slots: Var<_> = builder.constant(CF::N::from_canonical_usize(DIGEST_SIZE + 1));
+    let vkey_slots: Var<_> = builder.constant(RC::N::from_canonical_usize(DIGEST_SIZE + 1));
     let total_slots: Var<_> = builder.eval(vkey_slots + domain_slots);
     let mut inputs = builder.dyn_array(total_slots);
     builder.range(0, DIGEST_SIZE).for_each(|i, builder| {
@@ -192,8 +161,8 @@ pub fn hash_vkey<CF: Config>(
         builder.set(&mut inputs, i, element);
     });
     builder.set(&mut inputs, DIGEST_SIZE, vk.pc_start);
-    let four: Var<_> = builder.constant(CF::N::from_canonical_usize(4));
-    let one: Var<_> = builder.constant(CF::N::one());
+    let four: Var<_> = builder.constant(RC::N::from_canonical_usize(4));
+    let one: Var<_> = builder.constant(RC::N::one());
     builder
         .range(0, vk.preprocessed_domains.len())
         .for_each(|i, builder| {

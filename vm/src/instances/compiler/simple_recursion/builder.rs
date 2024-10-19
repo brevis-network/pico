@@ -1,15 +1,7 @@
-use std::{
-    array,
-    borrow::{Borrow, BorrowMut},
-    marker::PhantomData,
-};
-
 use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
     compiler::recursion::{
-        config::InnerConfig,
-        ir::{Builder, Config, Ext, ExtConst, Felt},
-        prelude::*,
+        ir::{Builder, Ext, ExtConst, Felt},
         program::RecursionProgram,
         program_builder::{
             hints::hintable::Hintable,
@@ -23,12 +15,11 @@ use crate::{
             },
         },
     },
-    configs::{
-        bb_poseidon2::BabyBearPoseidon2,
-        config::{Com, StarkGenericConfig},
-    },
+    configs::config::{Com, RecursionGenericConfig, StarkGenericConfig},
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType, compiler::utils::commit_public_values,
+        chiptype::riscv_chiptype::RiscvChipType,
+        compiler::utils::commit_public_values,
+        configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
         machine::simple_machine::SimpleMachine,
     },
     machine::machine::MachineBehavior,
@@ -43,22 +34,27 @@ use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractField, PrimeField32, TwoAdicField};
+use std::{
+    array,
+    borrow::{Borrow, BorrowMut},
+    marker::PhantomData,
+};
 
 /// A program for recursively verifying a batch of Pico proofs.
 #[derive(Debug, Clone, Copy)]
-pub struct SimpleVerifierCircuit<CF: Config, SC: StarkGenericConfig> {
-    _phantom: PhantomData<(CF, SC)>,
+pub struct SimpleVerifierCircuit<RC: RecursionGenericConfig, SC: StarkGenericConfig> {
+    _phantom: PhantomData<(RC, SC)>,
 }
 
-impl SimpleVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
-    /// Create a new instance of the program for the [BabyBearPoseidon2] config.
+impl SimpleVerifierCircuit<rcf::RecursionConfig, RiscvSC> {
+    /// Create a new instance of the program for the [RiscvSC] config.
     pub fn build(
-        machine: &SimpleMachine<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
+        machine: &SimpleMachine<RiscvSC, RiscvChipType<BabyBear>>,
     ) -> RecursionProgram<BabyBear> {
-        let mut builder = Builder::<InnerConfig>::new(RecursionProgramType::Riscv);
+        let mut builder = Builder::<rcf::RecursionConfig>::new(RecursionProgramType::Riscv);
 
         let input: SimpleRecursionStdinVariable<_> = builder.uninit();
-        SimpleRecursionStdin::<BabyBearPoseidon2, RiscvChipType<_>>::witness(&input, &mut builder);
+        SimpleRecursionStdin::<RiscvSC, RiscvChipType<_>>::witness(&input, &mut builder);
 
         let pcs = TwoAdicFriPcsVariable {
             config: const_fri_config(&mut builder, machine.config().pcs().fri_config()),
@@ -71,21 +67,21 @@ impl SimpleVerifierCircuit<InnerConfig, BabyBearPoseidon2> {
     }
 }
 
-impl<CF: Config, SC: StarkGenericConfig> SimpleVerifierCircuit<CF, SC>
+impl<RC: RecursionGenericConfig, SC: StarkGenericConfig> SimpleVerifierCircuit<RC, SC>
 where
-    CF::F: PrimeField32 + TwoAdicField,
+    RC::F: PrimeField32 + TwoAdicField,
     SC: StarkGenericConfig<
-        Val = CF::F,
-        Challenge = CF::EF,
-        Domain = TwoAdicMultiplicativeCoset<CF::F>,
+        Val = RC::F,
+        Challenge = RC::EF,
+        Domain = TwoAdicMultiplicativeCoset<RC::F>,
     >,
     Com<SC>: Into<[SC::Val; DIGEST_SIZE]>,
 {
     pub fn build_verifier(
-        builder: &mut Builder<CF>,
-        pcs: &TwoAdicFriPcsVariable<CF>,
+        builder: &mut Builder<RC>,
+        pcs: &TwoAdicFriPcsVariable<RC>,
         machine: &SimpleMachine<SC, RiscvChipType<SC::Val>>,
-        input: SimpleRecursionStdinVariable<CF>,
+        input: SimpleRecursionStdinVariable<RC>,
     ) {
         // Read input.
         let SimpleRecursionStdinVariable {
@@ -102,7 +98,7 @@ where
             initial_reconstruct_challenger.copy(builder);
 
         // Initialize the cumulative sum.
-        let cumulative_sum: Ext<_, _> = builder.eval(CF::EF::zero().cons());
+        let cumulative_sum: Ext<_, _> = builder.eval(RC::EF::zero().cons());
 
         // Assert that the number of proofs is not zero.
         // builder.assert_usize_eq(base_proofs.len(), 1);
@@ -116,7 +112,7 @@ where
             // Verify each chunk
             let mut challenger = base_challenger.copy(builder);
 
-            StarkVerifier::<CF, SC>::verify_chunk(
+            StarkVerifier::<RC, SC>::verify_chunk(
                 builder,
                 &vk,
                 pcs,
@@ -155,7 +151,7 @@ where
             let is_complete_felt = var2felt(builder, flag_complete);
 
             // Initialize the public values we will commit to.
-            let zero: Felt<_> = builder.eval(CF::F::zero());
+            let zero: Felt<_> = builder.eval(RC::F::zero());
 
             let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
             let recursion_public_values: &mut RecursionPublicValues<_> =
@@ -166,7 +162,7 @@ where
             recursion_public_values.flag_complete = is_complete_felt;
 
             // Assert complete
-            builder.if_eq(flag_complete, CF::N::one()).then(|builder| {
+            builder.if_eq(flag_complete, RC::N::one()).then(|builder| {
                 Self::assert_simple_complete(
                     builder,
                     recursion_public_values,
@@ -179,9 +175,9 @@ where
     }
 
     pub(crate) fn assert_simple_complete(
-        builder: &mut Builder<CF>,
-        public_values: &RecursionPublicValues<Felt<CF::F>>,
-        end_reconstruct_challenger: &DuplexChallengerVariable<CF>,
+        builder: &mut Builder<RC>,
+        public_values: &RecursionPublicValues<Felt<RC::F>>,
+        end_reconstruct_challenger: &DuplexChallengerVariable<RC>,
     ) {
         let RecursionPublicValues {
             cumulative_sum,
@@ -194,7 +190,7 @@ where
 
         // Assert that the cumulative sum is zero.
         for b in cumulative_sum.iter() {
-            builder.assert_felt_eq(*b, CF::F::zero());
+            builder.assert_felt_eq(*b, RC::F::zero());
         }
     }
 }
