@@ -4,41 +4,29 @@ use p3_field::{ExtensionField, Field, PrimeField, TwoAdicField};
 use std::marker::PhantomData;
 
 // Resembling Plonky3: https://github.com/Plonky3/Plonky3/blob/main/uni-stark/src/config.rs
-pub type PackedVal<SC> = <<SC as StarkGenericConfig>::Val as Field>::Packing;
 
-pub type PackedChallenge<SC> = <<SC as StarkGenericConfig>::Challenge as ExtensionField<
-    <SC as StarkGenericConfig>::Val,
->>::ExtensionPacking;
+pub type PackedVal<SC> = <Val<SC> as Field>::Packing;
 
-// Resembling Plonky3: unistark/src/proof.rs, representing types in pcs.rs
-pub type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::Commitment;
+pub type PackedChallenge<SC> = <Challenge<SC> as ExtensionField<Val<SC>>>::ExtensionPacking;
 
-pub type PcsProverData<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::ProverData;
+pub type Com<SC> =
+    <<SC as StarkGenericConfig>::Pcs as Pcs<Challenge<SC>, Challenger<SC>>>::Commitment;
 
-pub type PcsProof<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::Proof;
+pub type PcsProverData<SC> =
+    <<SC as StarkGenericConfig>::Pcs as Pcs<Challenge<SC>, Challenger<SC>>>::ProverData;
 
-pub type PcsError<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::Error;
+pub type PcsProof<SC> =
+    <<SC as StarkGenericConfig>::Pcs as Pcs<Challenge<SC>, Challenger<SC>>>::Proof;
+
+pub type PcsError<SC> =
+    <<SC as StarkGenericConfig>::Pcs as Pcs<Challenge<SC>, Challenger<SC>>>::Error;
 
 // shorthand for types used in the StarkGenericConfig
-pub type Val<SC> = <SC as StarkGenericConfig>::Val;
+type Val<SC> = <SC as StarkGenericConfig>::Val;
 
-pub type Domain<SC> = <SC as StarkGenericConfig>::Domain;
+type Challenge<SC> = <SC as StarkGenericConfig>::Challenge;
 
-pub type Challenge<SC> = <SC as StarkGenericConfig>::Challenge;
-
-pub type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
+type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
 
 /// A generic config for machines
 pub trait StarkGenericConfig: Sync + Clone {
