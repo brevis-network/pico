@@ -22,11 +22,11 @@ pub type PcsError<SC> =
     <<SC as StarkGenericConfig>::Pcs as Pcs<Challenge<SC>, Challenger<SC>>>::Error;
 
 // shorthand for types used in the StarkGenericConfig
-type Val<SC> = <SC as StarkGenericConfig>::Val;
+pub type Val<SC> = <SC as StarkGenericConfig>::Val;
 
-type Challenge<SC> = <SC as StarkGenericConfig>::Challenge;
+pub type Challenge<SC> = <SC as StarkGenericConfig>::Challenge;
 
-type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
+pub type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
 
 /// A generic config for machines
 pub trait StarkGenericConfig: Sync + Clone {
@@ -56,17 +56,17 @@ pub trait StarkGenericConfig: Sync + Clone {
     fn name(&self) -> String;
 }
 
-pub trait RecursionGenericConfig: Clone + Default {
+pub trait FieldGenericConfig: Clone + Default {
     type N: PrimeField;
     type F: PrimeField + TwoAdicField;
     type EF: ExtensionField<Self::F> + TwoAdicField;
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct RecursionSimpleConfig<F, EF>(PhantomData<(F, EF)>);
+pub struct FieldSimpleConfig<F, EF>(PhantomData<(F, EF)>);
 
-impl<F: PrimeField + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> RecursionGenericConfig
-    for RecursionSimpleConfig<F, EF>
+impl<F: PrimeField + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> FieldGenericConfig
+    for FieldSimpleConfig<F, EF>
 {
     type N = F;
     type F = F;

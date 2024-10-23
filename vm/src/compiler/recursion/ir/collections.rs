@@ -1,16 +1,16 @@
 use super::{Builder, FromConstant, MemIndex, MemVariable, Ptr, Usize, Var, Variable};
-use crate::configs::config::RecursionGenericConfig;
+use crate::configs::config::FieldGenericConfig;
 use itertools::Itertools;
 use p3_field::AbstractField;
 
 /// An array that is either of static or dynamic size.
 #[derive(Debug, Clone)]
-pub enum Array<RC: RecursionGenericConfig, T> {
+pub enum Array<RC: FieldGenericConfig, T> {
     Fixed(Vec<T>),
     Dyn(Ptr<RC::N>, Usize<RC::N>),
 }
 
-impl<RC: RecursionGenericConfig, V: MemVariable<RC>> Array<RC, V> {
+impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
     /// Gets a fixed version of the array.
     pub fn vec(&self) -> Vec<V> {
         match self {
@@ -99,7 +99,7 @@ impl<RC: RecursionGenericConfig, V: MemVariable<RC>> Array<RC, V> {
     }
 }
 
-impl<RC: RecursionGenericConfig> Builder<RC> {
+impl<RC: FieldGenericConfig> Builder<RC> {
     /// Initialize an array of fixed length `len`. The entries will be uninitialized.
     pub fn array<V: MemVariable<RC>>(&mut self, len: impl Into<Usize<RC::N>>) -> Array<RC, V> {
         self.dyn_array(len)
@@ -239,7 +239,7 @@ impl<RC: RecursionGenericConfig> Builder<RC> {
     }
 }
 
-impl<RC: RecursionGenericConfig, T: MemVariable<RC>> Variable<RC> for Array<RC, T> {
+impl<RC: FieldGenericConfig, T: MemVariable<RC>> Variable<RC> for Array<RC, T> {
     type Expression = Self;
 
     fn uninit(builder: &mut Builder<RC>) -> Self {
@@ -324,7 +324,7 @@ impl<RC: RecursionGenericConfig, T: MemVariable<RC>> Variable<RC> for Array<RC, 
     }
 }
 
-impl<RC: RecursionGenericConfig, T: MemVariable<RC>> MemVariable<RC> for Array<RC, T> {
+impl<RC: FieldGenericConfig, T: MemVariable<RC>> MemVariable<RC> for Array<RC, T> {
     fn size_of() -> usize {
         2
     }
@@ -343,7 +343,7 @@ impl<RC: RecursionGenericConfig, T: MemVariable<RC>> MemVariable<RC> for Array<R
 
     fn store(
         &self,
-        dst: Ptr<<RC as RecursionGenericConfig>::N>,
+        dst: Ptr<<RC as FieldGenericConfig>::N>,
         index: MemIndex<RC::N>,
         builder: &mut Builder<RC>,
     ) {
@@ -359,7 +359,7 @@ impl<RC: RecursionGenericConfig, T: MemVariable<RC>> MemVariable<RC> for Array<R
     }
 }
 
-impl<RC: RecursionGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromConstant<RC>
+impl<RC: FieldGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromConstant<RC>
     for Array<RC, V>
 {
     type Constant = Vec<V::Constant>;
@@ -374,9 +374,7 @@ impl<RC: RecursionGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromCons
     }
 }
 
-impl<RC: RecursionGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromConstant<RC>
-    for Vec<V>
-{
+impl<RC: FieldGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromConstant<RC> for Vec<V> {
     type Constant = Vec<V::Constant>;
 
     fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
@@ -384,8 +382,8 @@ impl<RC: RecursionGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromCons
     }
 }
 
-impl<RC: RecursionGenericConfig, V: FromConstant<RC> + MemVariable<RC>, const N: usize>
-    FromConstant<RC> for [V; N]
+impl<RC: FieldGenericConfig, V: FromConstant<RC> + MemVariable<RC>, const N: usize> FromConstant<RC>
+    for [V; N]
 {
     type Constant = [V::Constant; N];
 

@@ -1,4 +1,4 @@
-use crate::configs::stark::bb_poseidon2;
+use crate::configs::stark_config::bb_poseidon2;
 
 /// A configuration for riscv, with BabyBear field and Poseidon2 hash
 

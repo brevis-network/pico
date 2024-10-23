@@ -14,14 +14,14 @@ use crate::{
             commit::PcsVariable,
         },
     },
-    configs::config::RecursionGenericConfig,
+    configs::config::FieldGenericConfig,
     primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
 };
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractField, TwoAdicField};
 use p3_symmetric::Hash;
 
-pub fn verify_two_adic_pcs<RC: RecursionGenericConfig>(
+pub fn verify_two_adic_pcs<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     config: &FriConfigVariable<RC>,
     rounds: Array<RC, TwoAdicPcsRoundVariable<RC>>,
@@ -145,10 +145,7 @@ pub fn verify_two_adic_pcs<RC: RecursionGenericConfig>(
                             let z: Ext<RC::F, RC::EF> = builder.get(&mat_points, l);
                             let ps_at_z: Array<
                                 RC,
-                                Ext<
-                                    <RC as RecursionGenericConfig>::F,
-                                    <RC as RecursionGenericConfig>::EF,
-                                >,
+                                Ext<<RC as FieldGenericConfig>::F, <RC as FieldGenericConfig>::EF>,
                             > = builder.get(&mat_values, l);
                             let input = FriFoldInput {
                                 z,
@@ -183,7 +180,7 @@ pub fn verify_two_adic_pcs<RC: RecursionGenericConfig>(
     builder.cycle_tracker("stage-d-3-verify-challenges");
 }
 
-impl<RC: RecursionGenericConfig> FromConstant<RC> for TwoAdicPcsRoundVariable<RC>
+impl<RC: FieldGenericConfig> FromConstant<RC> for TwoAdicPcsRoundVariable<RC>
 where
     RC::F: TwoAdicField,
 {
@@ -244,11 +241,11 @@ where
 }
 
 #[derive(DslVariable, Clone)]
-pub struct TwoAdicFriPcsVariable<RC: RecursionGenericConfig> {
+pub struct TwoAdicFriPcsVariable<RC: FieldGenericConfig> {
     pub config: FriConfigVariable<RC>,
 }
 
-impl<RC: RecursionGenericConfig> PcsVariable<RC, DuplexChallengerVariable<RC>>
+impl<RC: FieldGenericConfig> PcsVariable<RC, DuplexChallengerVariable<RC>>
     for TwoAdicFriPcsVariable<RC>
 where
     RC::F: TwoAdicField,

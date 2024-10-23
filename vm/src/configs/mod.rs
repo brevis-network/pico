@@ -1,3 +1,3 @@
 pub mod config;
-pub mod recursion;
-pub mod stark;
+pub mod field_config;
+pub mod stark_config;

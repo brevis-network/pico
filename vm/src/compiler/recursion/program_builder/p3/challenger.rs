@@ -3,31 +3,31 @@ use crate::{
         prelude::*,
         program_builder::{keys::BaseVerifyingKeyVariable, p3::fri::types::DigestVariable},
     },
-    configs::config::RecursionGenericConfig,
+    configs::config::FieldGenericConfig,
     primitives::consts::DIGEST_SIZE,
     recursion::runtime::{HASH_RATE, PERMUTATION_WIDTH},
 };
 use p3_field::AbstractField;
 
 /// Reference: [p3_challenger::CanObserve].
-pub trait CanObserveVariable<RC: RecursionGenericConfig, V> {
+pub trait CanObserveVariable<RC: FieldGenericConfig, V> {
     fn observe(&mut self, builder: &mut Builder<RC>, value: V);
 
     fn observe_slice(&mut self, builder: &mut Builder<RC>, values: Array<RC, V>);
 }
 
-pub trait CanSampleVariable<RC: RecursionGenericConfig, V> {
+pub trait CanSampleVariable<RC: FieldGenericConfig, V> {
     fn sample(&mut self, builder: &mut Builder<RC>) -> V;
 }
 
 /// Reference: [p3_challenger::FieldChallenger].
-pub trait FeltChallenger<RC: RecursionGenericConfig>:
+pub trait FeltChallenger<RC: FieldGenericConfig>:
     CanObserveVariable<RC, Felt<RC::F>> + CanSampleVariable<RC, Felt<RC::F>> + CanSampleBitsVariable<RC>
 {
     fn sample_ext(&mut self, builder: &mut Builder<RC>) -> Ext<RC::F, RC::EF>;
 }
 
-pub trait CanSampleBitsVariable<RC: RecursionGenericConfig> {
+pub trait CanSampleBitsVariable<RC: FieldGenericConfig> {
     fn sample_bits(
         &mut self,
         builder: &mut Builder<RC>,
@@ -37,7 +37,7 @@ pub trait CanSampleBitsVariable<RC: RecursionGenericConfig> {
 
 /// Reference: [p3_challenger::DuplexChallenger]
 #[derive(Clone, DslVariable)]
-pub struct DuplexChallengerVariable<RC: RecursionGenericConfig> {
+pub struct DuplexChallengerVariable<RC: FieldGenericConfig> {
     pub sponge_state: Array<RC, Felt<RC::F>>,
     pub nb_inputs: Var<RC::N>,
     pub input_buffer: Array<RC, Felt<RC::F>>,
@@ -45,7 +45,7 @@ pub struct DuplexChallengerVariable<RC: RecursionGenericConfig> {
     pub output_buffer: Array<RC, Felt<RC::F>>,
 }
 
-impl<RC: RecursionGenericConfig> DuplexChallengerVariable<RC> {
+impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
     /// Creates a new duplex challenger with the default state.
     pub fn new(builder: &mut Builder<RC>) -> Self {
         let mut result = DuplexChallengerVariable::<RC> {
@@ -224,9 +224,7 @@ impl<RC: RecursionGenericConfig> DuplexChallengerVariable<RC> {
     }
 }
 
-impl<RC: RecursionGenericConfig> CanObserveVariable<RC, Felt<RC::F>>
-    for DuplexChallengerVariable<RC>
-{
+impl<RC: FieldGenericConfig> CanObserveVariable<RC, Felt<RC::F>> for DuplexChallengerVariable<RC> {
     fn observe(&mut self, builder: &mut Builder<RC>, value: Felt<RC::F>) {
         DuplexChallengerVariable::observe(self, builder, value);
     }
@@ -248,15 +246,13 @@ impl<RC: RecursionGenericConfig> CanObserveVariable<RC, Felt<RC::F>>
     }
 }
 
-impl<RC: RecursionGenericConfig> CanSampleVariable<RC, Felt<RC::F>>
-    for DuplexChallengerVariable<RC>
-{
+impl<RC: FieldGenericConfig> CanSampleVariable<RC, Felt<RC::F>> for DuplexChallengerVariable<RC> {
     fn sample(&mut self, builder: &mut Builder<RC>) -> Felt<RC::F> {
         DuplexChallengerVariable::sample(self, builder)
     }
 }
 
-impl<RC: RecursionGenericConfig> CanSampleBitsVariable<RC> for DuplexChallengerVariable<RC> {
+impl<RC: FieldGenericConfig> CanSampleBitsVariable<RC> for DuplexChallengerVariable<RC> {
     fn sample_bits(
         &mut self,
         builder: &mut Builder<RC>,
@@ -266,7 +262,7 @@ impl<RC: RecursionGenericConfig> CanSampleBitsVariable<RC> for DuplexChallengerV
     }
 }
 
-impl<RC: RecursionGenericConfig> CanObserveVariable<RC, DigestVariable<RC>>
+impl<RC: FieldGenericConfig> CanObserveVariable<RC, DigestVariable<RC>>
     for DuplexChallengerVariable<RC>
 {
     fn observe(&mut self, builder: &mut Builder<RC>, commitment: DigestVariable<RC>) {
@@ -282,7 +278,7 @@ impl<RC: RecursionGenericConfig> CanObserveVariable<RC, DigestVariable<RC>>
     }
 }
 
-impl<RC: RecursionGenericConfig> CanObserveVariable<RC, BaseVerifyingKeyVariable<RC>>
+impl<RC: FieldGenericConfig> CanObserveVariable<RC, BaseVerifyingKeyVariable<RC>>
     for DuplexChallengerVariable<RC>
 {
     fn observe(&mut self, builder: &mut Builder<RC>, value: BaseVerifyingKeyVariable<RC>) {
@@ -299,7 +295,7 @@ impl<RC: RecursionGenericConfig> CanObserveVariable<RC, BaseVerifyingKeyVariable
     }
 }
 
-impl<RC: RecursionGenericConfig> FeltChallenger<RC> for DuplexChallengerVariable<RC> {
+impl<RC: FieldGenericConfig> FeltChallenger<RC> for DuplexChallengerVariable<RC> {
     fn sample_ext(&mut self, builder: &mut Builder<RC>) -> Ext<RC::F, RC::EF> {
         DuplexChallengerVariable::sample_ext(self, builder)
     }

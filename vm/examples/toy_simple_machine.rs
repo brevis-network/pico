@@ -135,7 +135,7 @@ fn main() {
     simple_machine.complement_record(&mut records);
 
     info!("\n Construct proving witness..");
-    let witness = ProvingWitness::new_with_records(records);
+    let witness = ProvingWitness::setup_with_records(records);
 
     // Generate the proof.
     info!("\n Generating proof..");

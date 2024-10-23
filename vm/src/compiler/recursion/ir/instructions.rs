@@ -2,14 +2,14 @@ use super::{
     Array, CircuitV2FriFoldInput, CircuitV2FriFoldOutput, Ext, Felt, FriFoldInput, MemIndex, Ptr,
     TracedVec, Usize, Var,
 };
-use crate::{configs::config::RecursionGenericConfig, recursion::air::RecursionPublicValues};
+use crate::{configs::config::FieldGenericConfig, recursion::air::RecursionPublicValues};
 
 /// An intermeddiate instruction set for implementing programs.
 ///
 /// Programs written in the DSL can compile both to the recursive zkVM and the R1CS or Plonk-ish
 /// circuits.
 #[derive(Debug, Clone)]
-pub enum DslIr<RC: RecursionGenericConfig> {
+pub enum DslIr<RC: FieldGenericConfig> {
     // Immediates.
     /// Assigns an immediate to a variable (var = imm).
     ImmV(Var<RC::N>, RC::N),

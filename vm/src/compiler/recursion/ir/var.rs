@@ -1,7 +1,7 @@
 use super::{Builder, Ptr, Usize};
-use crate::configs::config::RecursionGenericConfig;
+use crate::configs::config::FieldGenericConfig;
 
-pub trait Variable<RC: RecursionGenericConfig>: Clone {
+pub trait Variable<RC: FieldGenericConfig>: Clone {
     type Expression: From<Self>;
 
     fn uninit(builder: &mut Builder<RC>) -> Self;
@@ -28,7 +28,7 @@ pub struct MemIndex<N> {
     pub size: usize,
 }
 
-pub trait MemVariable<RC: RecursionGenericConfig>: Variable<RC> {
+pub trait MemVariable<RC: FieldGenericConfig>: Variable<RC> {
     fn size_of() -> usize;
     /// Loads the variable from the heap.
     fn load(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>);
@@ -36,7 +36,7 @@ pub trait MemVariable<RC: RecursionGenericConfig>: Variable<RC> {
     fn store(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>);
 }
 
-pub trait FromConstant<RC: RecursionGenericConfig> {
+pub trait FromConstant<RC: FieldGenericConfig> {
     type Constant;
 
     fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self;

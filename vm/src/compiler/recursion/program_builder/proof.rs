@@ -1,7 +1,7 @@
 use super::p3::fri::types::{DigestVariable, PcsProofVariable};
 use crate::{
     compiler::recursion::prelude::*,
-    configs::config::RecursionGenericConfig,
+    configs::config::FieldGenericConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
         proof::ChipOpenedValues,
@@ -13,7 +13,7 @@ use pico_derive::DslVariable;
 
 /// Reference: [pico_machine::stark::BaseProof]
 #[derive(DslVariable, Clone)]
-pub struct BaseProofVariable<RC: RecursionGenericConfig> {
+pub struct BaseProofVariable<RC: FieldGenericConfig> {
     pub commitment: BaseCommitmentsVariable<RC>,
     pub opened_values: BaseOpenedValuesVariable<RC>,
     pub opening_proof: PcsProofVariable<RC>,
@@ -25,7 +25,7 @@ pub struct BaseProofVariable<RC: RecursionGenericConfig> {
 
 /// Reference: [pico_machine::BaseCommitments]
 #[derive(DslVariable, Clone)]
-pub struct BaseCommitmentsVariable<RC: RecursionGenericConfig> {
+pub struct BaseCommitmentsVariable<RC: FieldGenericConfig> {
     pub main_commit: DigestVariable<RC>,
     pub permutation_commit: DigestVariable<RC>,
     pub quotient_commit: DigestVariable<RC>,
@@ -33,14 +33,14 @@ pub struct BaseCommitmentsVariable<RC: RecursionGenericConfig> {
 
 /// Reference: [pico_machine::BaseOpenedValues]
 #[derive(DslVariable, Debug, Clone)]
-pub struct BaseOpenedValuesVariable<RC: RecursionGenericConfig> {
+pub struct BaseOpenedValuesVariable<RC: FieldGenericConfig> {
     pub chips_opened_values: Array<RC, ChipOpenedValuesVariable<RC>>,
 }
 
 // todo: consider necessity
 /// Reference: [pico_machine::proof::ChipOpenedValues]
 #[derive(Debug, Clone)]
-pub struct ChipOpening<RC: RecursionGenericConfig> {
+pub struct ChipOpening<RC: FieldGenericConfig> {
     pub preprocessed_local: Vec<Ext<RC::F, RC::EF>>,
     pub preprocessed_next: Vec<Ext<RC::F, RC::EF>>,
     pub main_local: Vec<Ext<RC::F, RC::EF>>,
@@ -54,7 +54,7 @@ pub struct ChipOpening<RC: RecursionGenericConfig> {
 
 /// Reference: [pico_machine::stark::ChipOpenedValues]
 #[derive(DslVariable, Debug, Clone)]
-pub struct ChipOpenedValuesVariable<RC: RecursionGenericConfig> {
+pub struct ChipOpenedValuesVariable<RC: FieldGenericConfig> {
     pub preprocessed_local: Array<RC, Ext<RC::F, RC::EF>>,
     pub preprocessed_next: Array<RC, Ext<RC::F, RC::EF>>,
     pub main_local: Array<RC, Ext<RC::F, RC::EF>>,
@@ -67,12 +67,12 @@ pub struct ChipOpenedValuesVariable<RC: RecursionGenericConfig> {
 }
 
 #[derive(DslVariable, Clone, Copy)]
-pub struct QuotientDataVariable<RC: RecursionGenericConfig> {
+pub struct QuotientDataVariable<RC: FieldGenericConfig> {
     pub log_quotient_degree: Var<RC::N>,
     pub quotient_size: Var<RC::N>,
 }
 
-impl<RC: RecursionGenericConfig> ChipOpening<RC> {
+impl<RC: FieldGenericConfig> ChipOpening<RC> {
     /// Collect opening values from a dynamic array into vectors.
     ///
     /// This method is used to convert a `ChipOpenedValuesVariable` into a `ChipOpenedValues`, which
@@ -156,7 +156,7 @@ impl<RC: RecursionGenericConfig> ChipOpening<RC> {
     }
 }
 
-impl<RC: RecursionGenericConfig> FromConstant<RC> for ChipOpenedValuesVariable<RC> {
+impl<RC: FieldGenericConfig> FromConstant<RC> for ChipOpenedValuesVariable<RC> {
     type Constant = ChipOpenedValues<RC::EF>;
 
     fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {

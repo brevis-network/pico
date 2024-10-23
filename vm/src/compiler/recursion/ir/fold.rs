@@ -1,9 +1,9 @@
 use super::{Array, Builder, Ext, Felt, MemIndex, MemVariable, Ptr, Var, Variable};
-use crate::configs::config::RecursionGenericConfig;
+use crate::configs::config::FieldGenericConfig;
 use pico_derive::DslVariable;
 
 #[derive(DslVariable, Debug, Clone)]
-pub struct FriFoldInput<RC: RecursionGenericConfig> {
+pub struct FriFoldInput<RC: FieldGenericConfig> {
     pub z: Ext<RC::F, RC::EF>,
     pub alpha: Ext<RC::F, RC::EF>,
     pub x: Felt<RC::F>,
@@ -15,7 +15,7 @@ pub struct FriFoldInput<RC: RecursionGenericConfig> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CircuitV2FriFoldInput<RC: RecursionGenericConfig> {
+pub struct CircuitV2FriFoldInput<RC: FieldGenericConfig> {
     pub z: Ext<RC::F, RC::EF>,
     pub alpha: Ext<RC::F, RC::EF>,
     pub x: Felt<RC::F>,
@@ -26,7 +26,7 @@ pub struct CircuitV2FriFoldInput<RC: RecursionGenericConfig> {
 }
 
 #[derive(Debug, Clone)]
-pub struct CircuitV2FriFoldOutput<RC: RecursionGenericConfig> {
+pub struct CircuitV2FriFoldOutput<RC: FieldGenericConfig> {
     pub alpha_pow_output: Vec<Ext<RC::F, RC::EF>>,
     pub ro_output: Vec<Ext<RC::F, RC::EF>>,
 }

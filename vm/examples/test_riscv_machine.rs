@@ -16,8 +16,8 @@ use pico_vm::{
         riscv::{
             record::EmulationRecord,
             riscv_emulator::{EmulationError, EmulatorMode, RiscvEmulator},
+            stdin::EmulatorStdin,
         },
-        stdin::EmulatorStdin,
     },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -64,9 +64,9 @@ fn main() {
     let (pk, vk) = riscv_machine.setup_keys(&program);
 
     info!("\n Construct proving witness..");
-    let witness = ProvingWitness::new_with_program(
+    let witness = ProvingWitness::setup_for_riscv(
         program,
-        stdin,
+        &stdin,
         EmulatorOpts::test_opts(),
         EmulatorContext::default(),
     );

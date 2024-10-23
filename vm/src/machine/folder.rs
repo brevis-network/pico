@@ -2,7 +2,7 @@ use crate::{
     compiler::recursion::ir::{
         Ext as RecursionExt, Felt as RecursionFelt, SymbolicExt as RecursionSymbolicExt,
     },
-    configs::config::{PackedChallenge, PackedVal, RecursionGenericConfig, StarkGenericConfig},
+    configs::config::{FieldGenericConfig, PackedChallenge, PackedVal, StarkGenericConfig},
     machine::{
         builder::{
             ChipBuilder, EmptyLookupBuilder, LookupBuilder, PermutationBuilder, PublicValuesBuilder,
@@ -371,11 +371,11 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC
 
 pub type RecursiveVerifierConstraintFolder<'a, CF> = GenericVerifierConstraintFolder<
     'a,
-    <CF as RecursionGenericConfig>::F,
-    <CF as RecursionGenericConfig>::EF,
-    RecursionFelt<<CF as RecursionGenericConfig>::F>,
-    RecursionExt<<CF as RecursionGenericConfig>::F, <CF as RecursionGenericConfig>::EF>,
-    RecursionSymbolicExt<<CF as RecursionGenericConfig>::F, <CF as RecursionGenericConfig>::EF>,
+    <CF as FieldGenericConfig>::F,
+    <CF as FieldGenericConfig>::EF,
+    RecursionFelt<<CF as FieldGenericConfig>::F>,
+    RecursionExt<<CF as FieldGenericConfig>::F, <CF as FieldGenericConfig>::EF>,
+    RecursionSymbolicExt<<CF as FieldGenericConfig>::F, <CF as FieldGenericConfig>::EF>,
 >;
 
 /// A folder for verifier constraints.

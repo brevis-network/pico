@@ -7,17 +7,17 @@ use crate::{
         ir::{Array, Builder},
         program_builder::hints::hintable::Hintable,
     },
-    configs::config::RecursionGenericConfig,
+    configs::config::FieldGenericConfig,
     instances::configs::recur_config as rcf,
     primitives::consts::DIGEST_SIZE,
     recursion::air::Block,
 };
 use p3_field::{AbstractExtensionField, AbstractField};
 
-impl Hintable<rcf::RecursionConfig> for rcf::Digest {
-    type HintVariable = DigestVariable<rcf::RecursionConfig>;
+impl Hintable<rcf::FieldConfig> for rcf::Digest {
+    type HintVariable = DigestVariable<rcf::FieldConfig>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         builder.hint_felts()
     }
 
@@ -27,10 +27,10 @@ impl Hintable<rcf::RecursionConfig> for rcf::Digest {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for Vec<rcf::Digest> {
-    type HintVariable = Array<rcf::RecursionConfig, DigestVariable<rcf::RecursionConfig>>;
+impl Hintable<rcf::FieldConfig> for Vec<rcf::Digest> {
+    type HintVariable = Array<rcf::FieldConfig, DigestVariable<rcf::FieldConfig>>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -55,10 +55,10 @@ impl Hintable<rcf::RecursionConfig> for Vec<rcf::Digest> {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for rcf::CommitPhaseStep {
-    type HintVariable = FriCommitPhaseProofStepVariable<rcf::RecursionConfig>;
+impl Hintable<rcf::FieldConfig> for rcf::CommitPhaseStep {
+    type HintVariable = FriCommitPhaseProofStepVariable<rcf::FieldConfig>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let sibling_value = builder.hint_ext();
         let opening_proof = Vec::<rcf::Digest>::read(builder);
         Self::HintVariable {
@@ -67,7 +67,7 @@ impl Hintable<rcf::RecursionConfig> for rcf::CommitPhaseStep {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         let sibling_value: &[rcf::Val] = self.sibling_value.as_base_slice();
@@ -80,11 +80,10 @@ impl Hintable<rcf::RecursionConfig> for rcf::CommitPhaseStep {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for Vec<rcf::CommitPhaseStep> {
-    type HintVariable =
-        Array<rcf::RecursionConfig, FriCommitPhaseProofStepVariable<rcf::RecursionConfig>>;
+impl Hintable<rcf::FieldConfig> for Vec<rcf::CommitPhaseStep> {
+    type HintVariable = Array<rcf::FieldConfig, FriCommitPhaseProofStepVariable<rcf::FieldConfig>>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -94,7 +93,7 @@ impl Hintable<rcf::RecursionConfig> for Vec<rcf::CommitPhaseStep> {
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         let len = rcf::Val::from_canonical_usize(self.len());
@@ -109,17 +108,17 @@ impl Hintable<rcf::RecursionConfig> for Vec<rcf::CommitPhaseStep> {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for rcf::QueryProof {
-    type HintVariable = FriQueryProofVariable<rcf::RecursionConfig>;
+impl Hintable<rcf::FieldConfig> for rcf::QueryProof {
+    type HintVariable = FriQueryProofVariable<rcf::FieldConfig>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let commit_phase_openings = Vec::<rcf::CommitPhaseStep>::read(builder);
         Self::HintVariable {
             commit_phase_openings,
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         stream.extend(Vec::<rcf::CommitPhaseStep>::write(
@@ -130,10 +129,10 @@ impl Hintable<rcf::RecursionConfig> for rcf::QueryProof {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for Vec<rcf::QueryProof> {
-    type HintVariable = Array<rcf::RecursionConfig, FriQueryProofVariable<rcf::RecursionConfig>>;
+impl Hintable<rcf::FieldConfig> for Vec<rcf::QueryProof> {
+    type HintVariable = Array<rcf::FieldConfig, FriQueryProofVariable<rcf::FieldConfig>>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -143,7 +142,7 @@ impl Hintable<rcf::RecursionConfig> for Vec<rcf::QueryProof> {
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         let len = rcf::Val::from_canonical_usize(self.len());
@@ -158,10 +157,10 @@ impl Hintable<rcf::RecursionConfig> for Vec<rcf::QueryProof> {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for rcf::FriProof {
-    type HintVariable = FriProofVariable<rcf::RecursionConfig>;
+impl Hintable<rcf::FieldConfig> for rcf::FriProof {
+    type HintVariable = FriProofVariable<rcf::FieldConfig>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let commit_phase_commits = Vec::<rcf::Digest>::read(builder);
         let query_proofs = Vec::<rcf::QueryProof>::read(builder);
         let final_poly = builder.hint_ext();
@@ -174,7 +173,7 @@ impl Hintable<rcf::RecursionConfig> for rcf::FriProof {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         stream.extend(Vec::<rcf::Digest>::write(
@@ -195,10 +194,10 @@ impl Hintable<rcf::RecursionConfig> for rcf::FriProof {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for rcf::BatchOpening {
-    type HintVariable = BatchOpeningVariable<rcf::RecursionConfig>;
+impl Hintable<rcf::FieldConfig> for rcf::BatchOpening {
+    type HintVariable = BatchOpeningVariable<rcf::FieldConfig>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let opened_values = Vec::<Vec<rcf::Challenge>>::read(builder);
         let opening_proof = Vec::<rcf::Digest>::read(builder);
         Self::HintVariable {
@@ -207,7 +206,7 @@ impl Hintable<rcf::RecursionConfig> for rcf::BatchOpening {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
         stream.extend(Vec::<Vec<rcf::Challenge>>::write(
             &self
@@ -221,10 +220,10 @@ impl Hintable<rcf::RecursionConfig> for rcf::BatchOpening {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for Vec<rcf::BatchOpening> {
-    type HintVariable = Array<rcf::RecursionConfig, BatchOpeningVariable<rcf::RecursionConfig>>;
+impl Hintable<rcf::FieldConfig> for Vec<rcf::BatchOpening> {
+    type HintVariable = Array<rcf::FieldConfig, BatchOpeningVariable<rcf::FieldConfig>>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -234,7 +233,7 @@ impl Hintable<rcf::RecursionConfig> for Vec<rcf::BatchOpening> {
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         let len = rcf::Val::from_canonical_usize(self.len());
@@ -249,13 +248,11 @@ impl Hintable<rcf::RecursionConfig> for Vec<rcf::BatchOpening> {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for Vec<Vec<rcf::BatchOpening>> {
-    type HintVariable = Array<
-        rcf::RecursionConfig,
-        Array<rcf::RecursionConfig, BatchOpeningVariable<rcf::RecursionConfig>>,
-    >;
+impl Hintable<rcf::FieldConfig> for Vec<Vec<rcf::BatchOpening>> {
+    type HintVariable =
+        Array<rcf::FieldConfig, Array<rcf::FieldConfig, BatchOpeningVariable<rcf::FieldConfig>>>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
@@ -265,7 +262,7 @@ impl Hintable<rcf::RecursionConfig> for Vec<Vec<rcf::BatchOpening>> {
         arr
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         let len = rcf::Val::from_canonical_usize(self.len());
@@ -280,10 +277,10 @@ impl Hintable<rcf::RecursionConfig> for Vec<Vec<rcf::BatchOpening>> {
     }
 }
 
-impl Hintable<rcf::RecursionConfig> for rcf::PcsProof {
-    type HintVariable = PcsProofVariable<rcf::RecursionConfig>;
+impl Hintable<rcf::FieldConfig> for rcf::PcsProof {
+    type HintVariable = PcsProofVariable<rcf::FieldConfig>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let fri_proof = rcf::FriProof::read(builder);
         let query_openings = Vec::<Vec<rcf::BatchOpening>>::read(builder);
         Self::HintVariable {
@@ -292,7 +289,7 @@ impl Hintable<rcf::RecursionConfig> for rcf::PcsProof {
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
         stream.extend(self.fri_proof.write());
         stream.extend(self.query_openings.write());

@@ -15,8 +15,8 @@ use pico_vm::{
         riscv::{
             record::EmulationRecord,
             riscv_emulator::{EmulationError, EmulatorMode, RiscvEmulator},
+            stdin::EmulatorStdin,
         },
-        stdin::EmulatorStdin,
     },
     instances::{
         configs::riscv_config::StarkConfig as RiscvSC, machine::simple_machine::SimpleMachine,

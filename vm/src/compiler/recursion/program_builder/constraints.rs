@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     compiler::recursion::ir::{Array, Builder, Ext, ExtConst, Felt, SymbolicExt},
-    configs::config::{RecursionGenericConfig, StarkGenericConfig},
+    configs::config::{FieldGenericConfig, StarkGenericConfig},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::RecursiveVerifierConstraintFolder,
@@ -17,7 +17,7 @@ use p3_commit::LagrangeSelectors;
 use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 
-impl<RC: RecursionGenericConfig, SC: StarkGenericConfig> StarkVerifier<RC, SC>
+impl<RC: FieldGenericConfig, SC: StarkGenericConfig> StarkVerifier<RC, SC>
 where
     // todo: check in the future
     SC: StarkGenericConfig<Val = RC::F, Challenge = RC::EF>,

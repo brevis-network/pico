@@ -2,7 +2,7 @@ use super::{
     Array, DslIr, Ext, Felt, FromConstant, SymbolicExt, SymbolicFelt, SymbolicUsize, SymbolicVar,
     Usize, Var, Variable,
 };
-use crate::{configs::config::RecursionGenericConfig, primitives::types::RecursionProgramType};
+use crate::{configs::config::FieldGenericConfig, primitives::types::RecursionProgramType};
 use backtrace::Backtrace;
 use p3_field::AbstractField;
 use std::{iter::Zip, vec::IntoIter};
@@ -79,7 +79,7 @@ impl<T> IntoIterator for TracedVec<T> {
 ///
 /// Can compile to both assembly and a set of constraints.
 #[derive(Debug, Clone)]
-pub struct Builder<RC: RecursionGenericConfig> {
+pub struct Builder<RC: FieldGenericConfig> {
     pub(crate) variable_count: u32,
     pub operations: TracedVec<DslIr<RC>>,
     pub(crate) nb_public_values: Option<Var<RC::N>>,
@@ -92,13 +92,13 @@ pub struct Builder<RC: RecursionGenericConfig> {
     pub program_type: RecursionProgramType,
 }
 
-impl<RC: RecursionGenericConfig> Default for Builder<RC> {
+impl<RC: FieldGenericConfig> Default for Builder<RC> {
     fn default() -> Self {
         Self::new(RecursionProgramType::Riscv)
     }
 }
 
-impl<RC: RecursionGenericConfig> Builder<RC> {
+impl<RC: FieldGenericConfig> Builder<RC> {
     pub fn new(program_type: RecursionProgramType) -> Self {
         // We need to create a temporary placeholder for the p2_hash_num variable.
         let placeholder_p2_hash_num = Var::new(0);
@@ -521,7 +521,7 @@ impl<RC: RecursionGenericConfig> Builder<RC> {
 }
 
 /// A builder for the DSL that handles if statements.
-pub struct IfBuilder<'a, RC: RecursionGenericConfig> {
+pub struct IfBuilder<'a, RC: FieldGenericConfig> {
     lhs: SymbolicVar<RC::N>,
     rhs: SymbolicVar<RC::N>,
     is_eq: bool,
@@ -538,7 +538,7 @@ enum IfCondition<N> {
     NeI(Var<N>, N),
 }
 
-impl<'a, RC: RecursionGenericConfig> IfBuilder<'a, RC> {
+impl<'a, RC: FieldGenericConfig> IfBuilder<'a, RC> {
     pub fn then(mut self, mut f: impl FnMut(&mut Builder<RC>)) {
         // Get the condition reduced from the expressions for lhs and rhs.
         let condition = self.condition();
@@ -728,14 +728,14 @@ impl<'a, RC: RecursionGenericConfig> IfBuilder<'a, RC> {
 }
 
 /// A builder for the DSL that handles for loops.
-pub struct RangeBuilder<'a, RC: RecursionGenericConfig> {
+pub struct RangeBuilder<'a, RC: FieldGenericConfig> {
     start: Usize<RC::N>,
     end: Usize<RC::N>,
     step_size: usize,
     builder: &'a mut Builder<RC>,
 }
 
-impl<'a, RC: RecursionGenericConfig> RangeBuilder<'a, RC> {
+impl<'a, RC: FieldGenericConfig> RangeBuilder<'a, RC> {
     pub const fn step_by(mut self, step_size: usize) -> Self {
         self.step_size = step_size;
         self

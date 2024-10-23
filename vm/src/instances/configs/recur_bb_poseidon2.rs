@@ -1,13 +1,13 @@
 use crate::{
-    configs::{recursion::bb_simple, stark::bb_poseidon2},
+    configs::{field_config::bb_simple, stark_config::bb_poseidon2},
     primitives::consts::DIGEST_SIZE,
 };
 
-/// A configuration for recursion, with BabyBear field and Poseidon2 hash
+/// A configuration for field_config, with BabyBear field and Poseidon2 hash
 
-// Each recursion config mod should have public types with the same names as below.
+// Each field_config config mod should have public types with the same names as below.
 
-pub type RecursionConfig = bb_simple::BabyBearSimple;
+pub type FieldConfig = bb_simple::BabyBearSimple;
 pub type StarkConfig = bb_poseidon2::BabyBearPoseidon2;
 
 pub type Val = bb_poseidon2::Val;

@@ -8,7 +8,7 @@ use crate::{
             proof::BaseProofVariable,
         },
     },
-    configs::config::{RecursionGenericConfig, StarkGenericConfig},
+    configs::config::{FieldGenericConfig, StarkGenericConfig},
     instances::{
         configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
         machine::simple_machine::SimpleMachine,
@@ -42,7 +42,7 @@ where
 }
 
 #[derive(DslVariable, Clone)]
-pub struct SimpleRecursionStdinVariable<RC: RecursionGenericConfig> {
+pub struct SimpleRecursionStdinVariable<RC: FieldGenericConfig> {
     pub vk: BaseVerifyingKeyVariable<RC>,
     pub base_proofs: Array<RC, BaseProofVariable<RC>>,
     pub base_challenger: DuplexChallengerVariable<RC>,
@@ -85,15 +85,15 @@ where
     }
 }
 
-impl<'a, A> Hintable<rcf::RecursionConfig> for SimpleRecursionStdin<'a, RiscvSC, A>
+impl<'a, A> Hintable<rcf::FieldConfig> for SimpleRecursionStdin<'a, RiscvSC, A>
 where
     A: ChipBehavior<BabyBear>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
 {
-    type HintVariable = SimpleRecursionStdinVariable<rcf::RecursionConfig>;
+    type HintVariable = SimpleRecursionStdinVariable<rcf::FieldConfig>;
 
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let vk = VerifyingKeyHint::<'a, RiscvSC, A>::read(builder);
         let base_proofs = Vec::<BaseProofHint<'a, RiscvSC, A>>::read(builder);
         let base_challenger = DuplexChallenger::<rcf::Val, rcf::Perm, 16, 8>::read(builder);
@@ -110,7 +110,7 @@ where
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         let vk_hint = VerifyingKeyHint::<'a, RiscvSC, _>::new(

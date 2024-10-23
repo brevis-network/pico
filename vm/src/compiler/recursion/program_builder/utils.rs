@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     compiler::recursion::ir::{Array, Builder, Felt, Var},
-    configs::config::{RecursionGenericConfig, StarkGenericConfig},
+    configs::config::{FieldGenericConfig, StarkGenericConfig},
     instances::configs::recur_config as rcf,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -28,9 +28,9 @@ use p3_field::{AbstractField, TwoAdicField};
 use p3_fri::FriConfig;
 
 pub fn const_fri_config(
-    builder: &mut Builder<rcf::RecursionConfig>,
+    builder: &mut Builder<rcf::FieldConfig>,
     config: &FriConfig<rcf::ChallengeMmcs>,
-) -> FriConfigVariable<rcf::RecursionConfig> {
+) -> FriConfigVariable<rcf::FieldConfig> {
     let two_addicity = rcf::Val::TWO_ADICITY;
     let mut generators = builder.dyn_array(two_addicity);
     let mut subgroups = builder.dyn_array(two_addicity);
@@ -56,7 +56,7 @@ pub fn const_fri_config(
 }
 
 // OPT: this can be done much more efficiently, but in the meantime this should work
-pub fn felt2var<RC: RecursionGenericConfig>(
+pub fn felt2var<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     felt: Felt<RC::F>,
 ) -> Var<RC::N> {
@@ -64,16 +64,13 @@ pub fn felt2var<RC: RecursionGenericConfig>(
     builder.bits2num_v(&bits)
 }
 
-pub fn var2felt<RC: RecursionGenericConfig>(
-    builder: &mut Builder<RC>,
-    var: Var<RC::N>,
-) -> Felt<RC::F> {
+pub fn var2felt<RC: FieldGenericConfig>(builder: &mut Builder<RC>, var: Var<RC::N>) -> Felt<RC::F> {
     let bits = builder.num2bits_v(var);
     builder.bits2num_f(&bits)
 }
 
 /// Asserts that the challenger variable is equal to a challenger in public values.
-pub fn assert_challenger_eq_pv<RC: RecursionGenericConfig>(
+pub fn assert_challenger_eq_pv<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     var: &DuplexChallengerVariable<RC>,
     values: ChallengerPublicValues<Felt<RC::F>>,
@@ -107,7 +104,7 @@ pub fn assert_challenger_eq_pv<RC: RecursionGenericConfig>(
 }
 
 /// Assigns a challenger variable from a challenger in public values.
-pub fn assign_challenger_from_pv<RC: RecursionGenericConfig>(
+pub fn assign_challenger_from_pv<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     dst: &mut DuplexChallengerVariable<RC>,
     values: ChallengerPublicValues<Felt<RC::F>>,
@@ -127,7 +124,7 @@ pub fn assign_challenger_from_pv<RC: RecursionGenericConfig>(
     }
 }
 
-pub fn get_challenger_public_values<RC: RecursionGenericConfig>(
+pub fn get_challenger_public_values<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     var: &DuplexChallengerVariable<RC>,
 ) -> ChallengerPublicValues<Felt<RC::F>> {
@@ -148,7 +145,7 @@ pub fn get_challenger_public_values<RC: RecursionGenericConfig>(
 
 /// Hash the verifying key + prep domains into a single digest.
 /// poseidon2( commit[0..8] || pc_start || prep_domains[N].{log_n, .size, .shift, .g})
-pub fn hash_vkey<RC: RecursionGenericConfig>(
+pub fn hash_vkey<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     vk: &BaseVerifyingKeyVariable<RC>,
 ) -> Array<RC, Felt<RC::F>> {

@@ -36,7 +36,7 @@ pub fn eval_channel_selector<AB: AirBuilder>(
         .when_first_row()
         .assert_one(local.channel_selector[0]);
 
-    // Constrain the transition by asserting that the selectors satisfy the recursion relation:
+    // Constrain the transition by asserting that the selectors satisfy the field_config relation:
     // selectors_next[(i + 1) % NUM_BYTE_LOOKUP_CHANNELS] = selectors[i]
     for i in 0..NUM_BYTE_LOOKUP_CHANNELS as usize {
         builder

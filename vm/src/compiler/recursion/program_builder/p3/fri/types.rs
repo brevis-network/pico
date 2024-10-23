@@ -1,17 +1,17 @@
 use super::TwoAdicMultiplicativeCosetVariable;
 use crate::{
     compiler::{recursion::prelude::*, word::Word},
-    configs::config::RecursionGenericConfig,
+    configs::config::FieldGenericConfig,
     primitives::consts::{PV_DIGEST_NUM_WORDS, WORD_SIZE},
 };
-pub type DigestVariable<RC> = Array<RC, Felt<<RC as RecursionGenericConfig>::F>>;
+pub type DigestVariable<RC> = Array<RC, Felt<<RC as FieldGenericConfig>::F>>;
 
 #[derive(DslVariable, Debug, Clone)]
-pub struct Sha256DigestVariable<RC: RecursionGenericConfig> {
+pub struct Sha256DigestVariable<RC: FieldGenericConfig> {
     pub bytes: Array<RC, Felt<RC::F>>,
 }
 
-impl<RC: RecursionGenericConfig> Sha256DigestVariable<RC> {
+impl<RC: FieldGenericConfig> Sha256DigestVariable<RC> {
     pub fn from_words(builder: &mut Builder<RC>, words: &[Word<Felt<RC::F>>]) -> Self {
         let mut bytes = builder.array(PV_DIGEST_NUM_WORDS * WORD_SIZE);
         for (i, word) in words.iter().enumerate() {
@@ -25,7 +25,7 @@ impl<RC: RecursionGenericConfig> Sha256DigestVariable<RC> {
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriConfigVariable<RC: RecursionGenericConfig> {
+pub struct FriConfigVariable<RC: FieldGenericConfig> {
     pub log_blowup: Var<RC::N>,
     pub blowup: Var<RC::N>,
     pub num_queries: Var<RC::N>,
@@ -34,7 +34,7 @@ pub struct FriConfigVariable<RC: RecursionGenericConfig> {
     pub subgroups: Array<RC, TwoAdicMultiplicativeCosetVariable<RC>>,
 }
 
-impl<RC: RecursionGenericConfig> FriConfigVariable<RC> {
+impl<RC: FieldGenericConfig> FriConfigVariable<RC> {
     pub fn get_subgroup(
         &self,
         builder: &mut Builder<RC>,
@@ -53,7 +53,7 @@ impl<RC: RecursionGenericConfig> FriConfigVariable<RC> {
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriProofVariable<RC: RecursionGenericConfig> {
+pub struct FriProofVariable<RC: FieldGenericConfig> {
     pub commit_phase_commits: Array<RC, DigestVariable<RC>>,
     pub query_proofs: Array<RC, FriQueryProofVariable<RC>>,
     pub final_poly: Ext<RC::F, RC::EF>,
@@ -61,48 +61,48 @@ pub struct FriProofVariable<RC: RecursionGenericConfig> {
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriQueryProofVariable<RC: RecursionGenericConfig> {
+pub struct FriQueryProofVariable<RC: FieldGenericConfig> {
     pub commit_phase_openings: Array<RC, FriCommitPhaseProofStepVariable<RC>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriCommitPhaseProofStepVariable<RC: RecursionGenericConfig> {
+pub struct FriCommitPhaseProofStepVariable<RC: FieldGenericConfig> {
     pub sibling_value: Ext<RC::F, RC::EF>,
     pub opening_proof: Array<RC, DigestVariable<RC>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriChallengesVariable<RC: RecursionGenericConfig> {
+pub struct FriChallengesVariable<RC: FieldGenericConfig> {
     pub query_indices: Array<RC, Array<RC, Var<RC::N>>>,
     pub betas: Array<RC, Ext<RC::F, RC::EF>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct DimensionsVariable<RC: RecursionGenericConfig> {
+pub struct DimensionsVariable<RC: FieldGenericConfig> {
     pub height: Var<RC::N>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct PcsProofVariable<RC: RecursionGenericConfig> {
+pub struct PcsProofVariable<RC: FieldGenericConfig> {
     pub fri_proof: FriProofVariable<RC>,
     pub query_openings: Array<RC, Array<RC, BatchOpeningVariable<RC>>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct BatchOpeningVariable<RC: RecursionGenericConfig> {
+pub struct BatchOpeningVariable<RC: FieldGenericConfig> {
     pub opened_values: Array<RC, Array<RC, Ext<RC::F, RC::EF>>>,
     pub opening_proof: Array<RC, Array<RC, Felt<RC::F>>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct TwoAdicPcsRoundVariable<RC: RecursionGenericConfig> {
+pub struct TwoAdicPcsRoundVariable<RC: FieldGenericConfig> {
     pub batch_commit: DigestVariable<RC>,
     pub mats: Array<RC, TwoAdicPcsMatsVariable<RC>>,
 }
 
 #[allow(clippy::type_complexity)]
 #[derive(DslVariable, Clone)]
-pub struct TwoAdicPcsMatsVariable<RC: RecursionGenericConfig> {
+pub struct TwoAdicPcsMatsVariable<RC: FieldGenericConfig> {
     pub domain: TwoAdicMultiplicativeCosetVariable<RC>,
     pub points: Array<RC, Ext<RC::F, RC::EF>>,
     pub values: Array<RC, Array<RC, Ext<RC::F, RC::EF>>>,

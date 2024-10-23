@@ -14,7 +14,7 @@ use crate::{
     compiler::recursion::ir::{
         Array, Builder, Ext, ExtensionOperand, Felt, Ptr, SymbolicVar, Usize, Var,
     },
-    configs::config::RecursionGenericConfig,
+    configs::config::FieldGenericConfig,
     primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
 };
 pub use domain::*;
@@ -22,7 +22,7 @@ use p3_field::{AbstractField, Field, TwoAdicField};
 pub use two_adic_pcs::*;
 
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/verifier.rs#L27
-pub fn verify_shape_and_sample_challenges<RC: RecursionGenericConfig>(
+pub fn verify_shape_and_sample_challenges<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     config: &FriConfigVariable<RC>,
     proof: &FriProofVariable<RC>,
@@ -72,7 +72,7 @@ pub fn verify_shape_and_sample_challenges<RC: RecursionGenericConfig>(
 ///
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/verifier.rs#L67
 #[allow(clippy::type_complexity)]
-pub fn verify_challenges<RC: RecursionGenericConfig>(
+pub fn verify_challenges<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     config: &FriConfigVariable<RC>,
     proof: &FriProofVariable<RC>,
@@ -113,7 +113,7 @@ pub fn verify_challenges<RC: RecursionGenericConfig>(
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/verifier.rs#L101
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
-pub fn verify_query<RC: RecursionGenericConfig>(
+pub fn verify_query<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     config: &FriConfigVariable<RC>,
     commit_phase_commits: &Array<RC, DigestVariable<RC>>,
@@ -213,7 +213,7 @@ where
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/merkle-tree/src/mmcs.rs#L92
 #[allow(clippy::type_complexity)]
 #[allow(unused_variables)]
-pub fn verify_batch<RC: RecursionGenericConfig, const D: usize>(
+pub fn verify_batch<RC: FieldGenericConfig, const D: usize>(
     builder: &mut Builder<RC>,
     commit: &DigestVariable<RC>,
     dimensions: Array<RC, DimensionsVariable<RC>>,
@@ -289,7 +289,7 @@ pub fn verify_batch<RC: RecursionGenericConfig, const D: usize>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn reduce_fast<RC: RecursionGenericConfig, const D: usize>(
+pub fn reduce_fast<RC: FieldGenericConfig, const D: usize>(
     builder: &mut Builder<RC>,
     dim_idx: Var<RC::N>,
     dims: &Array<RC, DimensionsVariable<RC>>,

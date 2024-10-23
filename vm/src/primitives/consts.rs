@@ -65,7 +65,7 @@ pub const TEST_CHUNK_BATCH_SIZE: usize = 2;
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 5;
 
 /*
-For recursion
+For field_config
  */
 
 pub const COMBINE_SIZE: usize = 2;

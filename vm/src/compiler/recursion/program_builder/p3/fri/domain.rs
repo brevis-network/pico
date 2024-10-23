@@ -1,18 +1,18 @@
 use super::{super::commit::PolynomialSpaceVariable, types::FriConfigVariable};
-use crate::{compiler::recursion::prelude::*, configs::config::RecursionGenericConfig};
+use crate::{compiler::recursion::prelude::*, configs::config::FieldGenericConfig};
 use p3_commit::{LagrangeSelectors, TwoAdicMultiplicativeCoset};
 use p3_field::{AbstractField, TwoAdicField};
 
 /// Reference: [p3_commit::TwoAdicMultiplicativeCoset]
 #[derive(DslVariable, Clone, Copy)]
-pub struct TwoAdicMultiplicativeCosetVariable<RC: RecursionGenericConfig> {
+pub struct TwoAdicMultiplicativeCosetVariable<RC: FieldGenericConfig> {
     pub log_n: Var<RC::N>,
     pub size: Var<RC::N>,
     pub shift: Felt<RC::F>,
     pub g: Felt<RC::F>,
 }
 
-impl<RC: RecursionGenericConfig> TwoAdicMultiplicativeCosetVariable<RC> {
+impl<RC: FieldGenericConfig> TwoAdicMultiplicativeCosetVariable<RC> {
     pub const fn size(&self) -> Var<RC::N> {
         self.size
     }
@@ -26,7 +26,7 @@ impl<RC: RecursionGenericConfig> TwoAdicMultiplicativeCosetVariable<RC> {
     }
 }
 
-impl<RC: RecursionGenericConfig> FromConstant<RC> for TwoAdicMultiplicativeCosetVariable<RC>
+impl<RC: FieldGenericConfig> FromConstant<RC> for TwoAdicMultiplicativeCosetVariable<RC>
 where
     RC::F: TwoAdicField,
 {
@@ -44,8 +44,7 @@ where
     }
 }
 
-impl<RC: RecursionGenericConfig> PolynomialSpaceVariable<RC>
-    for TwoAdicMultiplicativeCosetVariable<RC>
+impl<RC: FieldGenericConfig> PolynomialSpaceVariable<RC> for TwoAdicMultiplicativeCosetVariable<RC>
 where
     RC::F: TwoAdicField,
 {
@@ -54,17 +53,16 @@ where
     fn next_point(
         &self,
         builder: &mut Builder<RC>,
-        point: Ext<<RC as RecursionGenericConfig>::F, <RC as RecursionGenericConfig>::EF>,
-    ) -> Ext<<RC as RecursionGenericConfig>::F, <RC as RecursionGenericConfig>::EF> {
+        point: Ext<<RC as FieldGenericConfig>::F, <RC as FieldGenericConfig>::EF>,
+    ) -> Ext<<RC as FieldGenericConfig>::F, <RC as FieldGenericConfig>::EF> {
         builder.eval(point * self.gen())
     }
 
     fn selectors_at_point(
         &self,
         builder: &mut Builder<RC>,
-        point: Ext<<RC as RecursionGenericConfig>::F, <RC as RecursionGenericConfig>::EF>,
-    ) -> LagrangeSelectors<Ext<<RC as RecursionGenericConfig>::F, <RC as RecursionGenericConfig>::EF>>
-    {
+        point: Ext<<RC as FieldGenericConfig>::F, <RC as FieldGenericConfig>::EF>,
+    ) -> LagrangeSelectors<Ext<<RC as FieldGenericConfig>::F, <RC as FieldGenericConfig>::EF>> {
         let unshifted_point: Ext<_, _> = builder.eval(point * self.shift.inverse());
         let z_h_expr = builder
             .exp_power_of_2_v::<Ext<_, _>>(unshifted_point, Usize::Var(self.log_n))
@@ -82,8 +80,8 @@ where
     fn zp_at_point(
         &self,
         builder: &mut Builder<RC>,
-        point: Ext<<RC as RecursionGenericConfig>::F, <RC as RecursionGenericConfig>::EF>,
-    ) -> Ext<<RC as RecursionGenericConfig>::F, <RC as RecursionGenericConfig>::EF> {
+        point: Ext<<RC as FieldGenericConfig>::F, <RC as FieldGenericConfig>::EF>,
+    ) -> Ext<<RC as FieldGenericConfig>::F, <RC as FieldGenericConfig>::EF> {
         let unshifted_power = builder
             .exp_power_of_2_v::<Ext<_, _>>(point * self.shift.inverse(), Usize::Var(self.log_n));
         builder.eval(unshifted_power - RC::EF::one())
@@ -147,7 +145,7 @@ where
     fn create_disjoint_domain(
         &self,
         builder: &mut Builder<RC>,
-        log_degree: Usize<<RC as RecursionGenericConfig>::N>,
+        log_degree: Usize<<RC as FieldGenericConfig>::N>,
         config: Option<FriConfigVariable<RC>>,
     ) -> Self {
         let domain = config.unwrap().get_subgroup(builder, log_degree);

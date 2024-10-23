@@ -1,12 +1,12 @@
 use super::fri::types::{FriConfigVariable, TwoAdicPcsRoundVariable};
 use crate::{
     compiler::recursion::ir::{Array, Builder, Ext, FromConstant, Usize},
-    configs::config::RecursionGenericConfig,
+    configs::config::FieldGenericConfig,
 };
 use p3_commit::{LagrangeSelectors, PolynomialSpace};
 
 /// Reference: [p3_commit::PolynomialSpace]
-pub trait PolynomialSpaceVariable<RC: RecursionGenericConfig>: Sized + FromConstant<RC> {
+pub trait PolynomialSpaceVariable<RC: FieldGenericConfig>: Sized + FromConstant<RC> {
     type Constant: PolynomialSpace<Val = RC::F>;
 
     fn next_point(
@@ -45,7 +45,7 @@ pub trait PolynomialSpaceVariable<RC: RecursionGenericConfig>: Sized + FromConst
 }
 
 /// Reference: [p3_commit::Pcs]
-pub trait PcsVariable<RC: RecursionGenericConfig, Challenger> {
+pub trait PcsVariable<RC: FieldGenericConfig, Challenger> {
     type Domain: PolynomialSpaceVariable<RC>;
 
     type Commitment;

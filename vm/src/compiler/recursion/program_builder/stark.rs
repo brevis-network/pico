@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     compiler::recursion::ir::{Array, Builder, Ext, ExtConst, Usize, Var},
-    configs::config::{Com, RecursionGenericConfig, StarkGenericConfig},
+    configs::config::{Com, FieldGenericConfig, StarkGenericConfig},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{
@@ -32,11 +32,11 @@ pub const EMPTY: usize = 0x_1111_1111;
 
 // TODO-Alan: refactor to make it more general
 #[derive(Debug, Clone, Copy)]
-pub struct StarkVerifier<RC: RecursionGenericConfig, SC: StarkGenericConfig> {
+pub struct StarkVerifier<RC: FieldGenericConfig, SC: StarkGenericConfig> {
     _phantom: std::marker::PhantomData<(RC, SC)>,
 }
 
-impl<RC: RecursionGenericConfig, SC: StarkGenericConfig> StarkVerifier<RC, SC>
+impl<RC: FieldGenericConfig, SC: StarkGenericConfig> StarkVerifier<RC, SC>
 where
     RC::F: TwoAdicField,
     SC: StarkGenericConfig<

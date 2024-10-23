@@ -1,4 +1,5 @@
 use crate::{configs::config::StarkGenericConfig, primitives::RC_16_30};
+use log::info;
 use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
 use p3_challenger::DuplexChallenger;
 use p3_commit::ExtensionMmcs;
@@ -67,9 +68,15 @@ impl BabyBearPoseidon2 {
         let val_mmcs = ValMmcs::new(hash, compress);
         let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
         let dft = Dft {};
+        let num_queries = match std::env::var("FRI_QUERIES") {
+            Ok(num_queries) => num_queries.parse().unwrap(),
+            Err(_) => 100,
+        };
+        info!("NUM_QUERIES: {}", num_queries);
+
         let fri_config = FriConfig {
             log_blowup: 1,
-            num_queries: 100,
+            num_queries,
             proof_of_work_bits: 16,
             mmcs: challenge_mmcs,
         };

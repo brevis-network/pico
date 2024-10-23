@@ -1,5 +1,4 @@
 use crate::{
-    compiler::riscv::program::Program,
     configs::config::StarkGenericConfig,
     emulator::record::RecordBehavior,
     machine::{
@@ -25,7 +24,7 @@ use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use std::time::Instant;
 
 /// Functions that each machine instance should implement.
-pub trait MachineBehavior<SC, C, P>
+pub trait MachineBehavior<NSC, NC, SC, C, P, I>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>
@@ -66,7 +65,7 @@ where
     fn prove(
         &self,
         pk: &BaseProvingKey<SC>,
-        witness: &ProvingWitness<SC::Val, C>,
+        witness: &ProvingWitness<NSC, NC, SC, C, I>,
     ) -> MetaProof<SC, P>;
 
     /// Verify the proof.

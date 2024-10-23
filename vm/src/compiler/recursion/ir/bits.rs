@@ -1,8 +1,8 @@
 use super::{Array, Builder, DslIr, Felt, Usize, Var};
-use crate::{configs::config::RecursionGenericConfig, recursion::runtime::NUM_BITS};
+use crate::{configs::config::FieldGenericConfig, recursion::runtime::NUM_BITS};
 use p3_field::{AbstractField, Field};
 
-impl<RC: RecursionGenericConfig> Builder<RC> {
+impl<RC: FieldGenericConfig> Builder<RC> {
     /// Converts a variable to LE bits.
     pub fn num2bits_v(&mut self, num: Var<RC::N>) -> Array<RC, Var<RC::N>> {
         // This function is only used when the native field is Babybear.

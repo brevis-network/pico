@@ -1,12 +1,12 @@
 use super::{Array, Builder, DslIr, Ext, Felt, Usize, Var};
 use crate::{
-    configs::config::RecursionGenericConfig,
+    configs::config::FieldGenericConfig,
     primitives::consts::DIGEST_SIZE,
     recursion::runtime::{HASH_RATE, PERMUTATION_WIDTH},
 };
 use p3_field::AbstractField;
 
-impl<RC: RecursionGenericConfig> Builder<RC> {
+impl<RC: FieldGenericConfig> Builder<RC> {
     /// Applies the Poseidon2 permutation to the given array.
     ///
     /// Reference: [p3_poseidon2::Poseidon2]

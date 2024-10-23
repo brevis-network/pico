@@ -166,7 +166,7 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                 });
 
                 quote! {
-                    impl<RC: RecursionGenericConfig> Variable<RC> for #name<RC> {
+                    impl<RC: FieldGenericConfig> Variable<RC> for #name<RC> {
                         type Expression = Self;
 
                         fn uninit(builder: &mut Builder<RC>) -> Self {
@@ -200,22 +200,22 @@ pub fn derive_variable(input: TokenStream) -> TokenStream {
                         }
                     }
 
-                    impl<RC: RecursionGenericConfig> MemVariable<RC> for #name<RC> {
+                    impl<RC: FieldGenericConfig> MemVariable<RC> for #name<RC> {
                         fn size_of() -> usize {
                             let mut size = 0;
                             #(size += #field_sizes;)*
                             size
                         }
 
-                        fn load(&self, ptr: Ptr<<RC as RecursionGenericConfig>::N>,
-                            index: MemIndex<<RC as RecursionGenericConfig>::N>,
+                        fn load(&self, ptr: Ptr<<RC as FieldGenericConfig>::N>,
+                            index: MemIndex<<RC as FieldGenericConfig>::N>,
                             builder: &mut Builder<RC>) {
                             let mut index = index;
                             #(#field_loads)*
                         }
 
-                        fn store(&self, ptr: Ptr<<RC as RecursionGenericConfig>::N>,
-                                 index: MemIndex<<RC as RecursionGenericConfig>::N>,
+                        fn store(&self, ptr: Ptr<<RC as FieldGenericConfig>::N>,
+                                 index: MemIndex<<RC as FieldGenericConfig>::N>,
                                 builder: &mut Builder<RC>) {
                             let mut index = index;
                             #(#field_stores)*

@@ -7,7 +7,7 @@ use crate::{
             utils::{assert_challenger_eq_pv, felt2var, get_preprocessed_data},
         },
     },
-    configs::config::{Com, RecursionGenericConfig, StarkGenericConfig},
+    configs::config::{Com, FieldGenericConfig, StarkGenericConfig},
     instances::machine::simple_machine::SimpleMachine,
     machine::{
         chip::ChipBehavior,
@@ -27,7 +27,7 @@ use std::mem::transmute;
 /// Assertions on the public values describing a complete recursive proof state.
 ///
 /// See [SP1Prover::verify] for the verification algorithm of a complete SP1 proof.
-pub(crate) fn assert_complete<RC: RecursionGenericConfig>(
+pub(crate) fn assert_complete<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     public_values: &RecursionPublicValues<Felt<RC::F>>,
     end_reconstruct_challenger: &DuplexChallengerVariable<RC>,
@@ -69,7 +69,7 @@ pub(crate) fn assert_complete<RC: RecursionGenericConfig>(
     }
 }
 
-pub(crate) fn proof_data_from_vk<RC: RecursionGenericConfig, SC, A>(
+pub(crate) fn proof_data_from_vk<RC: FieldGenericConfig, SC, A>(
     builder: &mut Builder<RC>,
     vk: &BaseVerifyingKey<SC>,
     machine: &SimpleMachine<SC, A>,
@@ -119,8 +119,8 @@ where
     }
 }
 
-/// Calculates the digest of the recursion public values.
-fn calculate_public_values_digest<RC: RecursionGenericConfig>(
+/// Calculates the digest of the field_config public values.
+fn calculate_public_values_digest<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     public_values: &RecursionPublicValues<Felt<RC::F>>,
 ) -> Array<RC, Felt<RC::F>> {
@@ -133,7 +133,7 @@ fn calculate_public_values_digest<RC: RecursionGenericConfig>(
 }
 
 /// Verifies the digest of a recursive public values struct.
-pub(crate) fn verify_public_values_hash<RC: RecursionGenericConfig>(
+pub(crate) fn verify_public_values_hash<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     public_values: &RecursionPublicValues<Felt<RC::F>>,
 ) {
@@ -150,8 +150,8 @@ pub(crate) fn verify_public_values_hash<RC: RecursionGenericConfig>(
     });
 }
 
-/// Register and commits the recursion public values.
-pub fn commit_public_values<RC: RecursionGenericConfig>(
+/// Register and commits the field_config public values.
+pub fn commit_public_values<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     public_values: &RecursionPublicValues<Felt<RC::F>>,
 ) {

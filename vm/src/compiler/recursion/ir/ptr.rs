@@ -1,5 +1,5 @@
 use super::{Builder, DslIr, MemIndex, MemVariable, SymbolicVar, Usize, Var, Variable};
-use crate::configs::config::RecursionGenericConfig;
+use crate::configs::config::FieldGenericConfig;
 use core::ops::{Add, Sub};
 use p3_field::Field;
 
@@ -13,7 +13,7 @@ pub struct SymbolicPtr<N: Field> {
     pub address: SymbolicVar<N>,
 }
 
-impl<RC: RecursionGenericConfig> Builder<RC> {
+impl<RC: FieldGenericConfig> Builder<RC> {
     /// Allocates an array on the heap.
     pub(crate) fn alloc(&mut self, len: Usize<RC::N>, size: usize) -> Ptr<RC::N> {
         let ptr = Ptr::uninit(self);
@@ -32,7 +32,7 @@ impl<RC: RecursionGenericConfig> Builder<RC> {
     }
 }
 
-impl<RC: RecursionGenericConfig> Variable<RC> for Ptr<RC::N> {
+impl<RC: FieldGenericConfig> Variable<RC> for Ptr<RC::N> {
     type Expression = SymbolicPtr<RC::N>;
 
     fn uninit(builder: &mut Builder<RC>) -> Self {
@@ -62,7 +62,7 @@ impl<RC: RecursionGenericConfig> Variable<RC> for Ptr<RC::N> {
     }
 }
 
-impl<RC: RecursionGenericConfig> MemVariable<RC> for Ptr<RC::N> {
+impl<RC: FieldGenericConfig> MemVariable<RC> for Ptr<RC::N> {
     fn size_of() -> usize {
         1
     }
@@ -73,7 +73,7 @@ impl<RC: RecursionGenericConfig> MemVariable<RC> for Ptr<RC::N> {
 
     fn store(
         &self,
-        ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+        ptr: Ptr<<RC as FieldGenericConfig>::N>,
         index: MemIndex<RC::N>,
         builder: &mut Builder<RC>,
     ) {

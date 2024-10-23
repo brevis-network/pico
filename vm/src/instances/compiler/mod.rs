@@ -1,3 +1,4 @@
-pub mod riscv_recursion;
-pub mod simple_recursion;
+pub mod recursion_circuit;
+pub mod riscv_circuit;
+pub mod simple_circuit;
 mod utils;

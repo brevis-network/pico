@@ -10,4 +10,4 @@ pub use compiler::*;
 pub use instruction::*;
 pub use utils::*;
 
-pub use crate::configs::config::RecursionSimpleConfig as AsmConfig;
+pub use crate::configs::config::FieldSimpleConfig as AsmConfig;

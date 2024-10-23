@@ -1,7 +1,7 @@
 use log::info;
-use pico_vm::emulator::stdin::EmulatorStdin;
+use pico_vm::emulator::riscv::stdin::EmulatorStdin;
 
-pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin, String, u32) {
+pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin<Vec<u8>>, String, u32) {
     const ELF_FIB: &[u8] =
         include_bytes!("../../src/compiler/test_data/riscv32im-sp1-fibonacci-elf");
     const ELF_KECCAK: &[u8] =

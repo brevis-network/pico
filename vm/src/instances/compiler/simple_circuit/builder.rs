@@ -15,7 +15,7 @@ use crate::{
             },
         },
     },
-    configs::config::{Com, RecursionGenericConfig, StarkGenericConfig},
+    configs::config::{Com, FieldGenericConfig, StarkGenericConfig},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
         compiler::utils::commit_public_values,
@@ -42,16 +42,16 @@ use std::{
 
 /// A program for recursively verifying a batch of Pico proofs.
 #[derive(Debug, Clone, Copy)]
-pub struct SimpleVerifierCircuit<RC: RecursionGenericConfig, SC: StarkGenericConfig> {
+pub struct SimpleVerifierCircuit<RC: FieldGenericConfig, SC: StarkGenericConfig> {
     _phantom: PhantomData<(RC, SC)>,
 }
 
-impl SimpleVerifierCircuit<rcf::RecursionConfig, RiscvSC> {
+impl SimpleVerifierCircuit<rcf::FieldConfig, RiscvSC> {
     /// Create a new instance of the program for the [RiscvSC] config.
     pub fn build(
         machine: &SimpleMachine<RiscvSC, RiscvChipType<BabyBear>>,
     ) -> RecursionProgram<BabyBear> {
-        let mut builder = Builder::<rcf::RecursionConfig>::new(RecursionProgramType::Riscv);
+        let mut builder = Builder::<rcf::FieldConfig>::new(RecursionProgramType::Riscv);
 
         let input: SimpleRecursionStdinVariable<_> = builder.uninit();
         SimpleRecursionStdin::<RiscvSC, RiscvChipType<_>>::witness(&input, &mut builder);
@@ -67,7 +67,7 @@ impl SimpleVerifierCircuit<rcf::RecursionConfig, RiscvSC> {
     }
 }
 
-impl<RC: RecursionGenericConfig, SC: StarkGenericConfig> SimpleVerifierCircuit<RC, SC>
+impl<RC: FieldGenericConfig, SC: StarkGenericConfig> SimpleVerifierCircuit<RC, SC>
 where
     RC::F: PrimeField32 + TwoAdicField,
     SC: StarkGenericConfig<

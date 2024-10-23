@@ -2,7 +2,7 @@ use super::{
     Builder, DslIr, ExtConst, FromConstant, MemIndex, MemVariable, Ptr, SymbolicExt, SymbolicFelt,
     SymbolicUsize, SymbolicVar, Variable,
 };
-use crate::configs::config::RecursionGenericConfig;
+use crate::configs::config::FieldGenericConfig;
 use alloc::format;
 use core::marker::PhantomData;
 use p3_field::{AbstractField, ExtensionField, Field};
@@ -35,7 +35,7 @@ pub enum Usize<N> {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Witness<RC: RecursionGenericConfig> {
+pub struct Witness<RC: FieldGenericConfig> {
     pub vars: Vec<RC::N>,
     pub felts: Vec<RC::F>,
     pub exts: Vec<RC::EF>,
@@ -43,7 +43,7 @@ pub struct Witness<RC: RecursionGenericConfig> {
     pub commited_values_digest: RC::N,
 }
 
-impl<RC: RecursionGenericConfig> Witness<RC> {
+impl<RC: FieldGenericConfig> Witness<RC> {
     pub fn size(&self) -> usize {
         self.vars.len() + self.felts.len() + self.exts.len() + 2
     }
@@ -67,7 +67,7 @@ impl<N: Field> Usize<N> {
         }
     }
 
-    pub fn materialize<RC: RecursionGenericConfig<N = N>>(
+    pub fn materialize<RC: FieldGenericConfig<N = N>>(
         &self,
         builder: &mut Builder<RC>,
     ) -> Var<RC::N> {
@@ -147,7 +147,7 @@ impl<F, EF> Ext<F, EF> {
     }
 }
 
-impl<RC: RecursionGenericConfig> Variable<RC> for Usize<RC::N> {
+impl<RC: FieldGenericConfig> Variable<RC> for Usize<RC::N> {
     type Expression = SymbolicUsize<RC::N>;
 
     fn uninit(builder: &mut Builder<RC>) -> Self {
@@ -218,7 +218,7 @@ impl<RC: RecursionGenericConfig> Variable<RC> for Usize<RC::N> {
 }
 
 impl<N: Field> Var<N> {
-    fn assign_with_cache<RC: RecursionGenericConfig<N = N>>(
+    fn assign_with_cache<RC: FieldGenericConfig<N = N>>(
         &self,
         src: SymbolicVar<N>,
         builder: &mut Builder<RC>,
@@ -398,7 +398,7 @@ impl<N: Field> Var<N> {
     }
 }
 
-impl<RC: RecursionGenericConfig> Variable<RC> for Var<RC::N> {
+impl<RC: FieldGenericConfig> Variable<RC> for Var<RC::N> {
     type Expression = SymbolicVar<RC::N>;
 
     fn uninit(builder: &mut Builder<RC>) -> Self {
@@ -494,7 +494,7 @@ impl<RC: RecursionGenericConfig> Variable<RC> for Var<RC::N> {
     }
 }
 
-impl<RC: RecursionGenericConfig> MemVariable<RC> for Var<RC::N> {
+impl<RC: FieldGenericConfig> MemVariable<RC> for Var<RC::N> {
     fn size_of() -> usize {
         1
     }
@@ -505,7 +505,7 @@ impl<RC: RecursionGenericConfig> MemVariable<RC> for Var<RC::N> {
 
     fn store(
         &self,
-        ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+        ptr: Ptr<<RC as FieldGenericConfig>::N>,
         index: MemIndex<RC::N>,
         builder: &mut Builder<RC>,
     ) {
@@ -514,7 +514,7 @@ impl<RC: RecursionGenericConfig> MemVariable<RC> for Var<RC::N> {
 }
 
 impl<F: Field> Felt<F> {
-    fn assign_with_cache<RC: RecursionGenericConfig<F = F>>(
+    fn assign_with_cache<RC: FieldGenericConfig<F = F>>(
         &self,
         src: SymbolicFelt<F>,
         builder: &mut Builder<RC>,
@@ -746,7 +746,7 @@ impl<F: Field> Felt<F> {
     }
 }
 
-impl<RC: RecursionGenericConfig> Variable<RC> for Felt<RC::F> {
+impl<RC: FieldGenericConfig> Variable<RC> for Felt<RC::F> {
     type Expression = SymbolicFelt<RC::F>;
 
     fn uninit(builder: &mut Builder<RC>) -> Self {
@@ -842,7 +842,7 @@ impl<RC: RecursionGenericConfig> Variable<RC> for Felt<RC::F> {
     }
 }
 
-impl<RC: RecursionGenericConfig> MemVariable<RC> for Felt<RC::F> {
+impl<RC: FieldGenericConfig> MemVariable<RC> for Felt<RC::F> {
     fn size_of() -> usize {
         1
     }
@@ -853,7 +853,7 @@ impl<RC: RecursionGenericConfig> MemVariable<RC> for Felt<RC::F> {
 
     fn store(
         &self,
-        ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+        ptr: Ptr<<RC as FieldGenericConfig>::N>,
         index: MemIndex<RC::N>,
         builder: &mut Builder<RC>,
     ) {
@@ -862,7 +862,7 @@ impl<RC: RecursionGenericConfig> MemVariable<RC> for Felt<RC::F> {
 }
 
 impl<F: Field, EF: ExtensionField<F>> Ext<F, EF> {
-    fn assign_with_caches<RC: RecursionGenericConfig<F = F, EF = EF>>(
+    fn assign_with_caches<RC: FieldGenericConfig<F = F, EF = EF>>(
         &self,
         src: SymbolicExt<F, EF>,
         builder: &mut Builder<RC>,
@@ -1145,7 +1145,7 @@ impl<F: Field, EF: ExtensionField<F>> Ext<F, EF> {
     }
 }
 
-impl<RC: RecursionGenericConfig> Variable<RC> for Ext<RC::F, RC::EF> {
+impl<RC: FieldGenericConfig> Variable<RC> for Ext<RC::F, RC::EF> {
     type Expression = SymbolicExt<RC::F, RC::EF>;
 
     fn uninit(builder: &mut Builder<RC>) -> Self {
@@ -1241,7 +1241,7 @@ impl<RC: RecursionGenericConfig> Variable<RC> for Ext<RC::F, RC::EF> {
     }
 }
 
-impl<RC: RecursionGenericConfig> MemVariable<RC> for Ext<RC::F, RC::EF> {
+impl<RC: FieldGenericConfig> MemVariable<RC> for Ext<RC::F, RC::EF> {
     fn size_of() -> usize {
         1
     }
@@ -1252,7 +1252,7 @@ impl<RC: RecursionGenericConfig> MemVariable<RC> for Ext<RC::F, RC::EF> {
 
     fn store(
         &self,
-        ptr: Ptr<<RC as RecursionGenericConfig>::N>,
+        ptr: Ptr<<RC as FieldGenericConfig>::N>,
         index: MemIndex<RC::N>,
         builder: &mut Builder<RC>,
     ) {
@@ -1260,7 +1260,7 @@ impl<RC: RecursionGenericConfig> MemVariable<RC> for Ext<RC::F, RC::EF> {
     }
 }
 
-impl<RC: RecursionGenericConfig> FromConstant<RC> for Var<RC::N> {
+impl<RC: FieldGenericConfig> FromConstant<RC> for Var<RC::N> {
     type Constant = RC::N;
 
     fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
@@ -1268,7 +1268,7 @@ impl<RC: RecursionGenericConfig> FromConstant<RC> for Var<RC::N> {
     }
 }
 
-impl<RC: RecursionGenericConfig> FromConstant<RC> for Felt<RC::F> {
+impl<RC: FieldGenericConfig> FromConstant<RC> for Felt<RC::F> {
     type Constant = RC::F;
 
     fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
@@ -1276,7 +1276,7 @@ impl<RC: RecursionGenericConfig> FromConstant<RC> for Felt<RC::F> {
     }
 }
 
-impl<RC: RecursionGenericConfig> FromConstant<RC> for Ext<RC::F, RC::EF> {
+impl<RC: FieldGenericConfig> FromConstant<RC> for Ext<RC::F, RC::EF> {
     type Constant = RC::EF;
 
     fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {

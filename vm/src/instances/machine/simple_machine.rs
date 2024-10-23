@@ -32,7 +32,7 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<SC, C> MachineBehavior<SC, C, EnsembleProof<SC>> for SimpleMachine<SC, C>
+impl<SC, C> MachineBehavior<SC, C, SC, C, EnsembleProof<SC>, Vec<u8>> for SimpleMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>
@@ -72,7 +72,7 @@ where
     fn prove(
         &self,
         pk: &BaseProvingKey<SC>,
-        witness: &ProvingWitness<SC::Val, C>,
+        witness: &ProvingWitness<SC, C, SC, C, Vec<u8>>,
     ) -> MetaProof<SC, EnsembleProof<SC>> {
         let proofs =
             self.base_machine

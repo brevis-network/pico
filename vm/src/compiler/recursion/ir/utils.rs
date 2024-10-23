@@ -1,9 +1,9 @@
 use super::{Array, Builder, DslIr, Ext, Felt, SymbolicExt, Usize, Var, Variable};
-use crate::configs::config::RecursionGenericConfig;
+use crate::configs::config::FieldGenericConfig;
 use p3_field::{AbstractExtensionField, AbstractField};
 use std::ops::{Add, Mul, MulAssign};
 
-impl<RC: RecursionGenericConfig> Builder<RC> {
+impl<RC: FieldGenericConfig> Builder<RC> {
     /// The generator for the field.
     ///
     /// Reference: [p3_baby_bear::BabyBear]

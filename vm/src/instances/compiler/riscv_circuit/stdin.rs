@@ -11,7 +11,7 @@ use crate::{
         },
         riscv::program::Program,
     },
-    configs::config::{RecursionGenericConfig, StarkGenericConfig},
+    configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
     emulator::riscv::record::EmulationRecord,
     instances::{
         configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
@@ -30,11 +30,13 @@ use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_challenger::{CanObserve, DuplexChallenger};
 use pico_derive::DslVariable;
+use serde::Serialize;
 
+#[derive(Clone)]
 pub struct RiscvRecursionStdin<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
+    C: ChipBehavior<Val<SC>>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -47,7 +49,7 @@ where
 }
 
 #[derive(DslVariable, Clone)]
-pub struct RiscvRecursionStdinVariable<RC: RecursionGenericConfig> {
+pub struct RiscvRecursionStdinVariable<RC: FieldGenericConfig> {
     pub vk: BaseVerifyingKeyVariable<RC>,
     pub proofs: Array<RC, BaseProofVariable<RC>>,
     pub base_challenger: DuplexChallengerVariable<RC>,
@@ -55,73 +57,15 @@ pub struct RiscvRecursionStdinVariable<RC: RecursionGenericConfig> {
     pub flag_complete: Var<RC::N>,
 }
 
-impl<'a, C> RiscvRecursionStdin<'a, RiscvSC, C>
+impl<'a, C> Hintable<rcf::FieldConfig> for RiscvRecursionStdin<'a, RiscvSC, C>
 where
     C: ChipBehavior<BabyBear, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
 {
-    /// Construct the recursion stdin.
-    /// base_challenger is assumed to be a fresh new one (has not observed anything)
-    pub fn construct(
-        vk: &'a BaseVerifyingKey<RiscvSC>,
-        machine: &'a RiscvMachine<RiscvSC, C>,
-        proofs: &[BaseProof<RiscvSC>],
-        base_challenger: &'a mut <RiscvSC as StarkGenericConfig>::Challenger,
-        batch_size: usize,
-    ) -> Vec<Self> {
-        let num_public_values = machine.num_public_values();
+    type HintVariable = RiscvRecursionStdinVariable<rcf::FieldConfig>;
 
-        let mut stdin = Vec::new();
-
-        // phase 1 for base_challenger
-        vk.observed_by(base_challenger);
-        for each_proof in proofs.iter() {
-            base_challenger.observe(each_proof.clone().commitments.main_commit);
-            base_challenger.observe_slice(&each_proof.public_values[0..num_public_values]);
-        }
-
-        // base_challenger is ready for use in phase 2
-        // reconstruct challenger is initialized here
-        let mut reconstruct_challenger = machine.config().challenger();
-        vk.observed_by(&mut reconstruct_challenger);
-
-        let proof_batches = proofs.chunks(batch_size);
-        let total = proof_batches.len();
-
-        for (i, batch_proofs) in proof_batches.enumerate() {
-            let batch_proofs = batch_proofs.to_vec();
-            let flag_complete = i == total - 1;
-            stdin.push(RiscvRecursionStdin {
-                vk,
-                machine,
-                proofs: batch_proofs.clone(),
-                base_challenger,
-                reconstruct_challenger: reconstruct_challenger.clone(),
-                flag_complete,
-            });
-
-            for each_proof in batch_proofs.iter() {
-                // todo: check efficiency
-                reconstruct_challenger.observe(each_proof.clone().commitments.main_commit);
-                reconstruct_challenger
-                    .observe_slice(&each_proof.public_values[0..num_public_values]);
-            }
-        }
-
-        stdin
-    }
-}
-
-impl<'a, C> Hintable<rcf::RecursionConfig> for RiscvRecursionStdin<'a, RiscvSC, C>
-where
-    C: ChipBehavior<BabyBear, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
-{
-    type HintVariable = RiscvRecursionStdinVariable<rcf::RecursionConfig>;
-
-    fn read(builder: &mut Builder<rcf::RecursionConfig>) -> Self::HintVariable {
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let vk = VerifyingKeyHint::<'a, RiscvSC, C>::read(builder);
         let proofs = Vec::<BaseProofHint<'a, RiscvSC, C>>::read(builder);
         let base_challenger = DuplexChallenger::<rcf::Val, rcf::Perm, 16, 8>::read(builder);
@@ -137,7 +81,7 @@ where
         }
     }
 
-    fn write(&self) -> Vec<Vec<Block<<rcf::RecursionConfig as RecursionGenericConfig>::F>>> {
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
         let vk_hint = VerifyingKeyHint::<'a, RiscvSC, _>::new(

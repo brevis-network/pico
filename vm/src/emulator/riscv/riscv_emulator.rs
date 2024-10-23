@@ -13,11 +13,11 @@ use crate::{
             public_values::PublicValues,
             record::{EmulationRecord, MemoryAccessRecord},
             state::RiscvEmulationState,
+            stdin::EmulatorStdin,
             syscalls::{
                 default_syscall_map, syscall_context::SyscallContext, Syscall, SyscallCode,
             },
         },
-        stdin::EmulatorStdin,
     },
 };
 use hashbrown::{hash_map::Entry, HashMap};
@@ -305,7 +305,7 @@ impl RiscvEmulator {
     }
 
     // todo: refactor
-    pub fn run_with_stdin(&mut self, stdin: EmulatorStdin) -> Result<(), EmulationError> {
+    pub fn run_with_stdin(&mut self, stdin: EmulatorStdin<Vec<u8>>) -> Result<(), EmulationError> {
         self.emulator_mode = EmulatorMode::Trace;
         for input in &stdin.buffer {
             self.state.input_stream.push(input.clone());
@@ -1341,7 +1341,7 @@ impl RiscvEmulator {
         // Ensure that all proofs and input bytes were read, otherwise warn the user.
         // if self.state.proof_stream_ptr != self.state.proof_stream.len() {
         //     panic!(
-        //         "Not all proofs were read. Proving will fail during recursion. Did you pass too
+        //         "Not all proofs were read. Proving will fail during field_config. Did you pass too
         // many proofs in or forget to call verify_sp1_proof?"     );
         // }
         if self.state.input_stream_ptr != self.state.input_stream.len() {
@@ -1415,7 +1415,7 @@ mod tests {
     use super::{Program, RiscvEmulator};
     use crate::{
         compiler::riscv::compiler::{Compiler, SourceType},
-        emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
+        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     };
 
     const FIBONACCI_ELF: &[u8] =
