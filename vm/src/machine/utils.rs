@@ -11,6 +11,7 @@ use crate::{
 use core::iter;
 use hashbrown::HashMap;
 use itertools::Itertools;
+use log::debug;
 use p3_air::{Air, PairCol};
 use p3_commit::PolynomialSpace;
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, PackedValue, Powers};
@@ -19,6 +20,7 @@ use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use std::any::type_name;
+use tracing::{debug_span, instrument, Span};
 
 pub fn type_name_of<T>(_: &T) -> String {
     type_name::<T>().to_string()
@@ -138,96 +140,99 @@ where
     }
     let ext_degree = SC::Challenge::D;
 
-    (0..quotient_size)
-        .into_par_iter()
-        .step_by(PackedVal::<SC>::WIDTH)
-        .flat_map_iter(|i_start| {
-            // let wrap = |i| i % quotient_size;
-            let i_range = i_start..i_start + PackedVal::<SC>::WIDTH;
+    debug_span!(parent: Span::current(), "chip_compute_quotient_values", chip = chip.name(), quotient_size = quotient_size, tag = "tag-chip").in_scope(|| {
+        (0..quotient_size)
+            .into_par_iter()
+            .step_by(PackedVal::<SC>::WIDTH)
+            .flat_map_iter(|i_start| {
+                // let wrap = |i| i % quotient_size;
+                let i_range = i_start..i_start + PackedVal::<SC>::WIDTH;
 
-            let is_first_row = *PackedVal::<SC>::from_slice(&sels.is_first_row[i_range.clone()]);
-            let is_last_row = *PackedVal::<SC>::from_slice(&sels.is_last_row[i_range.clone()]);
-            let is_transition = *PackedVal::<SC>::from_slice(&sels.is_transition[i_range.clone()]);
-            let inv_zerofier = *PackedVal::<SC>::from_slice(&sels.inv_zeroifier[i_range.clone()]);
+                let is_first_row = *PackedVal::<SC>::from_slice(&sels.is_first_row[i_range.clone()]);
+                let is_last_row = *PackedVal::<SC>::from_slice(&sels.is_last_row[i_range.clone()]);
+                let is_transition = *PackedVal::<SC>::from_slice(&sels.is_transition[i_range.clone()]);
+                let inv_zerofier = *PackedVal::<SC>::from_slice(&sels.inv_zeroifier[i_range.clone()]);
 
-            let preprocessed_trace_on_quotient_domain = RowMajorMatrix::new(
-                iter::empty()
-                    .chain(preprocessed_on_quotient_domain.vertically_packed_row(i_start))
-                    .chain(
-                        preprocessed_on_quotient_domain.vertically_packed_row(i_start + next_step),
-                    )
-                    .collect_vec(),
-                preprocessed_width,
-            );
-
-            let main_on_quotient_domain = RowMajorMatrix::new(
-                iter::empty()
-                    .chain(main_trace_on_quotient_domain.vertically_packed_row(i_start))
-                    .chain(main_trace_on_quotient_domain.vertically_packed_row(i_start + next_step))
-                    .collect_vec(),
-                main_width,
-            );
-
-            let perm_local = (0..permutation_width).step_by(ext_degree).map(|c| {
-                PackedChallenge::<SC>::from_base_fn(|i| {
-                    PackedVal::<SC>::from_fn(|offset| {
-                        permutation_trace_on_quotient_domain.get(
-                            (i_start + offset) % permutation_trace_on_quotient_domain.height(),
-                            c + i,
+                let preprocessed_trace_on_quotient_domain = RowMajorMatrix::new(
+                    iter::empty()
+                        .chain(preprocessed_on_quotient_domain.vertically_packed_row(i_start))
+                        .chain(
+                            preprocessed_on_quotient_domain.vertically_packed_row(i_start + next_step),
                         )
+                        .collect_vec(),
+                    preprocessed_width,
+                );
+
+                let main_on_quotient_domain = RowMajorMatrix::new(
+                    iter::empty()
+                        .chain(main_trace_on_quotient_domain.vertically_packed_row(i_start))
+                        .chain(main_trace_on_quotient_domain.vertically_packed_row(i_start + next_step))
+                        .collect_vec(),
+                    main_width,
+                );
+
+                let perm_local = (0..permutation_width).step_by(ext_degree).map(|c| {
+                    PackedChallenge::<SC>::from_base_fn(|i| {
+                        PackedVal::<SC>::from_fn(|offset| {
+                            permutation_trace_on_quotient_domain.get(
+                                (i_start + offset) % permutation_trace_on_quotient_domain.height(),
+                                c + i,
+                            )
+                        })
                     })
-                })
-            });
+                });
 
-            let perm_next = (0..permutation_width).step_by(ext_degree).map(|c| {
-                PackedChallenge::<SC>::from_base_fn(|i| {
-                    PackedVal::<SC>::from_fn(|offset| {
-                        permutation_trace_on_quotient_domain.get(
-                            (i_start + next_step + offset)
-                                % permutation_trace_on_quotient_domain.height(),
-                            c + i,
-                        )
+                let perm_next = (0..permutation_width).step_by(ext_degree).map(|c| {
+                    PackedChallenge::<SC>::from_base_fn(|i| {
+                        PackedVal::<SC>::from_fn(|offset| {
+                            permutation_trace_on_quotient_domain.get(
+                                (i_start + next_step + offset)
+                                    % permutation_trace_on_quotient_domain.height(),
+                                c + i,
+                            )
+                        })
                     })
+                });
+
+                let perm_vertical_width = permutation_width / ext_degree;
+                let permutation_on_quotient_domain = RowMajorMatrix::new(
+                    iter::empty()
+                        .chain(perm_local)
+                        .chain(perm_next)
+                        .collect_vec(),
+                    perm_vertical_width,
+                );
+
+                let accumulator = PackedChallenge::<SC>::zero();
+
+                let mut folder = ProverConstraintFolder {
+                    preprocessed: preprocessed_trace_on_quotient_domain,
+                    main: main_on_quotient_domain,
+                    perm: permutation_on_quotient_domain,
+                    public_values,
+                    perm_challenges,
+                    cumulative_sum,
+                    is_first_row,
+                    is_last_row,
+                    is_transition,
+                    alpha,
+                    accumulator,
+                };
+
+                chip.eval(&mut folder);
+
+                let quotient = folder.accumulator * inv_zerofier;
+
+                // todo: need to check this in detail
+                (0..core::cmp::min(quotient_size, PackedVal::<SC>::WIDTH)).map(move |idx_in_packing| {
+                    let quotient_value = (0..<SC::Challenge as AbstractExtensionField<SC::Val>>::D)
+                        .map(|coeff_idx| quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing])
+                        .collect::<Vec<_>>();
+                    SC::Challenge::from_base_slice(&quotient_value)
                 })
-            });
-
-            let perm_vertical_width = permutation_width / ext_degree;
-            let permutation_on_quotient_domain = RowMajorMatrix::new(
-                iter::empty()
-                    .chain(perm_local)
-                    .chain(perm_next)
-                    .collect_vec(),
-                perm_vertical_width,
-            );
-
-            let accumulator = PackedChallenge::<SC>::zero();
-
-            let mut folder = ProverConstraintFolder {
-                preprocessed: preprocessed_trace_on_quotient_domain,
-                main: main_on_quotient_domain,
-                perm: permutation_on_quotient_domain,
-                public_values,
-                perm_challenges,
-                cumulative_sum,
-                is_first_row,
-                is_last_row,
-                is_transition,
-                alpha,
-                accumulator,
-            };
-            chip.eval(&mut folder);
-
-            let quotient = folder.accumulator * inv_zerofier;
-
-            // todo: need to check this in detail
-            (0..core::cmp::min(quotient_size, PackedVal::<SC>::WIDTH)).map(move |idx_in_packing| {
-                let quotient_value = (0..<SC::Challenge as AbstractExtensionField<SC::Val>>::D)
-                    .map(|coeff_idx| quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing])
-                    .collect::<Vec<_>>();
-                SC::Challenge::from_base_slice(&quotient_value)
             })
-        })
-        .collect()
+            .collect()
+    })
 }
 
 // Infer log of constraint degree

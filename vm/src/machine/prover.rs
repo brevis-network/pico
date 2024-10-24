@@ -23,6 +23,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use std::{cmp::Reverse, time::Instant};
+use tracing::{debug_span, instrument, Span};
 
 pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
@@ -98,19 +99,28 @@ where
     }
 
     /// generate ordered preprocessed traces with chip names
+    #[instrument(
+        name = "generate_preprocessed",
+        level = "debug",
+        skip_all,
+        fields(tag = "tag-chip")
+    )]
     pub fn generate_preprocessed(
         &self,
         chips: &[MetaChip<SC::Val, C>],
         program: &C::Program,
     ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
+        let parent_span = Span::current();
         let mut durations = HashMap::new();
         let mut chips_and_preprocessed = chips
             .iter()
             .filter_map(|chip| {
                 let begin = Instant::now();
-                let trace = chip
-                    .generate_preprocessed(program)
-                    .map(|trace| (chip.name(), trace));
+                let trace =
+                    debug_span!(parent: &parent_span, "chip_generate_preprocessed", chip = chip.name(), tag = "tag-chip").in_scope(|| {
+                        chip.generate_preprocessed(program)
+                            .map(|trace| (chip.name(), trace))
+                    });
                 durations.insert(chip.name(), begin.elapsed());
                 trace
             })
@@ -131,15 +141,31 @@ where
 
     /// emulate to generate extra events
     /// should only be called after first emulator run and before generate_main
+    #[instrument(
+        name = "complement_record",
+        level = "debug",
+        skip_all,
+        fields(tag = "tag-chip")
+    )]
     pub fn complement_record(&self, chips: &[MetaChip<SC::Val, C>], input: &mut C::Record) {
+        let parent_span = Span::current();
         chips.iter().for_each(|chip| {
-            let mut extra = C::Record::default();
-            chip.extra_record(input, &mut extra);
-            input.append(&mut extra);
+            debug_span!(parent: &parent_span, "chip_complement_record", chip = chip.name(), tag = "tag-chip")
+                .in_scope(|| {
+                    let mut extra = C::Record::default();
+                    chip.extra_record(input, &mut extra);
+                    input.append(&mut extra);
+                });
         });
     }
 
     /// generate ordered main traces with chip names
+    #[instrument(
+        name = "generate_main",
+        level = "debug",
+        skip_all,
+        fields(tag = "tag-chip")
+    )]
     pub fn generate_main(
         &self,
         chips: &[MetaChip<SC::Val, C>],
@@ -148,16 +174,19 @@ where
         info!("generate main traces: BEGIN");
         let start = Instant::now();
 
-        let active_chips = chips
-            .iter()
-            .filter(|chip| chip.is_active(record))
-            .collect::<Vec<_>>();
-
-        let mut chips_and_main = active_chips
+        let parent_span = Span::current();
+        let mut chips_and_main = chips
             .par_iter()
-            .map(|chip| {
+            .filter_map(|chip| {
+                if !chip.is_active(record) {
+                    debug_span!(parent: &parent_span, "chip_inactive", chip = chip.name(), tag = "tag-chip");
+                    return None;
+                }
+
                 let begin = Instant::now();
-                let trace = chip.generate_main(record, &mut C::Record::default());
+                let trace =
+                    debug_span!(parent: &parent_span, "chip_generate_main", chip = chip.name(), tag = "tag-chip")
+                        .in_scope(|| chip.generate_main(record, &mut C::Record::default()));
                 debug!(
                     "generated main: {:<17} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
                     chip.name(),
@@ -166,7 +195,8 @@ where
                     trace.values.len(),
                     begin.elapsed(),
                 );
-                (chip.name(), trace)
+
+                Some((chip.name(), trace))
             })
             .collect::<Vec<_>>();
         chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
@@ -174,6 +204,12 @@ where
         chips_and_main
     }
 
+    #[instrument(
+        name = "commit_main",
+        level = "debug",
+        skip_all,
+        fields(tag = "tag-chip")
+    )]
     pub fn commit_main(
         &self,
         config: &SC,
@@ -219,6 +255,12 @@ where
     }
 
     /// generate chips permutation traces and cumulative sums
+    #[instrument(
+        name = "generate_permutation",
+        level = "debug",
+        skip_all,
+        fields(tag = "tag-chip")
+    )]
     pub fn generate_permutation(
         &self,
         ordered_chips: &[&MetaChip<SC::Val, C>],
@@ -235,19 +277,22 @@ where
             })
             .collect::<Vec<_>>();
 
+        let parent_span = Span::current();
         let (permutation_traces, cumulative_sums): (Vec<_>, Vec<_>) = ordered_chips
             .par_iter()
             .zip(main_trace_commitments.main_traces.par_iter())
             .zip(preprocessed_traces.into_par_iter())
             .map(|((chip, main_trace), preprocessed_trace)| {
-                let permutation_trace =
-                    chip.generate_permutation(preprocessed_trace, main_trace, perm_challenges);
-                let cumulative_sum = permutation_trace
-                    .row_slice(main_trace.height() - 1)
-                    .last()
-                    .copied()
-                    .unwrap();
-                (permutation_trace, cumulative_sum)
+                debug_span!(parent: &parent_span, "chip_generate_permutation", chip = chip.name(), tag = "tag-chip").in_scope(|| {
+                    let permutation_trace =
+                        chip.generate_permutation(preprocessed_trace, main_trace, perm_challenges);
+                    let cumulative_sum = permutation_trace
+                        .row_slice(main_trace.height() - 1)
+                        .last()
+                        .copied()
+                        .unwrap();
+                    (permutation_trace, cumulative_sum)
+                })
             })
             .unzip();
 
@@ -256,6 +301,12 @@ where
 
     /// core proving function in BaseProver
     /// Assumes pk, main and pvs have already been observed by challenger
+    #[instrument(
+        name = "core_prove",
+        level = "debug",
+        skip_all,
+        fields(tag = "tag-chip")
+    )]
     pub fn prove(
         &self,
         config: &SC,
@@ -352,51 +403,62 @@ where
             })
             .collect::<Vec<_>>();
 
-        let quotient_values = quotient_domains
-            .iter()
-            .enumerate()
-            .map(|(i, quotient_domain)| {
-                let pre_trace_on_quotient_domains = pk
-                    .preprocessed_chip_ordering
-                    .get(&ordered_chips[i].name())
-                    .map(|index| {
-                        pcs.get_evaluations_on_domain(
-                            &pk.preprocessed_prover_data,
-                            *index,
-                            *quotient_domain,
-                        )
-                        .to_row_major_matrix()
-                    })
-                    .unwrap_or_else(|| {
-                        RowMajorMatrix::new_col(vec![<SC::Val>::zero(); quotient_domain.size()])
-                    });
-                let main_on_quotient_domain = pcs
-                    .get_evaluations_on_domain(&main_commitments.data, i, *quotient_domain)
-                    .to_row_major_matrix();
+        let quotient_values =
+            debug_span!(parent: Span::current(), "compute_quotient_values", tag = "tag-chip")
+                .in_scope(|| {
+                    quotient_domains
+                        .iter()
+                        .enumerate()
+                        .map(|(i, quotient_domain)| {
+                            let pre_trace_on_quotient_domains = pk
+                                .preprocessed_chip_ordering
+                                .get(&ordered_chips[i].name())
+                                .map(|index| {
+                                    pcs.get_evaluations_on_domain(
+                                        &pk.preprocessed_prover_data,
+                                        *index,
+                                        *quotient_domain,
+                                    )
+                                    .to_row_major_matrix()
+                                })
+                                .unwrap_or_else(|| {
+                                    RowMajorMatrix::new_col(vec![
+                                        <SC::Val>::zero();
+                                        quotient_domain.size()
+                                    ])
+                                });
+                            let main_on_quotient_domain = pcs
+                                .get_evaluations_on_domain(
+                                    &main_commitments.data,
+                                    i,
+                                    *quotient_domain,
+                                )
+                                .to_row_major_matrix();
 
-                let permutation_trace_on_quotient_domains = pcs
-                    .get_evaluations_on_domain(&permutation_data, i, *quotient_domain)
-                    .to_row_major_matrix();
+                            let permutation_trace_on_quotient_domains = pcs
+                                .get_evaluations_on_domain(&permutation_data, i, *quotient_domain)
+                                .to_row_major_matrix();
 
-                let packed_perm_challenges = permutation_challenges
-                    .iter()
-                    .map(|c| PackedChallenge::<SC>::from_f(*c))
-                    .collect::<Vec<_>>();
+                            let packed_perm_challenges = permutation_challenges
+                                .iter()
+                                .map(|c| PackedChallenge::<SC>::from_f(*c))
+                                .collect::<Vec<_>>();
 
-                compute_quotient_values(
-                    &ordered_chips[i],
-                    &main_commitments.public_values,
-                    main_domains[i],
-                    *quotient_domain,
-                    pre_trace_on_quotient_domains,
-                    main_on_quotient_domain,
-                    permutation_trace_on_quotient_domains,
-                    packed_perm_challenges.as_slice(),
-                    cumulative_sums.clone()[i],
-                    alpha,
-                )
-            })
-            .collect::<Vec<_>>();
+                            compute_quotient_values(
+                                &ordered_chips[i],
+                                &main_commitments.public_values,
+                                main_domains[i],
+                                *quotient_domain,
+                                pre_trace_on_quotient_domains,
+                                main_on_quotient_domain,
+                                permutation_trace_on_quotient_domains,
+                                packed_perm_challenges.as_slice(),
+                                cumulative_sums.clone()[i],
+                                alpha,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                });
 
         let quotient_domains_and_values = quotient_domains
             .into_iter()
