@@ -46,7 +46,7 @@ use p3_challenger::{CanObserve, DuplexChallenger};
 use p3_field::AbstractField;
 use std::{any::type_name, borrow::Borrow, marker::PhantomData};
 
-pub struct RiscvCompressMachine<NC, C>
+pub struct RiscvRecursionMachine<NC, C>
 where
     NC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
@@ -75,7 +75,7 @@ impl<'a, NC, C>
         C,
         EnsembleProof<RecursionSC>,
         RiscvRecursionStdin<'a, RiscvSC, NC>,
-    > for RiscvCompressMachine<NC, C>
+    > for RiscvRecursionMachine<NC, C>
 where
     NC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
@@ -130,7 +130,6 @@ where
         // Generate batch records and commit to challenger
         info!("phase 1 - BEGIN");
 
-        let a = witness.program.clone();
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
         loop {
             let (record, done) = recursion_emulator.next();
@@ -222,7 +221,7 @@ where
     }
 }
 
-impl<RiscvC, C> RiscvCompressMachine<RiscvC, C>
+impl<RiscvC, C> RiscvRecursionMachine<RiscvC, C>
 where
     RiscvC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
@@ -255,83 +254,5 @@ where
             .filter(|(_, chip)| chip.preprocessed_width() > 0)
             .map(|(i, _)| i)
             .collect()
-    }
-
-    pub fn emulate_and_prove(
-        &self,
-        recursion_records_p1: Vec<RecursionRecord<Val<RecursionSC>>>,
-        recursion_records_p2: Vec<RecursionRecord<Val<RecursionSC>>>,
-        recursion_pk: &BaseProvingKey<RecursionSC>,
-    ) -> MetaProof<RecursionSC, EnsembleProof<RecursionSC>> {
-        info!("challenger observe pk");
-        let mut challenger = self.config().challenger();
-        recursion_pk.observed_by(&mut challenger);
-
-        // First phase
-        // Generate batch records and commit to challenger
-        info!("phase 1 - BEGIN");
-
-        recursion_records_p1
-            .into_iter()
-            .enumerate()
-            .for_each(|(i, record)| {
-                let mut records = vec![record];
-
-                debug!("phase 1 complement records");
-                // read slice of records and complement them
-                self.complement_record(records.as_mut_slice());
-
-                debug!("record {} stats", i);
-                let stats = records[0].stats();
-                for (key, value) in &stats {
-                    debug!("{:<25}: {}", key, value);
-                }
-
-                debug!("phase 1 generate commitments for batch records");
-                let commitment = self
-                    .base_machine
-                    .commit(self.config(), &self.chips, &records[0]);
-
-                challenger.observe(commitment.commitment.clone());
-                challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
-            });
-        info!("phase 1 - END");
-
-        // Second phase
-        // Generate batch records and generate proofs
-        info!("phase 2 - BEGIN");
-
-        // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
-        let mut all_proofs = vec![];
-        recursion_records_p2
-            .into_iter()
-            .enumerate()
-            .for_each(|(i, record)| {
-                let mut records = vec![record];
-
-                debug!("phase 2 complement records");
-                self.complement_record(&mut records);
-
-                info!("phase 2 generate commitments for batch records");
-                let commitment = self
-                    .base_machine
-                    .commit(self.config(), &self.chips, &records[0]);
-
-                info!("phase 2 prove single record");
-                let proof = self.base_machine.prove_plain(
-                    self.config(),
-                    &self.chips,
-                    recursion_pk,
-                    &mut challenger.clone(),
-                    commitment,
-                );
-
-                // extend all_proofs to include batch_proofs
-                all_proofs.push(proof);
-            });
-        info!("phase 2 - END");
-
-        // construct meta proof
-        MetaProof::new(self.config(), EnsembleProof::new(all_proofs))
     }
 }

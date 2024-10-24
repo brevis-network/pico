@@ -36,7 +36,7 @@ use pico_vm::{
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
             riscv_config::StarkConfig as RiscvSC,
         },
-        machine::{riscv_compress::RiscvCompressMachine, riscv_machine::RiscvMachine},
+        machine::{riscv_machine::RiscvMachine, riscv_recursion::RiscvRecursionMachine},
     },
     machine::{
         builder::ChipBuilder,
@@ -68,7 +68,7 @@ fn main() {
     let (elf, stdin, _, _) = parse_args::parse_args(env::args().collect());
     let start = Instant::now();
 
-    info!("Being RiscV..");
+    info!("Begin RiscV..");
 
     info!("\n Creating Program..");
     let compiler = Compiler::new(SourceType::RiscV, elf);
@@ -126,15 +126,9 @@ fn main() {
     let recursion_program =
         RiscvCompressVerifierCircuit::<RecursionFC, RiscvSC>::build(&riscv_machine);
 
-    let serialized_program = bincode::serialize(&recursion_program).unwrap();
-    let mut hasher = DefaultHasher::new();
-    serialized_program.hash(&mut hasher);
-    let hash = hasher.finish();
-    info!("field_config program hash: {}", hash);
-
     // Setup machine
     info!("\n Setup recursion machine (at {:?})..", start.elapsed());
-    let recursion_machine = RiscvCompressMachine::new(
+    let recursion_machine = RiscvRecursionMachine::new(
         RecursionSC::new(),
         RECURSION_NUM_PVS,
         RecursionChipType::<BabyBear, 3>::all_chips(),
@@ -142,7 +136,7 @@ fn main() {
     let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
 
     // Setup stdin and witnesses
-    info!("\n Construct field_config stdin and witnesses..");
+    info!("\n Construct riscv_compress recursion stdin and witnesses..");
     let mut challenger = DuplexChallenger::new(riscv_machine.config().perm.clone());
     let recursion_stdin = EmulatorStdin::construct_for_compress(
         &vk,

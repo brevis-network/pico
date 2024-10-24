@@ -63,3 +63,4 @@ jobs:
           RUST_LOG="info" RUSTFLAGS="-Awarnings" FRI_QUERIES="1" cargo run --release --example test_riscv_emulator
           RUST_LOG="info" RUSTFLAGS="-Awarnings" FRI_QUERIES="1" cargo run --release --example test_riscv_machine keccak
           RUST_LOG="info" RUSTFLAGS="-Awarnings" FRI_QUERIES="1" cargo run --release --example test_riscv_compress
+          RUST_LOG="info" RUSTFLAGS="-Awarnings" FRI_QUERIES="1" cargo run --release --example test_riscv_combine

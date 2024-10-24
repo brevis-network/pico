@@ -30,8 +30,14 @@ use pico_vm::{
         compiler::riscv_circuit::{
             combine::builder::RiscvCombineVerifierCircuit, stdin::RiscvRecursionStdin,
         },
-        configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
-        machine::{riscv_machine::RiscvMachine, simple_machine::SimpleMachine},
+        configs::{
+            recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
+            riscv_config::StarkConfig as RiscvSC,
+        },
+        machine::{
+            riscv_machine::RiscvMachine, riscv_recursion::RiscvRecursionMachine,
+            simple_machine::SimpleMachine,
+        },
     },
     machine::{
         builder::ChipBuilder,
@@ -62,7 +68,7 @@ fn main() {
     let (elf, stdin, _, _) = parse_args::parse_args(env::args().collect());
     let start = Instant::now();
 
-    info!("Being RiscV..");
+    info!("Begin RiscV..");
 
     info!("\n Creating Program..");
     let compiler = Compiler::new(SourceType::RiscV, elf);
@@ -113,13 +119,19 @@ fn main() {
 
     info!("Build field_config program (at {:?})..", start.elapsed());
     let recursion_program =
-        RiscvCombineVerifierCircuit::<rcf::FieldConfig, RiscvSC>::build(&riscv_machine);
+        RiscvCombineVerifierCircuit::<RecursionFC, RiscvSC>::build(&riscv_machine);
 
-    let serialized_program = bincode::serialize(&recursion_program).unwrap();
-    let mut hasher = DefaultHasher::new();
-    serialized_program.hash(&mut hasher);
-    let hash = hasher.finish();
+    // Setup recursion machine
+    info!("\n Setup recursion machine (at {:?})..", start.elapsed());
+    let recursion_machine = RiscvRecursionMachine::new(
+        RecursionSC::new(),
+        RECURSION_NUM_PVS,
+        RecursionChipType::<BabyBear, 3>::all_chips(),
+    );
+    let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
 
+    // Setup stdin and witnesses
+    info!("\n Construct riscv_combine recursion stdin and witnesses..");
     let mut challenger = DuplexChallenger::new(riscv_machine.config().perm.clone());
     let recursion_stdin = EmulatorStdin::construct_for_combine(
         &vk,
@@ -127,57 +139,18 @@ fn main() {
         &proof.proofs(),
         &mut challenger,
         TEST_BATCH_SIZE,
-    )
-    .buffer;
-    assert_eq!(recursion_stdin.len(), 1);
-
-    // Execute the runtime.
-    let recursion_record = tracing::debug_span!("execute runtime").in_scope(|| {
-        let mut witness_stream = Vec::new();
-        witness_stream.extend(recursion_stdin[0].write());
-
-        let mut runtime = RecursionRuntime::<
-            <rcf::StarkConfig as StarkGenericConfig>::Val,
-            <rcf::StarkConfig as StarkGenericConfig>::Challenge,
-            _,
-        >::new(&recursion_program, riscv_machine.config().perm.clone());
-        runtime.witness_stream = witness_stream.into();
-        runtime.run().unwrap();
-        runtime.record
-    });
-
-    let stats = recursion_record.stats();
-    debug!("field_config record stats:");
-    for (key, value) in &stats {
-        debug!("|- {:<28}: {}", key, value);
-    }
-
-    // Setup field_config machine
-    info!("\n Setup field_config machine (at {:?})..", start.elapsed());
-
-    let riscv_recursion_machine = SimpleMachine::new(
-        rcf::StarkConfig::new(),
-        RECURSION_NUM_PVS,
-        RecursionChipType::<BabyBear, 3>::all_chips(),
     );
-    let (recursion_pk, recursion_vk) = riscv_recursion_machine.setup_keys(&recursion_program);
+    assert_eq!(recursion_stdin.buffer.len(), 1);
 
-    info!(
-        "\n Complement field_config records (at {:?})..",
-        start.elapsed()
+    let recursion_witness = ProvingWitness::setup_for_riscv_recursion(
+        recursion_program,
+        &recursion_stdin,
+        recursion_machine.config(),
     );
-    let mut recursion_records = vec![recursion_record.clone()];
-    riscv_recursion_machine.complement_record(&mut recursion_records);
-
-    info!("\n Construct proving witness..");
-    let recursion_witness = ProvingWitness::setup_with_records(recursion_records);
 
     // Generate the proof.
-    info!(
-        "\n Generating field_config proof (at {:?})..",
-        start.elapsed()
-    );
-    let recursion_proof = riscv_recursion_machine.prove(&recursion_pk, &recursion_witness);
+    info!("\n Generating recursion proof (at {:?})..", start.elapsed());
+    let recursion_proof = recursion_machine.prove(&recursion_pk, &recursion_witness);
     info!("{} generated.", recursion_proof.name());
 
     let proof_size = bincode::serialize(&recursion_proof).unwrap().len();
@@ -188,7 +161,7 @@ fn main() {
         "\n Verifying field_config proof (at {:?})..",
         start.elapsed()
     );
-    let recursion_result = riscv_recursion_machine.verify(&recursion_vk, &recursion_proof);
+    let recursion_result = recursion_machine.verify(&recursion_vk, &recursion_proof);
     info!(
         "The proof is verified: {} (at {:?})",
         recursion_result.is_ok(),
