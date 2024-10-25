@@ -45,8 +45,6 @@ where
         chips: &[MetaChip<SC::Val, C>],
         program: &C::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        info!("setup keys: BEGIN");
-        let begin = Instant::now();
         let chips_and_preprocessed = self.generate_preprocessed(chips, program);
 
         // Get the chip ordering.
@@ -80,7 +78,6 @@ where
 
         let pc_start = program.pc_start();
 
-        info!("setup keys: END in {:?}", begin.elapsed());
         (
             BaseProvingKey {
                 commit: commit.clone(),
@@ -124,7 +121,7 @@ where
                     });
                 let elapsed_time = begin.elapsed();
                 durations.insert(chip.name(), elapsed_time);
-                info!("PERF: step=generate_preprocessed, chip={}, cpu_time={}ms", chip.name(), elapsed_time.as_millis());
+                info!("PERF-step=generate_preprocessed-chip={}-cpu_time={}", chip.name(), elapsed_time.as_millis());
                 trace
             })
             .collect::<Vec<_>>();
@@ -140,7 +137,7 @@ where
             )
         }
         info!(
-            "PERF: step=generate_preprocessed, user_time={}ms",
+            "PERF-step=generate_preprocessed-user_time={}",
             begin.elapsed().as_millis(),
         );
         chips_and_preprocessed
@@ -183,7 +180,7 @@ where
                     trace.values.len(),
                     elapsed_time,
                 );
-                info!("PERF: step=generate_main, chip={}, cpu_time={}ms", chip.name(), elapsed_time.as_millis());
+                info!("PERF-step=generate_main-chip={}-cpu_time={}", chip.name(), elapsed_time.as_millis());
 
                 Some((chip.name(), trace))
             })
@@ -192,7 +189,7 @@ where
         let elapsed_time = begin.elapsed();
         info!("generate main traces: END in {:?}", elapsed_time);
         info!(
-            "PERF: step=generate_main, user_time={}ms",
+            "PERF-step=generate_main-user_time={}",
             elapsed_time.as_millis(),
         );
         chips_and_main
@@ -241,7 +238,7 @@ where
         let elapsed_time = begin.elapsed();
         info!("commit main: END {:?}", elapsed_time);
         info!(
-            "PERF: step=commit_main, user_time={}ms",
+            "PERF-step=commit_main-user_time={}",
             elapsed_time.as_millis(),
         );
         MainTraceCommitments {
@@ -295,14 +292,14 @@ where
                     (permutation_trace, cumulative_sum)
                 });
 
-                info!("PERF: step=generate_permutation, chip={}, cpu_time={}ms", chip.name(), begin.elapsed().as_millis());
+                info!("PERF-step=generate_permutation-chip={}-cpu_time={}", chip.name(), begin.elapsed().as_millis());
 
                 result
             })
             .unzip();
 
         info!(
-            "PERF: step=generate_permutation, user_time={}ms",
+            "PERF-step=generate_permutation-user_time={}",
             begin.elapsed().as_millis(),
         );
 
@@ -477,7 +474,7 @@ where
                     });
 
             info!(
-                "PERF: step=compute_quotient_values, user_time={}ms",
+                "PERF-step=compute_quotient_values-user_time={}",
                 begin.elapsed().as_millis(),
             );
 
@@ -528,6 +525,7 @@ where
             .map(|_| vec![zeta])
             .collect::<Vec<_>>();
 
+        let begin_open = Instant::now();
         let (opened_values, opening_proof) = pcs.open(
             vec![
                 (&pk.preprocessed_prover_data, preprocessed_opening_points),
@@ -536,6 +534,10 @@ where
                 (&quotient_data, quotient_opening_points),
             ],
             challenger,
+        );
+        info!(
+            "PERF-step=open-user_time={}",
+            begin_open.elapsed().as_millis(),
         );
 
         let [preprocessed_values, main_values, permutation_values, mut quotient_values] =
@@ -604,7 +606,7 @@ where
         let elapsed_time = begin.elapsed();
         info!("core prove - END in {:?}", elapsed_time);
         info!(
-            "PERF: step=core_prove, user_time={}ms",
+            "PERF-step=core_prove-user_time={}",
             begin.elapsed().as_millis(),
         );
         // final base proof

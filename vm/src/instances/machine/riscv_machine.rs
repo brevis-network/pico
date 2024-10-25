@@ -30,7 +30,7 @@ use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
-use std::{any::type_name, borrow::Borrow};
+use std::{any::type_name, borrow::Borrow, time::Instant};
 
 pub struct RiscvMachine<SC, C>
 where
@@ -75,10 +75,19 @@ where
 
     /// setup prover, verifier and keys.
     fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        info!("PERF: machine=riscv");
+        info!("PERF-machine=riscv");
 
-        self.base_machine
-            .setup_keys(self.config(), self.chips(), program)
+        let begin = Instant::now();
+        let (pk, vk) = self
+            .base_machine
+            .setup_keys(self.config(), self.chips(), program);
+
+        info!(
+            "PERF-step=setup_keys-user_time={}",
+            begin.elapsed().as_millis(),
+        );
+
+        (pk, vk)
     }
 
     /// Get the prover of the machine.
@@ -87,7 +96,7 @@ where
         pk: &BaseProvingKey<SC>,
         witness: &ProvingWitness<SC, C, SC, C, Vec<u8>>,
     ) -> MetaProof<SC, EnsembleProof<SC>> {
-        info!("PERF: machine=riscv");
+        info!("PERF-machine=riscv");
 
         let ProvingWitness {
             program,
@@ -121,7 +130,7 @@ where
                 }
 
                 debug!("phase 1 generate commitments for batch records");
-                info!("PERF: chunk={}, phase=1", i + 1);
+                info!("PERF-chunk={}-phase=1", i + 1);
                 let commitment = self.base_machine.commit(self.config(), &self.chips, record);
 
                 challenger.observe(commitment.commitment.clone());
@@ -153,7 +162,7 @@ where
                 .iter()
                 .enumerate()
                 .map(|(i, record)| {
-                    info!("PERF: chunk={}, phase=2", i + 1);
+                    info!("PERF-chunk={}-phase=2", i + 1);
 
                     // generate and commit main trace
                     self.base_machine.commit(self.config(), &self.chips, record)
@@ -165,7 +174,7 @@ where
                 .into_iter()
                 .enumerate()
                 .map(|(i, commitment)| {
-                    info!("PERF: chunk={}, phase=2", i + 1);
+                    info!("PERF-chunk={}-phase=2", i + 1);
 
                     self.base_machine.prove_plain(
                         self.config(),
@@ -202,6 +211,8 @@ where
         let mut prev_next_pc = vk.pc_start;
         let mut prev_last_initialize_addr_bits = [<SC::Val>::zero(); 32];
         let mut prev_last_finalize_addr_bits = [<SC::Val>::zero(); 32];
+
+        let begin = Instant::now();
 
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -284,6 +295,8 @@ where
 
         self.base_machine
             .verify_ensemble(self.config(), self.chips(), vk, proof.proofs())?;
+
+        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 
         Ok(())
     }

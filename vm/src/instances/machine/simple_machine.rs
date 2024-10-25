@@ -14,7 +14,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use log::info;
 use p3_air::Air;
-use std::any::type_name;
+use std::{any::type_name, time::Instant};
 
 pub struct SimpleMachine<SC, C>
 where
@@ -65,7 +65,7 @@ where
         &self,
         program: &<C as ChipBehavior<<SC as StarkGenericConfig>::Val>>::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        info!("PERF: machine=simple");
+        info!("PERF-machine=simple");
 
         self.base_machine
             .setup_keys(self.config(), self.chips(), program)
@@ -91,11 +91,14 @@ where
         proof: &MetaProof<SC, EnsembleProof<SC>>,
     ) -> Result<()> {
         // panic if proofs is empty
+        let begin = Instant::now();
         if proof.proofs().is_empty() {
             panic!("proofs is empty");
         }
         self.base_machine
             .verify_ensemble(self.config(), self.chips(), vk, proof.proofs())?;
+
+        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 
         Ok(())
     }

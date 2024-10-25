@@ -100,13 +100,13 @@ fn main() {
     let proof = riscv_machine.prove(&pk, &witness);
     info!("{} generated.", proof.name());
 
-    for each_proof in proof.proofs() {
-        let public_values: &PublicValues<Word<_>, _> = each_proof.public_values.as_slice().borrow();
-        info!("public values: {:?}", public_values);
-    }
+    // for each_proof in proof.proofs() {
+    //     let public_values: &PublicValues<Word<_>, _> = each_proof.public_values.as_slice().borrow();
+    //     info!("public values: {:?}", public_values);
+    // }
 
     let proof_size = bincode::serialize(&proof).unwrap().len();
-    info!("Riscv proof size: {}", proof_size);
+    info!("PERF-proof_size-{}", proof_size);
 
     // Verify the proof.
     info!("\n Verifying Riscv proof (at {:?})..", start.elapsed());
@@ -157,7 +157,7 @@ fn main() {
     info!("{} generated.", proof.name());
 
     let proof_size = bincode::serialize(&recursion_proof).unwrap().len();
-    info!("Recursion proof size: {}", proof_size);
+    info!("PERF-proof_size-{}", proof_size);
 
     // Verify the proof.
     info!(

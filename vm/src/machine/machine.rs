@@ -176,7 +176,7 @@ where
             .iter()
             .enumerate()
             .map(|(i, record)| {
-                info!("PERF: chunk={}", i + 1);
+                info!("PERF-chunk={}", i + 1);
 
                 let commitment = self.prover.commit_main(
                     config,
@@ -194,7 +194,7 @@ where
             .into_iter()
             .enumerate()
             .map(|(i, commitment)| {
-                info!("PERF: chunk={}", i + 1);
+                info!("PERF-chunk={}", i + 1);
 
                 self.prover
                     .prove(config, chips, pk, &mut challenger.clone(), commitment)

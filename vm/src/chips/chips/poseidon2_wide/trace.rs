@@ -28,7 +28,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for Poseidon2WideChip
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
-        format!("Poseidon2Wide {}", DEGREE)
+        format!("Poseidon2Wide_{}", DEGREE)
     }
 
     #[instrument(name = "generate poseidon2 wide trace", level = "debug", skip_all, fields(rows = input.poseidon2_compress_events.len()))]

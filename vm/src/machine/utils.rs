@@ -237,7 +237,7 @@ where
     });
 
     info!(
-        "PERF: step=compute_quotient_values, chip={}, cpu_time={}ms",
+        "PERF-step=compute_quotient_values-chip={}-cpu_time={}",
         chip.name(),
         begin_time.elapsed().as_millis(),
     );

@@ -44,7 +44,7 @@ use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_challenger::{CanObserve, DuplexChallenger};
 use p3_field::AbstractField;
-use std::{any::type_name, borrow::Borrow, marker::PhantomData};
+use std::{any::type_name, borrow::Borrow, marker::PhantomData, time::Instant};
 
 pub struct RiscvRecursionMachine<NC, C>
 where
@@ -112,7 +112,7 @@ where
         &self,
         program: &C::Program,
     ) -> (BaseProvingKey<RecursionSC>, BaseVerifyingKey<RecursionSC>) {
-        info!("PERF: machine=recursion");
+        info!("PERF-machine=recursion");
 
         self.base_machine
             .setup_keys(self.config(), self.chips(), program)
@@ -149,7 +149,7 @@ where
             }
 
             debug!("phase 1 generate commitments for batch records");
-            info!("PERF: chunk={chunk}, phase=1");
+            info!("PERF-chunk={chunk}-phase=1");
 
             let commitment = self
                 .base_machine
@@ -182,7 +182,7 @@ where
             self.complement_record(records.as_mut_slice());
 
             info!("phase 2 generate commitments for batch records");
-            info!("PERF: chunk={chunk}, phase=2");
+            info!("PERF-chunk={chunk}-phase=2");
             let commitment = self
                 .base_machine
                 .commit(self.config(), &self.chips, &records[0]);
@@ -218,6 +218,8 @@ where
         vk: &BaseVerifyingKey<RecursionSC>,
         proof: &MetaProof<RecursionSC, EnsembleProof<RecursionSC>>,
     ) -> Result<()> {
+        let begin = Instant::now();
+
         for each_proof in proof.proofs().iter() {
             let public_values: &RecursionPublicValues<_> =
                 each_proof.public_values.as_slice().borrow();
@@ -227,6 +229,8 @@ where
 
         self.base_machine
             .verify_ensemble(self.config(), self.chips(), vk, proof.proofs())?;
+
+        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 
         Ok(())
     }
