@@ -18,6 +18,7 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
+        perf::{Perf, PerfContext},
         proof::{EnsembleProof, MetaProof},
         witness::ProvingWitness,
     },
@@ -117,7 +118,11 @@ where
                 }
 
                 debug!("phase 1 generate commitments for batch records");
-                let commitment = self.base_machine.commit(self.config(), &self.chips, record);
+                let mut perf_ctx = PerfContext::default();
+                perf_ctx.set_chunk(Some(i as u32 + 1));
+                let commitment =
+                    self.base_machine
+                        .commit(self.config(), &self.chips, record, &perf_ctx);
 
                 challenger.observe(commitment.commitment.clone());
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
@@ -146,22 +151,32 @@ where
             info!("phase 2 generate commitments for batch records");
             let batch_main_commitments = batch_records
                 .iter()
-                .map(|record| {
+                .enumerate()
+                .map(|(i, record)| {
+                    let mut perf_ctx = PerfContext::default();
+                    perf_ctx.set_chunk(Some(i as u32 + 1));
+
                     // generate and commit main trace
-                    self.base_machine.commit(self.config(), &self.chips, record)
+                    self.base_machine
+                        .commit(self.config(), &self.chips, record, &perf_ctx)
                 })
                 .collect::<Vec<_>>();
 
             info!("phase 2 prove batch records");
             let batch_proofs = batch_main_commitments
                 .into_iter()
-                .map(|commitment| {
+                .enumerate()
+                .map(|(i, commitment)| {
+                    let mut perf_ctx = PerfContext::default();
+                    perf_ctx.set_chunk(Some(i as u32 + 1));
+
                     self.base_machine.prove_plain(
                         self.config(),
                         &self.chips,
                         pk,
                         &mut challenger.clone(),
                         commitment,
+                        &perf_ctx,
                     )
                 })
                 .collect::<Vec<_>>();

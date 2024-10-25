@@ -32,6 +32,7 @@ use crate::{
         },
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
+        perf::PerfContext,
         proof::{EnsembleProof, MetaProof},
         witness::ProvingWitness,
     },
@@ -130,6 +131,7 @@ where
         // Generate batch records and commit to challenger
         info!("phase 1 - BEGIN");
 
+        let mut chunk = 1;
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
         loop {
             let (record, done) = recursion_emulator.next();
@@ -146,9 +148,11 @@ where
             }
 
             debug!("phase 1 generate commitments for batch records");
-            let commitment = self
-                .base_machine
-                .commit(self.config(), &self.chips, &records[0]);
+            let mut perf_ctx = PerfContext::default();
+            perf_ctx.set_chunk(Some(chunk));
+            let commitment =
+                self.base_machine
+                    .commit(self.config(), &self.chips, &records[0], &perf_ctx);
 
             challenger.observe(commitment.commitment.clone());
             challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
@@ -156,6 +160,8 @@ where
             if done {
                 break;
             }
+
+            chunk += 1;
         }
 
         info!("phase 1 - END");
@@ -166,6 +172,7 @@ where
 
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
         let mut all_proofs = vec![];
+        let mut chunk = 1;
         loop {
             let (record, done) = recursion_emulator.next();
             let mut records = vec![record];
@@ -174,9 +181,11 @@ where
             self.complement_record(records.as_mut_slice());
 
             info!("phase 2 generate commitments for batch records");
-            let commitment = self
-                .base_machine
-                .commit(self.config(), &self.chips, &records[0]);
+            let mut perf_ctx = PerfContext::default();
+            perf_ctx.set_chunk(Some(chunk));
+            let commitment =
+                self.base_machine
+                    .commit(self.config(), &self.chips, &records[0], &perf_ctx);
 
             info!("phase 2 prove single record");
             let proof = self.base_machine.prove_plain(
@@ -185,6 +194,7 @@ where
                 pk,
                 &mut challenger.clone(),
                 commitment,
+                &PerfContext::default(),
             );
 
             // extend all_proofs to include batch_proofs
@@ -193,6 +203,8 @@ where
             if done {
                 break;
             }
+
+            chunk += 1;
         }
 
         info!("phase 2 - END");

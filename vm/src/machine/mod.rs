@@ -6,6 +6,7 @@ pub mod keys;
 pub mod logger;
 pub mod lookup;
 pub mod machine;
+pub mod perf;
 pub mod permutation;
 pub mod proof;
 pub mod prover;

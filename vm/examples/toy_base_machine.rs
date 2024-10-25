@@ -18,6 +18,7 @@ use pico_vm::{
         chip::{ChipBehavior, MetaChip},
         logger::setup_logger,
         machine::BaseMachine,
+        perf::PerfContext,
     },
     primitives::consts::RISCV_NUM_PVS,
 };
@@ -129,7 +130,7 @@ fn main() {
 
     info!("\n Generating proof");
     // Generate the proof.
-    let proof = base_machine.prove_unit(&config, &chips, &pk, record);
+    let proof = base_machine.prove_unit(&config, &chips, &pk, record, &PerfContext::default());
 
     // Verify the proof.
     info!("\n Verifying proof");

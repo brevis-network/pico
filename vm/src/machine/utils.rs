@@ -5,6 +5,7 @@ use crate::{
         folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
         lookup::VirtualPairLookup,
+        perf::{Perf, PerfContext},
         proof::BaseProof,
     },
 };
@@ -19,7 +20,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
-use std::any::type_name;
+use std::{any::type_name, time::Instant};
 use tracing::{debug_span, instrument, Span};
 
 pub fn type_name_of<T>(_: &T) -> String {
@@ -117,12 +118,15 @@ pub fn compute_quotient_values<'a, SC, C, Mat>(
     perm_challenges: &'a [PackedChallenge<SC>],
     cumulative_sum: SC::Challenge,
     alpha: SC::Challenge,
+    perf_ctx: &PerfContext,
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
     C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
     Mat: Matrix<SC::Val> + Sync,
 {
+    let begin_time = Instant::now();
+
     let quotient_size = quotient_domain.size();
     let preprocessed_width = preprocessed_on_quotient_domain.width();
     let main_width = main_trace_on_quotient_domain.width();
@@ -140,7 +144,7 @@ where
     }
     let ext_degree = SC::Challenge::D;
 
-    debug_span!(parent: Span::current(), "chip_compute_quotient_values", chip = chip.name(), quotient_size = quotient_size, tag = "tag-chip").in_scope(|| {
+    let quotient_values = debug_span!(parent: Span::current(), "chip_compute_quotient_values", chip = chip.name(), quotient_size = quotient_size, tag = "tag-chip").in_scope(|| {
         (0..quotient_size)
             .into_par_iter()
             .step_by(PackedVal::<SC>::WIDTH)
@@ -232,7 +236,17 @@ where
                 })
             })
             .collect()
-    })
+    });
+
+    Perf::add(
+        begin_time.elapsed(),
+        perf_ctx.chunk(),
+        Some("compute_quotient_values"),
+        Some(&chip.name()),
+        Some("cpu_time"),
+    );
+
+    quotient_values
 }
 
 // Infer log of constraint degree

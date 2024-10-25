@@ -6,6 +6,7 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::ProverConstraintFolder,
         keys::{BaseProvingKey, BaseVerifyingKey},
+        perf::{Perf, PerfContext},
         proof::{
             BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, MainTraceCommitments,
         },
@@ -110,6 +111,7 @@ where
         chips: &[MetaChip<SC::Val, C>],
         program: &C::Program,
     ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
+        let begin = Instant::now();
         let parent_span = Span::current();
         let mut durations = HashMap::new();
         let mut chips_and_preprocessed = chips
@@ -121,7 +123,15 @@ where
                         chip.generate_preprocessed(program)
                             .map(|trace| (chip.name(), trace))
                     });
-                durations.insert(chip.name(), begin.elapsed());
+                let elapsed_time = begin.elapsed();
+                durations.insert(chip.name(), elapsed_time);
+                Perf::add(
+                    elapsed_time,
+                    None,
+                    Some("generate_preprocessed"),
+                    Some(&chip.name()),
+                    Some("cpu_time"),
+                );
                 trace
             })
             .collect::<Vec<_>>();
@@ -136,27 +146,14 @@ where
                 durations.get(&cp.0).unwrap()
             )
         }
+        Perf::add(
+            begin.elapsed(),
+            None,
+            Some("generate_preprocessed"),
+            None,
+            Some("user_time"),
+        );
         chips_and_preprocessed
-    }
-
-    /// emulate to generate extra events
-    /// should only be called after first emulator run and before generate_main
-    #[instrument(
-        name = "complement_record",
-        level = "debug",
-        skip_all,
-        fields(tag = "tag-chip")
-    )]
-    pub fn complement_record(&self, chips: &[MetaChip<SC::Val, C>], input: &mut C::Record) {
-        let parent_span = Span::current();
-        chips.iter().for_each(|chip| {
-            debug_span!(parent: &parent_span, "chip_complement_record", chip = chip.name(), tag = "tag-chip")
-                .in_scope(|| {
-                    let mut extra = C::Record::default();
-                    chip.extra_record(input, &mut extra);
-                    input.append(&mut extra);
-                });
-        });
     }
 
     /// generate ordered main traces with chip names
@@ -170,9 +167,10 @@ where
         &self,
         chips: &[MetaChip<SC::Val, C>],
         record: &C::Record,
+        perf_ctx: &PerfContext,
     ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
         info!("generate main traces: BEGIN");
-        let start = Instant::now();
+        let begin = Instant::now();
 
         let parent_span = Span::current();
         let mut chips_and_main = chips
@@ -187,20 +185,36 @@ where
                 let trace =
                     debug_span!(parent: &parent_span, "chip_generate_main", chip = chip.name(), tag = "tag-chip")
                         .in_scope(|| chip.generate_main(record, &mut C::Record::default()));
+                let elapsed_time = begin.elapsed();
                 debug!(
                     "generated main: {:<17} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
                     chip.name(),
                     trace.width(),
                     trace.height(),
                     trace.values.len(),
-                    begin.elapsed(),
+                    elapsed_time,
+                );
+                Perf::add(
+                    elapsed_time,
+                    perf_ctx.chunk(),
+                    Some("generate_main"),
+                    Some(&chip.name()),
+                    Some("cpu_time"),
                 );
 
                 Some((chip.name(), trace))
             })
             .collect::<Vec<_>>();
         chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
-        info!("generate main traces: END in {:?}", start.elapsed());
+        let elapsed_time = begin.elapsed();
+        info!("generate main traces: END in {:?}", elapsed_time);
+        Perf::add(
+            elapsed_time,
+            perf_ctx.chunk(),
+            Some("generate_main"),
+            None,
+            Some("user_time"),
+        );
         chips_and_main
     }
 
@@ -215,6 +229,7 @@ where
         config: &SC,
         record: &C::Record,
         chips_and_main: Vec<(String, RowMajorMatrix<SC::Val>)>,
+        perf_ctx: &PerfContext,
     ) -> MainTraceCommitments<SC> {
         let begin = Instant::now();
         info!("commit main: BEGIN");
@@ -244,7 +259,15 @@ where
             .map(|(_, trace)| trace)
             .collect::<Vec<_>>();
 
-        info!("commit main: END {:?}", begin.elapsed());
+        let elapsed_time = begin.elapsed();
+        info!("commit main: END {:?}", elapsed_time);
+        Perf::add(
+            elapsed_time,
+            perf_ctx.chunk(),
+            Some("commit_main"),
+            None,
+            Some("user_time"),
+        );
         MainTraceCommitments {
             main_traces,
             main_chip_ordering,
@@ -267,7 +290,9 @@ where
         pk: &BaseProvingKey<SC>,
         main_trace_commitments: &MainTraceCommitments<SC>,
         perm_challenges: &[SC::Challenge],
+        perf_ctx: &PerfContext,
     ) -> (Vec<RowMajorMatrix<SC::Challenge>>, Vec<SC::Challenge>) {
+        let begin = Instant::now();
         let preprocessed_traces = ordered_chips
             .iter()
             .map(|chip| {
@@ -283,7 +308,8 @@ where
             .zip(main_trace_commitments.main_traces.par_iter())
             .zip(preprocessed_traces.into_par_iter())
             .map(|((chip, main_trace), preprocessed_trace)| {
-                debug_span!(parent: &parent_span, "chip_generate_permutation", chip = chip.name(), tag = "tag-chip").in_scope(|| {
+                let begin = Instant::now();
+                let result = debug_span!(parent: &parent_span, "chip_generate_permutation", chip = chip.name(), tag = "tag-chip").in_scope(|| {
                     let permutation_trace =
                         chip.generate_permutation(preprocessed_trace, main_trace, perm_challenges);
                     let cumulative_sum = permutation_trace
@@ -292,9 +318,27 @@ where
                         .copied()
                         .unwrap();
                     (permutation_trace, cumulative_sum)
-                })
+                });
+
+                Perf::add(
+                    begin.elapsed(),
+                    perf_ctx.chunk(),
+                    Some("generate_permutation"),
+                    Some(&chip.name()),
+                    Some("cpu_time"),
+                );
+
+                result
             })
             .unzip();
+
+        Perf::add(
+            begin.elapsed(),
+            perf_ctx.chunk(),
+            Some("generate_permutation"),
+            None,
+            Some("user_time"),
+        );
 
         (permutation_traces, cumulative_sums)
     }
@@ -314,6 +358,7 @@ where
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         main_commitments: MainTraceCommitments<SC>,
+        perf_ctx: &PerfContext,
     ) -> BaseProof<SC> {
         let begin = Instant::now();
         info!("core prove - BEGIN");
@@ -355,6 +400,7 @@ where
             pk,
             &main_commitments,
             &permutation_challenges,
+            perf_ctx,
         );
 
         // commit permutation traces on main domain
@@ -403,62 +449,80 @@ where
             })
             .collect::<Vec<_>>();
 
-        let quotient_values =
-            debug_span!(parent: Span::current(), "compute_quotient_values", tag = "tag-chip")
-                .in_scope(|| {
-                    quotient_domains
-                        .iter()
-                        .enumerate()
-                        .map(|(i, quotient_domain)| {
-                            let pre_trace_on_quotient_domains = pk
-                                .preprocessed_chip_ordering
-                                .get(&ordered_chips[i].name())
-                                .map(|index| {
-                                    pcs.get_evaluations_on_domain(
-                                        &pk.preprocessed_prover_data,
-                                        *index,
+        let quotient_values = {
+            let begin = Instant::now();
+            let quotient_values =
+                debug_span!(parent: Span::current(), "compute_quotient_values", tag = "tag-chip")
+                    .in_scope(|| {
+                        quotient_domains
+                            .iter()
+                            .enumerate()
+                            .map(|(i, quotient_domain)| {
+                                let pre_trace_on_quotient_domains = pk
+                                    .preprocessed_chip_ordering
+                                    .get(&ordered_chips[i].name())
+                                    .map(|index| {
+                                        pcs.get_evaluations_on_domain(
+                                            &pk.preprocessed_prover_data,
+                                            *index,
+                                            *quotient_domain,
+                                        )
+                                        .to_row_major_matrix()
+                                    })
+                                    .unwrap_or_else(|| {
+                                        RowMajorMatrix::new_col(vec![
+                                            <SC::Val>::zero();
+                                            quotient_domain.size()
+                                        ])
+                                    });
+                                let main_on_quotient_domain = pcs
+                                    .get_evaluations_on_domain(
+                                        &main_commitments.data,
+                                        i,
                                         *quotient_domain,
                                     )
-                                    .to_row_major_matrix()
-                                })
-                                .unwrap_or_else(|| {
-                                    RowMajorMatrix::new_col(vec![
-                                        <SC::Val>::zero();
-                                        quotient_domain.size()
-                                    ])
-                                });
-                            let main_on_quotient_domain = pcs
-                                .get_evaluations_on_domain(
-                                    &main_commitments.data,
-                                    i,
+                                    .to_row_major_matrix();
+
+                                let permutation_trace_on_quotient_domains = pcs
+                                    .get_evaluations_on_domain(
+                                        &permutation_data,
+                                        i,
+                                        *quotient_domain,
+                                    )
+                                    .to_row_major_matrix();
+
+                                let packed_perm_challenges = permutation_challenges
+                                    .iter()
+                                    .map(|c| PackedChallenge::<SC>::from_f(*c))
+                                    .collect::<Vec<_>>();
+
+                                compute_quotient_values(
+                                    &ordered_chips[i],
+                                    &main_commitments.public_values,
+                                    main_domains[i],
                                     *quotient_domain,
+                                    pre_trace_on_quotient_domains,
+                                    main_on_quotient_domain,
+                                    permutation_trace_on_quotient_domains,
+                                    packed_perm_challenges.as_slice(),
+                                    cumulative_sums.clone()[i],
+                                    alpha,
+                                    &perf_ctx,
                                 )
-                                .to_row_major_matrix();
+                            })
+                            .collect::<Vec<_>>()
+                    });
 
-                            let permutation_trace_on_quotient_domains = pcs
-                                .get_evaluations_on_domain(&permutation_data, i, *quotient_domain)
-                                .to_row_major_matrix();
+            Perf::add(
+                begin.elapsed(),
+                perf_ctx.chunk(),
+                Some("compute_quotient_values"),
+                None,
+                Some("user_time"),
+            );
 
-                            let packed_perm_challenges = permutation_challenges
-                                .iter()
-                                .map(|c| PackedChallenge::<SC>::from_f(*c))
-                                .collect::<Vec<_>>();
-
-                            compute_quotient_values(
-                                &ordered_chips[i],
-                                &main_commitments.public_values,
-                                main_domains[i],
-                                *quotient_domain,
-                                pre_trace_on_quotient_domains,
-                                main_on_quotient_domain,
-                                permutation_trace_on_quotient_domains,
-                                packed_perm_challenges.as_slice(),
-                                cumulative_sums.clone()[i],
-                                alpha,
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                });
+            quotient_values
+        };
 
         let quotient_domains_and_values = quotient_domains
             .into_iter()
@@ -577,7 +641,15 @@ where
             )
             .collect::<Vec<_>>();
 
-        info!("core prove - END in {:?}", begin.elapsed());
+        let elapsed_time = begin.elapsed();
+        info!("core prove - END in {:?}", elapsed_time);
+        Perf::add(
+            begin.elapsed(),
+            perf_ctx.chunk(),
+            Some("core_prove"),
+            None,
+            Some("user_time"),
+        );
         // final base proof
         BaseProof::<SC> {
             commitments: BaseCommitments {

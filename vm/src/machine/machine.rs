@@ -5,6 +5,7 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
+        perf::Perf,
         proof::{BaseProof, MainTraceCommitments, MetaProof, UnitProof},
         prover::BaseProver,
         utils::type_name_of,
@@ -22,6 +23,8 @@ use p3_field::Field;
 use p3_fri::FriConfig;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use std::time::Instant;
+
+use super::perf::PerfContext;
 
 /// Functions that each machine instance should implement.
 pub trait MachineBehavior<NSC, NC, SC, C, P, I>
@@ -130,9 +133,14 @@ where
         config: &SC,
         chips: &[MetaChip<SC::Val, C>],
         record: &C::Record,
+        perf_ctx: &PerfContext,
     ) -> MainTraceCommitments<SC> {
-        self.prover
-            .commit_main(config, record, self.prover.generate_main(chips, record))
+        self.prover.commit_main(
+            config,
+            record,
+            self.prover.generate_main(chips, record, perf_ctx),
+            perf_ctx,
+        )
     }
 
     /// Prove a single record.
@@ -142,20 +150,30 @@ where
         chips: &[MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
         record: &C::Record,
+        perf_ctx: &PerfContext,
     ) -> BaseProof<SC> {
         // observe preprocessed
         let mut challenger = config.challenger();
         pk.observed_by(&mut challenger);
 
-        let main_commitment =
-            self.prover
-                .commit_main(config, record, self.prover.generate_main(chips, record));
+        let main_commitment = self.prover.commit_main(
+            config,
+            record,
+            self.prover.generate_main(chips, record, perf_ctx),
+            perf_ctx,
+        );
 
         challenger.observe(main_commitment.commitment.clone());
         challenger.observe_slice(&main_commitment.public_values[..self.num_public_values]);
 
-        self.prover
-            .prove(config, chips, pk, &mut challenger, main_commitment)
+        self.prover.prove(
+            config,
+            chips,
+            pk,
+            &mut challenger,
+            main_commitment,
+            perf_ctx,
+        )
     }
 
     /// prove a batch of records
@@ -174,11 +192,16 @@ where
         info!("generate commitments for {} records", records.len());
         let main_commitments = records
             .iter()
-            .map(|record| {
+            .enumerate()
+            .map(|(i, record)| {
+                let mut perf_ctx = PerfContext::default();
+                perf_ctx.set_chunk(Some(i as u32 + 1));
+
                 let commitment = self.prover.commit_main(
                     config,
                     record,
-                    self.prover.generate_main(chips, record),
+                    self.prover.generate_main(chips, record, &perf_ctx),
+                    &perf_ctx,
                 );
                 challenger.observe(commitment.commitment.clone());
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values]);
@@ -189,9 +212,19 @@ where
         info!("iterate {} commitments and prove", main_commitments.len());
         main_commitments
             .into_iter()
-            .map(|commitment| {
-                self.prover
-                    .prove(config, chips, pk, &mut challenger.clone(), commitment)
+            .enumerate()
+            .map(|(i, commitment)| {
+                let mut perf_ctx = PerfContext::default();
+                perf_ctx.set_chunk(Some(i as u32 + 1));
+
+                self.prover.prove(
+                    config,
+                    chips,
+                    pk,
+                    &mut challenger.clone(),
+                    commitment,
+                    &perf_ctx,
+                )
             })
             .collect::<Vec<_>>()
     }
@@ -204,8 +237,10 @@ where
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         commitment: MainTraceCommitments<SC>,
+        perf_ctx: &PerfContext,
     ) -> BaseProof<SC> {
-        self.prover.prove(config, chips, pk, challenger, commitment)
+        self.prover
+            .prove(config, chips, pk, challenger, commitment, perf_ctx)
     }
 
     /// Verify a single BaseProof e2e
