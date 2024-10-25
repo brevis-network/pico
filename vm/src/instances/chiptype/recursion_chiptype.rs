@@ -1,7 +1,8 @@
 use crate::{
     chips::chips::{
-        fri_fold::FriFoldChip, multi::MultiChip, poseidon2_wide::Poseidon2WideChip,
-        recursion_cpu::CpuChip, recursion_memory::MemoryGlobalChip, recursion_program::ProgramChip,
+        exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip, multi::MultiChip,
+        poseidon2_wide::Poseidon2WideChip, recursion_cpu::CpuChip,
+        recursion_memory::MemoryGlobalChip, recursion_program::ProgramChip,
         recursion_range_check::RangeCheckChip,
     },
     compiler::recursion::program::RecursionProgram,
@@ -10,7 +11,7 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
     },
     primitives::consts::EXTENSION_DEGREE,
-    recursion::{exp_reverse_bits::ExpReverseBitsLenChip, runtime::RecursionRecord},
+    recursion::runtime::RecursionRecord,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};

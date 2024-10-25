@@ -3,6 +3,7 @@ mod utils;
 
 use crate::{
     chips::chips::{
+        exp_reverse_bits::ExpReverseBitsLenEvent,
         fri_fold::FriFoldEvent,
         poseidon2_wide::events::{
             Poseidon2AbsorbEvent, Poseidon2CompressEvent, Poseidon2FinalizeEvent,
@@ -15,10 +16,7 @@ use crate::{
     compiler::recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
     emulator::riscv::events::MemoryAccessPosition,
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
-    recursion::{
-        air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
-        exp_reverse_bits::ExpReverseBitsLenEvent,
-    },
+    recursion::air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
 };
 use hashbrown::HashMap;
 use itertools::Itertools;

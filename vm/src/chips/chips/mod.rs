@@ -1,5 +1,6 @@
 pub mod alu;
 pub mod byte;
+pub mod exp_reverse_bits;
 pub mod fri_fold;
 pub mod memory_program;
 pub mod multi;

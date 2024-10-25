@@ -1,5 +1,6 @@
 use crate::{
     chips::chips::{
+        exp_reverse_bits::ExpReverseBitsLenEvent,
         fri_fold::FriFoldEvent,
         poseidon2_wide::events::{Poseidon2CompressEvent, Poseidon2HashEvent},
         recursion_cpu::CpuEvent,
@@ -8,7 +9,7 @@ use crate::{
     compiler::recursion::program::RecursionProgram,
     emulator::record::RecordBehavior,
     primitives::consts::MAX_NUM_PVS,
-    recursion::{air::Block, exp_reverse_bits::ExpReverseBitsLenEvent},
+    recursion::air::Block,
 };
 use hashbrown::HashMap;
 use p3_field::{AbstractField, PrimeField32};
