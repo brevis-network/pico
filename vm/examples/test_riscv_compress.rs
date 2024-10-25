@@ -106,7 +106,7 @@ fn main() {
     // }
 
     let proof_size = bincode::serialize(&proof).unwrap().len();
-    info!("PERF-proof_size-{}", proof_size);
+    info!("PERF-step=proof_size-{}", proof_size);
 
     // Verify the proof.
     info!("\n Verifying Riscv proof (at {:?})..", start.elapsed());
@@ -157,7 +157,7 @@ fn main() {
     info!("{} generated.", proof.name());
 
     let proof_size = bincode::serialize(&recursion_proof).unwrap().len();
-    info!("PERF-proof_size-{}", proof_size);
+    info!("PERF-step=proof_size-{}", proof_size);
 
     // Verify the proof.
     info!(
