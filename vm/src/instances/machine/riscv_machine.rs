@@ -18,7 +18,6 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
-        perf::{Perf, PerfContext},
         proof::{EnsembleProof, MetaProof},
         witness::ProvingWitness,
     },
@@ -76,6 +75,8 @@ where
 
     /// setup prover, verifier and keys.
     fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+        info!("PERF: machine=riscv");
+
         self.base_machine
             .setup_keys(self.config(), self.chips(), program)
     }
@@ -86,6 +87,8 @@ where
         pk: &BaseProvingKey<SC>,
         witness: &ProvingWitness<SC, C, SC, C, Vec<u8>>,
     ) -> MetaProof<SC, EnsembleProof<SC>> {
+        info!("PERF: machine=riscv");
+
         let ProvingWitness {
             program,
             stdin,
@@ -118,11 +121,8 @@ where
                 }
 
                 debug!("phase 1 generate commitments for batch records");
-                let mut perf_ctx = PerfContext::default();
-                perf_ctx.set_chunk(Some(i as u32 + 1));
-                let commitment =
-                    self.base_machine
-                        .commit(self.config(), &self.chips, record, &perf_ctx);
+                info!("PERF: chunk={}, phase=1", i + 1);
+                let commitment = self.base_machine.commit(self.config(), &self.chips, record);
 
                 challenger.observe(commitment.commitment.clone());
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
@@ -153,12 +153,10 @@ where
                 .iter()
                 .enumerate()
                 .map(|(i, record)| {
-                    let mut perf_ctx = PerfContext::default();
-                    perf_ctx.set_chunk(Some(i as u32 + 1));
+                    info!("PERF: chunk={}, phase=2", i + 1);
 
                     // generate and commit main trace
-                    self.base_machine
-                        .commit(self.config(), &self.chips, record, &perf_ctx)
+                    self.base_machine.commit(self.config(), &self.chips, record)
                 })
                 .collect::<Vec<_>>();
 
@@ -167,8 +165,7 @@ where
                 .into_iter()
                 .enumerate()
                 .map(|(i, commitment)| {
-                    let mut perf_ctx = PerfContext::default();
-                    perf_ctx.set_chunk(Some(i as u32 + 1));
+                    info!("PERF: chunk={}, phase=2", i + 1);
 
                     self.base_machine.prove_plain(
                         self.config(),
@@ -176,7 +173,6 @@ where
                         pk,
                         &mut challenger.clone(),
                         commitment,
-                        &perf_ctx,
                     )
                 })
                 .collect::<Vec<_>>();

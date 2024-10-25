@@ -16,8 +16,8 @@ use pico_vm::{
         machine::simple_machine::SimpleMachine,
     },
     machine::{
-        keys::BaseVerifyingKey, logger::setup_logger, machine::MachineBehavior, perf::Perf,
-        proof::BaseProof, witness::ProvingWitness,
+        keys::BaseVerifyingKey, logger::setup_logger, machine::MachineBehavior, proof::BaseProof,
+        witness::ProvingWitness,
     },
     primitives::consts::{MAX_NUM_PVS, RECURSION_NUM_PVS, RISCV_NUM_PVS},
     recursion::runtime::Runtime as RecursionRuntime,
@@ -248,6 +248,4 @@ fn main() {
         start.elapsed()
     );
     assert_eq!(recursion_result.is_ok(), true);
-
-    Perf::save_to_csv("test_simple_recursion_perf.csv").unwrap();
 }

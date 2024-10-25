@@ -12,6 +12,7 @@ use crate::{
 use anyhow::Result;
 use hashbrown::HashMap;
 use itertools::Itertools;
+use log::info;
 use p3_air::Air;
 use std::any::type_name;
 
@@ -64,6 +65,8 @@ where
         &self,
         program: &<C as ChipBehavior<<SC as StarkGenericConfig>::Val>>::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+        info!("PERF: machine=simple");
+
         self.base_machine
             .setup_keys(self.config(), self.chips(), program)
     }

@@ -6,7 +6,6 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::ProverConstraintFolder,
         keys::{BaseProvingKey, BaseVerifyingKey},
-        perf::{Perf, PerfContext},
         proof::{
             BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, MainTraceCommitments,
         },
@@ -125,13 +124,7 @@ where
                     });
                 let elapsed_time = begin.elapsed();
                 durations.insert(chip.name(), elapsed_time);
-                Perf::add(
-                    elapsed_time,
-                    None,
-                    Some("generate_preprocessed"),
-                    Some(&chip.name()),
-                    Some("cpu_time"),
-                );
+                info!("PERF: step=generate_preprocessed, chip={}, cpu_time={}ms", chip.name(), elapsed_time.as_millis());
                 trace
             })
             .collect::<Vec<_>>();
@@ -146,12 +139,9 @@ where
                 durations.get(&cp.0).unwrap()
             )
         }
-        Perf::add(
-            begin.elapsed(),
-            None,
-            Some("generate_preprocessed"),
-            None,
-            Some("user_time"),
+        info!(
+            "PERF: step=generate_preprocessed, user_time={}ms",
+            begin.elapsed().as_millis(),
         );
         chips_and_preprocessed
     }
@@ -167,7 +157,6 @@ where
         &self,
         chips: &[MetaChip<SC::Val, C>],
         record: &C::Record,
-        perf_ctx: &PerfContext,
     ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
         info!("generate main traces: BEGIN");
         let begin = Instant::now();
@@ -194,13 +183,7 @@ where
                     trace.values.len(),
                     elapsed_time,
                 );
-                Perf::add(
-                    elapsed_time,
-                    perf_ctx.chunk(),
-                    Some("generate_main"),
-                    Some(&chip.name()),
-                    Some("cpu_time"),
-                );
+                info!("PERF: step=generate_main, chip={}, cpu_time={}ms", chip.name(), elapsed_time.as_millis());
 
                 Some((chip.name(), trace))
             })
@@ -208,12 +191,9 @@ where
         chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
         let elapsed_time = begin.elapsed();
         info!("generate main traces: END in {:?}", elapsed_time);
-        Perf::add(
-            elapsed_time,
-            perf_ctx.chunk(),
-            Some("generate_main"),
-            None,
-            Some("user_time"),
+        info!(
+            "PERF: step=generate_main, user_time={}ms",
+            elapsed_time.as_millis(),
         );
         chips_and_main
     }
@@ -229,7 +209,6 @@ where
         config: &SC,
         record: &C::Record,
         chips_and_main: Vec<(String, RowMajorMatrix<SC::Val>)>,
-        perf_ctx: &PerfContext,
     ) -> MainTraceCommitments<SC> {
         let begin = Instant::now();
         info!("commit main: BEGIN");
@@ -261,12 +240,9 @@ where
 
         let elapsed_time = begin.elapsed();
         info!("commit main: END {:?}", elapsed_time);
-        Perf::add(
-            elapsed_time,
-            perf_ctx.chunk(),
-            Some("commit_main"),
-            None,
-            Some("user_time"),
+        info!(
+            "PERF: step=commit_main, user_time={}ms",
+            elapsed_time.as_millis(),
         );
         MainTraceCommitments {
             main_traces,
@@ -290,7 +266,6 @@ where
         pk: &BaseProvingKey<SC>,
         main_trace_commitments: &MainTraceCommitments<SC>,
         perm_challenges: &[SC::Challenge],
-        perf_ctx: &PerfContext,
     ) -> (Vec<RowMajorMatrix<SC::Challenge>>, Vec<SC::Challenge>) {
         let begin = Instant::now();
         let preprocessed_traces = ordered_chips
@@ -320,24 +295,15 @@ where
                     (permutation_trace, cumulative_sum)
                 });
 
-                Perf::add(
-                    begin.elapsed(),
-                    perf_ctx.chunk(),
-                    Some("generate_permutation"),
-                    Some(&chip.name()),
-                    Some("cpu_time"),
-                );
+                info!("PERF: step=generate_permutation, chip={}, cpu_time={}ms", chip.name(), begin.elapsed().as_millis());
 
                 result
             })
             .unzip();
 
-        Perf::add(
-            begin.elapsed(),
-            perf_ctx.chunk(),
-            Some("generate_permutation"),
-            None,
-            Some("user_time"),
+        info!(
+            "PERF: step=generate_permutation, user_time={}ms",
+            begin.elapsed().as_millis(),
         );
 
         (permutation_traces, cumulative_sums)
@@ -358,7 +324,6 @@ where
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         main_commitments: MainTraceCommitments<SC>,
-        perf_ctx: &PerfContext,
     ) -> BaseProof<SC> {
         let begin = Instant::now();
         info!("core prove - BEGIN");
@@ -400,7 +365,6 @@ where
             pk,
             &main_commitments,
             &permutation_challenges,
-            perf_ctx,
         );
 
         // commit permutation traces on main domain
@@ -507,18 +471,14 @@ where
                                     packed_perm_challenges.as_slice(),
                                     cumulative_sums.clone()[i],
                                     alpha,
-                                    &perf_ctx,
                                 )
                             })
                             .collect::<Vec<_>>()
                     });
 
-            Perf::add(
-                begin.elapsed(),
-                perf_ctx.chunk(),
-                Some("compute_quotient_values"),
-                None,
-                Some("user_time"),
+            info!(
+                "PERF: step=compute_quotient_values, user_time={}ms",
+                begin.elapsed().as_millis(),
             );
 
             quotient_values
@@ -643,12 +603,9 @@ where
 
         let elapsed_time = begin.elapsed();
         info!("core prove - END in {:?}", elapsed_time);
-        Perf::add(
-            begin.elapsed(),
-            perf_ctx.chunk(),
-            Some("core_prove"),
-            None,
-            Some("user_time"),
+        info!(
+            "PERF: step=core_prove, user_time={}ms",
+            begin.elapsed().as_millis(),
         );
         // final base proof
         BaseProof::<SC> {

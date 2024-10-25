@@ -5,14 +5,13 @@ use crate::{
         folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
         lookup::VirtualPairLookup,
-        perf::{Perf, PerfContext},
         proof::BaseProof,
     },
 };
 use core::iter;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::debug;
+use log::info;
 use p3_air::{Air, PairCol};
 use p3_commit::PolynomialSpace;
 use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, PackedValue, Powers};
@@ -118,7 +117,6 @@ pub fn compute_quotient_values<'a, SC, C, Mat>(
     perm_challenges: &'a [PackedChallenge<SC>],
     cumulative_sum: SC::Challenge,
     alpha: SC::Challenge,
-    perf_ctx: &PerfContext,
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
@@ -238,12 +236,10 @@ where
             .collect()
     });
 
-    Perf::add(
-        begin_time.elapsed(),
-        perf_ctx.chunk(),
-        Some("compute_quotient_values"),
-        Some(&chip.name()),
-        Some("cpu_time"),
+    info!(
+        "PERF: step=compute_quotient_values, chip={}, cpu_time={}ms",
+        chip.name(),
+        begin_time.elapsed().as_millis(),
     );
 
     quotient_values

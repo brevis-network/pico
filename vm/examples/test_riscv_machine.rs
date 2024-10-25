@@ -29,7 +29,6 @@ use pico_vm::{
         chip::{ChipBehavior, MetaChip},
         logger::setup_logger,
         machine::MachineBehavior,
-        perf::Perf,
         witness::ProvingWitness,
     },
     primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
@@ -89,6 +88,4 @@ fn main() {
         start.elapsed()
     );
     assert_eq!(result.is_ok(), true);
-
-    Perf::save_to_csv("test_riscv_machine_perf.csv").unwrap();
 }
