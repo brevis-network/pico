@@ -65,7 +65,6 @@ fn main() {
 
     // Create a new machine based on config and chips
     let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, chips);
-    info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.
     info!("\n Setup machine (at {:?})..", start.elapsed());
@@ -80,10 +79,7 @@ fn main() {
     // Generate the proof.
     info!("\n Generating proof (at {:?})..", start.elapsed());
     let proof = simple_machine.prove(&pk, &witness);
-    info!("{} generated.", proof.name());
 
-    let proof_size = bincode::serialize(&proof).unwrap().len();
-    info!("Proof size: {}", proof_size);
     debug!(
         "|- Commitment size: {}",
         bincode::serialize(&proof.proof.proof[0].commitments)

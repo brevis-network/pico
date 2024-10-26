@@ -66,9 +66,18 @@ where
         program: &<C as ChipBehavior<<SC as StarkGenericConfig>::Val>>::Program,
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         info!("PERF-machine=simple");
+        let begin = Instant::now();
 
-        self.base_machine
-            .setup_keys(self.config(), self.chips(), program)
+        let (pk, vk) = self
+            .base_machine
+            .setup_keys(self.config(), self.chips(), program);
+
+        info!(
+            "PERF-step=setup_keys-user_time={}",
+            begin.elapsed().as_millis(),
+        );
+
+        (pk, vk)
     }
 
     /// Get the prover of the machine.
@@ -77,11 +86,18 @@ where
         pk: &BaseProvingKey<SC>,
         witness: &ProvingWitness<SC, C, SC, C, Vec<u8>>,
     ) -> MetaProof<SC, EnsembleProof<SC>> {
+        info!("PERF-machine=simple");
+        let begin = Instant::now();
+
         let proofs =
             self.base_machine
                 .prove_ensemble(self.config(), self.chips(), pk, witness.records());
 
-        MetaProof::new(self.config(), EnsembleProof::new(proofs))
+        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
+
+        let proof = MetaProof::new(self.config(), EnsembleProof::new(proofs));
+
+        proof
     }
 
     /// Verify the proof.
@@ -91,6 +107,7 @@ where
         proof: &MetaProof<SC, EnsembleProof<SC>>,
     ) -> Result<()> {
         // panic if proofs is empty
+        info!("PERF-machine=simple");
         let begin = Instant::now();
         if proof.proofs().is_empty() {
             panic!("proofs is empty");

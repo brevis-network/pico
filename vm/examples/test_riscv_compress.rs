@@ -56,8 +56,6 @@ use std::{
     time::Instant,
 };
 
-const TEST_BATCH_SIZE: usize = 100;
-
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
@@ -98,15 +96,6 @@ fn main() {
     // Generate the proof.
     info!("\n Generating proof (at {:?})..", start.elapsed());
     let proof = riscv_machine.prove(&pk, &witness);
-    info!("{} generated.", proof.name());
-
-    // for each_proof in proof.proofs() {
-    //     let public_values: &PublicValues<Word<_>, _> = each_proof.public_values.as_slice().borrow();
-    //     info!("public values: {:?}", public_values);
-    // }
-
-    let proof_size = bincode::serialize(&proof).unwrap().len();
-    info!("PERF-step=proof_size-{}", proof_size);
 
     // Verify the proof.
     info!("\n Verifying Riscv proof (at {:?})..", start.elapsed());
@@ -154,10 +143,6 @@ fn main() {
     // Generate the proof.
     info!("\n Generating recursion proof (at {:?})..", start.elapsed());
     let recursion_proof = recursion_machine.prove(&recursion_pk, &recursion_witness);
-    info!("{} generated.", proof.name());
-
-    let proof_size = bincode::serialize(&recursion_proof).unwrap().len();
-    info!("PERF-step=proof_size-{}", proof_size);
 
     // Verify the proof.
     info!(

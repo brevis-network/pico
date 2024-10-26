@@ -207,8 +207,9 @@ where
         record: &C::Record,
         chips_and_main: Vec<(String, RowMajorMatrix<SC::Val>)>,
     ) -> MainTraceCommitments<SC> {
-        let begin = Instant::now();
         info!("commit main: BEGIN");
+        let begin = Instant::now();
+
         let pcs = config.pcs();
         // todo: optimize in the future
         let domains_and_traces = chips_and_main
@@ -265,6 +266,7 @@ where
         perm_challenges: &[SC::Challenge],
     ) -> (Vec<RowMajorMatrix<SC::Challenge>>, Vec<SC::Challenge>) {
         let begin = Instant::now();
+
         let preprocessed_traces = ordered_chips
             .iter()
             .map(|chip| {
@@ -356,7 +358,6 @@ where
             permutation_challenges.push(challenger.sample_ext_element());
         }
 
-        debug!("core prove - generate permutation");
         let (mut permutation_traces, mut cumulative_sums) = self.generate_permutation(
             &ordered_chips,
             pk,
@@ -366,6 +367,8 @@ where
 
         // commit permutation traces on main domain
         debug!("core prove - commit permutation traces on main domain");
+        let begin_commit_permutation = Instant::now();
+
         let perm_domain = permutation_traces
             .into_iter()
             .zip(main_domains.iter())
@@ -376,20 +379,18 @@ where
             .collect::<Vec<_>>();
 
         let pcs = config.pcs();
-        let pcs_commit_permutation_start = Instant::now();
         let (permutation_commit, permutation_data) = pcs.commit(perm_domain);
-        debug!(
-            "pcs commit permutation trace in {:?}",
-            pcs_commit_permutation_start.elapsed()
+
+        info!(
+            "PERF-step=commit_permutation-user_time={}",
+            begin_commit_permutation.elapsed().as_millis(),
         );
 
         challenger.observe(permutation_commit.clone());
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
 
-        // Handle quotient
-        // get quotient degrees
-        debug!("core prove - handle quotient");
+        /// Quotient
         let log_quotient_degrees = ordered_chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
@@ -399,7 +400,7 @@ where
             .map(|log_degree| 1 << log_degree)
             .collect::<Vec<_>>();
 
-        // quotient domains and values
+        // Compute quotient values
         debug!("core prove - handle quotient - commit domains and values");
         let quotient_domains = main_domains
             .iter()
@@ -481,6 +482,9 @@ where
             quotient_values
         };
 
+        // Commit quotient
+        let begin_commit_quotient = Instant::now();
+
         let quotient_domains_and_values = quotient_domains
             .into_iter()
             .zip_eq(quotient_values)
@@ -493,17 +497,18 @@ where
             })
             .collect::<Vec<_>>();
 
-        let pcs_commit_quotient_start = Instant::now();
         let (quotient_commit, quotient_data) = pcs.commit(quotient_domains_and_values);
-        debug!(
-            "pcs commit quotient trace in {:?}",
-            pcs_commit_quotient_start.elapsed()
+        info!(
+            "PERF-step=commit_quotient-user_time={}",
+            begin_commit_quotient.elapsed().as_millis(),
         );
 
         challenger.observe(quotient_commit.clone());
 
         // quotient argument
         debug!("core prove - handle quotient - open");
+        let begin_open = Instant::now();
+
         let zeta: SC::Challenge = challenger.sample_ext_element();
 
         let preprocessed_opening_points = pk
@@ -525,7 +530,6 @@ where
             .map(|_| vec![zeta])
             .collect::<Vec<_>>();
 
-        let begin_open = Instant::now();
         let (opened_values, opening_proof) = pcs.open(
             vec![
                 (&pk.preprocessed_prover_data, preprocessed_opening_points),
@@ -534,10 +538,6 @@ where
                 (&quotient_data, quotient_opening_points),
             ],
             challenger,
-        );
-        info!(
-            "PERF-step=open-user_time={}",
-            begin_open.elapsed().as_millis(),
         );
 
         let [preprocessed_values, main_values, permutation_values, mut quotient_values] =
@@ -603,8 +603,11 @@ where
             )
             .collect::<Vec<_>>();
 
-        let elapsed_time = begin.elapsed();
-        info!("core prove - END in {:?}", elapsed_time);
+        info!(
+            "PERF-step=open-user_time={}",
+            begin_open.elapsed().as_millis(),
+        );
+
         info!(
             "PERF-step=core_prove-user_time={}",
             begin.elapsed().as_millis(),

@@ -140,7 +140,6 @@ fn main() {
     // Generate the proof.
     info!("\n Generating proof..");
     let proof = simple_machine.prove(&pk, &witness);
-    info!("{} generated.", proof.name());
 
     // Verify the proof.
     let result = simple_machine.verify(&vk, &proof);

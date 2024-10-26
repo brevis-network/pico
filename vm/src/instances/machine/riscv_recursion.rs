@@ -113,9 +113,18 @@ where
         program: &C::Program,
     ) -> (BaseProvingKey<RecursionSC>, BaseVerifyingKey<RecursionSC>) {
         info!("PERF-machine=recursion");
+        let begin = Instant::now();
 
-        self.base_machine
-            .setup_keys(self.config(), self.chips(), program)
+        let (pk, vk) = self
+            .base_machine
+            .setup_keys(self.config(), self.chips(), program);
+
+        info!(
+            "PERF-step=setup_keys-user_time={}",
+            begin.elapsed().as_millis()
+        );
+
+        (pk, vk)
     }
 
     /// Get the prover of the machine.
@@ -124,13 +133,14 @@ where
         pk: &BaseProvingKey<RecursionSC>,
         witness: &ProvingWitness<RiscvSC, NC, RecursionSC, C, RiscvRecursionStdin<RiscvSC, NC>>,
     ) -> MetaProof<RecursionSC, EnsembleProof<RecursionSC>> {
-        info!("challenger observe pk");
+        info!("PERF-machine=recursion");
+        let begin = Instant::now();
+
         let mut challenger = self.config().challenger();
         pk.observed_by(&mut challenger);
 
         // First phase
         // Generate batch records and commit to challenger
-        info!("phase 1 - BEGIN");
 
         let mut chunk = 1;
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
@@ -138,7 +148,6 @@ where
             let (record, done) = recursion_emulator.next();
             let mut records = vec![record];
 
-            debug!("phase 1 complement records");
             // read slice of records and complement them
             self.complement_record(records.as_mut_slice());
 
@@ -148,7 +157,6 @@ where
                 debug!("{:<25}: {}", key, value);
             }
 
-            debug!("phase 1 generate commitments for batch records");
             info!("PERF-chunk={chunk}-phase=1");
 
             let commitment = self
@@ -165,11 +173,8 @@ where
             chunk += 1;
         }
 
-        info!("phase 1 - END");
-
         // Second phase
         // Generate batch records and generate proofs
-        info!("phase 2 - BEGIN");
 
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
         let mut all_proofs = vec![];
@@ -178,16 +183,13 @@ where
             let (record, done) = recursion_emulator.next();
             let mut records = vec![record];
 
-            debug!("phase 2 complement records");
             self.complement_record(records.as_mut_slice());
 
-            info!("phase 2 generate commitments for batch records");
             info!("PERF-chunk={chunk}-phase=2");
             let commitment = self
                 .base_machine
                 .commit(self.config(), &self.chips, &records[0]);
 
-            info!("phase 2 prove single record");
             let proof = self.base_machine.prove_plain(
                 self.config(),
                 &self.chips,
@@ -209,7 +211,11 @@ where
         info!("phase 2 - END");
 
         // construct meta proof
-        MetaProof::new(self.config(), EnsembleProof::new(all_proofs))
+        let proof = MetaProof::new(self.config(), EnsembleProof::new(all_proofs));
+        let proof_size = bincode::serialize(&proof).unwrap().len();
+        info!("PERF-step=proof_size-{}", proof_size);
+
+        proof
     }
 
     /// Verify the proof.
@@ -218,6 +224,7 @@ where
         vk: &BaseVerifyingKey<RecursionSC>,
         proof: &MetaProof<RecursionSC, EnsembleProof<RecursionSC>>,
     ) -> Result<()> {
+        info!("PERF-machine=recursion");
         let begin = Instant::now();
 
         for each_proof in proof.proofs().iter() {

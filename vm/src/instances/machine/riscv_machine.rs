@@ -24,9 +24,13 @@ use crate::{
     primitives::consts::MAX_LOG_CHUNK_SIZE,
 };
 
-use crate::emulator::emulator::EmulatorType;
+use crate::{
+    configs::config::Val, emulator::emulator::EmulatorType,
+    instances::configs::riscv_config::StarkConfig as RiscvSC,
+};
 use anyhow::Result;
 use log::{debug, info};
+use num::{one, zero};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
@@ -46,20 +50,20 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<SC, C> MachineBehavior<SC, C, SC, C, EnsembleProof<SC>, Vec<u8>> for RiscvMachine<SC, C>
+impl<C> MachineBehavior<RiscvSC, C, RiscvSC, C, EnsembleProof<RiscvSC>, Vec<u8>>
+    for RiscvMachine<RiscvSC, C>
 where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val, Program = Program, Record = EmulationRecord>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
+        + for<'a> Air<ProverConstraintFolder<'a, RiscvSC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, RiscvSC>>,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!("Riscv Machine<{}>", type_name::<SC>())
+        format!("Riscv Machine <{}>", type_name::<RiscvSC>())
     }
 
     /// Get the configuration of the machine.
-    fn config(&self) -> &SC {
+    fn config(&self) -> &RiscvSC {
         &self.config
     }
 
@@ -69,12 +73,15 @@ where
     }
 
     /// Get the chips of the machine.
-    fn chips(&self) -> &[MetaChip<SC::Val, C>] {
+    fn chips(&self) -> &[MetaChip<Val<RiscvSC>, C>] {
         &self.chips
     }
 
     /// setup prover, verifier and keys.
-    fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
+    fn setup_keys(
+        &self,
+        program: &C::Program,
+    ) -> (BaseProvingKey<RiscvSC>, BaseVerifyingKey<RiscvSC>) {
         info!("PERF-machine=riscv");
 
         let begin = Instant::now();
@@ -93,10 +100,11 @@ where
     /// Get the prover of the machine.
     fn prove(
         &self,
-        pk: &BaseProvingKey<SC>,
-        witness: &ProvingWitness<SC, C, SC, C, Vec<u8>>,
-    ) -> MetaProof<SC, EnsembleProof<SC>> {
+        pk: &BaseProvingKey<RiscvSC>,
+        witness: &ProvingWitness<RiscvSC, C, RiscvSC, C, Vec<u8>>,
+    ) -> MetaProof<RiscvSC, EnsembleProof<RiscvSC>> {
         info!("PERF-machine=riscv");
+        let begin = Instant::now();
 
         let ProvingWitness {
             program,
@@ -106,20 +114,17 @@ where
             ..
         } = witness;
 
-        info!("challenger observe pk");
         let mut challenger = self.config().challenger();
         pk.observed_by(&mut challenger);
 
         // First phase
         // Generate batch records and commit to challenger
-        info!("phase 1 - BEGIN");
 
+        let mut curr_batch = 0;
         let mut emulator = MetaEmulator::setup_riscv(witness, opts.unwrap().chunk_batch_size);
-
         loop {
             let (batch_records, done) = emulator.next_batch();
 
-            debug!("phase 1 complement records");
             self.complement_record(batch_records);
 
             for (i, record) in batch_records.iter().enumerate() {
@@ -129,8 +134,10 @@ where
                     debug!("{:<25}: {}", key, value);
                 }
 
-                debug!("phase 1 generate commitments for batch records");
-                info!("PERF-chunk={}-phase=1", i + 1);
+                info!(
+                    "PERF-chunk={}-phase=1",
+                    curr_batch * opts.unwrap().chunk_batch_size + i + 1
+                );
                 let commitment = self.base_machine.commit(self.config(), &self.chips, record);
 
                 challenger.observe(commitment.commitment.clone());
@@ -140,13 +147,14 @@ where
             if done {
                 break;
             }
+
+            curr_batch += 1
         }
-        info!("phase 1 - END");
 
         // Second phase
         // Generate batch records and generate proofs
-        info!("phase 2 - BEGIN");
 
+        let mut chunk = 1;
         let mut emulator = MetaEmulator::setup_riscv(witness, opts.unwrap().chunk_batch_size);
 
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
@@ -154,27 +162,23 @@ where
         loop {
             let (batch_records, done) = emulator.next_batch();
 
-            debug!("phase 2 complement records");
             self.complement_record(batch_records);
 
-            info!("phase 2 generate commitments for batch records");
             let batch_main_commitments = batch_records
                 .iter()
                 .enumerate()
                 .map(|(i, record)| {
-                    info!("PERF-chunk={}-phase=2", i + 1);
-
+                    info!("PERF-chunk={chunk}-phase=2");
                     // generate and commit main trace
                     self.base_machine.commit(self.config(), &self.chips, record)
                 })
                 .collect::<Vec<_>>();
 
-            info!("phase 2 prove batch records");
             let batch_proofs = batch_main_commitments
                 .into_iter()
                 .enumerate()
                 .map(|(i, commitment)| {
-                    info!("PERF-chunk={}-phase=2", i + 1);
+                    info!("PERF-chunk={chunk}-phase=2");
 
                     self.base_machine.prove_plain(
                         self.config(),
@@ -192,27 +196,34 @@ where
             if done {
                 break;
             }
+
+            chunk += 1;
         }
-        info!("phase 2 - END");
+        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        MetaProof::new(self.config(), EnsembleProof::new(all_proofs))
+        let proof = MetaProof::new(self.config(), EnsembleProof::new(all_proofs));
+        let proof_size = bincode::serialize(&proof).unwrap().len();
+        info!("PERF-step=proof_size-{}", proof_size);
+
+        proof
     }
 
     /// Verify the proof.
     fn verify(
         &self,
-        vk: &BaseVerifyingKey<SC>,
-        proof: &MetaProof<SC, EnsembleProof<SC>>,
+        vk: &BaseVerifyingKey<RiscvSC>,
+        proof: &MetaProof<RiscvSC, EnsembleProof<RiscvSC>>,
     ) -> Result<()> {
-        // initialize bookkeeping
-        let mut proof_count = <SC::Val>::zero();
-        let mut execution_proof_count = <SC::Val>::zero();
-        let mut prev_next_pc = vk.pc_start;
-        let mut prev_last_initialize_addr_bits = [<SC::Val>::zero(); 32];
-        let mut prev_last_finalize_addr_bits = [<SC::Val>::zero(); 32];
-
+        info!("PERF-machine=riscv");
         let begin = Instant::now();
+
+        // initialize bookkeeping
+        let mut proof_count = <Val<RiscvSC>>::zero();
+        let mut execution_proof_count = <Val<RiscvSC>>::zero();
+        let mut prev_next_pc = vk.pc_start;
+        let mut prev_last_initialize_addr_bits = [<Val<RiscvSC>>::zero(); 32];
+        let mut prev_last_finalize_addr_bits = [<Val<RiscvSC>>::zero(); 32];
 
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -226,15 +237,15 @@ where
             }
 
             // conditional constraints
-            proof_count += <SC::Val>::one();
+            proof_count += <Val<RiscvSC>>::one();
             if each_proof.includes_chip("Cpu") {
-                execution_proof_count += <SC::Val>::one();
+                execution_proof_count += <Val<RiscvSC>>::one();
 
                 if each_proof.log_main_degree() > MAX_LOG_CHUNK_SIZE as usize {
                     panic!("Cpu log degree too large");
                 }
 
-                if public_values.start_pc == <SC::Val>::zero() {
+                if public_values.start_pc == <Val<RiscvSC>>::zero() {
                     panic!("First proof start_pc is zero");
                 }
             } else {
@@ -259,7 +270,7 @@ where
 
             // ending constraints
             if i == proof.proofs().len() - 1 {
-                if public_values.next_pc != <SC::Val>::zero() {
+                if public_values.next_pc != <Val<RiscvSC>>::zero() {
                     panic!("Last proof next_pc is not zero");
                 }
             }
@@ -274,7 +285,7 @@ where
             if public_values.execution_chunk != execution_proof_count {
                 panic!("Execution chunk number mismatch");
             }
-            if public_values.exit_code != <SC::Val>::zero() {
+            if public_values.exit_code != <Val<RiscvSC>>::zero() {
                 panic!("Exit code is not zero");
             }
             if public_values.previous_initialize_addr_bits != prev_last_initialize_addr_bits {

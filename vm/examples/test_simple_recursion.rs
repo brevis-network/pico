@@ -107,7 +107,6 @@ fn main() {
 
     // Create a new machine based on config and chips
     let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, fib_chips);
-    info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.
     info!("\n Setup machine (at {:?})..", start.elapsed());
@@ -123,8 +122,6 @@ fn main() {
     info!("\n Generating proof (at {:?})..", start.elapsed());
     let proof = simple_machine.prove(&pk, &witness);
     let base_proof = proof.proofs()[0].clone();
-    let base_proof_size = bincode::serialize(&base_proof).unwrap().len();
-    info!("base_proof_size {}", base_proof_size);
     info!("{} generated.", proof.name());
 
     // Verify the proof.
@@ -154,7 +151,7 @@ fn main() {
         &mut reconstruct_challenger,
         &vk,
         &mut base_challenger,
-        base_proof,
+        base_proof.clone(),
     );
 
     // Execute the runtime.

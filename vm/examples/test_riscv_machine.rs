@@ -57,7 +57,6 @@ fn main() {
 
     // Create a new machine based on config and chips
     let riscv_machine = RiscvMachine::new(config, RISCV_NUM_PVS, chips);
-    info!("{} created.", riscv_machine.name());
 
     // Setup machine prover, verifier, pk and vk.
     info!("\n Setup machine (at {:?})..", start.elapsed());
@@ -74,10 +73,6 @@ fn main() {
     // Generate the proof.
     info!("\n Generating proof (at {:?})..", start.elapsed());
     let proof = riscv_machine.prove(&pk, &witness);
-    info!("{} generated.", proof.name());
-
-    let proof_size = bincode::serialize(&proof).unwrap().len();
-    info!("Proof size: {}", proof_size);
 
     // Verify the proof.
     info!("\n Verifying proof (at {:?})..", start.elapsed());

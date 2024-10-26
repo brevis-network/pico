@@ -394,8 +394,6 @@ impl RiscvEmulator {
     pub fn emulate_to_batch(&mut self) -> Result<bool, EmulationError> {
         self.batch_records.clear();
 
-        info!("emulate_to_batch - BEGIN");
-
         let begin = Instant::now();
 
         // Get the current chunk.
@@ -468,8 +466,6 @@ impl RiscvEmulator {
             }
             record.public_values = self.public_values_buffer.clone();
         }
-
-        info!("emulate_to_batch - END in {:?}", begin.elapsed());
 
         Ok(done)
     }
