@@ -154,7 +154,7 @@ where
         // Second phase
         // Generate batch records and generate proofs
 
-        let mut chunk = 1;
+        let mut curr_batch = 0;
         let mut emulator = MetaEmulator::setup_riscv(witness, opts.unwrap().chunk_batch_size);
 
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
@@ -168,7 +168,10 @@ where
                 .iter()
                 .enumerate()
                 .map(|(i, record)| {
-                    info!("PERF-chunk={chunk}-phase=2");
+                    info!(
+                        "PERF-chunk={}-phase=2",
+                        curr_batch * opts.unwrap().chunk_batch_size + i + 1,
+                    );
                     // generate and commit main trace
                     self.base_machine.commit(self.config(), &self.chips, record)
                 })
@@ -178,7 +181,10 @@ where
                 .into_iter()
                 .enumerate()
                 .map(|(i, commitment)| {
-                    info!("PERF-chunk={chunk}-phase=2");
+                    info!(
+                        "PERF-chunk={}-phase=2",
+                        curr_batch * opts.unwrap().chunk_batch_size + i + 1,
+                    );
 
                     self.base_machine.prove_plain(
                         self.config(),
@@ -197,7 +203,7 @@ where
                 break;
             }
 
-            chunk += 1;
+            curr_batch += 1;
         }
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 

@@ -208,7 +208,7 @@ where
             chunk += 1;
         }
 
-        info!("phase 2 - END");
+        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
         let proof = MetaProof::new(self.config(), EnsembleProof::new(all_proofs));
