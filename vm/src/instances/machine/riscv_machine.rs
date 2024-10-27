@@ -120,7 +120,6 @@ where
         // First phase
         // Generate batch records and commit to challenger
 
-        let mut curr_batch = 0;
         let mut emulator = MetaEmulator::setup_riscv(witness, opts.unwrap().chunk_batch_size);
         loop {
             let (batch_records, done) = emulator.next_batch();
@@ -134,10 +133,7 @@ where
                     debug!("{:<25}: {}", key, value);
                 }
 
-                info!(
-                    "PERF-chunk={}-phase=1",
-                    curr_batch * opts.unwrap().chunk_batch_size + i + 1
-                );
+                info!("PERF-phase=1-chunk={}", record.chunk_index(),);
                 let commitment = self.base_machine.commit(self.config(), &self.chips, record);
 
                 challenger.observe(commitment.commitment.clone());
@@ -147,14 +143,11 @@ where
             if done {
                 break;
             }
-
-            curr_batch += 1
         }
 
         // Second phase
         // Generate batch records and generate proofs
 
-        let mut curr_batch = 0;
         let mut emulator = MetaEmulator::setup_riscv(witness, opts.unwrap().chunk_batch_size);
 
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
@@ -168,10 +161,7 @@ where
                 .iter()
                 .enumerate()
                 .map(|(i, record)| {
-                    info!(
-                        "PERF-chunk={}-phase=2",
-                        curr_batch * opts.unwrap().chunk_batch_size + i + 1,
-                    );
+                    info!("PERF-phase=2-chunk={}", record.chunk_index(),);
                     // generate and commit main trace
                     self.base_machine.commit(self.config(), &self.chips, record)
                 })
@@ -181,10 +171,7 @@ where
                 .into_iter()
                 .enumerate()
                 .map(|(i, commitment)| {
-                    info!(
-                        "PERF-chunk={}-phase=2",
-                        curr_batch * opts.unwrap().chunk_batch_size + i + 1,
-                    );
+                    info!("PERF-phase=2-chunk={}", batch_records[i].chunk_index(),);
 
                     self.base_machine.prove_plain(
                         self.config(),
@@ -192,6 +179,7 @@ where
                         pk,
                         &mut challenger.clone(),
                         commitment,
+                        batch_records[i].chunk_index(),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -202,8 +190,6 @@ where
             if done {
                 break;
             }
-
-            curr_batch += 1;
         }
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 

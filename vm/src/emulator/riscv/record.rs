@@ -225,6 +225,10 @@ impl RecordBehavior for EmulationRecord {
     fn public_values<F: AbstractField>(&self) -> Vec<F> {
         self.public_values.to_vec()
     }
+
+    fn chunk_index(&self) -> usize {
+        self.public_values.chunk as usize
+    }
 }
 
 #[derive(Debug, Copy, Clone, Default)]

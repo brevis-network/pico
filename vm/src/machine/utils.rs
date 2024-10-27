@@ -123,8 +123,6 @@ where
     C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
     Mat: Matrix<SC::Val> + Sync,
 {
-    let begin_time = Instant::now();
-
     let quotient_size = quotient_domain.size();
     let preprocessed_width = preprocessed_on_quotient_domain.width();
     let main_width = main_trace_on_quotient_domain.width();
@@ -235,12 +233,6 @@ where
             })
             .collect()
     });
-
-    info!(
-        "PERF-step=compute_quotient_values-chip={}-cpu_time={}",
-        chip.name(),
-        begin_time.elapsed().as_millis(),
-    );
 
     quotient_values
 }

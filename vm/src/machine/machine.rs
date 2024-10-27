@@ -154,8 +154,14 @@ where
         challenger.observe(main_commitment.commitment.clone());
         challenger.observe_slice(&main_commitment.public_values[..self.num_public_values]);
 
-        self.prover
-            .prove(config, chips, pk, &mut challenger, main_commitment)
+        self.prover.prove(
+            config,
+            chips,
+            pk,
+            &mut challenger,
+            main_commitment,
+            record.chunk_index(),
+        )
     }
 
     /// prove a batch of records
@@ -168,10 +174,8 @@ where
     ) -> Vec<BaseProof<SC>> {
         let mut challenger = config.challenger();
         // observe preprocessed
-        info!("challenger observe preprocessed");
         pk.observed_by(&mut challenger);
 
-        info!("generate commitments for {} records", records.len());
         let main_commitments = records
             .iter()
             .enumerate()
@@ -189,15 +193,20 @@ where
             })
             .collect::<Vec<_>>();
 
-        info!("iterate {} commitments and prove", main_commitments.len());
         main_commitments
             .into_iter()
             .enumerate()
             .map(|(i, commitment)| {
                 info!("PERF-chunk={}", i + 1);
 
-                self.prover
-                    .prove(config, chips, pk, &mut challenger.clone(), commitment)
+                self.prover.prove(
+                    config,
+                    chips,
+                    pk,
+                    &mut challenger.clone(),
+                    commitment,
+                    records[i].chunk_index(),
+                )
             })
             .collect::<Vec<_>>()
     }
@@ -210,8 +219,10 @@ where
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         commitment: MainTraceCommitments<SC>,
+        chunk_index: usize,
     ) -> BaseProof<SC> {
-        self.prover.prove(config, chips, pk, challenger, commitment)
+        self.prover
+            .prove(config, chips, pk, challenger, commitment, chunk_index)
     }
 
     /// Verify a single BaseProof e2e
@@ -258,13 +269,11 @@ where
 
         // verify all proofs
         for (i, proof) in proofs.into_iter().enumerate() {
-            debug!("Verifying proof {}", i);
             self.verifier
                 .verify(config, chips, vk, &mut challenger.clone(), proof)?;
         }
 
         // compute sum of each proof.cumulative_sum() and add them up and judge if it is zero
-        debug!("Verifying lookup");
         let sum = proofs
             .iter()
             .map(|proof| proof.cumulative_sum())
