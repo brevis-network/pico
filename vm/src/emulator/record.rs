@@ -14,4 +14,6 @@ pub trait RecordBehavior: Default + Sync {
 
     /// Registers the nonces of the record.
     fn register_nonces(&mut self) {}
+
+    fn chunk_index(&self) -> usize;
 }

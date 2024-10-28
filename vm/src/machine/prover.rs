@@ -155,7 +155,6 @@ where
         chips: &[MetaChip<SC::Val, C>],
         record: &C::Record,
     ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
-        info!("generate main traces: BEGIN");
         let begin = Instant::now();
 
         let parent_span = Span::current();
@@ -180,16 +179,21 @@ where
                     trace.values.len(),
                     elapsed_time,
                 );
-                info!("PERF-step=generate_main-chip={}-cpu_time={}", chip.name(), elapsed_time.as_millis());
+                info!(
+                    "PERF-step=generate_main-chunk={}-chip={}-cpu_time={}",
+                    record.chunk_index(),
+                    chip.name(),
+                    elapsed_time.as_millis(),
+                );
 
                 Some((chip.name(), trace))
             })
             .collect::<Vec<_>>();
         chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
         let elapsed_time = begin.elapsed();
-        info!("generate main traces: END in {:?}", elapsed_time);
         info!(
-            "PERF-step=generate_main-user_time={}",
+            "PERF-step=generate_main-chunk={}-user_time={}",
+            record.chunk_index(),
             elapsed_time.as_millis(),
         );
         chips_and_main
@@ -207,7 +211,6 @@ where
         record: &C::Record,
         chips_and_main: Vec<(String, RowMajorMatrix<SC::Val>)>,
     ) -> MainTraceCommitments<SC> {
-        info!("commit main: BEGIN");
         let begin = Instant::now();
 
         let pcs = config.pcs();
@@ -218,12 +221,7 @@ where
             .map(|(name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
             .collect::<Vec<_>>();
 
-        let pcs_commit_main_start = Instant::now();
         let (commitment, data) = pcs.commit(domains_and_traces);
-        debug!(
-            "pcs commit main trace in {:?}",
-            pcs_commit_main_start.elapsed()
-        );
 
         let main_chip_ordering = chips_and_main
             .iter()
@@ -236,11 +234,10 @@ where
             .map(|(_, trace)| trace)
             .collect::<Vec<_>>();
 
-        let elapsed_time = begin.elapsed();
-        info!("commit main: END {:?}", elapsed_time);
         info!(
-            "PERF-step=commit_main-user_time={}",
-            elapsed_time.as_millis(),
+            "PERF-step=commit_main-chunk={}-user_time={}",
+            record.chunk_index(),
+            begin.elapsed().as_millis(),
         );
         MainTraceCommitments {
             main_traces,
@@ -264,6 +261,7 @@ where
         pk: &BaseProvingKey<SC>,
         main_trace_commitments: &MainTraceCommitments<SC>,
         perm_challenges: &[SC::Challenge],
+        chunk_index: usize,
     ) -> (Vec<RowMajorMatrix<SC::Challenge>>, Vec<SC::Challenge>) {
         let begin = Instant::now();
 
@@ -294,14 +292,20 @@ where
                     (permutation_trace, cumulative_sum)
                 });
 
-                info!("PERF-step=generate_permutation-chip={}-cpu_time={}", chip.name(), begin.elapsed().as_millis());
+                info!(
+                    "PERF-step=generate_permutation-chunk={}-chip={}-cpu_time={}",
+                    chunk_index,
+                    chip.name(),
+                    begin.elapsed().as_millis()
+                );
 
                 result
             })
             .unzip();
 
         info!(
-            "PERF-step=generate_permutation-user_time={}",
+            "PERF-step=generate_permutation-chunk={}-user_time={}",
+            chunk_index,
             begin.elapsed().as_millis(),
         );
 
@@ -323,9 +327,10 @@ where
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         main_commitments: MainTraceCommitments<SC>,
+        chunk_index: usize,
     ) -> BaseProof<SC> {
         let begin = Instant::now();
-        info!("core prove - BEGIN");
+
         // setup pcs
         let pcs = config.pcs();
 
@@ -363,6 +368,7 @@ where
             pk,
             &main_commitments,
             &permutation_challenges,
+            chunk_index,
         );
 
         // commit permutation traces on main domain
@@ -382,7 +388,8 @@ where
         let (permutation_commit, permutation_data) = pcs.commit(perm_domain);
 
         info!(
-            "PERF-step=commit_permutation-user_time={}",
+            "PERF-step=commit_permutation-chunk={}-user_time={}",
+            chunk_index,
             begin_commit_permutation.elapsed().as_millis(),
         );
 
@@ -401,7 +408,6 @@ where
             .collect::<Vec<_>>();
 
         // Compute quotient values
-        debug!("core prove - handle quotient - commit domains and values");
         let quotient_domains = main_domains
             .iter()
             .zip_eq(log_main_degrees.iter())
@@ -420,6 +426,9 @@ where
                             .iter()
                             .enumerate()
                             .map(|(i, quotient_domain)| {
+
+                                let begin_compute_quotient = Instant::now();
+
                                 let pre_trace_on_quotient_domains = pk
                                     .preprocessed_chip_ordering
                                     .get(&ordered_chips[i].name())
@@ -458,7 +467,7 @@ where
                                     .map(|c| PackedChallenge::<SC>::from_f(*c))
                                     .collect::<Vec<_>>();
 
-                                compute_quotient_values(
+                                let qv = compute_quotient_values(
                                     &ordered_chips[i],
                                     &main_commitments.public_values,
                                     main_domains[i],
@@ -469,13 +478,23 @@ where
                                     packed_perm_challenges.as_slice(),
                                     cumulative_sums.clone()[i],
                                     alpha,
-                                )
+                                );
+
+                                info!(
+                                    "PERF-step=compute_quotient_values-chunk={}-chip={}-cpu_time={}",
+                                    chunk_index,
+                                    ordered_chips[i].name(),
+                                    begin_compute_quotient.elapsed().as_millis(),
+                                );
+
+                                qv
                             })
                             .collect::<Vec<_>>()
                     });
 
             info!(
-                "PERF-step=compute_quotient_values-user_time={}",
+                "PERF-step=compute_quotient_values-chunk={}-user_time={}",
+                chunk_index,
                 begin.elapsed().as_millis(),
             );
 
@@ -499,14 +518,14 @@ where
 
         let (quotient_commit, quotient_data) = pcs.commit(quotient_domains_and_values);
         info!(
-            "PERF-step=commit_quotient-user_time={}",
+            "PERF-step=commit_quotient-chunk={}-user_time={}",
+            chunk_index,
             begin_commit_quotient.elapsed().as_millis(),
         );
 
         challenger.observe(quotient_commit.clone());
 
         // quotient argument
-        debug!("core prove - handle quotient - open");
         let begin_open = Instant::now();
 
         let zeta: SC::Challenge = challenger.sample_ext_element();
@@ -604,12 +623,14 @@ where
             .collect::<Vec<_>>();
 
         info!(
-            "PERF-step=open-user_time={}",
+            "PERF-step=open-chunk={}-user_time={}",
+            chunk_index,
             begin_open.elapsed().as_millis(),
         );
 
         info!(
-            "PERF-step=core_prove-user_time={}",
+            "PERF-step=core_prove-chunk={}-user_time={}",
+            chunk_index,
             begin.elapsed().as_millis(),
         );
         // final base proof

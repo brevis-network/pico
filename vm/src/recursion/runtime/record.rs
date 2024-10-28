@@ -99,4 +99,8 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
     fn name(&self) -> String {
         todo!()
     }
+
+    fn chunk_index(&self) -> usize {
+        0
+    }
 }

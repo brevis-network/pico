@@ -139,10 +139,10 @@ where
         let mut challenger = self.config().challenger();
         pk.observed_by(&mut challenger);
 
-        // First phase
+        // First
         // Generate batch records and commit to challenger
 
-        let mut chunk = 1;
+        let mut chunk_index = 1;
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
         loop {
             let (record, done) = recursion_emulator.next();
@@ -157,7 +157,7 @@ where
                 debug!("{:<25}: {}", key, value);
             }
 
-            info!("PERF-chunk={chunk}-phase=1");
+            info!("PERF-phase=1-chunk={chunk_index}");
 
             let commitment = self
                 .base_machine
@@ -170,7 +170,7 @@ where
                 break;
             }
 
-            chunk += 1;
+            chunk_index += 1;
         }
 
         // Second phase
@@ -178,14 +178,14 @@ where
 
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
         let mut all_proofs = vec![];
-        let mut chunk = 1;
+        let mut chunk_index = 1;
         loop {
             let (record, done) = recursion_emulator.next();
             let mut records = vec![record];
 
             self.complement_record(records.as_mut_slice());
 
-            info!("PERF-chunk={chunk}-phase=2");
+            info!("PERF-phase=2-chunk={chunk_index}");
             let commitment = self
                 .base_machine
                 .commit(self.config(), &self.chips, &records[0]);
@@ -196,6 +196,7 @@ where
                 pk,
                 &mut challenger.clone(),
                 commitment,
+                records[0].chunk_index(),
             );
 
             // extend all_proofs to include batch_proofs
@@ -205,7 +206,7 @@ where
                 break;
             }
 
-            chunk += 1;
+            chunk_index += 1;
         }
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
