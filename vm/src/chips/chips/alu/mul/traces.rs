@@ -1,7 +1,10 @@
 use super::{columns::NUM_MUL_COLS, MulChip};
 use crate::{
     chips::{
-        chips::alu::mul::{columns::MulCols, BYTE_MASK, PRODUCT_SIZE},
+        chips::{
+            alu::mul::{columns::MulCols, BYTE_MASK, PRODUCT_SIZE},
+            byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        },
         utils::get_msb,
     },
     compiler::{
@@ -11,13 +14,7 @@ use crate::{
         },
         word::Word,
     },
-    emulator::{
-        record::RecordBehavior,
-        riscv::{
-            events::{ByteLookupEvent, ByteRecordBehavior},
-            record::EmulationRecord,
-        },
-    },
+    emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };

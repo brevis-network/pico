@@ -1,7 +1,10 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
+    chips::{
+        chips::{alu::event::AluEvent, riscv_cpu::event::CpuEvent},
+        utils::create_alu_lookups,
+    },
     compiler::{riscv::opcode::Opcode, word::Word},
-    emulator::riscv::events::{create_alu_lookups, AluEvent, CpuEvent},
 };
 use hashbrown::HashMap;
 use p3_field::Field;

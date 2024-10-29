@@ -1,9 +1,11 @@
 #![allow(clippy::needless_range_loop)]
 
+mod event;
+
+pub use event::*;
+
 use crate::{
-    chips::chips::recursion_memory::{
-        MemoryReadCols, MemoryReadSingleCols, MemoryReadWriteCols, MemoryRecord,
-    },
+    chips::chips::recursion_memory::{MemoryReadCols, MemoryReadSingleCols, MemoryReadWriteCols},
     compiler::recursion::{opcode::Opcode, program::RecursionProgram},
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, RecursionLookupBuilder, RecursionMemoryBuilder},
@@ -30,29 +32,6 @@ pub struct FriFoldChip<const DEGREE: usize, F> {
     pub fixed_log2_rows: Option<usize>,
     pub pad: bool,
     pub _phantom: PhantomData<F>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FriFoldEvent<F> {
-    pub clk: F,
-    pub m: F,
-    pub input_ptr: F,
-    pub is_last_iteration: F,
-
-    pub z: MemoryRecord<F>,
-    pub alpha: MemoryRecord<F>,
-    pub x: MemoryRecord<F>,
-    pub log_height: MemoryRecord<F>,
-    pub mat_opening_ptr: MemoryRecord<F>,
-    pub ps_at_z_ptr: MemoryRecord<F>,
-    pub alpha_pow_ptr: MemoryRecord<F>,
-    pub ro_ptr: MemoryRecord<F>,
-
-    pub p_at_x: MemoryRecord<F>,
-    pub p_at_z: MemoryRecord<F>,
-
-    pub alpha_pow_at_log_height: MemoryRecord<F>,
-    pub ro_at_log_height: MemoryRecord<F>,
 }
 
 #[derive(AlignedBorrow, Debug, Clone, Copy)]

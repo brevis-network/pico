@@ -4,11 +4,10 @@ use super::super::{
 };
 use crate::{
     chips::{
-        chips::riscv_memory::read_write::columns::MemoryCols,
+        chips::riscv_memory::{event::MemoryAccessPosition, read_write::columns::MemoryCols},
         gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
-    emulator::riscv::events::MemoryAccessPosition,
     machine::builder::{
         ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
     },

@@ -1,6 +1,7 @@
 use super::columns::{MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols};
-use crate::emulator::riscv::events::{
-    ByteRecordBehavior, MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
+use crate::chips::chips::{
+    byte::event::ByteRecordBehavior,
+    riscv_memory::event::{MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord},
 };
 use p3_field::Field;
 

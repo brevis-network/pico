@@ -1,8 +1,8 @@
 //! Bytes less than gadget
 
 use crate::{
+    chips::chips::byte::event::{ByteLookupEvent, ByteRecordBehavior},
     compiler::riscv::opcode::ByteOpcode,
-    emulator::riscv::events::{ByteLookupEvent, ByteRecordBehavior},
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
 };
 use itertools::izip;

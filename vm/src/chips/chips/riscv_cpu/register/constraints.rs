@@ -1,6 +1,6 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    emulator::riscv::events::MemoryAccessPosition,
+    chips::chips::riscv_memory::event::MemoryAccessPosition,
     machine::builder::{ChipBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder},
 };
 use p3_field::{AbstractField, Field};

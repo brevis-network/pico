@@ -3,8 +3,9 @@ use super::{
     MemoryChipType, MemoryInitializeFinalizeChip,
 };
 use crate::{
+    chips::chips::riscv_memory::event::MemoryInitializeFinalizeEvent,
     compiler::riscv::program::Program,
-    emulator::riscv::{events::MemoryInitializeFinalizeEvent, record::EmulationRecord},
+    emulator::riscv::record::EmulationRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use p3_field::Field;

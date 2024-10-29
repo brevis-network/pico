@@ -1,8 +1,17 @@
 use super::{columns::NUM_DIVREM_COLS, DivRemChip};
 use crate::{
-    chips::chips::alu::divrem::{
-        columns::DivRemCols,
-        utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
+    chips::{
+        chips::{
+            alu::{
+                divrem::{
+                    columns::DivRemCols,
+                    utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
+                },
+                event::AluEvent,
+            },
+            byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        },
+        utils::create_alu_lookups,
     },
     compiler::{
         riscv::{
@@ -11,10 +20,7 @@ use crate::{
         },
         word::Word,
     },
-    emulator::riscv::{
-        events::{create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecordBehavior},
-        record::EmulationRecord,
-    },
+    emulator::riscv::record::EmulationRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
 };

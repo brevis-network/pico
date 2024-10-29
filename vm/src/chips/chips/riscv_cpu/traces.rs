@@ -3,15 +3,17 @@ use super::{
     CpuChip,
 };
 use crate::{
-    chips::chips::riscv_memory::read_write::columns::MemoryCols,
+    chips::chips::{
+        alu::event::AluEvent,
+        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        riscv_cpu::event::CpuEvent,
+        riscv_memory::{event::MemoryRecordEnum, read_write::columns::MemoryCols},
+    },
     compiler::riscv::{
         opcode::{ByteOpcode::U8Range, Opcode},
         program::Program,
     },
-    emulator::riscv::{
-        events::{AluEvent, ByteLookupEvent, ByteRecordBehavior, CpuEvent, MemoryRecordEnum},
-        record::EmulationRecord,
-    },
+    emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
 };
 use hashbrown::HashMap;

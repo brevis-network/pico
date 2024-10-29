@@ -1,7 +1,10 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
+    chips::chips::{
+        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        riscv_cpu::event::CpuEvent,
+    },
     compiler::riscv::opcode::ByteOpcode::{U16Range, U8Range},
-    emulator::riscv::events::{ByteLookupEvent, ByteRecordBehavior, CpuEvent},
 };
 use p3_field::Field;
 

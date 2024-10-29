@@ -1,8 +1,8 @@
 //! The gadget for the addition of two words (Uint32)
 
 use crate::{
+    chips::chips::byte::event::ByteRecordBehavior,
     compiler::word::Word,
-    emulator::riscv::events::ByteRecordBehavior,
     machine::builder::{ChipBuilder, ChipRangeBuilder},
 };
 use p3_air::AirBuilder;

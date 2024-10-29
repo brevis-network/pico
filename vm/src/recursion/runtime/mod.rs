@@ -12,9 +12,9 @@ use crate::{
         recursion_cpu::CpuEvent,
         recursion_memory::{compute_addr_diff, MemoryRecord},
         recursion_range_check::{RangeCheckEvent, RangeCheckOpcode},
+        riscv_memory::event::MemoryAccessPosition,
     },
     compiler::recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
-    emulator::riscv::events::MemoryAccessPosition,
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
     recursion::air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
 };

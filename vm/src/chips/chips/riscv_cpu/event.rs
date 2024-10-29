@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::compiler::riscv::instruction::Instruction;
-
-use super::memory::MemoryRecordEnum;
+use crate::{
+    chips::chips::riscv_memory::event::MemoryRecordEnum, compiler::riscv::instruction::Instruction,
+};
 
 /// CPU Event.
 ///

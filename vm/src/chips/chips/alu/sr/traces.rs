@@ -1,6 +1,12 @@
 use super::columns::{ShiftRightCols, NUM_SLR_COLS};
 use crate::{
-    chips::chips::byte::utils::shr_carry,
+    chips::chips::{
+        alu::event::AluEvent,
+        byte::{
+            event::{ByteLookupEvent, ByteRecordBehavior},
+            utils::shr_carry,
+        },
+    },
     compiler::{
         riscv::{
             opcode::{ByteOpcode, Opcode},
@@ -8,10 +14,7 @@ use crate::{
         },
         word::Word,
     },
-    emulator::riscv::{
-        events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
-        record::EmulationRecord,
-    },
+    emulator::riscv::record::EmulationRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
 };

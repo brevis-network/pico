@@ -1,4 +1,15 @@
 use crate::{
+    chips::{
+        chips::{
+            alu::event::AluEvent,
+            riscv_cpu::event::CpuEvent,
+            riscv_memory::event::{
+                MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryReadRecord,
+                MemoryRecord, MemoryWriteRecord,
+            },
+        },
+        utils::{create_alu_lookup_id, create_alu_lookups},
+    },
     compiler::riscv::{
         instruction::Instruction, opcode::Opcode, program::Program, register::Register,
     },
@@ -6,10 +17,6 @@ use crate::{
         context::EmulatorContext,
         opts::EmulatorOpts,
         riscv::{
-            events::{
-                create_alu_lookup_id, create_alu_lookups, AluEvent, CpuEvent, MemoryAccessPosition,
-                MemoryInitializeFinalizeEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
-            },
             public_values::PublicValues,
             record::{EmulationRecord, MemoryAccessRecord},
             state::RiscvEmulationState,

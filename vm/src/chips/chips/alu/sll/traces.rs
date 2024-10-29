@@ -1,10 +1,11 @@
 use super::columns::{ShiftLeftCols, NUM_SLL_COLS};
 use crate::{
-    compiler::{riscv::program::Program, word::Word},
-    emulator::riscv::{
-        events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
-        record::EmulationRecord,
+    chips::chips::{
+        alu::event::AluEvent,
+        byte::event::{ByteLookupEvent, ByteRecordBehavior},
     },
+    compiler::{riscv::program::Program, word::Word},
+    emulator::riscv::record::EmulationRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };

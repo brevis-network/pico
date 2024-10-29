@@ -1,7 +1,6 @@
 use super::super::{CpuChip, CpuCols};
 use crate::{
-    chips::chips::recursion_memory::MemoryCols,
-    emulator::riscv::events::MemoryAccessPosition,
+    chips::chips::{recursion_memory::MemoryCols, riscv_memory::event::MemoryAccessPosition},
     machine::builder::{ChipBuilder, RecursionMemoryBuilder},
     recursion::air::BlockBuilder,
 };

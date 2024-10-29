@@ -7,6 +7,7 @@ pub mod chunk_clk;
 pub mod columns;
 pub mod constraints;
 pub mod ecall;
+pub mod event;
 pub mod instruction;
 pub mod jump;
 pub mod memory;

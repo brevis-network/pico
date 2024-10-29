@@ -3,11 +3,13 @@ use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::emulator::riscv::{
-    events::MemoryRecord,
-    record::{EmulationRecord, MemoryAccessRecord},
-    riscv_emulator::EmulatorMode,
-    syscalls::SyscallCode,
+use crate::{
+    chips::chips::riscv_memory::event::MemoryRecord,
+    emulator::riscv::{
+        record::{EmulationRecord, MemoryAccessRecord},
+        riscv_emulator::EmulatorMode,
+        syscalls::SyscallCode,
+    },
 };
 
 /// Holds data describing the current state of a program's emulation.

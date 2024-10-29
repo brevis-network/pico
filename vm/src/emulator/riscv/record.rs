@@ -1,16 +1,12 @@
-use super::events::ByteRecordBehavior;
 use crate::{
-    compiler::riscv::{opcode::Opcode, program::Program},
-    emulator::{
-        record::RecordBehavior,
-        riscv::{
-            events::{
-                add_chunked_byte_lookup_events, AluEvent, ByteLookupEvent, CpuEvent,
-                MemoryInitializeFinalizeEvent, MemoryRecordEnum,
-            },
-            public_values::PublicValues,
-        },
+    chips::chips::{
+        alu::event::AluEvent,
+        byte::event::{add_chunked_byte_lookup_events, ByteLookupEvent, ByteRecordBehavior},
+        riscv_cpu::event::CpuEvent,
+        riscv_memory::event::{MemoryInitializeFinalizeEvent, MemoryRecordEnum},
     },
+    compiler::riscv::{opcode::Opcode, program::Program},
+    emulator::{record::RecordBehavior, riscv::public_values::PublicValues},
 };
 use hashbrown::HashMap;
 use p3_field::AbstractField;

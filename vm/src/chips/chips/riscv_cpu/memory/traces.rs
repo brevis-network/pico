@@ -1,11 +1,16 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
+    chips::{
+        chips::{
+            alu::event::AluEvent,
+            byte::event::{ByteLookupEvent, ByteRecordBehavior},
+            riscv_cpu::event::CpuEvent,
+        },
+        utils::create_alu_lookups,
+    },
     compiler::riscv::{
         opcode::{ByteOpcode, Opcode},
         register::Register::X0,
-    },
-    emulator::riscv::events::{
-        create_alu_lookups, AluEvent, ByteLookupEvent, ByteRecordBehavior, CpuEvent,
     },
     primitives::consts::WORD_SIZE,
 };

@@ -3,6 +3,10 @@ use super::{
     BitwiseChip,
 };
 use crate::{
+    chips::chips::{
+        alu::event::AluEvent,
+        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+    },
     compiler::{
         riscv::{
             opcode::{ByteOpcode, Opcode},
@@ -10,10 +14,7 @@ use crate::{
         },
         word::Word,
     },
-    emulator::riscv::{
-        events::{AluEvent, ByteLookupEvent, ByteRecordBehavior},
-        record::EmulationRecord,
-    },
+    emulator::riscv::record::EmulationRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use core::borrow::BorrowMut;

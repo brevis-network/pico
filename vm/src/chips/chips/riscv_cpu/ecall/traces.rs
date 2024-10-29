@@ -1,7 +1,7 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    chips::chips::riscv_memory::read_write::columns::MemoryCols,
-    emulator::riscv::{events::CpuEvent, syscalls::SyscallCode},
+    chips::chips::{riscv_cpu::event::CpuEvent, riscv_memory::read_write::columns::MemoryCols},
+    emulator::riscv::syscalls::SyscallCode,
 };
 use hashbrown::HashMap;
 use p3_field::Field;

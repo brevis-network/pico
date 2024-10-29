@@ -1,10 +1,7 @@
 use crate::{
+    chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
     compiler::riscv::register::Register,
-    emulator::riscv::{
-        events::{MemoryReadRecord, MemoryWriteRecord},
-        record::EmulationRecord,
-        riscv_emulator::RiscvEmulator,
-    },
+    emulator::riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
 };
 
 /// A runtime for syscalls that is protected so that developers cannot arbitrarily modify the

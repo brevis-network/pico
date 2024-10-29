@@ -1,5 +1,4 @@
-use super::create_alu_lookups;
-use crate::compiler::riscv::opcode::Opcode;
+use crate::{chips::utils::create_alu_lookups, compiler::riscv::opcode::Opcode};
 use serde::{Deserialize, Serialize};
 
 /// Arithmetic Logic Unit (ALU) Event.
