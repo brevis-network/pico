@@ -2,7 +2,7 @@ use crate::{
     compiler::program::ProgramBehavior,
     emulator::record::RecordBehavior,
     machine::{
-        builder::{ChipBuilder, LookupBuilder, PermutationBuilder},
+        builder::{ChipBuilder, PermutationBuilder},
         folder::SymbolicConstraintFolder,
         lookup::VirtualPairLookup,
         permutation::{

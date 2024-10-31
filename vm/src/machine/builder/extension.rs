@@ -2,7 +2,6 @@
 
 use super::ChipBuilder;
 use crate::machine::extension::BinomialExtension;
-use p3_air::AirBuilder;
 use p3_field::Field;
 use std::array;
 

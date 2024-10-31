@@ -1,7 +1,7 @@
 use crate::{
     chips::gadgets::{baby_bear::word_range::BabyBearWordRangeChecker, is_zero::IsZeroGadget},
     compiler::word::Word,
-    primitives::consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
+    primitives::consts::PV_DIGEST_NUM_WORDS,
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;

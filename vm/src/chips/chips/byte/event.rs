@@ -1,7 +1,6 @@
 use crate::compiler::riscv::opcode::ByteOpcode;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::PrimeField32;
 use p3_maybe_rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -49,69 +48,6 @@ pub trait ByteRecordBehavior {
         }
     }
 
-    /// Adds a `ByteLookupEvent` to verify `a` and `b` are indeed bytes to the chunk.
-    fn add_u8_range_check(&mut self, chunk: u32, channel: u8, a: u8, b: u8) {
-        self.add_byte_lookup_event(ByteLookupEvent {
-            chunk,
-            channel,
-            opcode: ByteOpcode::U8Range,
-            a1: 0,
-            a2: 0,
-            b: a,
-            c: b,
-        });
-    }
-
-    /// Adds a `ByteLookupEvent` to verify `a` is indeed u16.
-    fn add_u16_range_check(&mut self, chunk: u32, channel: u8, a: u16) {
-        self.add_byte_lookup_event(ByteLookupEvent {
-            chunk,
-            channel,
-            opcode: ByteOpcode::U16Range,
-            a1: a,
-            a2: 0,
-            b: 0,
-            c: 0,
-        });
-    }
-
-    /// Adds `ByteLookupEvent`s to verify that all the bytes in the input slice are indeed bytes.
-    fn add_u8_range_checks(&mut self, chunk: u32, channel: u8, bytes: &[u8]) {
-        let mut index = 0;
-        while index + 1 < bytes.len() {
-            self.add_u8_range_check(chunk, channel, bytes[index], bytes[index + 1]);
-            index += 2;
-        }
-        if index < bytes.len() {
-            // If the input slice's length is odd, we need to add a check for the last byte.
-            self.add_u8_range_check(chunk, channel, bytes[index], 0);
-        }
-    }
-
-    /// Adds `ByteLookupEvent`s to verify that all the field elements in the input slice are indeed
-    /// bytes.
-    fn add_u8_range_checks_field<F: PrimeField32>(
-        &mut self,
-        chunk: u32,
-        channel: u8,
-        field_values: &[F],
-    ) {
-        self.add_u8_range_checks(
-            chunk,
-            channel,
-            &field_values
-                .iter()
-                .map(|x| x.as_canonical_u32() as u8)
-                .collect::<Vec<_>>(),
-        );
-    }
-
-    /// Adds `ByteLookupEvent`s to verify that all the bytes in the input slice are indeed bytes.
-    fn add_u16_range_checks(&mut self, chunk: u32, channel: u8, ls: &[u16]) {
-        ls.iter()
-            .for_each(|x| self.add_u16_range_check(chunk, channel, *x));
-    }
-
     /// Adds a `ByteLookupEvent` to compute the bitwise OR of the two input values.
     fn lookup_or(&mut self, chunk: u32, channel: u8, b: u8, c: u8) {
         self.add_byte_lookup_event(ByteLookupEvent {
@@ -139,6 +75,16 @@ impl ByteLookupEvent {
             b,
             c,
         }
+    }
+}
+
+impl ByteRecordBehavior for () {
+    fn add_byte_lookup_event(&mut self, _event: ByteLookupEvent) {}
+
+    fn add_chunked_byte_lookup_events(
+        &mut self,
+        _: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
+    ) {
     }
 }
 

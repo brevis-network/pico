@@ -14,7 +14,7 @@ use crate::{
         builder::ChipBuilder,
         lookup::{LookupType, SymbolicLookup},
     },
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    primitives::consts::RISCV_NUM_PVS,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field};

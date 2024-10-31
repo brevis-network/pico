@@ -4,9 +4,7 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::VerifierConstraintFolder,
         keys::BaseVerifyingKey,
-        proof::{
-            BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, MainTraceCommitments,
-        },
+        proof::{BaseCommitments, BaseProof},
         utils::order_chips,
     },
 };

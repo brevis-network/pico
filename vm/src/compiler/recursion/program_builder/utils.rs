@@ -14,7 +14,6 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::MachineBehavior,
         proof::{BaseProof, QuotientData},
         utils::order_chips,
     },

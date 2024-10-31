@@ -23,7 +23,6 @@ use crate::{
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        machine::MachineBehavior,
         proof::{BaseCommitments, BaseOpenedValues, ChipOpenedValues, QuotientData},
     },
     primitives::consts::PV_DIGEST_NUM_WORDS,

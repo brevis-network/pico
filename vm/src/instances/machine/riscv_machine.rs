@@ -2,16 +2,9 @@ use crate::{
     compiler::{riscv::program::Program, word::Word},
     configs::config::StarkGenericConfig,
     emulator::{
-        context::EmulatorContext,
         emulator::MetaEmulator,
-        opts::EmulatorOpts,
         record::RecordBehavior,
-        riscv::{
-            public_values::PublicValues,
-            record::EmulationRecord,
-            riscv_emulator::{EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
-        },
+        riscv::{public_values::PublicValues, record::EmulationRecord},
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -24,13 +17,9 @@ use crate::{
     primitives::consts::MAX_LOG_CHUNK_SIZE,
 };
 
-use crate::{
-    configs::config::Val, emulator::emulator::EmulatorType,
-    instances::configs::riscv_config::StarkConfig as RiscvSC,
-};
+use crate::{configs::config::Val, instances::configs::riscv_config::StarkConfig as RiscvSC};
 use anyhow::Result;
 use log::{debug, info};
-use num::{one, zero};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
@@ -107,10 +96,10 @@ where
         let begin = Instant::now();
 
         let ProvingWitness {
-            program,
-            stdin,
+            // program,
+            // stdin,
             opts,
-            context,
+            // context,
             ..
         } = witness;
 
@@ -159,8 +148,7 @@ where
 
             let batch_main_commitments = batch_records
                 .iter()
-                .enumerate()
-                .map(|(i, record)| {
+                .map(|record| {
                     info!("PERF-phase=2-chunk={}", record.chunk_index(),);
                     // generate and commit main trace
                     self.base_machine.commit(self.config(), &self.chips, record)

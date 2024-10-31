@@ -1,13 +1,7 @@
-use crate::{
-    configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig},
-    machine::utils::type_name_of,
-};
+use crate::configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig};
 use alloc::vec::Vec;
 use hashbrown::HashMap;
-use p3_matrix::{
-    dense::{RowMajorMatrix, RowMajorMatrixView},
-    stack::VerticalPair,
-};
+use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 
 /// Wrapper for all proof types

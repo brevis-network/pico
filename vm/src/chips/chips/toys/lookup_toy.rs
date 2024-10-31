@@ -65,7 +65,7 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
         trace
     }
 
-    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
         let record = EmulationRecord::new(Arc::new(Program::default()));
         Some(self.generate_main(&record, &mut EmulationRecord::default()))
     }
@@ -73,7 +73,7 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
         3
     }
 
-    fn is_active(&self, record: &Self::Record) -> bool {
+    fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
 }
@@ -95,7 +95,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, _next) = (main.row_slice(0), main.row_slice(1));
         let local: &AddLookingCols<CB::Var> = (*local).borrow();
 
         // no constraints for main trace, addition result is constrained by lookup
@@ -118,7 +118,7 @@ impl<F: Field> ChipBehavior<F> for AddLookedChip<F> {
         "Add Looked Chip".to_string()
     }
 
-    fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+    fn generate_main(&self, _input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         // because of just test lookup feature, hardcode test data instead of the inputs are not from emulation records
         let row_num = 8;
 
@@ -138,7 +138,7 @@ impl<F: Field> ChipBehavior<F> for AddLookedChip<F> {
         trace
     }
 
-    fn is_active(&self, record: &Self::Record) -> bool {
+    fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
 }

@@ -1,5 +1,3 @@
-use core::mem::take;
-
 /// Context to run a program inside Pico Emulator.
 #[derive(Clone, Default)]
 pub struct EmulatorContext {

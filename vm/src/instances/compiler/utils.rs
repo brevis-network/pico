@@ -18,7 +18,6 @@ use crate::{
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
     recursion::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
 };
-use itertools::Itertools;
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::AbstractField;
@@ -27,17 +26,18 @@ use std::mem::transmute;
 /// Assertions on the public values describing a complete recursive proof state.
 ///
 /// See [SP1Prover::verify] for the verification algorithm of a complete SP1 proof.
+#[allow(dead_code)]
 pub(crate) fn assert_complete<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     public_values: &RecursionPublicValues<Felt<RC::F>>,
     end_reconstruct_challenger: &DuplexChallengerVariable<RC>,
 ) {
     let RecursionPublicValues {
-        next_pc,
-        start_chunk,
-        next_chunk,
-        start_execution_chunk,
-        next_execution_chunk,
+        // next_pc,
+        // start_chunk,
+        // next_chunk,
+        // start_execution_chunk,
+        // next_execution_chunk,
         cumulative_sum,
         base_challenger,
         ..
@@ -69,6 +69,7 @@ pub(crate) fn assert_complete<RC: FieldGenericConfig>(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn proof_data_from_vk<RC: FieldGenericConfig, SC, A>(
     builder: &mut Builder<RC>,
     vk: &BaseVerifyingKey<SC>,
@@ -133,6 +134,7 @@ fn calculate_public_values_digest<RC: FieldGenericConfig>(
 }
 
 /// Verifies the digest of a recursive public values struct.
+#[allow(dead_code)]
 pub(crate) fn verify_public_values_hash<RC: FieldGenericConfig>(
     builder: &mut Builder<RC>,
     public_values: &RecursionPublicValues<Felt<RC::F>>,

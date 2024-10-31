@@ -2,7 +2,7 @@ use super::columns::{ShiftLeftCols, NUM_SLL_COLS};
 use crate::{
     chips::chips::{
         alu::event::AluEvent,
-        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
     },
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::record::EmulationRecord,
@@ -10,7 +10,6 @@ use crate::{
     primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };
 use hashbrown::HashMap;
-use itertools::Itertools;
 use log::debug;
 use p3_air::BaseAir;
 use p3_field::Field;
@@ -43,8 +42,7 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
             .zip(input.shift_left_events.clone())
             .for_each(|(row, event)| {
                 let cols: &mut ShiftLeftCols<F> = row.borrow_mut();
-                let mut blu = Vec::new();
-                self.event_to_row(&event, cols, &mut blu);
+                self.event_to_row(&event, cols, &mut ());
             });
         pad_to_power_of_two::<NUM_SLL_COLS, F>(&mut trace.values);
 
@@ -75,21 +73,21 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(input.shift_left_events.len() / num_cpus::get(), 1);
 
-        let blu_batches = input
+        let range_batches = input
             .shift_left_events
             .par_chunks(chunk_size)
             .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
                     let mut row = [F::zero(); NUM_SLL_COLS];
                     let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(event, cols, &mut range);
                 });
-                blu
+                range
             })
             .collect::<Vec<_>>();
 
-        extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        extra.add_rangecheck_lookup_events(range_batches);
         debug!("{} chip - extra_record", self.name());
     }
 
@@ -103,7 +101,7 @@ impl<F: Field> SLLChip<F> {
         &self,
         event: &AluEvent,
         cols: &mut ShiftLeftCols<F>,
-        blu: &mut impl ByteRecordBehavior,
+        blu: &mut impl RangeRecordBehavior,
     ) {
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
@@ -148,8 +146,8 @@ impl<F: Field> SLLChip<F> {
             cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
         }
 
-        blu.add_u8_range_checks(event.chunk, event.channel, &shift_result);
-        blu.add_u8_range_checks(event.chunk, event.channel, &shift_result_carry);
+        blu.add_u8_range_checks(event.chunk, event.channel, shift_result);
+        blu.add_u8_range_checks(event.chunk, event.channel, shift_result_carry);
 
         // Sanity check.
         for i in num_bytes_to_shift..WORD_SIZE {

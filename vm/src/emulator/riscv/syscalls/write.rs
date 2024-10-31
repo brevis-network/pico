@@ -37,9 +37,9 @@ impl Syscall for WriteSyscall {
             .collect::<Vec<u8>>();
         let slice = bytes.as_slice();
         if fd == 1 {
-            let s = core::str::from_utf8(slice).unwrap();
+            let _s = core::str::from_utf8(slice).unwrap();
         } else if fd == 2 {
-            let s = core::str::from_utf8(slice).unwrap();
+            let _s = core::str::from_utf8(slice).unwrap();
         } else if fd == 3 {
             rt.state.public_values_stream.extend_from_slice(slice);
         } else if fd == 4 {

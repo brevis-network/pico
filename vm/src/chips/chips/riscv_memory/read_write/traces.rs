@@ -1,6 +1,6 @@
 use super::columns::{MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols};
 use crate::chips::chips::{
-    byte::event::ByteRecordBehavior,
+    rangecheck::event::RangeRecordBehavior,
     riscv_memory::event::{MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord},
 };
 use p3_field::Field;
@@ -10,7 +10,7 @@ impl<F: Field> MemoryWriteCols<F> {
         &mut self,
         channel: u8,
         record: MemoryWriteRecord,
-        output: &mut impl ByteRecordBehavior,
+        output: &mut impl RangeRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -33,7 +33,7 @@ impl<F: Field> MemoryReadCols<F> {
         &mut self,
         channel: u8,
         record: MemoryReadRecord,
-        output: &mut impl ByteRecordBehavior,
+        output: &mut impl RangeRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -55,7 +55,7 @@ impl<F: Field> MemoryReadWriteCols<F> {
         &mut self,
         channel: u8,
         record: MemoryRecordEnum,
-        output: &mut impl ByteRecordBehavior,
+        output: &mut impl RangeRecordBehavior,
     ) {
         match record {
             MemoryRecordEnum::Read(read_record) => self.populate_read(channel, read_record, output),
@@ -69,7 +69,7 @@ impl<F: Field> MemoryReadWriteCols<F> {
         &mut self,
         channel: u8,
         record: MemoryWriteRecord,
-        output: &mut impl ByteRecordBehavior,
+        output: &mut impl RangeRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -90,7 +90,7 @@ impl<F: Field> MemoryReadWriteCols<F> {
         &mut self,
         channel: u8,
         record: MemoryReadRecord,
-        output: &mut impl ByteRecordBehavior,
+        output: &mut impl RangeRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -114,7 +114,7 @@ impl<F: Field> MemoryAccessCols<F> {
         channel: u8,
         current_record: MemoryRecord,
         prev_record: MemoryRecord,
-        output: &mut impl ByteRecordBehavior,
+        output: &mut impl RangeRecordBehavior,
     ) {
         self.value = current_record.value.into();
 
@@ -144,9 +144,9 @@ impl<F: Field> MemoryAccessCols<F> {
 
         let chunk = current_record.chunk;
 
-        // Add a byte table lookup with the 16Range op.
+        // Add a range table lookup with the U16 op.
         output.add_u16_range_check(chunk, channel, diff_16bit_limb);
-        // Add a byte table lookup with the U8Range op.
-        output.add_u8_range_check(chunk, channel, 0, diff_8bit_limb as u8);
+        // Add a range table lookup with the U8 op.
+        output.add_u8_range_check(diff_8bit_limb as u8);
     }
 }

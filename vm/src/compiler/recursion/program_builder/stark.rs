@@ -18,8 +18,6 @@ use crate::{
         folder::{
             ProverConstraintFolder, RecursiveVerifierConstraintFolder, VerifierConstraintFolder,
         },
-        keys::BaseVerifyingKey,
-        proof::BaseProof,
     },
     primitives::consts::DIGEST_SIZE,
 };

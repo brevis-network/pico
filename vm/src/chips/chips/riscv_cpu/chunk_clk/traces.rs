@@ -1,10 +1,10 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
     chips::chips::{
-        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
         riscv_cpu::event::CpuEvent,
     },
-    compiler::riscv::opcode::ByteOpcode::{U16Range, U8Range},
+    compiler::riscv::opcode::RangeCheckOpcode::{U16, U8},
 };
 use p3_field::Field;
 
@@ -14,7 +14,7 @@ impl<F: Field> CpuChip<F> {
         &self,
         cols: &mut CpuCols<F>,
         event: &CpuEvent,
-        blu_events: &mut impl ByteRecordBehavior,
+        range_events: &mut impl RangeRecordBehavior,
     ) {
         cols.chunk = F::from_canonical_u32(event.chunk);
         cols.channel = F::from_canonical_u8(event.channel);
@@ -27,32 +27,8 @@ impl<F: Field> CpuChip<F> {
 
         cols.channel_selector.populate(event.channel);
 
-        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            event.chunk,
-            event.channel,
-            U16Range,
-            event.chunk as u16,
-            0,
-            0,
-            0,
-        ));
-        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            event.chunk,
-            event.channel,
-            U16Range,
-            clk_16bit_limb,
-            0,
-            0,
-            0,
-        ));
-        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            event.chunk,
-            event.channel,
-            U8Range,
-            0,
-            0,
-            0,
-            clk_8bit_limb,
-        ));
+        range_events.add_range_lookup_event(RangeLookupEvent::new(U16, event.chunk as u16));
+        range_events.add_range_lookup_event(RangeLookupEvent::new(U16, clk_16bit_limb));
+        range_events.add_range_lookup_event(RangeLookupEvent::new(U8, clk_8bit_limb.into()));
     }
 }

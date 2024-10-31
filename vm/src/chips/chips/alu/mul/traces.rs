@@ -4,6 +4,7 @@ use crate::{
         chips::{
             alu::mul::{columns::MulCols, BYTE_MASK, PRODUCT_SIZE},
             byte::event::{ByteLookupEvent, ByteRecordBehavior},
+            rangecheck::event::RangeRecordBehavior,
         },
         utils::get_msb,
     },
@@ -157,7 +158,7 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                             record.add_u8_range_checks(
                                 event.chunk,
                                 event.channel,
-                                &product.map(|x| x as u8),
+                                product.map(|x| x as u8),
                             );
                         }
 

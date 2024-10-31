@@ -5,13 +5,11 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
-        proof::{BaseProof, EnsembleProof, MetaProof},
+        proof::{EnsembleProof, MetaProof},
         witness::ProvingWitness,
     },
 };
 use anyhow::Result;
-use hashbrown::HashMap;
-use itertools::Itertools;
 use log::info;
 use p3_air::Air;
 use std::{any::type_name, time::Instant};

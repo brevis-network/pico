@@ -11,17 +11,14 @@ use crate::{
     instances::{
         compiler::riscv_circuit::stdin::RiscvRecursionStdin,
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
-        machine::riscv_machine::RiscvMachine,
     },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
     },
-    recursion::runtime::{RecursionRecord, PERMUTATION_WIDTH, POSEIDON2_SBOX_DEGREE},
+    recursion::runtime::RecursionRecord,
 };
 use p3_air::Air;
-use p3_field::Field;
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 
 // Here SC, C refers to types in recurion, while I refers to type in native
 pub struct ProvingWitness<'a, NSC, NC, SC, C, I>

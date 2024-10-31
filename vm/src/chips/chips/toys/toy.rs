@@ -9,7 +9,6 @@ use itertools::Itertools;
 use p3_air::{Air, BaseAir};
 use p3_field::{AbstractField, Field};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::ParallelIterator;
 use std::{marker::PhantomData, mem::size_of};
 
 /// The number of main trace columns for `ToyChip`
@@ -54,7 +53,7 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
         TOY_CHIP_NAME.to_string()
     }
 
-    fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
+    fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
         // NOTE: It's not reasonable, just to enable testing.
         // `4096` is the column number equalled to main trace.
         Some(RowMajorMatrix::new(vec![F::zero(); 4096], 1))
@@ -113,7 +112,7 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
         0
     }
 
-    fn is_active(&self, record: &Self::Record) -> bool {
+    fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
 }

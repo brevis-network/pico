@@ -4,7 +4,7 @@ mod compiler;
 mod instruction;
 mod utils;
 
-pub use builder::*;
+//pub use builder::*;
 pub use code::*;
 pub use compiler::*;
 pub use instruction::*;

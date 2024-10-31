@@ -31,12 +31,7 @@ use hashbrown::{hash_map::Entry, HashMap};
 use log::{debug, info};
 use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
-use std::{
-    fs::File,
-    io::{BufWriter, Write},
-    sync::Arc,
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 use thiserror::Error;
 
 pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;
@@ -401,11 +396,11 @@ impl RiscvEmulator {
     pub fn emulate_to_batch(&mut self) -> Result<bool, EmulationError> {
         self.batch_records.clear();
 
-        let begin = Instant::now();
+        // let begin = Instant::now();
 
         // Get the current chunk.
-        let start_chunk = self.state.current_chunk; // needed for public input
-        let start_execution_chunk = self.state.current_execution_chunk;
+        // let start_chunk = self.state.current_chunk; // needed for public input
+        // let start_execution_chunk = self.state.current_execution_chunk;
 
         // If it's the first cycle, initialize the program.
         if self.state.global_clk == 0 {
@@ -435,7 +430,7 @@ impl RiscvEmulator {
         debug!("emulate - global clk {}", self.state.global_clk);
 
         // Get the final public values.
-        let public_values = self.record.public_values;
+        // let public_values = self.record.public_values;
 
         if !self.record.cpu_events.is_empty() {
             self.bump_record_to_batch();
@@ -451,7 +446,7 @@ impl RiscvEmulator {
 
         // Set the global public values for all chunks.
         // println!("# batch records to be processed: {}", self.batch_records.len());
-        for (i, record) in self.batch_records.iter_mut().enumerate() {
+        for (_i, record) in self.batch_records.iter_mut().enumerate() {
             self.public_values_buffer.chunk += 1;
             if !record.cpu_events.is_empty() {
                 self.public_values_buffer.execution_chunk += 1;
@@ -1416,18 +1411,18 @@ impl Default for EmulatorMode {
 
 mod tests {
     use super::{Program, RiscvEmulator};
-    use crate::{
-        compiler::riscv::compiler::{Compiler, SourceType},
-        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
-    };
+    use crate::compiler::riscv::compiler::{Compiler, SourceType};
 
+    #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =
         include_bytes!("../../compiler/test_data/riscv32im-pico-fibonacci-elf");
 
+    #[allow(dead_code)]
     const KECCAK_ELF: &[u8] = include_bytes!("../../compiler/test_data/riscv32im-pico-keccak-elf");
 
     #[must_use]
     #[allow(clippy::unreadable_literal)]
+    #[allow(dead_code)]
     pub fn simple_fibo_program() -> Program {
         let compiler = Compiler::new(SourceType::RiscV, FIBONACCI_ELF);
 
@@ -1436,6 +1431,7 @@ mod tests {
 
     #[must_use]
     #[allow(clippy::unreadable_literal)]
+    #[allow(dead_code)]
     pub fn simple_keccak_program() -> Program {
         let compiler = Compiler::new(SourceType::RiscV, KECCAK_ELF);
 
@@ -1449,6 +1445,7 @@ mod tests {
         _assert_send::<RiscvEmulator>();
     }
 
+    #[allow(dead_code)]
     const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 836789u32;
 
     #[test]

@@ -6,6 +6,7 @@ use crate::{
         },
         byte::ByteChip,
         memory_program::MemoryProgramChip,
+        rangecheck::RangeCheckChip,
         riscv_cpu::CpuChip,
         riscv_memory::initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
         riscv_program::ProgramChip,
@@ -35,6 +36,7 @@ pub enum RiscvChipType<F: Field> {
     Lt(LtChip<F>),
     SLL(SLLChip<F>),
     SR(ShiftRightChip<F>),
+    Range(RangeCheckChip<EmulationRecord, Program, F>),
 }
 
 // NOTE: These trait implementations are used to save this `TestChipType` to `MetaChip`.
@@ -59,6 +61,7 @@ impl<F: PrimeField32> ChipBehavior<F> for RiscvChipType<F> {
             Self::Lt(chip) => chip.name(),
             Self::SLL(chip) => chip.name(),
             Self::SR(chip) => chip.name(),
+            Self::Range(chip) => chip.name(),
         }
     }
 
@@ -77,6 +80,7 @@ impl<F: PrimeField32> ChipBehavior<F> for RiscvChipType<F> {
             Self::Lt(chip) => chip.generate_preprocessed(program),
             Self::SLL(chip) => chip.generate_preprocessed(program),
             Self::SR(chip) => chip.generate_preprocessed(program),
+            Self::Range(chip) => chip.generate_preprocessed(program),
         }
     }
 
@@ -95,6 +99,7 @@ impl<F: PrimeField32> ChipBehavior<F> for RiscvChipType<F> {
             Self::Lt(chip) => chip.generate_main(input, output),
             Self::SLL(chip) => chip.generate_main(input, output),
             Self::SR(chip) => chip.generate_main(input, output),
+            Self::Range(chip) => chip.generate_main(input, output),
         }
     }
 
@@ -113,6 +118,7 @@ impl<F: PrimeField32> ChipBehavior<F> for RiscvChipType<F> {
             Self::Lt(chip) => chip.preprocessed_width(),
             Self::SLL(chip) => chip.preprocessed_width(),
             Self::SR(chip) => chip.preprocessed_width(),
+            Self::Range(chip) => chip.preprocessed_width(),
         }
     }
 
@@ -131,6 +137,7 @@ impl<F: PrimeField32> ChipBehavior<F> for RiscvChipType<F> {
             Self::Lt(chip) => chip.extra_record(input, extra),
             Self::SLL(chip) => chip.extra_record(input, extra),
             Self::SR(chip) => chip.extra_record(input, extra),
+            Self::Range(chip) => chip.extra_record(input, extra),
         }
     }
 
@@ -149,6 +156,7 @@ impl<F: PrimeField32> ChipBehavior<F> for RiscvChipType<F> {
             Self::Lt(chip) => chip.is_active(record),
             Self::SLL(chip) => chip.is_active(record),
             Self::SR(chip) => chip.is_active(record),
+            Self::Range(chip) => chip.is_active(record),
         }
     }
 }
@@ -169,6 +177,7 @@ impl<F: Field> BaseAir<F> for RiscvChipType<F> {
             Self::Lt(chip) => chip.width(),
             Self::SLL(chip) => chip.width(),
             Self::SR(chip) => chip.width(),
+            Self::Range(chip) => chip.width(),
         }
     }
 
@@ -188,6 +197,7 @@ impl<F: Field> BaseAir<F> for RiscvChipType<F> {
             Self::Lt(chip) => chip.preprocessed_trace(),
             Self::SLL(chip) => chip.preprocessed_trace(),
             Self::SR(chip) => chip.preprocessed_trace(),
+            Self::Range(chip) => chip.preprocessed_trace(),
         }
     }
 }
@@ -212,6 +222,7 @@ where
             Self::Lt(chip) => chip.eval(b),
             Self::SLL(chip) => chip.eval(b),
             Self::SR(chip) => chip.eval(b),
+            Self::Range(chip) => chip.eval(b),
         }
     }
 }
@@ -236,6 +247,7 @@ impl<F: PrimeField32> RiscvChipType<F> {
             MetaChip::new(Self::AddSub(AddSubChip::default())),
             MetaChip::new(Self::Bitwise(BitwiseChip::default())),
             MetaChip::new(Self::Byte(ByteChip::default())),
+            MetaChip::new(Self::Range(RangeCheckChip::default())),
         ]
     }
 }

@@ -2,6 +2,7 @@ use crate::{
     chips::chips::{
         alu::event::AluEvent,
         byte::event::{add_chunked_byte_lookup_events, ByteLookupEvent, ByteRecordBehavior},
+        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
         riscv_cpu::event::CpuEvent,
         riscv_memory::event::{MemoryInitializeFinalizeEvent, MemoryRecordEnum},
     },
@@ -43,6 +44,8 @@ pub struct EmulationRecord {
     pub lt_events: Vec<AluEvent>,
     /// A trace of the byte lookups that are needed.
     pub byte_lookups: HashMap<u32, HashMap<ByteLookupEvent, usize>>,
+    /// A trace of the range lookups that are needed.
+    pub range_lookups: HashMap<RangeLookupEvent, usize>,
     /// A trace of the memory initialize events.
     pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the memory finalize events.
@@ -102,6 +105,17 @@ impl EmulationRecord {
             }
         }
     }
+
+    pub fn add_rangecheck_lookup_events(
+        &mut self,
+        events: impl IntoIterator<Item = HashMap<RangeLookupEvent, usize>>,
+    ) {
+        events.into_iter().for_each(|events| {
+            for (ev, cnt) in events.into_iter() {
+                *self.range_lookups.entry(ev).or_insert(0) += cnt;
+            }
+        });
+    }
 }
 
 impl RecordBehavior for EmulationRecord {
@@ -143,6 +157,7 @@ impl RecordBehavior for EmulationRecord {
                     .map_or(0, hashbrown::HashMap::len),
             );
         }
+        stats.insert("Range lookups".to_string(), self.range_lookups.len());
 
         // Filter out the empty events.
         stats.retain(|_, v| *v != 0);
@@ -168,6 +183,9 @@ impl RecordBehavior for EmulationRecord {
             self.byte_lookups = std::mem::take(&mut extra.byte_lookups);
         } else {
             self.add_chunked_byte_lookup_events(vec![&extra.byte_lookups]);
+        }
+        for (ev, cnt) in extra.range_lookups.iter() {
+            *self.range_lookups.entry(*ev).or_insert(0) += cnt;
         }
     }
 
@@ -255,5 +273,15 @@ impl ByteRecordBehavior for EmulationRecord {
         new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
     ) {
         add_chunked_byte_lookup_events(&mut self.byte_lookups, new_events);
+    }
+}
+
+impl RangeRecordBehavior for EmulationRecord {
+    fn add_range_lookup_event(&mut self, event: RangeLookupEvent) {
+        *self.range_lookups.entry(event).or_insert(0) += 1;
+    }
+
+    fn range_lookup_events(&self) -> impl Iterator<Item = (RangeLookupEvent, usize)> {
+        self.range_lookups.iter().map(|(k, v)| (*k, *v))
     }
 }

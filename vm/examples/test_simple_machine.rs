@@ -73,6 +73,14 @@ fn main() {
     info!("\n Complement records (at {:?})..", start.elapsed());
     simple_machine.complement_record(&mut records);
 
+    for (i, record) in records.iter().enumerate() {
+        let stats = record.stats();
+        debug!("post complement record stats[{}]:", i);
+        for (key, value) in &stats {
+            debug!("|- {:<25}: {}", key, value);
+        }
+    }
+
     info!("\n Construct proving witness..");
     let witness = ProvingWitness::setup_with_records(records);
 

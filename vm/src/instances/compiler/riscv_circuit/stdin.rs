@@ -28,9 +28,8 @@ use crate::{
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
+use p3_challenger::DuplexChallenger;
 use pico_derive::DslVariable;
-use serde::Serialize;
 
 #[derive(Clone)]
 pub struct RiscvRecursionStdin<'a, SC, C>

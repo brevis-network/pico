@@ -7,7 +7,7 @@ pub mod traces;
 pub mod utils;
 
 /// The number of different byte operations.
-pub const NUM_BYTE_OPS: usize = 9;
+pub const NUM_BYTE_OPS: usize = 7;
 
 /// The number of different byte lookup channels.
 pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;

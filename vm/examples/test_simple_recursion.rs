@@ -19,7 +19,7 @@ use pico_vm::{
         keys::BaseVerifyingKey, logger::setup_logger, machine::MachineBehavior, proof::BaseProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{MAX_NUM_PVS, RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    primitives::consts::{MAX_NUM_PVS, RISCV_NUM_PVS},
     recursion::runtime::Runtime as RecursionRuntime,
 };
 use std::{
@@ -140,7 +140,7 @@ fn main() {
     serialized_program.hash(&mut hasher);
     let hash = hasher.finish();
     info!("field_config program hash: {}", hash);
-    assert_eq!(hash, 13525417017394808428);
+    assert_eq!(hash, 9976425964140445116);
 
     // Get field_config input
     let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());

@@ -5,9 +5,8 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
-        proof::{BaseProof, MainTraceCommitments, MetaProof, UnitProof},
+        proof::{BaseProof, MainTraceCommitments, MetaProof},
         prover::BaseProver,
-        utils::type_name_of,
         verifier::BaseVerifier,
         witness::ProvingWitness,
     },
@@ -15,12 +14,8 @@ use crate::{
 use anyhow::Result;
 use log::{debug, info};
 use p3_air::Air;
-use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
-use p3_challenger::{CanObserve, DuplexChallenger};
-use p3_commit::{Pcs, PolynomialSpace};
+use p3_challenger::CanObserve;
 use p3_field::Field;
-use p3_fri::FriConfig;
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use std::time::Instant;
 
 /// Functions that each machine instance should implement.
@@ -268,7 +263,7 @@ where
         });
 
         // verify all proofs
-        for (i, proof) in proofs.into_iter().enumerate() {
+        for proof in proofs.into_iter() {
             self.verifier
                 .verify(config, chips, vk, &mut challenger.clone(), proof)?;
         }

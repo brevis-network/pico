@@ -115,16 +115,26 @@ pub enum ByteOpcode {
     XOR = 2,
     /// Shift Left Logical.
     SLL = 3,
-    /// Unsigned 8-bit Range Check.
-    U8Range = 4,
     /// Shift Right with Carry.
-    ShrCarry = 5,
+    ShrCarry = 4,
     /// Unsigned Less Than.
-    LTU = 6,
+    LTU = 5,
     /// Most Significant Bit.
-    MSB = 7,
+    MSB = 6,
+}
+
+/// Range Check Opcode.
+///
+/// This represents a type of range check that can be performed on a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[allow(clippy::upper_case_acronyms)]
+pub enum RangeCheckOpcode {
+    /// Unsigned 8-bit Range Check.
+    U8 = 0,
+    /// Unsigned 12-bit Range Check.
+    U12 = 1,
     /// Unsigned 16-bit Range Check.
-    U16Range = 8,
+    U16 = 2,
 }
 
 impl Opcode {
@@ -187,7 +197,7 @@ impl Display for Opcode {
 }
 
 /// The number of different byte operations.
-pub const NUM_BYTE_OPS: usize = 9;
+pub const NUM_BYTE_OPS: usize = 7;
 
 impl From<Opcode> for ByteOpcode {
     /// Convert an opcode to a byte opcode.
@@ -211,14 +221,30 @@ impl ByteOpcode {
             ByteOpcode::OR,
             ByteOpcode::XOR,
             ByteOpcode::SLL,
-            ByteOpcode::U8Range,
             ByteOpcode::ShrCarry,
             ByteOpcode::LTU,
             ByteOpcode::MSB,
-            ByteOpcode::U16Range,
         ];
         assert_eq!(opcodes.len(), NUM_BYTE_OPS);
         opcodes
+    }
+
+    /// Convert the opcode to a field element.
+    #[must_use]
+    pub fn as_field<F: Field>(self) -> F {
+        F::from_canonical_u8(self as u8)
+    }
+}
+
+impl RangeCheckOpcode {
+    /// Get all the byte opcodes.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        vec![
+            RangeCheckOpcode::U8,
+            RangeCheckOpcode::U12,
+            RangeCheckOpcode::U16,
+        ]
     }
 
     /// Convert the opcode to a field element.

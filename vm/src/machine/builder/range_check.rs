@@ -2,7 +2,7 @@
 
 use super::{ChipBuilder, ChipLookupBuilder};
 use crate::{
-    compiler::riscv::opcode::ByteOpcode,
+    compiler::riscv::opcode::RangeCheckOpcode,
     machine::lookup::{LookupType, SymbolicLookup},
 };
 use p3_air::AirBuilder;
@@ -13,54 +13,25 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
     fn slice_range_check_u8(
         &mut self,
         input: &[impl Into<Self::Expr> + Clone],
-        chunk: impl Into<Self::Expr> + Clone,
-        channel: impl Into<Self::Expr> + Clone,
+        _chunk: impl Into<Self::Expr> + Clone,
+        _channel: impl Into<Self::Expr> + Clone,
         mult: impl Into<Self::Expr> + Clone,
     ) {
-        let mut index = 0;
-        while index + 1 < input.len() {
-            self.looking_byte(
-                Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                Self::Expr::zero(),
-                input[index].clone(),
-                input[index + 1].clone(),
-                chunk.clone(),
-                channel.clone(),
-                mult.clone(),
-            );
-            index += 2;
-        }
-        if index < input.len() {
-            self.looking_byte(
-                Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-                Self::Expr::zero(),
-                input[index].clone(),
-                Self::Expr::zero(),
-                chunk.clone(),
-                channel.clone(),
-                mult.clone(),
-            );
-        }
+        input.iter().for_each(|limb| {
+            self.looking_rangecheck(RangeCheckOpcode::U8, limb.clone(), mult.clone());
+        });
     }
 
     /// Check that each limb of the given slice is a u16.
     fn slice_range_check_u16(
         &mut self,
         input: &[impl Into<Self::Expr> + Copy],
-        chunk: impl Into<Self::Expr> + Clone,
-        channel: impl Into<Self::Expr> + Clone,
+        _chunk: impl Into<Self::Expr> + Clone,
+        _channel: impl Into<Self::Expr> + Clone,
         mult: impl Into<Self::Expr> + Clone,
     ) {
         input.iter().for_each(|limb| {
-            self.looking_byte(
-                Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
-                *limb,
-                Self::Expr::zero(),
-                Self::Expr::zero(),
-                chunk.clone(),
-                channel.clone(),
-                mult.clone(),
-            );
+            self.looking_rangecheck(RangeCheckOpcode::U16, *limb, mult.clone());
         });
     }
 
@@ -75,8 +46,8 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
         value: impl Into<Self::Expr>,
         limb_16: impl Into<Self::Expr> + Clone,
         limb_8: impl Into<Self::Expr> + Clone,
-        chunk: impl Into<Self::Expr> + Clone,
-        channel: impl Into<Self::Expr> + Clone,
+        _chunk: impl Into<Self::Expr> + Clone,
+        _channel: impl Into<Self::Expr> + Clone,
         do_check: impl Into<Self::Expr> + Clone,
     ) {
         // Verify that value = limb_16 + limb_8 * 2^16.
@@ -87,24 +58,8 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
         );
 
         // Send the range checks for the limbs.
-        self.looking_byte(
-            Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
-            limb_16,
-            Self::Expr::zero(),
-            Self::Expr::zero(),
-            chunk.clone(),
-            channel.clone(),
-            do_check.clone(),
-        );
-        self.looking_byte(
-            Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-            Self::Expr::zero(),
-            Self::Expr::zero(),
-            limb_8,
-            chunk.clone(),
-            channel.clone(),
-            do_check,
-        )
+        self.looking_rangecheck(RangeCheckOpcode::U16, limb_16, do_check.clone());
+        self.looking_rangecheck(RangeCheckOpcode::U8, limb_8, do_check.clone());
     }
 
     /// Looking a range check operation to be processed.

@@ -3,38 +3,24 @@ use crate::{
         recursion::{program::RecursionProgram, program_builder::hints::hintable::Hintable},
         riscv::program::Program,
     },
-    configs::{
-        config::{Challenge, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
-    },
-    emulator::{
-        opts::EmulatorOpts,
-        riscv::{
-            record::EmulationRecord,
-            riscv_emulator::{EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
-        },
+    configs::config::{Challenge, StarkGenericConfig, Val},
+    emulator::riscv::{
+        record::EmulationRecord,
+        riscv_emulator::{EmulatorMode, RiscvEmulator},
+        stdin::EmulatorStdin,
     },
     instances::{
         compiler::riscv_circuit::stdin::RiscvRecursionStdin,
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
-        machine::riscv_machine::RiscvMachine,
     },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
-        machine::MachineBehavior,
-        proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
-    recursion::runtime::{RecursionRecord, Runtime, PERMUTATION_WIDTH, POSEIDON2_SBOX_DEGREE},
+    recursion::runtime::{RecursionRecord, Runtime},
 };
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
-use p3_challenger::DuplexChallenger;
-use p3_field::{extension::BinomialExtensionField, ExtensionField, PrimeField32};
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 
 pub enum EmulatorType {
     Riscv,
@@ -126,7 +112,7 @@ where
         >,
         batch_size: usize,
     ) -> Self {
-        let mut emulator = RecursionEmulator {
+        let emulator = RecursionEmulator {
             recursion_program: input.program.clone(),
             config: input.config.unwrap(),
             phantom: std::marker::PhantomData,
@@ -143,7 +129,7 @@ where
     }
 
     pub fn next(&mut self) -> (RecursionRecord<Val<RecursionSC>>, bool) {
-        let (mut stdin, done) = self.stdin.get(self.ptr);
+        let (stdin, done) = self.stdin.get(self.ptr);
         let record = self.emulator.run_riscv(stdin);
         self.ptr += 1;
         (record, done)

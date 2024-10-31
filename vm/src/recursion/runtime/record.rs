@@ -3,8 +3,8 @@ use crate::{
         exp_reverse_bits::ExpReverseBitsLenEvent,
         fri_fold::FriFoldEvent,
         poseidon2_wide::events::{Poseidon2CompressEvent, Poseidon2HashEvent},
+        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
         recursion_cpu::CpuEvent,
-        recursion_range_check::RangeCheckEvent,
     },
     compiler::recursion::program::RecursionProgram,
     emulator::record::RecordBehavior,
@@ -22,7 +22,7 @@ pub struct RecursionRecord<F: Default> {
     pub poseidon2_compress_events: Vec<Poseidon2CompressEvent<F>>,
     pub poseidon2_hash_events: Vec<Poseidon2HashEvent<F>>,
     pub fri_fold_events: Vec<FriFoldEvent<F>>,
-    pub range_check_events: HashMap<RangeCheckEvent, usize>,
+    pub range_check_events: HashMap<RangeLookupEvent, usize>,
     pub exp_reverse_bits_len_events: Vec<ExpReverseBitsLenEvent<F>>,
     // (address, value)
     pub first_memory_record: Vec<(F, Block<F>)>,
@@ -35,7 +35,7 @@ pub struct RecursionRecord<F: Default> {
 }
 
 impl<F: Default> RecursionRecord<F> {
-    pub fn add_range_check_events(&mut self, events: &[RangeCheckEvent]) {
+    pub fn add_range_check_events(&mut self, events: &[RangeLookupEvent]) {
         for event in events {
             *self.range_check_events.entry(*event).or_insert(0) += 1;
         }
@@ -102,5 +102,15 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
 
     fn chunk_index(&self) -> usize {
         0
+    }
+}
+
+impl<F: Default> RangeRecordBehavior for RecursionRecord<F> {
+    fn add_range_lookup_event(&mut self, event: RangeLookupEvent) {
+        *self.range_check_events.entry(event).or_insert(0) += 1;
+    }
+
+    fn range_lookup_events(&self) -> impl Iterator<Item = (RangeLookupEvent, usize)> {
+        self.range_check_events.iter().map(|(k, v)| (*k, *v))
     }
 }

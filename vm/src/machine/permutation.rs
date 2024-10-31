@@ -3,8 +3,8 @@ use crate::machine::{
     lookup::VirtualPairLookup,
 };
 use itertools::Itertools;
-use p3_air::{ExtensionBuilder, PairBuilder};
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, Powers, PrimeField};
+use p3_air::ExtensionBuilder;
+use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, Powers};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use rayon_scan::ScanParallelIterator;

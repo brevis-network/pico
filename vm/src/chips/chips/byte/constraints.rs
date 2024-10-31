@@ -49,15 +49,6 @@ where
                     ByteOpcode::SLL => builder.looked_byte(
                         field_op, local.sll, local.b, local.c, chunk, channel_f, mult,
                     ),
-                    ByteOpcode::U8Range => builder.looked_byte(
-                        field_op,
-                        CB::F::zero(),
-                        local.b,
-                        local.c,
-                        chunk,
-                        channel_f,
-                        mult,
-                    ),
                     ByteOpcode::ShrCarry => builder.looked_byte_pair(
                         field_op,
                         local.shr,
@@ -75,15 +66,6 @@ where
                         field_op,
                         local.msb,
                         local.b,
-                        CB::F::zero(),
-                        chunk,
-                        channel_f,
-                        mult,
-                    ),
-                    ByteOpcode::U16Range => builder.looked_byte(
-                        field_op,
-                        local.value_u16,
-                        CB::F::zero(),
                         CB::F::zero(),
                         chunk,
                         channel_f,

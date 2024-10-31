@@ -29,16 +29,10 @@ use crate::{
     },
     recursion::air::RecursionPublicValues,
 };
-use itertools::Itertools;
-use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractField, PrimeField32, TwoAdicField};
-use std::{
-    array,
-    borrow::{Borrow, BorrowMut},
-    marker::PhantomData,
-};
+use std::{array, borrow::BorrowMut, marker::PhantomData};
 
 /// A program for recursively verifying a batch of Pico proofs.
 #[derive(Debug, Clone, Copy)]

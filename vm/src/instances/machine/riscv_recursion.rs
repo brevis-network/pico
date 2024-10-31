@@ -1,49 +1,25 @@
 use crate::{
-    compiler::{
-        recursion::{program::RecursionProgram, program_builder::hints::hintable::Hintable},
-        riscv::program::Program,
-        word::Word,
-    },
-    configs::{
-        config::{StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
-    },
-    emulator::{
-        context::EmulatorContext,
-        emulator::MetaEmulator,
-        opts::EmulatorOpts,
-        record::RecordBehavior,
-        riscv::{
-            public_values::PublicValues,
-            record::EmulationRecord,
-            riscv_emulator::{EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
-        },
-    },
+    compiler::{recursion::program::RecursionProgram, riscv::program::Program},
+    configs::config::{StarkGenericConfig, Val},
+    emulator::{emulator::MetaEmulator, record::RecordBehavior, riscv::record::EmulationRecord},
     instances::{
         compiler::riscv_circuit::stdin::RiscvRecursionStdin,
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
-        machine::riscv_machine::RiscvMachine,
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{
-            ProverConstraintFolder, RecursiveVerifierConstraintFolder, VerifierConstraintFolder,
-        },
+        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{EnsembleProof, MetaProof},
         witness::ProvingWitness,
     },
-    primitives::consts::MAX_LOG_CHUNK_SIZE,
     recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use anyhow::Result;
 use log::{debug, info};
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
-use p3_field::AbstractField;
+use p3_challenger::CanObserve;
 use std::{any::type_name, borrow::Borrow, marker::PhantomData, time::Instant};
 
 pub struct RiscvRecursionMachine<NC, C>

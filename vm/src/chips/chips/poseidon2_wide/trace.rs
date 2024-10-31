@@ -7,8 +7,8 @@ use super::{
     NUM_INTERNAL_ROUNDS, RATE, WIDTH,
 };
 use crate::{
-    chips::chips::recursion_range_check::{RangeCheckEvent, RangeCheckOpcode},
-    compiler::recursion::program::RecursionProgram,
+    chips::chips::rangecheck::event::RangeLookupEvent,
+    compiler::{recursion::program::RecursionProgram, riscv::opcode::RangeCheckOpcode},
     machine::chip::ChipBehavior,
     primitives::RC_16_30_U32,
     recursion::{
@@ -267,7 +267,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
                 syscall_params.input_ptr = absorb_event.input_addr;
                 syscall_params.input_len = absorb_event.input_len;
 
-                output.add_range_check_events(&[RangeCheckEvent::new(
+                output.add_range_check_events(&[RangeLookupEvent::new(
                     RangeCheckOpcode::U16,
                     absorb_event.input_len.as_canonical_u32() as u16,
                 )]);
@@ -291,19 +291,19 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
                 let absorb_workspace = cols.opcode_workspace_mut().absorb_mut();
 
                 absorb_workspace.hash_num = absorb_event.hash_num;
-                output.add_range_check_events(&[RangeCheckEvent::new(
+                output.add_range_check_events(&[RangeLookupEvent::new(
                     RangeCheckOpcode::U16,
                     absorb_event.hash_num.as_canonical_u32() as u16,
                 )]);
                 absorb_workspace.absorb_num = absorb_event.absorb_num;
-                output.add_range_check_events(&[RangeCheckEvent::new(
+                output.add_range_check_events(&[RangeLookupEvent::new(
                     RangeCheckOpcode::U12,
                     absorb_event.absorb_num.as_canonical_u32() as u16,
                 )]);
 
                 let num_remaining_rows = num_absorb_rows - 1 - iter_num;
                 absorb_workspace.num_remaining_rows = F::from_canonical_usize(num_remaining_rows);
-                output.add_range_check_events(&[RangeCheckEvent::new(
+                output.add_range_check_events(&[RangeLookupEvent::new(
                     RangeCheckOpcode::U16,
                     num_remaining_rows as u16,
                 )]);

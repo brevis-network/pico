@@ -1,7 +1,7 @@
 //! The gadget for the addition of two words (Uint32)
 
 use crate::{
-    chips::chips::byte::event::ByteRecordBehavior,
+    chips::chips::rangecheck::event::RangeRecordBehavior,
     compiler::word::Word,
     machine::builder::{ChipBuilder, ChipRangeBuilder},
 };
@@ -23,7 +23,7 @@ pub struct AddGadget<T> {
 impl<F: Field> AddGadget<F> {
     pub fn populate(
         &mut self,
-        record: &mut impl ByteRecordBehavior,
+        record: &mut impl RangeRecordBehavior,
         chunk: u32,
         channel: u8,
         a_u32: u32,
@@ -56,9 +56,9 @@ impl<F: Field> AddGadget<F> {
 
         // Range check
         {
-            record.add_u8_range_checks(chunk, channel, &a);
-            record.add_u8_range_checks(chunk, channel, &b);
-            record.add_u8_range_checks(chunk, channel, &expected.to_le_bytes());
+            record.add_u8_range_checks(chunk, channel, a);
+            record.add_u8_range_checks(chunk, channel, b);
+            record.add_u8_range_checks(chunk, channel, expected.to_le_bytes());
         }
         expected
     }

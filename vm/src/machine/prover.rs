@@ -1,7 +1,7 @@
 use crate::{
-    compiler::{program::ProgramBehavior, riscv::program::Program},
-    configs::config::{Com, PackedChallenge, PcsProof, StarkGenericConfig},
-    emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
+    compiler::program::ProgramBehavior,
+    configs::config::{PackedChallenge, StarkGenericConfig},
+    emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::ProverConstraintFolder,
@@ -18,7 +18,7 @@ use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::{AbstractField, Field};
+use p3_field::AbstractField;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
@@ -218,7 +218,7 @@ where
         let domains_and_traces = chips_and_main
             .clone()
             .into_iter()
-            .map(|(name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
+            .map(|(_name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
             .collect::<Vec<_>>();
 
         let (commitment, data) = pcs.commit(domains_and_traces);
@@ -363,7 +363,7 @@ where
             permutation_challenges.push(challenger.sample_ext_element());
         }
 
-        let (mut permutation_traces, mut cumulative_sums) = self.generate_permutation(
+        let (permutation_traces, cumulative_sums) = self.generate_permutation(
             &ordered_chips,
             pk,
             &main_commitments,
@@ -397,7 +397,7 @@ where
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
 
-        /// Quotient
+        // Quotient
         let log_quotient_degrees = ordered_chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())

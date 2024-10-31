@@ -6,8 +6,9 @@ use super::super::{
     Poseidon2WideChip, RATE,
 };
 use crate::{
-    chips::{chips::recursion_range_check::RangeCheckOpcode, gadgets::is_zero::IsZeroGadget},
-    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipRangeBuilder},
+    chips::gadgets::is_zero::IsZeroGadget,
+    compiler::riscv::opcode::RangeCheckOpcode,
+    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
 };
 use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
@@ -241,13 +242,13 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
                     + local_hash_workspace.absorb_num,
                 local_syscall_params.absorb().hash_and_absorb_num,
             );
-            builder.recursion_looking_range_check(
-                AB::Expr::from_canonical_u8(RangeCheckOpcode::U16 as u8),
+            builder.looking_rangecheck(
+                RangeCheckOpcode::U16,
                 local_hash_workspace.hash_num,
                 send_range_check,
             );
-            builder.recursion_looking_range_check(
-                AB::Expr::from_canonical_u8(RangeCheckOpcode::U12 as u8),
+            builder.looking_rangecheck(
+                RangeCheckOpcode::U12,
                 local_hash_workspace.absorb_num,
                 send_range_check,
             );
@@ -341,15 +342,15 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
             // Range check that input_len < 2^16.  This check is only needed for absorb syscall
             // rows, but we send it for all absorb rows, since the `is_real` parameter
             // must be an expression with at most degree 1.
-            builder.recursion_looking_range_check(
-                AB::Expr::from_canonical_u8(RangeCheckOpcode::U16 as u8),
+            builder.looking_rangecheck(
+                RangeCheckOpcode::U16,
                 local_syscall_params.absorb().input_len,
                 send_range_check,
             );
 
             // Range check that num_remaining_rows is between [0, 2^16-1].
-            builder.recursion_looking_range_check(
-                AB::Expr::from_canonical_u8(RangeCheckOpcode::U16 as u8),
+            builder.looking_rangecheck(
+                RangeCheckOpcode::U16,
                 local_hash_workspace.num_remaining_rows,
                 send_range_check,
             );

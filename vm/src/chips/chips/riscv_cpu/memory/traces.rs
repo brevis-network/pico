@@ -3,13 +3,13 @@ use crate::{
     chips::{
         chips::{
             alu::event::AluEvent,
-            byte::event::{ByteLookupEvent, ByteRecordBehavior},
+            rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
             riscv_cpu::event::CpuEvent,
         },
         utils::create_alu_lookups,
     },
     compiler::riscv::{
-        opcode::{ByteOpcode, Opcode},
+        opcode::{Opcode, RangeCheckOpcode},
         register::Register::X0,
     },
     primitives::consts::WORD_SIZE,
@@ -25,7 +25,7 @@ impl<F: Field> CpuChip<F> {
         cols: &mut CpuCols<F>,
         event: &CpuEvent,
         new_alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
-        blu_events: &mut impl ByteRecordBehavior,
+        range_events: &mut impl RangeRecordBehavior,
         nonce_lookup: &HashMap<u128, u32>,
     ) {
         if !matches!(
@@ -171,15 +171,14 @@ impl<F: Field> CpuChip<F> {
         // Add event to byte lookup for byte range checking each byte in the memory addr
         let addr_bytes = memory_addr.to_le_bytes();
         for byte_pair in addr_bytes.chunks_exact(2) {
-            blu_events.add_byte_lookup_event(ByteLookupEvent {
-                chunk: event.chunk,
-                channel: event.channel,
-                opcode: ByteOpcode::U8Range,
-                a1: 0,
-                a2: 0,
-                b: byte_pair[0],
-                c: byte_pair[1],
-            });
+            range_events.add_range_lookup_event(RangeLookupEvent::new(
+                RangeCheckOpcode::U8,
+                byte_pair[0] as u16,
+            ));
+            range_events.add_range_lookup_event(RangeLookupEvent::new(
+                RangeCheckOpcode::U8,
+                byte_pair[1] as u16,
+            ));
         }
     }
 }

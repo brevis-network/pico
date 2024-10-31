@@ -10,6 +10,7 @@ use crate::{
                 event::AluEvent,
             },
             byte::event::{ByteLookupEvent, ByteRecordBehavior},
+            rangecheck::event::RangeRecordBehavior,
         },
         utils::create_alu_lookups,
     },
@@ -319,13 +320,9 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
 
                 // Range check.
                 {
-                    output.add_u8_range_checks(event.chunk, event.channel, &quotient.to_le_bytes());
-                    output.add_u8_range_checks(
-                        event.chunk,
-                        event.channel,
-                        &remainder.to_le_bytes(),
-                    );
-                    output.add_u8_range_checks(event.chunk, event.channel, &c_times_quotient);
+                    output.add_u8_range_checks(event.chunk, event.channel, quotient.to_le_bytes());
+                    output.add_u8_range_checks(event.chunk, event.channel, remainder.to_le_bytes());
+                    output.add_u8_range_checks(event.chunk, event.channel, c_times_quotient);
                 }
             }
 

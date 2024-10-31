@@ -1,9 +1,8 @@
 use crate::{
     chips::chips::{
         exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip, multi::MultiChip,
-        poseidon2_wide::Poseidon2WideChip, recursion_cpu::CpuChip,
+        poseidon2_wide::Poseidon2WideChip, rangecheck::RangeCheckChip, recursion_cpu::CpuChip,
         recursion_memory::MemoryGlobalChip, recursion_program::ProgramChip,
-        recursion_range_check::RangeCheckChip,
     },
     compiler::recursion::program::RecursionProgram,
     machine::{
@@ -27,7 +26,7 @@ pub enum RecursionChipType<
     MemoryGlobal(MemoryGlobalChip<F>),
     Poseidon2Wide(Poseidon2WideChip<DEGREE, F>),
     FriFold(FriFoldChip<DEGREE, F>),
-    RangeCheck(RangeCheckChip<F>),
+    RangeCheck(RangeCheckChip<RecursionRecord<F>, RecursionProgram<F>, F>),
     Multi(MultiChip<DEGREE, F>),
     ExpReverseBitsLen(ExpReverseBitsLenChip<DEGREE, F>),
 }

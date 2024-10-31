@@ -1,5 +1,5 @@
 use hashbrown::HashMap;
-use p3_field::{AbstractField, Field};
+use p3_field::AbstractField;
 
 // set it temporarily for now
 

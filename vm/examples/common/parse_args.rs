@@ -24,7 +24,7 @@ pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin<Vec<u8>>, 
     if n == 0 {
         n = 20; // default fibonacci seq num or keccak input str len
     }
-    let mut elf: &[u8];
+    let elf: &[u8];
     if test_case == "fibonacci" || test_case == "fib" || test_case == "f" {
         test_case = String::from("fibonacci");
         elf = ELF_FIB;

@@ -45,6 +45,9 @@ pub enum LookupType {
 
     /// Interaction with a syscall.
     Syscall = 8,
+
+    /// Interaction with the new range checker chip
+    RangeUnified = 9,
 }
 
 pub(crate) fn symbolic_to_virtual_pair<F: Field>(

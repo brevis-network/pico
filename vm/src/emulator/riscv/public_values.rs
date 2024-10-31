@@ -4,10 +4,7 @@ use crate::{
 };
 use p3_field::AbstractField;
 use serde::{Deserialize, Serialize};
-use std::{
-    borrow::{Borrow, BorrowMut},
-    mem::size_of,
-};
+use std::borrow::{Borrow, BorrowMut};
 
 #[derive(Clone, Copy, Default, Debug, Serialize, Deserialize)]
 #[repr(C)]

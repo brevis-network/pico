@@ -11,7 +11,7 @@ use crate::{
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::Field;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
 pub const NUM_ROWS: usize = 1 << 16;
@@ -46,11 +46,7 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
             .unwrap_or(&HashMap::new())
             .iter()
         {
-            let row = if lookup.opcode != ByteOpcode::U16Range {
-                (((lookup.b as u16) << 8) + lookup.c as u16) as usize
-            } else {
-                lookup.a1 as usize
-            };
+            let row = (((lookup.b as u16) << 8) + lookup.c as u16) as usize;
             let index = lookup.opcode as usize;
             let channel = lookup.channel as usize;
 
@@ -62,7 +58,7 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
         trace
     }
 
-    fn is_active(&self, record: &Self::Record) -> bool {
+    fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
 }
@@ -110,7 +106,6 @@ impl<F: Field> ByteChip<F> {
                         let sll = b << (c & 7);
                         col.sll = F::from_canonical_u8(sll);
                     }
-                    ByteOpcode::U8Range => {}
                     ByteOpcode::ShrCarry => {
                         let (res, carry) = shr_carry(b, c);
                         col.shr = F::from_canonical_u8(res);
@@ -123,10 +118,6 @@ impl<F: Field> ByteChip<F> {
                     ByteOpcode::MSB => {
                         let msb = (b & 0b1000_0000) != 0;
                         col.msb = F::from_bool(msb);
-                    }
-                    ByteOpcode::U16Range => {
-                        let v = ((b as u32) << 8) + c as u32;
-                        col.value_u16 = F::from_canonical_u32(v);
                     }
                 };
             }

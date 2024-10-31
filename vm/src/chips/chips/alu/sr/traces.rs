@@ -6,6 +6,7 @@ use crate::{
             event::{ByteLookupEvent, ByteRecordBehavior},
             utils::shr_carry,
         },
+        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
     },
     compiler::{
         riscv::{
@@ -57,8 +58,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
             .zip(input.shift_right_events.clone())
             .for_each(|(row, event)| {
                 let cols: &mut ShiftRightCols<F> = row.borrow_mut();
-                let mut blu = Vec::new();
-                self.event_to_row(&event, cols, &mut blu);
+                self.event_to_row(&event, cols, &mut (), &mut ());
             });
 
         // Pad the trace to a power of two.
@@ -93,21 +93,23 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
     fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(input.shift_right_events.len() / num_cpus::get(), 1);
 
-        let blu_batches = input
+        let (blu_batches, range_batches): (Vec<_>, Vec<_>) = input
             .shift_right_events
             .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
                     let mut row = [F::zero(); NUM_SLR_COLS];
                     let cols: &mut ShiftRightCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(event, cols, &mut blu, &mut range);
                 });
-                blu
+                (blu, range)
             })
-            .collect::<Vec<_>>();
+            .unzip();
 
         extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        extra.add_rangecheck_lookup_events(range_batches);
         debug!("{} chip - extra_record", self.name());
     }
 
@@ -122,6 +124,7 @@ impl<F: PrimeField32> ShiftRightChip<F> {
         event: &AluEvent,
         cols: &mut ShiftRightCols<F>,
         blu: &mut impl ByteRecordBehavior,
+        range: &mut impl RangeRecordBehavior,
     ) {
         // Initialize cols with basic operands and flags derived from the current event.
         {
@@ -217,10 +220,10 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             for i in 0..WORD_SIZE {
                 debug_assert_eq!(cols.a[i], cols.bit_shift_result[i].clone());
             }
-            blu.add_u8_range_checks(event.chunk, event.channel, &byte_shift_result);
-            blu.add_u8_range_checks(event.chunk, event.channel, &bit_shift_result);
-            blu.add_u8_range_checks(event.chunk, event.channel, &shr_carry_output_carry);
-            blu.add_u8_range_checks(event.chunk, event.channel, &shr_carry_output_shifted_byte);
+            range.add_u8_range_checks(event.chunk, event.channel, byte_shift_result);
+            range.add_u8_range_checks(event.chunk, event.channel, bit_shift_result);
+            range.add_u8_range_checks(event.chunk, event.channel, shr_carry_output_carry);
+            range.add_u8_range_checks(event.chunk, event.channel, shr_carry_output_shifted_byte);
         }
     }
 }

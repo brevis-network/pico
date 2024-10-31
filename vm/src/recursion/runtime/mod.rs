@@ -9,12 +9,15 @@ use crate::{
             Poseidon2AbsorbEvent, Poseidon2CompressEvent, Poseidon2FinalizeEvent,
             Poseidon2HashEvent,
         },
+        rangecheck::event::RangeLookupEvent,
         recursion_cpu::CpuEvent,
         recursion_memory::{compute_addr_diff, MemoryRecord},
-        recursion_range_check::{RangeCheckEvent, RangeCheckOpcode},
         riscv_memory::event::MemoryAccessPosition,
     },
-    compiler::recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
+    compiler::{
+        recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
+        riscv::opcode::RangeCheckOpcode,
+    },
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
     recursion::air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
 };
@@ -292,11 +295,11 @@ where
     /// Given a MemoryRecord event, track the range checks for the memory access.
     /// This will be used later to set the multiplicities in the range check table.
     fn track_memory_range_checks(&mut self, record: &MemoryRecord<F>) {
-        let diff_16bit_limb_event = RangeCheckEvent::new(
+        let diff_16bit_limb_event = RangeLookupEvent::new(
             RangeCheckOpcode::U16,
             record.diff_16bit_limb.as_canonical_u32() as u16,
         );
-        let diff_12bit_limb_event = RangeCheckEvent::new(
+        let diff_12bit_limb_event = RangeLookupEvent::new(
             RangeCheckOpcode::U12,
             record.diff_12bit_limb.as_canonical_u32() as u16,
         );
@@ -311,9 +314,9 @@ where
     fn track_addr_range_check(&mut self, addr: F, next_addr: F, subtract_one: bool) {
         let (diff_16, diff_12) = compute_addr_diff(next_addr, addr, subtract_one);
         let diff_16bit_limb_event =
-            RangeCheckEvent::new(RangeCheckOpcode::U16, diff_16.as_canonical_u32() as u16);
+            RangeLookupEvent::new(RangeCheckOpcode::U16, diff_16.as_canonical_u32() as u16);
         let diff_8bit_limb_event =
-            RangeCheckEvent::new(RangeCheckOpcode::U12, diff_12.as_canonical_u32() as u16);
+            RangeLookupEvent::new(RangeCheckOpcode::U12, diff_12.as_canonical_u32() as u16);
         self.record
             .add_range_check_events(&[diff_16bit_limb_event, diff_8bit_limb_event]);
     }

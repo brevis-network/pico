@@ -12,7 +12,7 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
         lookup::{LookupType, SymbolicLookup},
     },
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    primitives::consts::RISCV_NUM_PVS,
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::{AbstractField, Field, PrimeField32};

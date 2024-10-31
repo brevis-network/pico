@@ -2,25 +2,21 @@ use crate::{
     configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
-        lookup::VirtualPairLookup,
-        proof::BaseProof,
+        folder::{ProverConstraintFolder, SymbolicConstraintFolder},
     },
 };
 use core::iter;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::info;
 use p3_air::{Air, PairCol};
 use p3_commit::PolynomialSpace;
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, PackedValue, Powers};
+use p3_field::{AbstractExtensionField, AbstractField, Field, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
-use std::{any::type_name, time::Instant};
-use tracing::{debug_span, instrument, Span};
+use std::any::type_name;
+use tracing::{debug_span, Span};
 
 pub fn type_name_of<T>(_: &T) -> String {
     type_name::<T>().to_string()

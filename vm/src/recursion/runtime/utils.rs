@@ -1,6 +1,8 @@
 use p3_field::PrimeField32;
 
-use crate::chips::chips::recursion_range_check::{RangeCheckEvent, RangeCheckOpcode};
+use crate::{
+    chips::chips::rangecheck::event::RangeLookupEvent, compiler::riscv::opcode::RangeCheckOpcode,
+};
 
 use super::{Instruction, Opcode, HEAP_PTR, HEAP_START_ADDRESS};
 
@@ -16,15 +18,15 @@ pub fn canonical_i32_to_field<F: PrimeField32>(x: i32) -> F {
 
 pub fn get_heap_size_range_check_events<F: PrimeField32>(
     end_heap_address: F,
-) -> (RangeCheckEvent, RangeCheckEvent) {
+) -> (RangeLookupEvent, RangeLookupEvent) {
     let heap_size =
         (end_heap_address - F::from_canonical_usize(HEAP_START_ADDRESS)).as_canonical_u32();
     let diff_16bit_limb = heap_size & 0xffff;
     let diff_12bit_limb = (heap_size >> 16) & 0xfff;
 
     (
-        RangeCheckEvent::new(RangeCheckOpcode::U16, diff_16bit_limb as u16),
-        RangeCheckEvent::new(RangeCheckOpcode::U12, diff_12bit_limb as u16),
+        RangeLookupEvent::new(RangeCheckOpcode::U16, diff_16bit_limb as u16),
+        RangeLookupEvent::new(RangeCheckOpcode::U12, diff_12bit_limb as u16),
     )
 }
 

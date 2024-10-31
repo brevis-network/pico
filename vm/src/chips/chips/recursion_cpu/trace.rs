@@ -77,8 +77,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const L: usize> C
                     get_heap_size_range_check_events(cols.a.value()[0]);
 
                 let heap_cols = cols.opcode_specific.heap_expand_mut();
-                heap_cols.diff_16bit_limb = F::from_canonical_u16(u16_range_check.val);
-                heap_cols.diff_12bit_limb = F::from_canonical_u16(u12_range_check.val);
+                heap_cols.diff_16bit_limb = F::from_canonical_u16(u16_range_check.value);
+                heap_cols.diff_12bit_limb = F::from_canonical_u16(u12_range_check.value);
             }
 
             // Populate the branch columns.

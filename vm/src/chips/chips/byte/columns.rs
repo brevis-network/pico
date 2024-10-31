@@ -37,10 +37,12 @@ pub struct BytePreprocessedCols<T> {
     /// The result of the `LTU` operation on `b` and `c`
     pub ltu: T,
 
+    // TODO: maybe this can be moved into RangeCheckChip?
     /// The most significant bit of `b`.
     pub msb: T,
 
-    /// A u16 value used for `U16Range`.
+    // TODO: we can probably get rid of this column
+    /// A u16 value representing the row of the table.
     pub value_u16: T,
 }
 

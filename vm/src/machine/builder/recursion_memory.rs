@@ -1,11 +1,9 @@
 //! Recursion memory associating builder functions
 
-use super::{ChipBuilder, ChipRangeBuilder};
+use super::{ChipBuilder, ChipLookupBuilder};
 use crate::{
-    chips::chips::{
-        recursion_memory::{MemoryAccessTimestampCols, MemoryCols},
-        recursion_range_check::RangeCheckOpcode,
-    },
+    chips::chips::recursion_memory::{MemoryAccessTimestampCols, MemoryCols},
+    compiler::riscv::opcode::RangeCheckOpcode,
     machine::lookup::{LookupType, SymbolicLookup},
     recursion::air::Block,
 };
@@ -134,16 +132,7 @@ pub trait RecursionMemoryBuilder<F: Field>: ChipBuilder<F> {
         );
 
         // Send the range checks for the limbs.
-        self.recursion_looking_range_check(
-            Self::Expr::from_canonical_u8(RangeCheckOpcode::U16 as u8),
-            limb_16,
-            is_real.clone(),
-        );
-
-        self.recursion_looking_range_check(
-            Self::Expr::from_canonical_u8(RangeCheckOpcode::U12 as u8),
-            limb_12,
-            is_real,
-        )
+        self.looking_rangecheck(RangeCheckOpcode::U16, limb_16, is_real.clone());
+        self.looking_rangecheck(RangeCheckOpcode::U12, limb_12, is_real);
     }
 }

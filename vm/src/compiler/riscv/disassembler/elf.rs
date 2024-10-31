@@ -22,7 +22,7 @@ pub const MAXIMUM_MEMORY_SIZE: u32 = u32::MAX;
 ///
 /// This format is commonly used in embedded systems and is supported by many compilers.
 #[derive(Debug, Clone)]
-pub(crate) struct Elf {
+pub struct Elf {
     /// The instructions of the program encoded as 32-bits.
     pub(crate) instructions: Vec<u32>,
     /// The start address of the program.
