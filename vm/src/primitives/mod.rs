@@ -6,6 +6,7 @@ use p3_baby_bear::BabyBear;
 use p3_field::AbstractField;
 
 pub mod consts;
+pub mod consts_v2;
 pub mod types;
 
 lazy_static! {
