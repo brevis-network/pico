@@ -369,13 +369,13 @@ impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC
     }
 }
 
-pub type RecursiveVerifierConstraintFolder<'a, CF> = GenericVerifierConstraintFolder<
+pub type RecursiveVerifierConstraintFolder<'a, FC> = GenericVerifierConstraintFolder<
     'a,
-    <CF as FieldGenericConfig>::F,
-    <CF as FieldGenericConfig>::EF,
-    RecursionFelt<<CF as FieldGenericConfig>::F>,
-    RecursionExt<<CF as FieldGenericConfig>::F, <CF as FieldGenericConfig>::EF>,
-    RecursionSymbolicExt<<CF as FieldGenericConfig>::F, <CF as FieldGenericConfig>::EF>,
+    <FC as FieldGenericConfig>::F,
+    <FC as FieldGenericConfig>::EF,
+    RecursionFelt<<FC as FieldGenericConfig>::F>,
+    RecursionExt<<FC as FieldGenericConfig>::F, <FC as FieldGenericConfig>::EF>,
+    RecursionSymbolicExt<<FC as FieldGenericConfig>::F, <FC as FieldGenericConfig>::EF>,
 >;
 
 /// A folder for verifier constraints.

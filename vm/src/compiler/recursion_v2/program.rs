@@ -10,6 +10,7 @@ pub struct RecursionProgram<F> {
     pub total_memory: usize,
     #[serde(skip)]
     pub traces: Vec<Option<Backtrace>>,
+    //TODO: add shape
 }
 
 impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
