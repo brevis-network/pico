@@ -1,3 +1,4 @@
+use super::folder::DebugConstraintFolder;
 use crate::{
     configs::config::{StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
@@ -7,6 +8,7 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey},
         proof::{BaseProof, MainTraceCommitments, MetaProof},
         prover::BaseProver,
+        utils::debug_all_chips_constraints,
         verifier::BaseVerifier,
         witness::ProvingWitness,
     },
@@ -83,7 +85,9 @@ where
     }
 
     /// Get the prover of the machine.
-    fn prove(&self, pk: &BaseProvingKey<SC>, witness: &ProvingWitness<SC, C, I>) -> MetaProof<SC>;
+    fn prove(&self, pk: &BaseProvingKey<SC>, witness: &ProvingWitness<SC, C, I>) -> MetaProof<SC>
+    where
+        C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>;
 
     /// Verify the proof.
     fn verify(&self, vk: &BaseVerifyingKey<SC>, proof: &MetaProof<SC>) -> Result<()>;
@@ -181,10 +185,19 @@ where
         &self,
         pk: &BaseProvingKey<SC>,
         records: &[C::Record],
-    ) -> Vec<BaseProof<SC>> {
+    ) -> Vec<BaseProof<SC>>
+    where
+        C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
+    {
         let mut challenger = self.config().challenger();
         // observe preprocessed
         pk.observed_by(&mut challenger);
+
+        #[cfg(feature = "debug")]
+        {
+            let mut debug_challenger = self.config().challenger();
+            debug_all_chips_constraints(self.chips(), pk, &records, &mut debug_challenger);
+        }
 
         let main_commitments = records
             .iter()

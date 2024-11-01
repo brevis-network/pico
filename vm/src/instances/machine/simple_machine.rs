@@ -2,7 +2,7 @@ use crate::{
     configs::config::{StarkGenericConfig, Val},
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
@@ -47,7 +47,10 @@ where
         &self,
         pk: &BaseProvingKey<SC>,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
-    ) -> MetaProof<SC> {
+    ) -> MetaProof<SC>
+    where
+        C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
+    {
         info!("PERF-machine=simple");
         let begin = Instant::now();
 

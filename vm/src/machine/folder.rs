@@ -688,3 +688,156 @@ where
         self.preprocessed
     }
 }
+
+/// A folder for debugging constraints.
+pub struct DebugConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
+    pub(crate) preprocessed: ViewPair<'a, F>,
+    pub(crate) main: ViewPair<'a, F>,
+    pub(crate) permutation: ViewPair<'a, EF>,
+    pub(crate) cumulative_sum: EF,
+    pub(crate) permutation_challenges: &'a [EF],
+    pub(crate) is_first_row: F,
+    pub(crate) is_last_row: F,
+    pub(crate) is_transition: F,
+    pub(crate) public_values: &'a [F],
+}
+
+impl<'a, F, EF> DebugConstraintFolder<'a, F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    #[allow(clippy::unused_self)]
+    #[inline]
+    fn debug_eq_constraint(&self, x: F, y: F) {
+        if x != y {
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            eprintln!("constraint failed: {x:?} != {y:?}\n{backtrace}");
+            panic!();
+        }
+    }
+}
+
+impl<'a, F, EF> AirBuilder for DebugConstraintFolder<'a, F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    type F = F;
+    type Expr = F;
+    type Var = F;
+    type M = ViewPair<'a, F>;
+
+    fn is_first_row(&self) -> Self::Expr {
+        self.is_first_row
+    }
+
+    fn is_last_row(&self) -> Self::Expr {
+        self.is_last_row
+    }
+
+    fn is_transition_window(&self, size: usize) -> Self::Expr {
+        if size == 2 {
+            self.is_transition
+        } else {
+            panic!("only supports a window size of 2")
+        }
+    }
+
+    fn main(&self) -> Self::M {
+        self.main
+    }
+
+    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
+        self.debug_eq_constraint(x.into(), F::zero());
+    }
+
+    fn assert_one<I: Into<Self::Expr>>(&mut self, x: I) {
+        self.debug_eq_constraint(x.into(), F::one());
+    }
+
+    fn assert_eq<I1: Into<Self::Expr>, I2: Into<Self::Expr>>(&mut self, x: I1, y: I2) {
+        self.debug_eq_constraint(x.into(), y.into());
+    }
+
+    /// Assert that `x` is a boolean, i.e. either 0 or 1.
+    fn assert_bool<I: Into<Self::Expr>>(&mut self, x: I) {
+        let x = x.into();
+        if x != F::zero() && x != F::one() {
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            eprintln!("constraint failed: {x:?} is not a bool\n{backtrace}");
+            panic!();
+        }
+    }
+}
+
+impl<'a, F, EF> ExtensionBuilder for DebugConstraintFolder<'a, F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    type EF = EF;
+    type VarEF = EF;
+    type ExprEF = EF;
+
+    fn assert_zero_ext<I>(&mut self, x: I)
+    where
+        I: Into<Self::ExprEF>,
+    {
+        assert_eq!(x.into(), EF::zero(), "constraints must evaluate to zero");
+    }
+}
+
+impl<'a, F, EF> PermutationBuilder for DebugConstraintFolder<'a, F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    type MP = ViewPair<'a, EF>;
+
+    type RandomVar = EF;
+
+    type Sum = EF;
+
+    fn permutation(&self) -> Self::MP {
+        self.permutation
+    }
+
+    fn permutation_randomness(&self) -> &[Self::EF] {
+        self.permutation_challenges
+    }
+
+    fn cumulative_sum(&self) -> Self::Sum {
+        self.cumulative_sum
+    }
+}
+
+impl<'a, F, EF> PairBuilder for DebugConstraintFolder<'a, F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    fn preprocessed(&self) -> Self::M {
+        self.preprocessed
+    }
+}
+
+impl<'a, F, EF> ChipBuilder<F> for DebugConstraintFolder<'a, F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    fn preprocessed(&self) -> Self::M {
+        self.preprocessed
+    }
+}
+
+impl<'a, F: Field, EF: ExtensionField<F>> PublicValuesBuilder for DebugConstraintFolder<'a, F, EF> {
+    type PublicVar = F;
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        self.public_values
+    }
+}
+
+impl<'a, F: Field, EF: ExtensionField<F>> EmptyLookupBuilder for DebugConstraintFolder<'a, F, EF> {}

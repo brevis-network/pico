@@ -8,7 +8,7 @@ use crate::{
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
@@ -24,6 +24,9 @@ use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
 use std::{any::type_name, borrow::Borrow, time::Instant};
+
+#[cfg(feature = "debug")]
+use crate::machine::utils::debug_all_chips_constraints;
 
 pub struct RiscvMachine<SC, C>
 where
@@ -56,7 +59,16 @@ where
         &self,
         pk: &BaseProvingKey<RiscvSC>,
         witness: &ProvingWitness<RiscvSC, C, Vec<u8>>,
-    ) -> MetaProof<RiscvSC> {
+    ) -> MetaProof<RiscvSC>
+    where
+        C: for<'a> Air<
+            DebugConstraintFolder<
+                'a,
+                <RiscvSC as StarkGenericConfig>::Val,
+                <RiscvSC as StarkGenericConfig>::Challenge,
+            >,
+        >,
+    {
         info!("PERF-machine=riscv");
         let begin = Instant::now();
 
@@ -110,6 +122,17 @@ where
             let (batch_records, done) = emulator.next_batch();
 
             self.complement_record(batch_records);
+
+            #[cfg(feature = "debug")]
+            {
+                let mut debug_challenger = self.config().challenger();
+                debug_all_chips_constraints(
+                    &self.chips(),
+                    pk,
+                    batch_records,
+                    &mut debug_challenger,
+                );
+            }
 
             let batch_main_commitments = batch_records
                 .iter()

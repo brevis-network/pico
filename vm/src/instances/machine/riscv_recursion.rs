@@ -9,10 +9,11 @@ use crate::{
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
+        utils::debug_all_chips_constraints,
         witness::ProvingWitness,
     },
     recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
@@ -68,7 +69,16 @@ where
             C,
             RiscvRecursionStdin<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
         >,
-    ) -> MetaProof<RecursionSC> {
+    ) -> MetaProof<RecursionSC>
+    where
+        C: for<'c> Air<
+            DebugConstraintFolder<
+                'c,
+                <RecursionSC as StarkGenericConfig>::Val,
+                <RecursionSC as StarkGenericConfig>::Challenge,
+            >,
+        >,
+    {
         info!("PERF-machine=recursion");
         let begin = Instant::now();
 
@@ -85,6 +95,12 @@ where
 
             // read slice of records and complement them
             self.complement_record(records.as_mut_slice());
+
+            #[cfg(feature = "debug")]
+            {
+                let mut debug_challenger = self.config().challenger();
+                debug_all_chips_constraints(self.chips(), pk, &records, &mut debug_challenger);
+            }
 
             debug!("record stats");
             let stats = records[0].stats();
