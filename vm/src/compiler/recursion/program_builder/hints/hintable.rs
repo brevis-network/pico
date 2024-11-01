@@ -35,14 +35,14 @@ use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
 
 // TODO: Walkthrough
-pub trait Hintable<RC: FieldGenericConfig> {
-    type HintVariable: Variable<RC>;
+pub trait Hintable<FC: FieldGenericConfig> {
+    type HintVariable: Variable<FC>;
 
-    fn read(builder: &mut Builder<RC>) -> Self::HintVariable;
+    fn read(builder: &mut Builder<FC>) -> Self::HintVariable;
 
-    fn write(&self) -> Vec<Vec<Block<RC::F>>>;
+    fn write(&self) -> Vec<Vec<Block<FC::F>>>;
 
-    fn witness(variable: &Self::HintVariable, builder: &mut Builder<RC>) {
+    fn witness(variable: &Self::HintVariable, builder: &mut Builder<FC>) {
         let target = Self::read(builder);
         builder.assign(variable.clone(), target);
     }
@@ -150,7 +150,7 @@ impl Hintable<rcf::FieldConfig> for TwoAdicMultiplicativeCoset<rcf::Val> {
     }
 }
 
-trait VecAutoHintable<RC: FieldGenericConfig>: Hintable<rcf::FieldConfig> {}
+trait VecAutoHintable<FC: FieldGenericConfig>: Hintable<rcf::FieldConfig> {}
 
 impl<'a, A> VecAutoHintable<rcf::FieldConfig> for BaseProofHint<'a, RiscvSC, A> where
     A: ChipBehavior<BabyBear>

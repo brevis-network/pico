@@ -10,11 +10,11 @@ use p3_air::AirBuilder;
 use p3_field::{AbstractField, Field};
 use pico_derive::AlignedBorrow;
 
-/// Gadget columns for verifying that an unit is within the range `[0, modulus)`.
+/// Gadget columns for verifying that an compress is within the range `[0, modulus)`.
 #[derive(Debug, Clone, Copy, AlignedBorrow)]
 #[repr(C)]
 pub struct AssertLtColsBytes<T, const N: usize> {
-    /// Boolean flags to indicate the first byte in which the unit is smaller than the modulus.
+    /// Boolean flags to indicate the first byte in which the compress is smaller than the modulus.
     pub(crate) byte_flags: [T; N],
 
     pub(crate) a_comparison_byte: T,

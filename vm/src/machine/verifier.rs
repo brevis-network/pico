@@ -10,6 +10,7 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use itertools::{izip, Itertools};
+use log::debug;
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
@@ -69,13 +70,22 @@ where
             .map(|_| challenger.sample_ext_element::<SC::Challenge>())
             .collect::<Vec<_>>();
 
+        debug!(
+            "VERIFIER: permutation challenges: {:?}",
+            permutation_challenges
+        );
+
         challenger.observe(permutation_commit.clone());
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
 
+        debug!("VERIFIER: alpha: {:?}", alpha);
+
         challenger.observe(quotient_commit.clone());
 
         let zeta: SC::Challenge = challenger.sample_ext_element();
+
+        debug!("VERIFIER: zeta: {:?}", zeta);
 
         // main opening
         let main_domains = log_main_degrees

@@ -9,19 +9,23 @@ use crate::{
         riscv::{record::EmulationRecord, stdin::EmulatorStdin},
     },
     instances::{
-        compiler::riscv_circuit::stdin::RiscvRecursionStdin,
+        chiptype::riscv_chiptype::RiscvChipType,
+        compiler::{
+            recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::RiscvRecursionStdin,
+        },
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
     },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        keys::BaseVerifyingKey,
     },
     recursion::runtime::RecursionRecord,
 };
 use p3_air::Air;
 
-// Here SC, C refers to types in recurion, while I refers to type in native
-pub struct ProvingWitness<'a, NSC, NC, SC, C, I>
+// Here SC, C refers to types in recursion (native), while I refers to type in original
+pub struct ProvingWitness<'a, SC, C, I>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
@@ -36,12 +40,30 @@ where
 
     pub config: Option<&'a SC>,
 
-    pub records: Vec<C::Record>,
+    pub vk: Option<&'a BaseVerifyingKey<SC>>, // for the machine to construct recursive stdin internally
 
-    phantom: std::marker::PhantomData<(NSC, NC)>,
+    pub records: Vec<C::Record>,
 }
 
-impl<'a, NSC, NC, SC, C, I> ProvingWitness<'a, NSC, NC, SC, C, I>
+impl<'a, SC, C, I> ProvingWitness<'a, SC, C, I>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>,
+{
+    pub fn default() -> Self {
+        Self {
+            program: C::Program::default(),
+            stdin: None,
+            opts: None,
+            context: None,
+            config: None,
+            vk: None,
+            records: vec![],
+        }
+    }
+}
+
+impl<'a, SC, C, I> ProvingWitness<'a, SC, C, I>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
@@ -53,8 +75,8 @@ where
             opts: None,
             context: None,
             config: None,
+            vk: None,
             records,
-            phantom: std::marker::PhantomData,
         }
     }
 
@@ -68,7 +90,7 @@ where
 }
 
 // implement Witness for riscv machine
-impl<'a, SC, C> ProvingWitness<'a, SC, C, SC, C, Vec<u8>>
+impl<'a, SC, C> ProvingWitness<'a, SC, C, Vec<u8>>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
@@ -85,16 +107,16 @@ where
             opts: Some(opts),
             context: Some(context),
             config: None,
+            vk: None,
             records: vec![],
-            phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<'a, NC, C>
-    ProvingWitness<'a, RiscvSC, NC, RecursionSC, C, RiscvRecursionStdin<'a, RiscvSC, NC>>
+// implement Witness for riscv-recursion machine
+impl<'a, C, RiscvC> ProvingWitness<'a, RecursionSC, C, RiscvRecursionStdin<'a, RiscvSC, RiscvC>>
 where
-    NC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
+    RiscvC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
     C: ChipBehavior<
@@ -106,7 +128,7 @@ where
 {
     pub fn setup_for_riscv_recursion(
         program: C::Program,
-        stdin: &'a EmulatorStdin<RiscvRecursionStdin<'a, RiscvSC, NC>>,
+        stdin: &'a EmulatorStdin<RiscvRecursionStdin<'a, RiscvSC, RiscvC>>,
         config: &'a RecursionSC,
     ) -> Self {
         Self {
@@ -115,8 +137,43 @@ where
             opts: None,
             context: None,
             config: Some(config),
+            vk: None,
             records: vec![],
-            phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+// implement Witness for recursion-recursion machine
+impl<'a, C, RecursionC>
+    ProvingWitness<'a, RecursionSC, C, RecursionStdin<'a, RecursionSC, RecursionC>>
+where
+    C: ChipBehavior<
+            Val<RecursionSC>,
+            Program = RecursionProgram<Val<RecursionSC>>,
+            Record = RecursionRecord<Val<RecursionSC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+    RecursionC: ChipBehavior<
+            Val<RecursionSC>,
+            Program = RecursionProgram<Val<RecursionSC>>,
+            Record = RecursionRecord<Val<RecursionSC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+{
+    pub fn setup_for_recursion(
+        program: C::Program,
+        stdin: &'a EmulatorStdin<RecursionStdin<'a, RecursionSC, RecursionC>>,
+        config: &'a RecursionSC,
+        vk: &'a BaseVerifyingKey<RecursionSC>,
+    ) -> Self {
+        Self {
+            program,
+            stdin: Some(stdin),
+            opts: None,
+            context: None,
+            config: Some(config),
+            vk: Some(vk),
+            records: vec![],
         }
     }
 }

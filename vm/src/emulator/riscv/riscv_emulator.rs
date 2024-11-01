@@ -446,16 +446,26 @@ impl RiscvEmulator {
 
         // Set the global public values for all chunks.
         // println!("# batch records to be processed: {}", self.batch_records.len());
-        for (_i, record) in self.batch_records.iter_mut().enumerate() {
+        let mut current_execution_chunk = 0;
+        let mut flag_extra = true;
+        for (i, record) in self.batch_records.iter_mut().enumerate() {
             self.public_values_buffer.chunk += 1;
             if !record.cpu_events.is_empty() {
                 self.public_values_buffer.execution_chunk += 1;
+                current_execution_chunk = self.public_values_buffer.execution_chunk;
                 self.public_values_buffer.start_pc = record.cpu_events[0].pc;
                 self.public_values_buffer.next_pc = record.cpu_events.last().unwrap().next_pc;
                 self.public_values_buffer.exit_code = record.cpu_events.last().unwrap().exit_code;
                 self.public_values_buffer.committed_value_digest =
                     record.public_values.committed_value_digest;
             } else {
+                // hack to make execution chunk consistent
+                if flag_extra {
+                    current_execution_chunk += 1;
+                    flag_extra = false;
+                }
+                self.public_values_buffer.execution_chunk = current_execution_chunk;
+
                 self.public_values_buffer.start_pc = self.public_values_buffer.next_pc;
                 self.public_values_buffer.previous_initialize_addr_bits =
                     record.public_values.previous_initialize_addr_bits;
@@ -1411,7 +1421,10 @@ impl Default for EmulatorMode {
 
 mod tests {
     use super::{Program, RiscvEmulator};
-    use crate::compiler::riscv::compiler::{Compiler, SourceType};
+    use crate::{
+        compiler::riscv::compiler::{Compiler, SourceType},
+        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    };
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =

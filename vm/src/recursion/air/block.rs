@@ -8,7 +8,7 @@ use pico_derive::AlignedBorrow;
 use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut};
 
-/// The smallest unit of memory that can be read and written to.
+/// The smallest compress of memory that can be read and written to.
 #[derive(
     AlignedBorrow, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize,
 )]

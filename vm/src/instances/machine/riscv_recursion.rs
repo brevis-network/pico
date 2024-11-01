@@ -3,6 +3,7 @@ use crate::{
     configs::config::{StarkGenericConfig, Val},
     emulator::{emulator::MetaEmulator, record::RecordBehavior, riscv::record::EmulationRecord},
     instances::{
+        chiptype::riscv_chiptype::RiscvChipType,
         compiler::riscv_circuit::stdin::RiscvRecursionStdin,
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
     },
@@ -11,7 +12,7 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
-        proof::{EnsembleProof, MetaProof},
+        proof::MetaProof,
         witness::ProvingWitness,
     },
     recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
@@ -19,43 +20,28 @@ use crate::{
 use anyhow::Result;
 use log::{debug, info};
 use p3_air::Air;
-use p3_challenger::CanObserve;
+use p3_baby_bear::BabyBear;
+use p3_challenger::{CanObserve, DuplexChallenger};
+use p3_field::{AbstractField, Field};
 use std::{any::type_name, borrow::Borrow, marker::PhantomData, time::Instant};
 
-pub struct RiscvRecursionMachine<NC, C>
+pub struct RiscvRecursionMachine<SC, C>
 where
-    NC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
+    SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    config: RecursionSC,
-
-    chips: Vec<MetaChip<Val<RecursionSC>, C>>,
-
-    base_machine: BaseMachine<RecursionSC, C>,
-
-    _phantom: PhantomData<NC>,
+    base_machine: BaseMachine<SC, C>,
 }
 
-impl<'a, NC, C>
-    MachineBehavior<
-        RiscvSC,
-        NC,
-        RecursionSC,
-        C,
-        EnsembleProof<RecursionSC>,
-        RiscvRecursionStdin<'a, RiscvSC, NC>,
-    > for RiscvRecursionMachine<NC, C>
+impl<'a, C>
+    MachineBehavior<RecursionSC, C, RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>>
+    for RiscvRecursionMachine<RecursionSC, C>
 where
-    NC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
     C: ChipBehavior<
             Val<RecursionSC>,
             Program = RecursionProgram<Val<RecursionSC>>,
@@ -68,58 +54,31 @@ where
         format!("Riscv Compress Machine <{}>", type_name::<RecursionSC>())
     }
 
-    /// Get the configuration of the machine.
-    fn config(&self) -> &RecursionSC {
-        &self.config
-    }
-
-    /// Get the number of public values
-    fn num_public_values(&self) -> usize {
-        self.base_machine.num_public_values()
-    }
-
-    /// Get the chips of the machine.
-    fn chips(&self) -> &[MetaChip<Val<RecursionSC>, C>] {
-        &self.chips
-    }
-
-    /// setup prover, verifier and keys.
-    fn setup_keys(
-        &self,
-        program: &C::Program,
-    ) -> (BaseProvingKey<RecursionSC>, BaseVerifyingKey<RecursionSC>) {
-        info!("PERF-machine=recursion");
-        let begin = Instant::now();
-
-        let (pk, vk) = self
-            .base_machine
-            .setup_keys(self.config(), self.chips(), program);
-
-        info!(
-            "PERF-step=setup_keys-user_time={}",
-            begin.elapsed().as_millis()
-        );
-
-        (pk, vk)
+    /// Get the base machine.
+    fn base_machine(&self) -> &BaseMachine<RecursionSC, C> {
+        &self.base_machine
     }
 
     /// Get the prover of the machine.
     fn prove(
         &self,
         pk: &BaseProvingKey<RecursionSC>,
-        witness: &ProvingWitness<RiscvSC, NC, RecursionSC, C, RiscvRecursionStdin<RiscvSC, NC>>,
-    ) -> MetaProof<RecursionSC, EnsembleProof<RecursionSC>> {
+        witness: &ProvingWitness<
+            RecursionSC,
+            C,
+            RiscvRecursionStdin<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+        >,
+    ) -> MetaProof<RecursionSC> {
         info!("PERF-machine=recursion");
         let begin = Instant::now();
-
-        let mut challenger = self.config().challenger();
-        pk.observed_by(&mut challenger);
 
         // First
         // Generate batch records and commit to challenger
 
         let mut chunk_index = 1;
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
+        let mut all_proofs = vec![];
+
         loop {
             let (record, done) = recursion_emulator.next();
             let mut records = vec![record];
@@ -135,40 +94,15 @@ where
 
             info!("PERF-phase=1-chunk={chunk_index}");
 
-            let commitment = self
-                .base_machine
-                .commit(self.config(), &self.chips, &records[0]);
+            let commitment = self.base_machine.commit(&records[0]);
+
+            let mut challenger = self.config().challenger();
+            pk.observed_by(&mut challenger);
 
             challenger.observe(commitment.commitment.clone());
             challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
 
-            if done {
-                break;
-            }
-
-            chunk_index += 1;
-        }
-
-        // Second phase
-        // Generate batch records and generate proofs
-
-        let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
-        let mut all_proofs = vec![];
-        let mut chunk_index = 1;
-        loop {
-            let (record, done) = recursion_emulator.next();
-            let mut records = vec![record];
-
-            self.complement_record(records.as_mut_slice());
-
-            info!("PERF-phase=2-chunk={chunk_index}");
-            let commitment = self
-                .base_machine
-                .commit(self.config(), &self.chips, &records[0]);
-
             let proof = self.base_machine.prove_plain(
-                self.config(),
-                &self.chips,
                 pk,
                 &mut challenger.clone(),
                 commitment,
@@ -185,10 +119,44 @@ where
             chunk_index += 1;
         }
 
+        // Second phase
+        // Generate batch records and generate proofs
+
+        // let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
+        // let mut all_proofs = vec![];
+        // let mut chunk_index = 1;
+        // loop {
+        //     let (record, done) = recursion_emulator.next();
+        //     let mut records = vec![record];
+        //
+        //     self.complement_record(records.as_mut_slice());
+        //
+        //     info!("PERF-phase=2-chunk={chunk_index}");
+        //     let commitment = self
+        //         .base_machine
+        //         .commit(&records[0]);
+        //
+        //     let proof = self.base_machine.prove_plain(
+        //         pk,
+        //         &mut challenger.clone(),
+        //         commitment,
+        //         records[0].chunk_index(),
+        //     );
+        //
+        //     // extend all_proofs to include batch_proofs
+        //     all_proofs.push(proof);
+        //
+        //     if done {
+        //         break;
+        //     }
+        //
+        //     chunk_index += 1;
+        // }
+
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(self.config(), EnsembleProof::new(all_proofs));
+        let proof = MetaProof::new(all_proofs);
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
@@ -199,7 +167,7 @@ where
     fn verify(
         &self,
         vk: &BaseVerifyingKey<RecursionSC>,
-        proof: &MetaProof<RecursionSC, EnsembleProof<RecursionSC>>,
+        proof: &MetaProof<RecursionSC>,
     ) -> Result<()> {
         info!("PERF-machine=recursion");
         let begin = Instant::now();
@@ -209,10 +177,30 @@ where
                 each_proof.public_values.as_slice().borrow();
 
             debug!("public values: {:?}", public_values);
+
+            let mut challenger = self.config().challenger();
+            // observe all preprocessed and main commits and pv's
+            vk.observed_by(&mut challenger);
+            challenger.observe(each_proof.commitments.main_commit.clone());
+            challenger.observe_slice(&each_proof.public_values[..self.num_public_values()]);
+
+            self.base_machine
+                .verify_plain(vk, &mut challenger, each_proof)?;
         }
 
-        self.base_machine
-            .verify_ensemble(self.config(), self.chips(), vk, proof.proofs())?;
+        // compute sum of each proof.cumulative_sum() and add them up and judge if it is zero
+        let sum = proof
+            .proofs()
+            .iter()
+            .map(|proof| proof.cumulative_sum())
+            .sum::<<RecursionSC as StarkGenericConfig>::Challenge>();
+
+        if !sum.is_zero() {
+            panic!("verify_ensemble:lookup cumulative sum is not zero");
+        }
+
+        // self.base_machine
+        //     .verify_ensemble(vk, proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 
@@ -220,38 +208,19 @@ where
     }
 }
 
-impl<RiscvC, C> RiscvRecursionMachine<RiscvC, C>
+impl<SC, C> RiscvRecursionMachine<SC, C>
 where
-    RiscvC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
+    SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub fn new(
-        config: RecursionSC,
-        num_public_values: usize,
-        chips: Vec<MetaChip<Val<RecursionSC>, C>>,
-    ) -> Self {
+    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {
-            config,
-            chips,
-            base_machine: BaseMachine::<RecursionSC, C>::new(num_public_values),
-            _phantom: PhantomData,
+            base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }
-    }
-
-    /// Returns the id of all chips in the machine that have preprocessed columns.
-    pub fn preprocessed_chip_ids(&self) -> Vec<usize> {
-        self.chips
-            .iter()
-            .enumerate()
-            .filter(|(_, chip)| chip.preprocessed_width() > 0)
-            .map(|(i, _)| i)
-            .collect()
     }
 }

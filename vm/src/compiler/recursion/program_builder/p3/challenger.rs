@@ -10,63 +10,63 @@ use crate::{
 use p3_field::AbstractField;
 
 /// Reference: [p3_challenger::CanObserve].
-pub trait CanObserveVariable<RC: FieldGenericConfig, V> {
-    fn observe(&mut self, builder: &mut Builder<RC>, value: V);
+pub trait CanObserveVariable<FC: FieldGenericConfig, V> {
+    fn observe(&mut self, builder: &mut Builder<FC>, value: V);
 
-    fn observe_slice(&mut self, builder: &mut Builder<RC>, values: Array<RC, V>);
+    fn observe_slice(&mut self, builder: &mut Builder<FC>, values: Array<FC, V>);
 }
 
-pub trait CanSampleVariable<RC: FieldGenericConfig, V> {
-    fn sample(&mut self, builder: &mut Builder<RC>) -> V;
+pub trait CanSampleVariable<FC: FieldGenericConfig, V> {
+    fn sample(&mut self, builder: &mut Builder<FC>) -> V;
 }
 
 /// Reference: [p3_challenger::FieldChallenger].
-pub trait FeltChallenger<RC: FieldGenericConfig>:
-    CanObserveVariable<RC, Felt<RC::F>> + CanSampleVariable<RC, Felt<RC::F>> + CanSampleBitsVariable<RC>
+pub trait FeltChallenger<FC: FieldGenericConfig>:
+    CanObserveVariable<FC, Felt<FC::F>> + CanSampleVariable<FC, Felt<FC::F>> + CanSampleBitsVariable<FC>
 {
-    fn sample_ext(&mut self, builder: &mut Builder<RC>) -> Ext<RC::F, RC::EF>;
+    fn sample_ext(&mut self, builder: &mut Builder<FC>) -> Ext<FC::F, FC::EF>;
 }
 
-pub trait CanSampleBitsVariable<RC: FieldGenericConfig> {
+pub trait CanSampleBitsVariable<FC: FieldGenericConfig> {
     fn sample_bits(
         &mut self,
-        builder: &mut Builder<RC>,
-        nb_bits: Usize<RC::N>,
-    ) -> Array<RC, Var<RC::N>>;
+        builder: &mut Builder<FC>,
+        nb_bits: Usize<FC::N>,
+    ) -> Array<FC, Var<FC::N>>;
 }
 
 /// Reference: [p3_challenger::DuplexChallenger]
 #[derive(Clone, DslVariable)]
-pub struct DuplexChallengerVariable<RC: FieldGenericConfig> {
-    pub sponge_state: Array<RC, Felt<RC::F>>,
-    pub nb_inputs: Var<RC::N>,
-    pub input_buffer: Array<RC, Felt<RC::F>>,
-    pub nb_outputs: Var<RC::N>,
-    pub output_buffer: Array<RC, Felt<RC::F>>,
+pub struct DuplexChallengerVariable<FC: FieldGenericConfig> {
+    pub sponge_state: Array<FC, Felt<FC::F>>,
+    pub nb_inputs: Var<FC::N>,
+    pub input_buffer: Array<FC, Felt<FC::F>>,
+    pub nb_outputs: Var<FC::N>,
+    pub output_buffer: Array<FC, Felt<FC::F>>,
 }
 
-impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
+impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
     /// Creates a new duplex challenger with the default state.
-    pub fn new(builder: &mut Builder<RC>) -> Self {
-        let mut result = DuplexChallengerVariable::<RC> {
+    pub fn new(builder: &mut Builder<FC>) -> Self {
+        let mut result = DuplexChallengerVariable::<FC> {
             sponge_state: builder.dyn_array(PERMUTATION_WIDTH),
-            nb_inputs: builder.eval(RC::N::zero()),
+            nb_inputs: builder.eval(FC::N::zero()),
             input_buffer: builder.dyn_array(PERMUTATION_WIDTH),
-            nb_outputs: builder.eval(RC::N::zero()),
+            nb_outputs: builder.eval(FC::N::zero()),
             output_buffer: builder.dyn_array(PERMUTATION_WIDTH),
         };
 
         // Constrain the state of the challenger to contain all zeroes.
         builder.range(0, PERMUTATION_WIDTH).for_each(|i, builder| {
-            builder.set(&mut result.sponge_state, i, RC::F::zero());
-            builder.set(&mut result.input_buffer, i, RC::F::zero());
-            builder.set(&mut result.output_buffer, i, RC::F::zero());
+            builder.set(&mut result.sponge_state, i, FC::F::zero());
+            builder.set(&mut result.input_buffer, i, FC::F::zero());
+            builder.set(&mut result.output_buffer, i, FC::F::zero());
         });
         result
     }
 
     /// Creates a new challenger with the same state as an existing challenger.
-    pub fn copy(&self, builder: &mut Builder<RC>) -> Self {
+    pub fn copy(&self, builder: &mut Builder<FC>) -> Self {
         let mut sponge_state = builder.dyn_array(PERMUTATION_WIDTH);
         builder.range(0, PERMUTATION_WIDTH).for_each(|i, builder| {
             let element = builder.get(&self.sponge_state, i);
@@ -84,7 +84,7 @@ impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
             let element = builder.get(&self.output_buffer, i);
             builder.set(&mut output_buffer, i, element);
         });
-        DuplexChallengerVariable::<RC> {
+        DuplexChallengerVariable::<FC> {
             sponge_state,
             nb_inputs,
             input_buffer,
@@ -94,7 +94,7 @@ impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
     }
 
     /// Asserts that the state of this challenger is equal to the state of another challenger.
-    pub fn assert_eq(&self, builder: &mut Builder<RC>, other: &Self) {
+    pub fn assert_eq(&self, builder: &mut Builder<FC>, other: &Self) {
         builder.assert_var_eq(self.nb_inputs, other.nb_inputs);
         builder.assert_var_eq(self.nb_outputs, other.nb_outputs);
         builder.range(0, PERMUTATION_WIDTH).for_each(|i, builder| {
@@ -114,9 +114,9 @@ impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
         });
     }
 
-    pub fn reset(&mut self, builder: &mut Builder<RC>) {
-        let zero: Var<_> = builder.eval(RC::N::zero());
-        let zero_felt: Felt<_> = builder.eval(RC::F::zero());
+    pub fn reset(&mut self, builder: &mut Builder<FC>) {
+        let zero: Var<_> = builder.eval(FC::N::zero());
+        let zero_felt: Felt<_> = builder.eval(FC::F::zero());
         builder.range(0, PERMUTATION_WIDTH).for_each(|i, builder| {
             builder.set(&mut self.sponge_state, i, zero_felt);
         });
@@ -130,46 +130,46 @@ impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
         });
     }
 
-    pub fn duplexing(&mut self, builder: &mut Builder<RC>) {
+    pub fn duplexing(&mut self, builder: &mut Builder<FC>) {
         builder.range(0, self.nb_inputs).for_each(|i, builder| {
             let element = builder.get(&self.input_buffer, i);
             builder.set(&mut self.sponge_state, i, element);
         });
-        builder.assign(self.nb_inputs, RC::N::zero());
+        builder.assign(self.nb_inputs, FC::N::zero());
 
         builder.poseidon2_permute_mut(&self.sponge_state);
 
-        builder.assign(self.nb_outputs, RC::N::zero());
+        builder.assign(self.nb_outputs, FC::N::zero());
 
         for i in 0..PERMUTATION_WIDTH {
             let element = builder.get(&self.sponge_state, i);
             builder.set(&mut self.output_buffer, i, element);
-            builder.assign(self.nb_outputs, self.nb_outputs + RC::N::one());
+            builder.assign(self.nb_outputs, self.nb_outputs + FC::N::one());
         }
     }
 
-    fn observe(&mut self, builder: &mut Builder<RC>, value: Felt<RC::F>) {
-        builder.assign(self.nb_outputs, RC::N::zero());
+    fn observe(&mut self, builder: &mut Builder<FC>, value: Felt<FC::F>) {
+        builder.assign(self.nb_outputs, FC::N::zero());
 
         builder.set(&mut self.input_buffer, self.nb_inputs, value);
-        builder.assign(self.nb_inputs, self.nb_inputs + RC::N::one());
+        builder.assign(self.nb_inputs, self.nb_inputs + FC::N::one());
 
         builder
-            .if_eq(self.nb_inputs, RC::N::from_canonical_usize(HASH_RATE))
+            .if_eq(self.nb_inputs, FC::N::from_canonical_usize(HASH_RATE))
             .then(|builder| {
                 self.duplexing(builder);
             })
     }
 
-    fn observe_commitment(&mut self, builder: &mut Builder<RC>, commitment: DigestVariable<RC>) {
+    fn observe_commitment(&mut self, builder: &mut Builder<FC>, commitment: DigestVariable<FC>) {
         for i in 0..DIGEST_SIZE {
             let element = builder.get(&commitment, i);
             self.observe(builder, element);
         }
     }
 
-    fn sample(&mut self, builder: &mut Builder<RC>) -> Felt<RC::F> {
-        let zero: Var<_> = builder.eval(RC::N::zero());
+    fn sample(&mut self, builder: &mut Builder<FC>) -> Felt<FC::F> {
+        let zero: Var<_> = builder.eval(FC::N::zero());
         builder.if_ne(self.nb_inputs, zero).then_or_else(
             |builder| {
                 self.clone().duplexing(builder);
@@ -180,13 +180,13 @@ impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
                 });
             },
         );
-        let idx: Var<_> = builder.eval(self.nb_outputs - RC::N::one());
+        let idx: Var<_> = builder.eval(self.nb_outputs - FC::N::one());
         let output = builder.get(&self.output_buffer, idx);
-        builder.assign(self.nb_outputs, self.nb_outputs - RC::N::one());
+        builder.assign(self.nb_outputs, self.nb_outputs - FC::N::one());
         output
     }
 
-    fn sample_ext(&mut self, builder: &mut Builder<RC>) -> Ext<RC::F, RC::EF> {
+    fn sample_ext(&mut self, builder: &mut Builder<FC>) -> Ext<FC::F, FC::EF> {
         let a = self.sample(builder);
         let b = self.sample(builder);
         let c = self.sample(builder);
@@ -196,14 +196,14 @@ impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
 
     fn sample_bits(
         &mut self,
-        builder: &mut Builder<RC>,
-        nb_bits: Usize<RC::N>,
-    ) -> Array<RC, Var<RC::N>> {
+        builder: &mut Builder<FC>,
+        nb_bits: Usize<FC::N>,
+    ) -> Array<FC, Var<FC::N>> {
         let rand_f = self.sample(builder);
         let mut bits = builder.num2bits_f(rand_f);
 
         builder.range(nb_bits, bits.len()).for_each(|i, builder| {
-            builder.set(&mut bits, i, RC::N::zero());
+            builder.set(&mut bits, i, FC::N::zero());
         });
 
         bits
@@ -211,25 +211,25 @@ impl<RC: FieldGenericConfig> DuplexChallengerVariable<RC> {
 
     pub fn check_witness(
         &mut self,
-        builder: &mut Builder<RC>,
-        nb_bits: Var<RC::N>,
-        witness: Felt<RC::F>,
+        builder: &mut Builder<FC>,
+        nb_bits: Var<FC::N>,
+        witness: Felt<FC::F>,
     ) {
         self.observe(builder, witness);
         let element_bits = self.sample_bits(builder, nb_bits.into());
         builder.range(0, nb_bits).for_each(|i, builder| {
             let element = builder.get(&element_bits, i);
-            builder.assert_var_eq(element, RC::N::zero());
+            builder.assert_var_eq(element, FC::N::zero());
         });
     }
 }
 
-impl<RC: FieldGenericConfig> CanObserveVariable<RC, Felt<RC::F>> for DuplexChallengerVariable<RC> {
-    fn observe(&mut self, builder: &mut Builder<RC>, value: Felt<RC::F>) {
+impl<FC: FieldGenericConfig> CanObserveVariable<FC, Felt<FC::F>> for DuplexChallengerVariable<FC> {
+    fn observe(&mut self, builder: &mut Builder<FC>, value: Felt<FC::F>) {
         DuplexChallengerVariable::observe(self, builder, value);
     }
 
-    fn observe_slice(&mut self, builder: &mut Builder<RC>, values: Array<RC, Felt<RC::F>>) {
+    fn observe_slice(&mut self, builder: &mut Builder<FC>, values: Array<FC, Felt<FC::F>>) {
         match values {
             Array::Dyn(_, len) => {
                 builder.range(0, len).for_each(|i, builder| {
@@ -246,57 +246,57 @@ impl<RC: FieldGenericConfig> CanObserveVariable<RC, Felt<RC::F>> for DuplexChall
     }
 }
 
-impl<RC: FieldGenericConfig> CanSampleVariable<RC, Felt<RC::F>> for DuplexChallengerVariable<RC> {
-    fn sample(&mut self, builder: &mut Builder<RC>) -> Felt<RC::F> {
+impl<FC: FieldGenericConfig> CanSampleVariable<FC, Felt<FC::F>> for DuplexChallengerVariable<FC> {
+    fn sample(&mut self, builder: &mut Builder<FC>) -> Felt<FC::F> {
         DuplexChallengerVariable::sample(self, builder)
     }
 }
 
-impl<RC: FieldGenericConfig> CanSampleBitsVariable<RC> for DuplexChallengerVariable<RC> {
+impl<FC: FieldGenericConfig> CanSampleBitsVariable<FC> for DuplexChallengerVariable<FC> {
     fn sample_bits(
         &mut self,
-        builder: &mut Builder<RC>,
-        nb_bits: Usize<RC::N>,
-    ) -> Array<RC, Var<RC::N>> {
+        builder: &mut Builder<FC>,
+        nb_bits: Usize<FC::N>,
+    ) -> Array<FC, Var<FC::N>> {
         DuplexChallengerVariable::sample_bits(self, builder, nb_bits)
     }
 }
 
-impl<RC: FieldGenericConfig> CanObserveVariable<RC, DigestVariable<RC>>
-    for DuplexChallengerVariable<RC>
+impl<FC: FieldGenericConfig> CanObserveVariable<FC, DigestVariable<FC>>
+    for DuplexChallengerVariable<FC>
 {
-    fn observe(&mut self, builder: &mut Builder<RC>, commitment: DigestVariable<RC>) {
+    fn observe(&mut self, builder: &mut Builder<FC>, commitment: DigestVariable<FC>) {
         DuplexChallengerVariable::observe_commitment(self, builder, commitment);
     }
 
     fn observe_slice(
         &mut self,
-        _builder: &mut Builder<RC>,
-        _values: Array<RC, DigestVariable<RC>>,
+        _builder: &mut Builder<FC>,
+        _values: Array<FC, DigestVariable<FC>>,
     ) {
         todo!()
     }
 }
 
-impl<RC: FieldGenericConfig> CanObserveVariable<RC, BaseVerifyingKeyVariable<RC>>
-    for DuplexChallengerVariable<RC>
+impl<FC: FieldGenericConfig> CanObserveVariable<FC, BaseVerifyingKeyVariable<FC>>
+    for DuplexChallengerVariable<FC>
 {
-    fn observe(&mut self, builder: &mut Builder<RC>, value: BaseVerifyingKeyVariable<RC>) {
+    fn observe(&mut self, builder: &mut Builder<FC>, value: BaseVerifyingKeyVariable<FC>) {
         self.observe_commitment(builder, value.commitment);
         self.observe(builder, value.pc_start)
     }
 
     fn observe_slice(
         &mut self,
-        _builder: &mut Builder<RC>,
-        _values: Array<RC, BaseVerifyingKeyVariable<RC>>,
+        _builder: &mut Builder<FC>,
+        _values: Array<FC, BaseVerifyingKeyVariable<FC>>,
     ) {
         todo!()
     }
 }
 
-impl<RC: FieldGenericConfig> FeltChallenger<RC> for DuplexChallengerVariable<RC> {
-    fn sample_ext(&mut self, builder: &mut Builder<RC>) -> Ext<RC::F, RC::EF> {
+impl<FC: FieldGenericConfig> FeltChallenger<FC> for DuplexChallengerVariable<FC> {
+    fn sample_ext(&mut self, builder: &mut Builder<FC>) -> Ext<FC::F, FC::EF> {
         DuplexChallengerVariable::sample_ext(self, builder)
     }
 }

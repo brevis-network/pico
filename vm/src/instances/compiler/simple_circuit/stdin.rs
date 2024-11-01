@@ -17,7 +17,7 @@ use crate::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::MachineBehavior,
+        machine::{BaseMachine, MachineBehavior},
         proof::BaseProof,
     },
     recursion::air::Block,
@@ -34,7 +34,7 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub vk: &'a BaseVerifyingKey<SC>,
-    pub machine: &'a SimpleMachine<SC, C>,
+    pub machine: &'a BaseMachine<SC, C>,
     pub base_proofs: Vec<BaseProof<SC>>,
     pub base_challenger: &'a SC::Challenger,
     pub initial_reconstruct_challenger: SC::Challenger,
@@ -42,12 +42,12 @@ where
 }
 
 #[derive(DslVariable, Clone)]
-pub struct SimpleRecursionStdinVariable<RC: FieldGenericConfig> {
-    pub vk: BaseVerifyingKeyVariable<RC>,
-    pub base_proofs: Array<RC, BaseProofVariable<RC>>,
-    pub base_challenger: DuplexChallengerVariable<RC>,
-    pub initial_reconstruct_challenger: DuplexChallengerVariable<RC>,
-    pub flag_complete: Var<RC::N>,
+pub struct SimpleRecursionStdinVariable<FC: FieldGenericConfig> {
+    pub vk: BaseVerifyingKeyVariable<FC>,
+    pub base_proofs: Array<FC, BaseProofVariable<FC>>,
+    pub base_challenger: DuplexChallengerVariable<FC>,
+    pub initial_reconstruct_challenger: DuplexChallengerVariable<FC>,
+    pub flag_complete: Var<FC::N>,
 }
 
 impl<'a, SC, C> SimpleRecursionStdin<'a, SC, C>
@@ -58,7 +58,7 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub fn construct(
-        machine: &'a SimpleMachine<SC, C>,
+        machine: &'a BaseMachine<SC, C>,
         reconstruct_challenger: &mut SC::Challenger,
         vk: &'a BaseVerifyingKey<SC>,
         base_challenger: &'a mut SC::Challenger,

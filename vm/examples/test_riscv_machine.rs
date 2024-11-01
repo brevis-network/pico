@@ -56,7 +56,7 @@ fn main() {
     let chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips
-    let riscv_machine = RiscvMachine::new(config, RISCV_NUM_PVS, chips);
+    let riscv_machine = RiscvMachine::new(config, chips, RISCV_NUM_PVS);
 
     // Setup machine prover, verifier, pk and vk.
     info!("\n Setup machine (at {:?})..", start.elapsed());

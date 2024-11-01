@@ -73,3 +73,13 @@ pub const COMBINE_SIZE: usize = 2;
 pub const EMPTY: usize = 0x_1111_1111;
 
 pub const ADDR_NUM_BITS: usize = 32;
+
+/*
+For recursion chip degrees
+ */
+pub const RISCV_SIMPLE_DEGREE: usize = 3;
+pub const RISCV_COMPRESS_DEGREE: usize = 3;
+pub const RISCV_COMBINE_DEGREE: usize = 3;
+pub const COMBINE_DEGREE: usize = 3;
+pub const COMPRESS_DEGREE: usize = 3;
+pub const EMBED_DEGREE: usize = 9;

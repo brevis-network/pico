@@ -13,7 +13,7 @@ use crate::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::MachineBehavior,
+        machine::{BaseMachine, MachineBehavior},
     },
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
     recursion::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
@@ -27,10 +27,10 @@ use std::mem::transmute;
 ///
 /// See [SP1Prover::verify] for the verification algorithm of a complete SP1 proof.
 #[allow(dead_code)]
-pub(crate) fn assert_complete<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    public_values: &RecursionPublicValues<Felt<RC::F>>,
-    end_reconstruct_challenger: &DuplexChallengerVariable<RC>,
+pub(crate) fn assert_complete<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    public_values: &RecursionPublicValues<Felt<FC::F>>,
+    end_reconstruct_challenger: &DuplexChallengerVariable<FC>,
 ) {
     let RecursionPublicValues {
         // next_pc,
@@ -44,42 +44,42 @@ pub(crate) fn assert_complete<RC: FieldGenericConfig>(
     } = public_values;
 
     // Assert that `next_pc` is equal to zero (so program execution has completed)
-    // builder.assert_felt_eq(*next_pc, RC::F::zero());
+    // builder.assert_felt_eq(*next_pc, FC::F::zero());
 
     // Assert that start chunk is equal to 1.
-    // builder.assert_felt_eq(*start_chunk, RC::F::one());
+    // builder.assert_felt_eq(*start_chunk, FC::F::one());
 
     // Assert that the next chunk is not equal to one. This guarantees that there is at least one
     // chunk.
-    // builder.assert_felt_ne(*next_chunk, RC::F::one());
+    // builder.assert_felt_ne(*next_chunk, FC::F::one());
 
     // Assert that the start execution chunk is equal to 1.
-    // builder.assert_felt_eq(*start_execution_chunk, RC::F::one());
+    // builder.assert_felt_eq(*start_execution_chunk, FC::F::one());
 
     // Assert that next chunk is not equal to one. This guarantees that there is at least one chunk
     // with CPU.
-    // builder.assert_felt_ne(*next_execution_chunk, RC::F::one());
+    // builder.assert_felt_ne(*next_execution_chunk, FC::F::one());
 
     // Assert that the end reconstruct challenger is equal to the leaf challenger.
     assert_challenger_eq_pv(builder, end_reconstruct_challenger, *base_challenger);
 
     // Assert that the cumulative sum is zero.
     for b in cumulative_sum.iter() {
-        builder.assert_felt_eq(*b, RC::F::zero());
+        builder.assert_felt_eq(*b, FC::F::zero());
     }
 }
 
 #[allow(dead_code)]
-pub(crate) fn proof_data_from_vk<RC: FieldGenericConfig, SC, A>(
-    builder: &mut Builder<RC>,
+pub(crate) fn proof_data_from_vk<FC: FieldGenericConfig, SC, A>(
+    builder: &mut Builder<FC>,
     vk: &BaseVerifyingKey<SC>,
-    machine: &SimpleMachine<SC, A>,
-) -> BaseVerifyingKeyVariable<RC>
+    machine: &BaseMachine<SC, A>,
+) -> BaseVerifyingKeyVariable<FC>
 where
     SC: StarkGenericConfig<
-        Val = RC::F,
-        Challenge = RC::EF,
-        Domain = TwoAdicMultiplicativeCoset<RC::F>,
+        Val = FC::F,
+        Challenge = FC::EF,
+        Domain = TwoAdicMultiplicativeCoset<FC::F>,
     >,
     A: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
@@ -103,7 +103,7 @@ where
         builder.set(
             &mut prep_sorted_indices,
             i,
-            RC::N::from_canonical_usize(*value),
+            FC::N::from_canonical_usize(*value),
         );
     }
 
@@ -121,10 +121,10 @@ where
 }
 
 /// Calculates the digest of the field_config public values.
-fn calculate_public_values_digest<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    public_values: &RecursionPublicValues<Felt<RC::F>>,
-) -> Array<RC, Felt<RC::F>> {
+fn calculate_public_values_digest<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    public_values: &RecursionPublicValues<Felt<FC::F>>,
+) -> Array<FC, Felt<FC::F>> {
     let pv_elements: [Felt<_>; RECURSION_NUM_PVS] = unsafe { transmute(*public_values) };
     let mut poseidon_inputs = builder.array(NUM_PV_ELMS_TO_HASH);
     for (i, elm) in pv_elements[0..NUM_PV_ELMS_TO_HASH].iter().enumerate() {
@@ -135,13 +135,13 @@ fn calculate_public_values_digest<RC: FieldGenericConfig>(
 
 /// Verifies the digest of a recursive public values struct.
 #[allow(dead_code)]
-pub(crate) fn verify_public_values_hash<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    public_values: &RecursionPublicValues<Felt<RC::F>>,
+pub(crate) fn verify_public_values_hash<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    public_values: &RecursionPublicValues<Felt<FC::F>>,
 ) {
     let var_exit_code = felt2var(builder, public_values.exit_code);
     // Check that the public values digest is correct if the exit_code is 0.
-    builder.if_eq(var_exit_code, RC::N::zero()).then(|builder| {
+    builder.if_eq(var_exit_code, FC::N::zero()).then(|builder| {
         let calculated_digest = calculate_public_values_digest(builder, public_values);
 
         let expected_digest = public_values.digest;
@@ -153,9 +153,9 @@ pub(crate) fn verify_public_values_hash<RC: FieldGenericConfig>(
 }
 
 /// Register and commits the field_config public values.
-pub fn commit_public_values<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    public_values: &RecursionPublicValues<Felt<RC::F>>,
+pub fn commit_public_values<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    public_values: &RecursionPublicValues<Felt<FC::F>>,
 ) {
     let pv_elements: [Felt<_>; RECURSION_NUM_PVS] = unsafe { transmute(*public_values) };
     let pv_elms_no_digest = &pv_elements[0..NUM_PV_ELMS_TO_HASH];

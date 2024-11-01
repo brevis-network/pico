@@ -1,23 +1,23 @@
 use super::{Builder, Ptr, Usize};
 use crate::configs::config::FieldGenericConfig;
 
-pub trait Variable<RC: FieldGenericConfig>: Clone {
+pub trait Variable<FC: FieldGenericConfig>: Clone {
     type Expression: From<Self>;
 
-    fn uninit(builder: &mut Builder<RC>) -> Self;
+    fn uninit(builder: &mut Builder<FC>) -> Self;
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>);
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<FC>);
 
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<RC>,
+        builder: &mut Builder<FC>,
     );
 
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<RC>,
+        builder: &mut Builder<FC>,
     );
 }
 
@@ -28,16 +28,16 @@ pub struct MemIndex<N> {
     pub size: usize,
 }
 
-pub trait MemVariable<RC: FieldGenericConfig>: Variable<RC> {
+pub trait MemVariable<FC: FieldGenericConfig>: Variable<FC> {
     fn size_of() -> usize;
     /// Loads the variable from the heap.
-    fn load(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>);
+    fn load(&self, ptr: Ptr<FC::N>, index: MemIndex<FC::N>, builder: &mut Builder<FC>);
     /// Stores the variable to the heap.
-    fn store(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>);
+    fn store(&self, ptr: Ptr<FC::N>, index: MemIndex<FC::N>, builder: &mut Builder<FC>);
 }
 
-pub trait FromConstant<RC: FieldGenericConfig> {
+pub trait FromConstant<FC: FieldGenericConfig> {
     type Constant;
 
-    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self;
+    fn constant(value: Self::Constant, builder: &mut Builder<FC>) -> Self;
 }

@@ -11,7 +11,7 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
-        proof::{EnsembleProof, MetaProof},
+        proof::MetaProof,
         witness::ProvingWitness,
     },
     primitives::consts::MAX_LOG_CHUNK_SIZE,
@@ -32,15 +32,10 @@ where
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    config: SC,
-
-    chips: Vec<MetaChip<SC::Val, C>>,
-
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<C> MachineBehavior<RiscvSC, C, RiscvSC, C, EnsembleProof<RiscvSC>, Vec<u8>>
-    for RiscvMachine<RiscvSC, C>
+impl<C> MachineBehavior<RiscvSC, C, Vec<u8>> for RiscvMachine<RiscvSC, C>
 where
     C: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
         + for<'a> Air<ProverConstraintFolder<'a, RiscvSC>>
@@ -48,50 +43,20 @@ where
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!("Riscv Machine <{}>", type_name::<RiscvSC>())
+        format!("RiscvMachine <{}>", type_name::<RiscvSC>())
     }
 
-    /// Get the configuration of the machine.
-    fn config(&self) -> &RiscvSC {
-        &self.config
-    }
-
-    /// Get the number of public values
-    fn num_public_values(&self) -> usize {
-        self.base_machine.num_public_values()
-    }
-
-    /// Get the chips of the machine.
-    fn chips(&self) -> &[MetaChip<Val<RiscvSC>, C>] {
-        &self.chips
-    }
-
-    /// setup prover, verifier and keys.
-    fn setup_keys(
-        &self,
-        program: &C::Program,
-    ) -> (BaseProvingKey<RiscvSC>, BaseVerifyingKey<RiscvSC>) {
-        info!("PERF-machine=riscv");
-
-        let begin = Instant::now();
-        let (pk, vk) = self
-            .base_machine
-            .setup_keys(self.config(), self.chips(), program);
-
-        info!(
-            "PERF-step=setup_keys-user_time={}",
-            begin.elapsed().as_millis(),
-        );
-
-        (pk, vk)
+    /// Get the base machine.
+    fn base_machine(&self) -> &BaseMachine<RiscvSC, C> {
+        &self.base_machine
     }
 
     /// Get the prover of the machine.
     fn prove(
         &self,
         pk: &BaseProvingKey<RiscvSC>,
-        witness: &ProvingWitness<RiscvSC, C, RiscvSC, C, Vec<u8>>,
-    ) -> MetaProof<RiscvSC, EnsembleProof<RiscvSC>> {
+        witness: &ProvingWitness<RiscvSC, C, Vec<u8>>,
+    ) -> MetaProof<RiscvSC> {
         info!("PERF-machine=riscv");
         let begin = Instant::now();
 
@@ -123,7 +88,7 @@ where
                 }
 
                 info!("PERF-phase=1-chunk={}", record.chunk_index(),);
-                let commitment = self.base_machine.commit(self.config(), &self.chips, record);
+                let commitment = self.base_machine.commit(record);
 
                 challenger.observe(commitment.commitment.clone());
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
@@ -151,7 +116,7 @@ where
                 .map(|record| {
                     info!("PERF-phase=2-chunk={}", record.chunk_index(),);
                     // generate and commit main trace
-                    self.base_machine.commit(self.config(), &self.chips, record)
+                    self.base_machine.commit(record)
                 })
                 .collect::<Vec<_>>();
 
@@ -162,8 +127,6 @@ where
                     info!("PERF-phase=2-chunk={}", batch_records[i].chunk_index(),);
 
                     self.base_machine.prove_plain(
-                        self.config(),
-                        &self.chips,
                         pk,
                         &mut challenger.clone(),
                         commitment,
@@ -182,7 +145,7 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(self.config(), EnsembleProof::new(all_proofs));
+        let proof = MetaProof::new(all_proofs);
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
@@ -190,11 +153,7 @@ where
     }
 
     /// Verify the proof.
-    fn verify(
-        &self,
-        vk: &BaseVerifyingKey<RiscvSC>,
-        proof: &MetaProof<RiscvSC, EnsembleProof<RiscvSC>>,
-    ) -> Result<()> {
+    fn verify(&self, vk: &BaseVerifyingKey<RiscvSC>, proof: &MetaProof<RiscvSC>) -> Result<()> {
         info!("PERF-machine=riscv");
         let begin = Instant::now();
 
@@ -204,6 +163,8 @@ where
         let mut prev_next_pc = vk.pc_start;
         let mut prev_last_initialize_addr_bits = [<Val<RiscvSC>>::zero(); 32];
         let mut prev_last_finalize_addr_bits = [<Val<RiscvSC>>::zero(); 32];
+
+        let mut flag_extra = true;
 
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -218,6 +179,8 @@ where
 
             // conditional constraints
             proof_count += <Val<RiscvSC>>::one();
+            // hack to make execution chunk consistent
+
             if each_proof.includes_chip("Cpu") {
                 execution_proof_count += <Val<RiscvSC>>::one();
 
@@ -231,6 +194,10 @@ where
             } else {
                 if public_values.start_pc != public_values.next_pc {
                     panic!("Non-Cpu proof start_pc is not equal to next_pc");
+                }
+                if flag_extra {
+                    execution_proof_count += <Val<RiscvSC>>::one();
+                    flag_extra = false;
                 }
             }
             if !each_proof.includes_chip("MemoryInitialize") {
@@ -284,8 +251,7 @@ where
 
         // TODO: add committed_value_digest support
 
-        self.base_machine
-            .verify_ensemble(self.config(), self.chips(), vk, proof.proofs())?;
+        self.base_machine.verify_ensemble(vk, proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 
@@ -300,21 +266,9 @@ where
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    pub fn new(config: SC, num_public_values: usize, chips: Vec<MetaChip<SC::Val, C>>) -> Self {
+    pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {
         Self {
-            config,
-            chips,
-            base_machine: BaseMachine::<SC, C>::new(num_public_values),
+            base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }
-    }
-
-    /// Returns the id of all chips in the machine that have preprocessed columns.
-    pub fn preprocessed_chip_ids(&self) -> Vec<usize> {
-        self.chips
-            .iter()
-            .enumerate()
-            .filter(|(_, chip)| chip.preprocessed_width() > 0)
-            .map(|(i, _)| i)
-            .collect()
     }
 }

@@ -64,7 +64,7 @@ fn main() {
     let chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips
-    let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, chips);
+    let simple_machine = SimpleMachine::new(config, chips, RISCV_NUM_PVS);
 
     // Setup machine prover, verifier, pk and vk.
     info!("\n Setup machine (at {:?})..", start.elapsed());
@@ -90,43 +90,43 @@ fn main() {
 
     debug!(
         "|- Commitment size: {}",
-        bincode::serialize(&proof.proof.proof[0].commitments)
+        bincode::serialize(&proof.proofs()[0].commitments)
             .unwrap()
             .len()
     );
     debug!(
         "|- Opened values size: {}",
-        bincode::serialize(&proof.proof.proof[0].opened_values)
+        bincode::serialize(&proof.proofs()[0].opened_values)
             .unwrap()
             .len()
     );
     debug!(
         "|- Opening proof size: {}",
-        bincode::serialize(&proof.proof.proof[0].opening_proof)
+        bincode::serialize(&proof.proofs()[0].opening_proof)
             .unwrap()
             .len()
     );
     debug!(
         "|- Log main degrees size: {}",
-        bincode::serialize(&proof.proof.proof[0].log_main_degrees)
+        bincode::serialize(&proof.proofs()[0].log_main_degrees)
             .unwrap()
             .len()
     );
     debug!(
         "|- Log quotient degrees size: {}",
-        bincode::serialize(&proof.proof.proof[0].log_quotient_degrees)
+        bincode::serialize(&proof.proofs()[0].log_quotient_degrees)
             .unwrap()
             .len()
     );
     debug!(
         "|- Chip ordering size: {}",
-        bincode::serialize(&proof.proof.proof[0].main_chip_ordering)
+        bincode::serialize(&proof.proofs()[0].main_chip_ordering)
             .unwrap()
             .len()
     );
     debug!(
         "|- Public values size: {}",
-        bincode::serialize(&proof.proof.proof[0].public_values)
+        bincode::serialize(&proof.proofs()[0].public_values)
             .unwrap()
             .len()
     );

@@ -4,15 +4,15 @@ use crate::{
     configs::config::FieldGenericConfig,
     primitives::consts::{PV_DIGEST_NUM_WORDS, WORD_SIZE},
 };
-pub type DigestVariable<RC> = Array<RC, Felt<<RC as FieldGenericConfig>::F>>;
+pub type DigestVariable<FC> = Array<FC, Felt<<FC as FieldGenericConfig>::F>>;
 
 #[derive(DslVariable, Debug, Clone)]
-pub struct Sha256DigestVariable<RC: FieldGenericConfig> {
-    pub bytes: Array<RC, Felt<RC::F>>,
+pub struct Sha256DigestVariable<FC: FieldGenericConfig> {
+    pub bytes: Array<FC, Felt<FC::F>>,
 }
 
-impl<RC: FieldGenericConfig> Sha256DigestVariable<RC> {
-    pub fn from_words(builder: &mut Builder<RC>, words: &[Word<Felt<RC::F>>]) -> Self {
+impl<FC: FieldGenericConfig> Sha256DigestVariable<FC> {
+    pub fn from_words(builder: &mut Builder<FC>, words: &[Word<Felt<FC::F>>]) -> Self {
         let mut bytes = builder.array(PV_DIGEST_NUM_WORDS * WORD_SIZE);
         for (i, word) in words.iter().enumerate() {
             for j in 0..WORD_SIZE {
@@ -25,85 +25,85 @@ impl<RC: FieldGenericConfig> Sha256DigestVariable<RC> {
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriConfigVariable<RC: FieldGenericConfig> {
-    pub log_blowup: Var<RC::N>,
-    pub blowup: Var<RC::N>,
-    pub num_queries: Var<RC::N>,
-    pub proof_of_work_bits: Var<RC::N>,
-    pub generators: Array<RC, Felt<RC::F>>,
-    pub subgroups: Array<RC, TwoAdicMultiplicativeCosetVariable<RC>>,
+pub struct FriConfigVariable<FC: FieldGenericConfig> {
+    pub log_blowup: Var<FC::N>,
+    pub blowup: Var<FC::N>,
+    pub num_queries: Var<FC::N>,
+    pub proof_of_work_bits: Var<FC::N>,
+    pub generators: Array<FC, Felt<FC::F>>,
+    pub subgroups: Array<FC, TwoAdicMultiplicativeCosetVariable<FC>>,
 }
 
-impl<RC: FieldGenericConfig> FriConfigVariable<RC> {
+impl<FC: FieldGenericConfig> FriConfigVariable<FC> {
     pub fn get_subgroup(
         &self,
-        builder: &mut Builder<RC>,
-        log_degree: impl Into<Usize<RC::N>>,
-    ) -> TwoAdicMultiplicativeCosetVariable<RC> {
+        builder: &mut Builder<FC>,
+        log_degree: impl Into<Usize<FC::N>>,
+    ) -> TwoAdicMultiplicativeCosetVariable<FC> {
         builder.get(&self.subgroups, log_degree)
     }
 
     pub fn get_two_adic_generator(
         &self,
-        builder: &mut Builder<RC>,
-        bits: impl Into<Usize<RC::N>>,
-    ) -> Felt<RC::F> {
+        builder: &mut Builder<FC>,
+        bits: impl Into<Usize<FC::N>>,
+    ) -> Felt<FC::F> {
         builder.get(&self.generators, bits)
     }
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriProofVariable<RC: FieldGenericConfig> {
-    pub commit_phase_commits: Array<RC, DigestVariable<RC>>,
-    pub query_proofs: Array<RC, FriQueryProofVariable<RC>>,
-    pub final_poly: Ext<RC::F, RC::EF>,
-    pub pow_witness: Felt<RC::F>,
+pub struct FriProofVariable<FC: FieldGenericConfig> {
+    pub commit_phase_commits: Array<FC, DigestVariable<FC>>,
+    pub query_proofs: Array<FC, FriQueryProofVariable<FC>>,
+    pub final_poly: Ext<FC::F, FC::EF>,
+    pub pow_witness: Felt<FC::F>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriQueryProofVariable<RC: FieldGenericConfig> {
-    pub commit_phase_openings: Array<RC, FriCommitPhaseProofStepVariable<RC>>,
+pub struct FriQueryProofVariable<FC: FieldGenericConfig> {
+    pub commit_phase_openings: Array<FC, FriCommitPhaseProofStepVariable<FC>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriCommitPhaseProofStepVariable<RC: FieldGenericConfig> {
-    pub sibling_value: Ext<RC::F, RC::EF>,
-    pub opening_proof: Array<RC, DigestVariable<RC>>,
+pub struct FriCommitPhaseProofStepVariable<FC: FieldGenericConfig> {
+    pub sibling_value: Ext<FC::F, FC::EF>,
+    pub opening_proof: Array<FC, DigestVariable<FC>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriChallengesVariable<RC: FieldGenericConfig> {
-    pub query_indices: Array<RC, Array<RC, Var<RC::N>>>,
-    pub betas: Array<RC, Ext<RC::F, RC::EF>>,
+pub struct FriChallengesVariable<FC: FieldGenericConfig> {
+    pub query_indices: Array<FC, Array<FC, Var<FC::N>>>,
+    pub betas: Array<FC, Ext<FC::F, FC::EF>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct DimensionsVariable<RC: FieldGenericConfig> {
-    pub height: Var<RC::N>,
+pub struct DimensionsVariable<FC: FieldGenericConfig> {
+    pub height: Var<FC::N>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct PcsProofVariable<RC: FieldGenericConfig> {
-    pub fri_proof: FriProofVariable<RC>,
-    pub query_openings: Array<RC, Array<RC, BatchOpeningVariable<RC>>>,
+pub struct PcsProofVariable<FC: FieldGenericConfig> {
+    pub fri_proof: FriProofVariable<FC>,
+    pub query_openings: Array<FC, Array<FC, BatchOpeningVariable<FC>>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct BatchOpeningVariable<RC: FieldGenericConfig> {
-    pub opened_values: Array<RC, Array<RC, Ext<RC::F, RC::EF>>>,
-    pub opening_proof: Array<RC, Array<RC, Felt<RC::F>>>,
+pub struct BatchOpeningVariable<FC: FieldGenericConfig> {
+    pub opened_values: Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,
+    pub opening_proof: Array<FC, Array<FC, Felt<FC::F>>>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct TwoAdicPcsRoundVariable<RC: FieldGenericConfig> {
-    pub batch_commit: DigestVariable<RC>,
-    pub mats: Array<RC, TwoAdicPcsMatsVariable<RC>>,
+pub struct TwoAdicPcsRoundVariable<FC: FieldGenericConfig> {
+    pub batch_commit: DigestVariable<FC>,
+    pub mats: Array<FC, TwoAdicPcsMatsVariable<FC>>,
 }
 
 #[allow(clippy::type_complexity)]
 #[derive(DslVariable, Clone)]
-pub struct TwoAdicPcsMatsVariable<RC: FieldGenericConfig> {
-    pub domain: TwoAdicMultiplicativeCosetVariable<RC>,
-    pub points: Array<RC, Ext<RC::F, RC::EF>>,
-    pub values: Array<RC, Array<RC, Ext<RC::F, RC::EF>>>,
+pub struct TwoAdicPcsMatsVariable<FC: FieldGenericConfig> {
+    pub domain: TwoAdicMultiplicativeCosetVariable<FC>,
+    pub points: Array<FC, Ext<FC::F, FC::EF>>,
+    pub values: Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,
 }

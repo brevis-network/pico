@@ -30,35 +30,36 @@ pub const EMPTY: usize = 0x_1111_1111;
 
 // TODO-Alan: refactor to make it more general
 #[derive(Debug, Clone, Copy)]
-pub struct StarkVerifier<RC: FieldGenericConfig, SC: StarkGenericConfig> {
-    _phantom: std::marker::PhantomData<(RC, SC)>,
+pub struct StarkVerifier<FC: FieldGenericConfig, SC: StarkGenericConfig> {
+    _phantom: std::marker::PhantomData<(FC, SC)>,
 }
 
-impl<RC: FieldGenericConfig, SC: StarkGenericConfig> StarkVerifier<RC, SC>
+impl<FC: FieldGenericConfig, SC: StarkGenericConfig> StarkVerifier<FC, SC>
 where
-    RC::F: TwoAdicField,
+    FC::F: TwoAdicField,
     SC: StarkGenericConfig<
-        Val = RC::F,
-        Challenge = RC::EF,
-        Domain = TwoAdicMultiplicativeCoset<RC::F>,
+        Val = FC::F,
+        Challenge = FC::EF,
+        Domain = TwoAdicMultiplicativeCoset<FC::F>,
     >,
 {
     pub fn verify_chunk<A>(
-        builder: &mut Builder<RC>,
-        vk: &BaseVerifyingKeyVariable<RC>,
-        pcs: &TwoAdicFriPcsVariable<RC>,
-        chips: &[MetaChip<RC::F, A>],
+        builder: &mut Builder<FC>,
+        vk: &BaseVerifyingKeyVariable<FC>,
+        pcs: &TwoAdicFriPcsVariable<FC>,
+        chips: &[MetaChip<FC::F, A>],
         preprocessed_chip_ids: &[usize],
-        challenger: &mut DuplexChallengerVariable<RC>,
-        proof: &BaseProofVariable<RC>,
+        challenger: &mut DuplexChallengerVariable<FC>,
+        proof: &BaseProofVariable<FC>,
         check_cumulative_sum: bool,
     ) where
-        A: ChipBehavior<RC::F>
-            + for<'a> Air<ProverConstraintFolder<'a, SC>>
-            + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-            + for<'a> Air<RecursiveVerifierConstraintFolder<'a, RC>>,
-        RC::F: TwoAdicField,
-        RC::EF: TwoAdicField,
+        A: ChipBehavior<FC::F>
+            // todo: make sure this is correct
+            // + for<'a> Air<ProverConstraintFolder<'a, SC>>
+            // + for<'a> Air<VerifierConstraintFolder<'a, SC>>
+            + for<'a> Air<RecursiveVerifierConstraintFolder<'a, FC>>,
+        FC::F: TwoAdicField,
+        FC::EF: TwoAdicField,
         Com<SC>: Into<[SC::Val; DIGEST_SIZE]>,
     {
         builder.cycle_tracker("stage-c-verify-chunk-setup");
@@ -100,7 +101,7 @@ where
         let mut main_mats: Array<_, TwoAdicPcsMatsVariable<_>> = builder.dyn_array(num_chunk_chips);
         let mut perm_mats: Array<_, TwoAdicPcsMatsVariable<_>> = builder.dyn_array(num_chunk_chips);
 
-        let num_quotient_mats: Var<_> = builder.eval(RC::N::zero());
+        let num_quotient_mats: Var<_> = builder.eval(FC::N::zero());
         builder.range(0, num_chunk_chips).for_each(|i, builder| {
             let num_quotient_chunks = builder.get(&proof.quotient_data, i).quotient_size;
             builder.assign(num_quotient_mats, num_quotient_mats + num_quotient_chunks);
@@ -130,10 +131,10 @@ where
             builder.set_value(&mut trace_points, 0, zeta);
             builder.set_value(&mut trace_points, 1, zeta_next);
 
-            let mut prep_values = builder.dyn_array::<Array<RC, _>>(2);
+            let mut prep_values = builder.dyn_array::<Array<FC, _>>(2);
             builder.set_value(&mut prep_values, 0, opening.preprocessed_local);
             builder.set_value(&mut prep_values, 1, opening.preprocessed_next);
-            let main_mat = TwoAdicPcsMatsVariable::<RC> {
+            let main_mat = TwoAdicPcsMatsVariable::<FC> {
                 domain: domain.clone(),
                 values: prep_values,
                 points: trace_points.clone(),
@@ -141,7 +142,7 @@ where
             builder.set_value(&mut prep_mats, preprocessed_sorted_id, main_mat);
         }
 
-        let qc_index: Var<_> = builder.eval(RC::N::zero());
+        let qc_index: Var<_> = builder.eval(FC::N::zero());
         builder.range(0, num_chunk_chips).for_each(|i, builder| {
             let opening = builder.get(&opened_values.chips_opened_values, i);
             let QuotientDataVariable {
@@ -165,10 +166,10 @@ where
             builder.set_value(&mut trace_points, 1, zeta_next);
 
             // Get the main matrix.
-            let mut main_values = builder.dyn_array::<Array<RC, _>>(2);
+            let mut main_values = builder.dyn_array::<Array<FC, _>>(2);
             builder.set_value(&mut main_values, 0, opening.main_local);
             builder.set_value(&mut main_values, 1, opening.main_next);
-            let main_mat = TwoAdicPcsMatsVariable::<RC> {
+            let main_mat = TwoAdicPcsMatsVariable::<FC> {
                 domain: domain.clone(),
                 values: main_values,
                 points: trace_points.clone(),
@@ -176,10 +177,10 @@ where
             builder.set_value(&mut main_mats, i, main_mat);
 
             // Get the permutation matrix.
-            let mut perm_values = builder.dyn_array::<Array<RC, _>>(2);
+            let mut perm_values = builder.dyn_array::<Array<FC, _>>(2);
             builder.set_value(&mut perm_values, 0, opening.permutation_local);
             builder.set_value(&mut perm_values, 1, opening.permutation_next);
-            let perm_mat = TwoAdicPcsMatsVariable::<RC> {
+            let perm_mat = TwoAdicPcsMatsVariable::<FC> {
                 domain: domain.clone(),
                 values: perm_values,
                 points: trace_points,
@@ -193,15 +194,15 @@ where
             builder.range(0, qc_domains.len()).for_each(|j, builder| {
                 let qc_dom = builder.get(&qc_domains, j);
                 let qc_vals_array = builder.get(&opening.quotient, j);
-                let mut qc_values = builder.dyn_array::<Array<RC, _>>(1);
+                let mut qc_values = builder.dyn_array::<Array<FC, _>>(1);
                 builder.set_value(&mut qc_values, 0, qc_vals_array);
-                let qc_mat = TwoAdicPcsMatsVariable::<RC> {
+                let qc_mat = TwoAdicPcsMatsVariable::<FC> {
                     domain: qc_dom,
                     values: qc_values,
                     points: qc_points.clone(),
                 };
                 builder.set_value(&mut quotient_mats, qc_index, qc_mat);
-                builder.assign(qc_index, qc_index + RC::N::one());
+                builder.assign(qc_index, qc_index + FC::N::one());
             });
         });
 
@@ -237,17 +238,17 @@ where
 
         builder.cycle_tracker("stage-e-verify-constraints");
 
-        let num_chunk_chips_enabled: Var<_> = builder.eval(RC::N::zero());
+        let num_chunk_chips_enabled: Var<_> = builder.eval(FC::N::zero());
         for (i, chip) in chips.iter().enumerate() {
             tracing::debug!("verifying constraints for chip: {}", chip.name());
             let index = builder.get(&proof.sorted_indices, i);
 
             if chip.preprocessed_width() > 0 {
-                builder.assert_var_ne(index, RC::N::from_canonical_usize(EMPTY));
+                builder.assert_var_ne(index, FC::N::from_canonical_usize(EMPTY));
             }
 
             builder
-                .if_ne(index, RC::N::from_canonical_usize(EMPTY))
+                .if_ne(index, FC::N::from_canonical_usize(EMPTY))
                 .then(|builder| {
                     let values = builder.get(&opened_values.chips_opened_values, index);
                     let trace_domain = builder.get(&trace_domains, index);
@@ -287,7 +288,7 @@ where
                     // Increment the number of chunk chips that are enabled.
                     builder.assign(
                         num_chunk_chips_enabled,
-                        num_chunk_chips_enabled + RC::N::one(),
+                        num_chunk_chips_enabled + FC::N::one(),
                     );
                 });
         }
@@ -298,7 +299,7 @@ where
 
         // If we're checking the cumulative sum, assert that the sum of the cumulative sums is zero.
         if check_cumulative_sum {
-            let sum: Ext<_, _> = builder.eval(RC::EF::zero().cons());
+            let sum: Ext<_, _> = builder.eval(FC::EF::zero().cons());
             builder
                 .range(0, proof.opened_values.chips_opened_values.len())
                 .for_each(|i, builder| {
@@ -307,7 +308,7 @@ where
                         .cumulative_sum;
                     builder.assign(sum, sum + cumulative_sum);
                 });
-            builder.assert_ext_eq(sum, RC::EF::zero().cons());
+            builder.assert_ext_eq(sum, FC::EF::zero().cons());
         }
 
         builder.cycle_tracker("stage-e-verify-constraints");

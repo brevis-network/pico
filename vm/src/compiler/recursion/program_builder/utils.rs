@@ -55,24 +55,24 @@ pub fn const_fri_config(
 }
 
 // OPT: this can be done much more efficiently, but in the meantime this should work
-pub fn felt2var<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    felt: Felt<RC::F>,
-) -> Var<RC::N> {
+pub fn felt2var<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    felt: Felt<FC::F>,
+) -> Var<FC::N> {
     let bits = builder.num2bits_f(felt);
     builder.bits2num_v(&bits)
 }
 
-pub fn var2felt<RC: FieldGenericConfig>(builder: &mut Builder<RC>, var: Var<RC::N>) -> Felt<RC::F> {
+pub fn var2felt<FC: FieldGenericConfig>(builder: &mut Builder<FC>, var: Var<FC::N>) -> Felt<FC::F> {
     let bits = builder.num2bits_v(var);
     builder.bits2num_f(&bits)
 }
 
 /// Asserts that the challenger variable is equal to a challenger in public values.
-pub fn assert_challenger_eq_pv<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    var: &DuplexChallengerVariable<RC>,
-    values: ChallengerPublicValues<Felt<RC::F>>,
+pub fn assert_challenger_eq_pv<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    var: &DuplexChallengerVariable<FC>,
+    values: ChallengerPublicValues<Felt<FC::F>>,
 ) {
     for i in 0..PERMUTATION_WIDTH {
         let element = builder.get(&var.sponge_state, i);
@@ -103,10 +103,10 @@ pub fn assert_challenger_eq_pv<RC: FieldGenericConfig>(
 }
 
 /// Assigns a challenger variable from a challenger in public values.
-pub fn assign_challenger_from_pv<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    dst: &mut DuplexChallengerVariable<RC>,
-    values: ChallengerPublicValues<Felt<RC::F>>,
+pub fn assign_challenger_from_pv<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    dst: &mut DuplexChallengerVariable<FC>,
+    values: ChallengerPublicValues<Felt<FC::F>>,
 ) {
     for i in 0..PERMUTATION_WIDTH {
         builder.set(&mut dst.sponge_state, i, values.sponge_state[i]);
@@ -123,10 +123,10 @@ pub fn assign_challenger_from_pv<RC: FieldGenericConfig>(
     }
 }
 
-pub fn get_challenger_public_values<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    var: &DuplexChallengerVariable<RC>,
-) -> ChallengerPublicValues<Felt<RC::F>> {
+pub fn get_challenger_public_values<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    var: &DuplexChallengerVariable<FC>,
+) -> ChallengerPublicValues<Felt<FC::F>> {
     let sponge_state = core::array::from_fn(|i| builder.get(&var.sponge_state, i));
     let num_inputs = var2felt(builder, var.nb_inputs);
     let input_buffer = core::array::from_fn(|i| builder.get(&var.input_buffer, i));
@@ -144,12 +144,12 @@ pub fn get_challenger_public_values<RC: FieldGenericConfig>(
 
 /// Hash the verifying key + prep domains into a single digest.
 /// poseidon2( commit[0..8] || pc_start || prep_domains[N].{log_n, .size, .shift, .g})
-pub fn hash_vkey<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    vk: &BaseVerifyingKeyVariable<RC>,
-) -> Array<RC, Felt<RC::F>> {
+pub fn hash_vkey<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    vk: &BaseVerifyingKeyVariable<FC>,
+) -> Array<FC, Felt<FC::F>> {
     let domain_slots: Var<_> = builder.eval(vk.preprocessed_domains.len() * 4);
-    let vkey_slots: Var<_> = builder.constant(RC::N::from_canonical_usize(DIGEST_SIZE + 1));
+    let vkey_slots: Var<_> = builder.constant(FC::N::from_canonical_usize(DIGEST_SIZE + 1));
     let total_slots: Var<_> = builder.eval(vkey_slots + domain_slots);
     let mut inputs = builder.dyn_array(total_slots);
     builder.range(0, DIGEST_SIZE).for_each(|i, builder| {
@@ -157,8 +157,8 @@ pub fn hash_vkey<RC: FieldGenericConfig>(
         builder.set(&mut inputs, i, element);
     });
     builder.set(&mut inputs, DIGEST_SIZE, vk.pc_start);
-    let four: Var<_> = builder.constant(RC::N::from_canonical_usize(4));
-    let one: Var<_> = builder.constant(RC::N::one());
+    let four: Var<_> = builder.constant(FC::N::from_canonical_usize(4));
+    let one: Var<_> = builder.constant(FC::N::one());
     builder
         .range(0, vk.preprocessed_domains.len())
         .for_each(|i, builder| {

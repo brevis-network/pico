@@ -17,33 +17,33 @@ use p3_commit::LagrangeSelectors;
 use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 
-impl<RC: FieldGenericConfig, SC: StarkGenericConfig> StarkVerifier<RC, SC>
+impl<FC: FieldGenericConfig, SC: StarkGenericConfig> StarkVerifier<FC, SC>
 where
     // todo: check in the future
-    SC: StarkGenericConfig<Val = RC::F, Challenge = RC::EF>,
-    // SC: StarkGenericConfig<Challenge = RC::EF>,
-    RC::F: TwoAdicField,
+    SC: StarkGenericConfig<Val = FC::F, Challenge = FC::EF>,
+    // SC: StarkGenericConfig<Challenge = FC::EF>,
+    FC::F: TwoAdicField,
 {
     fn eval_constrains<A>(
-        builder: &mut Builder<RC>,
+        builder: &mut Builder<FC>,
         chip: &MetaChip<SC::Val, A>,
-        opening: &ChipOpening<RC>,
-        public_values: Array<RC, Felt<RC::F>>,
-        selectors: &LagrangeSelectors<Ext<RC::F, RC::EF>>,
-        alpha: Ext<RC::F, RC::EF>,
-        permutation_challenges: &[Ext<RC::F, RC::EF>],
-    ) -> Ext<RC::F, RC::EF>
+        opening: &ChipOpening<FC>,
+        public_values: Array<FC, Felt<FC::F>>,
+        selectors: &LagrangeSelectors<Ext<FC::F, FC::EF>>,
+        alpha: Ext<FC::F, FC::EF>,
+        permutation_challenges: &[Ext<FC::F, FC::EF>],
+    ) -> Ext<FC::F, FC::EF>
     where
-        A: for<'b> Air<RecursiveVerifierConstraintFolder<'b, RC>>,
+        A: for<'b> Air<RecursiveVerifierConstraintFolder<'b, FC>>,
     {
-        let mut unflatten = |v: &[Ext<RC::F, RC::EF>]| {
+        let mut unflatten = |v: &[Ext<FC::F, FC::EF>]| {
             v.chunks_exact(SC::Challenge::D)
                 .map(|chunk| {
                     builder.eval(
                         chunk
                             .iter()
                             .enumerate()
-                            .map(|(e_i, &x)| x * RC::EF::monomial(e_i).cons())
+                            .map(|(e_i, &x)| x * FC::EF::monomial(e_i).cons())
                             .sum::<SymbolicExt<_, _>>(),
                     )
                 })
@@ -58,7 +58,7 @@ where
             folder_pv.push(builder.get(&public_values, i));
         }
 
-        let mut folder = RecursiveVerifierConstraintFolder::<RC> {
+        let mut folder = RecursiveVerifierConstraintFolder::<FC> {
             preprocessed: VerticalPair::new(
                 RowMajorMatrixView::new_row(&opening.preprocessed_local),
                 RowMajorMatrixView::new_row(&opening.preprocessed_next),
@@ -87,11 +87,11 @@ where
     }
 
     fn recompute_quotient(
-        builder: &mut Builder<RC>,
-        opening: &ChipOpening<RC>,
-        qc_domains: Vec<TwoAdicMultiplicativeCosetVariable<RC>>,
-        zeta: Ext<RC::F, RC::EF>,
-    ) -> Ext<RC::F, RC::EF> {
+        builder: &mut Builder<FC>,
+        opening: &ChipOpening<FC>,
+        qc_domains: Vec<TwoAdicMultiplicativeCosetVariable<FC>>,
+        zeta: Ext<FC::F, FC::EF>,
+    ) -> Ext<FC::F, FC::EF> {
         let zps = qc_domains
             .iter()
             .enumerate()
@@ -118,10 +118,10 @@ where
                 .iter()
                 .enumerate()
                 .map(|(ch_i, ch)| {
-                    assert_eq!(ch.len(), RC::EF::D);
+                    assert_eq!(ch.len(), FC::EF::D);
                     ch.iter()
                         .enumerate()
-                        .map(|(e_i, &c)| zps[ch_i] * RC::EF::monomial(e_i) * c)
+                        .map(|(e_i, &c)| zps[ch_i] * FC::EF::monomial(e_i) * c)
                         .sum::<SymbolicExt<_, _>>()
                 })
                 .sum::<SymbolicExt<_, _>>(),
@@ -130,17 +130,17 @@ where
 
     /// Reference: [pico_machine::stark::Verifier::verify_constraints]
     pub fn verify_constraints<A>(
-        builder: &mut Builder<RC>,
+        builder: &mut Builder<FC>,
         chip: &MetaChip<SC::Val, A>,
-        opening: &ChipOpenedValuesVariable<RC>,
-        public_values: Array<RC, Felt<RC::F>>,
-        trace_domain: TwoAdicMultiplicativeCosetVariable<RC>,
-        qc_domains: Vec<TwoAdicMultiplicativeCosetVariable<RC>>,
-        zeta: Ext<RC::F, RC::EF>,
-        alpha: Ext<RC::F, RC::EF>,
-        permutation_challenges: &[Ext<RC::F, RC::EF>],
+        opening: &ChipOpenedValuesVariable<FC>,
+        public_values: Array<FC, Felt<FC::F>>,
+        trace_domain: TwoAdicMultiplicativeCosetVariable<FC>,
+        qc_domains: Vec<TwoAdicMultiplicativeCosetVariable<FC>>,
+        zeta: Ext<FC::F, FC::EF>,
+        alpha: Ext<FC::F, FC::EF>,
+        permutation_challenges: &[Ext<FC::F, FC::EF>],
     ) where
-        A: ChipBehavior<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, RC>>,
+        A: ChipBehavior<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, FC>>,
     {
         let opening = ChipOpening::from_variable(builder, chip, opening);
         let sels = trace_domain.selectors_at_point(builder, zeta);

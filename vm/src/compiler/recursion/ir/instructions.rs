@@ -9,166 +9,166 @@ use crate::{configs::config::FieldGenericConfig, recursion::air::RecursionPublic
 /// Programs written in the DSL can compile both to the recursive zkVM and the R1CS or Plonk-ish
 /// circuits.
 #[derive(Debug, Clone)]
-pub enum DslIr<RC: FieldGenericConfig> {
+pub enum DslIr<FC: FieldGenericConfig> {
     // Immediates.
     /// Assigns an immediate to a variable (var = imm).
-    ImmV(Var<RC::N>, RC::N),
+    ImmV(Var<FC::N>, FC::N),
     /// Assigns a field immediate to a field element (felt = field imm).
-    ImmF(Felt<RC::F>, RC::F),
+    ImmF(Felt<FC::F>, FC::F),
     /// Assigns an ext field immediate to an extension field element (ext = ext field imm).
-    ImmE(Ext<RC::F, RC::EF>, RC::EF),
+    ImmE(Ext<FC::F, FC::EF>, FC::EF),
 
     // Additions.
     /// Add two variables (var = var + var).
-    AddV(Var<RC::N>, Var<RC::N>, Var<RC::N>),
+    AddV(Var<FC::N>, Var<FC::N>, Var<FC::N>),
     /// Add a variable and an immediate (var = var + imm).
-    AddVI(Var<RC::N>, Var<RC::N>, RC::N),
+    AddVI(Var<FC::N>, Var<FC::N>, FC::N),
     /// Add two field elements (felt = felt + felt).
-    AddF(Felt<RC::F>, Felt<RC::F>, Felt<RC::F>),
+    AddF(Felt<FC::F>, Felt<FC::F>, Felt<FC::F>),
     /// Add a field element and a field immediate (felt = felt + field imm).
-    AddFI(Felt<RC::F>, Felt<RC::F>, RC::F),
+    AddFI(Felt<FC::F>, Felt<FC::F>, FC::F),
     /// Add two extension field elements (ext = ext + ext).
-    AddE(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>),
+    AddE(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>),
     /// Add an extension field element and an ext field immediate (ext = ext + ext field imm).
-    AddEI(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, RC::EF),
+    AddEI(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, FC::EF),
     /// Add an extension field element and a field element (ext = ext + felt).
-    AddEF(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, Felt<RC::F>),
+    AddEF(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, Felt<FC::F>),
     /// Add an extension field element and a field immediate (ext = ext + field imm).
-    AddEFI(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, RC::F),
+    AddEFI(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, FC::F),
     /// Add a field element and an ext field immediate (ext = felt + ext field imm).
-    AddEFFI(Ext<RC::F, RC::EF>, Felt<RC::F>, RC::EF),
+    AddEFFI(Ext<FC::F, FC::EF>, Felt<FC::F>, FC::EF),
 
     // Subtractions.
     /// Subtracts two variables (var = var - var).
-    SubV(Var<RC::N>, Var<RC::N>, Var<RC::N>),
+    SubV(Var<FC::N>, Var<FC::N>, Var<FC::N>),
     /// Subtracts a variable and an immediate (var = var - imm).
-    SubVI(Var<RC::N>, Var<RC::N>, RC::N),
+    SubVI(Var<FC::N>, Var<FC::N>, FC::N),
     /// Subtracts an immediate and a variable (var = imm - var).
-    SubVIN(Var<RC::N>, RC::N, Var<RC::N>),
+    SubVIN(Var<FC::N>, FC::N, Var<FC::N>),
     /// Subtracts two field elements (felt = felt - felt).
-    SubF(Felt<RC::F>, Felt<RC::F>, Felt<RC::F>),
+    SubF(Felt<FC::F>, Felt<FC::F>, Felt<FC::F>),
     /// Subtracts a field element and a field immediate (felt = felt - field imm).
-    SubFI(Felt<RC::F>, Felt<RC::F>, RC::F),
+    SubFI(Felt<FC::F>, Felt<FC::F>, FC::F),
     /// Subtracts a field immediate and a field element (felt = field imm - felt).
-    SubFIN(Felt<RC::F>, RC::F, Felt<RC::F>),
+    SubFIN(Felt<FC::F>, FC::F, Felt<FC::F>),
     /// Subtracts two extension field elements (ext = ext - ext).
-    SubE(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>),
+    SubE(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>),
     /// Subtrancts an extension field element and an extension field immediate (ext = ext - ext
     /// field imm).
-    SubEI(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, RC::EF),
+    SubEI(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, FC::EF),
     /// Subtracts an extension field immediate and an extension field element (ext = ext field imm
     /// - ext).
-    SubEIN(Ext<RC::F, RC::EF>, RC::EF, Ext<RC::F, RC::EF>),
+    SubEIN(Ext<FC::F, FC::EF>, FC::EF, Ext<FC::F, FC::EF>),
     /// Subtracts an extension field element and a field immediate (ext = ext - field imm).
-    SubEFI(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, RC::F),
+    SubEFI(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, FC::F),
     /// Subtracts an extension field element and a field element (ext = ext - felt).
-    SubEF(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, Felt<RC::F>),
+    SubEF(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, Felt<FC::F>),
 
     // Multiplications.
     /// Multiplies two variables (var = var * var).
-    MulV(Var<RC::N>, Var<RC::N>, Var<RC::N>),
+    MulV(Var<FC::N>, Var<FC::N>, Var<FC::N>),
     /// Multiplies a variable and an immediate (var = var * imm).
-    MulVI(Var<RC::N>, Var<RC::N>, RC::N),
+    MulVI(Var<FC::N>, Var<FC::N>, FC::N),
     /// Multiplies two field elements (felt = felt * felt).
-    MulF(Felt<RC::F>, Felt<RC::F>, Felt<RC::F>),
+    MulF(Felt<FC::F>, Felt<FC::F>, Felt<FC::F>),
     /// Multiplies a field element and a field immediate (felt = felt * field imm).
-    MulFI(Felt<RC::F>, Felt<RC::F>, RC::F),
+    MulFI(Felt<FC::F>, Felt<FC::F>, FC::F),
     /// Multiplies two extension field elements (ext = ext * ext).
-    MulE(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>),
+    MulE(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>),
     /// Multiplies an extension field element and an extension field immediate (ext = ext * ext
     /// field imm).
-    MulEI(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, RC::EF),
+    MulEI(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, FC::EF),
     /// Multiplies an extension field element and a field immediate (ext = ext * field imm).
-    MulEFI(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, RC::F),
+    MulEFI(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, FC::F),
     /// Multiplies an extension field element and a field element (ext = ext * felt).
-    MulEF(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, Felt<RC::F>),
+    MulEF(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, Felt<FC::F>),
 
     // Divisions.
     /// Divides two variables (var = var / var).
-    DivF(Felt<RC::F>, Felt<RC::F>, Felt<RC::F>),
+    DivF(Felt<FC::F>, Felt<FC::F>, Felt<FC::F>),
     /// Divides a field element and a field immediate (felt = felt / field imm).
-    DivFI(Felt<RC::F>, Felt<RC::F>, RC::F),
+    DivFI(Felt<FC::F>, Felt<FC::F>, FC::F),
     /// Divides a field immediate and a field element (felt = field imm / felt).
-    DivFIN(Felt<RC::F>, RC::F, Felt<RC::F>),
+    DivFIN(Felt<FC::F>, FC::F, Felt<FC::F>),
     /// Divides two extension field elements (ext = ext / ext).
-    DivE(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>),
+    DivE(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>),
     /// Divides an extension field element and an extension field immediate (ext = ext / ext field
     /// imm).
-    DivEI(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, RC::EF),
+    DivEI(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, FC::EF),
     /// Divides and extension field immediate and an extension field element (ext = ext field imm /
     /// ext).
-    DivEIN(Ext<RC::F, RC::EF>, RC::EF, Ext<RC::F, RC::EF>),
+    DivEIN(Ext<FC::F, FC::EF>, FC::EF, Ext<FC::F, FC::EF>),
     /// Divides an extension field element and a field immediate (ext = ext / field imm).
-    DivEFI(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, RC::F),
+    DivEFI(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, FC::F),
     /// Divides a field immediate and an extension field element (ext = field imm / ext).
-    DivEFIN(Ext<RC::F, RC::EF>, RC::F, Ext<RC::F, RC::EF>),
+    DivEFIN(Ext<FC::F, FC::EF>, FC::F, Ext<FC::F, FC::EF>),
     /// Divides an extension field element and a field element (ext = ext / felt).
-    DivEF(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>, Felt<RC::F>),
+    DivEF(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>, Felt<FC::F>),
 
     // Negations.
     /// Negates a variable (var = -var).
-    NegV(Var<RC::N>, Var<RC::N>),
+    NegV(Var<FC::N>, Var<FC::N>),
     /// Negates a field element (felt = -felt).
-    NegF(Felt<RC::F>, Felt<RC::F>),
+    NegF(Felt<FC::F>, Felt<FC::F>),
     /// Negates an extension field element (ext = -ext).
-    NegE(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>),
+    NegE(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>),
     /// Inverts a variable (var = 1 / var).
-    InvV(Var<RC::N>, Var<RC::N>),
+    InvV(Var<FC::N>, Var<FC::N>),
     /// Inverts a field element (felt = 1 / felt).
-    InvF(Felt<RC::F>, Felt<RC::F>),
+    InvF(Felt<FC::F>, Felt<FC::F>),
     /// Inverts an extension field element (ext = 1 / ext).
-    InvE(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>),
+    InvE(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>),
 
     // Control flow.
     /// Executes a for loop with the parameters (start step value, end step value, step size, step
     /// variable, body).
     For(
         Box<(
-            Usize<RC::N>,
-            Usize<RC::N>,
-            RC::N,
-            Var<RC::N>,
-            TracedVec<DslIr<RC>>,
+            Usize<FC::N>,
+            Usize<FC::N>,
+            FC::N,
+            Var<FC::N>,
+            TracedVec<DslIr<FC>>,
         )>,
     ),
     /// Executes an equal conditional branch with the parameters (lhs var, rhs var, then body, else
     /// body).
     IfEq(
         Box<(
-            Var<RC::N>,
-            Var<RC::N>,
-            TracedVec<DslIr<RC>>,
-            TracedVec<DslIr<RC>>,
+            Var<FC::N>,
+            Var<FC::N>,
+            TracedVec<DslIr<FC>>,
+            TracedVec<DslIr<FC>>,
         )>,
     ),
     /// Executes a not equal conditional branch with the parameters (lhs var, rhs var, then body,
     /// else body).
     IfNe(
         Box<(
-            Var<RC::N>,
-            Var<RC::N>,
-            TracedVec<DslIr<RC>>,
-            TracedVec<DslIr<RC>>,
+            Var<FC::N>,
+            Var<FC::N>,
+            TracedVec<DslIr<FC>>,
+            TracedVec<DslIr<FC>>,
         )>,
     ),
     /// Executes an equal conditional branch with the parameters (lhs var, rhs imm, then body, else
     /// body).
     IfEqI(
         Box<(
-            Var<RC::N>,
-            RC::N,
-            TracedVec<DslIr<RC>>,
-            TracedVec<DslIr<RC>>,
+            Var<FC::N>,
+            FC::N,
+            TracedVec<DslIr<FC>>,
+            TracedVec<DslIr<FC>>,
         )>,
     ),
     /// Executes a not equal conditional branch with the parameters (lhs var, rhs imm, then body,
     /// else body).
     IfNeI(
         Box<(
-            Var<RC::N>,
-            RC::N,
-            TracedVec<DslIr<RC>>,
-            TracedVec<DslIr<RC>>,
+            Var<FC::N>,
+            FC::N,
+            TracedVec<DslIr<FC>>,
+            TracedVec<DslIr<FC>>,
         )>,
     ),
     /// Break out of a for loop.
@@ -176,170 +176,170 @@ pub enum DslIr<RC: FieldGenericConfig> {
 
     // Assertions.
     /// Assert that two variables are equal (var == var).
-    AssertEqV(Var<RC::N>, Var<RC::N>),
+    AssertEqV(Var<FC::N>, Var<FC::N>),
     /// Assert that two variables are not equal (var != var).
-    AssertNeV(Var<RC::N>, Var<RC::N>),
+    AssertNeV(Var<FC::N>, Var<FC::N>),
     /// Assert that two field elements are equal (felt == felt).
-    AssertEqF(Felt<RC::F>, Felt<RC::F>),
+    AssertEqF(Felt<FC::F>, Felt<FC::F>),
     /// Assert that two field elements are not equal (felt != felt).
-    AssertNeF(Felt<RC::F>, Felt<RC::F>),
+    AssertNeF(Felt<FC::F>, Felt<FC::F>),
     /// Assert that two extension field elements are equal (ext == ext).
-    AssertEqE(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>),
+    AssertEqE(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>),
     /// Assert that two extension field elements are not equal (ext != ext).
-    AssertNeE(Ext<RC::F, RC::EF>, Ext<RC::F, RC::EF>),
+    AssertNeE(Ext<FC::F, FC::EF>, Ext<FC::F, FC::EF>),
     /// Assert that a variable is equal to an immediate (var == imm).
-    AssertEqVI(Var<RC::N>, RC::N),
+    AssertEqVI(Var<FC::N>, FC::N),
     /// Assert that a variable is not equal to an immediate (var != imm).
-    AssertNeVI(Var<RC::N>, RC::N),
+    AssertNeVI(Var<FC::N>, FC::N),
     /// Assert that a field element is equal to a field immediate (felt == field imm).
-    AssertEqFI(Felt<RC::F>, RC::F),
+    AssertEqFI(Felt<FC::F>, FC::F),
     /// Assert that a field element is not equal to a field immediate (felt != field imm).
-    AssertNeFI(Felt<RC::F>, RC::F),
+    AssertNeFI(Felt<FC::F>, FC::F),
     /// Assert that an extension field element is equal to an extension field immediate (ext == ext
     /// field imm).
-    AssertEqEI(Ext<RC::F, RC::EF>, RC::EF),
+    AssertEqEI(Ext<FC::F, FC::EF>, FC::EF),
     /// Assert that an extension field element is not equal to an extension field immediate (ext !=
     /// ext field imm).
-    AssertNeEI(Ext<RC::F, RC::EF>, RC::EF),
+    AssertNeEI(Ext<FC::F, FC::EF>, FC::EF),
 
     // Memory instructions.
     /// Allocate (ptr, len, size) a memory slice of length len
-    Alloc(Ptr<RC::N>, Usize<RC::N>, usize),
+    Alloc(Ptr<FC::N>, Usize<FC::N>, usize),
     /// Load variable (var, ptr, index)
-    LoadV(Var<RC::N>, Ptr<RC::N>, MemIndex<RC::N>),
+    LoadV(Var<FC::N>, Ptr<FC::N>, MemIndex<FC::N>),
     /// Load field element (var, ptr, index)
-    LoadF(Felt<RC::F>, Ptr<RC::N>, MemIndex<RC::N>),
+    LoadF(Felt<FC::F>, Ptr<FC::N>, MemIndex<FC::N>),
     /// Load extension field
-    LoadE(Ext<RC::F, RC::EF>, Ptr<RC::N>, MemIndex<RC::N>),
+    LoadE(Ext<FC::F, FC::EF>, Ptr<FC::N>, MemIndex<FC::N>),
     /// Store variable at address
-    StoreV(Var<RC::N>, Ptr<RC::N>, MemIndex<RC::N>),
+    StoreV(Var<FC::N>, Ptr<FC::N>, MemIndex<FC::N>),
     /// Store field element at address
-    StoreF(Felt<RC::F>, Ptr<RC::N>, MemIndex<RC::N>),
+    StoreF(Felt<FC::F>, Ptr<FC::N>, MemIndex<FC::N>),
     /// Store extension field at address
-    StoreE(Ext<RC::F, RC::EF>, Ptr<RC::N>, MemIndex<RC::N>),
+    StoreE(Ext<FC::F, FC::EF>, Ptr<FC::N>, MemIndex<FC::N>),
 
     /// Force reduction of field elements in circuit.
-    ReduceE(Ext<RC::F, RC::EF>),
+    ReduceE(Ext<FC::F, FC::EF>),
 
     // Bits.
     /// Decompose a variable into size bits (bits = num2bits(var, size)). Should only be used when
     /// target is a gnark circuit.
-    CircuitNum2BitsV(Var<RC::N>, usize, Vec<Var<RC::N>>),
+    CircuitNum2BitsV(Var<FC::N>, usize, Vec<Var<FC::N>>),
     /// Decompose a field element into bits (bits = num2bits(felt)). Should only be used when
     /// target is a gnark circuit.
-    CircuitNum2BitsF(Felt<RC::F>, Vec<Var<RC::N>>),
+    CircuitNum2BitsF(Felt<FC::F>, Vec<Var<FC::N>>),
     /// Convert a Felt to a Var in a circuit. Avoids decomposing to bits and then reconstructing.
-    CircuitFelt2Var(Felt<RC::F>, Var<RC::N>),
+    CircuitFelt2Var(Felt<FC::F>, Var<FC::N>),
 
     // Hashing.
     /// Permutes an array of baby bear elements using Poseidon2 (output = p2_permute(array)).
-    Poseidon2PermuteBabyBear(Box<(Array<RC, Felt<RC::F>>, Array<RC, Felt<RC::F>>)>),
+    Poseidon2PermuteBabyBear(Box<(Array<FC, Felt<FC::F>>, Array<FC, Felt<FC::F>>)>),
     /// Compresses two baby bear element arrays using Poseidon2 (output = p2_compress(array1,
     /// array2)).
     Poseidon2CompressBabyBear(
         Box<(
-            Array<RC, Felt<RC::F>>,
-            Array<RC, Felt<RC::F>>,
-            Array<RC, Felt<RC::F>>,
+            Array<FC, Felt<FC::F>>,
+            Array<FC, Felt<FC::F>>,
+            Array<FC, Felt<FC::F>>,
         )>,
     ),
     /// Absorb an array of baby bear elements for a specified hash instance.
-    Poseidon2AbsorbBabyBear(Var<RC::N>, Array<RC, Felt<RC::F>>),
+    Poseidon2AbsorbBabyBear(Var<FC::N>, Array<FC, Felt<FC::F>>),
     /// Finalize and return the hash digest of a specified hash instance.
-    Poseidon2FinalizeBabyBear(Var<RC::N>, Array<RC, Felt<RC::F>>),
+    Poseidon2FinalizeBabyBear(Var<FC::N>, Array<FC, Felt<FC::F>>),
     /// Permutes an array of Bn254 elements using Poseidon2 (output = p2_permute(array)). Should
     /// only be used when target is a gnark circuit.
-    CircuitPoseidon2Permute([Var<RC::N>; 3]),
+    CircuitPoseidon2Permute([Var<FC::N>; 3]),
     /// Permutates an array of BabyBear elements in the circuit.
-    CircuitPoseidon2PermuteBabyBear(Box<[Felt<RC::F>; 16]>),
+    CircuitPoseidon2PermuteBabyBear(Box<[Felt<FC::F>; 16]>),
     /// Permutates an array of BabyBear elements in the circuit using the skinny precompile.
-    CircuitV2Poseidon2PermuteBabyBear(Box<([Felt<RC::F>; 16], [Felt<RC::F>; 16])>),
+    CircuitV2Poseidon2PermuteBabyBear(Box<([Felt<FC::F>; 16], [Felt<FC::F>; 16])>),
     /// Commits the public values.
-    CircuitV2CommitPublicValues(Box<RecursionPublicValues<Felt<RC::F>>>),
+    CircuitV2CommitPublicValues(Box<RecursionPublicValues<Felt<FC::F>>>),
 
     // Miscellaneous instructions.
     /// Decompose hint operation of a usize into an array. (output = num2bits(usize)).
-    HintBitsU(Array<RC, Var<RC::N>>, Usize<RC::N>),
+    HintBitsU(Array<FC, Var<FC::N>>, Usize<FC::N>),
     /// Decompose hint operation of a variable into an array. (output = num2bits(var)).
-    HintBitsV(Array<RC, Var<RC::N>>, Var<RC::N>),
+    HintBitsV(Array<FC, Var<FC::N>>, Var<FC::N>),
     /// Decompose hint operation of a field element into an array. (output = num2bits(felt)).
-    HintBitsF(Array<RC, Var<RC::N>>, Felt<RC::F>),
+    HintBitsF(Array<FC, Var<FC::N>>, Felt<FC::F>),
     /// Decompose hint operation of a field element into an array. (output = num2bits(felt)).
-    CircuitV2HintBitsF(Vec<Felt<RC::F>>, Felt<RC::F>),
+    CircuitV2HintBitsF(Vec<Felt<FC::F>>, Felt<FC::F>),
     /// Prints a variable.
-    PrintV(Var<RC::N>),
+    PrintV(Var<FC::N>),
     /// Prints a field element.
-    PrintF(Felt<RC::F>),
+    PrintF(Felt<FC::F>),
     /// Prints an extension field element.
-    PrintE(Ext<RC::F, RC::EF>),
+    PrintE(Ext<FC::F, FC::EF>),
     /// Throws an error.
     Error(),
 
     /// Converts an ext to a slice of felts.
-    HintExt2Felt(Array<RC, Felt<RC::F>>, Ext<RC::F, RC::EF>),
+    HintExt2Felt(Array<FC, Felt<FC::F>>, Ext<FC::F, FC::EF>),
     /// Hint the length of the next array.
-    HintLen(Var<RC::N>),
+    HintLen(Var<FC::N>),
     /// Hint an array of variables.
-    HintVars(Array<RC, Var<RC::N>>),
+    HintVars(Array<FC, Var<FC::N>>),
     /// Hint an array of field elements.
-    HintFelts(Array<RC, Felt<RC::F>>),
+    HintFelts(Array<FC, Felt<FC::F>>),
     /// Hint an array of extension field elements.
-    HintExts(Array<RC, Ext<RC::F, RC::EF>>),
+    HintExts(Array<FC, Ext<FC::F, FC::EF>>),
     /// Hint an array of field elements.
-    CircuitV2HintFelts(Vec<Felt<RC::F>>),
+    CircuitV2HintFelts(Vec<Felt<FC::F>>),
     /// Hint an array of extension field elements.
-    CircuitV2HintExts(Vec<Ext<RC::F, RC::EF>>),
+    CircuitV2HintExts(Vec<Ext<FC::F, FC::EF>>),
     /// Witness a variable. Should only be used when target is a gnark circuit.
-    WitnessVar(Var<RC::N>, u32),
+    WitnessVar(Var<FC::N>, u32),
     /// Witness a field element. Should only be used when target is a gnark circuit.
-    WitnessFelt(Felt<RC::F>, u32),
+    WitnessFelt(Felt<FC::F>, u32),
     /// Witness an extension field element. Should only be used when target is a gnark circuit.
-    WitnessExt(Ext<RC::F, RC::EF>, u32),
+    WitnessExt(Ext<FC::F, FC::EF>, u32),
     /// Label a field element as the ith public input.
-    Commit(Felt<RC::F>, Var<RC::N>),
+    Commit(Felt<FC::F>, Var<FC::N>),
     /// Registers a field element to the public inputs.
-    RegisterPublicValue(Felt<RC::F>),
+    RegisterPublicValue(Felt<FC::F>),
     /// Operation to halt the program. Should be the last instruction in the program.
     Halt,
 
     // Public inputs for circuits.
     /// Asserts that the inputted var is equal the circuit's vkey hash public input. Should only be
     /// used when target is a gnark circuit.
-    CircuitCommitVkeyHash(Var<RC::N>),
+    CircuitCommitVkeyHash(Var<FC::N>),
     /// Asserts that the inputted var is equal the circuit's commited values digest public input.
     /// Should only be used when target is a gnark circuit.
-    CircuitCommitCommitedValuesDigest(Var<RC::N>),
+    CircuitCommitCommitedValuesDigest(Var<FC::N>),
 
     // FRI specific instructions.
     /// Executes a FRI fold operation. 1st field is the size of the fri fold input array.  2nd
     /// field is the fri fold input array.  See [`FriFoldInput`] for more details.
-    FriFold(Var<RC::N>, Array<RC, FriFoldInput<RC>>),
+    FriFold(Var<FC::N>, Array<FC, FriFoldInput<FC>>),
     // FRI specific instructions.
     /// Executes a FRI fold operation. Input is the fri fold input array.  See [`FriFoldInput`] for
     /// more details.
-    CircuitV2FriFold(Box<(CircuitV2FriFoldOutput<RC>, CircuitV2FriFoldInput<RC>)>),
+    CircuitV2FriFold(Box<(CircuitV2FriFoldOutput<FC>, CircuitV2FriFoldInput<FC>)>),
     /// Select's a variable based on a condition. (select(cond, true_val, false_val) => output).
     /// Should only be used when target is a gnark circuit.
-    CircuitSelectV(Var<RC::N>, Var<RC::N>, Var<RC::N>, Var<RC::N>),
+    CircuitSelectV(Var<FC::N>, Var<FC::N>, Var<FC::N>, Var<FC::N>),
     /// Select's a field element based on a condition. (select(cond, true_val, false_val) =>
     /// output). Should only be used when target is a gnark circuit.
-    CircuitSelectF(Var<RC::N>, Felt<RC::F>, Felt<RC::F>, Felt<RC::F>),
+    CircuitSelectF(Var<FC::N>, Felt<FC::F>, Felt<FC::F>, Felt<FC::F>),
     /// Select's an extension field element based on a condition. (select(cond, true_val,
     /// false_val) => output). Should only be used when target is a gnark circuit.
     CircuitSelectE(
-        Var<RC::N>,
-        Ext<RC::F, RC::EF>,
-        Ext<RC::F, RC::EF>,
-        Ext<RC::F, RC::EF>,
+        Var<FC::N>,
+        Ext<FC::F, FC::EF>,
+        Ext<FC::F, FC::EF>,
+        Ext<FC::F, FC::EF>,
     ),
     /// Converts an ext to a slice of felts. Should only be used when target is a gnark circuit.
-    CircuitExt2Felt([Felt<RC::F>; 4], Ext<RC::F, RC::EF>),
+    CircuitExt2Felt([Felt<FC::F>; 4], Ext<FC::F, FC::EF>),
     /// Converts a slice of felts to an ext. Should only be used when target is a gnark circuit.
-    CircuitFelts2Ext([Felt<RC::F>; 4], Ext<RC::F, RC::EF>),
+    CircuitFelts2Ext([Felt<FC::F>; 4], Ext<FC::F, FC::EF>),
 
     // Debugging instructions.
     /// Executes less than (var = var < var).  This operation is NOT constrained.
-    LessThan(Var<RC::N>, Var<RC::N>, Var<RC::N>),
+    LessThan(Var<FC::N>, Var<FC::N>, Var<FC::N>),
     /// Tracks the number of cycles used by a block of code annotated by the string input.
     CycleTracker(String),
     /// Tracks the number of cycles used by a block of code annotated by the string input.
@@ -348,7 +348,7 @@ pub enum DslIr<RC: FieldGenericConfig> {
     CycleTrackerV2Exit,
 
     // Reverse bits exponentiation.
-    ExpReverseBitsLen(Ptr<RC::N>, Var<RC::N>, Var<RC::N>),
+    ExpReverseBitsLen(Ptr<FC::N>, Var<FC::N>, Var<FC::N>),
     /// Reverse bits exponentiation. Output, base, exponent bits.
-    CircuitV2ExpReverseBits(Felt<RC::F>, Felt<RC::F>, Vec<Felt<RC::F>>),
+    CircuitV2ExpReverseBits(Felt<FC::F>, Felt<FC::F>, Vec<Felt<FC::F>>),
 }

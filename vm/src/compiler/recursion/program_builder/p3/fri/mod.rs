@@ -22,13 +22,13 @@ use p3_field::{AbstractField, Field, TwoAdicField};
 pub use two_adic_pcs::*;
 
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/verifier.rs#L27
-pub fn verify_shape_and_sample_challenges<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    config: &FriConfigVariable<RC>,
-    proof: &FriProofVariable<RC>,
-    challenger: &mut DuplexChallengerVariable<RC>,
-) -> FriChallengesVariable<RC> {
-    let mut betas: Array<RC, Ext<RC::F, RC::EF>> =
+pub fn verify_shape_and_sample_challenges<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    config: &FriConfigVariable<FC>,
+    proof: &FriProofVariable<FC>,
+    challenger: &mut DuplexChallengerVariable<FC>,
+) -> FriChallengesVariable<FC> {
+    let mut betas: Array<FC, Ext<FC::F, FC::EF>> =
         builder.dyn_array(proof.commit_phase_commits.len());
 
     builder
@@ -72,15 +72,15 @@ pub fn verify_shape_and_sample_challenges<RC: FieldGenericConfig>(
 ///
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/verifier.rs#L67
 #[allow(clippy::type_complexity)]
-pub fn verify_challenges<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    config: &FriConfigVariable<RC>,
-    proof: &FriProofVariable<RC>,
-    challenges: &FriChallengesVariable<RC>,
-    reduced_openings: &Array<RC, Array<RC, Ext<RC::F, RC::EF>>>,
+pub fn verify_challenges<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    config: &FriConfigVariable<FC>,
+    proof: &FriProofVariable<FC>,
+    challenges: &FriChallengesVariable<FC>,
+    reduced_openings: &Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,
 ) where
-    RC::F: TwoAdicField,
-    RC::EF: TwoAdicField,
+    FC::F: TwoAdicField,
+    FC::EF: TwoAdicField,
 {
     let nb_commit_phase_commits = proof.commit_phase_commits.len().materialize(builder);
     let log_max_height = builder.eval(nb_commit_phase_commits + config.log_blowup);
@@ -113,25 +113,25 @@ pub fn verify_challenges<RC: FieldGenericConfig>(
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/verifier.rs#L101
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
-pub fn verify_query<RC: FieldGenericConfig>(
-    builder: &mut Builder<RC>,
-    config: &FriConfigVariable<RC>,
-    commit_phase_commits: &Array<RC, DigestVariable<RC>>,
-    index_bits: &Array<RC, Var<RC::N>>,
-    proof: &FriQueryProofVariable<RC>,
-    betas: &Array<RC, Ext<RC::F, RC::EF>>,
-    reduced_openings: &Array<RC, Ext<RC::F, RC::EF>>,
-    log_max_height: Usize<RC::N>,
-) -> Ext<RC::F, RC::EF>
+pub fn verify_query<FC: FieldGenericConfig>(
+    builder: &mut Builder<FC>,
+    config: &FriConfigVariable<FC>,
+    commit_phase_commits: &Array<FC, DigestVariable<FC>>,
+    index_bits: &Array<FC, Var<FC::N>>,
+    proof: &FriQueryProofVariable<FC>,
+    betas: &Array<FC, Ext<FC::F, FC::EF>>,
+    reduced_openings: &Array<FC, Ext<FC::F, FC::EF>>,
+    log_max_height: Usize<FC::N>,
+) -> Ext<FC::F, FC::EF>
 where
-    RC::F: TwoAdicField,
-    RC::EF: TwoAdicField,
+    FC::F: TwoAdicField,
+    FC::EF: TwoAdicField,
 {
     builder.cycle_tracker("verify-query");
-    let folded_eval: Ext<RC::F, RC::EF> = builder.eval(RC::F::zero());
+    let folded_eval: Ext<FC::F, FC::EF> = builder.eval(FC::F::zero());
     let two_adic_generator_f = config.get_two_adic_generator(builder, log_max_height);
 
-    let x = if matches!(builder.program_type, RecursionProgramType::Wrap) {
+    let x = if matches!(builder.program_type, RecursionProgramType::Embed) {
         builder.exp_reverse_bits_len(two_adic_generator_f, index_bits, log_max_height)
     } else {
         builder.exp_reverse_bits_len_fast(two_adic_generator_f, index_bits, log_max_height)
@@ -141,8 +141,8 @@ where
     builder
         .range(0, commit_phase_commits.len())
         .for_each(|i, builder| {
-            let log_folded_height: Var<_> = builder.eval(log_max_height - i - RC::N::one());
-            let log_folded_height_plus_one: Var<_> = builder.eval(log_folded_height + RC::N::one());
+            let log_folded_height: Var<_> = builder.eval(log_max_height - i - FC::N::one());
+            let log_folded_height_plus_one: Var<_> = builder.eval(log_folded_height + FC::N::one());
             let commit = builder.get(commit_phase_commits, i);
             let step = builder.get(&proof.commit_phase_openings, i);
             let beta = builder.get(betas, i);
@@ -151,25 +151,25 @@ where
             builder.assign(folded_eval, folded_eval + reduced_opening);
 
             let index_bit = builder.get(index_bits, i);
-            let index_sibling_mod_2: Var<RC::N> =
-                builder.eval(SymbolicVar::from(RC::N::one()) - index_bit);
-            let i_plus_one = builder.eval(i + RC::N::one());
+            let index_sibling_mod_2: Var<FC::N> =
+                builder.eval(SymbolicVar::from(FC::N::one()) - index_bit);
+            let i_plus_one = builder.eval(i + FC::N::one());
             let index_pair = index_bits.shift(builder, i_plus_one);
 
-            let mut evals: Array<RC, Ext<RC::F, RC::EF>> = builder.array(2);
+            let mut evals: Array<FC, Ext<FC::F, FC::EF>> = builder.array(2);
             builder.set_value(&mut evals, 0, folded_eval);
             builder.set_value(&mut evals, 1, folded_eval);
             builder.set_value(&mut evals, index_sibling_mod_2, step.sibling_value);
 
-            let dims = DimensionsVariable::<RC> {
-                height: builder.sll(RC::N::one(), Usize::Var(log_folded_height)),
+            let dims = DimensionsVariable::<FC> {
+                height: builder.sll(FC::N::one(), Usize::Var(log_folded_height)),
             };
-            let mut dims_slice: Array<RC, DimensionsVariable<RC>> = builder.array(1);
+            let mut dims_slice: Array<FC, DimensionsVariable<FC>> = builder.array(1);
             builder.set_value(&mut dims_slice, 0, dims);
 
             let mut opened_values = builder.array(1);
             builder.set_value(&mut opened_values, 0, evals.clone());
-            verify_batch::<RC, 4>(
+            verify_batch::<FC, 4>(
                 builder,
                 &commit,
                 dims_slice,
@@ -182,7 +182,7 @@ where
             let xs_0: Ext<_, _> = builder.eval(x);
             let xs_1: Ext<_, _> = builder.eval(x);
             builder
-                .if_eq(index_sibling_mod_2, RC::N::zero())
+                .if_eq(index_sibling_mod_2, FC::N::zero())
                 .then_or_else(
                     |builder| {
                         builder.assign(xs_0, x * two_adic_generator_one.to_operand().symbolic());
@@ -213,37 +213,37 @@ where
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/merkle-tree/src/mmcs.rs#L92
 #[allow(clippy::type_complexity)]
 #[allow(unused_variables)]
-pub fn verify_batch<RC: FieldGenericConfig, const D: usize>(
-    builder: &mut Builder<RC>,
-    commit: &DigestVariable<RC>,
-    dimensions: Array<RC, DimensionsVariable<RC>>,
-    index_bits: Array<RC, Var<RC::N>>,
-    opened_values: Array<RC, Array<RC, Ext<RC::F, RC::EF>>>,
-    proof: &Array<RC, DigestVariable<RC>>,
+pub fn verify_batch<FC: FieldGenericConfig, const D: usize>(
+    builder: &mut Builder<FC>,
+    commit: &DigestVariable<FC>,
+    dimensions: Array<FC, DimensionsVariable<FC>>,
+    index_bits: Array<FC, Var<FC::N>>,
+    opened_values: Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,
+    proof: &Array<FC, DigestVariable<FC>>,
 ) {
     builder.cycle_tracker("verify-batch");
     // The index of which table to process next.
-    let index: Var<RC::N> = builder.eval(RC::N::zero());
+    let index: Var<FC::N> = builder.eval(FC::N::zero());
 
     // The height of the current layer (padded).
     let current_height = builder.get(&dimensions, index).height;
 
     // Reduce all the tables that have the same height to a single root.
-    let root = reduce_fast::<RC, D>(builder, index, &dimensions, current_height, &opened_values);
+    let root = reduce_fast::<FC, D>(builder, index, &dimensions, current_height, &opened_values);
     let root_ptr = match root {
         Array::Fixed(_) => panic!("root is fixed"),
         Array::Dyn(ptr, _) => ptr,
     };
 
     // For each sibling in the proof, reconstruct the root.
-    let one: Var<_> = builder.eval(RC::N::one());
-    let left: Ptr<RC::N> = builder.uninit();
-    let right: Ptr<RC::N> = builder.uninit();
+    let one: Var<_> = builder.eval(FC::N::one());
+    let left: Ptr<FC::N> = builder.uninit();
+    let right: Ptr<FC::N> = builder.uninit();
     builder.range(0, proof.len()).for_each(|i, builder| {
         let sibling = builder.get_ptr(proof, i);
         let bit = builder.get(&index_bits, i);
 
-        builder.if_eq(bit, RC::N::one()).then_or_else(
+        builder.if_eq(bit, FC::N::one()).then_or_else(
             |builder| {
                 builder.assign(left, sibling);
                 builder.assign(right, root_ptr);
@@ -259,12 +259,12 @@ pub fn verify_batch<RC: FieldGenericConfig, const D: usize>(
             &Array::Dyn(left, Usize::Const(0)),
             &Array::Dyn(right, Usize::Const(0)),
         );
-        builder.assign(current_height, current_height * (RC::N::two().inverse()));
+        builder.assign(current_height, current_height * (FC::N::two().inverse()));
 
         builder.if_ne(index, dimensions.len()).then(|builder| {
             let next_height = builder.get(&dimensions, index).height;
             builder.if_eq(next_height, current_height).then(|builder| {
-                let next_height_openings_digest = reduce_fast::<RC, D>(
+                let next_height_openings_digest = reduce_fast::<FC, D>(
                     builder,
                     index,
                     &dimensions,
@@ -289,15 +289,15 @@ pub fn verify_batch<RC: FieldGenericConfig, const D: usize>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn reduce_fast<RC: FieldGenericConfig, const D: usize>(
-    builder: &mut Builder<RC>,
-    dim_idx: Var<RC::N>,
-    dims: &Array<RC, DimensionsVariable<RC>>,
-    curr_height_padded: Var<RC::N>,
-    opened_values: &Array<RC, Array<RC, Ext<RC::F, RC::EF>>>,
-) -> Array<RC, Felt<RC::F>> {
+pub fn reduce_fast<FC: FieldGenericConfig, const D: usize>(
+    builder: &mut Builder<FC>,
+    dim_idx: Var<FC::N>,
+    dims: &Array<FC, DimensionsVariable<FC>>,
+    curr_height_padded: Var<FC::N>,
+    opened_values: &Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,
+) -> Array<FC, Felt<FC::F>> {
     builder.cycle_tracker("verify-batch-reduce-fast");
-    let nb_opened_values: Var<_> = builder.eval(RC::N::zero());
+    let nb_opened_values: Var<_> = builder.eval(FC::N::zero());
     let mut nested_opened_values: Array<_, Array<_, Ext<_, _>>> = builder.dyn_array(8192);
     let start_dim_idx: Var<_> = builder.eval(dim_idx);
     builder.cycle_tracker("verify-batch-reduce-fast-setup");
@@ -312,8 +312,8 @@ pub fn reduce_fast<RC: FieldGenericConfig, const D: usize>(
                     nb_opened_values,
                     opened_values.clone(),
                 );
-                builder.assign(nb_opened_values, nb_opened_values + RC::N::one());
-                builder.assign(dim_idx, dim_idx + RC::N::one());
+                builder.assign(nb_opened_values, nb_opened_values + FC::N::one());
+                builder.assign(dim_idx, dim_idx + FC::N::one());
             });
         });
     builder.cycle_tracker("verify-batch-reduce-fast-setup");

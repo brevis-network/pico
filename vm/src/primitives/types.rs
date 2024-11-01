@@ -2,7 +2,7 @@
 pub enum RecursionProgramType {
     Riscv,
     Deferred,
+    Combine,
     Compress,
-    Shrink,
-    Wrap,
+    Embed,
 }

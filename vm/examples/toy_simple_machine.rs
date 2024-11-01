@@ -124,7 +124,7 @@ fn main() {
     let chips = ToyChipType::all_chips();
 
     // Create a new machine based on config and chips
-    let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, chips);
+    let simple_machine = SimpleMachine::new(config, chips, RISCV_NUM_PVS);
     info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.

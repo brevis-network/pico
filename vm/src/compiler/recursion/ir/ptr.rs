@@ -13,42 +13,42 @@ pub struct SymbolicPtr<N: Field> {
     pub address: SymbolicVar<N>,
 }
 
-impl<RC: FieldGenericConfig> Builder<RC> {
+impl<FC: FieldGenericConfig> Builder<FC> {
     /// Allocates an array on the heap.
-    pub(crate) fn alloc(&mut self, len: Usize<RC::N>, size: usize) -> Ptr<RC::N> {
+    pub(crate) fn alloc(&mut self, len: Usize<FC::N>, size: usize) -> Ptr<FC::N> {
         let ptr = Ptr::uninit(self);
         self.push(DslIr::Alloc(ptr, len, size));
         ptr
     }
 
     /// Loads a value from memory.
-    pub fn load<V: MemVariable<RC>>(&mut self, var: V, ptr: Ptr<RC::N>, index: MemIndex<RC::N>) {
+    pub fn load<V: MemVariable<FC>>(&mut self, var: V, ptr: Ptr<FC::N>, index: MemIndex<FC::N>) {
         var.load(ptr, index, self);
     }
 
     /// Stores a value to memory.
-    pub fn store<V: MemVariable<RC>>(&mut self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, value: V) {
+    pub fn store<V: MemVariable<FC>>(&mut self, ptr: Ptr<FC::N>, index: MemIndex<FC::N>, value: V) {
         value.store(ptr, index, self);
     }
 }
 
-impl<RC: FieldGenericConfig> Variable<RC> for Ptr<RC::N> {
-    type Expression = SymbolicPtr<RC::N>;
+impl<FC: FieldGenericConfig> Variable<FC> for Ptr<FC::N> {
+    type Expression = SymbolicPtr<FC::N>;
 
-    fn uninit(builder: &mut Builder<RC>) -> Self {
+    fn uninit(builder: &mut Builder<FC>) -> Self {
         Ptr {
             address: Var::uninit(builder),
         }
     }
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>) {
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<FC>) {
         self.address.assign(src.address, builder);
     }
 
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<RC>,
+        builder: &mut Builder<FC>,
     ) {
         Var::assert_eq(lhs.into().address, rhs.into().address, builder);
     }
@@ -56,26 +56,26 @@ impl<RC: FieldGenericConfig> Variable<RC> for Ptr<RC::N> {
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<RC>,
+        builder: &mut Builder<FC>,
     ) {
         Var::assert_ne(lhs.into().address, rhs.into().address, builder);
     }
 }
 
-impl<RC: FieldGenericConfig> MemVariable<RC> for Ptr<RC::N> {
+impl<FC: FieldGenericConfig> MemVariable<FC> for Ptr<FC::N> {
     fn size_of() -> usize {
         1
     }
 
-    fn load(&self, ptr: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>) {
+    fn load(&self, ptr: Ptr<FC::N>, index: MemIndex<FC::N>, builder: &mut Builder<FC>) {
         self.address.load(ptr, index, builder);
     }
 
     fn store(
         &self,
-        ptr: Ptr<<RC as FieldGenericConfig>::N>,
-        index: MemIndex<RC::N>,
-        builder: &mut Builder<RC>,
+        ptr: Ptr<<FC as FieldGenericConfig>::N>,
+        index: MemIndex<FC::N>,
+        builder: &mut Builder<FC>,
     ) {
         self.address.store(ptr, index, builder);
     }

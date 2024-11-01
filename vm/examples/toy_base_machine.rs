@@ -109,31 +109,30 @@ fn main() {
     let compiler = Compiler::new(SourceType::RiscV, ELF);
     let program = compiler.compile();
 
+    // Create the prover.
+    info!("\n Creating Base Machine");
+    let config = RiscvSC::new();
+    let chips = ToyChipType::all_chips();
+    let base_machine = BaseMachine::new(config, chips, RISCV_NUM_PVS);
+
+    // Setup PK and VK.
+    info!("\n Setup PK and VK");
+    let (pk, vk) = base_machine.setup_keys(&program);
+
     info!("\n Creating Runtime..");
     let mut runtime = RiscvEmulator::new(program, EmulatorOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
 
-    let record = &mut runtime.records[0];
-
-    // Create the prover.
-    info!("\n Creating Base Machine");
-    let config = RiscvSC::new();
-
-    let chips = ToyChipType::all_chips();
-    let base_machine = BaseMachine::new(RISCV_NUM_PVS);
-
-    // Setup PK and VK.
-    info!("\n Setup PK and VK");
-    let (pk, vk) = base_machine.setup_keys(&config, &chips, &record.program);
+    let records = &mut vec![runtime.records[0].clone()];
 
     info!("\n Generating proof");
     // Generate the proof.
-    let proof = base_machine.prove_unit(&config, &chips, &pk, record);
+    let proof = base_machine.prove_ensemble(&pk, records);
 
     // Verify the proof.
     info!("\n Verifying proof");
-    let result = base_machine.verify_unit(&config, &chips, &vk, &proof);
+    let result = base_machine.verify_ensemble(&vk, &proof);
     info!("\n The proof is verified: {}", result.is_ok());
     assert_eq!(result.is_ok(), true);
 }

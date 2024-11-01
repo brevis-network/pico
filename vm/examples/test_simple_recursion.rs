@@ -19,7 +19,7 @@ use pico_vm::{
         keys::BaseVerifyingKey, logger::setup_logger, machine::MachineBehavior, proof::BaseProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{MAX_NUM_PVS, RISCV_NUM_PVS},
+    primitives::consts::{MAX_NUM_PVS, RECURSION_NUM_PVS, RISCV_NUM_PVS, RISCV_SIMPLE_DEGREE},
     recursion::runtime::Runtime as RecursionRuntime,
 };
 use std::{
@@ -50,7 +50,7 @@ pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
 
     let stdin = SimpleRecursionStdin {
         vk,
-        machine,
+        machine: machine.base_machine(),
         base_proofs: vec![base_proof.clone()],
         base_challenger,
         initial_reconstruct_challenger: reconstruct_challenger.clone(),
@@ -106,7 +106,7 @@ fn main() {
     let fib_chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips
-    let simple_machine = SimpleMachine::new(config, RISCV_NUM_PVS, fib_chips);
+    let simple_machine = SimpleMachine::new(config, fib_chips, RISCV_NUM_PVS);
 
     // Setup machine prover, verifier, pk and vk.
     info!("\n Setup machine (at {:?})..", start.elapsed());
@@ -133,7 +133,8 @@ fn main() {
     // Get field_config program
     // Note that simple_machine is used as input for recursive verifier to build the program
     info!("\n Build field_config program (at {:?})..", start.elapsed());
-    let recursion_program = SimpleVerifierCircuit::<rcf::FieldConfig, _>::build(&simple_machine);
+    let recursion_program =
+        SimpleVerifierCircuit::<rcf::FieldConfig, _>::build(simple_machine.base_machine());
 
     let serialized_program = bincode::serialize(&recursion_program).unwrap();
     let mut hasher = DefaultHasher::new();
@@ -147,7 +148,7 @@ fn main() {
     let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
 
     let recursion_stdin = SimpleRecursionStdin::construct(
-        &simple_machine,
+        &simple_machine.base_machine(),
         &mut reconstruct_challenger,
         &vk,
         &mut base_challenger,
@@ -210,8 +211,8 @@ fn main() {
     // Note that it should only accept witnesses initialized from records
     let recursion_machine = SimpleMachine::new(
         rcf::StarkConfig::new(),
+        RecursionChipType::<BabyBear, RISCV_SIMPLE_DEGREE>::all_chips(),
         MAX_NUM_PVS,
-        RecursionChipType::<BabyBear, 3>::all_chips(),
     );
     let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
 

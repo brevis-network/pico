@@ -5,12 +5,12 @@ use p3_field::AbstractField;
 
 /// An array that is either of static or dynamic size.
 #[derive(Debug, Clone)]
-pub enum Array<RC: FieldGenericConfig, T> {
+pub enum Array<FC: FieldGenericConfig, T> {
     Fixed(Vec<T>),
-    Dyn(Ptr<RC::N>, Usize<RC::N>),
+    Dyn(Ptr<FC::N>, Usize<FC::N>),
 }
 
-impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
+impl<FC: FieldGenericConfig, V: MemVariable<FC>> Array<FC, V> {
     /// Gets a fixed version of the array.
     pub fn vec(&self) -> Vec<V> {
         match self {
@@ -20,7 +20,7 @@ impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
     }
 
     /// Gets the length of the array as a variable inside the DSL.
-    pub fn len(&self) -> Usize<RC::N> {
+    pub fn len(&self) -> Usize<FC::N> {
         match self {
             Self::Fixed(vec) => Usize::from(vec.len()),
             Self::Dyn(_, len) => *len,
@@ -28,7 +28,7 @@ impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
     }
 
     /// Shifts the array by `shift` elements.
-    pub fn shift(&self, builder: &mut Builder<RC>, shift: Var<RC::N>) -> Array<RC, V> {
+    pub fn shift(&self, builder: &mut Builder<FC>, shift: Var<FC::N>) -> Array<FC, V> {
         match self {
             Self::Fixed(_) => {
                 todo!()
@@ -36,7 +36,7 @@ impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
             Self::Dyn(ptr, len) => {
                 assert!(V::size_of() == 1, "only support variables of size 1");
                 let new_address = builder.eval(ptr.address + shift);
-                let new_ptr = Ptr::<RC::N> {
+                let new_ptr = Ptr::<FC::N> {
                     address: new_address,
                 };
                 let len_var = len.materialize(builder);
@@ -47,7 +47,7 @@ impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
     }
 
     /// Truncates the array to `len` elements.
-    pub fn truncate(&self, builder: &mut Builder<RC>, len: Usize<RC::N>) {
+    pub fn truncate(&self, builder: &mut Builder<FC>, len: Usize<FC::N>) {
         match self {
             Self::Fixed(_) => {
                 todo!()
@@ -60,10 +60,10 @@ impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
 
     pub fn slice(
         &self,
-        builder: &mut Builder<RC>,
-        start: Usize<RC::N>,
-        end: Usize<RC::N>,
-    ) -> Array<RC, V> {
+        builder: &mut Builder<FC>,
+        start: Usize<FC::N>,
+        end: Usize<FC::N>,
+    ) -> Array<FC, V> {
         match self {
             Self::Fixed(vec) => {
                 if let (Usize::Const(start), Usize::Const(end)) = (start, end) {
@@ -77,12 +77,12 @@ impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
                     let start_v = start.materialize(builder);
                     let end_v = end.materialize(builder);
                     let valid = builder.lt(start_v, end_v);
-                    builder.assert_var_eq(valid, RC::N::one());
+                    builder.assert_var_eq(valid, FC::N::one());
 
                     let len_v = len.materialize(builder);
-                    let len_plus_1_v = builder.eval(len_v + RC::N::one());
+                    let len_plus_1_v = builder.eval(len_v + FC::N::one());
                     let valid = builder.lt(end_v, len_plus_1_v);
-                    builder.assert_var_eq(valid, RC::N::one());
+                    builder.assert_var_eq(valid, FC::N::one());
                 }
 
                 let slice_len: Usize<_> = builder.eval(end - start);
@@ -99,21 +99,21 @@ impl<RC: FieldGenericConfig, V: MemVariable<RC>> Array<RC, V> {
     }
 }
 
-impl<RC: FieldGenericConfig> Builder<RC> {
+impl<FC: FieldGenericConfig> Builder<FC> {
     /// Initialize an array of fixed length `len`. The entries will be uninitialized.
-    pub fn array<V: MemVariable<RC>>(&mut self, len: impl Into<Usize<RC::N>>) -> Array<RC, V> {
+    pub fn array<V: MemVariable<FC>>(&mut self, len: impl Into<Usize<FC::N>>) -> Array<FC, V> {
         self.dyn_array(len)
     }
 
     /// Creates an array from a vector.
-    pub fn vec<V: MemVariable<RC>>(&mut self, v: Vec<V>) -> Array<RC, V> {
+    pub fn vec<V: MemVariable<FC>>(&mut self, v: Vec<V>) -> Array<FC, V> {
         Array::Fixed(v)
     }
 
     /// Creates a dynamic array for a length.
-    pub fn dyn_array<V: MemVariable<RC>>(&mut self, len: impl Into<Usize<RC::N>>) -> Array<RC, V> {
+    pub fn dyn_array<V: MemVariable<FC>>(&mut self, len: impl Into<Usize<FC::N>>) -> Array<FC, V> {
         let len = match len.into() {
-            Usize::Const(len) => self.eval(RC::N::from_canonical_usize(len)),
+            Usize::Const(len) => self.eval(FC::N::from_canonical_usize(len)),
             Usize::Var(len) => len,
         };
         let len = Usize::Var(len);
@@ -121,9 +121,9 @@ impl<RC: FieldGenericConfig> Builder<RC> {
         Array::Dyn(ptr, len)
     }
 
-    pub fn get<V: MemVariable<RC>, I: Into<Usize<RC::N>>>(
+    pub fn get<V: MemVariable<FC>, I: Into<Usize<FC::N>>>(
         &mut self,
-        slice: &Array<RC, V>,
+        slice: &Array<FC, V>,
         index: I,
     ) -> V {
         let index = index.into();
@@ -141,7 +141,7 @@ impl<RC: FieldGenericConfig> Builder<RC> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, RC::N::one());
+                    self.assert_var_eq(valid, FC::N::one());
                 }
                 let index = MemIndex {
                     index,
@@ -155,11 +155,11 @@ impl<RC: FieldGenericConfig> Builder<RC> {
         }
     }
 
-    pub fn get_ptr<V: MemVariable<RC>, I: Into<Usize<RC::N>>>(
+    pub fn get_ptr<V: MemVariable<FC>, I: Into<Usize<FC::N>>>(
         &mut self,
-        slice: &Array<RC, V>,
+        slice: &Array<FC, V>,
         index: I,
-    ) -> Ptr<RC::N> {
+    ) -> Ptr<FC::N> {
         let index = index.into();
 
         match slice {
@@ -171,23 +171,23 @@ impl<RC: FieldGenericConfig> Builder<RC> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, RC::N::one());
+                    self.assert_var_eq(valid, FC::N::one());
                 }
                 let index = MemIndex {
                     index,
                     offset: 0,
                     size: V::size_of(),
                 };
-                let var: Ptr<RC::N> = self.uninit();
+                let var: Ptr<FC::N> = self.uninit();
                 self.load(var, *ptr, index);
                 var
             }
         }
     }
 
-    pub fn set<V: MemVariable<RC>, I: Into<Usize<RC::N>>, Expr: Into<V::Expression>>(
+    pub fn set<V: MemVariable<FC>, I: Into<Usize<FC::N>>, Expr: Into<V::Expression>>(
         &mut self,
-        slice: &mut Array<RC, V>,
+        slice: &mut Array<FC, V>,
         index: I,
         value: Expr,
     ) {
@@ -202,7 +202,7 @@ impl<RC: FieldGenericConfig> Builder<RC> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, RC::N::one());
+                    self.assert_var_eq(valid, FC::N::one());
                 }
                 let index = MemIndex {
                     index,
@@ -215,9 +215,9 @@ impl<RC: FieldGenericConfig> Builder<RC> {
         }
     }
 
-    pub fn set_value<V: MemVariable<RC>, I: Into<Usize<RC::N>>>(
+    pub fn set_value<V: MemVariable<FC>, I: Into<Usize<FC::N>>>(
         &mut self,
-        slice: &mut Array<RC, V>,
+        slice: &mut Array<FC, V>,
         index: I,
         value: V,
     ) {
@@ -239,14 +239,14 @@ impl<RC: FieldGenericConfig> Builder<RC> {
     }
 }
 
-impl<RC: FieldGenericConfig, T: MemVariable<RC>> Variable<RC> for Array<RC, T> {
+impl<FC: FieldGenericConfig, T: MemVariable<FC>> Variable<FC> for Array<FC, T> {
     type Expression = Self;
 
-    fn uninit(builder: &mut Builder<RC>) -> Self {
+    fn uninit(builder: &mut Builder<FC>) -> Self {
         Array::Dyn(builder.uninit(), builder.uninit())
     }
 
-    fn assign(&self, src: Self::Expression, builder: &mut Builder<RC>) {
+    fn assign(&self, src: Self::Expression, builder: &mut Builder<FC>) {
         match (self, src.clone()) {
             (Array::Dyn(lhs_ptr, lhs_len), Array::Dyn(rhs_ptr, rhs_len)) => {
                 builder.assign(*lhs_ptr, rhs_ptr);
@@ -259,7 +259,7 @@ impl<RC: FieldGenericConfig, T: MemVariable<RC>> Variable<RC> for Array<RC, T> {
     fn assert_eq(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<RC>,
+        builder: &mut Builder<FC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -294,7 +294,7 @@ impl<RC: FieldGenericConfig, T: MemVariable<RC>> Variable<RC> for Array<RC, T> {
     fn assert_ne(
         lhs: impl Into<Self::Expression>,
         rhs: impl Into<Self::Expression>,
-        builder: &mut Builder<RC>,
+        builder: &mut Builder<FC>,
     ) {
         let lhs = lhs.into();
         let rhs = rhs.into();
@@ -324,17 +324,17 @@ impl<RC: FieldGenericConfig, T: MemVariable<RC>> Variable<RC> for Array<RC, T> {
     }
 }
 
-impl<RC: FieldGenericConfig, T: MemVariable<RC>> MemVariable<RC> for Array<RC, T> {
+impl<FC: FieldGenericConfig, T: MemVariable<FC>> MemVariable<FC> for Array<FC, T> {
     fn size_of() -> usize {
         2
     }
 
-    fn load(&self, src: Ptr<RC::N>, index: MemIndex<RC::N>, builder: &mut Builder<RC>) {
+    fn load(&self, src: Ptr<FC::N>, index: MemIndex<FC::N>, builder: &mut Builder<FC>) {
         match self {
             Array::Dyn(dst, Usize::Var(len)) => {
                 let mut index = index;
                 dst.load(src, index, builder);
-                index.offset += <Ptr<RC::N> as MemVariable<RC>>::size_of();
+                index.offset += <Ptr<FC::N> as MemVariable<FC>>::size_of();
                 len.load(src, index, builder);
             }
             _ => unreachable!(),
@@ -343,15 +343,15 @@ impl<RC: FieldGenericConfig, T: MemVariable<RC>> MemVariable<RC> for Array<RC, T
 
     fn store(
         &self,
-        dst: Ptr<<RC as FieldGenericConfig>::N>,
-        index: MemIndex<RC::N>,
-        builder: &mut Builder<RC>,
+        dst: Ptr<<FC as FieldGenericConfig>::N>,
+        index: MemIndex<FC::N>,
+        builder: &mut Builder<FC>,
     ) {
         match self {
             Array::Dyn(src, Usize::Var(len)) => {
                 let mut index = index;
                 src.store(dst, index, builder);
-                index.offset += <Ptr<RC::N> as MemVariable<RC>>::size_of();
+                index.offset += <Ptr<FC::N> as MemVariable<FC>>::size_of();
                 len.store(dst, index, builder);
             }
             _ => unreachable!(),
@@ -359,12 +359,12 @@ impl<RC: FieldGenericConfig, T: MemVariable<RC>> MemVariable<RC> for Array<RC, T
     }
 }
 
-impl<RC: FieldGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromConstant<RC>
-    for Array<RC, V>
+impl<FC: FieldGenericConfig, V: FromConstant<FC> + MemVariable<FC>> FromConstant<FC>
+    for Array<FC, V>
 {
     type Constant = Vec<V::Constant>;
 
-    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
+    fn constant(value: Self::Constant, builder: &mut Builder<FC>) -> Self {
         let mut array = builder.dyn_array(value.len());
         for (i, val) in value.into_iter().enumerate() {
             let val = V::constant(val, builder);
@@ -374,20 +374,20 @@ impl<RC: FieldGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromConstant
     }
 }
 
-impl<RC: FieldGenericConfig, V: FromConstant<RC> + MemVariable<RC>> FromConstant<RC> for Vec<V> {
+impl<FC: FieldGenericConfig, V: FromConstant<FC> + MemVariable<FC>> FromConstant<FC> for Vec<V> {
     type Constant = Vec<V::Constant>;
 
-    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
+    fn constant(value: Self::Constant, builder: &mut Builder<FC>) -> Self {
         value.into_iter().map(|x| V::constant(x, builder)).collect()
     }
 }
 
-impl<RC: FieldGenericConfig, V: FromConstant<RC> + MemVariable<RC>, const N: usize> FromConstant<RC>
+impl<FC: FieldGenericConfig, V: FromConstant<FC> + MemVariable<FC>, const N: usize> FromConstant<FC>
     for [V; N]
 {
     type Constant = [V::Constant; N];
 
-    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
+    fn constant(value: Self::Constant, builder: &mut Builder<FC>) -> Self {
         value.map(|x| V::constant(x, builder))
     }
 }

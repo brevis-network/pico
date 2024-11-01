@@ -29,7 +29,10 @@ use crate::{
         configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
         machine::riscv_machine::RiscvMachine,
     },
-    machine::{chip::ChipBehavior, machine::MachineBehavior},
+    machine::{
+        chip::ChipBehavior,
+        machine::{BaseMachine, MachineBehavior},
+    },
     primitives::{
         consts::{ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, RECURSION_NUM_PVS},
         types::RecursionProgramType,
@@ -45,13 +48,13 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy)]
-pub struct RiscvCombineVerifierCircuit<RC: FieldGenericConfig, SC: StarkGenericConfig> {
-    _phantom: PhantomData<(RC, SC)>,
+pub struct RiscvCombineVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig> {
+    _phantom: PhantomData<(FC, SC)>,
 }
 
 impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
     pub fn build(
-        machine: &RiscvMachine<RiscvSC, RiscvChipType<BabyBear>>,
+        machine: &BaseMachine<RiscvSC, RiscvChipType<BabyBear>>,
     ) -> RecursionProgram<BabyBear> {
         let mut builder = Builder::<rcf::FieldConfig>::new(RecursionProgramType::Riscv);
 
@@ -71,7 +74,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
     pub fn build_verifier(
         builder: &mut Builder<rcf::FieldConfig>,
         pcs: &TwoAdicFriPcsVariable<rcf::FieldConfig>,
-        machine: &RiscvMachine<RiscvSC, RiscvChipType<BabyBear>>,
+        machine: &BaseMachine<RiscvSC, RiscvChipType<BabyBear>>,
         stdin: RiscvRecursionStdinVariable<rcf::FieldConfig>,
     ) {
         let RiscvRecursionStdinVariable {
@@ -512,12 +515,12 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
         recursion_public_values.next_chunk = current_chunk;
         recursion_public_values.start_execution_chunk = start_execution_chunk;
         recursion_public_values.next_execution_chunk = current_execution_chunk;
-        recursion_public_values.previous_init_addr_bits = start_previous_initialize_addr_bits;
+        recursion_public_values.previous_initialize_addr_bits = start_previous_initialize_addr_bits;
         recursion_public_values.last_init_addr_bits = current_previous_initialize_addr_bits;
         recursion_public_values.previous_finalize_addr_bits = start_previous_finalize_addr_bits;
         recursion_public_values.last_finalize_addr_bits = current_previous_finalize_addr_bits;
 
-        recursion_public_values.pico_vk_digest = vk_digest;
+        recursion_public_values.riscv_vk_digest = vk_digest;
         recursion_public_values.base_challenger = base_challenger_public_values;
         recursion_public_values.start_reconstruct_challenger = start_challenger_public_values;
         recursion_public_values.end_reconstruct_challenger = end_challenger_public_values;

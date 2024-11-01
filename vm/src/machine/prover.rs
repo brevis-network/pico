@@ -363,7 +363,12 @@ where
             permutation_challenges.push(challenger.sample_ext_element());
         }
 
-        let (permutation_traces, cumulative_sums) = self.generate_permutation(
+        debug!(
+            "PROVER: permutation_challenges: {:?}",
+            permutation_challenges
+        );
+
+        let (mut permutation_traces, mut cumulative_sums) = self.generate_permutation(
             &ordered_chips,
             pk,
             &main_commitments,
@@ -372,7 +377,6 @@ where
         );
 
         // commit permutation traces on main domain
-        debug!("core prove - commit permutation traces on main domain");
         let begin_commit_permutation = Instant::now();
 
         let perm_domain = permutation_traces
@@ -397,7 +401,9 @@ where
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
 
-        // Quotient
+        debug!("PROVER: alpha: {:?}", alpha);
+
+        /// Quotient
         let log_quotient_degrees = ordered_chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
@@ -530,6 +536,8 @@ where
 
         let zeta: SC::Challenge = challenger.sample_ext_element();
 
+        debug!("PROVER: zeta: {:?}", zeta);
+
         let preprocessed_opening_points = pk
             .preprocessed_trace
             .iter()
@@ -633,6 +641,7 @@ where
             chunk_index,
             begin.elapsed().as_millis(),
         );
+
         // final base proof
         BaseProof::<SC> {
             commitments: BaseCommitments {

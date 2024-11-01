@@ -7,86 +7,36 @@ use serde::{Deserialize, Serialize};
 /// Wrapper for all proof types
 /// The top layer of abstraction (the most abstract layer)
 #[derive(Serialize)]
-pub struct MetaProof<'a, SC, P>
+pub struct MetaProof<SC>
 where
     SC: StarkGenericConfig,
 {
-    /// The configuration of the proof
-    pub config: &'a SC,
-
     /// The proof that impls ProofBehavior
-    pub proof: P,
+    pub proofs: Vec<BaseProof<SC>>,
 }
 
-impl<'a, SC, P> MetaProof<'a, SC, P>
+impl<SC> MetaProof<SC>
 where
     SC: StarkGenericConfig,
-    P: ProofBehavior<SC>,
 {
     /// Create a new MetaProof
-    pub fn new(config: &'a SC, proof: P) -> Self {
-        Self { config, proof }
+    pub fn new(proofs: Vec<BaseProof<SC>>) -> Self {
+        Self { proofs }
     }
 
-    /// Get the name of the proof and config
+    /// Get the number of the proof and config
     pub fn name(&self) -> String {
-        format!("{} with config {}", self.proof.name(), self.config.name(),)
+        format!("MetaProof of {} BaseProofs", self.proofs.len())
     }
 
+    /// Get the proofs
     pub fn proofs(&self) -> &[BaseProof<SC>] {
-        self.proof.proofs()
-    }
-}
-
-/// Each type of proof should impl ProofBehavior
-/// Represents the middle layer of abstraction
-pub trait ProofBehavior<SC: StarkGenericConfig> {
-    fn name(&self) -> String;
-
-    fn proofs(&self) -> &[BaseProof<SC>];
-}
-
-/// Proof wrapper for an element (single chunk)
-#[derive(Serialize)]
-pub struct UnitProof<SC: StarkGenericConfig> {
-    pub proof: BaseProof<SC>,
-}
-
-impl<SC: StarkGenericConfig> ProofBehavior<SC> for UnitProof<SC> {
-    fn name(&self) -> String {
-        "UnitProof".to_string()
+        self.proofs.as_slice()
     }
 
-    fn proofs(&self) -> &[BaseProof<SC>] {
-        std::slice::from_ref(&self.proof)
-    }
-}
-
-impl<SC: StarkGenericConfig> UnitProof<SC> {
-    pub fn new(proof: BaseProof<SC>) -> Self {
-        Self { proof }
-    }
-}
-
-/// Proof wrapper for an ensemble (chunks)
-#[derive(Serialize)]
-pub struct EnsembleProof<SC: StarkGenericConfig> {
-    pub proof: Vec<BaseProof<SC>>,
-}
-
-impl<SC: StarkGenericConfig> ProofBehavior<SC> for EnsembleProof<SC> {
-    fn name(&self) -> String {
-        format!("EnsembleProof of {} BaseProofs", self.proof.len())
-    }
-
-    fn proofs(&self) -> &[BaseProof<SC>] {
-        &self.proof
-    }
-}
-
-impl<SC: StarkGenericConfig> EnsembleProof<SC> {
-    pub fn new(proof: Vec<BaseProof<SC>>) -> Self {
-        Self { proof }
+    /// Get the number of proofs
+    pub fn num_proofs(&self) -> usize {
+        self.proofs.len()
     }
 }
 

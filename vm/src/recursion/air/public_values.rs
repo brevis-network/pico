@@ -87,7 +87,7 @@ pub struct RecursionPublicValues<T> {
     pub next_execution_chunk: T,
 
     /// Previous MemoryInit address bits.
-    pub previous_init_addr_bits: [T; 32],
+    pub previous_initialize_addr_bits: [T; 32],
 
     /// Last MemoryInit address bits.
     pub last_init_addr_bits: [T; 32],
@@ -111,10 +111,10 @@ pub struct RecursionPublicValues<T> {
     pub end_reconstruct_deferred_digest: [T; POSEIDON_NUM_WORDS],
 
     /// The commitment to the Pico program being proven.
-    pub pico_vk_digest: [T; DIGEST_SIZE],
+    pub riscv_vk_digest: [T; DIGEST_SIZE],
 
     /// The commitment to the compress key being used in recursive verification.
-    pub compress_vk_digest: [T; DIGEST_SIZE],
+    pub recursion_vk_digest: [T; DIGEST_SIZE],
 
     /// The leaf challenger containing the entropy from the main trace commitment.
     pub base_challenger: ChallengerPublicValues<T>,

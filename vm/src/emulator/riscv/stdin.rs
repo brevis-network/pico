@@ -1,23 +1,28 @@
 use crate::{
-    compiler::riscv::program::Program,
-    configs::config::{Challenger, StarkGenericConfig},
+    compiler::{recursion::program::RecursionProgram, riscv::program::Program},
+    configs::config::{Challenger, StarkGenericConfig, Val},
     emulator::riscv::record::EmulationRecord,
     instances::{
-        compiler::riscv_circuit::stdin::RiscvRecursionStdin,
-        configs::riscv_config::StarkConfig as RiscvSC, machine::riscv_machine::RiscvMachine,
+        compiler::{
+            recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::RiscvRecursionStdin,
+        },
+        configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
+        machine::riscv_machine::RiscvMachine,
     },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::MachineBehavior,
+        machine::{BaseMachine, MachineBehavior},
         proof::BaseProof,
     },
+    recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
 use serde::Serialize;
+use std::borrow::Borrow;
 
 #[derive(Clone, Serialize)]
 pub struct EmulatorStdin<I> {
@@ -63,19 +68,19 @@ impl EmulatorStdin<Vec<u8>> {
     }
 }
 
-// for riscv field_config stdin, both compress and combine
-impl<'a, RiscvC> EmulatorStdin<RiscvRecursionStdin<'a, RiscvSC, RiscvC>>
+// for riscv recursion stdin, both compress and combine
+impl<'a, C> EmulatorStdin<RiscvRecursionStdin<'a, RiscvSC, C>>
 where
-    RiscvC: ChipBehavior<BabyBear, Program = Program, Record = EmulationRecord>
+    C: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
 {
-    /// Construct the field_config stdin for riscv_compress.
+    /// Construct the recursion stdin for riscv_compress.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// batch_size should be greater than 1
-    pub fn construct_for_compress(
+    pub fn setup_for_riscv_compress(
         vk: &'a BaseVerifyingKey<RiscvSC>,
-        machine: &'a RiscvMachine<RiscvSC, RiscvC>,
+        machine: &'a BaseMachine<RiscvSC, C>,
         proofs: &[BaseProof<RiscvSC>],
         base_challenger: &'a mut Challenger<RiscvSC>,
     ) -> Self {
@@ -119,12 +124,12 @@ where
         }
     }
 
-    /// Construct the field_config stdin for riscv_combine.
+    /// Construct the recursion stdin for riscv_combine.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// batch_size should be greater than 1
-    pub fn construct_for_combine(
+    pub fn setup_for_riscv_combine(
         vk: &'a BaseVerifyingKey<RiscvSC>,
-        machine: &'a RiscvMachine<RiscvSC, RiscvC>,
+        machine: &'a BaseMachine<RiscvSC, C>,
         proofs: &[BaseProof<RiscvSC>],
         base_challenger: &'a mut <RiscvSC as StarkGenericConfig>::Challenger,
         batch_size: usize,
@@ -168,6 +173,45 @@ where
                 reconstruct_challenger
                     .observe_slice(&each_proof.public_values[0..num_public_values]);
             }
+        }
+
+        Self {
+            buffer: stdin,
+            cursor: 0,
+        }
+    }
+}
+
+// for recursion stdin
+impl<'a, C> EmulatorStdin<RecursionStdin<'a, RecursionSC, C>>
+where
+    C: ChipBehavior<
+            Val<RecursionSC>,
+            Program = RecursionProgram<Val<RecursionSC>>,
+            Record = RecursionRecord<Val<RecursionSC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+{
+    /// Construct the recursion stdin for one layer of combine.
+    pub fn setup_for_combine(
+        vk: &'a BaseVerifyingKey<RecursionSC>,
+        machine: &'a BaseMachine<RecursionSC, C>,
+        proofs: &[BaseProof<RecursionSC>],
+        batch_size: usize,
+        flag_complete: bool,
+    ) -> Self {
+        let mut stdin = Vec::new();
+
+        let proof_batches = proofs.chunks(batch_size);
+
+        for (i, batch_proofs) in proof_batches.enumerate() {
+            let batch_proofs = batch_proofs.to_vec();
+            stdin.push(RecursionStdin {
+                vk,
+                machine,
+                proofs: batch_proofs.clone(),
+                flag_complete,
+            });
         }
 
         Self {

@@ -13,66 +13,66 @@ use pico_derive::DslVariable;
 
 /// Reference: [pico_machine::stark::BaseProof]
 #[derive(DslVariable, Clone)]
-pub struct BaseProofVariable<RC: FieldGenericConfig> {
-    pub commitment: BaseCommitmentsVariable<RC>,
-    pub opened_values: BaseOpenedValuesVariable<RC>,
-    pub opening_proof: PcsProofVariable<RC>,
-    pub public_values: Array<RC, Felt<RC::F>>,
-    pub quotient_data: Array<RC, QuotientDataVariable<RC>>,
-    pub sorted_indices: Array<RC, Var<RC::N>>,
+pub struct BaseProofVariable<FC: FieldGenericConfig> {
+    pub commitment: BaseCommitmentsVariable<FC>,
+    pub opened_values: BaseOpenedValuesVariable<FC>,
+    pub opening_proof: PcsProofVariable<FC>,
+    pub public_values: Array<FC, Felt<FC::F>>,
+    pub quotient_data: Array<FC, QuotientDataVariable<FC>>,
+    pub sorted_indices: Array<FC, Var<FC::N>>,
     // todo: public values?
 }
 
 /// Reference: [pico_machine::BaseCommitments]
 #[derive(DslVariable, Clone)]
-pub struct BaseCommitmentsVariable<RC: FieldGenericConfig> {
-    pub main_commit: DigestVariable<RC>,
-    pub permutation_commit: DigestVariable<RC>,
-    pub quotient_commit: DigestVariable<RC>,
+pub struct BaseCommitmentsVariable<FC: FieldGenericConfig> {
+    pub main_commit: DigestVariable<FC>,
+    pub permutation_commit: DigestVariable<FC>,
+    pub quotient_commit: DigestVariable<FC>,
 }
 
 /// Reference: [pico_machine::BaseOpenedValues]
 #[derive(DslVariable, Debug, Clone)]
-pub struct BaseOpenedValuesVariable<RC: FieldGenericConfig> {
-    pub chips_opened_values: Array<RC, ChipOpenedValuesVariable<RC>>,
+pub struct BaseOpenedValuesVariable<FC: FieldGenericConfig> {
+    pub chips_opened_values: Array<FC, ChipOpenedValuesVariable<FC>>,
 }
 
 // todo: consider necessity
 /// Reference: [pico_machine::proof::ChipOpenedValues]
 #[derive(Debug, Clone)]
-pub struct ChipOpening<RC: FieldGenericConfig> {
-    pub preprocessed_local: Vec<Ext<RC::F, RC::EF>>,
-    pub preprocessed_next: Vec<Ext<RC::F, RC::EF>>,
-    pub main_local: Vec<Ext<RC::F, RC::EF>>,
-    pub main_next: Vec<Ext<RC::F, RC::EF>>,
-    pub permutation_local: Vec<Ext<RC::F, RC::EF>>,
-    pub permutation_next: Vec<Ext<RC::F, RC::EF>>,
-    pub quotient: Vec<Vec<Ext<RC::F, RC::EF>>>,
-    pub cumulative_sum: Ext<RC::F, RC::EF>,
-    pub log_main_degree: Var<RC::N>,
+pub struct ChipOpening<FC: FieldGenericConfig> {
+    pub preprocessed_local: Vec<Ext<FC::F, FC::EF>>,
+    pub preprocessed_next: Vec<Ext<FC::F, FC::EF>>,
+    pub main_local: Vec<Ext<FC::F, FC::EF>>,
+    pub main_next: Vec<Ext<FC::F, FC::EF>>,
+    pub permutation_local: Vec<Ext<FC::F, FC::EF>>,
+    pub permutation_next: Vec<Ext<FC::F, FC::EF>>,
+    pub quotient: Vec<Vec<Ext<FC::F, FC::EF>>>,
+    pub cumulative_sum: Ext<FC::F, FC::EF>,
+    pub log_main_degree: Var<FC::N>,
 }
 
 /// Reference: [pico_machine::stark::ChipOpenedValues]
 #[derive(DslVariable, Debug, Clone)]
-pub struct ChipOpenedValuesVariable<RC: FieldGenericConfig> {
-    pub preprocessed_local: Array<RC, Ext<RC::F, RC::EF>>,
-    pub preprocessed_next: Array<RC, Ext<RC::F, RC::EF>>,
-    pub main_local: Array<RC, Ext<RC::F, RC::EF>>,
-    pub main_next: Array<RC, Ext<RC::F, RC::EF>>,
-    pub permutation_local: Array<RC, Ext<RC::F, RC::EF>>,
-    pub permutation_next: Array<RC, Ext<RC::F, RC::EF>>,
-    pub quotient: Array<RC, Array<RC, Ext<RC::F, RC::EF>>>,
-    pub cumulative_sum: Ext<RC::F, RC::EF>,
-    pub log_main_degree: Var<RC::N>,
+pub struct ChipOpenedValuesVariable<FC: FieldGenericConfig> {
+    pub preprocessed_local: Array<FC, Ext<FC::F, FC::EF>>,
+    pub preprocessed_next: Array<FC, Ext<FC::F, FC::EF>>,
+    pub main_local: Array<FC, Ext<FC::F, FC::EF>>,
+    pub main_next: Array<FC, Ext<FC::F, FC::EF>>,
+    pub permutation_local: Array<FC, Ext<FC::F, FC::EF>>,
+    pub permutation_next: Array<FC, Ext<FC::F, FC::EF>>,
+    pub quotient: Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,
+    pub cumulative_sum: Ext<FC::F, FC::EF>,
+    pub log_main_degree: Var<FC::N>,
 }
 
 #[derive(DslVariable, Clone, Copy)]
-pub struct QuotientDataVariable<RC: FieldGenericConfig> {
-    pub log_quotient_degree: Var<RC::N>,
-    pub quotient_size: Var<RC::N>,
+pub struct QuotientDataVariable<FC: FieldGenericConfig> {
+    pub log_quotient_degree: Var<FC::N>,
+    pub quotient_size: Var<FC::N>,
 }
 
-impl<RC: FieldGenericConfig> ChipOpening<RC> {
+impl<FC: FieldGenericConfig> ChipOpening<FC> {
     /// Collect opening values from a dynamic array into vectors.
     ///
     /// This method is used to convert a `ChipOpenedValuesVariable` into a `ChipOpenedValues`, which
@@ -81,12 +81,12 @@ impl<RC: FieldGenericConfig> ChipOpening<RC> {
     /// *Safety*: This method also verifies that the length of the dynamic arrays match the expected
     /// length of the vectors.
     pub fn from_variable<A>(
-        builder: &mut Builder<RC>,
-        chip: &MetaChip<RC::F, A>,
-        opening: &ChipOpenedValuesVariable<RC>,
+        builder: &mut Builder<FC>,
+        chip: &MetaChip<FC::F, A>,
+        opening: &ChipOpenedValuesVariable<FC>,
     ) -> Self
     where
-        A: ChipBehavior<RC::F>,
+        A: ChipBehavior<FC::F>,
     {
         let mut preprocessed_local = vec![];
         let mut preprocessed_next = vec![];
@@ -114,7 +114,7 @@ impl<RC: FieldGenericConfig> ChipOpening<RC> {
 
         let mut permutation_local = vec![];
         let mut permutation_next = vec![];
-        let permutation_width = RC::EF::D * chip.permutation_width();
+        let permutation_width = FC::EF::D * chip.permutation_width();
         // Assert that the length of the dynamic arrays match the expected length of the vectors.
         builder.assert_usize_eq(permutation_width, opening.permutation_local.len());
         builder.assert_usize_eq(permutation_width, opening.permutation_next.len());
@@ -132,10 +132,10 @@ impl<RC: FieldGenericConfig> ChipOpening<RC> {
         for i in 0..num_quotient_chunks {
             let chunk = builder.get(&opening.quotient, i);
             // Assert that the chunk length matches the expected length.
-            builder.assert_usize_eq(RC::EF::D, chunk.len());
+            builder.assert_usize_eq(FC::EF::D, chunk.len());
             // Collect the quotient values into vectors.
             let mut quotient_vals = vec![];
-            for j in 0..RC::EF::D {
+            for j in 0..FC::EF::D {
                 let value = builder.get(&chunk, j);
                 quotient_vals.push(value);
             }
@@ -156,10 +156,10 @@ impl<RC: FieldGenericConfig> ChipOpening<RC> {
     }
 }
 
-impl<RC: FieldGenericConfig> FromConstant<RC> for ChipOpenedValuesVariable<RC> {
-    type Constant = ChipOpenedValues<RC::EF>;
+impl<FC: FieldGenericConfig> FromConstant<FC> for ChipOpenedValuesVariable<FC> {
+    type Constant = ChipOpenedValues<FC::EF>;
 
-    fn constant(value: Self::Constant, builder: &mut Builder<RC>) -> Self {
+    fn constant(value: Self::Constant, builder: &mut Builder<FC>) -> Self {
         ChipOpenedValuesVariable {
             preprocessed_local: builder.constant(value.preprocessed_local),
             preprocessed_next: builder.constant(value.preprocessed_next),
@@ -169,7 +169,7 @@ impl<RC: FieldGenericConfig> FromConstant<RC> for ChipOpenedValuesVariable<RC> {
             permutation_next: builder.constant(value.permutation_next),
             quotient: builder.constant(value.quotient),
             cumulative_sum: builder.eval(value.cumulative_sum.cons()),
-            log_main_degree: builder.eval(RC::N::from_canonical_usize(value.log_main_degree)),
+            log_main_degree: builder.eval(FC::N::from_canonical_usize(value.log_main_degree)),
         }
     }
 }

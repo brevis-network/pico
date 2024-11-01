@@ -18,7 +18,7 @@ use crate::{
         },
         word::Word,
     },
-    configs::config::{FieldGenericConfig, StarkGenericConfig},
+    configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
     emulator::riscv::public_values::PublicValues,
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -29,14 +29,16 @@ use crate::{
         configs::{recur_config::FieldConfig as RecursionFC, riscv_config::StarkConfig as RiscvSC},
         machine::riscv_machine::RiscvMachine,
     },
-    machine::{chip::ChipBehavior, machine::MachineBehavior},
+    machine::{
+        chip::ChipBehavior,
+        machine::{BaseMachine, MachineBehavior},
+    },
     primitives::{
         consts::{ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, RECURSION_NUM_PVS},
         types::RecursionProgramType,
     },
     recursion::air::RecursionPublicValues,
 };
-use p3_baby_bear::BabyBear;
 use p3_field::AbstractField;
 use std::{
     array,
@@ -46,18 +48,18 @@ use std::{
 
 /// Circuit that verifies a single riscv proof and checks constraints
 #[derive(Debug, Clone, Copy)]
-pub struct RiscvCompressVerifierCircuit<RC: FieldGenericConfig, SC: StarkGenericConfig> {
-    _phantom: PhantomData<(RC, SC)>,
+pub struct RiscvCompressVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig> {
+    _phantom: PhantomData<(FC, SC)>,
 }
 
 impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
     pub fn build(
-        machine: &RiscvMachine<RiscvSC, RiscvChipType<BabyBear>>,
-    ) -> RecursionProgram<BabyBear> {
+        machine: &BaseMachine<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+    ) -> RecursionProgram<Val<RiscvSC>> {
         let mut builder = Builder::<RecursionFC>::new(RecursionProgramType::Riscv);
 
         let stdin: RiscvRecursionStdinVariable<_> = builder.uninit();
-        RiscvRecursionStdin::<RiscvSC, RiscvChipType<BabyBear>>::witness(&stdin, &mut builder);
+        RiscvRecursionStdin::<RiscvSC, RiscvChipType<Val<RiscvSC>>>::witness(&stdin, &mut builder);
 
         let pcs = TwoAdicFriPcsVariable {
             config: const_fri_config(&mut builder, machine.config().pcs().fri_config()),
@@ -72,7 +74,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
     pub fn build_verifier(
         builder: &mut Builder<RecursionFC>,
         pcs: &TwoAdicFriPcsVariable<RecursionFC>,
-        machine: &RiscvMachine<RiscvSC, RiscvChipType<BabyBear>>,
+        machine: &BaseMachine<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
         stdin: RiscvRecursionStdinVariable<RecursionFC>,
     ) {
         let RiscvRecursionStdinVariable {
@@ -385,7 +387,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
             .range(0, opened_values.len())
             .for_each(|k, builder| {
                 let sum = builder.get(&opened_values, k).cumulative_sum;
-                builder.assign(cumulative_sum, sum);
+                builder.assign(cumulative_sum, cumulative_sum + sum);
             });
 
         /*
@@ -451,12 +453,12 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         recursion_public_values.next_chunk = current_chunk;
         recursion_public_values.start_execution_chunk = builder.eval(public_values.execution_chunk);
         recursion_public_values.next_execution_chunk = current_execution_chunk;
-        recursion_public_values.previous_init_addr_bits = start_previous_initialize_addr_bits;
+        recursion_public_values.previous_initialize_addr_bits = start_previous_initialize_addr_bits;
         recursion_public_values.last_init_addr_bits = current_previous_initialize_addr_bits;
         recursion_public_values.previous_finalize_addr_bits = start_previous_finalize_addr_bits;
         recursion_public_values.last_finalize_addr_bits = current_previous_finalize_addr_bits;
 
-        recursion_public_values.pico_vk_digest = vk_digest;
+        recursion_public_values.riscv_vk_digest = vk_digest;
         recursion_public_values.base_challenger = base_challenger_public_values;
         recursion_public_values.start_reconstruct_challenger = start_challenger_public_values;
         recursion_public_values.end_reconstruct_challenger = end_challenger_public_values;
