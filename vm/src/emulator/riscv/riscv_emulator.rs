@@ -448,7 +448,7 @@ impl RiscvEmulator {
         // println!("# batch records to be processed: {}", self.batch_records.len());
         let mut current_execution_chunk = 0;
         let mut flag_extra = true;
-        for (i, record) in self.batch_records.iter_mut().enumerate() {
+        for (_i, record) in self.batch_records.iter_mut().enumerate() {
             self.public_values_buffer.chunk += 1;
             if !record.cpu_events.is_empty() {
                 self.public_values_buffer.execution_chunk += 1;
@@ -1421,10 +1421,7 @@ impl Default for EmulatorMode {
 
 mod tests {
     use super::{Program, RiscvEmulator};
-    use crate::{
-        compiler::riscv::compiler::{Compiler, SourceType},
-        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
-    };
+    use crate::compiler::riscv::compiler::{Compiler, SourceType};
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =

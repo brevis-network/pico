@@ -9,7 +9,6 @@ use crate::{
         riscv::{record::EmulationRecord, stdin::EmulatorStdin},
     },
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType,
         compiler::{
             recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::RiscvRecursionStdin,
         },

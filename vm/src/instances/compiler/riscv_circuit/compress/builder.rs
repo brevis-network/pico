@@ -27,12 +27,8 @@ use crate::{
             utils::commit_public_values,
         },
         configs::{recur_config::FieldConfig as RecursionFC, riscv_config::StarkConfig as RiscvSC},
-        machine::riscv_machine::RiscvMachine,
     },
-    machine::{
-        chip::ChipBehavior,
-        machine::{BaseMachine, MachineBehavior},
-    },
+    machine::{chip::ChipBehavior, machine::BaseMachine},
     primitives::{
         consts::{ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, RECURSION_NUM_PVS},
         types::RecursionProgramType,

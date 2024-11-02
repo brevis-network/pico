@@ -337,8 +337,7 @@ where
         // Get the ordered chip, will be used in all following operations on chips
         // No chips should be used from now on!
         let ordered_chips =
-            order_chips::<SC, C>(chips, main_commitments.main_chip_ordering.clone())
-                .collect::<Vec<_>>();
+            order_chips::<SC, C>(chips, &main_commitments.main_chip_ordering).collect::<Vec<_>>();
 
         // Handle Main
         // get main commitments and degrees
@@ -368,7 +367,7 @@ where
             permutation_challenges
         );
 
-        let (mut permutation_traces, mut cumulative_sums) = self.generate_permutation(
+        let (permutation_traces, cumulative_sums) = self.generate_permutation(
             &ordered_chips,
             pk,
             &main_commitments,
@@ -403,7 +402,7 @@ where
 
         debug!("PROVER: alpha: {:?}", alpha);
 
-        /// Quotient
+        // Quotient
         let log_quotient_degrees = ordered_chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())

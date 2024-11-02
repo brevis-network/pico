@@ -21,7 +21,6 @@ use pico_vm::{
     },
     primitives::consts::RISCV_NUM_PVS,
 };
-use std::any::type_name;
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
@@ -95,10 +94,6 @@ impl<F: Field> ToyChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![MetaChip::new(Self::Toy(ToyChip::default()))]
     }
-}
-
-fn print_type_of<T>(_: &T) {
-    println!("Type: {}", type_name::<T>());
 }
 
 fn main() {

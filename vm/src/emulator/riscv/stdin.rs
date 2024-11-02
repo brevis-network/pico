@@ -7,22 +7,19 @@ use crate::{
             recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::RiscvRecursionStdin,
         },
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
-        machine::riscv_machine::RiscvMachine,
     },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::{BaseMachine, MachineBehavior},
+        machine::BaseMachine,
         proof::BaseProof,
     },
-    recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
+    recursion::runtime::RecursionRecord,
 };
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
 use serde::Serialize;
-use std::borrow::Borrow;
 
 #[derive(Clone, Serialize)]
 pub struct EmulatorStdin<I> {
@@ -204,7 +201,7 @@ where
 
         let proof_batches = proofs.chunks(batch_size);
 
-        for (i, batch_proofs) in proof_batches.enumerate() {
+        for (_i, batch_proofs) in proof_batches.enumerate() {
             let batch_proofs = batch_proofs.to_vec();
             stdin.push(RecursionStdin {
                 vk,

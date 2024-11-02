@@ -4,7 +4,6 @@ use crate::{
 };
 use hashbrown::HashMap;
 use p3_baby_bear::BabyBear;
-use p3_bn254_fr::Bn254Fr;
 use p3_challenger::CanObserve;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{AbstractField, TwoAdicField};

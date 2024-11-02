@@ -9,15 +9,12 @@ use crate::{
         },
     },
     configs::config::{FieldGenericConfig, StarkGenericConfig},
-    instances::{
-        configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
-        machine::simple_machine::SimpleMachine,
-    },
+    instances::configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::{BaseMachine, MachineBehavior},
+        machine::BaseMachine,
         proof::BaseProof,
     },
     recursion::air::Block,

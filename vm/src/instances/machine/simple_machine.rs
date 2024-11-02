@@ -5,7 +5,7 @@ use crate::{
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
-        proof::{BaseProof, MetaProof},
+        proof::MetaProof,
         witness::ProvingWitness,
     },
 };

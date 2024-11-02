@@ -43,13 +43,14 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
 }
 
 /// Chip wrapper, includes interactions
+#[derive(Clone, Debug)]
 pub struct MetaChip<F: Field, C> {
     /// Underlying chip
     chip: C,
     /// messages for chip as looking table
-    looking: Vec<VirtualPairLookup<F>>,
+    pub(crate) looking: Vec<VirtualPairLookup<F>>,
     /// messages for chip as looked table
-    looked: Vec<VirtualPairLookup<F>>,
+    pub(crate) looked: Vec<VirtualPairLookup<F>>,
     /// log degree of quotient polynomial
     log_quotient_degree: usize,
 }

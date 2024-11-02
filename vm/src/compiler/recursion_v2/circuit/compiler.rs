@@ -19,7 +19,7 @@ use itertools::Itertools;
 use p3_field::{
     AbstractExtensionField, AbstractField, Field, PrimeField, PrimeField64, TwoAdicField,
 };
-use std::{borrow::Borrow, collections::HashMap, iter::repeat, mem::transmute};
+use std::{borrow::Borrow, collections::HashMap, mem::transmute};
 use vec_map::VecMap;
 
 /// The backend for the circuit compiler.
@@ -532,7 +532,7 @@ where
         // This step also counts the number of times each address is read from.
         let (mut instrs, traces) = tracing::debug_span!("compile_one loop").in_scope(|| {
             let mut instrs = Vec::with_capacity(operations.vec.len());
-            let mut traces = vec![];
+            let traces = vec![];
             for (ir_instr, trace) in operations {
                 self.compile_one(ir_instr, &mut |item| match item {
                     Ok(instr) => instrs.push(instr),
@@ -637,7 +637,7 @@ where
         });
         debug_assert!(self.addr_to_mult.is_empty());
         // Initialize constants.
-        let total_consts = self.consts.len();
+        let _total_consts = self.consts.len();
         let instrs_consts =
             self.consts
                 .drain()
@@ -668,6 +668,7 @@ where
 }
 
 /// Used for cycle tracking.
+#[allow(dead_code)]
 const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
     match instr {
         Instruction::BaseAlu(_) => "BaseAlu",

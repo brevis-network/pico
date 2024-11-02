@@ -20,10 +20,9 @@ use crate::{
 use anyhow::Result;
 use log::{debug, info};
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
+use p3_challenger::CanObserve;
 use p3_field::AbstractField;
-use std::{any::type_name, borrow::Borrow, marker::PhantomData, time::Instant};
+use std::{any::type_name, borrow::Borrow, time::Instant};
 
 pub struct RecursionCombineMachine<SC, C>
 where
@@ -72,8 +71,8 @@ where
         // First
         // Generate batch records and commit to challenger
 
-        let mut recursion_stdin = EmulatorStdin::default();
-        let mut recursion_witness = ProvingWitness::default();
+        let mut recursion_stdin;
+        let mut recursion_witness;
         let mut recursion_emulator = MetaEmulator::setup_combine(witness, COMBINE_SIZE);
 
         let mut chunk_index = 1;

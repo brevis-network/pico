@@ -54,8 +54,7 @@ where
             public_values,
         } = proof;
 
-        let ordered_chips =
-            order_chips::<SC, C>(chips, main_chip_ordering.clone()).collect::<Vec<_>>();
+        let ordered_chips = order_chips::<SC, C>(chips, &main_chip_ordering).collect::<Vec<_>>();
 
         let pcs = config.pcs();
 

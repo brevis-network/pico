@@ -1,7 +1,7 @@
 use crate::{
-    compiler::{recursion::program::RecursionProgram, riscv::program::Program},
+    compiler::recursion::program::RecursionProgram,
     configs::config::{StarkGenericConfig, Val},
-    emulator::{emulator::MetaEmulator, record::RecordBehavior, riscv::record::EmulationRecord},
+    emulator::{emulator::MetaEmulator, record::RecordBehavior},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
         compiler::riscv_circuit::stdin::RiscvRecursionStdin,
@@ -13,7 +13,6 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
-        utils::debug_all_chips_constraints,
         witness::ProvingWitness,
     },
     recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
@@ -21,10 +20,9 @@ use crate::{
 use anyhow::Result;
 use log::{debug, info};
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
-use p3_field::{AbstractField, Field};
-use std::{any::type_name, borrow::Borrow, marker::PhantomData, time::Instant};
+use p3_challenger::CanObserve;
+use p3_field::Field;
+use std::{any::type_name, borrow::Borrow, time::Instant};
 
 pub struct RiscvRecursionMachine<SC, C>
 where

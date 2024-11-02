@@ -15,9 +15,7 @@ use crate::{
     configs::config::{Com, FieldGenericConfig, StarkGenericConfig},
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{
-            ProverConstraintFolder, RecursiveVerifierConstraintFolder, VerifierConstraintFolder,
-        },
+        folder::RecursiveVerifierConstraintFolder,
     },
     primitives::consts::DIGEST_SIZE,
 };

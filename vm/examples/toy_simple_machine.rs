@@ -19,13 +19,12 @@ use pico_vm::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
         logger::setup_logger,
-        machine::{BaseMachine, MachineBehavior},
+        machine::MachineBehavior,
     },
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    primitives::consts::RISCV_NUM_PVS,
 };
 
 use pico_vm::machine::witness::ProvingWitness;
-use std::any::type_name;
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),

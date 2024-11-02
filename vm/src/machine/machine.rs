@@ -8,7 +8,6 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey},
         proof::{BaseProof, MainTraceCommitments, MetaProof},
         prover::BaseProver,
-        utils::debug_all_chips_constraints,
         verifier::BaseVerifier,
         witness::ProvingWitness,
     },
@@ -271,7 +270,7 @@ where
         });
 
         // verify all proofs
-        for (i, proof) in proofs.into_iter().enumerate() {
+        for (_i, proof) in proofs.into_iter().enumerate() {
             self.verifier.verify(
                 self.config(),
                 self.chips(),

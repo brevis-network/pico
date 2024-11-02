@@ -20,9 +20,8 @@ use crate::{
         chiptype::riscv_chiptype::RiscvChipType,
         compiler::utils::commit_public_values,
         configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
-        machine::simple_machine::SimpleMachine,
     },
-    machine::machine::{BaseMachine, MachineBehavior},
+    machine::machine::BaseMachine,
     primitives::{
         consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
         types::RecursionProgramType,

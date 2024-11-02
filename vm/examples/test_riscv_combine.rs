@@ -1,60 +1,22 @@
-use hashbrown::HashMap;
-use itertools::enumerate;
-use log::{debug, info, warn};
-use p3_air::{Air, BaseAir};
+use log::info;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
-use p3_field::{AbstractField, Field, PrimeField32};
-use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
-    compiler::{
-        recursion::program_builder::hints::hintable::Hintable,
-        riscv::{
-            compiler::{Compiler, SourceType},
-            program::Program,
-        },
-    },
-    configs::config::StarkGenericConfig,
-    emulator::{
-        context::EmulatorContext,
-        opts::EmulatorOpts,
-        record::RecordBehavior,
-        riscv::{
-            record::EmulationRecord,
-            riscv_emulator::{EmulationError, EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
-        },
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
+    emulator::{context::EmulatorContext, opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler::riscv_circuit::{
-            combine::builder::RiscvCombineVerifierCircuit, stdin::RiscvRecursionStdin,
-        },
+        compiler::riscv_circuit::combine::builder::RiscvCombineVerifierCircuit,
         configs::{
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
             riscv_config::StarkConfig as RiscvSC,
         },
-        machine::{
-            riscv_machine::RiscvMachine, riscv_recursion::RiscvRecursionMachine,
-            simple_machine::SimpleMachine,
-        },
+        machine::{riscv_machine::RiscvMachine, riscv_recursion::RiscvRecursionMachine},
     },
-    machine::{
-        builder::ChipBuilder,
-        chip::{ChipBehavior, MetaChip},
-        logger::setup_logger,
-        machine::MachineBehavior,
-        witness::ProvingWitness,
-    },
+    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{RECURSION_NUM_PVS, RISCV_COMBINE_DEGREE, RISCV_NUM_PVS},
-    recursion::runtime::Runtime as RecursionRuntime,
 };
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use std::{
-    env,
-    hash::{DefaultHasher, Hash, Hasher},
-    time::Instant,
-};
+use std::{env, time::Instant};
 
 const TEST_BATCH_SIZE: usize = 100;
 

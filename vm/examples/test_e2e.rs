@@ -1,40 +1,14 @@
-use hashbrown::HashMap;
-use itertools::enumerate;
-use log::{debug, info, warn};
-use p3_air::{Air, BaseAir};
+use log::info;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
-use p3_field::{AbstractField, Field, PrimeField32};
-use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
-    compiler::{
-        recursion::{ir::Felt, program_builder::hints::hintable::Hintable},
-        riscv::{
-            compiler::{Compiler, SourceType},
-            program::Program,
-        },
-        word::Word,
-    },
-    configs::config::{Challenge, StarkGenericConfig, Val},
-    emulator::{
-        context::EmulatorContext,
-        emulator::RecursionEmulator,
-        opts::EmulatorOpts,
-        record::RecordBehavior,
-        riscv::{
-            public_values::PublicValues,
-            record::EmulationRecord,
-            riscv_emulator::{EmulationError, EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
-        },
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
+    emulator::{context::EmulatorContext, opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler::{
             recursion_circuit::combine::builder::RecursionCombineVerifierCircuit,
-            riscv_circuit::{
-                compress::builder::RiscvCompressVerifierCircuit, stdin::RiscvRecursionStdin,
-            },
+            riscv_circuit::compress::builder::RiscvCompressVerifierCircuit,
         },
         configs::{
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
@@ -45,27 +19,12 @@ use pico_vm::{
             riscv_recursion::RiscvRecursionMachine,
         },
     },
-    machine::{
-        builder::ChipBuilder,
-        chip::{ChipBehavior, MetaChip},
-        keys::HashableKey,
-        logger::setup_logger,
-        machine::MachineBehavior,
-        proof::MetaProof,
-        witness::ProvingWitness,
-    },
+    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{
         COMBINE_DEGREE, COMBINE_SIZE, RECURSION_NUM_PVS, RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
     },
-    recursion::runtime::{Runtime as RecursionRuntime, Runtime},
 };
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use std::{
-    borrow::Borrow,
-    env,
-    hash::{DefaultHasher, Hash, Hasher},
-    time::Instant,
-};
+use std::{env, time::Instant};
 
 #[path = "common/parse_args.rs"]
 mod parse_args;

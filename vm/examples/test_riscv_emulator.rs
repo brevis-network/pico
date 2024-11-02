@@ -1,35 +1,14 @@
 use itertools::enumerate;
 use log::{debug, info};
-use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
-use p3_field::{AbstractField, Field, PrimeField32};
-use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
-        riscv::{
-            record::EmulationRecord,
-            riscv_emulator::{EmulationError, EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
-        },
+        riscv::riscv_emulator::{EmulatorMode, RiscvEmulator},
     },
-    instances::{
-        configs::riscv_config::StarkConfig as RiscvSC, machine::simple_machine::SimpleMachine,
-    },
-    machine::{
-        builder::ChipBuilder,
-        chip::{ChipBehavior, MetaChip},
-        logger::setup_logger,
-        machine::MachineBehavior,
-    },
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    machine::logger::setup_logger,
 };
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use std::{env, time::Instant};
 
 #[path = "common/parse_args.rs"]

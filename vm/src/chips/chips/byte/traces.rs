@@ -79,8 +79,8 @@ impl<F: Field> ByteChip<F> {
 
         // Iterate over all options for pairs of bytes `a` and `b`.
         for (row_index, (b, c)) in (0..=u8::MAX).cartesian_product(0..=u8::MAX).enumerate() {
-            let b = b as u8;
-            let c = c as u8;
+            let b = b;
+            let c = c;
             let col: &mut BytePreprocessedCols<F> = initial_trace.row_mut(row_index).borrow_mut();
 
             // Set the values of `b` and `c`.

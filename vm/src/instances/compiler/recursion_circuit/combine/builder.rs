@@ -1,11 +1,9 @@
 use crate::{
     compiler::recursion::{
         ir::{Builder, Felt},
-        prelude::*,
         program::RecursionProgram,
         program_builder::{
             hints::hintable::Hintable,
-            keys::BaseVerifyingKeyVariable,
             p3::{
                 challenger::{CanObserveVariable, DuplexChallengerVariable},
                 fri::TwoAdicFriPcsVariable,
@@ -22,11 +20,11 @@ use crate::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
             recursion_circuit::stdin::{RecursionStdin, RecursionStdinVariable},
-            utils::{commit_public_values, verify_public_values_hash},
+            utils::commit_public_values,
         },
         configs::recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
     },
-    machine::machine::{BaseMachine, MachineBehavior},
+    machine::machine::BaseMachine,
     primitives::{
         consts::{ADDR_NUM_BITS, COMBINE_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
         types::RecursionProgramType,
@@ -108,7 +106,7 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
         let current_previous_finalize_addr_bits: [Felt<_>; ADDR_NUM_BITS] =
             array::from_fn(|_| builder.uninit());
 
-        let riscv_vk_digest: [Felt<_>; DIGEST_SIZE] = array::from_fn(|i| builder.uninit());
+        let riscv_vk_digest: [Felt<_>; DIGEST_SIZE] = array::from_fn(|_| builder.uninit());
 
         // challengers
         let mut base_challenger = DuplexChallengerVariable::new(builder);

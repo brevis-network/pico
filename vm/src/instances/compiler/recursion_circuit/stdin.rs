@@ -18,7 +18,7 @@ use crate::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::{BaseMachine, MachineBehavior},
+        machine::BaseMachine,
         proof::BaseProof,
     },
     recursion::{air::Block, runtime::RecursionRecord},

@@ -14,7 +14,7 @@ use itertools::Itertools;
 use p3_air::{Air, PairCol};
 use p3_challenger::FieldChallenger;
 use p3_commit::PolynomialSpace;
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, PackedValue, Powers};
+use p3_field::{AbstractExtensionField, AbstractField, Field, PackedValue};
 use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
     stack::VerticalPair,
@@ -27,7 +27,6 @@ use std::{
     any::type_name,
     panic::{self, AssertUnwindSafe},
     process::exit,
-    time::Instant,
 };
 use tracing::{debug_span, instrument, Span};
 
@@ -44,10 +43,10 @@ pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<
     values.resize(n_real_rows.next_power_of_two() * N, T::default());
 }
 
-pub fn order_chips<SC, C>(
-    chips: &[MetaChip<SC::Val, C>],
-    chip_ordering: HashMap<String, usize>,
-) -> impl Iterator<Item = &MetaChip<SC::Val, C>>
+pub fn order_chips<'a, SC, C>(
+    chips: &'a [MetaChip<SC::Val, C>],
+    chip_ordering: &'a HashMap<String, usize>,
+) -> impl Iterator<Item = &'a MetaChip<SC::Val, C>>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>,

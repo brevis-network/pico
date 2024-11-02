@@ -153,7 +153,7 @@ where
         input: &'a ProvingWitness<'a, RecursionSC, C, RecursionStdin<'a, RecursionSC, RecursionC>>,
         batch_size: usize,
     ) -> Self {
-        let mut emulator = RecursionEmulator {
+        let emulator = RecursionEmulator {
             recursion_program: input.program.clone(),
             config: input.config.unwrap(),
         };
@@ -169,7 +169,7 @@ where
     }
 
     pub fn next(&mut self) -> (RecursionRecord<Val<RecursionSC>>, bool) {
-        let (mut stdin, done) = self.stdin.get(self.ptr);
+        let (stdin, done) = self.stdin.get(self.ptr);
         let record = self.emulator.run_recursion(stdin);
         self.ptr += 1;
         (record, done)

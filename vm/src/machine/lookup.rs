@@ -3,6 +3,7 @@ use p3_air::VirtualPairCol;
 use p3_field::Field;
 use p3_uni_stark::SymbolicExpression;
 
+#[derive(Clone, Debug)]
 pub struct VirtualPairLookup<F: Field> {
     /// The values of the interaction.
     pub values: Vec<VirtualPairCol<F>>,

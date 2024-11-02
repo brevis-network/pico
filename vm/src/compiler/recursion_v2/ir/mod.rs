@@ -1,5 +1,3 @@
-use p3_field::{ExtensionField, PrimeField, PrimeField32, TwoAdicField};
-
 mod arithmetic;
 mod bits;
 mod builder;

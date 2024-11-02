@@ -8,12 +8,11 @@ use crate::{
         },
     },
     configs::config::{Com, FieldGenericConfig, StarkGenericConfig},
-    instances::machine::simple_machine::SimpleMachine,
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::{BaseMachine, MachineBehavior},
+        machine::BaseMachine,
     },
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
     recursion::air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},

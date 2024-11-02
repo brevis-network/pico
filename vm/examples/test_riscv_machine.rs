@@ -1,39 +1,14 @@
-use itertools::enumerate;
-use log::{debug, info};
-use p3_air::{Air, BaseAir};
-use p3_baby_bear::BabyBear;
-use p3_field::{AbstractField, Field, PrimeField32};
-use p3_matrix::dense::RowMajorMatrix;
+use log::info;
 use pico_vm::{
-    compiler::riscv::{
-        compiler::{Compiler, SourceType},
-        program::Program,
-    },
-    emulator::{
-        context::EmulatorContext,
-        opts::EmulatorOpts,
-        record::RecordBehavior,
-        riscv::{
-            record::EmulationRecord,
-            riscv_emulator::{EmulationError, EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
-        },
-    },
+    compiler::riscv::compiler::{Compiler, SourceType},
+    emulator::{context::EmulatorContext, opts::EmulatorOpts},
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType,
-        configs::riscv_config::StarkConfig as RiscvSC,
-        machine::{riscv_machine::RiscvMachine, simple_machine::SimpleMachine},
+        chiptype::riscv_chiptype::RiscvChipType, configs::riscv_config::StarkConfig as RiscvSC,
+        machine::riscv_machine::RiscvMachine,
     },
-    machine::{
-        builder::ChipBuilder,
-        chip::{ChipBehavior, MetaChip},
-        logger::setup_logger,
-        machine::MachineBehavior,
-        witness::ProvingWitness,
-    },
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
+    primitives::consts::RISCV_NUM_PVS,
 };
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use std::{env, time::Instant};
 
 #[path = "common/parse_args.rs"]

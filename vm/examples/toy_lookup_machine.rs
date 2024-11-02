@@ -16,7 +16,7 @@ use pico_vm::{
         machine::MachineBehavior,
         witness::ProvingWitness,
     },
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_NUM_PVS},
+    primitives::consts::RISCV_NUM_PVS,
 };
 use std::sync::Arc;
 

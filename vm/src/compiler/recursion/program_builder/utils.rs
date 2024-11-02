@@ -226,8 +226,7 @@ where
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    order_chips::<SC, C>(chips, proof.main_chip_ordering.clone())
-        .into_iter()
+    order_chips::<SC, C>(chips, &proof.main_chip_ordering)
         .map(|chip| {
             let log_quotient_degree = chip.get_log_quotient_degree();
             QuotientData {

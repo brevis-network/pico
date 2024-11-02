@@ -14,15 +14,14 @@ use crate::{
     configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
     emulator::riscv::record::EmulationRecord,
     instances::configs::{
-        recur_config as rcf,
-        recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
+        recur_config as rcf, recur_config::FieldConfig as RecursionFC,
         riscv_config::StarkConfig as RiscvSC,
     },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        machine::{BaseMachine, MachineBehavior},
+        machine::BaseMachine,
         proof::BaseProof,
     },
     recursion::air::Block,

@@ -118,10 +118,15 @@ where
 
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
         let mut all_proofs = vec![];
+
+        #[cfg(feature = "debug-lookup")]
+        let mut all_records = Vec::new();
         loop {
             let (batch_records, done) = emulator.next_batch();
 
             self.complement_record(batch_records);
+            #[cfg(feature = "debug-lookup")]
+            all_records.extend_from_slice(batch_records);
 
             #[cfg(feature = "debug")]
             {
@@ -171,6 +176,12 @@ where
         let proof = MetaProof::new(all_proofs);
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
+
+        #[cfg(feature = "debug-lookup")]
+        {
+            use crate::machine::debug::lookup::DebugLookup;
+            DebugLookup::debug_all(&self.chips, pk, &all_records, None);
+        }
 
         proof
     }
