@@ -34,6 +34,64 @@ impl<'a, SC: StarkGenericConfig> EmptyLookupBuilder for VerifierConstraintFolder
 impl<'a, F: Field, AB: AirBuilder<F = F>> EmptyLookupBuilder for FilteredAirBuilder<'a, AB> {}
 
 pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
+    /// Looking for an instruction to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn looking_instruction(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a: Word<impl Into<Self::Expr>>,
+        b: Word<impl Into<Self::Expr>>,
+        c: Word<impl Into<Self::Expr>>,
+        chunk: impl Into<Self::Expr>,
+        channel: impl Into<Self::Expr>,
+        nonce: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        let values = once(opcode.into())
+            .chain(a.0.into_iter().map(Into::into))
+            .chain(b.0.into_iter().map(Into::into))
+            .chain(c.0.into_iter().map(Into::into))
+            .chain(once(chunk.into()))
+            .chain(once(channel.into()))
+            .chain(once(nonce.into()))
+            .collect();
+
+        self.looking(SymbolicLookup::new(
+            values,
+            multiplicity.into(),
+            LookupType::Instruction,
+        ));
+    }
+
+    /// Looked for an instruction to be processed.
+    #[allow(clippy::too_many_arguments)]
+    fn looked_instruction(
+        &mut self,
+        opcode: impl Into<Self::Expr>,
+        a: Word<impl Into<Self::Expr>>,
+        b: Word<impl Into<Self::Expr>>,
+        c: Word<impl Into<Self::Expr>>,
+        chunk: impl Into<Self::Expr>,
+        channel: impl Into<Self::Expr>,
+        nonce: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        let values = once(opcode.into())
+            .chain(a.0.into_iter().map(Into::into))
+            .chain(b.0.into_iter().map(Into::into))
+            .chain(c.0.into_iter().map(Into::into))
+            .chain(once(chunk.into()))
+            .chain(once(channel.into()))
+            .chain(once(nonce.into()))
+            .collect();
+
+        self.looked(SymbolicLookup::new(
+            values,
+            multiplicity.into(),
+            LookupType::Instruction,
+        ));
+    }
+
     /// Looking for  an ALU operation to be processed.
     #[allow(clippy::too_many_arguments)]
     fn looking_alu(

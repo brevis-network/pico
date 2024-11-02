@@ -56,9 +56,16 @@ where
         self.eval_registers::<CB>(builder, local, is_branch_instruction.clone());
 
         // Memory instructions.
-        self.eval_memory_address_and_access::<CB>(builder, local, is_memory_instruction.clone());
-        self.eval_memory_load::<CB>(builder, local);
-        self.eval_memory_store::<CB>(builder, local);
+        builder.looking_instruction(
+            local.instruction.opcode,
+            local.op_a_val(),
+            local.op_b_val(),
+            local.op_c_val(),
+            local.chunk,
+            local.channel,
+            CB::Expr::zero(), // local.nonce,
+            is_memory_instruction,
+        );
 
         // Channel constraints.
         eval_channel_selector(
@@ -147,6 +154,29 @@ impl<F: Field> CpuChip<F> {
         opcode_selectors: &OpcodeSelectorCols<CB::Var>,
     ) -> CB::Expr {
         opcode_selectors.is_alu.into()
+    }
+
+    /// Computes whether the opcode is a memory instruction.
+    pub(crate) fn is_memory_instruction<CB: ChipBuilder<F>>(
+        &self,
+        opcode_selectors: &OpcodeSelectorCols<CB::Var>,
+    ) -> CB::Expr {
+        opcode_selectors.is_lb
+            + opcode_selectors.is_lbu
+            + opcode_selectors.is_lh
+            + opcode_selectors.is_lhu
+            + opcode_selectors.is_lw
+            + opcode_selectors.is_sb
+            + opcode_selectors.is_sh
+            + opcode_selectors.is_sw
+    }
+
+    /// Computes whether the opcode is a store instruction.
+    pub(crate) fn is_store_instruction<CB: ChipBuilder<F>>(
+        &self,
+        opcode_selectors: &OpcodeSelectorCols<CB::Var>,
+    ) -> CB::Expr {
+        opcode_selectors.is_sb + opcode_selectors.is_sh + opcode_selectors.is_sw
     }
 
     /// Constraints related to the pc for non jump, branch, and halt instructions.

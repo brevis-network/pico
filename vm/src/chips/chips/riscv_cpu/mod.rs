@@ -10,7 +10,6 @@ pub mod ecall;
 pub mod event;
 pub mod instruction;
 pub mod jump;
-pub mod memory;
 pub mod opcode_selector;
 pub mod opcode_specific;
 pub mod public_values;

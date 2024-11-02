@@ -141,7 +141,7 @@ fn main() {
     serialized_program.hash(&mut hasher);
     let hash = hasher.finish();
     info!("field_config program hash: {}", hash);
-    assert_eq!(hash, 11664076736591728369);
+    assert_eq!(hash, 5148864530479490320);
 
     // Get field_config input
     let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());

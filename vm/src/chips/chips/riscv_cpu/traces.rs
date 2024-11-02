@@ -169,17 +169,6 @@ impl<F: PrimeField32> CpuChip<F> {
         blu_events.add_range_lookup_event(RangeLookupEvent::new(U8, a_bytes[2] as u16));
         blu_events.add_range_lookup_event(RangeLookupEvent::new(U8, a_bytes[3] as u16));
 
-        // Populate memory accesses for reading from memory.
-        assert_eq!(event.memory_record.is_some(), event.memory.is_some());
-        let memory_columns = cols.opcode_specific.memory_mut();
-        if let Some(record) = event.memory_record {
-            memory_columns
-                .memory_access
-                .populate(event.channel, record, blu_events)
-        }
-
-        // Populate memory, branch, jump, and auipc specific fields.
-        self.populate_memory(cols, event, &mut new_alu_events, blu_events, nonce_lookup);
         self.populate_branch(cols, event, &mut new_alu_events, nonce_lookup);
         self.populate_jump(cols, event, &mut new_alu_events, nonce_lookup);
         self.populate_auipc(cols, event, &mut new_alu_events, nonce_lookup);
