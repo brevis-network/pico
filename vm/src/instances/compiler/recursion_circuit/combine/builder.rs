@@ -26,7 +26,9 @@ use crate::{
     },
     machine::machine::BaseMachine,
     primitives::{
-        consts::{ADDR_NUM_BITS, COMBINE_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+        consts::{
+            ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS, RISCV_COMPRESS_DEGREE,
+        },
         types::RecursionProgramType,
     },
     recursion::air::RecursionPublicValues,
@@ -46,12 +48,15 @@ pub struct RecursionCombineVerifierCircuit<FC: FieldGenericConfig, SC: StarkGene
 
 impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
     pub fn build(
-        machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMBINE_DEGREE>>,
+        machine: &BaseMachine<
+            RecursionSC,
+            RecursionChipType<Val<RecursionSC>, RISCV_COMPRESS_DEGREE>,
+        >,
     ) -> RecursionProgram<Val<RecursionSC>> {
         let mut builder = Builder::<RecursionFC>::new(RecursionProgramType::Combine);
 
         let stdin: RecursionStdinVariable<_> = builder.uninit();
-        RecursionStdin::<RecursionSC, RecursionChipType<Val<RecursionSC>, COMBINE_DEGREE>>::witness(
+        RecursionStdin::<RecursionSC, RecursionChipType<Val<RecursionSC>, RISCV_COMPRESS_DEGREE>>::witness(
             &stdin,
             &mut builder,
         );
@@ -68,7 +73,10 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
     pub fn build_verifier(
         builder: &mut Builder<RecursionFC>,
         pcs: &TwoAdicFriPcsVariable<RecursionFC>,
-        machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMBINE_DEGREE>>,
+        machine: &BaseMachine<
+            RecursionSC,
+            RecursionChipType<Val<RecursionSC>, RISCV_COMPRESS_DEGREE>,
+        >,
         stdin: RecursionStdinVariable<RecursionFC>,
     ) {
         let RecursionStdinVariable {
@@ -160,6 +168,7 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
                 Felt<<RecursionFC as FieldGenericConfig>::F>,
             > = public_values_stream.as_slice().borrow();
 
+            // todo
             // verify_public_values_hash(builder, public_values);
 
             /*

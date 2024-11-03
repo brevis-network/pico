@@ -23,7 +23,7 @@ use crate::{
     },
     machine::machine::BaseMachine,
     primitives::{
-        consts::{COMBINE_DEGREE, RECURSION_NUM_PVS},
+        consts::{COMPRESS_DEGREE, RECURSION_NUM_PVS},
         types::RecursionProgramType,
     },
     recursion::air::RecursionPublicValues,
@@ -32,18 +32,18 @@ use p3_field::AbstractField;
 use std::{borrow::Borrow, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
-pub struct RecursionCompressVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig> {
+pub struct RecursionEmbedVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig> {
     _phantom: PhantomData<(FC, SC)>,
 }
 
-impl RecursionCompressVerifierCircuit<RecursionFC, RecursionSC> {
+impl RecursionEmbedVerifierCircuit<RecursionFC, RecursionSC> {
     pub fn build(
-        machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMBINE_DEGREE>>,
+        machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>,
     ) -> RecursionProgram<Val<RecursionSC>> {
-        let mut builder = Builder::<RecursionFC>::new(RecursionProgramType::Compress);
+        let mut builder = Builder::<RecursionFC>::new(RecursionProgramType::Embed);
 
         let stdin: RecursionStdinVariable<_> = builder.uninit();
-        RecursionStdin::<RecursionSC, RecursionChipType<Val<RecursionSC>, COMBINE_DEGREE>>::witness(
+        RecursionStdin::<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>::witness(
             &stdin,
             &mut builder,
         );
@@ -60,7 +60,7 @@ impl RecursionCompressVerifierCircuit<RecursionFC, RecursionSC> {
     pub fn build_verifier(
         builder: &mut Builder<RecursionFC>,
         pcs: &TwoAdicFriPcsVariable<RecursionFC>,
-        machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMBINE_DEGREE>>,
+        machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>,
         stdin: RecursionStdinVariable<RecursionFC>,
     ) {
         let RecursionStdinVariable {
@@ -117,12 +117,6 @@ impl RecursionCompressVerifierCircuit<RecursionFC, RecursionSC> {
         // verify_public_values_hash(builder, public_values);
 
         builder.assert_felt_eq(public_values.flag_complete, <Val<RecursionSC>>::one());
-
-        let recursion_vk_digest = hash_vkey(builder, &vk);
-        for (i, digest_value) in public_values.recursion_vk_digest.iter().enumerate() {
-            let vk_digest_elem = builder.get(&recursion_vk_digest, i);
-            builder.assert_felt_eq(vk_digest_elem, *digest_value);
-        }
 
         commit_public_values(builder, public_values);
     }

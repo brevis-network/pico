@@ -1,30 +1,28 @@
 use crate::{
     compiler::recursion::program::RecursionProgram,
     configs::config::{StarkGenericConfig, Val},
-    emulator::{emulator::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
+    emulator::{emulator::MetaEmulator, record::RecordBehavior},
     instances::{
         compiler::recursion_circuit::stdin::RecursionStdin,
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::COMBINE_SIZE,
     recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
-use anyhow::Result;
 use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 
-pub struct RecursionCombineMachine<SC, C>
+pub struct RecursionCompressMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
@@ -40,7 +38,7 @@ where
 }
 
 impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<'a, RecursionSC, C>>
-    for RecursionCombineMachine<RecursionSC, C>
+    for RecursionCompressMachine<RecursionSC, C>
 where
     C: ChipBehavior<
             Val<RecursionSC>,
@@ -51,10 +49,13 @@ where
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!("Combine Recursion Machine <{}>", type_name::<RecursionSC>())
+        format!(
+            "Compress Recursion Machine <{}>",
+            type_name::<RecursionSC>()
+        )
     }
 
-    /// Get the base machine.
+    /// Get the base machine
     fn base_machine(&self) -> &BaseMachine<RecursionSC, C> {
         &self.base_machine
     }
@@ -64,99 +65,77 @@ where
         &self,
         pk: &BaseProvingKey<RecursionSC>,
         witness: &ProvingWitness<RecursionSC, C, RecursionStdin<RecursionSC, C>>,
-    ) -> MetaProof<RecursionSC> {
-        info!("PERF-machine=combine");
+    ) -> MetaProof<RecursionSC>
+    where
+        C: for<'c> Air<
+            DebugConstraintFolder<
+                'c,
+                <RecursionSC as StarkGenericConfig>::Val,
+                <RecursionSC as StarkGenericConfig>::Challenge,
+            >,
+        >,
+    {
+        info!("PERF-machine=compress");
         let begin = Instant::now();
 
-        // First
-        // Generate batch records and commit to challenger
+        // used for collect all records for debugging
+        #[cfg(feature = "debug")]
+        let mut all_records = Vec::new();
 
-        let mut recursion_stdin;
-        let mut recursion_witness;
-        let mut recursion_emulator = MetaEmulator::setup_combine(witness, COMBINE_SIZE);
+        let mut records = witness.records().to_vec();
 
-        let mut chunk_index = 1;
-        let mut layer_index = 1;
-        let mut all_proofs = vec![];
-        let mut flag_complete = false;
+        // let mut recursion_emulator = MetaEmulator::setup_recursion(witness, 1);
+        //
+        // let (record, _) = recursion_emulator.next();
+        // let mut records = vec![record];
 
-        loop {
-            loop {
-                info!("layer {}, chunk {}", layer_index, chunk_index);
-                // generate record
-                let (record, done) = recursion_emulator.next();
-                let mut records = vec![record];
+        self.complement_record(&mut records);
 
-                self.complement_record(&mut records);
-
-                debug!("record stats");
-                let stats = records[0].stats();
-                for (key, value) in &stats {
-                    debug!("{:<25}: {}", key, value);
-                }
-
-                // commit main
-                let commitment = self.base_machine.commit(&records[0]);
-
-                // setup challenger
-                let mut challenger = self.config().challenger();
-                pk.observed_by(&mut challenger);
-                challenger.observe(commitment.commitment.clone());
-                challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
-
-                let proof = self.base_machine.prove_plain(
-                    pk,
-                    &mut challenger.clone(),
-                    commitment,
-                    records[0].chunk_index(),
-                );
-
-                // extend all_proofs to include batch_proofs
-                all_proofs.push(proof);
-
-                if done {
-                    break;
-                }
-
-                chunk_index += 1;
+        #[cfg(feature = "debug")]
+        {
+            debug!("record stats");
+            let stats = records[0].stats();
+            for (key, value) in &stats {
+                debug!("{:<25}: {}", key, value);
             }
-
-            if flag_complete {
-                info!("combine finished");
-                break;
-            }
-            flag_complete = all_proofs.len() <= COMBINE_SIZE;
-
-            layer_index += 1;
-            chunk_index = 1;
-
-            // more than one proofs, need to combine another round
-            recursion_stdin = EmulatorStdin::setup_for_combine(
-                witness.vk.unwrap(),
-                self.base_machine(),
-                &all_proofs,
-                COMBINE_SIZE,
-                all_proofs.len() <= COMBINE_SIZE,
-            );
-
-            recursion_witness = ProvingWitness::setup_for_recursion(
-                witness.program.clone(),
-                &recursion_stdin,
-                self.config(),
-                witness.vk.unwrap(),
-            );
-
-            recursion_emulator = MetaEmulator::setup_combine(&recursion_witness, COMBINE_SIZE);
-
-            all_proofs.clear();
+            all_records.extend_from_slice(&records);
         }
+
+        // commit main
+        let commitment = self.base_machine.commit(&records[0]);
+
+        // setup challenger
+        let mut challenger = self.config().challenger();
+        pk.observed_by(&mut challenger);
+        challenger.observe(commitment.commitment.clone());
+        challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
+
+        let proof = self.base_machine.prove_plain(
+            pk,
+            &mut challenger.clone(),
+            commitment,
+            records[0].chunk_index(),
+        );
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(all_proofs);
+        let proof = MetaProof::new(vec![proof]);
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
+
+        #[cfg(feature = "debug")]
+        {
+            use crate::machine::debug::constraints::debug_all_constraints;
+            let mut debug_challenger = self.config().challenger();
+            debug_all_constraints(self.chips(), pk, &all_records, &mut debug_challenger);
+        }
+
+        #[cfg(feature = "debug-lookups")]
+        {
+            use crate::machine::debug::lookups::DebugLookup;
+            DebugLookup::debug_all_lookups(self.chips(), pk, &all_records, None);
+        }
 
         proof
     }
@@ -166,11 +145,11 @@ where
         &self,
         vk: &BaseVerifyingKey<RecursionSC>, // note that this is the vk of riscv machine
         proof: &MetaProof<RecursionSC>,
-    ) -> Result<()> {
-        info!("PERF-machine=combine");
+    ) -> anyhow::Result<()> {
+        info!("PERF-machine=compress");
         let begin = Instant::now();
 
-        assert_eq!(proof.proofs().len(), 1);
+        assert_eq!(proof.num_proofs(), 1);
 
         let public_values: &RecursionPublicValues<_> =
             proof.proofs[0].public_values.as_slice().borrow();
@@ -186,11 +165,6 @@ where
             panic!("riscv_vk is not equal to vk");
         }
 
-        // assert recursion vk
-        if public_values.recursion_vk_digest != vk.hash_babybear() {
-            panic!("recursion_vk is not equal to vk");
-        }
-
         // verify
         self.base_machine.verify_ensemble(vk, proof.proofs())?;
 
@@ -200,7 +174,7 @@ where
     }
 }
 
-impl<SC, C> RecursionCombineMachine<SC, C>
+impl<SC, C> RecursionCompressMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<

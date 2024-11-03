@@ -26,7 +26,7 @@ pub const NUM_MULTI_COLS: usize = core::mem::size_of::<MultiCols<u8>>();
 #[derive(Default)]
 pub struct MultiChip<const DEGREE: usize, F> {
     pub fixed_log2_rows: Option<usize>,
-    _phantom: PhantomData<F>,
+    pub _phantom: PhantomData<F>,
 }
 
 #[derive(AlignedBorrow, Clone, Copy)]

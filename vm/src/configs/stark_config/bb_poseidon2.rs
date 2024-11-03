@@ -84,6 +84,30 @@ impl BabyBearPoseidon2 {
 
         Self { perm, pcs }
     }
+
+    pub fn compress() -> Self {
+        let perm = Self::my_perm();
+        let hash = Hash::new(perm.clone());
+        let compress = Compress::new(perm.clone());
+        let val_mmcs = ValMmcs::new(hash, compress);
+        let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+        let dft = Dft {};
+        let num_queries = match std::env::var("FRI_QUERIES") {
+            Ok(num_queries) => num_queries.parse().unwrap(),
+            Err(_) => 50,
+        };
+        info!("NUM_QUERIES: {}", num_queries);
+
+        let fri_config = FriConfig {
+            log_blowup: 2,
+            num_queries,
+            proof_of_work_bits: 16,
+            mmcs: challenge_mmcs,
+        };
+        let pcs = Pcs::new(27, dft, val_mmcs, fri_config);
+
+        Self { perm, pcs }
+    }
 }
 
 impl Clone for BabyBearPoseidon2 {

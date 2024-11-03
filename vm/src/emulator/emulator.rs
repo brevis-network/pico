@@ -149,7 +149,7 @@ where
         > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
 {
-    pub fn setup_combine(
+    pub fn setup_recursion(
         input: &'a ProvingWitness<'a, RecursionSC, C, RecursionStdin<'a, RecursionSC, RecursionC>>,
         batch_size: usize,
     ) -> Self {

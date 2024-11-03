@@ -76,4 +76,4 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 
 [features]
 debug = []
-debug-lookup = ["debug"]
+debug-lookups = ["debug"]

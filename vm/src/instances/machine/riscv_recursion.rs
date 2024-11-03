@@ -87,6 +87,10 @@ where
         let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
         let mut all_proofs = vec![];
 
+        // used for collect all records for debugging
+        #[cfg(feature = "debug")]
+        let mut all_records = Vec::new();
+
         loop {
             let (record, done) = recursion_emulator.next();
             let mut records = vec![record];
@@ -96,14 +100,12 @@ where
 
             #[cfg(feature = "debug")]
             {
-                let mut debug_challenger = self.config().challenger();
-                debug_all_chips_constraints(self.chips(), pk, &records, &mut debug_challenger);
-            }
-
-            debug!("record stats");
-            let stats = records[0].stats();
-            for (key, value) in &stats {
-                debug!("{:<25}: {}", key, value);
+                debug!("record stats");
+                let stats = records[0].stats();
+                for (key, value) in &stats {
+                    debug!("{:<25}: {}", key, value);
+                }
+                all_records.extend_from_slice(&records);
             }
 
             info!("PERF-phase=1-chunk={chunk_index}");
@@ -133,39 +135,18 @@ where
             chunk_index += 1;
         }
 
-        // Second phase
-        // Generate batch records and generate proofs
+        #[cfg(feature = "debug")]
+        {
+            use crate::machine::debug::constraints::debug_all_constraints;
+            let mut debug_challenger = self.config().challenger();
+            debug_all_constraints(self.chips(), pk, &all_records, &mut debug_challenger);
+        }
 
-        // let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness, 1);
-        // let mut all_proofs = vec![];
-        // let mut chunk_index = 1;
-        // loop {
-        //     let (record, done) = recursion_emulator.next();
-        //     let mut records = vec![record];
-        //
-        //     self.complement_record(records.as_mut_slice());
-        //
-        //     info!("PERF-phase=2-chunk={chunk_index}");
-        //     let commitment = self
-        //         .base_machine
-        //         .commit(&records[0]);
-        //
-        //     let proof = self.base_machine.prove_plain(
-        //         pk,
-        //         &mut challenger.clone(),
-        //         commitment,
-        //         records[0].chunk_index(),
-        //     );
-        //
-        //     // extend all_proofs to include batch_proofs
-        //     all_proofs.push(proof);
-        //
-        //     if done {
-        //         break;
-        //     }
-        //
-        //     chunk_index += 1;
-        // }
+        #[cfg(feature = "debug-lookups")]
+        {
+            use crate::machine::debug::lookups::DebugLookup;
+            DebugLookup::debug_all_lookups(self.chips(), pk, &all_records, None);
+        }
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
@@ -212,9 +193,6 @@ where
         if !sum.is_zero() {
             panic!("verify_ensemble:lookup cumulative sum is not zero");
         }
-
-        // self.base_machine
-        //     .verify_ensemble(vk, proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 

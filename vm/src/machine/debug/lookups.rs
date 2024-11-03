@@ -9,7 +9,7 @@ use crate::{
 };
 use alloc::collections::BTreeMap;
 use core::{fmt::Display, iter::repeat};
-use log::{error, info};
+use log::error;
 use p3_air::Air;
 use p3_field::{Field, PrimeField64};
 use p3_matrix::Matrix;
@@ -152,7 +152,7 @@ where
         result
     }
 
-    pub fn debug_all<'r, 'c, SC, C, CI, R>(
+    pub fn debug_all_lookups<'r, 'c, SC, C, CI, R>(
         chips: CI,
         pkey: &BaseProvingKey<SC>,
         records: R,
@@ -169,6 +169,9 @@ where
         <R as IntoIterator>::IntoIter: Clone,
         <CI as IntoIterator>::IntoIter: Clone,
     {
+        tracing::info_span!("debug lookups").in_scope(|| {
+            tracing::info!("Debugging all lookups");
+        });
         // this stores (total balance, chip => local balance) per lookup key
         let mut lookup_map: BTreeMap<DebugLookupKey<F>, (isize, BTreeMap<&str, isize>)> =
             BTreeMap::new();
@@ -200,36 +203,42 @@ where
                 }
             }
 
-            info!("chip {} experienced {} events", name, chip_events);
+            tracing::debug!("chip {} experienced {} events", name, chip_events);
         }
 
-        let mut result = true;
+        tracing::info_span!("debug lookups").in_scope(|| {
+            let mut result = true;
 
-        // checks the imbalance per lookup key
-        for (k, (v, cv)) in lookup_map {
-            if v != 0 {
-                info!("lookup imbalance of {} for {}", v, k);
-                result = false;
+            tracing::info!("Checking for imbalance");
 
-                // print the detailed per-chip balancing data
-                for (c, cv) in cv {
-                    info!("{} balance: {}", c, cv);
+            // checks the imbalance per lookup key
+            for (k, (v, cv)) in lookup_map {
+                if v != 0 {
+                    tracing::info!("lookup imbalance of {} for {}", v, k);
+                    result = false;
+
+                    // print the detailed per-chip balancing data
+                    for (c, cv) in cv {
+                        tracing::info!("{} balance: {}", c, cv);
+                    }
                 }
             }
-        }
 
-        // log overall results
-        if result {
-            info!("lookups are balanced");
-        } else {
-            info!("positive values mean more looking than looked");
-            info!("negative values mean more looked than looking");
-            info!("total imbalance: {}", total);
-            if total == 0 {
-                info!("total sends/receives match, but some lookups may have the wrong key");
+            // log overall results
+            if result {
+                tracing::info!("lookups are balanced");
+            } else {
+                tracing::info!("positive values mean more looking than looked");
+                tracing::info!("negative values mean more looked than looking");
+                tracing::info!("total imbalance: {}", total);
+                if total == 0 {
+                    tracing::info!(
+                        "total sends/receives match, but some lookups may have the wrong key"
+                    );
+                }
             }
-        }
 
-        result
+            result
+        })
     }
 }

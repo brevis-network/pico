@@ -216,4 +216,26 @@ where
             cursor: 0,
         }
     }
+
+    pub fn setup_for_single(
+        vk: &'a BaseVerifyingKey<RecursionSC>,
+        machine: &'a BaseMachine<RecursionSC, C>,
+        proofs: &[BaseProof<RecursionSC>],
+    ) -> Self {
+        let mut stdin = Vec::new();
+
+        assert_eq!(proofs.len(), 1);
+
+        stdin.push(RecursionStdin {
+            vk,
+            machine,
+            proofs: proofs.to_vec().clone(),
+            flag_complete: true,
+        });
+
+        Self {
+            buffer: stdin,
+            cursor: 0,
+        }
+    }
 }

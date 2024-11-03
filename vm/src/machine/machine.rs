@@ -192,12 +192,6 @@ where
         // observe preprocessed
         pk.observed_by(&mut challenger);
 
-        #[cfg(feature = "debug")]
-        {
-            let mut debug_challenger = self.config().challenger();
-            debug_all_chips_constraints(self.chips(), pk, &records, &mut debug_challenger);
-        }
-
         let main_commitments = records
             .iter()
             .enumerate()
@@ -280,7 +274,6 @@ where
             )?;
         }
 
-        // compute sum of each proof.cumulative_sum() and add them up and judge if it is zero
         let sum = proofs
             .iter()
             .map(|proof| proof.cumulative_sum())

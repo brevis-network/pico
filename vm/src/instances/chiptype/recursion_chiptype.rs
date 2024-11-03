@@ -194,8 +194,80 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
                 ..Default::default()
             })),
             MetaChip::new(Self::RangeCheck(RangeCheckChip::default())),
-            // TODO: Seems `MultiChip` is useless, need to confirm.
-            // MetaChip::new(Self::Multi(MultiChip::default())),
+            MetaChip::new(Self::ExpReverseBitsLen(
+                ExpReverseBitsLenChip::<DEGREE, F> {
+                    fixed_log2_rows: None,
+                    pad: true,
+                    ..Default::default()
+                },
+            )),
+        ]
+    }
+
+    // todo: temporarily set to be the same as all_chips since adding Multi will break lookups
+    pub fn compress_chips() -> Vec<MetaChip<F, Self>> {
+        vec![
+            MetaChip::new(Self::Program(ProgramChip::default())),
+            MetaChip::new(Self::Cpu(CpuChip {
+                fixed_log2_rows: None,
+                _phantom: PhantomData,
+            })),
+            MetaChip::new(Self::MemoryGlobal(MemoryGlobalChip {
+                fixed_log2_rows: None,
+                ..Default::default()
+            })),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE, F> {
+                fixed_log2_rows: None,
+                pad: true,
+                ..Default::default()
+            })),
+            MetaChip::new(Self::FriFold(FriFoldChip::<DEGREE, F> {
+                fixed_log2_rows: None,
+                pad: true,
+                ..Default::default()
+            })),
+            // MetaChip::new(Self::Multi(MultiChip::<DEGREE, F> {
+            //     fixed_log2_rows: None,
+            //     _phantom: PhantomData,
+            // })),
+            MetaChip::new(Self::RangeCheck(RangeCheckChip::default())),
+            MetaChip::new(Self::ExpReverseBitsLen(
+                ExpReverseBitsLenChip::<DEGREE, F> {
+                    fixed_log2_rows: None,
+                    pad: true,
+                    ..Default::default()
+                },
+            )),
+        ]
+    }
+
+    // todo: temporarily set to be the same as all_chips since adding Multi will break lookups
+    pub fn embed_chips() -> Vec<MetaChip<F, Self>> {
+        vec![
+            MetaChip::new(Self::Program(ProgramChip::default())),
+            MetaChip::new(Self::Cpu(CpuChip {
+                fixed_log2_rows: None,
+                _phantom: PhantomData,
+            })),
+            MetaChip::new(Self::MemoryGlobal(MemoryGlobalChip {
+                fixed_log2_rows: None,
+                ..Default::default()
+            })),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE, F> {
+                fixed_log2_rows: None,
+                pad: true,
+                ..Default::default()
+            })),
+            MetaChip::new(Self::FriFold(FriFoldChip::<DEGREE, F> {
+                fixed_log2_rows: None,
+                pad: true,
+                ..Default::default()
+            })),
+            // MetaChip::new(Self::Multi(MultiChip::<DEGREE, F> {
+            //     fixed_log2_rows: None,
+            //     _phantom: PhantomData,
+            // })),
+            MetaChip::new(Self::RangeCheck(RangeCheckChip::default())),
             MetaChip::new(Self::ExpReverseBitsLen(
                 ExpReverseBitsLenChip::<DEGREE, F> {
                     fixed_log2_rows: None,

@@ -25,9 +25,6 @@ use p3_challenger::CanObserve;
 use p3_field::AbstractField;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 
-#[cfg(feature = "debug")]
-use crate::machine::utils::debug_all_chips_constraints;
-
 pub struct RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
@@ -72,13 +69,7 @@ where
         info!("PERF-machine=riscv");
         let begin = Instant::now();
 
-        let ProvingWitness {
-            // program,
-            // stdin,
-            opts,
-            // context,
-            ..
-        } = witness;
+        let ProvingWitness { opts, .. } = witness;
 
         let mut challenger = self.config().challenger();
         pk.observed_by(&mut challenger);
@@ -119,24 +110,18 @@ where
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
         let mut all_proofs = vec![];
 
-        #[cfg(feature = "debug-lookup")]
+        // used for collect all records for debugging
+        #[cfg(feature = "debug")]
         let mut all_records = Vec::new();
+
         loop {
             let (batch_records, done) = emulator.next_batch();
 
             self.complement_record(batch_records);
-            #[cfg(feature = "debug-lookup")]
-            all_records.extend_from_slice(batch_records);
 
             #[cfg(feature = "debug")]
             {
-                let mut debug_challenger = self.config().challenger();
-                debug_all_chips_constraints(
-                    &self.chips(),
-                    pk,
-                    batch_records,
-                    &mut debug_challenger,
-                );
+                all_records.extend_from_slice(batch_records);
             }
 
             let batch_main_commitments = batch_records
@@ -177,10 +162,17 @@ where
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
-        #[cfg(feature = "debug-lookup")]
+        #[cfg(feature = "debug")]
         {
-            use crate::machine::debug::lookup::DebugLookup;
-            DebugLookup::debug_all(&self.chips, pk, &all_records, None);
+            use crate::machine::debug::constraints::debug_all_constraints;
+            let mut debug_challenger = self.config().challenger();
+            debug_all_constraints(&self.chips(), pk, &all_records, &mut debug_challenger);
+        }
+
+        #[cfg(feature = "debug-lookups")]
+        {
+            use crate::machine::debug::lookups::DebugLookup;
+            DebugLookup::debug_all_lookups(self.chips(), pk, &all_records, None);
         }
 
         proof
