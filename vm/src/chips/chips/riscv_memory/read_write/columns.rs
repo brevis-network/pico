@@ -46,7 +46,6 @@ pub struct MemoryChipCols<T> {
     // LE bit decomposition for the most significant byte of memory value.  This is used to
     // determine the sign for that value (used for LB and LH).
     pub most_sig_byte_decomp: [T; 8],
-    pub unsigned_mem_val_nonce: T,
 
     /// The unsigned memory value is the value after the offset logic is applied. Used for the load
     /// memory opcodes (i.e. LB, LH, LW, LBU, and LHU).
@@ -65,6 +64,9 @@ pub struct MemoryChipCols<T> {
     ///
     /// > (is_lb | is_lh) & (most_sig_byte_decomp[7] == 1) & (not writing to x0)
     pub mem_value_is_neg_not_x0: T,
+
+    pub addr_word_nonce: T,
+    pub unsigned_mem_val_nonce: T,
 
     /// Memory instructions
     pub instruction: MemoryInstructionCols<T>,

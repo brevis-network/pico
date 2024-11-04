@@ -145,7 +145,7 @@ where
             local.c,
             local.chunk,
             local.channel,
-            F::zero(),
+            local.nonce,
             local.is_real,
         );
     }

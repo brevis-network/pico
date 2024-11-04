@@ -51,7 +51,7 @@ where
             local.operand_2,
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // local.nonce,
+            local.nonce,
             local.is_add,
         );
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
@@ -62,7 +62,7 @@ where
             local.operand_2,
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // local.nonce,
+            local.nonce,
             local.is_sub,
         );
 

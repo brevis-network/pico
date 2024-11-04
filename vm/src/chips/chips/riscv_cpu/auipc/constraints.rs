@@ -38,7 +38,8 @@ impl<F: PrimeField32> CpuChip<F> {
             local.op_b_val(),
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // auipc_columns.auipc_nonce,
+            // gupeng
+            auipc_columns.auipc_nonce,
             local.opcode_selector.is_auipc,
         );
     }

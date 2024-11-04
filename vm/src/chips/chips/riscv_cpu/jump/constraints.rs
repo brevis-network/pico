@@ -80,7 +80,7 @@ impl<F: Field> CpuChip<F> {
             local.op_b_val(),
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // jump_columns.jal_nonce,
+            jump_columns.jal_nonce,
             local.opcode_selector.is_jal,
         );
 
@@ -92,7 +92,7 @@ impl<F: Field> CpuChip<F> {
             local.op_c_val(),
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // jump_columns.jalr_nonce,
+            jump_columns.jalr_nonce,
             local.opcode_selector.is_jalr,
         );
     }

@@ -85,7 +85,7 @@ where
             local.op_c_val(),
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // local.nonce,
+            local.nonce,
             is_alu_instruction,
         );
 

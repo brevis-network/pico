@@ -82,7 +82,7 @@ impl<F: Field> CpuChip<F> {
                 local.op_c_val(),
                 local.chunk,
                 local.channel,
-                CB::Expr::zero(), // branch_cols.next_pc_nonce,
+                branch_cols.next_pc_nonce,
                 local.branching,
             );
 
@@ -194,7 +194,7 @@ impl<F: Field> CpuChip<F> {
             local.op_b_val(),
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // branch_cols.a_lt_b_nonce,
+            branch_cols.a_lt_b_nonce,
             is_branch_instruction.clone(),
         );
 
@@ -207,7 +207,7 @@ impl<F: Field> CpuChip<F> {
             local.op_a_val(),
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // branch_cols.a_gt_b_nonce,
+            branch_cols.a_gt_b_nonce,
             is_branch_instruction.clone(),
         );
     }

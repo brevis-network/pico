@@ -65,7 +65,7 @@ where
             local.c,
             local.chunk,
             local.channel,
-            CB::Expr::zero(), // local.nonce,
+            local.nonce,
             is_real.clone(),
         );
 
