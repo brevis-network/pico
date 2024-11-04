@@ -1,13 +1,10 @@
 use crate::{
     compiler::recursion::program::RecursionProgram,
     configs::config::{Challenge, StarkGenericConfig, Val},
-    emulator::{emulator::MetaEmulator, record::RecordBehavior},
-    instances::{
-        compiler::recursion_circuit::stdin::RecursionStdin,
-        configs::{
-            embed_bb_bn254_poseidon2::StarkConfig as EmbedSC,
-            recur_bb_poseidon2::{StarkConfig as RiscvSC, StarkConfig as RecursionSC},
-        },
+    emulator::record::RecordBehavior,
+    instances::configs::{
+        embed_bb_bn254_poseidon2::StarkConfig as EmbedSC,
+        recur_bb_poseidon2::StarkConfig as RiscvSC,
     },
     machine::{
         chip::{ChipBehavior, MetaChip},

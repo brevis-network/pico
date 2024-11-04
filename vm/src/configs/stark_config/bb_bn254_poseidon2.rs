@@ -1,26 +1,19 @@
-use crate::configs::{
-    config::StarkGenericConfig,
-    stark_config::{
-        bb_poseidon2::{Challenge, Challenger, Pcs, Perm},
-        utils::bn254_poseidon2_rc3,
-    },
-};
+use crate::configs::{config::StarkGenericConfig, stark_config::utils::bn254_poseidon2_rc3};
 use log::info;
-use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
+use p3_baby_bear::BabyBear;
 use p3_bn254_fr::{Bn254Fr, DiffusionMatrixBN254};
-use p3_challenger::{DuplexChallenger, MultiField32Challenger};
+use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::BinomialExtensionField, Field};
+use p3_field::extension::BinomialExtensionField;
 use p3_fri::{
     BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs,
     TwoAdicFriPcsProof,
 };
 use p3_merkle_tree::FieldMerkleTreeMmcs;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
-use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, PaddingFreeSponge, TruncatedPermutation};
+use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
-use serde_with::serde_derive::Deserialize;
 // todo: deeper understanding of the following types
 
 pub type SC_Val = BabyBear;

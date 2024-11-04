@@ -1,7 +1,7 @@
 use crate::{
     compiler::recursion::program::RecursionProgram,
     configs::config::{StarkGenericConfig, Val},
-    emulator::{emulator::MetaEmulator, record::RecordBehavior},
+    emulator::record::RecordBehavior,
     instances::{
         compiler::recursion_circuit::stdin::RecursionStdin,
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},

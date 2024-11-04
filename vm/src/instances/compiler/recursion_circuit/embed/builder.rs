@@ -9,7 +9,7 @@ use crate::{
                 fri::TwoAdicFriPcsVariable,
             },
             stark::StarkVerifier,
-            utils::{const_fri_config, hash_vkey},
+            utils::const_fri_config,
         },
     },
     configs::config::{FieldGenericConfig, StarkGenericConfig, Val},

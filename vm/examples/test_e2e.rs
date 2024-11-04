@@ -16,9 +16,7 @@ use pico_vm::{
                 compress::builder::RecursionCompressVerifierCircuit,
                 embed::builder::RecursionEmbedVerifierCircuit, stdin::RecursionStdin,
             },
-            riscv_circuit::{
-                compress::builder::RiscvCompressVerifierCircuit, stdin::RiscvRecursionStdin,
-            },
+            riscv_circuit::compress::builder::RiscvCompressVerifierCircuit,
         },
         configs::{
             embed_config::StarkConfig as EmbedSC,

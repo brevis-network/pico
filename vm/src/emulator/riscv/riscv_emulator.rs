@@ -1421,7 +1421,10 @@ impl Default for EmulatorMode {
 
 mod tests {
     use super::{Program, RiscvEmulator};
-    use crate::compiler::riscv::compiler::{Compiler, SourceType};
+    use crate::{
+        compiler::riscv::compiler::{Compiler, SourceType},
+        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    };
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =
