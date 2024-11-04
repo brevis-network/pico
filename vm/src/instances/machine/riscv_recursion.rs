@@ -211,6 +211,7 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
+        info!("PERF-machine=recursion");
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }

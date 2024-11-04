@@ -249,6 +249,7 @@ where
         num_public_values: usize,
         vk: BaseVerifyingKey<RiscvSC>,
     ) -> Self {
+        info!("PERF-machine=combine");
         Self {
             vk,
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),

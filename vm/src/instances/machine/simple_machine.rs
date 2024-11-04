@@ -87,6 +87,7 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {
+        info!("PERF-machine=simple");
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }
