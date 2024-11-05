@@ -1,5 +1,5 @@
 use super::instruction::Instruction;
-use crate::compiler::program::ProgramBehavior;
+use crate::{compiler::program::ProgramBehavior, machine::chip::ChipBehavior};
 use backtrace::Backtrace;
 use p3_field::Field;
 use serde::{Deserialize, Serialize};
@@ -31,5 +31,13 @@ impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
             total_memory: 0,
             traces: self.traces.clone(),
         }
+    }
+}
+
+impl<F: Field> RecursionProgram<F> {
+    #[inline]
+    pub fn fixed_log2_rows<A: ChipBehavior<F>>(&self, air: &A) -> Option<usize> {
+        // TODO, support shape
+        None
     }
 }

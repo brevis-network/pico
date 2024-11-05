@@ -1,17 +1,20 @@
-use super::super::{
-    air::RecursionPublicValues,
-    types::{
-        BaseAluEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent, FriFoldEvent,
-        MemEvent, Poseidon2Event,
+use std::{array, sync::Arc};
+
+use crate::{
+    compiler::recursion_v2::program::RecursionProgram,
+    emulator::{opts::EmulatorOpts, record::RecordBehavior},
+    machine::chip::ChipBehavior,
+    primitives::consts_v2::MAX_NUM_PVS,
+    recursion_v2::{
+        air::RecursionPublicValues,
+        types::{
+            BaseAluEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent, FriFoldEvent,
+            MemEvent, Poseidon2Event,
+        },
     },
 };
-use crate::{
-    compiler::recursion_v2::program::RecursionProgram, emulator::record::RecordBehavior,
-    primitives::consts::MAX_NUM_PVS,
-};
 use hashbrown::HashMap;
-use p3_field::{AbstractField, PrimeField32};
-use std::{array, sync::Arc};
+use p3_field::{AbstractField, Field, PrimeField32};
 
 #[derive(Clone, Default, Debug)]
 pub struct RecursionRecord<F> {
@@ -33,12 +36,11 @@ pub struct RecursionRecord<F> {
 }
 
 impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
-    fn name(&self) -> String {
-        "RecursionRecord".to_string()
-    }
+    // TODO
+    //type Config = EmulatorOpts;
 
-    fn chunk_index(&self) -> usize {
-        0
+    fn name(&self) -> String {
+        todo!()
     }
 
     fn stats(&self) -> hashbrown::HashMap<String, usize> {
@@ -94,5 +96,16 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
         });
 
         ret.to_vec()
+    }
+
+    fn chunk_index(&self) -> usize {
+        0
+    }
+}
+
+impl<F: Field> RecursionRecord<F> {
+    #[inline]
+    pub fn fixed_log2_rows<A: ChipBehavior<F>>(&self, air: &A) -> Option<usize> {
+        self.program.fixed_log2_rows(air)
     }
 }
