@@ -1,6 +1,8 @@
 mod opcode;
+mod record;
 
 pub use opcode::*;
+pub use record::*;
 
 pub const HEAP_PTR: i32 = -4;
 pub const HEAP_START_ADDRESS: usize = STACK_SIZE + 4;
