@@ -14,11 +14,9 @@ use std::{
 };
 
 use crate::{
+    chips::chips::recursion_memory_v2::MemEvent,
     compiler::recursion_v2::program::RecursionProgram,
-    recursion_v2::{
-        air::Block,
-        runtime::{memory::MemVecMap, record::RecursionRecord},
-    },
+    recursion_v2::{air::Block, runtime::memory::MemVecMap},
 };
 use backtrace::Backtrace as Trace;
 use hashbrown::HashMap;
@@ -32,8 +30,8 @@ use p3_util::reverse_bits_len;
 use crate::recursion_v2::types::{
     BaseAluEvent, BaseAluInstr, CommitPublicValuesEvent, ExpReverseBitsEvent, ExpReverseBitsInstr,
     ExpReverseBitsIo, ExtAluEvent, ExtAluInstr, FriFoldBaseIo, FriFoldEvent, FriFoldExtSingleIo,
-    FriFoldExtVecIo, FriFoldInstr, MemAccessKind, MemEvent, MemInstr, MemIo, Poseidon2Event,
-    Poseidon2Instr, Poseidon2Io,
+    FriFoldExtVecIo, FriFoldInstr, MemAccessKind, MemInstr, MemIo, Poseidon2Event, Poseidon2Instr,
+    Poseidon2Io,
 };
 use thiserror::Error;
 

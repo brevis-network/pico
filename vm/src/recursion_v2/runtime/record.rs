@@ -1,15 +1,16 @@
 use std::{array, sync::Arc};
 
 use crate::{
+    chips::chips::recursion_memory_v2::MemEvent,
     compiler::recursion_v2::program::RecursionProgram,
-    emulator::{opts::EmulatorOpts, record::RecordBehavior},
+    emulator::record::RecordBehavior,
     machine::chip::ChipBehavior,
     primitives::consts_v2::MAX_NUM_PVS,
     recursion_v2::{
         air::RecursionPublicValues,
         types::{
             BaseAluEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent, FriFoldEvent,
-            MemEvent, Poseidon2Event,
+            Poseidon2Event,
         },
     },
 };

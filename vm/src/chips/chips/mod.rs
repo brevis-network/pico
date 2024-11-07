@@ -13,3 +13,6 @@ pub mod riscv_cpu;
 pub mod riscv_memory;
 pub mod riscv_program;
 pub mod toys;
+
+// Recursion V2 chips
+pub mod recursion_memory_v2;

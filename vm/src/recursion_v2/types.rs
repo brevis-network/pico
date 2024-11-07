@@ -79,8 +79,6 @@ pub struct MemInstr<F> {
     pub kind: MemAccessKind,
 }
 
-pub type MemEvent<F> = MemIo<Block<F>>;
-
 // -------------------------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

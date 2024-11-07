@@ -12,6 +12,7 @@ mod public_values;
 mod range_check;
 mod recursion_lookup;
 mod recursion_memory;
+mod recursion_v2;
 mod riscv_memory;
 mod word;
 
@@ -23,6 +24,7 @@ pub use public_values::PublicValuesBuilder;
 pub use range_check::ChipRangeBuilder;
 pub use recursion_lookup::RecursionLookupBuilder;
 pub use recursion_memory::RecursionMemoryBuilder;
+pub use recursion_v2::RecursionBuilder;
 pub use riscv_memory::RiscVMemoryBuilder;
 pub use word::ChipWordBuilder;
 
@@ -41,6 +43,7 @@ impl<F: Field, CB: ChipBuilder<F>> ChipLookupBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> ChipRangeBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> ChipWordBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> ExtensionBuilder<F> for CB {}
+impl<F: Field, CB: ChipBuilder<F>> RecursionBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> RecursionLookupBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> RecursionMemoryBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> RiscVMemoryBuilder<F> for CB {}
