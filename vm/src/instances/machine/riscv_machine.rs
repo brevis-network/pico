@@ -191,8 +191,8 @@ where
         let mut prev_last_finalize_addr_bits = [<Val<RiscvSC>>::zero(); 32];
 
         let mut flag_extra = true;
-        let mut committed_value_digest_prev = None;
-        let mut deferred_proofs_digest_prev = None;
+        let mut committed_value_digest_prev = Default::default();
+        let mut deferred_proofs_digest_prev = Default::default();
         let zero_cvd = Default::default();
         let zero_dpd = Default::default();
 
@@ -322,28 +322,28 @@ where
 //   previous shard.
 //
 // This is replaced with the following impl.
-// 1. prev is initialized as None
-// 2. if prev was assigned, then cur == prev
-// 3. else, prev was unassigned, assign if cond
-// 4. if not cond, then cur must be some default value, because if prev was assigned to, it would
+// 1. prev is initialized as 0
+// 2. if prev != 0, then cur == prev
+// 3. else, prev == 0, assign if cond
+// 4. if not cond, then cur must be some default value, because if prev was non-zero, it would
 //    trigger the initial condition
-fn transition_with_condition<'a, T: core::fmt::Debug + Eq>(
-    prev: &mut Option<&'a T>,
+fn transition_with_condition<'a, T: Copy + core::fmt::Debug + Eq>(
+    prev: &'a mut T,
     cur: &'a T,
     default: &T,
     cond: bool,
     desc: &str,
     pos: usize,
 ) {
-    if let Some(prev) = prev {
+    if prev != default {
         assert_eq!(
-            *prev, cur,
+            prev, cur,
             "discrepancy between {} at position {}",
             desc, pos
         );
     } else {
         if cond {
-            *prev = Some(cur);
+            *prev = *cur;
         } else {
             assert_eq!(cur, default, "{} not zeroed on failed condition", desc);
         }
