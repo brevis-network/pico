@@ -36,7 +36,7 @@ impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
 
 impl<F: Field> RecursionProgram<F> {
     #[inline]
-    pub fn fixed_log2_rows<A: ChipBehavior<F>>(&self, air: &A) -> Option<usize> {
+    pub fn fixed_log2_rows<A: ChipBehavior<F>>(&self, _air: &A) -> Option<usize> {
         // TODO, support shape
         None
     }

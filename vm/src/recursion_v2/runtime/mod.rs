@@ -21,7 +21,6 @@ use crate::{
 use backtrace::Backtrace as Trace;
 use hashbrown::HashMap;
 use itertools::Itertools;
-pub use opcode::*;
 use p3_field::{AbstractField, ExtensionField, PrimeField32};
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{CryptographicPermutation, Permutation};

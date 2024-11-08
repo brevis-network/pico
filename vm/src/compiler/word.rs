@@ -57,6 +57,12 @@ impl<T: AbstractField> Word<T> {
     }
 }
 
+impl<T: Field> Word<T> {
+    pub fn is_zero(&self) -> bool {
+        self.0.iter().all(T::is_zero)
+    }
+}
+
 impl<F: Field> Word<F> {
     /// Converts a word to a u32.
     pub fn to_u32(&self) -> u32 {

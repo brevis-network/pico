@@ -191,6 +191,10 @@ where
         let mut prev_last_finalize_addr_bits = [<Val<RiscvSC>>::zero(); 32];
 
         let mut flag_extra = true;
+        let mut committed_value_digest_prev = None;
+        let mut deferred_proofs_digest_prev = None;
+        let zero_cvd = Default::default();
+        let zero_dpd = Default::default();
 
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -273,15 +277,76 @@ where
             prev_last_initialize_addr_bits = public_values.last_initialize_addr_bits;
             prev_last_finalize_addr_bits = public_values.last_finalize_addr_bits;
             // println!("public values: {:?}", public_values);
-        }
 
-        // TODO: add committed_value_digest support
+            // committed_value_digest and deferred_proofs_digest checks
+            transition_with_condition(
+                &mut committed_value_digest_prev,
+                &public_values.committed_value_digest,
+                &zero_cvd,
+                each_proof.includes_chip("Cpu"),
+                "committed_value_digest",
+                i,
+            );
+            transition_with_condition(
+                &mut deferred_proofs_digest_prev,
+                &public_values.deferred_proofs_digest,
+                &zero_dpd,
+                each_proof.includes_chip("Cpu"),
+                "deferred_proofs_digest",
+                i,
+            );
+        }
 
         self.base_machine.verify_ensemble(vk, proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 
         Ok(())
+    }
+}
+
+// Digest constraints.
+//
+// Initialization:
+// - `committed_value_digest` should be zero.
+// - `deferred_proofs_digest` should be zero.
+//
+// Transition:
+// - If `commited_value_digest_prev` is not zero, then `committed_value_digest` should equal
+//   `commited_value_digest_prev`.
+// - If `deferred_proofs_digest_prev` is not zero, then `deferred_proofs_digest` should equal
+//   `deferred_proofs_digest_prev`.
+// - If it's not a shard with "CPU", then `commited_value_digest` should not change from the
+//   previous shard.
+// - If it's not a shard with "CPU", then `deferred_proofs_digest` should not change from the
+//   previous shard.
+//
+// This is replaced with the following impl.
+// 1. prev is initialized as None
+// 2. if prev was assigned, then cur == prev
+// 3. else, prev was unassigned, assign if cond
+// 4. if not cond, then cur must be some default value, because if prev was assigned to, it would
+//    trigger the initial condition
+fn transition_with_condition<'a, T: core::fmt::Debug + Eq>(
+    prev: &mut Option<&'a T>,
+    cur: &'a T,
+    default: &T,
+    cond: bool,
+    desc: &str,
+    pos: usize,
+) {
+    if let Some(prev) = prev {
+        assert_eq!(
+            *prev, cur,
+            "discrepancy between {} at position {}",
+            desc, pos
+        );
+    } else {
+        if cond {
+            *prev = Some(cur);
+        } else {
+            assert_eq!(cur, default, "{} not zeroed on failed condition", desc);
+        }
     }
 }
 

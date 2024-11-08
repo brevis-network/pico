@@ -84,8 +84,6 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         // Assert number of proofs == 1
         builder.assert_usize_eq(proofs.len(), 1);
 
-        // todo: support commit and deferred digests
-
         /*
         Initializations
         */
@@ -356,19 +354,15 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
                         public_values.last_finalize_addr_bits[i],
                     );
                 }
-            });
-
-        /*
-        Transition constraints
-         */
+            }); /*
+                Transition constraints
+                 */
 
         // all exit codes should be zeros
         builder.assert_felt_eq(
             public_values.exit_code,
             <RecursionFC as FieldGenericConfig>::F::zero(),
         );
-
-        // todo: digests
 
         // update reconstruct challenger
         current_reconstruct_challenger.observe(builder, proof.commitment.main_commit.clone());
@@ -462,6 +456,12 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         recursion_public_values.cumulative_sum = cumulative_sum;
         recursion_public_values.exit_code = exit_code;
         recursion_public_values.flag_complete = var2felt(builder, flag_complete);
+
+        // committed value and deferred proof digests
+        // these are just Felts, which are in a sense a reference to virtual variable so these will refer to the same
+        // value when the AIR is built
+        recursion_public_values.committed_value_digest = public_values.committed_value_digest;
+        // recursion_public_values.deferred_proofs_digest = public_values.deferred_proofs_digest;
 
         // todo: check Commit the public values
         commit_public_values(builder, recursion_public_values);

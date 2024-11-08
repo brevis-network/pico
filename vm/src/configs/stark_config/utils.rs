@@ -39,6 +39,8 @@ pub fn bn254_poseidon2_rc3() -> Vec<[Bn254Fr; 3]> {
         .collect()
 }
 
+// TODO: determine if this is still needed
+#[allow(dead_code)]
 pub fn bn254_poseidon2_rc4() -> Vec<[Bn254Fr; 4]> {
     RC3.iter()
         .map(|vec| {

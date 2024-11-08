@@ -1,19 +1,22 @@
 use crate::{
-    compiler::recursion::{
-        ir::{Builder, Felt},
-        program::RecursionProgram,
-        program_builder::{
-            hints::hintable::Hintable,
-            p3::{
-                challenger::{CanObserveVariable, DuplexChallengerVariable},
-                fri::TwoAdicFriPcsVariable,
-            },
-            stark::StarkVerifier,
-            utils::{
-                assert_challenger_eq_pv, assign_challenger_from_pv, const_fri_config,
-                get_challenger_public_values, hash_vkey, var2felt,
+    compiler::{
+        recursion::{
+            ir::{Builder, Felt, Var},
+            program::RecursionProgram,
+            program_builder::{
+                hints::hintable::Hintable,
+                p3::{
+                    challenger::{CanObserveVariable, DuplexChallengerVariable},
+                    fri::TwoAdicFriPcsVariable,
+                },
+                stark::StarkVerifier,
+                utils::{
+                    assert_challenger_eq_pv, assign_challenger_from_pv, const_fri_config, felt2var,
+                    get_challenger_public_values, hash_vkey, var2felt,
+                },
             },
         },
+        word::Word,
     },
     configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
     instances::{
@@ -27,7 +30,8 @@ use crate::{
     machine::machine::BaseMachine,
     primitives::{
         consts::{
-            ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS, RISCV_COMPRESS_DEGREE,
+            ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
+            RISCV_COMPRESS_DEGREE,
         },
         types::RecursionProgramType,
     },
@@ -88,7 +92,11 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
         // Assert number of proofs > 0
         builder.assert_usize_ne(proofs.len(), 0);
 
-        // todo: support commit and deferred digests
+        // variables for commited value digest and deferred proofs
+        let committed_value_digest: [Word<Felt<_>>; PV_DIGEST_NUM_WORDS] =
+            array::from_fn(|_| Word(array::from_fn(|_| builder.uninit())));
+        // let deferred_proofs_digest: [Felt<_>; POSEIDON_NUM_WORDS] =
+        //     array::from_fn(|_| builder.uninit());
 
         /*
         Initializations
@@ -227,6 +235,22 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
                         &mut current_reconstruct_challenger,
                         public_values.start_reconstruct_challenger,
                     );
+
+                    for (cvd_i, cur_cvd_i) in committed_value_digest
+                        .into_iter()
+                        .zip(public_values.committed_value_digest)
+                    {
+                        for (cvd_ij, cur_cvd_ij) in cvd_i.0.into_iter().zip(cur_cvd_i.0) {
+                            builder.assign(cvd_ij, cur_cvd_ij);
+                        }
+                    }
+
+                    // for (dpd_i, cur_dpd_i) in deferred_proofs_digest
+                    //     .into_iter()
+                    //     .zip(public_values.deferred_proofs_digest)
+                    // {
+                    //     builder.assign(dpd_i, cur_dpd_i);
+                    // }
                 });
 
             /*
@@ -258,6 +282,81 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
                 &current_reconstruct_challenger,
                 public_values.start_reconstruct_challenger,
             );
+
+            // digest constraints
+            // ported from SP1
+            {
+                let zero = <RecursionFC as FieldGenericConfig>::N::zero();
+                let one = <RecursionFC as FieldGenericConfig>::N::one();
+
+                // first compute is_zero for cvd
+                // the idea is to constrain cvd when cvd != 0, or is_zero == 0, so we assign is_zero = 0
+                // when an element cvd_ij != 0
+                let is_zero: Var<_> = builder.eval(one);
+                for cvd_i in committed_value_digest {
+                    for cvd_ij in cvd_i.0 {
+                        let d = felt2var(builder, cvd_ij);
+                        // additionally gate on is_zero == 1 so we don't do multiple assignments
+                        builder.if_eq(is_zero, one).then(|builder| {
+                            builder.if_ne(d, zero).then(|builder| {
+                                builder.assign(is_zero, zero);
+                            })
+                        });
+                    }
+                }
+
+                // constrain
+                builder.if_eq(is_zero, zero).then(|builder| {
+                    for (cvd_i, pub_cvd_i) in committed_value_digest
+                        .into_iter()
+                        .zip(public_values.committed_value_digest)
+                    {
+                        for (cvd_ij, pub_cvd_ij) in cvd_i.0.into_iter().zip(pub_cvd_i) {
+                            builder.assert_felt_eq(cvd_ij, pub_cvd_ij);
+                        }
+                    }
+                });
+
+                // update cvd
+                for (cvd_i, pub_cvd_i) in committed_value_digest
+                    .into_iter()
+                    .zip(public_values.committed_value_digest)
+                {
+                    for (cvd_ij, pub_cvd_ij) in cvd_i.0.into_iter().zip(pub_cvd_i) {
+                        builder.assign(cvd_ij, pub_cvd_ij);
+                    }
+                }
+
+                // first compute is_zero for dpd
+                // let is_zero: Var<_> = builder.eval(one);
+                // for dpd_i in deferred_proofs_digest {
+                //     let d = felt2var(builder, dpd_i);
+                //     // additionally gate on is_zero == 1 so we don't do multiple assignments
+                //     builder.if_eq(is_zero, one).then(|builder| {
+                //         builder.if_ne(d, zero).then(|builder| {
+                //             builder.assign(is_zero, zero);
+                //         })
+                //     });
+                // }
+
+                // // constrain
+                // builder.if_eq(is_zero, zero).then(|builder| {
+                //     for (dpd_i, pub_dpd_i) in deferred_proofs_digest
+                //         .into_iter()
+                //         .zip(public_values.deferred_proofs_digest)
+                //     {
+                //         builder.assert_felt_eq(dpd_i, pub_dpd_i);
+                //     }
+                // });
+
+                // // update dpd
+                // for (dpd_i, pub_dpd_i) in deferred_proofs_digest
+                //     .into_iter()
+                //     .zip(public_values.deferred_proofs_digest)
+                // {
+                //     builder.assign(dpd_i, pub_dpd_i);
+                // }
+            }
 
             /*
             update current status
@@ -363,6 +462,8 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
 
         recursion_public_values.cumulative_sum = cumulative_sum;
         recursion_public_values.flag_complete = var2felt(builder, flag_complete);
+        recursion_public_values.committed_value_digest = committed_value_digest;
+        // recursion_public_values.deferred_proofs_digest = deferred_proofs_digest;
 
         commit_public_values(builder, recursion_public_values);
     }
