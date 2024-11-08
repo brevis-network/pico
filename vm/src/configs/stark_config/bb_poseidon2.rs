@@ -94,12 +94,12 @@ impl BabyBearPoseidon2 {
         let dft = Dft {};
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 50,
+            Err(_) => 33,
         };
         info!("NUM_QUERIES: {}", num_queries);
 
         let fri_config = FriConfig {
-            log_blowup: 2,
+            log_blowup: 3,
             num_queries,
             proof_of_work_bits: 16,
             mmcs: challenge_mmcs,
