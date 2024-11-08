@@ -146,8 +146,9 @@ impl<F: Field> SLLChip<F> {
             cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
         }
 
-        blu.add_u8_range_checks(event.chunk, event.channel, shift_result);
-        blu.add_u8_range_checks(event.chunk, event.channel, shift_result_carry);
+        let chunk = event.chunk;
+        blu.add_u8_range_checks(shift_result, Some(chunk));
+        blu.add_u8_range_checks(shift_result_carry, Some(chunk));
 
         // Sanity check.
         for i in num_bytes_to_shift..WORD_SIZE {

@@ -147,7 +147,7 @@ impl<F: Field> AddSubChip<F> {
         let operand_2 = event.c;
 
         cols.add_operation
-            .populate(blu, event.chunk, event.channel, operand_1, operand_2);
+            .populate(blu, event.chunk, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
     }

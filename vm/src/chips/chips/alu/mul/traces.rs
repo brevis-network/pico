@@ -150,16 +150,9 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
 
                         // Range check.
                         {
-                            record.add_u16_range_checks(
-                                event.chunk,
-                                event.channel,
-                                &carry.map(|x| x as u16),
-                            );
-                            record.add_u8_range_checks(
-                                event.chunk,
-                                event.channel,
-                                product.map(|x| x as u8),
-                            );
+                            let chunk = event.chunk;
+                            record.add_u16_range_checks(&carry.map(|x| x as u16), Some(chunk));
+                            record.add_u8_range_checks(product.map(|x| x as u8), Some(chunk));
                         }
 
                         row

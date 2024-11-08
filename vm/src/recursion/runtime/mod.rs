@@ -298,10 +298,12 @@ where
         let diff_16bit_limb_event = RangeLookupEvent::new(
             RangeCheckOpcode::U16,
             record.diff_16bit_limb.as_canonical_u32() as u16,
+            None,
         );
         let diff_12bit_limb_event = RangeLookupEvent::new(
             RangeCheckOpcode::U12,
             record.diff_12bit_limb.as_canonical_u32() as u16,
+            None,
         );
         self.record
             .add_range_check_events(&[diff_16bit_limb_event, diff_12bit_limb_event]);
@@ -313,10 +315,16 @@ where
     /// themselves.
     fn track_addr_range_check(&mut self, addr: F, next_addr: F, subtract_one: bool) {
         let (diff_16, diff_12) = compute_addr_diff(next_addr, addr, subtract_one);
-        let diff_16bit_limb_event =
-            RangeLookupEvent::new(RangeCheckOpcode::U16, diff_16.as_canonical_u32() as u16);
-        let diff_8bit_limb_event =
-            RangeLookupEvent::new(RangeCheckOpcode::U12, diff_12.as_canonical_u32() as u16);
+        let diff_16bit_limb_event = RangeLookupEvent::new(
+            RangeCheckOpcode::U16,
+            diff_16.as_canonical_u32() as u16,
+            None,
+        );
+        let diff_8bit_limb_event = RangeLookupEvent::new(
+            RangeCheckOpcode::U12,
+            diff_12.as_canonical_u32() as u16,
+            None,
+        );
         self.record
             .add_range_check_events(&[diff_16bit_limb_event, diff_8bit_limb_event]);
     }

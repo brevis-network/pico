@@ -198,7 +198,7 @@ where
         ];
 
         for long_word in long_words.iter() {
-            builder.slice_range_check_u8(long_word, local.chunk, local.channel, local.is_real);
+            builder.slice_range_check_u8(long_word, local.chunk, local.is_real);
         }
 
         // Check that the operation flags are boolean.

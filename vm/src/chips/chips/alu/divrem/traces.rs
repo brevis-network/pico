@@ -320,9 +320,10 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
 
                 // Range check.
                 {
-                    output.add_u8_range_checks(event.chunk, event.channel, quotient.to_le_bytes());
-                    output.add_u8_range_checks(event.chunk, event.channel, remainder.to_le_bytes());
-                    output.add_u8_range_checks(event.chunk, event.channel, c_times_quotient);
+                    let chunk = event.chunk;
+                    output.add_u8_range_checks(quotient.to_le_bytes(), Some(chunk));
+                    output.add_u8_range_checks(remainder.to_le_bytes(), Some(chunk));
+                    output.add_u8_range_checks(c_times_quotient, Some(chunk));
                 }
             }
 

@@ -25,8 +25,8 @@ pub fn get_heap_size_range_check_events<F: PrimeField32>(
     let diff_12bit_limb = (heap_size >> 16) & 0xfff;
 
     (
-        RangeLookupEvent::new(RangeCheckOpcode::U16, diff_16bit_limb as u16),
-        RangeLookupEvent::new(RangeCheckOpcode::U12, diff_12bit_limb as u16),
+        RangeLookupEvent::new(RangeCheckOpcode::U16, diff_16bit_limb as u16, None),
+        RangeLookupEvent::new(RangeCheckOpcode::U12, diff_12bit_limb as u16, None),
     )
 }
 

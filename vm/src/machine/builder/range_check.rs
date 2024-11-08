@@ -13,12 +13,16 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
     fn slice_range_check_u8(
         &mut self,
         input: &[impl Into<Self::Expr> + Clone],
-        _chunk: impl Into<Self::Expr> + Clone,
-        _channel: impl Into<Self::Expr> + Clone,
+        chunk: impl Into<Self::Expr> + Clone,
         mult: impl Into<Self::Expr> + Clone,
     ) {
         input.iter().for_each(|limb| {
-            self.looking_rangecheck(RangeCheckOpcode::U8, limb.clone(), mult.clone());
+            self.looking_rangecheck(
+                RangeCheckOpcode::U8,
+                limb.clone(),
+                chunk.clone(),
+                mult.clone(),
+            );
         });
     }
 
@@ -26,12 +30,11 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
     fn slice_range_check_u16(
         &mut self,
         input: &[impl Into<Self::Expr> + Copy],
-        _chunk: impl Into<Self::Expr> + Clone,
-        _channel: impl Into<Self::Expr> + Clone,
+        chunk: impl Into<Self::Expr> + Clone,
         mult: impl Into<Self::Expr> + Clone,
     ) {
         input.iter().for_each(|limb| {
-            self.looking_rangecheck(RangeCheckOpcode::U16, *limb, mult.clone());
+            self.looking_rangecheck(RangeCheckOpcode::U16, *limb, chunk.clone(), mult.clone());
         });
     }
 
@@ -46,8 +49,7 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
         value: impl Into<Self::Expr>,
         limb_16: impl Into<Self::Expr> + Clone,
         limb_8: impl Into<Self::Expr> + Clone,
-        _chunk: impl Into<Self::Expr> + Clone,
-        _channel: impl Into<Self::Expr> + Clone,
+        chunk: impl Into<Self::Expr> + Clone,
         do_check: impl Into<Self::Expr> + Clone,
     ) {
         // Verify that value = limb_16 + limb_8 * 2^16.
@@ -58,8 +60,18 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
         );
 
         // Send the range checks for the limbs.
-        self.looking_rangecheck(RangeCheckOpcode::U16, limb_16, do_check.clone());
-        self.looking_rangecheck(RangeCheckOpcode::U8, limb_8, do_check.clone());
+        self.looking_rangecheck(
+            RangeCheckOpcode::U16,
+            limb_16,
+            chunk.clone(),
+            do_check.clone(),
+        );
+        self.looking_rangecheck(
+            RangeCheckOpcode::U8,
+            limb_8,
+            chunk.clone(),
+            do_check.clone(),
+        );
     }
 
     /// Looking a range check operation to be processed.

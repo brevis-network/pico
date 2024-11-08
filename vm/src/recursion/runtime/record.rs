@@ -110,7 +110,10 @@ impl<F: Default> RangeRecordBehavior for RecursionRecord<F> {
         *self.range_check_events.entry(event).or_insert(0) += 1;
     }
 
-    fn range_lookup_events(&self) -> impl Iterator<Item = (RangeLookupEvent, usize)> {
-        self.range_check_events.iter().map(|(k, v)| (*k, *v))
+    fn range_lookup_events(
+        &self,
+        _chunk: Option<u32>,
+    ) -> Box<dyn Iterator<Item = (RangeLookupEvent, usize)> + '_> {
+        Box::new(self.range_check_events.iter().map(|(k, v)| (*k, *v)))
     }
 }

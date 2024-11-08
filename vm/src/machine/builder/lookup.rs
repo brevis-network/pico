@@ -207,10 +207,15 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         &mut self,
         opcode: RangeCheckOpcode,
         value: impl Into<Self::Expr>,
+        chunk: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.looking(SymbolicLookup::new(
-            vec![Self::Expr::from_canonical_u8(opcode as u8), value.into()],
+            vec![
+                Self::Expr::from_canonical_u8(opcode as u8),
+                value.into(),
+                chunk.into(),
+            ],
             multiplicity.into(),
             LookupType::RangeUnified,
         ))
@@ -221,10 +226,15 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         &mut self,
         opcode: RangeCheckOpcode,
         value: impl Into<Self::Expr>,
+        chunk: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.looked(SymbolicLookup::new(
-            vec![Self::Expr::from_canonical_u8(opcode as u8), value.into()],
+            vec![
+                Self::Expr::from_canonical_u8(opcode as u8),
+                value.into(),
+                chunk.into(),
+            ],
             multiplicity.into(),
             LookupType::RangeUnified,
         ))

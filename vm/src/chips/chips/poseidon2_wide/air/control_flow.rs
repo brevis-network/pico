@@ -245,11 +245,13 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
             builder.looking_rangecheck(
                 RangeCheckOpcode::U16,
                 local_hash_workspace.hash_num,
+                AB::Expr::zero(),
                 send_range_check,
             );
             builder.looking_rangecheck(
                 RangeCheckOpcode::U12,
                 local_hash_workspace.absorb_num,
+                AB::Expr::zero(),
                 send_range_check,
             );
         }
@@ -345,6 +347,7 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
             builder.looking_rangecheck(
                 RangeCheckOpcode::U16,
                 local_syscall_params.absorb().input_len,
+                AB::Expr::zero(),
                 send_range_check,
             );
 
@@ -352,6 +355,7 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
             builder.looking_rangecheck(
                 RangeCheckOpcode::U16,
                 local_hash_workspace.num_remaining_rows,
+                AB::Expr::zero(),
                 send_range_check,
             );
         }

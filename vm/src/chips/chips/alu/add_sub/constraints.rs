@@ -35,7 +35,6 @@ where
             local.operand_2,
             local.add_operation,
             local.chunk,
-            local.channel,
             local.is_add + local.is_sub,
         );
 

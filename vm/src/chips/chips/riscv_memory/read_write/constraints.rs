@@ -117,7 +117,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         builder.slice_range_check_u8(
             &local.addr_word.0,
             local.chunk,
-            local.channel,
             is_memory_instruction.clone(),
         );
 
@@ -165,7 +164,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // value into the memory columns.
         builder.eval_memory_access(
             local.chunk,
-            local.channel,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::Memory as u32),
             local.addr_aligned,
             &local.memory_access,

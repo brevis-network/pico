@@ -24,7 +24,6 @@ impl<F: Field> CpuChip<F> {
         // If they are not immediates, read `b` and `c` from memory.
         builder.eval_memory_access(
             local.chunk,
-            local.channel,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
             local.instruction.op_b[0],
             &local.op_b_access,
@@ -33,7 +32,6 @@ impl<F: Field> CpuChip<F> {
 
         builder.eval_memory_access(
             local.chunk,
-            local.channel,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
             local.instruction.op_c[0],
             &local.op_c_access,
@@ -49,7 +47,6 @@ impl<F: Field> CpuChip<F> {
         // we are performing a branch or a store.
         builder.eval_memory_access(
             local.chunk,
-            local.channel,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
             local.instruction.op_a[0],
             &local.op_a_access,
@@ -61,7 +58,6 @@ impl<F: Field> CpuChip<F> {
         builder.slice_range_check_u8(
             &local.op_a_access.access.value.0,
             local.chunk,
-            local.channel,
             local.is_real,
         );
 

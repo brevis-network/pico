@@ -121,6 +121,8 @@ impl<F: PrimeField32> CpuChip<F> {
         cols: &mut CpuCols<F>,
         blu_events: &mut impl RangeRecordBehavior,
     ) -> HashMap<Opcode, Vec<AluEvent>> {
+        let chunk = event.chunk;
+
         let mut new_alu_events = HashMap::new();
 
         // Populate chunk and clk columns.
@@ -146,13 +148,13 @@ impl<F: PrimeField32> CpuChip<F> {
 
         // Populate memory accesses for a, b, and c.
         if let Some(record) = event.a_record {
-            cols.op_a_access.populate(event.channel, record, blu_events);
+            cols.op_a_access.populate(record, blu_events);
         }
         if let Some(MemoryRecordEnum::Read(record)) = event.b_record {
-            cols.op_b_access.populate(event.channel, record, blu_events);
+            cols.op_b_access.populate(record, blu_events);
         }
         if let Some(MemoryRecordEnum::Read(record)) = event.c_record {
-            cols.op_c_access.populate(event.channel, record, blu_events);
+            cols.op_c_access.populate(record, blu_events);
         }
 
         // Populate range checks for a.
@@ -164,10 +166,26 @@ impl<F: PrimeField32> CpuChip<F> {
             .iter()
             .map(|x| x.as_canonical_u32())
             .collect::<Vec<_>>();
-        blu_events.add_range_lookup_event(RangeLookupEvent::new(U8, a_bytes[0] as u16));
-        blu_events.add_range_lookup_event(RangeLookupEvent::new(U8, a_bytes[1] as u16));
-        blu_events.add_range_lookup_event(RangeLookupEvent::new(U8, a_bytes[2] as u16));
-        blu_events.add_range_lookup_event(RangeLookupEvent::new(U8, a_bytes[3] as u16));
+        blu_events.add_range_lookup_event(RangeLookupEvent::new(
+            U8,
+            a_bytes[0] as u16,
+            Some(chunk),
+        ));
+        blu_events.add_range_lookup_event(RangeLookupEvent::new(
+            U8,
+            a_bytes[1] as u16,
+            Some(chunk),
+        ));
+        blu_events.add_range_lookup_event(RangeLookupEvent::new(
+            U8,
+            a_bytes[2] as u16,
+            Some(chunk),
+        ));
+        blu_events.add_range_lookup_event(RangeLookupEvent::new(
+            U8,
+            a_bytes[3] as u16,
+            Some(chunk),
+        ));
 
         self.populate_branch(cols, event, &mut new_alu_events, nonce_lookup);
         self.populate_jump(cols, event, &mut new_alu_events, nonce_lookup);

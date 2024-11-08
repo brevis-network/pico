@@ -132,7 +132,12 @@ pub trait RecursionMemoryBuilder<F: Field>: ChipBuilder<F> {
         );
 
         // Send the range checks for the limbs.
-        self.looking_rangecheck(RangeCheckOpcode::U16, limb_16, is_real.clone());
-        self.looking_rangecheck(RangeCheckOpcode::U12, limb_12, is_real);
+        self.looking_rangecheck(
+            RangeCheckOpcode::U16,
+            limb_16,
+            Self::Expr::zero(),
+            is_real.clone(),
+        );
+        self.looking_rangecheck(RangeCheckOpcode::U12, limb_12, Self::Expr::zero(), is_real);
     }
 }

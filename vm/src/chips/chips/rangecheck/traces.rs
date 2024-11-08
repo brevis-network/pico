@@ -43,13 +43,17 @@ where
             NUM_RANGECHECK_MULT_COLS,
         );
 
-        for (lookup, mult) in input.range_lookup_events() {
-            let row = lookup.value as usize;
-            let index = lookup.opcode as usize;
+        let chunk = input.chunk_index() as u32;
+        input
+            .range_lookup_events(Some(chunk))
+            .for_each(|(event, multi)| {
+                let row = event.value as usize;
+                let index = event.opcode as usize;
 
-            let cols: &mut RangeCheckMultCols<F> = trace.row_mut(row).borrow_mut();
-            cols.multiplicities[index] += F::from_canonical_usize(mult);
-        }
+                let cols: &mut RangeCheckMultCols<F> = trace.row_mut(row).borrow_mut();
+                cols.multiplicities[index] += F::from_canonical_usize(multi);
+                cols.chunk = F::from_canonical_u32(chunk);
+            });
 
         trace
     }

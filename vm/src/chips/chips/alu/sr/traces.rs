@@ -220,10 +220,12 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             for i in 0..WORD_SIZE {
                 debug_assert_eq!(cols.a[i], cols.bit_shift_result[i].clone());
             }
-            range.add_u8_range_checks(event.chunk, event.channel, byte_shift_result);
-            range.add_u8_range_checks(event.chunk, event.channel, bit_shift_result);
-            range.add_u8_range_checks(event.chunk, event.channel, shr_carry_output_carry);
-            range.add_u8_range_checks(event.chunk, event.channel, shr_carry_output_shifted_byte);
+
+            let chunk = event.chunk;
+            range.add_u8_range_checks(byte_shift_result, Some(chunk));
+            range.add_u8_range_checks(bit_shift_result, Some(chunk));
+            range.add_u8_range_checks(shr_carry_output_carry, Some(chunk));
+            range.add_u8_range_checks(shr_carry_output_shifted_byte, Some(chunk));
         }
     }
 }

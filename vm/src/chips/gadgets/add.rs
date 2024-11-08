@@ -25,7 +25,6 @@ impl<F: Field> AddGadget<F> {
         &mut self,
         record: &mut impl RangeRecordBehavior,
         chunk: u32,
-        channel: u8,
         a_u32: u32,
         b_u32: u32,
     ) -> u32 {
@@ -56,9 +55,9 @@ impl<F: Field> AddGadget<F> {
 
         // Range check
         {
-            record.add_u8_range_checks(chunk, channel, a);
-            record.add_u8_range_checks(chunk, channel, b);
-            record.add_u8_range_checks(chunk, channel, expected.to_le_bytes());
+            record.add_u8_range_checks(a, Some(chunk));
+            record.add_u8_range_checks(b, Some(chunk));
+            record.add_u8_range_checks(expected.to_le_bytes(), Some(chunk));
         }
         expected
     }
@@ -69,7 +68,6 @@ impl<F: Field> AddGadget<F> {
         b: Word<AB::Var>,
         cols: AddGadget<AB::Var>,
         chunk: AB::Var,
-        channel: impl Into<AB::Expr> + Clone,
         is_real: AB::Expr,
     ) {
         let one = AB::Expr::one();
@@ -106,9 +104,9 @@ impl<F: Field> AddGadget<F> {
 
         // Range check each byte.
         {
-            builder.slice_range_check_u8(&a.0, chunk, channel.clone(), is_real.clone());
-            builder.slice_range_check_u8(&b.0, chunk, channel.clone(), is_real.clone());
-            builder.slice_range_check_u8(&cols.value.0, chunk, channel.clone(), is_real);
+            builder.slice_range_check_u8(&a.0, chunk, is_real.clone());
+            builder.slice_range_check_u8(&b.0, chunk, is_real.clone());
+            builder.slice_range_check_u8(&cols.value.0, chunk, is_real);
         }
     }
 }

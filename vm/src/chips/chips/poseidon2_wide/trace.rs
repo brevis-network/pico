@@ -270,6 +270,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
                 output.add_range_check_events(&[RangeLookupEvent::new(
                     RangeCheckOpcode::U16,
                     absorb_event.input_len.as_canonical_u32() as u16,
+                    None,
                 )]);
             }
 
@@ -294,11 +295,13 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
                 output.add_range_check_events(&[RangeLookupEvent::new(
                     RangeCheckOpcode::U16,
                     absorb_event.hash_num.as_canonical_u32() as u16,
+                    None,
                 )]);
                 absorb_workspace.absorb_num = absorb_event.absorb_num;
                 output.add_range_check_events(&[RangeLookupEvent::new(
                     RangeCheckOpcode::U12,
                     absorb_event.absorb_num.as_canonical_u32() as u16,
+                    None,
                 )]);
 
                 let num_remaining_rows = num_absorb_rows - 1 - iter_num;
@@ -306,6 +309,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
                 output.add_range_check_events(&[RangeLookupEvent::new(
                     RangeCheckOpcode::U16,
                     num_remaining_rows as u16,
+                    None,
                 )]);
 
                 // Calculate last_row_num_consumed.

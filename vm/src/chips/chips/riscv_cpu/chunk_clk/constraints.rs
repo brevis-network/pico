@@ -27,7 +27,12 @@ impl<F: Field> CpuChip<F> {
             .assert_eq(local.chunk, next.chunk);
 
         // Verify that the chunk value is within 16 bits.
-        builder.looking_rangecheck(RangeCheckOpcode::U16, local.chunk, local.is_real);
+        builder.looking_rangecheck(
+            RangeCheckOpcode::U16,
+            local.chunk,
+            local.chunk,
+            local.is_real,
+        );
 
         // Verify that the first row has a clk value of 0.
         builder.when_first_row().assert_zero(local.clk);
@@ -52,7 +57,6 @@ impl<F: Field> CpuChip<F> {
             local.clk_16bit_limb,
             local.clk_8bit_limb,
             local.chunk,
-            local.channel,
             local.is_real,
         );
     }

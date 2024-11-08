@@ -141,8 +141,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // Populate memory accesses for reading from memory.
         assert_eq!(event.memory_record.is_some(), event.memory.is_some());
         if let Some(record) = event.memory_record {
-            cols.memory_access
-                .populate(event.channel, record, range_events);
+            cols.memory_access.populate(record, range_events);
         }
 
         cols.instruction.populate(event);
@@ -173,6 +172,8 @@ impl<F: Field> MemoryReadWriteChip<F> {
             ),
             "Must be a memory opcode"
         );
+
+        let chunk = event.chunk;
 
         // Populate addr_word and addr_aligned columns.
         let memory_addr = event.b.wrapping_add(event.c);
@@ -305,22 +306,19 @@ impl<F: Field> MemoryReadWriteChip<F> {
             range_events.add_range_lookup_event(RangeLookupEvent::new(
                 RangeCheckOpcode::U8,
                 byte_pair[0] as u16,
+                Some(chunk),
             ));
             range_events.add_range_lookup_event(RangeLookupEvent::new(
                 RangeCheckOpcode::U8,
                 byte_pair[1] as u16,
+                Some(chunk),
             ));
         }
     }
 }
 
 impl<F: Field> MemoryWriteCols<F> {
-    pub fn populate(
-        &mut self,
-        channel: u8,
-        record: MemoryWriteRecord,
-        output: &mut impl RangeRecordBehavior,
-    ) {
+    pub fn populate(&mut self, record: MemoryWriteRecord, output: &mut impl RangeRecordBehavior) {
         let current_record = MemoryRecord {
             value: record.value,
             chunk: record.chunk,
@@ -333,17 +331,12 @@ impl<F: Field> MemoryWriteCols<F> {
         };
         self.prev_value = prev_record.value.into();
         self.access
-            .populate_access(channel, current_record, prev_record, output);
+            .populate_access(current_record, prev_record, output);
     }
 }
 
 impl<F: Field> MemoryReadCols<F> {
-    pub fn populate(
-        &mut self,
-        channel: u8,
-        record: MemoryReadRecord,
-        output: &mut impl RangeRecordBehavior,
-    ) {
+    pub fn populate(&mut self, record: MemoryReadRecord, output: &mut impl RangeRecordBehavior) {
         let current_record = MemoryRecord {
             value: record.value,
             chunk: record.chunk,
@@ -355,28 +348,20 @@ impl<F: Field> MemoryReadCols<F> {
             timestamp: record.prev_timestamp,
         };
         self.access
-            .populate_access(channel, current_record, prev_record, output);
+            .populate_access(current_record, prev_record, output);
     }
 }
 
 impl<F: Field> MemoryReadWriteCols<F> {
-    pub fn populate(
-        &mut self,
-        channel: u8,
-        record: MemoryRecordEnum,
-        output: &mut impl RangeRecordBehavior,
-    ) {
+    pub fn populate(&mut self, record: MemoryRecordEnum, output: &mut impl RangeRecordBehavior) {
         match record {
-            MemoryRecordEnum::Read(read_record) => self.populate_read(channel, read_record, output),
-            MemoryRecordEnum::Write(write_record) => {
-                self.populate_write(channel, write_record, output)
-            }
+            MemoryRecordEnum::Read(read_record) => self.populate_read(read_record, output),
+            MemoryRecordEnum::Write(write_record) => self.populate_write(write_record, output),
         }
     }
 
     pub fn populate_write(
         &mut self,
-        channel: u8,
         record: MemoryWriteRecord,
         output: &mut impl RangeRecordBehavior,
     ) {
@@ -392,12 +377,11 @@ impl<F: Field> MemoryReadWriteCols<F> {
         };
         self.prev_value = prev_record.value.into();
         self.access
-            .populate_access(channel, current_record, prev_record, output);
+            .populate_access(current_record, prev_record, output);
     }
 
     pub fn populate_read(
         &mut self,
-        channel: u8,
         record: MemoryReadRecord,
         output: &mut impl RangeRecordBehavior,
     ) {
@@ -413,14 +397,13 @@ impl<F: Field> MemoryReadWriteCols<F> {
         };
         self.prev_value = prev_record.value.into();
         self.access
-            .populate_access(channel, current_record, prev_record, output);
+            .populate_access(current_record, prev_record, output);
     }
 }
 
 impl<F: Field> MemoryAccessCols<F> {
     pub(crate) fn populate_access(
         &mut self,
-        channel: u8,
         current_record: MemoryRecord,
         prev_record: MemoryRecord,
         output: &mut impl RangeRecordBehavior,
@@ -454,8 +437,8 @@ impl<F: Field> MemoryAccessCols<F> {
         let chunk = current_record.chunk;
 
         // Add a range table lookup with the U16 op.
-        output.add_u16_range_check(chunk, channel, diff_16bit_limb);
+        output.add_u16_range_check(diff_16bit_limb, Some(chunk));
         // Add a range table lookup with the U8 op.
-        output.add_u8_range_check(diff_8bit_limb as u8);
+        output.add_u8_range_check(diff_8bit_limb as u8, Some(chunk));
     }
 }

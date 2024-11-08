@@ -125,18 +125,8 @@ where
         builder.assert_bool(local.is_real);
 
         // range check
-        builder.slice_range_check_u8(
-            &local.shift_result,
-            local.chunk,
-            local.channel,
-            local.is_real,
-        );
-        builder.slice_range_check_u8(
-            &local.shift_result_carry,
-            local.chunk,
-            local.channel,
-            local.is_real,
-        );
+        builder.slice_range_check_u8(&local.shift_result, local.chunk, local.is_real);
+        builder.slice_range_check_u8(&local.shift_result_carry, local.chunk, local.is_real);
 
         builder.looked_alu(
             F::from_canonical_u32(Opcode::SLL as u32),

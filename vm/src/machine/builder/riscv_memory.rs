@@ -18,7 +18,6 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
     fn eval_memory_access<E: Into<Self::Expr> + Clone>(
         &mut self,
         chunk: impl Into<Self::Expr>,
-        channel: impl Into<Self::Expr>,
         clk: impl Into<Self::Expr>,
         addr: impl Into<Self::Expr>,
         memory_access: &impl MemoryCols<E>,
@@ -26,20 +25,13 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
     ) {
         let do_check: Self::Expr = do_check.into();
         let chunk: Self::Expr = chunk.into();
-        let channel: Self::Expr = channel.into();
         let clk: Self::Expr = clk.into();
         let mem_access = memory_access.access();
 
         self.assert_bool(do_check.clone());
 
         // Verify that the current memory access time is greater than the previous's.
-        self.eval_memory_access_timestamp(
-            mem_access,
-            do_check.clone(),
-            chunk.clone(),
-            channel,
-            clk.clone(),
-        );
+        self.eval_memory_access_timestamp(mem_access, do_check.clone(), chunk.clone(), clk.clone());
 
         // Add to the memory argument.
         let addr = addr.into();
@@ -82,7 +74,6 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
         mem_access: &MemoryAccessCols<impl Into<Self::Expr> + Clone>,
         do_check: impl Into<Self::Expr>,
         chunk: impl Into<Self::Expr> + Clone,
-        channel: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr>,
     ) {
         let do_check: Self::Expr = do_check.into();
@@ -123,7 +114,6 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
             mem_access.diff_16bit_limb.clone(),
             mem_access.diff_8bit_limb.clone(),
             chunk.clone(),
-            channel.clone(),
             do_check,
         );
     }
