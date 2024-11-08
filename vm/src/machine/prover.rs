@@ -22,6 +22,7 @@ use p3_field::AbstractField;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
+use rayon::ThreadPoolBuilder;
 use std::{cmp::Reverse, time::Instant};
 use tracing::{debug_span, instrument, Span};
 
@@ -157,21 +158,22 @@ where
     ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
         let begin = Instant::now();
 
-        let parent_span = Span::current();
-        let mut chips_and_main = chips
-            .par_iter()
-            .filter_map(|chip| {
-                if !chip.is_active(record) {
-                    debug_span!(parent: &parent_span, "chip_inactive", chip = chip.name(), tag = "tag-chip");
-                    return None;
-                }
+        let generate_main_closure = || {
+            let parent_span = Span::current();
+            let mut chips_and_main = chips
+                .par_iter()
+                .filter_map(|chip| {
+                    if !chip.is_active(record) {
+                        debug_span!(parent: &parent_span, "chip_inactive", chip = chip.name(), tag = "tag-chip");
+                        return None;
+                    }
 
-                let begin = Instant::now();
-                let trace =
-                    debug_span!(parent: &parent_span, "chip_generate_main", chip = chip.name(), tag = "tag-chip")
-                        .in_scope(|| chip.generate_main(record, &mut C::Record::default()));
-                let elapsed_time = begin.elapsed();
-                debug!(
+                    let begin = Instant::now();
+                    let trace =
+                        debug_span!(parent: &parent_span, "chip_generate_main", chip = chip.name(), tag = "tag-chip")
+                            .in_scope(|| chip.generate_main(record, &mut C::Record::default()));
+                    let elapsed_time = begin.elapsed();
+                    debug!(
                     "generated main: {:<17} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
                     chip.name(),
                     trace.width(),
@@ -179,24 +181,33 @@ where
                     trace.values.len(),
                     elapsed_time,
                 );
-                info!(
+                    info!(
                     "PERF-step=generate_main-chunk={}-chip={}-cpu_time={}",
                     record.chunk_index(),
                     chip.name(),
                     elapsed_time.as_millis(),
                 );
 
-                Some((chip.name(), trace))
-            })
-            .collect::<Vec<_>>();
-        chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
+                    Some((chip.name(), trace))
+                })
+                .collect::<Vec<_>>();
+            chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
+            chips_and_main
+        };
+        // Execute with or without thread pool based on the feature
+        let result = if cfg!(feature = "single-threaded") {
+            let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+            pool.install(generate_main_closure)
+        } else {
+            generate_main_closure()
+        };
         let elapsed_time = begin.elapsed();
         info!(
             "PERF-step=generate_main-chunk={}-user_time={}",
             record.chunk_index(),
             elapsed_time.as_millis(),
         );
-        chips_and_main
+        result
     }
 
     #[instrument(
@@ -274,34 +285,47 @@ where
             })
             .collect::<Vec<_>>();
 
-        let parent_span = Span::current();
-        let (permutation_traces, cumulative_sums): (Vec<_>, Vec<_>) = ordered_chips
-            .par_iter()
-            .zip(main_trace_commitments.main_traces.par_iter())
-            .zip(preprocessed_traces.into_par_iter())
-            .map(|((chip, main_trace), preprocessed_trace)| {
-                let begin = Instant::now();
-                let result = debug_span!(parent: &parent_span, "chip_generate_permutation", chip = chip.name(), tag = "tag-chip").in_scope(|| {
-                    let permutation_trace =
-                        chip.generate_permutation(preprocessed_trace, main_trace, perm_challenges);
-                    let cumulative_sum = permutation_trace
-                        .row_slice(main_trace.height() - 1)
-                        .last()
-                        .copied()
-                        .unwrap();
-                    (permutation_trace, cumulative_sum)
-                });
+        let main_traces = &main_trace_commitments.main_traces;
 
-                info!(
+        let parent_span = Span::current();
+
+        let generate_permutation_closure = || {
+            ordered_chips
+                .par_iter()
+                .zip(main_traces.par_iter())
+                .zip(preprocessed_traces.into_par_iter())
+                .map(|((chip, main_trace), preprocessed_trace)| {
+                    let begin = Instant::now();
+                    let result = debug_span!(parent: &parent_span, "chip_generate_permutation", chip = chip.name(), tag = "tag-chip").in_scope(|| {
+                        let permutation_trace =
+                            chip.generate_permutation(preprocessed_trace, main_trace, perm_challenges);
+                        let cumulative_sum = permutation_trace
+                            .row_slice(main_trace.height() - 1)
+                            .last()
+                            .copied()
+                            .unwrap();
+                        (permutation_trace, cumulative_sum)
+                    });
+
+                    info!(
                     "PERF-step=generate_permutation-chunk={}-chip={}-cpu_time={}",
                     chunk_index,
                     chip.name(),
                     begin.elapsed().as_millis()
                 );
 
-                result
-            })
-            .unzip();
+                    result
+                })
+                .unzip::<_, _, Vec<_>, Vec<_>>()
+        };
+        // Execute the closure with or without a thread pool based on the feature
+        let (permutation_traces, cumulative_sums): (Vec<_>, Vec<_>) =
+            if cfg!(feature = "single-threaded") {
+                let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+                pool.install(generate_permutation_closure)
+            } else {
+                generate_permutation_closure()
+            };
 
         info!(
             "PERF-step=generate_permutation-chunk={}-user_time={}",
@@ -431,7 +455,6 @@ where
                             .iter()
                             .enumerate()
                             .map(|(i, quotient_domain)| {
-
                                 let begin_compute_quotient = Instant::now();
 
                                 let pre_trace_on_quotient_domains = pk
@@ -443,7 +466,7 @@ where
                                             *index,
                                             *quotient_domain,
                                         )
-                                        .to_row_major_matrix()
+                                            .to_row_major_matrix()
                                     })
                                     .unwrap_or_else(|| {
                                         RowMajorMatrix::new_col(vec![

@@ -15,6 +15,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
+use rayon::ThreadPoolBuilder;
 use std::any::type_name;
 use tracing::{debug_span, Span};
 
@@ -148,7 +149,7 @@ where
     }
     let ext_degree = SC::Challenge::D;
 
-    let quotient_values = debug_span!(parent: Span::current(), "chip_compute_quotient_values", chip = chip.name(), quotient_size = quotient_size, tag = "tag-chip").in_scope(|| {
+    let compute_quotient_closure = || {
         (0..quotient_size)
             .into_par_iter()
             .step_by(PackedVal::<SC>::WIDTH)
@@ -156,16 +157,20 @@ where
                 // let wrap = |i| i % quotient_size;
                 let i_range = i_start..i_start + PackedVal::<SC>::WIDTH;
 
-                let is_first_row = *PackedVal::<SC>::from_slice(&sels.is_first_row[i_range.clone()]);
+                let is_first_row =
+                    *PackedVal::<SC>::from_slice(&sels.is_first_row[i_range.clone()]);
                 let is_last_row = *PackedVal::<SC>::from_slice(&sels.is_last_row[i_range.clone()]);
-                let is_transition = *PackedVal::<SC>::from_slice(&sels.is_transition[i_range.clone()]);
-                let inv_zerofier = *PackedVal::<SC>::from_slice(&sels.inv_zeroifier[i_range.clone()]);
+                let is_transition =
+                    *PackedVal::<SC>::from_slice(&sels.is_transition[i_range.clone()]);
+                let inv_zerofier =
+                    *PackedVal::<SC>::from_slice(&sels.inv_zeroifier[i_range.clone()]);
 
                 let preprocessed_trace_on_quotient_domain = RowMajorMatrix::new(
                     iter::empty()
                         .chain(preprocessed_on_quotient_domain.vertically_packed_row(i_start))
                         .chain(
-                            preprocessed_on_quotient_domain.vertically_packed_row(i_start + next_step),
+                            preprocessed_on_quotient_domain
+                                .vertically_packed_row(i_start + next_step),
                         )
                         .collect_vec(),
                     preprocessed_width,
@@ -174,7 +179,10 @@ where
                 let main_on_quotient_domain = RowMajorMatrix::new(
                     iter::empty()
                         .chain(main_trace_on_quotient_domain.vertically_packed_row(i_start))
-                        .chain(main_trace_on_quotient_domain.vertically_packed_row(i_start + next_step))
+                        .chain(
+                            main_trace_on_quotient_domain
+                                .vertically_packed_row(i_start + next_step),
+                        )
                         .collect_vec(),
                     main_width,
                 );
@@ -232,14 +240,27 @@ where
                 let quotient = folder.accumulator * inv_zerofier;
 
                 // todo: need to check this in detail
-                (0..core::cmp::min(quotient_size, PackedVal::<SC>::WIDTH)).map(move |idx_in_packing| {
-                    let quotient_value = (0..<SC::Challenge as AbstractExtensionField<SC::Val>>::D)
-                        .map(|coeff_idx| quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing])
-                        .collect::<Vec<_>>();
-                    SC::Challenge::from_base_slice(&quotient_value)
-                })
+                (0..core::cmp::min(quotient_size, PackedVal::<SC>::WIDTH)).map(
+                    move |idx_in_packing| {
+                        let quotient_value =
+                            (0..<SC::Challenge as AbstractExtensionField<SC::Val>>::D)
+                                .map(|coeff_idx| {
+                                    quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing]
+                                })
+                                .collect::<Vec<_>>();
+                        SC::Challenge::from_base_slice(&quotient_value)
+                    },
+                )
             })
             .collect()
+    };
+    let quotient_values = debug_span!(parent: Span::current(), "chip_compute_quotient_values", chip = chip.name(), quotient_size = quotient_size, tag = "tag-chip").in_scope(|| {
+        if cfg!(feature = "single-threaded") {
+            let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+            pool.install(compute_quotient_closure)
+        } else {
+            compute_quotient_closure()
+        }
     });
 
     quotient_values
