@@ -9,7 +9,6 @@ pub mod configs;
 pub mod emulator;
 pub mod instances;
 pub mod machine;
-pub mod macros;
 pub mod primitives;
 pub mod recursion;
 pub mod recursion_v2;
