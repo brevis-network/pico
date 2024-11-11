@@ -1,3 +1,4 @@
+import argparse
 import pandas as pd
 from collections import defaultdict
 import json
@@ -490,11 +491,15 @@ def compare_chip_performance(perf_data_0, perf_data_1, prefix_0='', prefix_1='')
 
 # main function
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Analyze log files with specified prefixes.")
+    parser.add_argument("prefix_0", help="The prefix for the first log file.")
+    parser.add_argument("prefix_1", help="The prefix for the second log file.")
+    args = parser.parse_args()
     '''
     extract performance data from log file
     '''
-    prefix_0 = 'sp1_2_large'
-    prefix_1 = 'sp1_3_large'
+    prefix_0 = args.prefix_0
+    prefix_1 = args.prefix_1
 
     for prefix in [prefix_0, prefix_1]:
         in_path = f'logs/test_{prefix}.log'

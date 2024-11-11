@@ -11,17 +11,18 @@ The goal of this script is to compare the performance differences between the `m
 PYTHON_CMD="/usr/bin/python3"
 REQUIRED_PYTHON_DEPENDENCIES=("pandas" "collections" "json" "matplotlib" "numpy")
 
-# Rust settings
-EXAMPLE_NAME="test_riscv_machine"
-RUST_LOG="info"
-RUSTFLAGS="-Awarnings"
-FRI_QUERIES="1" 
-CMD_ARGS="f 40" # Workload
+# User-defined Rust commands as an array (multiple commands for batch execution)
+RUST_CMD_ARRAY=(
+    "FRI_QUERIES=1 cargo run --release --example test_riscv_machine"
+    "/usr/bin/time -v env RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv_machine"
+)
+
+# Log prefixes for the main and current branch (multiple prefixes for batch processing)
+LOG_PREFIX_0_ARRAY=("main_test_riscv_machine_0" "main_test_riscv_machine_1")
+LOG_PREFIX_1_ARRAY=("new_test_riscv_machine_0" "new_test_riscv_machine_1")
 
 # Comparison settings
-SKIP_BASE_RUN=true # Important FLAG that determines the script's execution mode.
-LOG_PREFIX_0="main_${EXAMPLE_NAME}_${CMD_ARGS// /_}" # Main branch
-LOG_PREFIX_1="new_${EXAMPLE_NAME}_${CMD_ARGS// /_}" # Current branch
+SKIP_BASE_RUN=false
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 BASE_BRANCH="main"
 ```
