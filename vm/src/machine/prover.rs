@@ -30,6 +30,7 @@ pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
 }
 
+#[allow(clippy::new_without_default)]
 impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C>
 where
     C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
@@ -496,7 +497,7 @@ where
                                     .collect::<Vec<_>>();
 
                                 let qv = compute_quotient_values(
-                                    &ordered_chips[i],
+                                    ordered_chips[i],
                                     &main_commitments.public_values,
                                     main_domains[i],
                                     *quotient_domain,

@@ -115,6 +115,8 @@ pub fn eval_symbolic_to_virtual_pair<F: Field>(
 }
 
 /// Compute quotient values for opening proof
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::let_and_return)]
 pub fn compute_quotient_values<'a, SC, C, Mat>(
     chip: &MetaChip<SC::Val, C>,
     public_values: &'a [SC::Val],

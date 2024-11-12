@@ -49,7 +49,7 @@ where
         // assert same sign
         builder
             .when(local.is_sign_bit_same)
-            .assert_eq(local.bit_b, local.bit_c.clone());
+            .assert_eq(local.bit_b, local.bit_c);
 
         // assert 1 when b and c signs are not same
         builder

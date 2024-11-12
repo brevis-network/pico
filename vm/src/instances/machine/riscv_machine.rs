@@ -93,7 +93,7 @@ where
                 info!("PERF-phase=1-chunk={}", record.chunk_index(),);
                 let commitment = self.base_machine.commit(record);
 
-                challenger.observe(commitment.commitment.clone());
+                challenger.observe(commitment.commitment);
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
             }
 
@@ -166,7 +166,7 @@ where
         {
             use crate::machine::debug::constraints::debug_all_constraints;
             let mut debug_challenger = self.config().challenger();
-            debug_all_constraints(&self.chips(), pk, &all_records, &mut debug_challenger);
+            debug_all_constraints(self.chips(), pk, &all_records, &mut debug_challenger);
         }
 
         #[cfg(feature = "debug-lookups")]
@@ -201,10 +201,8 @@ where
                 each_proof.public_values.as_slice().borrow();
 
             // beginning constraints
-            if i == 0 {
-                if !each_proof.includes_chip("Cpu") {
-                    panic!("First proof does not include Cpu chip");
-                }
+            if i == 0 && !each_proof.includes_chip("Cpu") {
+                panic!("First proof does not include Cpu chip");
             }
 
             // conditional constraints
@@ -214,7 +212,7 @@ where
             if each_proof.includes_chip("Cpu") {
                 execution_proof_count += <Val<RiscvSC>>::one();
 
-                if each_proof.log_main_degree() > MAX_LOG_CHUNK_SIZE as usize {
+                if each_proof.log_main_degree() > MAX_LOG_CHUNK_SIZE {
                     panic!("Cpu log degree too large");
                 }
 
@@ -230,26 +228,23 @@ where
                     flag_extra = false;
                 }
             }
-            if !each_proof.includes_chip("MemoryInitialize") {
-                if public_values.previous_initialize_addr_bits
+            if !each_proof.includes_chip("MemoryInitialize")
+                && public_values.previous_initialize_addr_bits
                     != public_values.last_initialize_addr_bits
-                {
-                    panic!("Previous initialize addr bits mismatch");
-                }
+            {
+                panic!("Previous initialize addr bits mismatch");
             }
-            if !each_proof.includes_chip("MemoryFinalize") {
-                if public_values.previous_finalize_addr_bits
+
+            if !each_proof.includes_chip("MemoryFinalize")
+                && public_values.previous_finalize_addr_bits
                     != public_values.last_finalize_addr_bits
-                {
-                    panic!("Previous finalize addr bits mismatch");
-                }
+            {
+                panic!("Previous finalize addr bits mismatch");
             }
 
             // ending constraints
-            if i == proof.proofs().len() - 1 {
-                if public_values.next_pc != <Val<RiscvSC>>::zero() {
-                    panic!("Last proof next_pc is not zero");
-                }
+            if i == proof.proofs().len() - 1 && public_values.next_pc != <Val<RiscvSC>>::zero() {
+                panic!("Last proof next_pc is not zero");
             }
 
             // global constraints
@@ -341,12 +336,10 @@ fn transition_with_condition<'a, T: Copy + core::fmt::Debug + Eq>(
             "discrepancy between {} at position {}",
             desc, pos
         );
+    } else if cond {
+        *prev = *cur;
     } else {
-        if cond {
-            *prev = *cur;
-        } else {
-            assert_eq!(cur, default, "{} not zeroed on failed condition", desc);
-        }
+        assert_eq!(cur, default, "{} not zeroed on failed condition", desc);
     }
 }
 

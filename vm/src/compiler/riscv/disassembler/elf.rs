@@ -45,7 +45,6 @@ impl Elf {
     ///
     /// Reference: [Executable and Linkable Format](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format)
 
-    #[must_use]
     pub fn new(source_code: &[u8]) -> eyre::Result<Self> {
         // Decode the bytes as an ELF.
         let mut image: BTreeMap<u32, u32> = BTreeMap::new();

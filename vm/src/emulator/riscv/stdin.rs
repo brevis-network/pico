@@ -27,6 +27,7 @@ pub struct EmulatorStdin<I> {
     pub cursor: usize,
 }
 
+#[allow(clippy::should_implement_trait)]
 impl<I> EmulatorStdin<I> {
     pub fn default() -> Self {
         Self {
@@ -99,7 +100,7 @@ where
 
         let total = proofs.len();
 
-        for (i, proof) in proofs.into_iter().enumerate() {
+        for (i, proof) in proofs.iter().enumerate() {
             let flag_complete = i == total - 1;
             stdin.push(RiscvRecursionStdin {
                 vk,
@@ -201,7 +202,7 @@ where
 
         let proof_batches = proofs.chunks(batch_size);
 
-        for (_i, batch_proofs) in proof_batches.enumerate() {
+        for batch_proofs in proof_batches {
             let batch_proofs = batch_proofs.to_vec();
             stdin.push(RecursionStdin {
                 vk,

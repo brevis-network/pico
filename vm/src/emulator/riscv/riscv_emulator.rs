@@ -448,7 +448,7 @@ impl RiscvEmulator {
         // println!("# batch records to be processed: {}", self.batch_records.len());
         let mut current_execution_chunk = 0;
         let mut flag_extra = true;
-        for (_i, record) in self.batch_records.iter_mut().enumerate() {
+        for record in self.batch_records.iter_mut() {
             self.public_values_buffer.chunk += 1;
             if !record.cpu_events.is_empty() {
                 self.public_values_buffer.execution_chunk += 1;
@@ -476,7 +476,7 @@ impl RiscvEmulator {
                 self.public_values_buffer.last_finalize_addr_bits =
                     record.public_values.last_finalize_addr_bits;
             }
-            record.public_values = self.public_values_buffer.clone();
+            record.public_values = self.public_values_buffer;
         }
 
         Ok(done)
@@ -777,9 +777,7 @@ impl RiscvEmulator {
                     .syscall_counts
                     .entry(syscall_for_count)
                     .or_insert(0);
-                let (threshold, multiplier) = match syscall_for_count {
-                    _ => (self.opts.split_opts.deferred, 1),
-                };
+                let (threshold, multiplier) = (self.opts.split_opts.deferred, 1);
                 let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
                 self.record.nonce_lookup.insert(syscall_lookup_id, nonce);
                 *syscall_count += 1;
@@ -1420,7 +1418,8 @@ impl Default for EmulatorMode {
 }
 
 mod tests {
-    use super::{Program, RiscvEmulator};
+    #[allow(unused_imports)]
+    use super::{EmulatorOpts, EmulatorStdin, Program, RiscvEmulator};
     use crate::compiler::riscv::compiler::{Compiler, SourceType};
 
     #[allow(dead_code)]

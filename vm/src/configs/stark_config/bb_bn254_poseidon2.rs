@@ -120,6 +120,12 @@ impl BbBn254Poseidon2 {
     }
 }
 
+impl Default for BbBn254Poseidon2 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StarkGenericConfig for BbBn254Poseidon2 {
     type Val = SC_Val;
     type Domain = <SC_Pcs as p3_commit::Pcs<SC_Challenge, SC_Challenger>>::Domain;

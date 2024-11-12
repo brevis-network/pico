@@ -155,6 +155,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         output
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn poseidon2_hash_ext(
         &mut self,
         array: &Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,

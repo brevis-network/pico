@@ -116,6 +116,12 @@ impl Clone for BabyBearPoseidon2 {
     }
 }
 
+impl Default for BabyBearPoseidon2 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StarkGenericConfig for BabyBearPoseidon2 {
     type Val = BabyBear;
     type Domain = <Pcs as p3_commit::Pcs<Challenge, Challenger>>::Domain;

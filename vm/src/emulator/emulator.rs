@@ -118,6 +118,7 @@ where
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> (RecursionRecord<Val<RecursionSC>>, bool) {
         let (stdin, done) = self.stdin.get(self.ptr);
         let record = self.emulator.run_riscv(stdin);
@@ -168,6 +169,7 @@ where
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> (RecursionRecord<Val<RecursionSC>>, bool) {
         let (stdin, done) = self.stdin.get(self.ptr);
         let record = self.emulator.run_recursion(stdin);

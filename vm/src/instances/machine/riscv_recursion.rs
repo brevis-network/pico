@@ -115,7 +115,7 @@ where
             let mut challenger = self.config().challenger();
             pk.observed_by(&mut challenger);
 
-            challenger.observe(commitment.commitment.clone());
+            challenger.observe(commitment.commitment);
             challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
 
             let proof = self.base_machine.prove_plain(
@@ -176,7 +176,7 @@ where
             let mut challenger = self.config().challenger();
             // observe all preprocessed and main commits and pv's
             vk.observed_by(&mut challenger);
-            challenger.observe(each_proof.commitments.main_commit.clone());
+            challenger.observe(each_proof.commitments.main_commit);
             challenger.observe_slice(&each_proof.public_values[..self.num_public_values()]);
 
             self.base_machine

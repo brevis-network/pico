@@ -57,7 +57,7 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
             row
         };
         debug_assert!(padded_row_template.len() == NUM_SLL_COLS);
-        for i in rows.clone() * NUM_SLL_COLS..trace.values.len() {
+        for i in rows * NUM_SLL_COLS..trace.values.len() {
             trace.values[i] = padded_row_template[i % NUM_SLL_COLS];
         }
 

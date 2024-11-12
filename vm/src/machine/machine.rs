@@ -264,7 +264,7 @@ where
         });
 
         // verify all proofs
-        for (_i, proof) in proofs.into_iter().enumerate() {
+        for proof in proofs {
             self.verifier.verify(
                 self.config(),
                 self.chips(),

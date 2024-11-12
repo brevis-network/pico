@@ -189,8 +189,7 @@ where
     chips
         .iter()
         .map(|chip| proof.main_chip_ordering.get(&chip.name()).copied())
-        .into_iter()
-        .map(|x| x.unwrap_or_else(|| EMPTY))
+        .map(|x| x.unwrap_or(EMPTY))
         .collect()
 }
 
@@ -206,7 +205,7 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     let (prep_sorted_indices, prep_domains) = preprocessed_chip_ids
-        .into_iter()
+        .iter()
         .map(|&chip_idx| {
             let name = chips[chip_idx].name().clone();
             let prep_sorted_idx = vk.preprocessed_chip_ordering[&name];

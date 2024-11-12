@@ -112,7 +112,7 @@ where
         builder.set_value(&mut qc_points, 0, zeta);
 
         // Iterate through machine.chips filtered for preprocessed chips.
-        for (preprocessed_id, &chip_id) in preprocessed_chip_ids.into_iter().enumerate() {
+        for (preprocessed_id, &chip_id) in preprocessed_chip_ids.iter().enumerate() {
             // Get index within sorted preprocessed chips.
             let preprocessed_sorted_id = builder.get(&vk.preprocessed_sorted_idxs, preprocessed_id);
             // Get domain from witnessed domains. Array is ordered by machine.chips ordering.

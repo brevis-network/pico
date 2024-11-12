@@ -1,4 +1,6 @@
 #![deny(warnings)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::module_inception)]
 
 extern crate alloc;
 extern crate core;

@@ -95,9 +95,9 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                     cols.c_neg = cols.c_msb;
                     cols.is_overflow =
                         F::from_bool(event.b as i32 == i32::MIN && event.c as i32 == -1);
-                    cols.abs_remainder = Word::from((remainder as i32).abs() as u32);
-                    cols.abs_c = Word::from((event.c as i32).abs() as u32);
-                    cols.max_abs_c_or_1 = Word::from(u32::max(1, (event.c as i32).abs() as u32));
+                    cols.abs_remainder = Word::from((remainder as i32).unsigned_abs());
+                    cols.abs_c = Word::from((event.c as i32).unsigned_abs());
+                    cols.max_abs_c_or_1 = Word::from(u32::max(1, (event.c as i32).unsigned_abs()));
                 } else {
                     cols.abs_remainder = cols.remainder;
                     cols.abs_c = cols.c;
@@ -196,7 +196,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                                 opcode: Opcode::ADD,
                                 a: 0,
                                 b: event.c,
-                                c: (event.c as i32).abs() as u32,
+                                c: (event.c as i32).unsigned_abs(),
                                 sub_lookups: create_alu_lookups(),
                             })
                         }
@@ -209,7 +209,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                                 opcode: Opcode::ADD,
                                 a: 0,
                                 b: remainder,
-                                c: (remainder as i32).abs() as u32,
+                                c: (remainder as i32).unsigned_abs(),
                                 sub_lookups: create_alu_lookups(),
                             })
                         }
@@ -287,8 +287,8 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                             channel: event.channel,
                             opcode: Opcode::SLTU,
                             a: 1,
-                            b: (remainder as i32).abs() as u32,
-                            c: u32::max(1, (event.c as i32).abs() as u32),
+                            b: (remainder as i32).unsigned_abs(),
+                            c: u32::max(1, (event.c as i32).unsigned_abs()),
                             clk: event.clk,
                             sub_lookups: create_alu_lookups(),
                         }

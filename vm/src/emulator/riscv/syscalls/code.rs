@@ -91,9 +91,7 @@ impl SyscallCode {
     #[must_use]
     #[allow(clippy::match_same_arms)]
     pub fn count_map(&self) -> Self {
-        match self {
-            _ => *self,
-        }
+        *self
     }
 }
 

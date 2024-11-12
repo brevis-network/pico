@@ -54,7 +54,7 @@ where
             public_values,
         } = proof;
 
-        let ordered_chips = order_chips::<SC, C>(chips, &main_chip_ordering).collect::<Vec<_>>();
+        let ordered_chips = order_chips::<SC, C>(chips, main_chip_ordering).collect::<Vec<_>>();
 
         let pcs = config.pcs();
 
@@ -282,6 +282,16 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<SC, C> Default for BaseVerifier<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 

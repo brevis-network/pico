@@ -9,6 +9,7 @@ use crate::{configs::config::FieldGenericConfig, recursion_v2::air::RecursionPub
 /// Programs written in the DSL can compile both to the recursive zkVM and the R1CS or Plonk-ish
 /// circuits.
 #[derive(Debug, Clone)]
+#[allow(clippy::type_complexity)]
 pub enum DslIr<FC: FieldGenericConfig> {
     // Immediates.
     /// Assigns an immediate to a variable (var = imm).

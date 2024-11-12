@@ -120,7 +120,7 @@ where
                 // setup challenger
                 let mut challenger = self.config().challenger();
                 pk.observed_by(&mut challenger);
-                challenger.observe(commitment.commitment.clone());
+                challenger.observe(commitment.commitment);
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
 
                 let proof = self.base_machine.prove_plain(
@@ -182,7 +182,7 @@ where
             assert_eq!(all_records.len(), 1);
             use crate::machine::debug::constraints::debug_all_constraints;
             let mut debug_challenger = self.config().challenger();
-            debug_all_constraints(&self.chips(), pk, &all_records, &mut debug_challenger);
+            debug_all_constraints(self.chips(), pk, &all_records, &mut debug_challenger);
         }
 
         #[cfg(feature = "debug-lookups")]

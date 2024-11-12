@@ -65,7 +65,7 @@ where
         SC: StarkGenericConfig<Val = F>,
         C: ChipBehavior<F>,
     {
-        let trace = chip.generate_main(&record, &mut C::Record::default());
+        let trace = chip.generate_main(record, &mut C::Record::default());
         let height = trace.height();
         let preprocessed_trace = pkey
             .preprocessed_chip_ordering
@@ -95,7 +95,7 @@ where
                 .unwrap_or(empty.as_slice());
 
             for (num, (lookup, is_looking)) in lookups.clone() {
-                let mult: F = lookup.mult.apply(&preprocessed_row, &main_row);
+                let mult: F = lookup.mult.apply(preprocessed_row, &main_row);
 
                 // convert the upper half of F's range to negative values
                 let mult = mult.as_canonical_u64() as isize;
@@ -114,7 +114,7 @@ where
                 let values: Box<[F]> = lookup
                     .values
                     .iter()
-                    .map(|v| v.apply(&preprocessed_row, &main_row))
+                    .map(|v| v.apply(preprocessed_row, &main_row))
                     .collect();
 
                 let key = DebugLookupKey {
@@ -142,9 +142,9 @@ where
                 entry.0.push(value);
                 let balance = &mut entry.1;
                 if is_looking {
-                    *balance += mult as isize;
+                    *balance += mult;
                 } else {
-                    *balance -= mult as isize;
+                    *balance -= mult;
                 }
             }
         }
@@ -186,7 +186,7 @@ where
         for (chip, name) in chips.zip(names.iter()) {
             let mut chip_events = 0;
             for record in records.clone() {
-                let data = Self::debug_lookups(chip, pkey, record, types.clone()).lookup_data;
+                let data = Self::debug_lookups(chip, pkey, record, types).lookup_data;
                 chip_events += data.len();
 
                 // this loop consumes counts and thus the lookup key which allows us to use Box
@@ -199,7 +199,7 @@ where
                     // total balance
                     entry.0 += v;
                     // keyed balance
-                    *entry.1.entry(&name).or_default() += v;
+                    *entry.1.entry(name).or_default() += v;
                 }
             }
 

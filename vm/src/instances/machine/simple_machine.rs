@@ -58,9 +58,7 @@ where
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
-        let proof = MetaProof::new(proofs);
-
-        proof
+        MetaProof::new(proofs)
     }
 
     /// Verify the proof.

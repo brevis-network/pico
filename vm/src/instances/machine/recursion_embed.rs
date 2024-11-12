@@ -39,7 +39,7 @@ where
     phantom: std::marker::PhantomData<I>,
 }
 
-impl<'a, C, I> MachineBehavior<EmbedSC, C, I> for RecursionEmbedMachine<EmbedSC, C, I>
+impl<C, I> MachineBehavior<EmbedSC, C, I> for RecursionEmbedMachine<EmbedSC, C, I>
 where
     C: ChipBehavior<
             Val<EmbedSC>,
@@ -106,7 +106,7 @@ where
         // setup challenger
         let mut challenger = self.config().challenger();
         pk.observed_by(&mut challenger);
-        challenger.observe(commitment.commitment.clone());
+        challenger.observe(commitment.commitment);
         challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
 
         let proof = self.base_machine.prove_plain(

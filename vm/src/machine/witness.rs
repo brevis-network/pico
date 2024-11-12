@@ -44,6 +44,7 @@ where
     pub records: Vec<C::Record>,
 }
 
+#[allow(clippy::should_implement_trait)]
 impl<'a, SC, C, I> ProvingWitness<'a, SC, C, I>
 where
     SC: StarkGenericConfig,

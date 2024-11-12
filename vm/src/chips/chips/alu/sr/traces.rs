@@ -77,7 +77,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
         };
 
         debug_assert!(padded_row_template.len() == NUM_SLR_COLS);
-        for i in rows.clone() * NUM_SLR_COLS..trace.values.len() {
+        for i in rows * NUM_SLR_COLS..trace.values.len() {
             trace.values[i] = padded_row_template[i % NUM_SLR_COLS];
         }
 

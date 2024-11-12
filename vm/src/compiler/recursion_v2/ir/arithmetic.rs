@@ -44,6 +44,7 @@ pub struct FeltHandle<F> {
 }
 
 #[derive(Debug)]
+#[allow(clippy::type_complexity)]
 pub struct ExtHandle<F, EF> {
     ptr: *mut (),
 
