@@ -129,5 +129,5 @@ fn main() {
     info!("\n Verifying proof");
     let result = base_machine.verify_ensemble(&vk, &proof);
     info!("\n The proof is verified: {}", result.is_ok());
-    assert_eq!(result.is_ok(), true);
+    assert!(result.is_ok());
 }

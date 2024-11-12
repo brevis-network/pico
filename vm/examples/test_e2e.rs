@@ -86,7 +86,7 @@ fn main() {
         riscv_result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(riscv_result.is_ok(), true);
+    assert!(riscv_result.is_ok());
 
     /*
     Riscv Compression Recursion Machine
@@ -114,7 +114,7 @@ fn main() {
     let riscv_compress_stdin = EmulatorStdin::setup_for_riscv_compress(
         &riscv_vk,
         riscv_machine.base_machine(),
-        &riscv_proof.proofs(),
+        riscv_proof.proofs(),
         &mut riscv_challenger,
     );
 
@@ -138,7 +138,7 @@ fn main() {
         riscv_compress_result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(riscv_compress_result.is_ok(), true);
+    assert!(riscv_compress_result.is_ok());
 
     /*
     Combine Recursion Machine
@@ -191,7 +191,7 @@ fn main() {
         combine_result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(combine_result.is_ok(), true);
+    assert!(combine_result.is_ok());
 
     /*
     Compress Recursion Machine
@@ -253,7 +253,7 @@ fn main() {
         compress_result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(compress_result.is_ok(), true);
+    assert!(compress_result.is_ok());
 
     /*
     Embed Recursion Machine
@@ -318,5 +318,5 @@ fn main() {
         embed_result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(embed_result.is_ok(), true);
+    assert!(embed_result.is_ok());
 }

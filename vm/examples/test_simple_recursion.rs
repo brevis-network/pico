@@ -128,7 +128,7 @@ fn main() {
     info!("\n Verifying proof (at {:?})..", start.elapsed());
     let result = simple_machine.verify(&vk, &proof);
     info!("The proof is verified: {}", result.is_ok());
-    assert_eq!(result.is_ok(), true);
+    assert!(result.is_ok());
 
     // Get field_config program
     // Note that simple_machine is used as input for recursive verifier to build the program
@@ -148,7 +148,7 @@ fn main() {
     let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
 
     let recursion_stdin = SimpleRecursionStdin::construct(
-        &simple_machine.base_machine(),
+        simple_machine.base_machine(),
         &mut reconstruct_challenger,
         &vk,
         &mut base_challenger,
@@ -245,5 +245,5 @@ fn main() {
         recursion_result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(recursion_result.is_ok(), true);
+    assert!(recursion_result.is_ok());
 }

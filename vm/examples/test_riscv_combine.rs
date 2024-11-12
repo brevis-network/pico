@@ -68,7 +68,7 @@ fn main() {
         result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(result.is_ok(), true);
+    assert!(result.is_ok());
 
     //////////////////////////////////////
 
@@ -93,7 +93,7 @@ fn main() {
     let recursion_stdin = EmulatorStdin::setup_for_riscv_combine(
         &vk,
         riscv_machine.base_machine(),
-        &proof.proofs(),
+        proof.proofs(),
         &mut challenger,
         TEST_BATCH_SIZE,
     );
@@ -120,5 +120,5 @@ fn main() {
         recursion_result.is_ok(),
         start.elapsed()
     );
-    assert_eq!(recursion_result.is_ok(), true);
+    assert!(recursion_result.is_ok());
 }

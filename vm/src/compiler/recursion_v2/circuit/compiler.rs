@@ -24,6 +24,7 @@ use vec_map::VecMap;
 
 /// The backend for the circuit compiler.
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::type_complexity)]
 pub struct AsmCompiler<C: FieldGenericConfig> {
     pub next_addr: C::F,
     /// Map the frame pointers of the variables to the "physical" addresses.
@@ -536,9 +537,7 @@ where
             for (ir_instr, trace) in operations {
                 self.compile_one(ir_instr, &mut |item| match item {
                     Ok(instr) => instrs.push(instr),
-                    Err(CompileOneErr::CycleTrackerEnter(_) | CompileOneErr::CycleTrackerExit) => {
-                        ()
-                    }
+                    Err(CompileOneErr::CycleTrackerEnter(_) | CompileOneErr::CycleTrackerExit) => {}
                     Err(CompileOneErr::Unsupported(instr)) => {
                         panic!("unsupported instruction: {instr:?}\nbacktrace: {:?}", trace)
                     }

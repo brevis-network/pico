@@ -16,7 +16,7 @@ pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin<Vec<u8>>, 
     let mut stdin = EmulatorStdin::default();
 
     if args.len() > 1 {
-        test_case = args[1].clone();
+        test_case.clone_from(&args[1]);
         if args.len() > 2 {
             n = args[2].parse::<u32>().unwrap();
         }

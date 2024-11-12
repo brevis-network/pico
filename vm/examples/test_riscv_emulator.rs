@@ -24,7 +24,7 @@ fn main() {
     info!("\n Creating Program..");
     let compiler = Compiler::new(SourceType::RiscV, elf);
     let program = compiler.compile();
-    let pc_start = program.pc_start.clone();
+    let pc_start = program.pc_start;
 
     info!("\n Creating emulator (at {:?})..", start.elapsed());
     let mut emulator = RiscvEmulator::new(program, EmulatorOpts::test_opts());
@@ -50,13 +50,11 @@ fn main() {
         }
 
         for (i, record) in enumerate(emulator.batch_records.iter()) {
-            if record.cpu_events.len() > 0 {
+            if !record.cpu_events.is_empty() {
                 execution_record_count += 1;
-            } else {
-                if flag_first_nonexecution {
-                    execution_record_count += 1;
-                    flag_first_nonexecution = false;
-                }
+            } else if flag_first_nonexecution {
+                execution_record_count += 1;
+                flag_first_nonexecution = false;
             }
             record_count += 1;
 
@@ -74,10 +72,10 @@ fn main() {
 
             // For the first chunk, cpu events should not be empty
             if i == 0 {
-                assert!(record.cpu_events.len() > 0);
+                assert!(!record.cpu_events.is_empty());
                 assert_eq!(record.public_values.start_pc, prev_next_pc);
             }
-            if record.cpu_events.len() > 0 {
+            if !record.cpu_events.is_empty() {
                 assert_ne!(record.public_values.start_pc, 0);
             } else {
                 assert_eq!(record.public_values.start_pc, record.public_values.next_pc);
