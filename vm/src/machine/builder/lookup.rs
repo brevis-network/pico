@@ -291,4 +291,52 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             LookupType::Byte,
         ));
     }
+
+    fn looking_syscall(
+        &mut self,
+        chunk: impl Into<Self::Expr> + Clone,
+        clk: impl Into<Self::Expr> + Clone,
+        nonce: impl Into<Self::Expr> + Clone,
+        syscall_id: impl Into<Self::Expr> + Clone,
+        arg1: impl Into<Self::Expr> + Clone,
+        arg2: impl Into<Self::Expr> + Clone,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        self.looking(SymbolicLookup::new(
+            vec![
+                chunk.clone().into(),
+                clk.clone().into(),
+                nonce.clone().into(),
+                syscall_id.clone().into(),
+                arg1.clone().into(),
+                arg2.clone().into(),
+            ],
+            multiplicity.into(),
+            LookupType::Syscall,
+        ))
+    }
+
+    fn looked_syscall(
+        &mut self,
+        chunk: impl Into<Self::Expr> + Clone,
+        clk: impl Into<Self::Expr> + Clone,
+        nonce: impl Into<Self::Expr> + Clone,
+        syscall_id: impl Into<Self::Expr> + Clone,
+        arg1: impl Into<Self::Expr> + Clone,
+        arg2: impl Into<Self::Expr> + Clone,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        self.looked(SymbolicLookup::new(
+            vec![
+                chunk.clone().into(),
+                clk.clone().into(),
+                nonce.clone().into(),
+                syscall_id.clone().into(),
+                arg1.clone().into(),
+                arg2.clone().into(),
+            ],
+            multiplicity.into(),
+            LookupType::Syscall,
+        ))
+    }
 }

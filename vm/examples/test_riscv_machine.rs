@@ -6,7 +6,9 @@ use pico_vm::{
         chiptype::riscv_chiptype::RiscvChipType, configs::riscv_config::StarkConfig as RiscvSC,
         machine::riscv_machine::RiscvMachine,
     },
-    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
+    machine::{
+        chip::ChipBehavior, logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness,
+    },
     primitives::consts::RISCV_NUM_PVS,
 };
 use std::{env, time::Instant};
@@ -30,6 +32,10 @@ fn main() {
     let config = RiscvSC::new();
     let chips = RiscvChipType::all_chips();
 
+    info!(
+        "All chips: {:?}",
+        chips.iter().map(|c| c.name()).collect::<Vec<_>>()
+    );
     // Create a new machine based on config and chips
     let riscv_machine = RiscvMachine::new(config, chips, RISCV_NUM_PVS);
 

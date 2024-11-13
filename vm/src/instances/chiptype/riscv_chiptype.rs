@@ -1,18 +1,21 @@
 use crate::{
-    chips::chips::{
-        alu::{
-            add_sub::AddSubChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip,
-            mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip,
+    chips::{
+        chips::{
+            alu::{
+                add_sub::AddSubChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip,
+                mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip,
+            },
+            byte::ByteChip,
+            memory_program::MemoryProgramChip,
+            rangecheck::RangeCheckChip,
+            riscv_cpu::CpuChip,
+            riscv_memory::{
+                initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
+                read_write::MemoryReadWriteChip,
+            },
+            riscv_program::ProgramChip,
         },
-        byte::ByteChip,
-        memory_program::MemoryProgramChip,
-        rangecheck::RangeCheckChip,
-        riscv_cpu::CpuChip,
-        riscv_memory::{
-            initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
-            read_write::MemoryReadWriteChip,
-        },
-        riscv_program::ProgramChip,
+        precompiles::keccak256::KeccakPermuteChip,
     },
     compiler::riscv::program::Program,
     define_chip_type,
@@ -43,6 +46,7 @@ define_chip_type!(
         (AddSub, AddSubChip),
         (Bitwise, BitwiseChip),
         (Byte, ByteChip),
-        (Range, RangeCheckChip)
+        (Range, RangeCheckChip),
+        (KeecakP, KeccakPermuteChip)
     ]
 );

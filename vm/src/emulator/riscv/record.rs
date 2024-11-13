@@ -16,6 +16,8 @@ use p3_field::AbstractField;
 use serde::{Deserialize, Serialize};
 use std::{iter, sync::Arc};
 
+use super::syscalls::precompiles::keccak256::event::KeccakPermuteEvent;
+
 /// A record of the emulation of a program.
 ///
 /// The trace of the emulation is represented as a list of "events" that occur every cycle.
@@ -52,7 +54,10 @@ pub struct EmulationRecord {
     pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the memory finalize events.
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
-
+    /// A trace of the precompile events.
+    // pub precompile_events: PrecompileEvents,
+    /// A trace of the keccak256 permute events.
+    pub keccak_permute_events: Vec<KeccakPermuteEvent>,
     /// Public values
     pub public_values: PublicValues<u32, u32>,
 }
@@ -123,6 +128,11 @@ impl EmulationRecord {
             }
         });
     }
+
+    /// Add a keccak permute event to the execution record.
+    pub fn add_keccak_permute_lookup_event(&mut self, event: KeccakPermuteEvent) {
+        self.keccak_permute_events.push(event);
+    }
 }
 
 impl RecordBehavior for EmulationRecord {
@@ -165,6 +175,10 @@ impl RecordBehavior for EmulationRecord {
             );
         }
         stats.insert("Range lookups".to_string(), self.range_lookups.len());
+        stats.insert(
+            "Keccak Permute lookups".to_string(),
+            self.keccak_permute_events.len(),
+        );
 
         // Filter out the empty events.
         stats.retain(|_, v| *v != 0);
@@ -186,6 +200,8 @@ impl RecordBehavior for EmulationRecord {
             .append(&mut extra.memory_initialize_events);
         self.memory_finalize_events
             .append(&mut extra.memory_finalize_events);
+        self.keccak_permute_events
+            .append(&mut extra.keccak_permute_events);
         if self.byte_lookups.is_empty() {
             self.byte_lookups = std::mem::take(&mut extra.byte_lookups);
         } else {

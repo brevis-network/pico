@@ -1,10 +1,10 @@
 use crate::primitives::consts::{BYTE_SIZE, WORD_SIZE};
+use p3_field::Field;
+use rand::{thread_rng, Rng};
 use std::{
     fmt::Display,
     iter::{Map, Peekable},
 };
-
-use rand::{thread_rng, Rng};
 
 pub const fn indices_arr<const N: usize>() -> [usize; N] {
     let mut indices_arr = [0; N];
@@ -72,4 +72,15 @@ where
         .map(|(_, b)| b.len())
         .unwrap_or_default();
     table_with_string_counts.map(move |(label, count)| format!("{count:>width$} {label}"))
+}
+
+/// Returns a vector of zeros of the given length. This is faster than vec![F::zero(); len] which
+/// requires copying.
+///
+/// This function is safe to use only for fields that can be transmuted from 0u32.
+pub fn zeroed_f_vec<F: Field>(len: usize) -> Vec<F> {
+    debug_assert!(std::mem::size_of::<F>() == 4);
+
+    let vec = vec![0u32; len];
+    unsafe { std::mem::transmute::<Vec<u32>, Vec<F>>(vec) }
 }

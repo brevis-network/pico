@@ -6,6 +6,8 @@ pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin<Vec<u8>>, 
         include_bytes!("../../src/compiler/test_data/riscv32im-sp1-fibonacci-elf");
     const ELF_KECCAK: &[u8] =
         include_bytes!("../../src/compiler/test_data/riscv32im-pico-keccak-elf");
+    const ELF_KECCAK_PRECOMPILE_EXAMPLE: &[u8] =
+        include_bytes!("../../src/compiler/test_data/riscv32im-keccak-example-elf");
 
     if args.len() > 3 {
         eprintln!("Invalid number of arguments");
@@ -36,6 +38,10 @@ pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin<Vec<u8>>, 
         let input_str = (0..n).map(|_| "x").collect::<String>();
         stdin.write(&input_str);
         info!("Test Keccak, string len n={}", input_str.len());
+    } else if test_case == "keccak_precompile" {
+        test_case = String::from("keccak_precompile");
+        elf = ELF_KECCAK_PRECOMPILE_EXAMPLE;
+        info!("Test Keccak Precompile");
     } else {
         eprintln!("Invalid test case. Accept: [ fibonacci | fib | f ], [ keccak | k ]\n");
         std::process::exit(1);

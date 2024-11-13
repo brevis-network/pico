@@ -1494,6 +1494,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico-sdk"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "serde",
+]
+
+[[package]]
 name = "pico-vm"
 version = "0.1.0"
 dependencies = [
@@ -1538,6 +1546,7 @@ dependencies = [
  "p3-uni-stark",
  "p3-util",
  "pico-derive",
+ "pico-sdk",
  "rand",
  "rayon",
  "rayon-scan",

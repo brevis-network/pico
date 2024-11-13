@@ -1,6 +1,6 @@
 use crate::compiler::riscv::register::Register;
 
-use super::{Syscall, SyscallContext};
+use super::{Syscall, SyscallCode, SyscallContext};
 
 pub(crate) struct WriteSyscall;
 
@@ -25,7 +25,13 @@ impl Syscall for WriteSyscall {
     ///
     /// Else, log a warning.
     #[allow(clippy::pedantic)]
-    fn emulate(&self, ctx: &mut SyscallContext, arg1: u32, arg2: u32) -> Option<u32> {
+    fn emulate(
+        &self,
+        ctx: &mut SyscallContext,
+        _: SyscallCode,
+        arg1: u32,
+        arg2: u32,
+    ) -> Option<u32> {
         let a2 = Register::X12;
         let rt = &mut ctx.rt;
         let fd = arg1;

@@ -47,6 +47,13 @@ pub struct RiscvEmulator {
     /// The options for the runtime.
     pub opts: EmulatorOpts,
 
+    /// Whether the runtime is in constrained mode or not.
+    ///
+    /// In unconstrained mode, any events, clock, register, or memory changes are reset after
+    /// leaving the unconstrained block. The only thing preserved is writes to the input
+    /// stream.
+    pub unconstrained: bool,
+
     /// The maximum number of cpu cycles to use for emulation.
     pub max_cycles: Option<u64>,
 
@@ -191,6 +198,7 @@ impl RiscvEmulator {
         Self {
             syscall_map,
             memory_accesses: MemoryAccessRecord::default(),
+            unconstrained: false,
             chunk_size: opts.chunk_size as u32,
             chunk_batch_size: opts.chunk_batch_size as u32,
             record,
@@ -738,7 +746,7 @@ impl RiscvEmulator {
                         // Executing a syscall optionally returns a value to write to the t0
                         // register. If it returns None, we just keep the
                         // syscall_id in t0.
-                        let res = syscall_impl.emulate(&mut precompile_rt, b, c);
+                        let res = syscall_impl.emulate(&mut precompile_rt, syscall, b, c);
                         if let Some(val) = res {
                             a = val;
                         } else {

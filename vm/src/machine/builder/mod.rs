@@ -14,6 +14,7 @@ mod recursion_lookup;
 mod recursion_memory;
 mod recursion_v2;
 mod riscv_memory;
+mod sub_builder;
 mod word;
 
 pub use base::ChipBaseBuilder;
@@ -26,6 +27,7 @@ pub use recursion_lookup::RecursionLookupBuilder;
 pub use recursion_memory::RecursionMemoryBuilder;
 pub use recursion_v2::RecursionBuilder;
 pub use riscv_memory::RiscVMemoryBuilder;
+pub use sub_builder::SubAirBuilder;
 pub use word::ChipWordBuilder;
 
 /// Chip builder

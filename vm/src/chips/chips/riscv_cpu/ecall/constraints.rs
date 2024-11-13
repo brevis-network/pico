@@ -6,7 +6,7 @@ use crate::{
     },
     compiler::word::Word,
     emulator::riscv::{public_values::PublicValues, syscalls::SyscallCode},
-    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipWordBuilder},
+    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
     primitives::consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
 };
 use p3_air::AirBuilder;
@@ -50,18 +50,15 @@ impl<F: Field> CpuChip<F> {
             send_to_table * is_ecall_instruction.clone(),
         );
 
-        /* TODO: Enable after adding precompiles.
-                builder.send_syscall(
-                    local.chunk,
-                    local.channel,
-                    local.clk,
-                    ecall_cols.syscall_nonce,
-                    syscall_id,
-                    local.op_b_val().reduce::<CB>(),
-                    local.op_c_val().reduce::<CB>(),
-                    local.ecall_mul_send_to_table,
-                );
-        */
+        builder.looking_syscall(
+            local.chunk,
+            local.clk,
+            ecall_cols.syscall_nonce,
+            syscall_id,
+            local.op_b_val().reduce::<CB>(),
+            local.op_c_val().reduce::<CB>(),
+            local.ecall_mul_send_to_table,
+        );
 
         // Compute whether this ecall is ENTER_UNCONSTRAINED.
         let is_enter_unconstrained = {

@@ -35,20 +35,98 @@ pub enum SyscallCode {
     /// Exit unconstrained block.
     EXIT_UNCONSTRAINED = 0x00_00_00_04,
 
-    /// Emulates the `COMMIT` precompile.
+    /// Executes the `SHA_EXTEND` precompile.
+    SHA_EXTEND = 0x00_30_01_05,
+
+    /// Executes the `SHA_COMPRESS` precompile.
+    SHA_COMPRESS = 0x00_01_01_06,
+
+    /// Executes the `ED_ADD` precompile.
+    ED_ADD = 0x00_01_01_07,
+
+    /// Executes the `ED_DECOMPRESS` precompile.
+    ED_DECOMPRESS = 0x00_00_01_08,
+
+    /// Executes the `KECCAK_PERMUTE` precompile.
+    KECCAK_PERMUTE = 0x00_01_01_09,
+
+    /// Executes the `SECP256K1_ADD` precompile.
+    SECP256K1_ADD = 0x00_01_01_0A,
+
+    /// Executes the `SECP256K1_DOUBLE` precompile.
+    SECP256K1_DOUBLE = 0x00_00_01_0B,
+
+    /// Executes the `SECP256K1_DECOMPRESS` precompile.
+    SECP256K1_DECOMPRESS = 0x00_00_01_0C,
+
+    /// Executes the `BN254_ADD` precompile.
+    BN254_ADD = 0x00_01_01_0E,
+
+    /// Executes the `BN254_DOUBLE` precompile.
+    BN254_DOUBLE = 0x00_00_01_0F,
+
+    /// Executes the `COMMIT` precompile.
     COMMIT = 0x00_00_00_10,
 
-    /// Emulates the `COMMIT_DEFERRED_PROOFS` precompile.
+    /// Executes the `COMMIT_DEFERRED_PROOFS` precompile.
     COMMIT_DEFERRED_PROOFS = 0x00_00_00_1A,
 
-    /// Emulates the `VERIFY_PICO_PROOF` precompile.
+    /// Executes the `VERIFY_PICO_PROOF` precompile.
     VERIFY_PICO_PROOF = 0x00_00_00_1B,
 
-    /// Emulates the `HINT_LEN` precompile.
+    /// Executes the `BLS12381_DECOMPRESS` precompile.
+    BLS12381_DECOMPRESS = 0x00_00_01_1C,
+
+    /// Executes the `HINT_LEN` precompile.
     HINT_LEN = 0x00_00_00_F0,
 
-    /// Emulates the `HINT_READ` precompile.
+    /// Executes the `HINT_READ` precompile.
     HINT_READ = 0x00_00_00_F1,
+
+    /// Executes the `UINT256_MUL` precompile.
+    UINT256_MUL = 0x00_01_01_1D,
+
+    /// Executes the `BLS12381_ADD` precompile.
+    BLS12381_ADD = 0x00_01_01_1E,
+
+    /// Executes the `BLS12381_DOUBLE` precompile.
+    BLS12381_DOUBLE = 0x00_00_01_1F,
+
+    /// Executes the `BLS12381_FP_ADD` precompile.
+    BLS12381_FP_ADD = 0x00_01_01_20,
+
+    /// Executes the `BLS12381_FP_SUB` precompile.
+    BLS12381_FP_SUB = 0x00_01_01_21,
+
+    /// Executes the `BLS12381_FP_MUL` precompile.
+    BLS12381_FP_MUL = 0x00_01_01_22,
+
+    /// Executes the `BLS12381_FP2_ADD` precompile.
+    BLS12381_FP2_ADD = 0x00_01_01_23,
+
+    /// Executes the `BLS12381_FP2_SUB` precompile.
+    BLS12381_FP2_SUB = 0x00_01_01_24,
+
+    /// Executes the `BLS12381_FP2_MUL` precompile.
+    BLS12381_FP2_MUL = 0x00_01_01_25,
+
+    /// Executes the `BN254_FP_ADD` precompile.
+    BN254_FP_ADD = 0x00_01_01_26,
+
+    /// Executes the `BN254_FP_SUB` precompile.
+    BN254_FP_SUB = 0x00_01_01_27,
+
+    /// Executes the `BN254_FP_MUL` precompile.
+    BN254_FP_MUL = 0x00_01_01_28,
+
+    /// Executes the `BN254_FP2_ADD` precompile.
+    BN254_FP2_ADD = 0x00_01_01_29,
+
+    /// Executes the `BN254_FP2_SUB` precompile.
+    BN254_FP2_SUB = 0x00_01_01_2A,
+
+    /// Executes the `BN254_FP2_MUL` precompile.
+    BN254_FP2_MUL = 0x00_01_01_2B,
 }
 
 impl SyscallCode {
@@ -60,12 +138,38 @@ impl SyscallCode {
             0x00_00_00_02 => SyscallCode::WRITE,
             0x00_00_00_03 => SyscallCode::ENTER_UNCONSTRAINED,
             0x00_00_00_04 => SyscallCode::EXIT_UNCONSTRAINED,
+            0x00_30_01_05 => SyscallCode::SHA_EXTEND,
+            0x00_01_01_06 => SyscallCode::SHA_COMPRESS,
+            0x00_01_01_07 => SyscallCode::ED_ADD,
+            0x00_00_01_08 => SyscallCode::ED_DECOMPRESS,
+            0x00_01_01_09 => SyscallCode::KECCAK_PERMUTE,
+            0x00_01_01_0A => SyscallCode::SECP256K1_ADD,
+            0x00_00_01_0B => SyscallCode::SECP256K1_DOUBLE,
+            0x00_00_01_0C => SyscallCode::SECP256K1_DECOMPRESS,
+            0x00_01_01_0E => SyscallCode::BN254_ADD,
+            0x00_00_01_0F => SyscallCode::BN254_DOUBLE,
+            0x00_01_01_1E => SyscallCode::BLS12381_ADD,
+            0x00_00_01_1F => SyscallCode::BLS12381_DOUBLE,
             0x00_00_00_10 => SyscallCode::COMMIT,
             0x00_00_00_1A => SyscallCode::COMMIT_DEFERRED_PROOFS,
             0x00_00_00_1B => SyscallCode::VERIFY_PICO_PROOF,
             0x00_00_00_F0 => SyscallCode::HINT_LEN,
             0x00_00_00_F1 => SyscallCode::HINT_READ,
-            _ => panic!("invalid syscall number: {value}"),
+            0x00_01_01_1D => SyscallCode::UINT256_MUL,
+            0x00_01_01_20 => SyscallCode::BLS12381_FP_ADD,
+            0x00_01_01_21 => SyscallCode::BLS12381_FP_SUB,
+            0x00_01_01_22 => SyscallCode::BLS12381_FP_MUL,
+            0x00_01_01_23 => SyscallCode::BLS12381_FP2_ADD,
+            0x00_01_01_24 => SyscallCode::BLS12381_FP2_SUB,
+            0x00_01_01_25 => SyscallCode::BLS12381_FP2_MUL,
+            0x00_01_01_26 => SyscallCode::BN254_FP_ADD,
+            0x00_01_01_27 => SyscallCode::BN254_FP_SUB,
+            0x00_01_01_28 => SyscallCode::BN254_FP_MUL,
+            0x00_01_01_29 => SyscallCode::BN254_FP2_ADD,
+            0x00_01_01_2A => SyscallCode::BN254_FP2_SUB,
+            0x00_01_01_2B => SyscallCode::BN254_FP2_MUL,
+            0x00_00_01_1C => SyscallCode::BLS12381_DECOMPRESS,
+            _ => panic!("invalid syscall number: {}", value),
         }
     }
 
@@ -91,7 +195,15 @@ impl SyscallCode {
     #[must_use]
     #[allow(clippy::match_same_arms)]
     pub fn count_map(&self) -> Self {
-        *self
+        match self {
+            SyscallCode::BN254_FP_SUB => SyscallCode::BN254_FP_ADD,
+            SyscallCode::BN254_FP_MUL => SyscallCode::BN254_FP_ADD,
+            SyscallCode::BN254_FP2_SUB => SyscallCode::BN254_FP2_ADD,
+            SyscallCode::BLS12381_FP_SUB => SyscallCode::BLS12381_FP_ADD,
+            SyscallCode::BLS12381_FP_MUL => SyscallCode::BLS12381_FP_ADD,
+            SyscallCode::BLS12381_FP2_SUB => SyscallCode::BLS12381_FP2_ADD,
+            _ => *self,
+        }
     }
 }
 

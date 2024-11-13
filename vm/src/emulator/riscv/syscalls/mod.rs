@@ -1,19 +1,21 @@
 //! Syscall definitions & implementations for the [`crate::Emulator`].
 
-mod code;
+pub mod code;
 mod commit;
 mod deferred;
 mod halt;
 mod hint;
+pub mod precompiles;
 pub mod syscall_context;
 mod write;
 
 use std::sync::Arc;
 
-use hashbrown::HashMap;
-
 pub use code::*;
+use hashbrown::HashMap;
 use hint::{HintLenSyscall, HintReadSyscall};
+use precompiles::keccak256::permute::Keccak256PermuteSyscall;
+use serde::{Deserialize, Serialize};
 
 use crate::emulator::riscv::syscalls::{
     commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall,
@@ -31,7 +33,13 @@ pub trait Syscall: Send + Sync {
     /// X10 and X11, respectively. While not a hard requirement, the convention is that the return
     /// value is only for system calls such as `HALT`. Most precompiles use `arg1` and `arg2` to
     /// denote the addresses of the input data, and write the result to the memory at `arg1`.
-    fn emulate(&self, ctx: &mut SyscallContext, arg1: u32, arg2: u32) -> Option<u32>;
+    fn emulate(
+        &self,
+        ctx: &mut SyscallContext,
+        syscall_code: SyscallCode,
+        arg1: u32,
+        arg2: u32,
+    ) -> Option<u32>;
 
     /// The number of extra cycles that the syscall takes to emulate.
     ///
@@ -61,5 +69,32 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(SyscallCode::HALT, Arc::new(HaltSyscall));
 
+    syscall_map.insert(
+        SyscallCode::KECCAK_PERMUTE,
+        Arc::new(Keccak256PermuteSyscall),
+    );
+
     syscall_map
+}
+
+/// Syscall Event.
+///
+/// This object encapsulated the information needed to prove a syscall invocation from the CPU table.
+/// This includes its shard, clk, syscall id, arguments, other relevant information.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SyscallEvent {
+    /// The shard number.
+    pub shard: u32,
+    /// The clock cycle.
+    pub clk: u32,
+    /// The lookup id.
+    pub lookup_id: u128,
+    /// The syscall id.
+    pub syscall_id: u32,
+    /// The first argument.
+    pub arg1: u32,
+    /// The second operand.
+    pub arg2: u32,
+    /// The nonce for the syscall.
+    pub nonce: u32,
 }

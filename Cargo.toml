@@ -1,5 +1,5 @@
 [workspace]
-members = ["derive", "vm"]
+members = ["derive", "vm", "sdk"]
 resolver = "2"
 
 [workspace.package]
@@ -27,6 +27,7 @@ debug-assertions = true
 # pico
 pico-derive = { path = "derive" }
 pico-vm = { path = "vm", features = ["debug", "single-threaded"] }
+pico-sdk = { path = "sdk" }
 
 # p3
 
