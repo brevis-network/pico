@@ -15,4 +15,5 @@ pub mod riscv_program;
 pub mod toys;
 
 // Recursion V2 chips
+pub mod exp_reverse_bits_v2;
 pub mod recursion_memory_v2;

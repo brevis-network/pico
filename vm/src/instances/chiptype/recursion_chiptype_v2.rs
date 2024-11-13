@@ -1,5 +1,8 @@
 use crate::{
-    chips::chips::recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
+    chips::chips::{
+        exp_reverse_bits_v2::ExpReverseBitsLenChip,
+        recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
+    },
     compiler::recursion_v2::program::RecursionProgram,
     machine::{
         builder::ChipBuilder,
@@ -12,13 +15,17 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 
-pub enum RecursionChipType<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> {
+pub enum RecursionChipType<
+    F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+    const DEGREE: usize,
+> {
     MemoryConst(MemoryConstChip<F>),
     MemoryVar(MemoryVarChip<F>),
+    ExpReverseBitsLen(ExpReverseBitsLenChip<DEGREE, F>),
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
-    for RecursionChipType<F>
+impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usize> ChipBehavior<F>
+    for RecursionChipType<F, DEGREE>
 {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;
@@ -27,6 +34,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
         match self {
             Self::MemoryConst(chip) => ChipBehavior::<F>::name(chip),
             Self::MemoryVar(chip) => ChipBehavior::<F>::name(chip),
+            Self::ExpReverseBitsLen(chip) => ChipBehavior::<F>::name(chip),
         }
     }
 
@@ -34,6 +42,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
         match self {
             Self::MemoryConst(chip) => chip.generate_preprocessed(program),
             Self::MemoryVar(chip) => chip.generate_preprocessed(program),
+            Self::ExpReverseBitsLen(chip) => chip.generate_preprocessed(program),
         }
     }
 
@@ -41,6 +50,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
         match self {
             Self::MemoryConst(chip) => chip.generate_main(input, output),
             Self::MemoryVar(chip) => chip.generate_main(input, output),
+            Self::ExpReverseBitsLen(chip) => chip.generate_main(input, output),
         }
     }
 
@@ -48,6 +58,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
         match self {
             Self::MemoryConst(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::MemoryVar(chip) => ChipBehavior::<F>::preprocessed_width(chip),
+            Self::ExpReverseBitsLen(chip) => ChipBehavior::<F>::preprocessed_width(chip),
         }
     }
 
@@ -55,6 +66,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
         match self {
             Self::MemoryConst(chip) => chip.extra_record(input, extra),
             Self::MemoryVar(chip) => chip.extra_record(input, extra),
+            Self::ExpReverseBitsLen(chip) => chip.extra_record(input, extra),
         }
     }
 
@@ -62,15 +74,19 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F>
         match self {
             Self::MemoryConst(chip) => chip.is_active(record),
             Self::MemoryVar(chip) => chip.is_active(record),
+            Self::ExpReverseBitsLen(chip) => chip.is_active(record),
         }
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> BaseAir<F> for RecursionChipType<F> {
+impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usize> BaseAir<F>
+    for RecursionChipType<F, DEGREE>
+{
     fn width(&self) -> usize {
         match self {
             Self::MemoryConst(chip) => BaseAir::<F>::width(chip),
             Self::MemoryVar(chip) => BaseAir::<F>::width(chip),
+            Self::ExpReverseBitsLen(chip) => BaseAir::<F>::width(chip),
         }
     }
 
@@ -78,29 +94,37 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> BaseAir<F> for Re
         match self {
             Self::MemoryConst(chip) => chip.preprocessed_trace(),
             Self::MemoryVar(chip) => chip.preprocessed_trace(),
+            Self::ExpReverseBitsLen(chip) => chip.preprocessed_trace(),
         }
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, AB: ChipBuilder<F>> Air<AB>
-    for RecursionChipType<F>
+impl<
+        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+        AB: ChipBuilder<F>,
+        const DEGREE: usize,
+    > Air<AB> for RecursionChipType<F, DEGREE>
 where
-    RecursionChipType<F>: BaseAir<<AB as AirBuilder>::F>,
+    RecursionChipType<F, DEGREE>: BaseAir<<AB as AirBuilder>::F>,
     AB::Var: 'static,
 {
     fn eval(&self, b: &mut AB) {
         match self {
             Self::MemoryConst(chip) => chip.eval(b),
             Self::MemoryVar(chip) => chip.eval(b),
+            Self::ExpReverseBitsLen(chip) => chip.eval(b),
         }
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> RecursionChipType<F> {
+impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usize>
+    RecursionChipType<F, DEGREE>
+{
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
+            MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
         ]
     }
 
@@ -109,6 +133,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> RecursionChipType
         vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
+            MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
         ]
     }
 
@@ -117,6 +142,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> RecursionChipType
         vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
+            MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
         ]
     }
 }

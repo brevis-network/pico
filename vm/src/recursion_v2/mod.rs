@@ -32,8 +32,11 @@ pub mod tests {
         };
 
         // Setup the machine and get the PK and VK.
-        let machine =
-            SimpleMachine::new(SC::new(), RecursionChipType::<F>::all_chips(), MAX_NUM_PVS);
+        let machine = SimpleMachine::new(
+            SC::new(),
+            RecursionChipType::<F, 3>::all_chips(),
+            MAX_NUM_PVS,
+        );
         let (pk, vk) = machine.setup_keys(&program);
 
         // Prove with witness.
