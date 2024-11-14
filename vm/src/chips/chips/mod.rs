@@ -4,6 +4,7 @@ pub mod exp_reverse_bits;
 pub mod fri_fold;
 pub mod memory_program;
 pub mod multi;
+pub mod poseidon2_skinny_v2;
 pub mod poseidon2_wide;
 pub mod rangecheck;
 pub mod recursion_cpu;
