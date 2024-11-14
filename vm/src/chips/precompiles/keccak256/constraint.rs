@@ -70,9 +70,9 @@ where
             local.clk,
             local.nonce,
             CB::F::from_canonical_u32(SyscallCode::KECCAK_PERMUTE.syscall_id()),
-            local.state_addr.clone().into(),
+            local.state_addr,
             CB::Expr::zero(),
-            local.receive_ecall.clone().into(),
+            local.receive_ecall,
         );
 
         // Constrain that the inputs stay the same throughout the 24 rows of each cycle

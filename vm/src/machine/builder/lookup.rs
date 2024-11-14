@@ -292,6 +292,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         ));
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn looking_syscall(
         &mut self,
         chunk: impl Into<Self::Expr> + Clone,
@@ -316,6 +317,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn looked_syscall(
         &mut self,
         chunk: impl Into<Self::Expr> + Clone,
