@@ -1,5 +1,7 @@
 use crate::{
     chips::chips::{
+        alu_base::BaseAluChip,
+        alu_ext::ExtAluChip,
         exp_reverse_bits_v2::ExpReverseBitsLenChip,
         poseidon2_skinny_v2::Poseidon2SkinnyChip,
         recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
@@ -23,6 +25,8 @@ pub enum RecursionChipType<
     MemoryConst(MemoryConstChip<F>),
     MemoryVar(MemoryVarChip<F>),
     ExpReverseBitsLen(ExpReverseBitsLenChip<DEGREE, F>),
+    BaseAlu(BaseAluChip<F>),
+    ExtAlu(ExtAluChip<F>),
     Poseidon2Skinny(Poseidon2SkinnyChip<DEGREE, F>),
 }
 
@@ -37,6 +41,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::MemoryConst(chip) => ChipBehavior::<F>::name(chip),
             Self::MemoryVar(chip) => ChipBehavior::<F>::name(chip),
             Self::ExpReverseBitsLen(chip) => ChipBehavior::<F>::name(chip),
+            Self::BaseAlu(chip) => ChipBehavior::<F>::name(chip),
+            Self::ExtAlu(chip) => ChipBehavior::<F>::name(chip),
             Self::Poseidon2Skinny(chip) => ChipBehavior::<F>::name(chip),
         }
     }
@@ -46,6 +52,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::MemoryConst(chip) => chip.generate_preprocessed(program),
             Self::MemoryVar(chip) => chip.generate_preprocessed(program),
             Self::ExpReverseBitsLen(chip) => chip.generate_preprocessed(program),
+            Self::BaseAlu(chip) => chip.generate_preprocessed(program),
+            Self::ExtAlu(chip) => chip.generate_preprocessed(program),
             Self::Poseidon2Skinny(chip) => chip.generate_preprocessed(program),
         }
     }
@@ -55,6 +63,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::MemoryConst(chip) => chip.generate_main(input, output),
             Self::MemoryVar(chip) => chip.generate_main(input, output),
             Self::ExpReverseBitsLen(chip) => chip.generate_main(input, output),
+            Self::BaseAlu(chip) => chip.generate_main(input, output),
+            Self::ExtAlu(chip) => chip.generate_main(input, output),
             Self::Poseidon2Skinny(chip) => chip.generate_main(input, output),
         }
     }
@@ -64,6 +74,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::MemoryConst(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::MemoryVar(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::ExpReverseBitsLen(chip) => ChipBehavior::<F>::preprocessed_width(chip),
+            Self::BaseAlu(chip) => ChipBehavior::<F>::preprocessed_width(chip),
+            Self::ExtAlu(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::Poseidon2Skinny(chip) => ChipBehavior::<F>::preprocessed_width(chip),
         }
     }
@@ -73,6 +85,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::MemoryConst(chip) => chip.extra_record(input, extra),
             Self::MemoryVar(chip) => chip.extra_record(input, extra),
             Self::ExpReverseBitsLen(chip) => chip.extra_record(input, extra),
+            Self::BaseAlu(chip) => chip.extra_record(input, extra),
+            Self::ExtAlu(chip) => chip.extra_record(input, extra),
             Self::Poseidon2Skinny(chip) => chip.extra_record(input, extra),
         }
     }
@@ -82,6 +96,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::MemoryConst(chip) => chip.is_active(record),
             Self::MemoryVar(chip) => chip.is_active(record),
             Self::ExpReverseBitsLen(chip) => chip.is_active(record),
+            Self::BaseAlu(chip) => chip.is_active(record),
+            Self::ExtAlu(chip) => chip.is_active(record),
             Self::Poseidon2Skinny(chip) => chip.is_active(record),
         }
     }
@@ -95,6 +111,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::MemoryConst(chip) => BaseAir::<F>::width(chip),
             Self::MemoryVar(chip) => BaseAir::<F>::width(chip),
             Self::ExpReverseBitsLen(chip) => BaseAir::<F>::width(chip),
+            Self::BaseAlu(chip) => BaseAir::<F>::width(chip),
+            Self::ExtAlu(chip) => BaseAir::<F>::width(chip),
             Self::Poseidon2Skinny(chip) => BaseAir::<F>::width(chip),
         }
     }
@@ -104,6 +122,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::MemoryConst(chip) => chip.preprocessed_trace(),
             Self::MemoryVar(chip) => chip.preprocessed_trace(),
             Self::ExpReverseBitsLen(chip) => chip.preprocessed_trace(),
+            Self::BaseAlu(chip) => chip.preprocessed_trace(),
+            Self::ExtAlu(chip) => chip.preprocessed_trace(),
             Self::Poseidon2Skinny(chip) => chip.preprocessed_trace(),
         }
     }
@@ -123,6 +143,8 @@ where
             Self::MemoryConst(chip) => chip.eval(b),
             Self::MemoryVar(chip) => chip.eval(b),
             Self::ExpReverseBitsLen(chip) => chip.eval(b),
+            Self::BaseAlu(chip) => chip.eval(b),
+            Self::ExtAlu(chip) => chip.eval(b),
             Self::Poseidon2Skinny(chip) => chip.eval(b),
         }
     }
@@ -136,6 +158,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
+            MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
+            MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
         ]
     }
 
@@ -145,6 +169,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
+            MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
+            MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
         ]
     }
 
@@ -154,6 +180,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
+            MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
+            MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
         ]
     }
 

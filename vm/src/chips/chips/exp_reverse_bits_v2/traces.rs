@@ -31,14 +31,6 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         "ExpReverseBitsLen".to_string()
     }
 
-    fn extra_record(&self, _: &mut Self::Record, _: &mut Self::Record) {
-        // This is a no-op.
-    }
-
-    fn preprocessed_width(&self) -> usize {
-        NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS
-    }
-
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]> = Vec::new();
         program
@@ -157,6 +149,10 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         );
 
         trace
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS
     }
 
     fn is_active(&self, _record: &Self::Record) -> bool {
