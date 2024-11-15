@@ -17,7 +17,7 @@ use crate::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
             recursion_circuit::stdin::{RecursionStdin, RecursionStdinVariable},
-            utils::commit_public_values,
+            utils::{commit_public_values, verify_public_values_hash},
         },
         configs::recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
     },
@@ -114,7 +114,7 @@ impl RecursionCompressVerifierCircuit<RecursionFC, RecursionSC> {
             public_values_stream.as_slice().borrow();
 
         // todo: Check that the public values digest is correct.
-        // verify_public_values_hash(builder, public_values);
+        verify_public_values_hash(builder, public_values);
 
         builder.assert_felt_eq(public_values.flag_complete, <Val<RecursionSC>>::one());
 

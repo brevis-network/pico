@@ -70,7 +70,7 @@ fn main() {
     let riscv_witness = ProvingWitness::setup_for_riscv(
         riscv_program,
         &riscv_stdin,
-        EmulatorOpts::test_opts(),
+        EmulatorOpts::default(),
         EmulatorContext::default(),
     );
 
@@ -237,6 +237,8 @@ fn main() {
         );
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
+        tracing::debug!("Compress program stats");
+        runtime.print_stats();
         runtime.record
     };
     let compress_witness = ProvingWitness::setup_with_records(vec![compress_record]);
@@ -283,6 +285,9 @@ fn main() {
         );
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
+        tracing::debug!("Embed program stats");
+        runtime.print_stats();
+
         runtime.record
     };
 
