@@ -2,6 +2,8 @@ use crate::{
     configs::{field_config::bb_simple, stark_config::bb_poseidon2},
     primitives::consts::DIGEST_SIZE,
 };
+use p3_fri::{BatchOpening, CommitPhaseProofStep, FriProof, QueryProof, TwoAdicFriPcsProof};
+use p3_symmetric::Hash;
 
 /// A configuration for field_config, with BabyBear field and Poseidon2 hash
 
@@ -10,18 +12,18 @@ use crate::{
 pub type FieldConfig = bb_simple::BabyBearSimple;
 pub type StarkConfig = bb_poseidon2::BabyBearPoseidon2;
 
-pub type Val = bb_poseidon2::Val;
-pub type Perm = bb_poseidon2::Perm;
-pub type Hash = bb_poseidon2::Hash;
-pub type Compress = bb_poseidon2::Compress;
-pub type ValMmcs = bb_poseidon2::ValMmcs;
-pub type Challenge = bb_poseidon2::Challenge;
-pub type ChallengeMmcs = bb_poseidon2::ChallengeMmcs;
+pub type SC_Val = bb_poseidon2::SC_Val;
+pub type SC_Perm = bb_poseidon2::SC_Perm;
+pub type SC_Hash = bb_poseidon2::SC_Hash;
+pub type SC_Compress = bb_poseidon2::SC_Compress;
+pub type SC_ValMmcs = bb_poseidon2::SC_ValMmcs;
+pub type SC_Challenge = bb_poseidon2::SC_Challenge;
+pub type SC_ChallengeMmcs = bb_poseidon2::SC_ChallengeMmcs;
 
-pub type DigestHash = p3_symmetric::Hash<Val, Val, DIGEST_SIZE>;
-pub type Digest = [Val; DIGEST_SIZE];
-pub type QueryProof = p3_fri::QueryProof<Challenge, ChallengeMmcs>;
-pub type CommitPhaseStep = p3_fri::CommitPhaseProofStep<Challenge, ChallengeMmcs>;
-pub type FriProof = p3_fri::FriProof<Challenge, ChallengeMmcs, Val>;
-pub type BatchOpening = p3_fri::BatchOpening<Val, ValMmcs>;
-pub type PcsProof = p3_fri::TwoAdicFriPcsProof<Val, Challenge, ValMmcs, ChallengeMmcs>;
+pub type SC_DigestHash = Hash<SC_Val, SC_Val, DIGEST_SIZE>;
+pub type SC_Digest = [SC_Val; DIGEST_SIZE];
+pub type SC_QueryProof = QueryProof<SC_Challenge, SC_ChallengeMmcs>;
+pub type SC_CommitPhaseStep = CommitPhaseProofStep<SC_Challenge, SC_ChallengeMmcs>;
+pub type SC_FriProof = FriProof<SC_Challenge, SC_ChallengeMmcs, SC_Val>;
+pub type SC_BatchOpening = BatchOpening<SC_Val, SC_ValMmcs>;
+pub type SC_PcsProof = TwoAdicFriPcsProof<SC_Val, SC_Challenge, SC_ValMmcs, SC_ChallengeMmcs>;

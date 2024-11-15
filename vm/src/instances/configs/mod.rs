@@ -1,3 +1,5 @@
+#![allow(non_camel_case_types)]
+
 pub mod embed_bb_bn254_poseidon2;
 pub mod recur_bb_poseidon2;
 pub mod riscv_bb_poseidon2;

@@ -28,18 +28,18 @@ use p3_fri::FriConfig;
 
 pub fn const_fri_config(
     builder: &mut Builder<rcf::FieldConfig>,
-    config: &FriConfig<rcf::ChallengeMmcs>,
+    config: &FriConfig<rcf::SC_ChallengeMmcs>,
 ) -> FriConfigVariable<rcf::FieldConfig> {
-    let two_addicity = rcf::Val::TWO_ADICITY;
+    let two_addicity = rcf::SC_Val::TWO_ADICITY;
     let mut generators = builder.dyn_array(two_addicity);
     let mut subgroups = builder.dyn_array(two_addicity);
     for i in 0..two_addicity {
-        let constant_generator = rcf::Val::two_adic_generator(i);
+        let constant_generator = rcf::SC_Val::two_adic_generator(i);
         builder.set(&mut generators, i, constant_generator);
 
         let constant_domain = TwoAdicMultiplicativeCoset {
             log_n: i,
-            shift: rcf::Val::one(),
+            shift: rcf::SC_Val::one(),
         };
         let domain_value: TwoAdicMultiplicativeCosetVariable<_> = builder.constant(constant_domain);
         builder.set(&mut subgroups, i, domain_value);

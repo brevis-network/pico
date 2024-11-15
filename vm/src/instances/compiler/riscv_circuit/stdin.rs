@@ -67,8 +67,9 @@ where
     fn read(builder: &mut Builder<RecursionFC>) -> Self::HintVariable {
         let vk = VerifyingKeyHint::<'a, RiscvSC, C>::read(builder);
         let proofs = Vec::<BaseProofHint<'a, RiscvSC, C>>::read(builder);
-        let base_challenger = DuplexChallenger::<rcf::Val, rcf::Perm, 16, 8>::read(builder);
-        let reconstruct_challenger = DuplexChallenger::<rcf::Val, rcf::Perm, 16, 8>::read(builder);
+        let base_challenger = DuplexChallenger::<rcf::SC_Val, rcf::SC_Perm, 16, 8>::read(builder);
+        let reconstruct_challenger =
+            DuplexChallenger::<rcf::SC_Val, rcf::SC_Perm, 16, 8>::read(builder);
         let flag_complete = builder.hint_var();
 
         RiscvRecursionStdinVariable {

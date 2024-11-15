@@ -49,19 +49,19 @@ pub trait Hintable<FC: FieldGenericConfig> {
 }
 
 impl Hintable<rcf::FieldConfig> for usize {
-    type HintVariable = Var<rcf::Val>;
+    type HintVariable = Var<rcf::SC_Val>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         builder.hint_var()
     }
 
-    fn write(&self) -> Vec<Vec<Block<rcf::Val>>> {
-        vec![vec![Block::from(rcf::Val::from_canonical_usize(*self))]]
+    fn write(&self) -> Vec<Vec<Block<rcf::SC_Val>>> {
+        vec![vec![Block::from(rcf::SC_Val::from_canonical_usize(*self))]]
     }
 }
 
-impl Hintable<rcf::FieldConfig> for rcf::Val {
-    type HintVariable = Felt<rcf::Val>;
+impl Hintable<rcf::FieldConfig> for rcf::SC_Val {
+    type HintVariable = Felt<rcf::SC_Val>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         builder.hint_felt()
@@ -72,8 +72,8 @@ impl Hintable<rcf::FieldConfig> for rcf::Val {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for rcf::Challenge {
-    type HintVariable = Ext<rcf::Val, rcf::Challenge>;
+impl Hintable<rcf::FieldConfig> for rcf::SC_Challenge {
+    type HintVariable = Ext<rcf::SC_Val, rcf::SC_Challenge>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         builder.hint_ext()
@@ -122,13 +122,13 @@ impl Hintable<rcf::FieldConfig> for QuotientData {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for TwoAdicMultiplicativeCoset<rcf::Val> {
+impl Hintable<rcf::FieldConfig> for TwoAdicMultiplicativeCoset<rcf::SC_Val> {
     type HintVariable = TwoAdicMultiplicativeCosetVariable<rcf::FieldConfig>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let log_n = usize::read(builder);
-        let shift = rcf::Val::read(builder);
-        let g_val = rcf::Val::read(builder);
+        let shift = rcf::SC_Val::read(builder);
+        let g_val = rcf::SC_Val::read(builder);
         let size = usize::read(builder);
 
         // Initialize a domain.
@@ -143,8 +143,10 @@ impl Hintable<rcf::FieldConfig> for TwoAdicMultiplicativeCoset<rcf::Val> {
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut vec = Vec::new();
         vec.extend(usize::write(&self.log_n));
-        vec.extend(rcf::Val::write(&self.shift));
-        vec.extend(rcf::Val::write(&rcf::Val::two_adic_generator(self.log_n)));
+        vec.extend(rcf::SC_Val::write(&self.shift));
+        vec.extend(rcf::SC_Val::write(&rcf::SC_Val::two_adic_generator(
+            self.log_n,
+        )));
         vec.extend(usize::write(&(1usize << (self.log_n))));
         vec
     }
@@ -158,11 +160,11 @@ impl<'a, A> VecAutoHintable<rcf::FieldConfig> for BaseProofHint<'a, RiscvSC, A> 
         + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>
 {
 }
-impl VecAutoHintable<rcf::FieldConfig> for TwoAdicMultiplicativeCoset<rcf::Val> {}
+impl VecAutoHintable<rcf::FieldConfig> for TwoAdicMultiplicativeCoset<rcf::SC_Val> {}
 impl VecAutoHintable<rcf::FieldConfig> for Vec<usize> {}
 impl VecAutoHintable<rcf::FieldConfig> for QuotientData {}
 impl VecAutoHintable<rcf::FieldConfig> for Vec<QuotientData> {}
-impl VecAutoHintable<rcf::FieldConfig> for Vec<rcf::Val> {}
+impl VecAutoHintable<rcf::FieldConfig> for Vec<rcf::SC_Val> {}
 
 impl<I: VecAutoHintable<rcf::FieldConfig>> VecAutoHintable<rcf::FieldConfig> for &I {}
 
@@ -197,7 +199,7 @@ where
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let len = rcf::Val::from_canonical_usize(self.len());
+        let len = rcf::SC_Val::from_canonical_usize(self.len());
         stream.push(vec![len.into()]);
 
         self.iter().for_each(|i| {
@@ -210,22 +212,22 @@ where
 }
 
 impl Hintable<rcf::FieldConfig> for Vec<usize> {
-    type HintVariable = Array<rcf::FieldConfig, Var<rcf::Val>>;
+    type HintVariable = Array<rcf::FieldConfig, Var<rcf::SC_Val>>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         builder.hint_vars()
     }
 
-    fn write(&self) -> Vec<Vec<Block<rcf::Val>>> {
+    fn write(&self) -> Vec<Vec<Block<rcf::SC_Val>>> {
         vec![self
             .iter()
-            .map(|x| Block::from(rcf::Val::from_canonical_usize(*x)))
+            .map(|x| Block::from(rcf::SC_Val::from_canonical_usize(*x)))
             .collect()]
     }
 }
 
-impl Hintable<rcf::FieldConfig> for Vec<rcf::Val> {
-    type HintVariable = Array<rcf::FieldConfig, Felt<rcf::Val>>;
+impl Hintable<rcf::FieldConfig> for Vec<rcf::SC_Val> {
+    type HintVariable = Array<rcf::FieldConfig, Felt<rcf::SC_Val>>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         builder.hint_felts()
@@ -236,8 +238,8 @@ impl Hintable<rcf::FieldConfig> for Vec<rcf::Val> {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for Vec<rcf::Challenge> {
-    type HintVariable = Array<rcf::FieldConfig, Ext<rcf::Val, rcf::Challenge>>;
+impl Hintable<rcf::FieldConfig> for Vec<rcf::SC_Challenge> {
+    type HintVariable = Array<rcf::FieldConfig, Ext<rcf::SC_Val, rcf::SC_Challenge>>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         builder.hint_exts()
@@ -251,15 +253,15 @@ impl Hintable<rcf::FieldConfig> for Vec<rcf::Challenge> {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for Vec<Vec<rcf::Challenge>> {
+impl Hintable<rcf::FieldConfig> for Vec<Vec<rcf::SC_Challenge>> {
     type HintVariable =
-        Array<rcf::FieldConfig, Array<rcf::FieldConfig, Ext<rcf::Val, rcf::Challenge>>>;
+        Array<rcf::FieldConfig, Array<rcf::FieldConfig, Ext<rcf::SC_Val, rcf::SC_Challenge>>>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
-            let hint = Vec::<rcf::Challenge>::read(builder);
+            let hint = Vec::<rcf::SC_Challenge>::read(builder);
             builder.set(&mut arr, i, hint);
         });
         arr
@@ -268,11 +270,11 @@ impl Hintable<rcf::FieldConfig> for Vec<Vec<rcf::Challenge>> {
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let len = rcf::Val::from_canonical_usize(self.len());
+        let len = rcf::SC_Val::from_canonical_usize(self.len());
         stream.push(vec![len.into()]);
 
         self.iter().for_each(|arr| {
-            let comm = Vec::<rcf::Challenge>::write(arr);
+            let comm = Vec::<rcf::SC_Challenge>::write(arr);
             stream.extend(comm);
         });
 
@@ -280,18 +282,18 @@ impl Hintable<rcf::FieldConfig> for Vec<Vec<rcf::Challenge>> {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for ChipOpenedValues<rcf::Challenge> {
+impl Hintable<rcf::FieldConfig> for ChipOpenedValues<rcf::SC_Challenge> {
     type HintVariable = ChipOpenedValuesVariable<rcf::FieldConfig>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
-        let preprocessed_local = Vec::<rcf::Challenge>::read(builder);
-        let preprocessed_next = Vec::<rcf::Challenge>::read(builder);
-        let main_local = Vec::<rcf::Challenge>::read(builder);
-        let main_next = Vec::<rcf::Challenge>::read(builder);
-        let permutation_local = Vec::<rcf::Challenge>::read(builder);
-        let permutation_next = Vec::<rcf::Challenge>::read(builder);
-        let quotient = Vec::<Vec<rcf::Challenge>>::read(builder);
-        let cumulative_sum = rcf::Challenge::read(builder);
+        let preprocessed_local = Vec::<rcf::SC_Challenge>::read(builder);
+        let preprocessed_next = Vec::<rcf::SC_Challenge>::read(builder);
+        let main_local = Vec::<rcf::SC_Challenge>::read(builder);
+        let main_next = Vec::<rcf::SC_Challenge>::read(builder);
+        let permutation_local = Vec::<rcf::SC_Challenge>::read(builder);
+        let permutation_next = Vec::<rcf::SC_Challenge>::read(builder);
+        let quotient = Vec::<Vec<rcf::SC_Challenge>>::read(builder);
+        let cumulative_sum = rcf::SC_Challenge::read(builder);
         let log_main_degree = builder.hint_var();
         ChipOpenedValuesVariable {
             preprocessed_local,
@@ -321,14 +323,14 @@ impl Hintable<rcf::FieldConfig> for ChipOpenedValues<rcf::Challenge> {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for Vec<ChipOpenedValues<rcf::Challenge>> {
+impl Hintable<rcf::FieldConfig> for Vec<ChipOpenedValues<rcf::SC_Challenge>> {
     type HintVariable = Array<rcf::FieldConfig, ChipOpenedValuesVariable<rcf::FieldConfig>>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let len = builder.hint_var();
         let mut arr = builder.dyn_array(len);
         builder.range(0, len).for_each(|i, builder| {
-            let hint = ChipOpenedValues::<rcf::Challenge>::read(builder);
+            let hint = ChipOpenedValues::<rcf::SC_Challenge>::read(builder);
             builder.set(&mut arr, i, hint);
         });
         arr
@@ -337,11 +339,11 @@ impl Hintable<rcf::FieldConfig> for Vec<ChipOpenedValues<rcf::Challenge>> {
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let len = rcf::Val::from_canonical_usize(self.len());
+        let len = rcf::SC_Val::from_canonical_usize(self.len());
         stream.push(vec![len.into()]);
 
         self.iter().for_each(|arr| {
-            let comm = ChipOpenedValues::<rcf::Challenge>::write(arr);
+            let comm = ChipOpenedValues::<rcf::SC_Challenge>::write(arr);
             stream.extend(comm);
         });
 
@@ -349,11 +351,11 @@ impl Hintable<rcf::FieldConfig> for Vec<ChipOpenedValues<rcf::Challenge>> {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for BaseOpenedValues<rcf::Challenge> {
+impl Hintable<rcf::FieldConfig> for BaseOpenedValues<rcf::SC_Challenge> {
     type HintVariable = BaseOpenedValuesVariable<rcf::FieldConfig>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
-        let chips_opened_values = Vec::<ChipOpenedValues<rcf::Challenge>>::read(builder);
+        let chips_opened_values = Vec::<ChipOpenedValues<rcf::SC_Challenge>>::read(builder);
         BaseOpenedValuesVariable {
             chips_opened_values,
         }
@@ -366,13 +368,13 @@ impl Hintable<rcf::FieldConfig> for BaseOpenedValues<rcf::Challenge> {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for BaseCommitments<rcf::DigestHash> {
+impl Hintable<rcf::FieldConfig> for BaseCommitments<rcf::SC_DigestHash> {
     type HintVariable = BaseCommitmentsVariable<rcf::FieldConfig>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
-        let main_commit = rcf::Digest::read(builder);
-        let permutation_commit = rcf::Digest::read(builder);
-        let quotient_commit = rcf::Digest::read(builder);
+        let main_commit = rcf::SC_Digest::read(builder);
+        let permutation_commit = rcf::SC_Digest::read(builder);
+        let quotient_commit = rcf::SC_Digest::read(builder);
         BaseCommitmentsVariable {
             main_commit,
             permutation_commit,
@@ -382,17 +384,17 @@ impl Hintable<rcf::FieldConfig> for BaseCommitments<rcf::DigestHash> {
 
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
-        let h: rcf::Digest = self.main_commit.into();
+        let h: rcf::SC_Digest = self.main_commit.into();
         stream.extend(h.write());
-        let h: rcf::Digest = self.permutation_commit.into();
+        let h: rcf::SC_Digest = self.permutation_commit.into();
         stream.extend(h.write());
-        let h: rcf::Digest = self.quotient_commit.into();
+        let h: rcf::SC_Digest = self.quotient_commit.into();
         stream.extend(h.write());
         stream
     }
 }
 
-impl Hintable<rcf::FieldConfig> for DuplexChallenger<rcf::Val, rcf::Perm, 16, 8> {
+impl Hintable<rcf::FieldConfig> for DuplexChallenger<rcf::SC_Val, rcf::SC_Perm, 16, 8> {
     type HintVariable = DuplexChallengerVariable<rcf::FieldConfig>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
@@ -415,11 +417,11 @@ impl Hintable<rcf::FieldConfig> for DuplexChallenger<rcf::Val, rcf::Perm, 16, 8>
         stream.extend(self.sponge_state.to_vec().write());
         stream.extend(self.input_buffer.len().write());
         let mut input_padded = self.input_buffer.to_vec();
-        input_padded.resize(PERMUTATION_WIDTH, rcf::Val::zero());
+        input_padded.resize(PERMUTATION_WIDTH, rcf::SC_Val::zero());
         stream.extend(input_padded.write());
         stream.extend(self.output_buffer.len().write());
         let mut output_padded = self.output_buffer.to_vec();
-        output_padded.resize(PERMUTATION_WIDTH, rcf::Val::zero());
+        output_padded.resize(PERMUTATION_WIDTH, rcf::SC_Val::zero());
         stream.extend(output_padded.write());
         stream
     }
@@ -434,10 +436,10 @@ where
     type HintVariable = BaseVerifyingKeyVariable<rcf::FieldConfig>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
-        let commitment = rcf::Digest::read(builder);
-        let pc_start = rcf::Val::read(builder);
+        let commitment = rcf::SC_Digest::read(builder);
+        let pc_start = rcf::SC_Val::read(builder);
         let preprocessed_sorted_idxs = Vec::<usize>::read(builder);
-        let prep_domains = Vec::<TwoAdicMultiplicativeCoset<rcf::Val>>::read(builder);
+        let prep_domains = Vec::<TwoAdicMultiplicativeCoset<rcf::SC_Val>>::read(builder);
         BaseVerifyingKeyVariable {
             commitment,
             pc_start,
@@ -451,7 +453,7 @@ where
             get_preprocessed_data(self.chips, &self.preprocessed_chip_ids, self.vk);
 
         let mut stream = Vec::new();
-        let h: rcf::Digest = self.vk.commit.into();
+        let h: rcf::SC_Digest = self.vk.commit.into();
         stream.extend(h.write());
         stream.extend(self.vk.pc_start.write());
         stream.extend(preprocessed_sorted_idxs.write());
@@ -473,8 +475,8 @@ where
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
         let commitment = BaseCommitments::read(builder);
         let opened_values = BaseOpenedValues::read(builder);
-        let opening_proof = rcf::PcsProof::read(builder);
-        let public_values = Vec::<rcf::Val>::read(builder);
+        let opening_proof = rcf::SC_PcsProof::read(builder);
+        let public_values = Vec::<rcf::SC_Val>::read(builder);
         let quotient_data = Vec::<QuotientData>::read(builder);
         let sorted_indices = Vec::<usize>::read(builder);
         BaseProofVariable {
