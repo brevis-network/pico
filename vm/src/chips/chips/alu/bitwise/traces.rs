@@ -20,10 +20,10 @@ use crate::{
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::debug;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
+use tracing::debug;
 
 impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
     type Record = EmulationRecord;

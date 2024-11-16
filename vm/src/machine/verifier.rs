@@ -10,12 +10,12 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use itertools::{izip, Itertools};
-use log::debug;
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{AbstractExtensionField, AbstractField, Field};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
+use tracing::debug;
 
 /// struct of BaseVerifier where SC specifies type of config and C is not used
 pub struct BaseVerifier<SC, C> {

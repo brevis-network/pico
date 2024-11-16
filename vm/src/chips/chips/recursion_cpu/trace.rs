@@ -14,7 +14,6 @@ use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 use std::borrow::BorrowMut;
-use tracing::instrument;
 
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const L: usize> ChipBehavior<F>
     for CpuChip<F, L>
@@ -26,7 +25,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const L: usize> C
         "CPU".to_string()
     }
 
-    #[instrument(name = "generate cpu trace", level = "debug", skip_all, fields(rows = input.cpu_events.len()))]
     fn generate_main(
         &self,
         input: &RecursionRecord<F>,

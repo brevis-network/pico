@@ -1,5 +1,5 @@
 use crate::compiler::riscv::{disassembler::Elf, program::Program};
-use log::info;
+use tracing::info;
 
 pub enum SourceType {
     RiscV,

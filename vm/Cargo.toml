@@ -41,6 +41,7 @@ bincode.workspace = true
 bytemuck.workspace = true
 crossbeam.workspace = true
 csv.workspace = true
+dashmap.workspace = true
 elf.workspace = true
 eyre.workspace = true
 ff.workspace = true

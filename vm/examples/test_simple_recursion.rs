@@ -1,5 +1,4 @@
 use hashbrown::HashMap;
-use log::{debug, info, warn};
 use p3_baby_bear::BabyBear;
 use p3_challenger::{CanObserve, DuplexChallenger};
 use pico_vm::{
@@ -27,6 +26,7 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     time::Instant,
 };
+use tracing::{debug, info, warn};
 
 #[path = "common/parse_args.rs"]
 mod parse_args;

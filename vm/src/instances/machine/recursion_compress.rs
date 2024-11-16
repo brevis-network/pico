@@ -16,11 +16,11 @@ use crate::{
     },
     recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
-use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
 use std::{any::type_name, borrow::Borrow, time::Instant};
+use tracing::{info, instrument, trace};
 
 pub struct RecursionCompressMachine<SC, C>
 where
@@ -61,6 +61,7 @@ where
     }
 
     /// Get the prover of the machine.
+    #[instrument(name = "compress_prove", level = "debug", skip_all)]
     fn prove(
         &self,
         pk: &BaseProvingKey<RecursionSC>,
@@ -93,10 +94,10 @@ where
 
         #[cfg(feature = "debug")]
         {
-            debug!("record stats");
+            tracing::debug!("record stats");
             let stats = records[0].stats();
             for (key, value) in &stats {
-                debug!("{:<25}: {}", key, value);
+                tracing::debug!("{:<25}: {}", key, value);
             }
             all_records.extend_from_slice(&records);
         }
@@ -153,7 +154,7 @@ where
 
         let public_values: &RecursionPublicValues<_> =
             proof.proofs[0].public_values.as_slice().borrow();
-        debug!("public values: {:?}", public_values);
+        trace!("public values: {:?}", public_values);
 
         // assert completion
         if public_values.flag_complete != <Val<RecursionSC>>::one() {

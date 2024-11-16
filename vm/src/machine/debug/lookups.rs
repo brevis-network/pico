@@ -9,10 +9,10 @@ use crate::{
 };
 use alloc::collections::BTreeMap;
 use core::{fmt::Display, iter::repeat};
-use log::error;
 use p3_air::Air;
 use p3_field::{Field, PrimeField64};
 use p3_matrix::Matrix;
+use tracing::error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LookupData {

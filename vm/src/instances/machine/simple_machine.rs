@@ -10,9 +10,9 @@ use crate::{
     },
 };
 use anyhow::Result;
-use log::info;
 use p3_air::Air;
 use std::{any::type_name, time::Instant};
+use tracing::info;
 
 pub struct SimpleMachine<SC, C>
 where

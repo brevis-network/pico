@@ -1,4 +1,3 @@
-use log::{debug, info};
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator},
@@ -10,6 +9,7 @@ use pico_vm::{
     primitives::consts::RISCV_NUM_PVS,
 };
 use std::{env, time::Instant};
+use tracing::{debug, info};
 
 #[path = "common/parse_args.rs"]
 mod parse_args;

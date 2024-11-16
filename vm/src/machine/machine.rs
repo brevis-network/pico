@@ -13,11 +13,11 @@ use crate::{
     },
 };
 use anyhow::Result;
-use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::Field;
 use std::time::Instant;
+use tracing::{debug, info};
 
 /// Functions that each machine instance should implement.
 pub trait MachineBehavior<SC, C, I>

@@ -1,5 +1,5 @@
-use log::info;
 use pico_vm::emulator::riscv::stdin::EmulatorStdin;
+use tracing::info;
 
 pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin<Vec<u8>>, String, u32) {
     const ELF_FIB: &[u8] =

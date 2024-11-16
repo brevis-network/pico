@@ -1,4 +1,3 @@
-use log::info;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
@@ -21,6 +20,7 @@ use pico_vm::{
     },
     primitives::consts::RISCV_NUM_PVS,
 };
+use tracing::info;
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),

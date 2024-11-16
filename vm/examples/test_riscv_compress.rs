@@ -1,4 +1,3 @@
-use log::info;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use pico_vm::{
@@ -17,6 +16,7 @@ use pico_vm::{
     primitives::consts::{RECURSION_NUM_PVS, RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS},
 };
 use std::{env, time::Instant};
+use tracing::info;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;

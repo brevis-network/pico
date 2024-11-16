@@ -16,7 +16,6 @@ use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{collections::HashMap, marker::PhantomData};
-use tracing::instrument;
 
 pub const NUM_PROGRAM_PREPROCESSED_COLS: usize = size_of::<ProgramPreprocessedCols<u8>>();
 pub const NUM_PROGRAM_MULT_COLS: usize = size_of::<ProgramMultiplicityCols<u8>>();
@@ -83,7 +82,6 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
         ))
     }
 
-    #[instrument(name = "generate program trace", level = "debug", skip_all, fields(rows = input.program.instructions.len()))]
     fn generate_main(
         &self,
         input: &RecursionRecord<F>,

@@ -17,7 +17,6 @@ use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use rayon::ThreadPoolBuilder;
 use std::any::type_name;
-use tracing::{debug_span, Span};
 
 pub fn type_name_of<T>(_: &T) -> String {
     type_name::<T>().to_string()
@@ -256,14 +255,14 @@ where
             })
             .collect()
     };
-    let quotient_values = debug_span!(parent: Span::current(), "chip_compute_quotient_values", chip = chip.name(), quotient_size = quotient_size, tag = "tag-chip").in_scope(|| {
+    let quotient_values = {
         if cfg!(feature = "single-threaded") {
             let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
             pool.install(compute_quotient_closure)
         } else {
             compute_quotient_closure()
         }
-    });
+    };
 
     quotient_values
 }

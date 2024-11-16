@@ -17,7 +17,6 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::borrow::{Borrow, BorrowMut};
-use tracing::instrument;
 
 pub(crate) const NUM_MEMORY_INIT_COLS: usize = size_of::<MemoryInitCols<u8>>();
 
@@ -29,7 +28,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryGlobalChip<F> {
         "MemoryGlobalChip".to_string()
     }
 
-    #[instrument(name = "generate memory trace", level = "debug", skip_all, fields(first_rows = input.first_memory_record.len(), last_rows = input.last_memory_record.len()))]
     fn generate_main(
         &self,
         input: &RecursionRecord<F>,

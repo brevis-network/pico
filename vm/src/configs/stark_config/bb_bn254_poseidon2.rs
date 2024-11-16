@@ -1,5 +1,4 @@
 use crate::configs::{config::StarkGenericConfig, stark_config::utils::bn254_poseidon2_rc3};
-use log::info;
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::{Bn254Fr, DiffusionMatrixBN254};
 use p3_challenger::MultiField32Challenger;
@@ -14,6 +13,7 @@ use p3_merkle_tree::FieldMerkleTreeMmcs;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
+use tracing::info;
 // todo: deeper understanding of the following types
 
 pub type SC_Val = BabyBear;

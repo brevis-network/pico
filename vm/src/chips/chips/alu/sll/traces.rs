@@ -10,12 +10,12 @@ use crate::{
     primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };
 use hashbrown::HashMap;
-use log::debug;
 use p3_air::BaseAir;
 use p3_field::Field;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::{borrow::BorrowMut, marker::PhantomData};
+use tracing::debug;
 
 #[derive(Default, Clone, Debug)]
 pub struct SLLChip<F>(PhantomData<F>);

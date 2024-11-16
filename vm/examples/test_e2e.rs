@@ -1,4 +1,3 @@
-use log::info;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use pico_vm::{
@@ -37,6 +36,7 @@ use pico_vm::{
     recursion::runtime::Runtime,
 };
 use std::{env, time::Instant};
+use tracing::info;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;

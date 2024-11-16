@@ -1,5 +1,4 @@
 use itertools::enumerate;
-use log::{debug, info};
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     emulator::{
@@ -10,6 +9,7 @@ use pico_vm::{
     machine::logger::setup_logger,
 };
 use std::{env, time::Instant};
+use tracing::{debug, info, trace};
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
@@ -68,7 +68,7 @@ fn main() {
                 debug!("{:<25}: {}", key, value);
             }
 
-            debug!("public values: {:?}", record.public_values);
+            trace!("public values: {:?}", record.public_values);
 
             // For the first chunk, cpu events should not be empty
             if i == 0 {

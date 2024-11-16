@@ -1,5 +1,4 @@
 use crate::{configs::config::StarkGenericConfig, primitives::RC_16_30};
-use log::info;
 use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
 use p3_challenger::DuplexChallenger;
 use p3_commit::{ExtensionMmcs, Pcs};
@@ -10,6 +9,7 @@ use p3_merkle_tree::FieldMerkleTreeMmcs;
 use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
+use tracing::info;
 
 pub type SC_Val = BabyBear;
 pub type SC_Perm =

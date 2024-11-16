@@ -28,11 +28,11 @@ use crate::{
     },
 };
 use hashbrown::{hash_map::Entry, HashMap};
-use log::{debug, info};
 use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Instant};
 use thiserror::Error;
+use tracing::{debug, info, instrument};
 
 pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;
 
@@ -324,6 +324,7 @@ impl RiscvEmulator {
     }
 
     // todo: refactor
+    #[instrument(name = "emulate", level = "debug", skip_all)]
     fn emulate(&mut self) -> Result<bool, EmulationError> {
         // Get the current chunk.
         info!("emulate - BEGIN");
@@ -377,7 +378,7 @@ impl RiscvEmulator {
         // Set the global public values for all chunks.
         let mut last_next_pc = 0;
         let mut last_exit_code = 0;
-        println!("# records to be processed: {}", self.records.len());
+        debug!("# records to be processed: {}", self.records.len());
         for (i, record) in self.records.iter_mut().enumerate() {
             record.public_values = public_values;
             record.public_values.committed_value_digest = public_values.committed_value_digest;
@@ -401,6 +402,7 @@ impl RiscvEmulator {
     }
 
     /// Emulate chunk_batch_size cycles and bump to self.batch_records.
+    #[instrument(name = "emulate_to_batch", level = "debug", skip_all)]
     pub fn emulate_to_batch(&mut self) -> Result<bool, EmulationError> {
         self.batch_records.clear();
 

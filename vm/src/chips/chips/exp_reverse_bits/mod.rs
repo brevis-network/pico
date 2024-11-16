@@ -23,7 +23,6 @@ use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{borrow::BorrowMut, marker::PhantomData};
-use tracing::instrument;
 
 pub const NUM_EXP_REVERSE_BITS_LEN_COLS: usize = core::mem::size_of::<ExpReverseBitsLenCols<u8>>();
 
@@ -95,7 +94,6 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         "ExpReverseBitsLen".to_string()
     }
 
-    #[instrument(name = "generate exp reverse bits len trace", level = "debug", skip_all, fields(rows = input.exp_reverse_bits_len_events.len()))]
     fn generate_main(
         &self,
         input: &RecursionRecord<F>,

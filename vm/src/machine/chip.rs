@@ -11,11 +11,10 @@ use crate::{
         utils::get_log_quotient_degree,
     },
 };
-use log::debug;
 use p3_air::{Air, BaseAir};
 use p3_field::{ExtensionField, Field};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use std::time::Instant;
+use p3_matrix::dense::RowMajorMatrix;
+use tracing::debug;
 
 /// Chip behavior
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
@@ -72,7 +71,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         );
 
         debug!(
-            "{:<17} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
+            "new chip {:<17} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
             chip.name(),
             chip.preprocessed_width(),
             log_quotient_degree,
@@ -93,7 +92,6 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         main: &RowMajorMatrix<F>,
         perm_challenges: &[EF],
     ) -> RowMajorMatrix<EF> {
-        let begin = Instant::now();
         let batch_size = 1 << self.log_quotient_degree;
 
         // Generate the RLC elements to uniquely identify each interaction.
@@ -102,7 +100,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         // Generate the RLC elements to uniquely identify each item in the looked up tuple.
         let beta = perm_challenges[1];
 
-        let trace = generate_permutation_trace(
+        generate_permutation_trace(
             &self.looking,
             &self.looked,
             preprocessed,
@@ -110,16 +108,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
             alpha,
             beta,
             batch_size,
-        );
-        debug!(
-            "generated permutation: {:<17} | width {:<4} rows {:<8} cells {:<11} | in {:?}",
-            self.name(),
-            trace.width(),
-            trace.height(),
-            trace.values.len(),
-            begin.elapsed()
-        );
-        trace
+        )
     }
 
     /// Returns the width of the permutation trace.

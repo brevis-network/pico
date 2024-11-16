@@ -19,11 +19,11 @@ use crate::{
 
 use crate::{configs::config::Val, instances::configs::riscv_config::StarkConfig as RiscvSC};
 use anyhow::Result;
-use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
 use std::{any::type_name, borrow::Borrow, time::Instant};
+use tracing::{debug, info, instrument};
 
 pub struct RiscvMachine<SC, C>
 where
@@ -52,6 +52,7 @@ where
     }
 
     /// Get the prover of the machine.
+    #[instrument(name = "riscv_prove", level = "debug", skip_all)]
     fn prove(
         &self,
         pk: &BaseProvingKey<RiscvSC>,
@@ -83,11 +84,11 @@ where
 
             self.complement_record(batch_records);
 
-            for (i, record) in batch_records.iter().enumerate() {
-                debug!("record {} stats", i);
+            for record in batch_records {
+                debug!("record stats: chunk {}", record.chunk_index());
                 let stats = record.stats();
                 for (key, value) in &stats {
-                    debug!("{:<25}: {}", key, value);
+                    debug!("   |- {:<25}: {}", key, value);
                 }
 
                 info!("PERF-phase=1-chunk={}", record.chunk_index(),);

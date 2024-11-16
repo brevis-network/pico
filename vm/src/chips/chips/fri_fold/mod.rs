@@ -23,7 +23,6 @@ use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{borrow::BorrowMut, marker::PhantomData};
-use tracing::instrument;
 
 pub const NUM_FRI_FOLD_COLS: usize = core::mem::size_of::<FriFoldCols<u8>>();
 
@@ -81,7 +80,6 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for FriFoldChip<DEGRE
         "FriFold".to_string()
     }
 
-    #[instrument(name = "generate fri fold trace", level = "debug", skip_all, fields(rows = input.fri_fold_events.len()))]
     fn generate_main(
         &self,
         input: &RecursionRecord<F>,

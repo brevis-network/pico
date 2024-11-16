@@ -34,6 +34,9 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     steps:
+      - name: Configure git for private repo
+        run: |
+          git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
       - name: Checkout sources
         uses: actions/checkout@v4
       - name: Install toolchain

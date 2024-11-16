@@ -17,13 +17,13 @@ use crate::{
     machine::chip::ChipBehavior,
 };
 use hashbrown::HashMap;
-use log::debug;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::ParallelSlice;
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
 use std::borrow::BorrowMut;
+use tracing::debug;
 
 impl<F: Field> BaseAir<F> for CpuChip<F> {
     fn width(&self) -> usize {

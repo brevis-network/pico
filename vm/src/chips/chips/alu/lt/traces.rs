@@ -17,12 +17,12 @@ use crate::{
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
-use log::debug;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::prelude::*;
 use std::marker::PhantomData;
+use tracing::debug;
 
 /// Lt Chip for proving U32 Signed/Unsigned b < c
 #[derive(Default, Clone, Debug)]

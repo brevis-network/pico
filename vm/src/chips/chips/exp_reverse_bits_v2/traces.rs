@@ -17,7 +17,6 @@ use crate::{
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
-use tracing::instrument;
 
 #[cfg(debug_assertions)]
 use p3_matrix::Matrix;
@@ -84,7 +83,6 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         Some(trace)
     }
 
-    #[instrument(name = "generate exp reverse bits len main trace", level = "debug", skip_all, fields(rows = input.exp_reverse_bits_len_events.len()))]
     fn generate_main(
         &self,
         input: &RecursionRecord<F>,

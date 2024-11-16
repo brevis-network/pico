@@ -18,11 +18,11 @@ use crate::{
     recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use anyhow::Result;
-use log::{debug, info};
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::Field;
 use std::{any::type_name, borrow::Borrow, time::Instant};
+use tracing::{info, trace};
 
 pub struct RiscvRecursionMachine<SC, C>
 where
@@ -100,10 +100,10 @@ where
 
             #[cfg(feature = "debug")]
             {
-                debug!("record stats");
+                tracing::debug!("record stats");
                 let stats = records[0].stats();
                 for (key, value) in &stats {
-                    debug!("{:<25}: {}", key, value);
+                    tracing::debug!("{:<25}: {}", key, value);
                 }
                 all_records.extend_from_slice(&records);
             }
@@ -171,7 +171,7 @@ where
             let public_values: &RecursionPublicValues<_> =
                 each_proof.public_values.as_slice().borrow();
 
-            debug!("public values: {:?}", public_values);
+            trace!("public values: {:?}", public_values);
 
             let mut challenger = self.config().challenger();
             // observe all preprocessed and main commits and pv's

@@ -21,12 +21,12 @@ use crate::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use log::debug;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::{borrow::BorrowMut, marker::PhantomData};
+use tracing::debug;
 
 /// A chip that implements bitwise operations for the opcodes SRL and SRA.
 #[derive(Default)]
