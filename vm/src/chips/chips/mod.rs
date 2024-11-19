@@ -19,4 +19,5 @@ pub mod toys;
 pub mod alu_base;
 pub mod alu_ext;
 pub mod exp_reverse_bits_v2;
+pub mod poseidon2_wide_v2;
 pub mod recursion_memory_v2;
