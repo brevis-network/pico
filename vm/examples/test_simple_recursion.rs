@@ -22,11 +22,10 @@ use pico_vm::{
     recursion::runtime::Runtime as RecursionRuntime,
 };
 use std::{
-    env,
     hash::{DefaultHasher, Hash, Hasher},
     time::Instant,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
@@ -63,7 +62,7 @@ pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
 fn main() {
     setup_logger();
 
-    let (elf, stdin, test_case, input_n) = parse_args::parse_args(env::args().collect());
+    let (elf, stdin, step) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("\n Creating Program..");
@@ -82,6 +81,9 @@ fn main() {
         2,
         "We could only test for one record for now and the last is the final one",
     );
+    for record in &emulator.records {
+        debug!("record events: {:?}", record.stats());
+    }
     let mut record = emulator.records[0].clone();
     assert!(record.memory_initialize_events.is_empty());
     assert!(record.memory_finalize_events.is_empty());
@@ -93,20 +95,21 @@ fn main() {
         .clone_into(&mut record.memory_finalize_events);
     let program = record.program.clone();
 
-    let mut records = vec![record];
-
-    debug!("first record stats:");
-    for (key, value) in &records[0].stats() {
+    let stats = record.stats();
+    debug!("final record stats:");
+    for (key, value) in &stats {
         debug!("|- {:<25}: {}", key, value);
     }
+
+    let mut records = vec![record];
 
     // Setup config and chips.
     info!("\n Creating BaseMachine (at {:?})..", start.elapsed());
     let config = RiscvSC::new();
-    let fib_chips = RiscvChipType::all_chips();
+    let chips = RiscvChipType::all_chips();
 
     // Create a new machine based on config and chips
-    let simple_machine = SimpleMachine::new(config, fib_chips, RISCV_NUM_PVS);
+    let simple_machine = SimpleMachine::new(config, chips, RISCV_NUM_PVS);
 
     // Setup machine prover, verifier, pk and vk.
     info!("\n Setup machine (at {:?})..", start.elapsed());
@@ -115,20 +118,82 @@ fn main() {
     info!("\n Complement records (at {:?})..", start.elapsed());
     simple_machine.complement_record(&mut records);
 
+    for (i, record) in records.iter().enumerate() {
+        let stats = record.stats();
+        debug!("post complement record stats[{}]:", i);
+        for (key, value) in &stats {
+            debug!("|- {:<25}: {}", key, value);
+        }
+    }
+
     info!("\n Construct proving witness..");
     let witness = ProvingWitness::setup_with_records(records);
 
     // Generate the proof.
     info!("\n Generating proof (at {:?})..", start.elapsed());
     let proof = simple_machine.prove(&pk, &witness);
-    let base_proof = proof.proofs()[0].clone();
     info!("{} generated.", proof.name());
+
+    debug!(
+        "|- Commitment size: {}",
+        bincode::serialize(&proof.proofs()[0].commitments)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Opened values size: {}",
+        bincode::serialize(&proof.proofs()[0].opened_values)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Opening proof size: {}",
+        bincode::serialize(&proof.proofs()[0].opening_proof)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Log main degrees size: {}",
+        bincode::serialize(&proof.proofs()[0].log_main_degrees)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Log quotient degrees size: {}",
+        bincode::serialize(&proof.proofs()[0].log_quotient_degrees)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Chip ordering size: {}",
+        bincode::serialize(&proof.proofs()[0].main_chip_ordering)
+            .unwrap()
+            .len()
+    );
+    debug!(
+        "|- Public values size: {}",
+        bincode::serialize(&proof.proofs()[0].public_values)
+            .unwrap()
+            .len()
+    );
 
     // Verify the proof.
     info!("\n Verifying proof (at {:?})..", start.elapsed());
     let result = simple_machine.verify(&vk, &proof);
-    info!("The proof is verified: {}", result.is_ok());
+    info!(
+        "The proof is verified: {} (at {:?})",
+        result.is_ok(),
+        start.elapsed()
+    );
     assert!(result.is_ok());
+
+    if step == "riscv" {
+        return;
+    }
+
+    // ------------------ start recursion ------------------
+
+    let base_proof = proof.proofs()[0].clone();
 
     // Get field_config program
     // Note that simple_machine is used as input for recursive verifier to build the program
@@ -191,19 +256,6 @@ fn main() {
         stats.get("fri_fold_event"),
         expected_stats.get("fri_fold_event")
     );
-    if test_case == "fibonacci" && input_n == 20 {
-        info!("check event stats for fib-20");
-        // assert_eq!(
-        //     stats.get("range_check_events"),
-        //     expected_stats.get("range_check_events")
-        // );
-        // assert_eq!(
-        //     stats.get("exp_reverse_bits_len_events"),
-        //     expected_stats.get("exp_reverse_bits_len_events")
-        // );
-    } else {
-        warn!("skip certain event stats checking for non-fib-20");
-    }
 
     // Setup field_config machine
     info!("\n Setup field_config machine (at {:?})..", start.elapsed());

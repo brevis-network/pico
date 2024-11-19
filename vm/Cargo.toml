@@ -39,6 +39,7 @@ arrayref.workspace = true
 backtrace.workspace = true
 bincode.workspace = true
 bytemuck.workspace = true
+clap.workspace = true
 crossbeam.workspace = true
 csv.workspace = true
 dashmap.workspace = true

@@ -62,9 +62,7 @@ jobs:
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example toy_base_machine
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example toy_simple_machine
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example toy_lookup_machine
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_simple_machine keccak
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_simple_recursion
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_simple_recursion -- --case keccak --n 15
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_emulator
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_machine keccak
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_combine
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_combine -- --case keccak
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e

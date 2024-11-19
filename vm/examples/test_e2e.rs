@@ -35,7 +35,7 @@ use pico_vm::{
     },
     recursion::runtime::Runtime,
 };
-use std::{env, time::Instant};
+use std::time::Instant;
 use tracing::info;
 
 #[path = "common/parse_args.rs"]
@@ -44,13 +44,11 @@ mod parse_args;
 fn main() {
     setup_logger();
 
-    /*
-    Riscv Machine
-     */
+    // -------- Riscv Machine --------
 
     info!("\n Begin RiscV..");
 
-    let (elf, riscv_stdin, _, _) = parse_args::parse_args(env::args().collect());
+    let (elf, riscv_stdin, step) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("Creating Program..");
@@ -87,10 +85,11 @@ fn main() {
         start.elapsed()
     );
     assert!(riscv_result.is_ok());
+    if step == "riscv" {
+        return;
+    }
 
-    /*
-    Riscv Compression Recursion Machine
-     */
+    // -------- Riscv Compression Recursion Machine --------
 
     info!("\n Begin Riscv Recursion..");
 
@@ -140,9 +139,11 @@ fn main() {
     );
     assert!(riscv_compress_result.is_ok());
 
-    /*
-    Combine Recursion Machine
-     */
+    if step == "riscv_compress" {
+        return;
+    }
+
+    // -------- Combine Recursion Machine --------
 
     info!("\n Begin Combine..");
 
@@ -193,9 +194,11 @@ fn main() {
     );
     assert!(combine_result.is_ok());
 
-    /*
-    Compress Recursion Machine
-     */
+    if step == "recur_combine" {
+        return;
+    }
+
+    // -------- Compress Recursion Machine --------
 
     info!("\n Begin Compress..");
 
@@ -257,9 +260,11 @@ fn main() {
     );
     assert!(compress_result.is_ok());
 
-    /*
-    Embed Recursion Machine
-     */
+    if step == "recur_compress" {
+        return;
+    }
+
+    // -------- Embed Recursion Machine --------
 
     info!("\n Begin Embed..");
 

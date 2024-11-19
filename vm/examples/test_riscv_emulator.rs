@@ -8,7 +8,7 @@ use pico_vm::{
     },
     machine::logger::setup_logger,
 };
-use std::{env, time::Instant};
+use std::time::Instant;
 use tracing::{debug, info, trace};
 
 #[path = "common/parse_args.rs"]
@@ -17,7 +17,7 @@ mod parse_args;
 fn main() {
     setup_logger();
 
-    let (elf, stdin, _, _) = parse_args::parse_args(env::args().collect());
+    let (elf, stdin, _) = parse_args::parse_args();
 
     let start = Instant::now();
 

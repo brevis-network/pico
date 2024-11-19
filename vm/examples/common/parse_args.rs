@@ -1,51 +1,52 @@
+use clap::Parser;
 use pico_vm::emulator::riscv::stdin::EmulatorStdin;
 use tracing::info;
 
-pub fn parse_args(args: Vec<String>) -> (&'static [u8], EmulatorStdin<Vec<u8>>, String, u32) {
-    const ELF_FIB: &[u8] =
-        include_bytes!("../../src/compiler/test_data/riscv32im-sp1-fibonacci-elf");
-    const ELF_KECCAK: &[u8] =
-        include_bytes!("../../src/compiler/test_data/riscv32im-pico-keccak-elf");
-    const ELF_KECCAK_PRECOMPILE_EXAMPLE: &[u8] =
-        include_bytes!("../../src/compiler/test_data/riscv32im-keccak-example-elf");
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(long, default_value = "10")]
+    n: u32,
 
-    if args.len() > 3 {
-        eprintln!("Invalid number of arguments");
-        std::process::exit(1);
-    }
-    let mut test_case = String::from("fibonacci"); // default test_case is fibonacci
-    let mut n = 0;
+    // [ fibonacci | fib | f ], [ keccak | k ], [keccak_precompile]
+    #[clap(long, default_value = "fibonacci")]
+    case: String,
+
+    // all | riscv | riscv_compress | riscv_combine | recur_combine | recur_compress | recur_embed
+    #[clap(long, default_value = "all")]
+    step: String,
+}
+
+const ELF_FIB: &[u8] = include_bytes!("../../src/compiler/test_data/riscv32im-sp1-fibonacci-elf");
+const ELF_KECCAK: &[u8] = include_bytes!("../../src/compiler/test_data/riscv32im-pico-keccak-elf");
+const ELF_KECCAK_PRECOMPILE: &[u8] =
+    include_bytes!("../../src/compiler/test_data/riscv32im-keccak-example-elf");
+
+pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String) {
+    let args = Args::parse();
     let mut stdin = EmulatorStdin::default();
 
-    if args.len() > 1 {
-        test_case.clone_from(&args[1]);
-        if args.len() > 2 {
-            n = args[2].parse::<u32>().unwrap();
-        }
-    }
-    if n == 0 {
-        n = 20; // default fibonacci seq num or keccak input str len
-    }
     let elf: &[u8];
-    if test_case == "fibonacci" || test_case == "fib" || test_case == "f" {
-        test_case = String::from("fibonacci");
+    if args.case == "fibonacci" || args.case == "fib" || args.case == "f" {
         elf = ELF_FIB;
-        stdin.write(&n);
-        info!("Test Fibonacci, sequence n={}", n);
-    } else if test_case == "keccak" || test_case == "k" {
-        test_case = String::from("keccak");
+        stdin.write(&args.n);
+        info!("Test Fibonacci, sequence n={}, step={}", args.n, args.step);
+    } else if args.case == "keccak" || args.case == "k" {
         elf = ELF_KECCAK;
-        let input_str = (0..n).map(|_| "x").collect::<String>();
+        let input_str = (0..args.n).map(|_| "x").collect::<String>();
         stdin.write(&input_str);
-        info!("Test Keccak, string len n={}", input_str.len());
-    } else if test_case == "keccak_precompile" {
-        test_case = String::from("keccak_precompile");
-        elf = ELF_KECCAK_PRECOMPILE_EXAMPLE;
+        info!(
+            "Test Keccak, string len n={}, step={}",
+            input_str.len(),
+            args.step
+        );
+    } else if args.case == "keccak_precompile" {
+        elf = ELF_KECCAK_PRECOMPILE;
         info!("Test Keccak Precompile");
     } else {
-        eprintln!("Invalid test case. Accept: [ fibonacci | fib | f ], [ keccak | k ]\n");
+        eprintln!("Invalid test case. Accept: [ fibonacci | fib | f ], [ keccak | k ], [keccak_precompile]\n");
         std::process::exit(1);
     }
 
-    (elf, stdin, test_case, n)
+    (elf, stdin, args.step)
 }

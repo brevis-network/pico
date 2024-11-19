@@ -15,7 +15,7 @@ use pico_vm::{
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{RECURSION_NUM_PVS, RISCV_COMBINE_DEGREE, RISCV_NUM_PVS},
 };
-use std::{env, time::Instant};
+use std::time::Instant;
 use tracing::info;
 
 const TEST_BATCH_SIZE: usize = 100;
@@ -27,7 +27,7 @@ fn main() {
     setup_logger();
 
     // run with default fibo
-    let (elf, stdin, _, _) = parse_args::parse_args(env::args().collect());
+    let (elf, stdin, _) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("Begin RiscV..");
