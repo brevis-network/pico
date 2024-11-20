@@ -23,6 +23,7 @@ use crate::{
             stdin::EmulatorStdin,
             syscalls::{
                 default_syscall_map, syscall_context::SyscallContext, Syscall, SyscallCode,
+                SyscallEvent,
             },
         },
     },
@@ -740,6 +741,23 @@ impl RiscvEmulator {
                 // which is not permitted in unconstrained mode. This will result in
                 // non-zero memory interactions when generating a proof.
 
+                // Update the syscall counts.
+                let syscall_for_count = syscall.count_map();
+                let syscall_count = self
+                    .state
+                    .syscall_counts
+                    .entry(syscall_for_count)
+                    .or_insert(0);
+                let (threshold, multiplier) = match syscall_for_count {
+                    SyscallCode::KECCAK_PERMUTE => (self.opts.split_opts.keccak, 24),
+                    SyscallCode::SHA_EXTEND => (self.opts.split_opts.sha_extend, 48),
+                    SyscallCode::SHA_COMPRESS => (self.opts.split_opts.sha_compress, 80),
+                    _ => (self.opts.split_opts.deferred, 1),
+                };
+                let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
+                self.record.nonce_lookup.insert(syscall_lookup_id, nonce);
+                *syscall_count += 1;
+
                 let syscall_impl = self.get_syscall(syscall).cloned();
                 let mut precompile_rt = SyscallContext::new(self);
                 precompile_rt.syscall_lookup_id = syscall_lookup_id;
@@ -779,18 +797,6 @@ impl RiscvEmulator {
                 next_pc = precompile_next_pc;
                 self.state.clk += precompile_cycles;
                 exit_code = returned_exit_code;
-
-                // TODO: handle syscall counts
-                let syscall_for_count = syscall.count_map();
-                let syscall_count = self
-                    .state
-                    .syscall_counts
-                    .entry(syscall_for_count)
-                    .or_insert(0);
-                let (threshold, multiplier) = (self.opts.split_opts.deferred, 1);
-                let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
-                self.record.nonce_lookup.insert(syscall_lookup_id, nonce);
-                *syscall_count += 1;
             }
             Opcode::EBREAK => {
                 return Err(EmulationError::Breakpoint());
@@ -1173,6 +1179,26 @@ impl RiscvEmulator {
                 self.record.divrem_events.push(event);
             }
             _ => {}
+        }
+    }
+
+    #[inline]
+    pub(crate) fn syscall_event(
+        &self,
+        clk: u32,
+        syscall_id: u32,
+        arg1: u32,
+        arg2: u32,
+        lookup_id: u128,
+    ) -> SyscallEvent {
+        SyscallEvent {
+            chunk: self.chunk(),
+            clk,
+            syscall_id,
+            arg1,
+            arg2,
+            lookup_id,
+            nonce: self.record.nonce_lookup[&lookup_id],
         }
     }
 

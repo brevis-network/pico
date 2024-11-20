@@ -6,6 +6,8 @@ const ELF_FIB: &[u8] = include_bytes!("../../src/compiler/test_data/riscv32im-sp
 const ELF_KECCAK: &[u8] = include_bytes!("../../src/compiler/test_data/riscv32im-pico-keccak-elf");
 const ELF_KECCAK_PRECOMPILE: &[u8] =
     include_bytes!("../../src/compiler/test_data/riscv32im-keccak-example-elf");
+const ELF_FIB_WITH_SHA2: &[u8] =
+    include_bytes!("../../src/compiler/test_data/riscv32im-sp1-sha2-fibonacci-elf");
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -46,6 +48,13 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String) {
     } else if args.elf == "keccak_precompile" {
         elf = ELF_KECCAK_PRECOMPILE;
         info!("Test Keccak Precompile");
+    } else if args.elf == "sha2_precompile" {
+        elf = ELF_FIB_WITH_SHA2;
+        stdin.write(&args.n);
+        info!(
+            "Test precompile sha2 public inputs for Fibonacci, sequence n={}",
+            &args.n
+        );
     } else {
         eprintln!("Invalid test elf. Accept: [ fibonacci | fib | f ], [ keccak | k ], [keccak_precompile]\n");
         std::process::exit(1);

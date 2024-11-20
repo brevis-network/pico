@@ -1,6 +1,13 @@
 pub mod add;
+pub mod add4;
+pub mod add5;
+pub mod and;
 pub mod baby_bear;
+pub mod fixed_rotate_right;
+pub mod fixed_shift_right;
 pub mod is_equal_word;
 pub mod is_zero;
 pub mod is_zero_word;
 pub mod lt;
+pub mod not;
+pub mod xor;

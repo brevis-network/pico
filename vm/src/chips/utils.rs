@@ -84,3 +84,17 @@ pub fn zeroed_f_vec<F: Field>(len: usize) -> Vec<F> {
     let vec = vec![0u32; len];
     unsafe { std::mem::transmute::<Vec<u32>, Vec<F>>(vec) }
 }
+
+// TODO use pad_rows_fixed later
+pub fn pad_rows<T: Clone>(rows: &mut Vec<T>, row_fn: impl Fn() -> T) {
+    let nb_rows = rows.len();
+    let mut padded_nb_rows = nb_rows.next_power_of_two();
+    if padded_nb_rows < 16 {
+        padded_nb_rows = 16;
+    }
+    if padded_nb_rows == nb_rows {
+        return;
+    }
+    let dummy_row = row_fn();
+    rows.resize(padded_nb_rows, dummy_row);
+}

@@ -15,7 +15,10 @@ use crate::{
             },
             riscv_program::ProgramChip,
         },
-        precompiles::keccak256::KeccakPermuteChip,
+        precompiles::{
+            keccak256::KeccakPermuteChip,
+            sha256::{compress::ShaCompressChip, extend::ShaExtendChip},
+        },
     },
     compiler::riscv::program::Program,
     define_chip_type,
@@ -26,7 +29,7 @@ use crate::{
     },
 };
 use p3_air::{Air, BaseAir};
-use p3_field::{Field, PrimeField32};
+use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 
 define_chip_type!(
@@ -35,6 +38,8 @@ define_chip_type!(
         (Program, ProgramChip),
         (MemoryProgram, MemoryProgramChip),
         (Cpu, CpuChip),
+        (ShaCompress, ShaCompressChip),
+        (ShaExtend, ShaExtendChip),
         (MemoryInitialize, MemoryInitializeFinalizeChip),
         (MemoryFinalize, MemoryInitializeFinalizeChip),
         (MemoryReadWrite, MemoryReadWriteChip),

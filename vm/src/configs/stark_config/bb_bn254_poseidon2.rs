@@ -16,23 +16,40 @@ use serde::Serialize;
 use tracing::info;
 // todo: deeper understanding of the following types
 
+#[allow(non_camel_case_types)]
 pub type SC_Val = BabyBear;
+#[allow(non_camel_case_types)]
 pub type SC_Perm = Poseidon2<Bn254Fr, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBN254, 3, 5>;
+#[allow(non_camel_case_types)]
 pub type SC_Hash = MultiField32PaddingFreeSponge<SC_Val, Bn254Fr, SC_Perm, 3, 16, 1>;
+#[allow(non_camel_case_types)]
 pub type SC_DigestHash = Hash<Bn254Fr, Bn254Fr, 1>;
+#[allow(non_camel_case_types)]
 pub type SC_Digest = [Bn254Fr; 1];
+#[allow(non_camel_case_types)]
 pub type SC_Compress = TruncatedPermutation<SC_Perm, 2, 1, 3>;
+#[allow(non_camel_case_types)]
 pub type SC_ValMmcs = FieldMerkleTreeMmcs<BabyBear, Bn254Fr, SC_Hash, SC_Compress, 1>;
+#[allow(non_camel_case_types)]
 pub type SC_Challenge = BinomialExtensionField<SC_Val, 4>;
+#[allow(non_camel_case_types)]
 pub type SC_ChallengeMmcs = ExtensionMmcs<SC_Val, SC_Challenge, SC_ValMmcs>;
+#[allow(non_camel_case_types)]
 pub type SC_Challenger = MultiField32Challenger<SC_Val, Bn254Fr, SC_Perm, 3>;
+#[allow(non_camel_case_types)]
 pub type SC_Dft = Radix2DitParallel;
+#[allow(non_camel_case_types)]
 pub type SC_Pcs = TwoAdicFriPcs<SC_Val, SC_Dft, SC_ValMmcs, SC_ChallengeMmcs>;
 
+#[allow(non_camel_case_types)]
 pub type SC_QueryProof = QueryProof<SC_Challenge, SC_ChallengeMmcs>;
+#[allow(non_camel_case_types)]
 pub type SC_CommitPhaseStep = CommitPhaseProofStep<SC_Challenge, SC_ChallengeMmcs>;
+#[allow(non_camel_case_types)]
 pub type SC_FriProof = FriProof<SC_Challenge, SC_ChallengeMmcs, SC_Val>;
+#[allow(non_camel_case_types)]
 pub type SC_BatchOpening = BatchOpening<SC_Val, SC_ValMmcs>;
+#[allow(non_camel_case_types)]
 pub type SC_PcsProof = TwoAdicFriPcsProof<SC_Val, SC_Challenge, SC_ValMmcs, SC_ChallengeMmcs>;
 
 pub struct BbBn254Poseidon2 {

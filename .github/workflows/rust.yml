@@ -66,3 +66,4 @@ jobs:
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_emulator
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_combine -- --elf keccak
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf sha2_precompile --n 15

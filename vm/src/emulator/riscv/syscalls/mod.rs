@@ -18,7 +18,10 @@ use precompiles::keccak256::permute::Keccak256PermuteSyscall;
 use serde::{Deserialize, Serialize};
 
 use crate::emulator::riscv::syscalls::{
-    commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall,
+    commit::CommitSyscall,
+    deferred::CommitDeferredSyscall,
+    halt::HaltSyscall,
+    precompiles::sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
     syscall_context::SyscallContext,
 };
 use write::WriteSyscall;
@@ -62,6 +65,10 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(SyscallCode::COMMIT, Arc::new(CommitSyscall));
 
+    syscall_map.insert(SyscallCode::SHA_EXTEND, Arc::new(Sha256ExtendSyscall));
+
+    syscall_map.insert(SyscallCode::SHA_COMPRESS, Arc::new(Sha256CompressSyscall));
+
     syscall_map.insert(
         SyscallCode::COMMIT_DEFERRED_PROOFS,
         Arc::new(CommitDeferredSyscall),
@@ -83,8 +90,8 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 /// This includes its shard, clk, syscall id, arguments, other relevant information.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SyscallEvent {
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The clock cycle.
     pub clk: u32,
     /// The lookup id.

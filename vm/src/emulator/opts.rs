@@ -52,6 +52,12 @@ impl EmulatorOpts {
 pub struct SplitOpts {
     /// The threshold for default events.
     pub deferred: usize,
+    /// The threshold for keccak events.
+    pub keccak: usize,
+    /// The threshold for sha extend events.
+    pub sha_extend: usize,
+    /// The threshold for sha compress events.
+    pub sha_compress: usize,
     /// The threshold for memory events.
     pub memory: usize,
 }
@@ -62,6 +68,9 @@ impl SplitOpts {
     pub fn new(deferred_shift_threshold: usize) -> Self {
         Self {
             deferred: deferred_shift_threshold,
+            keccak: deferred_shift_threshold / 24,
+            sha_extend: deferred_shift_threshold / 48,
+            sha_compress: deferred_shift_threshold / 80,
             memory: deferred_shift_threshold * 4,
         }
     }

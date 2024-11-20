@@ -62,7 +62,7 @@ pub const TEST_CHUNK_SIZE: usize = 1 << 16;
 
 pub const TEST_CHUNK_BATCH_SIZE: usize = 2;
 
-pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 5;
+pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 
 /*
 For field_config

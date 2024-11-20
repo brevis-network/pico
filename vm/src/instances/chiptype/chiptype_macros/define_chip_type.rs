@@ -4,7 +4,7 @@ macro_rules! define_chip_type {
         $enum_name:ident<$F:ident>,
         [ $( ($variant:ident, $chip_type:ident) ),+ ]
     ) => {
-        pub enum $enum_name<$F: Field> {
+        pub enum $enum_name<$F: PrimeField32> {
             $(
                 $variant($crate::enum_chip_type!($chip_type<$F>)),
             )+

@@ -9,7 +9,16 @@ use crate::{
         riscv_memory::event::{MemoryInitializeFinalizeEvent, MemoryRecordEnum},
     },
     compiler::riscv::{opcode::Opcode, program::Program},
-    emulator::{record::RecordBehavior, riscv::public_values::PublicValues},
+    emulator::{
+        record::RecordBehavior,
+        riscv::{
+            public_values::PublicValues,
+            syscalls::{
+                precompiles::{PrecompileEvent, PrecompileEvents},
+                SyscallCode, SyscallEvent,
+            },
+        },
+    },
 };
 use hashbrown::HashMap;
 use p3_field::AbstractField;
@@ -55,7 +64,7 @@ pub struct EmulationRecord {
     /// A trace of the memory finalize events.
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the precompile events.
-    // pub precompile_events: PrecompileEvents,
+    pub precompile_events: PrecompileEvents,
     /// A trace of the keccak256 permute events.
     pub keccak_permute_events: Vec<KeccakPermuteEvent>,
     /// Public values
@@ -132,6 +141,30 @@ impl EmulationRecord {
     /// Add a keccak permute event to the execution record.
     pub fn add_keccak_permute_lookup_event(&mut self, event: KeccakPermuteEvent) {
         self.keccak_permute_events.push(event);
+    }
+
+    #[inline]
+    /// Add a precompile event to the execution record.
+    pub fn add_precompile_event(
+        &mut self,
+        syscall_code: SyscallCode,
+        syscall_event: SyscallEvent,
+        event: PrecompileEvent,
+    ) {
+        self.precompile_events
+            .add_event(syscall_code, syscall_event, event);
+    }
+
+    /// Get all the precompile events for a syscall code.
+    #[inline]
+    #[must_use]
+    pub fn get_precompile_events(
+        &self,
+        syscall_code: SyscallCode,
+    ) -> &Vec<(SyscallEvent, PrecompileEvent)> {
+        self.precompile_events
+            .get_events(syscall_code)
+            .expect("Precompile events not found")
     }
 }
 
