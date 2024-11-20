@@ -94,7 +94,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
     }
 
     fn extra_record(&self, input: &mut Self::Record, output: &mut Self::Record) {
-        let chunk_size = 8;
+        let chunk_size = std::cmp::max(input.sha_compress_events.len() / num_cpus::get(), 1);
         let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = input
             .sha_compress_events
             .par_chunks(chunk_size)

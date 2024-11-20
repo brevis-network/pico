@@ -98,26 +98,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
     }
 
     fn extra_record(&self, input: &mut Self::Record, output: &mut Self::Record) {
-        let chunk_size = 8;
-
-        /*let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = events
-        .par_chunks(chunk_size)
-        .map(|events| {
-            let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
-            let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
-            events.iter().for_each(|(_, event)| {
-                let event = if let PrecompileEvent::ShaExtend(event) = event {
-                    event
-                } else {
-                    unreachable!()
-                };
-                self.event_to_rows(event, &mut None, &mut blu, &mut range);
-            });
-            (blu, range)
-        })
-        .unzip();*/
-        //.collect::<Vec<_>>();
-
+        let chunk_size = std::cmp::max(input.sha_extend_events.len() / num_cpus::get(), 1);
         let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = input
             .sha_extend_events
             .par_chunks(chunk_size)

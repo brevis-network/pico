@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// chunk, channel, opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct AluEvent {
-    /// The lookup identifer.
+    /// The lookup identifier.
     pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
