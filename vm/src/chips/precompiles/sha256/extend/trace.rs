@@ -11,11 +11,7 @@ use crate::{
     },
     compiler::riscv::program::Program,
     emulator::riscv::{
-        record::EmulationRecord,
-        syscalls::{
-            precompiles::{sha256::event::ShaExtendEvent, PrecompileEvent},
-            SyscallCode,
-        },
+        record::EmulationRecord, syscalls::precompiles::sha256::event::ShaExtendEvent,
     },
     machine::chip::ChipBehavior,
 };
@@ -45,7 +41,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         let rows = Vec::new();
 
-        let mut new_byte_lookup_events = Vec::new();
+        /*let mut new_byte_lookup_events = Vec::new();
         let mut wrapped_rows = Some(rows);
         for (_, event) in input.get_precompile_events(SyscallCode::SHA_EXTEND).iter() {
             let event = if let PrecompileEvent::ShaExtend(event) = event {
@@ -55,6 +51,16 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
             };
             self.event_to_rows(
                 event,
+                &mut wrapped_rows,
+                &mut new_byte_lookup_events,
+                &mut Vec::new(),
+            );
+        }*/
+        let mut new_byte_lookup_events = Vec::new();
+        let mut wrapped_rows = Some(rows);
+        for i in 0..input.sha_extend_events.len() {
+            self.event_to_rows(
+                &input.sha_extend_events[i],
                 &mut wrapped_rows,
                 &mut new_byte_lookup_events,
                 &mut Vec::new(),
@@ -92,35 +98,45 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
     }
 
     fn extra_record(&self, input: &mut Self::Record, output: &mut Self::Record) {
-        let events = input.get_precompile_events(SyscallCode::SHA_EXTEND);
-        let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
+        let chunk_size = 8;
 
-        let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = events
+        /*let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = events
+        .par_chunks(chunk_size)
+        .map(|events| {
+            let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+            let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
+            events.iter().for_each(|(_, event)| {
+                let event = if let PrecompileEvent::ShaExtend(event) = event {
+                    event
+                } else {
+                    unreachable!()
+                };
+                self.event_to_rows(event, &mut None, &mut blu, &mut range);
+            });
+            (blu, range)
+        })
+        .unzip();*/
+        //.collect::<Vec<_>>();
+
+        let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = input
+            .sha_extend_events
             .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
                 let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
-                events.iter().for_each(|(_, event)| {
-                    let event = if let PrecompileEvent::ShaExtend(event) = event {
-                        event
-                    } else {
-                        unreachable!()
-                    };
+                events.iter().for_each(|event| {
                     self.event_to_rows(event, &mut None, &mut blu, &mut range);
                 });
                 (blu, range)
             })
             .unzip();
-        //.collect::<Vec<_>>();
 
         output.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
         output.add_rangecheck_lookup_events(range_batches);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        !record
-            .get_precompile_events(SyscallCode::SHA_EXTEND)
-            .is_empty()
+        !record.sha_extend_events.is_empty()
     }
 }
 

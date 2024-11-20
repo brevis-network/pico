@@ -1,3 +1,4 @@
+use super::syscalls::precompiles::keccak256::event::KeccakPermuteEvent;
 use crate::{
     chips::chips::{
         alu::event::AluEvent,
@@ -13,10 +14,7 @@ use crate::{
         record::RecordBehavior,
         riscv::{
             public_values::PublicValues,
-            syscalls::{
-                precompiles::{PrecompileEvent, PrecompileEvents},
-                SyscallCode, SyscallEvent,
-            },
+            syscalls::precompiles::sha256::event::{ShaCompressEvent, ShaExtendEvent},
         },
     },
 };
@@ -24,8 +22,6 @@ use hashbrown::HashMap;
 use p3_field::AbstractField;
 use serde::{Deserialize, Serialize};
 use std::{iter, sync::Arc};
-
-use super::syscalls::precompiles::keccak256::event::KeccakPermuteEvent;
 
 /// A record of the emulation of a program.
 ///
@@ -63,10 +59,12 @@ pub struct EmulationRecord {
     pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the memory finalize events.
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
-    /// A trace of the precompile events.
-    pub precompile_events: PrecompileEvents,
     /// A trace of the keccak256 permute events.
     pub keccak_permute_events: Vec<KeccakPermuteEvent>,
+    /// A trace of the sha256 extend events.
+    pub sha_extend_events: Vec<ShaExtendEvent>,
+    /// A trace of the sha256 compress events.
+    pub sha_compress_events: Vec<ShaCompressEvent>,
     /// Public values
     pub public_values: PublicValues<u32, u32>,
 }
@@ -143,28 +141,12 @@ impl EmulationRecord {
         self.keccak_permute_events.push(event);
     }
 
-    #[inline]
-    /// Add a precompile event to the execution record.
-    pub fn add_precompile_event(
-        &mut self,
-        syscall_code: SyscallCode,
-        syscall_event: SyscallEvent,
-        event: PrecompileEvent,
-    ) {
-        self.precompile_events
-            .add_event(syscall_code, syscall_event, event);
+    pub fn add_sha256_compress_lookup_event(&mut self, event: ShaCompressEvent) {
+        self.sha_compress_events.push(event);
     }
 
-    /// Get all the precompile events for a syscall code.
-    #[inline]
-    #[must_use]
-    pub fn get_precompile_events(
-        &self,
-        syscall_code: SyscallCode,
-    ) -> &Vec<(SyscallEvent, PrecompileEvent)> {
-        self.precompile_events
-            .get_events(syscall_code)
-            .expect("Precompile events not found")
+    pub fn add_sha256_extend_lookup_event(&mut self, event: ShaExtendEvent) {
+        self.sha_extend_events.push(event);
     }
 }
 

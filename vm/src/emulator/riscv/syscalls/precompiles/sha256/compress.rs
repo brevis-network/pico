@@ -1,7 +1,6 @@
 use crate::emulator::riscv::syscalls::{
-    precompiles::{sha256::event::ShaCompressEvent, PrecompileEvent::ShaCompress},
-    syscall_context::SyscallContext,
-    Syscall, SyscallCode,
+    precompiles::sha256::event::ShaCompressEvent, syscall_context::SyscallContext, Syscall,
+    SyscallCode,
 };
 
 pub const SHA_COMPRESS_K: [u32; 64] = [
@@ -26,8 +25,8 @@ impl Syscall for Sha256CompressSyscall {
     #[allow(clippy::many_single_char_names)]
     fn emulate(
         &self,
-        rt: &mut SyscallContext,
-        syscall_code: SyscallCode,
+        ctx: &mut SyscallContext,
+        _syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
     ) -> Option<u32> {
@@ -35,7 +34,7 @@ impl Syscall for Sha256CompressSyscall {
         let h_ptr = arg2;
         assert_ne!(w_ptr, h_ptr);
 
-        let start_clk = rt.clk;
+        let start_clk = ctx.clk;
         let mut h_read_records = Vec::new();
         let mut w_i_read_records = Vec::new();
         let mut h_write_records = Vec::new();
@@ -43,7 +42,7 @@ impl Syscall for Sha256CompressSyscall {
         // Execute the "initialize" phase where we read in the h values.
         let mut hx = [0u32; 8];
         for i in 0..8 {
-            let (record, value) = rt.mr(h_ptr + i as u32 * 4);
+            let (record, value) = ctx.mr(h_ptr + i as u32 * 4);
             h_read_records.push(record);
             hx[i] = value;
         }
@@ -61,7 +60,7 @@ impl Syscall for Sha256CompressSyscall {
         for i in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ (!e & g);
-            let (record, w_i) = rt.mr(w_ptr + i * 4);
+            let (record, w_i) = ctx.mr(w_ptr + i * 4);
             original_w.push(w_i);
             w_i_read_records.push(record);
             let temp1 = h
@@ -84,37 +83,33 @@ impl Syscall for Sha256CompressSyscall {
         }
         // Increment the clk by 1 before writing to h, since we've already read h at the start_clk
         // during the initialization phase.
-        rt.clk += 1;
+        ctx.clk += 1;
 
         // Execute the "finalize" phase.
         let v = [a, b, c, d, e, f, g, h];
         for i in 0..8 {
-            let record = rt.mw(h_ptr + i as u32 * 4, hx[i].wrapping_add(v[i]));
+            let record = ctx.mw(h_ptr + i as u32 * 4, hx[i].wrapping_add(v[i]));
             h_write_records.push(record);
         }
 
         // Push the SHA extend event.
-        let lookup_id = rt.syscall_lookup_id;
-        let chunk = rt.current_chunk();
-        let channel = rt.current_channel();
-        let event = ShaCompress(ShaCompressEvent {
-            lookup_id,
-            chunk,
-            channel,
-            clk: start_clk,
-            w_ptr,
-            h_ptr,
-            w: original_w,
-            h: hx,
-            h_read_records: h_read_records.try_into().unwrap(),
-            w_i_read_records,
-            h_write_records: h_write_records.try_into().unwrap(),
-        });
-        let syscall_event =
-            rt.rt
-                .syscall_event(start_clk, syscall_code.syscall_id(), arg1, arg2, lookup_id);
-        rt.record_mut()
-            .add_precompile_event(syscall_code, syscall_event, event);
+        let chunk = ctx.current_chunk();
+        let channel = ctx.current_channel();
+        let lookup_id = ctx.syscall_lookup_id;
+        ctx.record_mut()
+            .add_sha256_compress_lookup_event(ShaCompressEvent {
+                lookup_id,
+                chunk,
+                channel,
+                clk: start_clk,
+                w_ptr,
+                h_ptr,
+                w: original_w,
+                h: hx,
+                h_read_records: h_read_records.try_into().unwrap(),
+                w_i_read_records,
+                h_write_records: h_write_records.try_into().unwrap(),
+            });
 
         None
     }

@@ -23,7 +23,6 @@ use crate::{
             stdin::EmulatorStdin,
             syscalls::{
                 default_syscall_map, syscall_context::SyscallContext, Syscall, SyscallCode,
-                SyscallEvent,
             },
         },
     },
@@ -1179,26 +1178,6 @@ impl RiscvEmulator {
                 self.record.divrem_events.push(event);
             }
             _ => {}
-        }
-    }
-
-    #[inline]
-    pub(crate) fn syscall_event(
-        &self,
-        clk: u32,
-        syscall_id: u32,
-        arg1: u32,
-        arg2: u32,
-        lookup_id: u128,
-    ) -> SyscallEvent {
-        SyscallEvent {
-            chunk: self.chunk(),
-            clk,
-            syscall_id,
-            arg1,
-            arg2,
-            lookup_id,
-            nonce: self.record.nonce_lookup[&lookup_id],
         }
     }
 

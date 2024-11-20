@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 /// SHA-256 Extend Event.
 ///
 /// This event is emitted when a SHA-256 extend operation is performed.
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShaExtendEvent {
-    /// The lookup identifier.
+    /// The lookup identifer.
     pub lookup_id: u128,
     /// The shard number.
     pub chunk: u32,
@@ -31,9 +31,9 @@ pub struct ShaExtendEvent {
 /// SHA-256 Compress Event.
 ///
 /// This event is emitted when a SHA-256 compress operation is performed.
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShaCompressEvent {
-    /// The lookup identifier.
+    /// The lookup identifer.
     pub lookup_id: u128,
     /// The shard number.
     pub chunk: u32,
