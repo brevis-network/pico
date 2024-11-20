@@ -162,7 +162,7 @@ impl<T: Copy> Poseidon2Mut<T> for PermutationNoSbox<T> {
 
 pub fn permutation_mut<'a, 'b: 'a, T, const DEGREE: usize>(
     row: &'b mut [T],
-) -> Box<&mut (dyn Poseidon2Mut<T> + 'a)>
+) -> &mut (dyn Poseidon2Mut<T> + 'a)
 where
     T: Copy,
 {
@@ -170,13 +170,13 @@ where
         let start = POSEIDON2_DEGREE3_COL_MAP.state.external_rounds_state[0][0];
         let end = start + size_of::<PermutationSBox<u8>>();
         let convert: &mut PermutationSBox<T> = row[start..end].borrow_mut();
-        Box::new(convert)
+        convert
     } else if DEGREE == 9 || DEGREE == 17 {
         let start = POSEIDON2_DEGREE9_COL_MAP.state.external_rounds_state[0][0];
         let end = start + size_of::<PermutationNoSbox<u8>>();
 
         let convert: &mut PermutationNoSbox<T> = row[start..end].borrow_mut();
-        Box::new(convert)
+        convert
     } else {
         panic!("Unsupported degree");
     }
