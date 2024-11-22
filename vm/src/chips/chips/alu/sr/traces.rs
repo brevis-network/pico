@@ -129,7 +129,6 @@ impl<F: PrimeField32> ShiftRightChip<F> {
         // Initialize cols with basic operands and flags derived from the current event.
         {
             cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.channel = F::from_canonical_u8(event.channel);
             cols.a = Word::from(event.a);
             cols.b = Word::from(event.b);
             cols.c = Word::from(event.c);
@@ -149,7 +148,6 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             let most_significant_byte = event.b.to_le_bytes()[WORD_SIZE - 1];
             blu.add_byte_lookup_events(vec![ByteLookupEvent {
                 chunk: event.chunk,
-                channel: event.channel,
                 opcode: ByteOpcode::MSB,
                 a1: ((most_significant_byte >> 7) & 1) as u16,
                 a2: 0,
@@ -199,7 +197,6 @@ impl<F: PrimeField32> ShiftRightChip<F> {
 
                 let byte_event = ByteLookupEvent {
                     chunk: event.chunk,
-                    channel: event.channel,
                     opcode: ByteOpcode::ShrCarry,
                     a1: shift as u16,
                     a2: carry,

@@ -94,13 +94,11 @@ impl Syscall for Sha256CompressSyscall {
 
         // Push the SHA extend event.
         let chunk = ctx.current_chunk();
-        let channel = ctx.current_channel();
         let lookup_id = ctx.syscall_lookup_id;
         ctx.record_mut()
             .add_sha256_compress_lookup_event(ShaCompressEvent {
                 lookup_id,
                 chunk,
-                channel,
                 clk: start_clk,
                 w_ptr,
                 h_ptr,

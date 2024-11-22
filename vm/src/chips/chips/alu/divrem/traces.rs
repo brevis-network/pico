@@ -69,7 +69,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                 cols.b = Word::from(event.b);
                 cols.c = Word::from(event.c);
                 cols.chunk = F::from_canonical_u32(event.chunk);
-                cols.channel = F::from_canonical_u8(event.channel);
                 cols.is_real = F::one();
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
                 cols.is_remu = F::from_bool(event.opcode == Opcode::REMU);
@@ -130,7 +129,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                         let most_significant_byte = word.to_le_bytes()[WORD_SIZE - 1];
                         blu_events.push(ByteLookupEvent {
                             chunk: event.chunk,
-                            channel: event.channel,
                             opcode: ByteOpcode::MSB,
                             a1: get_msb(*word) as u16,
                             a2: 0,
@@ -191,7 +189,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                             add_events.push(AluEvent {
                                 lookup_id: event.sub_lookups[4],
                                 chunk: event.chunk,
-                                channel: event.channel,
                                 clk: event.clk,
                                 opcode: Opcode::ADD,
                                 a: 0,
@@ -204,7 +201,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                             add_events.push(AluEvent {
                                 lookup_id: event.sub_lookups[5],
                                 chunk: event.chunk,
-                                channel: event.channel,
                                 clk: event.clk,
                                 opcode: Opcode::ADD,
                                 a: 0,
@@ -231,7 +227,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                     let lower_multiplication = AluEvent {
                         lookup_id: event.sub_lookups[0],
                         chunk: event.chunk,
-                        channel: event.channel,
                         clk: event.clk,
                         opcode: Opcode::MUL,
                         a: lower_word,
@@ -251,7 +246,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                     let upper_multiplication = AluEvent {
                         lookup_id: event.sub_lookups[1],
                         chunk: event.chunk,
-                        channel: event.channel,
                         clk: event.clk,
                         opcode: {
                             if is_signed_operation(event.opcode) {
@@ -284,7 +278,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                         AluEvent {
                             lookup_id: event.sub_lookups[2],
                             chunk: event.chunk,
-                            channel: event.channel,
                             opcode: Opcode::SLTU,
                             a: 1,
                             b: (remainder as i32).unsigned_abs(),
@@ -303,7 +296,6 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                         AluEvent {
                             lookup_id: event.sub_lookups[3],
                             chunk: event.chunk,
-                            channel: event.channel,
                             opcode: Opcode::SLTU,
                             a: 1,
                             b: remainder,

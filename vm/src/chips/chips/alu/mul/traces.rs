@@ -102,7 +102,6 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                                     let most_significant_byte = word[WORD_SIZE - 1];
                                     blu_events.push(ByteLookupEvent {
                                         chunk: event.chunk,
-                                        channel: event.channel,
                                         opcode: ByteOpcode::MSB,
                                         a1: get_msb(*word) as u16,
                                         a2: 0,
@@ -146,7 +145,6 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                         cols.is_mulhu = F::from_bool(event.opcode == Opcode::MULHU);
                         cols.is_mulhsu = F::from_bool(event.opcode == Opcode::MULHSU);
                         cols.chunk = F::from_canonical_u32(event.chunk);
-                        cols.channel = F::from_canonical_u8(event.channel);
 
                         // Range check.
                         {

@@ -41,15 +41,7 @@ where
 
         let is_real = local.is_xor + local.is_or + local.is_and;
         for ((a, b), c) in local.a.into_iter().zip(local.b).zip(local.c) {
-            builder.looking_byte(
-                opcode.clone(),
-                a,
-                b,
-                c,
-                local.chunk,
-                local.channel,
-                is_real.clone(),
-            );
+            builder.looking_byte(opcode.clone(), a, b, c, is_real.clone());
         }
 
         // Get the cpu opcode, which corresponds to the opcode being sent in the CPU table.
@@ -64,7 +56,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.channel,
             local.nonce,
             is_real.clone(),
         );

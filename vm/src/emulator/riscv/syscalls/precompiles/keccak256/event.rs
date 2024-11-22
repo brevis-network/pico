@@ -12,8 +12,6 @@ pub struct KeccakPermuteEvent {
     pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
-    /// The channel number.
-    pub channel: u8,
     /// The clock cycle.
     pub clk: u32,
     /// The pre-state as a list of u64 words.

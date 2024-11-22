@@ -107,7 +107,6 @@ impl<F: PrimeField32> LtChip<F> {
         let c = event.c.to_le_bytes();
 
         cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.channel = F::from_canonical_u8(event.channel);
         cols.a = Word(a.map(F::from_canonical_u8));
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
@@ -124,7 +123,6 @@ impl<F: PrimeField32> LtChip<F> {
         // Send the masked interaction.
         blu.add_byte_lookup_event(ByteLookupEvent {
             chunk: event.chunk,
-            channel: event.channel,
             opcode: ByteOpcode::AND,
             a1: masked_b as u16,
             a2: 0,
@@ -133,7 +131,6 @@ impl<F: PrimeField32> LtChip<F> {
         });
         blu.add_byte_lookup_event(ByteLookupEvent {
             chunk: event.chunk,
-            channel: event.channel,
             opcode: ByteOpcode::AND,
             a1: masked_c as u16,
             a2: 0,
@@ -189,7 +186,6 @@ impl<F: PrimeField32> LtChip<F> {
 
         blu.add_byte_lookup_event(ByteLookupEvent {
             chunk: event.chunk,
-            channel: event.channel,
             opcode: ByteOpcode::LTU,
             a1: cols.slt_u.as_canonical_u32() as u16,
             a2: 0,

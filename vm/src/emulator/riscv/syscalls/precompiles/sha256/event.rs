@@ -10,8 +10,6 @@ pub struct ShaExtendEvent {
     pub lookup_id: u128,
     /// The shard number.
     pub chunk: u32,
-    /// The channel number.
-    pub channel: u8,
     /// The clock cycle.
     pub clk: u32,
     /// The pointer to the word.
@@ -37,8 +35,6 @@ pub struct ShaCompressEvent {
     pub lookup_id: u128,
     /// The shard number.
     pub chunk: u32,
-    /// The channel number.
-    pub channel: u8,
     /// The clock cycle.
     pub clk: u32,
     /// The pointer to the word.

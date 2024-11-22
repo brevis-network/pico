@@ -44,7 +44,6 @@ impl<F: Field> FixedShiftRightOperation<F> {
         &mut self,
         record: &mut impl ByteRecordBehavior,
         chunk: u32,
-        channel: u8,
         input: u32,
         rotation: usize,
     ) -> u32 {
@@ -75,7 +74,6 @@ impl<F: Field> FixedShiftRightOperation<F> {
             let (shift, carry) = shr_carry(b, c);
             let byte_event = ByteLookupEvent {
                 chunk,
-                channel,
                 opcode: ByteOpcode::ShrCarry,
                 a1: shift as u16,
                 a2: carry,
@@ -110,8 +108,6 @@ impl<F: Field> FixedShiftRightOperation<F> {
         input: Word<CB::Var>,
         rotation: usize,
         cols: FixedShiftRightOperation<CB::Var>,
-        chunk: impl Into<CB::Expr> + Copy,
-        channel: impl Into<CB::Expr> + Copy,
         is_real: CB::Var,
     ) {
         // Compute some constants with respect to the rotation needed for the rotation.
@@ -139,8 +135,6 @@ impl<F: Field> FixedShiftRightOperation<F> {
                 cols.carry[i],
                 input_bytes_rotated[i].clone(),
                 CB::F::from_canonical_usize(nb_bits_to_shift),
-                chunk,
-                channel,
                 is_real,
             );
 

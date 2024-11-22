@@ -33,7 +33,6 @@ impl<F: Field> NotOperation<F> {
         a: Word<CB::Var>,
         cols: NotOperation<CB::Var>,
         chunk: impl Into<CB::Expr> + Copy,
-        channel: impl Into<CB::Expr> + Copy,
         is_real: impl Into<CB::Expr> + Copy,
     ) {
         for i in (0..WORD_SIZE).step_by(2) {

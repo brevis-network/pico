@@ -48,11 +48,9 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
         {
             let row = (((lookup.b as u16) << 8) + lookup.c as u16) as usize;
             let index = lookup.opcode as usize;
-            let channel = lookup.channel as usize;
 
             let cols: &mut ByteMultCols<F> = trace.row_mut(row).borrow_mut();
-            cols.mult_channels[channel].multiplicities[index] += F::from_canonical_usize(*mult);
-            cols.chunk = F::from_canonical_u32(chunk);
+            cols.multiplicities[index] += F::from_canonical_usize(*mult);
         }
 
         trace

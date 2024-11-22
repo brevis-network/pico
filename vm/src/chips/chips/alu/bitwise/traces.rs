@@ -105,7 +105,6 @@ impl<F: Field> BitwiseChip<F> {
         let c = event.c.to_le_bytes();
 
         cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.channel = F::from_canonical_u8(event.channel);
         cols.a = Word::from(event.a);
         cols.b = Word::from(event.b);
         cols.c = Word::from(event.c);
@@ -117,7 +116,6 @@ impl<F: Field> BitwiseChip<F> {
         for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
             let byte_event = ByteLookupEvent {
                 chunk: event.chunk,
-                channel: event.channel,
                 opcode: ByteOpcode::from(event.opcode),
                 a1: b_a as u16,
                 a2: 0,

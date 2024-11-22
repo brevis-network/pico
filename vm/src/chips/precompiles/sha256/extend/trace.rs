@@ -136,7 +136,6 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             cols.is_real = F::one();
             cols.populate_flags(j);
             cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.channel = F::from_canonical_u8(event.channel);
             cols.clk = F::from_canonical_u32(event.clk);
             cols.w_ptr = F::from_canonical_u32(event.w_ptr);
 
@@ -148,56 +147,30 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             // `s0 := (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18) xor (w[i-15] rightshift
             // 3)`.
             let w_i_minus_15 = event.w_i_minus_15_reads[j].value;
-            let w_i_minus_15_rr_7 =
-                cols.w_i_minus_15_rr_7
-                    .populate(brb, chunk, event.channel, w_i_minus_15, 7);
-            let w_i_minus_15_rr_18 =
-                cols.w_i_minus_15_rr_18
-                    .populate(brb, chunk, event.channel, w_i_minus_15, 18);
-            let w_i_minus_15_rs_3 =
-                cols.w_i_minus_15_rs_3
-                    .populate(brb, chunk, event.channel, w_i_minus_15, 3);
-            let s0_intermediate = cols.s0_intermediate.populate(
-                brb,
-                chunk,
-                event.channel,
-                w_i_minus_15_rr_7,
-                w_i_minus_15_rr_18,
-            );
-            let s0 = cols.s0.populate(
-                brb,
-                chunk,
-                event.channel,
-                s0_intermediate,
-                w_i_minus_15_rs_3,
-            );
+            let w_i_minus_15_rr_7 = cols.w_i_minus_15_rr_7.populate(brb, chunk, w_i_minus_15, 7);
+            let w_i_minus_15_rr_18 = cols
+                .w_i_minus_15_rr_18
+                .populate(brb, chunk, w_i_minus_15, 18);
+            let w_i_minus_15_rs_3 = cols.w_i_minus_15_rs_3.populate(brb, chunk, w_i_minus_15, 3);
+            let s0_intermediate =
+                cols.s0_intermediate
+                    .populate(brb, chunk, w_i_minus_15_rr_7, w_i_minus_15_rr_18);
+            let s0 = cols
+                .s0
+                .populate(brb, chunk, s0_intermediate, w_i_minus_15_rs_3);
 
             // `s1 := (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19) xor (w[i-2] rightshift
             // 10)`.
             let w_i_minus_2 = event.w_i_minus_2_reads[j].value;
-            let w_i_minus_2_rr_17 =
-                cols.w_i_minus_2_rr_17
-                    .populate(brb, chunk, event.channel, w_i_minus_2, 17);
-            let w_i_minus_2_rr_19 =
-                cols.w_i_minus_2_rr_19
-                    .populate(brb, chunk, event.channel, w_i_minus_2, 19);
-            let w_i_minus_2_rs_10 =
-                cols.w_i_minus_2_rs_10
-                    .populate(brb, chunk, event.channel, w_i_minus_2, 10);
-            let s1_intermediate = cols.s1_intermediate.populate(
-                brb,
-                chunk,
-                event.channel,
-                w_i_minus_2_rr_17,
-                w_i_minus_2_rr_19,
-            );
-            let s1 = cols.s1.populate(
-                brb,
-                chunk,
-                event.channel,
-                s1_intermediate,
-                w_i_minus_2_rs_10,
-            );
+            let w_i_minus_2_rr_17 = cols.w_i_minus_2_rr_17.populate(brb, chunk, w_i_minus_2, 17);
+            let w_i_minus_2_rr_19 = cols.w_i_minus_2_rr_19.populate(brb, chunk, w_i_minus_2, 19);
+            let w_i_minus_2_rs_10 = cols.w_i_minus_2_rs_10.populate(brb, chunk, w_i_minus_2, 10);
+            let s1_intermediate =
+                cols.s1_intermediate
+                    .populate(brb, chunk, w_i_minus_2_rr_17, w_i_minus_2_rr_19);
+            let s1 = cols
+                .s1
+                .populate(brb, chunk, s1_intermediate, w_i_minus_2_rs_10);
 
             // Compute `s2`.
             let w_i_minus_7 = event.w_i_minus_7_reads[j].value;

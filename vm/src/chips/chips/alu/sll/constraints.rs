@@ -134,7 +134,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.channel,
             local.nonce,
             local.is_real,
         );

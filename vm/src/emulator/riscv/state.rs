@@ -29,10 +29,6 @@ pub struct RiscvEmulationState {
     /// emulated in this chunk.
     pub clk: u32,
 
-    /// The channel alternates between 0 and [crate::bytes::NUM_BYTE_LOOKUP_CHANNELS],
-    /// used to controll byte lookup multiplicity.
-    pub channel: u8,
-
     /// The program counter.
     pub pc: u32,
 
@@ -96,7 +92,6 @@ impl RiscvEmulationState {
             current_chunk: 1,
             current_execution_chunk: 1,
             clk: 0,
-            channel: 0,
             pc: pc_start,
             memory: HashMap::default(),
             uninitialized_memory: HashMap::default(),

@@ -20,7 +20,6 @@ impl<F: Field> XorOperation<F> {
         &mut self,
         record: &mut impl ByteRecordBehavior,
         chunk: u32,
-        channel: u8,
         x: u32,
         y: u32,
     ) -> u32 {
@@ -33,7 +32,6 @@ impl<F: Field> XorOperation<F> {
 
             let byte_event = ByteLookupEvent {
                 chunk,
-                channel,
                 opcode: ByteOpcode::XOR,
                 a1: xor as u16,
                 a2: 0,
@@ -51,8 +49,6 @@ impl<F: Field> XorOperation<F> {
         a: Word<CB::Var>,
         b: Word<CB::Var>,
         cols: XorOperation<CB::Var>,
-        chunk: CB::Var,
-        channel: impl Into<CB::Expr> + Clone,
         is_real: CB::Var,
     ) {
         for i in 0..WORD_SIZE {
@@ -61,8 +57,6 @@ impl<F: Field> XorOperation<F> {
                 cols.value[i],
                 a[i],
                 b[i],
-                chunk,
-                channel.clone(),
                 is_real,
             );
         }

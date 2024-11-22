@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 
 pub mod auipc;
 pub mod branch;
-pub mod channel_selector;
 pub mod chunk_clk;
 pub mod columns;
 pub mod constraints;

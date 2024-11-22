@@ -130,7 +130,6 @@ where
                 local.quotient,
                 local.c,
                 local.chunk,
-                local.channel,
                 local.lower_nonce,
                 local.is_real,
             );
@@ -156,7 +155,6 @@ where
                 local.quotient,
                 local.c,
                 local.chunk,
-                local.channel,
                 local.upper_nonce,
                 local.is_real,
             );
@@ -325,7 +323,6 @@ where
                 local.c,
                 local.abs_c,
                 local.chunk,
-                local.channel,
                 local.abs_c_alu_event_nonce,
                 local.abs_c_alu_event,
             );
@@ -335,7 +332,6 @@ where
                 local.remainder,
                 local.abs_remainder,
                 local.chunk,
-                local.channel,
                 local.abs_rem_alu_event_nonce,
                 local.abs_rem_alu_event,
             );
@@ -382,7 +378,6 @@ where
                 local.abs_remainder,
                 local.max_abs_c_or_1,
                 local.chunk,
-                local.channel,
                 local.abs_nonce,
                 local.remainder_check_multiplicity,
             );
@@ -399,15 +394,7 @@ where
             for msb_pair in msb_pairs.iter() {
                 let msb = msb_pair.0;
                 let byte = msb_pair.1;
-                builder.looking_byte(
-                    opcode,
-                    msb,
-                    byte,
-                    zero.clone(),
-                    local.chunk,
-                    local.channel,
-                    local.is_real,
-                );
+                builder.looking_byte(opcode, msb, byte, zero.clone(), local.is_real);
             }
         }
 
@@ -471,7 +458,6 @@ where
                 local.b,
                 local.c,
                 local.chunk,
-                local.channel,
                 local.nonce,
                 local.is_real,
             );

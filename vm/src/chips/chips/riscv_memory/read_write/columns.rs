@@ -18,8 +18,6 @@ pub const NUM_MEMORY_CHIP_COLS: usize = size_of::<MemoryChipCols<u8>>();
 pub struct MemoryChipCols<T> {
     /// The current chunk
     pub chunk: T,
-    /// The channel value for lookup multiplicity
-    pub channel: T,
     /// The clock cycle value for memory offset
     pub clk: T,
 

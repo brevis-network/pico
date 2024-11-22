@@ -7,13 +7,11 @@ use crate::{
 /// CPU Event.
 ///
 /// This object encapsulates the information needed to prove a CPU operation. This includes its
-/// chunk, channel, opcode, operands, and other relevant information.
+/// chunk, opcode, operands, and other relevant information.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub struct CpuEvent {
     /// The chunk number.
     pub chunk: u32,
-    /// The channel number.
-    pub channel: u8,
     /// The clock cycle.
     pub clk: u32,
     /// The program counter.

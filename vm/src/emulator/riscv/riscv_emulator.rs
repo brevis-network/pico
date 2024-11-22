@@ -34,8 +34,6 @@ use std::{sync::Arc, time::Instant};
 use thiserror::Error;
 use tracing::{debug, info, instrument};
 
-pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;
-
 /// An emulator for the Pico RISC-V zkVM.
 ///
 /// The exeuctor is responsible for executing a user program and tracing important events which
@@ -158,7 +156,6 @@ impl RiscvEmulator {
 
     fn initialize(&mut self) {
         self.state.clk = 0;
-        self.state.channel = 0;
         tracing::debug!("loading memory image");
         for (addr, value) in &self.program.memory_image {
             self.state.memory.insert(
@@ -239,7 +236,6 @@ impl RiscvEmulator {
         if self.state.clk + self.max_syscall_cycles >= self.chunk_size * 4 {
             self.state.current_chunk += 1;
             self.state.clk = 0;
-            self.state.channel = 0;
 
             self.bump_record();
         }
@@ -276,9 +272,8 @@ impl RiscvEmulator {
             if !self.record.cpu_events.is_empty() {
                 self.state.current_execution_chunk += 1;
             }
-            // reset clk and channel
+            // reset clk
             self.state.clk = 0;
-            self.state.channel = 0;
 
             self.bump_record_to_batch();
         }
@@ -871,16 +866,10 @@ impl RiscvEmulator {
         // Update the clk to the next cycle.
         self.state.clk += 4;
 
-        let channel = self.channel();
-
-        // Update the channel to the next cycle.
-        self.state.channel = (self.state.channel + 1) % NUM_BYTE_LOOKUP_CHANNELS;
-
         // Emit the CPU event for this cycle.
         if self.emulator_mode == EmulatorMode::Trace {
             self.emit_cpu(
                 self.chunk(),
-                channel,
                 clk,
                 pc,
                 next_pc,
@@ -916,13 +905,6 @@ impl RiscvEmulator {
     #[inline]
     pub fn chunk(&self) -> u32 {
         self.state.current_chunk
-    }
-
-    /// Get the current channel.
-    #[must_use]
-    #[inline]
-    pub fn channel(&self) -> u8 {
-        self.state.channel
     }
 
     /// Read a word from memory and create an access record.
@@ -1094,7 +1076,6 @@ impl RiscvEmulator {
     fn emit_cpu(
         &mut self,
         chunk: u32,
-        channel: u8,
         clk: u32,
         pc: u32,
         next_pc: u32,
@@ -1110,7 +1091,6 @@ impl RiscvEmulator {
     ) {
         let cpu_event = CpuEvent {
             chunk,
-            channel,
             clk,
             pc,
             next_pc,
@@ -1145,7 +1125,6 @@ impl RiscvEmulator {
             lookup_id,
             chunk: self.chunk(),
             clk,
-            channel: self.channel(),
             opcode,
             a,
             b,

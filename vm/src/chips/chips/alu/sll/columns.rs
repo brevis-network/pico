@@ -13,9 +13,6 @@ pub struct ShiftLeftCols<T: Copy + Sized> {
     /// The chunk number, used for byte lookup table.
     pub chunk: T,
 
-    /// The channel number, used for byte lookup table.
-    pub channel: T,
-
     /// The nonce of the operation.
     pub nonce: T,
 

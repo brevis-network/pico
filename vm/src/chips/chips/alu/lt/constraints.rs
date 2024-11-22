@@ -137,8 +137,6 @@ where
             local.b_masked,
             local.b[3],
             CB::F::from_canonical_u8(0x7f),
-            local.chunk,
-            local.channel,
             is_real.clone(),
         );
 
@@ -148,8 +146,6 @@ where
             local.c_masked,
             local.c[3],
             CB::F::from_canonical_u8(0x7f),
-            local.chunk,
-            local.channel,
             is_real.clone(),
         );
 
@@ -159,8 +155,6 @@ where
             local.slt_u,
             b_comp_byte,
             c_comp_byte,
-            local.chunk,
-            local.channel,
             is_real.clone(),
         );
 
@@ -173,7 +167,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.channel,
             local.nonce,
             is_real,
         )

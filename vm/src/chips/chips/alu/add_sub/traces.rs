@@ -139,7 +139,6 @@ impl<F: Field> AddSubChip<F> {
     ) {
         let is_add = event.opcode == Opcode::ADD;
         cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.channel = F::from_canonical_u8(event.channel);
         cols.is_add = F::from_bool(is_add);
         cols.is_sub = F::from_bool(!is_add);
 

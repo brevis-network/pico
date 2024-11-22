@@ -135,7 +135,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let mut alu_events = HashMap::new();
 
         cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.channel = F::from_canonical_u8(event.channel);
         cols.clk = F::from_canonical_u32(event.clk);
 
         // Populate memory accesses for reading from memory.
@@ -198,7 +197,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let add_event = AluEvent {
             lookup_id: event.memory_add_lookup_id,
             chunk: event.chunk,
-            channel: event.channel,
             clk: event.clk,
             opcode: Opcode::ADD,
             a: memory_addr,
@@ -265,7 +263,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
                         F::from_bool(event.instruction.op_a != (X0 as u32));
                     let sub_event = AluEvent {
                         lookup_id: event.memory_sub_lookup_id,
-                        channel: event.channel,
                         chunk: event.chunk,
                         clk: event.clk,
                         opcode: Opcode::SUB,

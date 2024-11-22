@@ -181,10 +181,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             .assert_eq(local.clk, next.clk);
         builder
             .when_transition()
-            .when_not(local.is_last_row)
-            .assert_eq(local.channel, next.channel);
-        builder
-            .when_transition()
             .when(local.is_real)
             .when_not(local.is_last_row)
             .assert_eq(local.w_ptr, next.w_ptr);
@@ -307,8 +303,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.e,
             6,
             local.e_rr_6,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate e rightrotate 11.
@@ -317,8 +311,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.e,
             11,
             local.e_rr_11,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate e rightrotate 25.
@@ -327,8 +319,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.e,
             25,
             local.e_rr_25,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate (e rightrotate 6) xor (e rightrotate 11).
@@ -337,8 +327,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.e_rr_6.value,
             local.e_rr_11.value,
             local.s1_intermediate,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate S1 := ((e rightrotate 6) xor (e rightrotate 11)) xor (e rightrotate 25).
@@ -347,8 +335,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.s1_intermediate.value,
             local.e_rr_25.value,
             local.s1,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
 
@@ -360,7 +346,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.f,
             local.e_and_f,
             local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate not e.
@@ -369,7 +354,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.e,
             local.e_not,
             local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate (not e) and g.
@@ -379,7 +363,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.g,
             local.e_not_and_g,
             local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate ch := (e and f) xor ((not e) and g).
@@ -388,8 +371,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.e_and_f.value,
             local.e_not_and_g.value,
             local.ch,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
 
@@ -415,8 +396,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.a,
             2,
             local.a_rr_2,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate a rightrotate 13.
@@ -425,8 +404,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.a,
             13,
             local.a_rr_13,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate a rightrotate 22.
@@ -435,8 +412,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.a,
             22,
             local.a_rr_22,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate (a rightrotate 2) xor (a rightrotate 13).
@@ -445,8 +420,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.a_rr_2.value,
             local.a_rr_13.value,
             local.s0_intermediate,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate S0 := ((a rightrotate 2) xor (a rightrotate 13)) xor (a rightrotate 22).
@@ -455,8 +428,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.s0_intermediate.value,
             local.a_rr_22.value,
             local.s0,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
 
@@ -468,7 +439,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.b,
             local.a_and_b,
             local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate a and c.
@@ -478,7 +448,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.c,
             local.a_and_c,
             local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate b and c.
@@ -488,7 +457,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.c,
             local.b_and_c,
             local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate (a and b) xor (a and c).
@@ -497,8 +465,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.a_and_b.value,
             local.a_and_c.value,
             local.maj_intermediate,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
         // Calculate maj := ((a and b) xor (a and c)) xor (b and c).
@@ -507,8 +473,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.maj_intermediate.value,
             local.b_and_c.value,
             local.maj,
-            local.chunk,
-            local.channel,
             local.is_compression,
         );
 

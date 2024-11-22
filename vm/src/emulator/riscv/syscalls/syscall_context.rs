@@ -48,12 +48,6 @@ impl<'a> SyscallContext<'a> {
         self.rt.state.current_chunk
     }
 
-    /// Get the current channel.
-    #[must_use]
-    pub fn current_channel(&self) -> u8 {
-        self.rt.state.channel
-    }
-
     /// Read a word from memory.
     pub fn mr(&mut self, addr: u32) -> (MemoryReadRecord, u32) {
         let record = self.rt.mr(addr, self.current_chunk, self.clk);

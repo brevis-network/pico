@@ -59,13 +59,11 @@ impl Syscall for Keccak256PermuteSyscall {
 
         // Push the Keccak permute event.
         let chunk = ctx.current_chunk();
-        let channel = ctx.current_channel();
         let lookup_id = ctx.syscall_lookup_id;
         ctx.record_mut()
             .add_keccak_permute_lookup_event(KeccakPermuteEvent {
                 lookup_id,
                 chunk,
-                channel,
                 clk: start_clk,
                 pre_state: saved_state.as_slice().try_into().unwrap(),
                 post_state: state.as_slice().try_into().unwrap(),

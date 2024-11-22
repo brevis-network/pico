@@ -1,5 +1,4 @@
 use super::{
-    channel_selector::constraints::eval_channel_selector,
     columns::CpuCols,
     instruction::columns::InstructionCols,
     opcode_selector::columns::{OpcodeSelectorCols, OPCODE_SELECTORS_COL_MAP},
@@ -62,19 +61,8 @@ where
             local.op_b_val(),
             local.op_c_val(),
             local.chunk,
-            local.channel,
             CB::Expr::zero(), // local.nonce,
             is_memory_instruction,
-        );
-
-        // Channel constraints.
-        eval_channel_selector(
-            builder,
-            &local.channel_selector,
-            &next.channel_selector,
-            local.channel,
-            local.is_real,
-            next.is_real,
         );
 
         // ALU instructions.
@@ -84,7 +72,6 @@ where
             local.op_b_val(),
             local.op_c_val(),
             local.chunk,
-            local.channel,
             local.nonce,
             is_alu_instruction,
         );

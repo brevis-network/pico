@@ -49,7 +49,6 @@ where
             local.operand_1,
             local.operand_2,
             local.chunk,
-            local.channel,
             local.nonce,
             local.is_add,
         );
@@ -60,7 +59,6 @@ where
             local.add_operation.value,
             local.operand_2,
             local.chunk,
-            local.channel,
             local.nonce,
             local.is_sub,
         );

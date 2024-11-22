@@ -72,15 +72,7 @@ where
             for msb_pair in msb_pairs.iter() {
                 let msb = msb_pair.0;
                 let byte = msb_pair.1;
-                builder.looking_byte(
-                    opcode,
-                    msb,
-                    byte,
-                    zero.clone(),
-                    local.chunk,
-                    local.channel,
-                    local.is_real,
-                );
+                builder.looking_byte(opcode, msb, byte, zero.clone(), local.is_real);
             }
             (local.b_msb, local.c_msb)
         };
@@ -209,7 +201,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.channel,
             local.nonce,
             local.is_real,
         );

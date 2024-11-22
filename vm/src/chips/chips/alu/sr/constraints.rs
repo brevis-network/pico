@@ -33,15 +33,7 @@ where
             let byte = local.b[WORD_SIZE - 1];
             let opcode = CB::F::from_canonical_u32(ByteOpcode::MSB as u32);
             let msb = local.b_msb;
-            builder.looking_byte(
-                opcode,
-                msb,
-                byte,
-                zero.clone(),
-                local.chunk,
-                local.channel,
-                local.is_real,
-            );
+            builder.looking_byte(opcode, msb, byte, zero.clone(), local.is_real);
         }
 
         // Calculate the number of bits and bytes to shift by from c.
@@ -149,8 +141,6 @@ where
                     local.shr_carry_output_carry[i],
                     local.byte_shift_result[i],
                     num_bits_to_shift.clone(),
-                    local.chunk,
-                    local.channel,
                     local.is_real,
                 );
             }
@@ -217,7 +207,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.channel,
             local.nonce,
             local.is_real,
         );

@@ -1,7 +1,6 @@
 use super::{
-    channel_selector::columns::ChannelSelectorCols, instruction::columns::InstructionCols,
-    opcode_selector::columns::OpcodeSelectorCols, opcode_specific::columns::OpcodeSpecificCols,
-    utils::make_col_map,
+    instruction::columns::InstructionCols, opcode_selector::columns::OpcodeSelectorCols,
+    opcode_specific::columns::OpcodeSpecificCols, utils::make_col_map,
 };
 use crate::{
     chips::chips::riscv_memory::read_write::columns::{
@@ -22,8 +21,6 @@ pub const CPU_COL_MAP: CpuCols<usize> = make_col_map();
 pub struct CpuCols<T: Copy> {
     /// The current chunk.
     pub chunk: T,
-    /// The channel value, used for byte lookup multiplicity.
-    pub channel: T,
 
     pub nonce: T,
 
@@ -42,9 +39,6 @@ pub struct CpuCols<T: Copy> {
 
     /// Columns related to the instruction.
     pub instruction: InstructionCols<T>,
-
-    /// Columns related to the byte lookup channel.
-    pub channel_selector: ChannelSelectorCols<T>,
 
     /// Selectors for the opcode.
     pub opcode_selector: OpcodeSelectorCols<T>,

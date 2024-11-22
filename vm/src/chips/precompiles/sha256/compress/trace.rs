@@ -126,7 +126,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         rrb: &mut impl RangeRecordBehavior,
     ) {
         let chunk = event.chunk;
-        let channel = event.channel;
 
         let og_h = event.h;
 
@@ -138,7 +137,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
             cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.channel = F::from_canonical_u8(event.channel);
             cols.clk = F::from_canonical_u32(event.clk);
             cols.w_ptr = F::from_canonical_u32(event.w_ptr);
             cols.h_ptr = F::from_canonical_u32(event.h_ptr);
@@ -181,7 +179,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             cols.octet_num[octet_num_idx] = F::one();
 
             cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.channel = F::from_canonical_u8(event.channel);
             cols.clk = F::from_canonical_u32(event.clk);
             cols.w_ptr = F::from_canonical_u32(event.w_ptr);
             cols.h_ptr = F::from_canonical_u32(event.h_ptr);
@@ -205,44 +202,32 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             cols.g = Word::from(g);
             cols.h = Word::from(h);
 
-            let e_rr_6 = cols.e_rr_6.populate(brb, chunk, channel, e, 6);
-            let e_rr_11 = cols.e_rr_11.populate(brb, chunk, channel, e, 11);
-            let e_rr_25 = cols.e_rr_25.populate(brb, chunk, channel, e, 25);
-            let s1_intermediate = cols
-                .s1_intermediate
-                .populate(brb, chunk, channel, e_rr_6, e_rr_11);
-            let s1 = cols
-                .s1
-                .populate(brb, chunk, channel, s1_intermediate, e_rr_25);
+            let e_rr_6 = cols.e_rr_6.populate(brb, chunk, e, 6);
+            let e_rr_11 = cols.e_rr_11.populate(brb, chunk, e, 11);
+            let e_rr_25 = cols.e_rr_25.populate(brb, chunk, e, 25);
+            let s1_intermediate = cols.s1_intermediate.populate(brb, chunk, e_rr_6, e_rr_11);
+            let s1 = cols.s1.populate(brb, chunk, s1_intermediate, e_rr_25);
 
-            let e_and_f = cols.e_and_f.populate(brb, chunk, channel, e, f);
+            let e_and_f = cols.e_and_f.populate(brb, chunk, e, f);
             let e_not = cols.e_not.populate(rrb, chunk, e);
-            let e_not_and_g = cols.e_not_and_g.populate(brb, chunk, channel, e_not, g);
-            let ch = cols.ch.populate(brb, chunk, channel, e_and_f, e_not_and_g);
+            let e_not_and_g = cols.e_not_and_g.populate(brb, chunk, e_not, g);
+            let ch = cols.ch.populate(brb, chunk, e_and_f, e_not_and_g);
 
             let temp1 = cols
                 .temp1
                 .populate(rrb, chunk, h, s1, ch, event.w[j], SHA_COMPRESS_K[j]);
 
-            let a_rr_2 = cols.a_rr_2.populate(brb, chunk, channel, a, 2);
-            let a_rr_13 = cols.a_rr_13.populate(brb, chunk, channel, a, 13);
-            let a_rr_22 = cols.a_rr_22.populate(brb, chunk, channel, a, 22);
-            let s0_intermediate = cols
-                .s0_intermediate
-                .populate(brb, chunk, channel, a_rr_2, a_rr_13);
-            let s0 = cols
-                .s0
-                .populate(brb, chunk, channel, s0_intermediate, a_rr_22);
+            let a_rr_2 = cols.a_rr_2.populate(brb, chunk, a, 2);
+            let a_rr_13 = cols.a_rr_13.populate(brb, chunk, a, 13);
+            let a_rr_22 = cols.a_rr_22.populate(brb, chunk, a, 22);
+            let s0_intermediate = cols.s0_intermediate.populate(brb, chunk, a_rr_2, a_rr_13);
+            let s0 = cols.s0.populate(brb, chunk, s0_intermediate, a_rr_22);
 
-            let a_and_b = cols.a_and_b.populate(brb, chunk, channel, a, b);
-            let a_and_c = cols.a_and_c.populate(brb, chunk, channel, a, c);
-            let b_and_c = cols.b_and_c.populate(brb, chunk, channel, b, c);
-            let maj_intermediate = cols
-                .maj_intermediate
-                .populate(brb, chunk, channel, a_and_b, a_and_c);
-            let maj = cols
-                .maj
-                .populate(brb, chunk, channel, maj_intermediate, b_and_c);
+            let a_and_b = cols.a_and_b.populate(brb, chunk, a, b);
+            let a_and_c = cols.a_and_c.populate(brb, chunk, a, c);
+            let b_and_c = cols.b_and_c.populate(brb, chunk, b, c);
+            let maj_intermediate = cols.maj_intermediate.populate(brb, chunk, a_and_b, a_and_c);
+            let maj = cols.maj.populate(brb, chunk, maj_intermediate, b_and_c);
 
             let temp2 = cols.temp2.populate(rrb, chunk, s0, maj);
 
@@ -279,7 +264,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
             cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.channel = F::from_canonical_u8(event.channel);
             cols.clk = F::from_canonical_u32(event.clk);
             cols.w_ptr = F::from_canonical_u32(event.w_ptr);
             cols.h_ptr = F::from_canonical_u32(event.h_ptr);

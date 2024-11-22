@@ -37,8 +37,6 @@ impl<F: PrimeField32> CpuChip<F> {
             auipc_columns.pc,
             local.op_b_val(),
             local.chunk,
-            local.channel,
-            // gupeng
             auipc_columns.auipc_nonce,
             local.opcode_selector.is_auipc,
         );

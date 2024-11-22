@@ -9,9 +9,6 @@ pub mod utils;
 /// The number of different byte operations.
 pub const NUM_BYTE_OPS: usize = 7;
 
-/// The number of different byte lookup channels.
-pub const NUM_BYTE_LOOKUP_CHANNELS: u8 = 16;
-
 /// A chip for computing byte operations.
 ///
 /// The chip contains a preprocessed table of all possible byte operations. Other chips can then

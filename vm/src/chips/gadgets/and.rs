@@ -20,7 +20,6 @@ impl<F: Field> AndOperation<F> {
         &mut self,
         record: &mut impl ByteRecordBehavior,
         chunk: u32,
-        channel: u8,
         x: u32,
         y: u32,
     ) -> u32 {
@@ -33,7 +32,6 @@ impl<F: Field> AndOperation<F> {
 
             let byte_event = ByteLookupEvent {
                 chunk,
-                channel,
                 opcode: ByteOpcode::AND,
                 a1: and as u16,
                 a2: 0,
@@ -52,7 +50,6 @@ impl<F: Field> AndOperation<F> {
         b: Word<CB::Var>,
         cols: AndOperation<CB::Var>,
         chunk: CB::Var,
-        channel: impl Into<CB::Expr> + Copy,
         is_real: CB::Var,
     ) {
         for i in 0..WORD_SIZE {
@@ -61,8 +58,6 @@ impl<F: Field> AndOperation<F> {
                 cols.value[i],
                 a[i],
                 b[i],
-                chunk,
-                channel,
                 is_real,
             );
         }

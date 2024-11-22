@@ -10,13 +10,11 @@ use std::hash::Hash;
 /// Byte Lookup Event.
 ///
 /// This object encapsulates the information needed to prove a byte lookup operation. This includes
-/// the chunk, channel, opcode, operands, and other relevant information.
+/// the chunk, opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct ByteLookupEvent {
     /// The chunk number.
     pub chunk: u32,
-    /// The channel number.
-    pub channel: u8,
     /// The opcode.
     pub opcode: ByteOpcode,
     /// The first operand.
@@ -49,10 +47,9 @@ pub trait ByteRecordBehavior {
     }
 
     /// Adds a `ByteLookupEvent` to compute the bitwise OR of the two input values.
-    fn lookup_or(&mut self, chunk: u32, channel: u8, b: u8, c: u8) {
+    fn lookup_or(&mut self, chunk: u32, b: u8, c: u8) {
         self.add_byte_lookup_event(ByteLookupEvent {
             chunk,
-            channel,
             opcode: ByteOpcode::OR,
             a1: (b | c) as u16,
             a2: 0,
@@ -65,10 +62,9 @@ pub trait ByteRecordBehavior {
 impl ByteLookupEvent {
     /// Creates a new `ByteLookupEvent`.
     #[must_use]
-    pub fn new(chunk: u32, channel: u8, opcode: ByteOpcode, a1: u16, a2: u8, b: u8, c: u8) -> Self {
+    pub fn new(chunk: u32, opcode: ByteOpcode, a1: u16, a2: u8, b: u8, c: u8) -> Self {
         Self {
             chunk,
-            channel,
             opcode,
             a1,
             a2,

@@ -41,7 +41,6 @@ where
             local.op_b_val(),
             local.op_c_val(),
             local.chunk,
-            local.channel,
             CB::Expr::zero(), // local.nonce,
             is_memory_instruction.clone(),
         );
@@ -100,7 +99,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
             local.op_b_val(),
             local.op_c_val(),
             local.chunk,
-            local.channel,
             local.addr_word_nonce,
             is_memory_instruction.clone(),
         );
@@ -215,7 +213,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
             local.unsigned_mem_val,
             signed_value,
             local.chunk,
-            local.channel,
             local.unsigned_mem_val_nonce,
             local.mem_value_is_neg_not_x0,
         );

@@ -26,7 +26,6 @@ impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
         &mut self,
         record: &mut impl ByteRecordBehavior,
         chunk: u32,
-        channel: u8,
         a: &[u8],
         b: &[u8],
     ) {
@@ -43,7 +42,6 @@ impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
                 record.add_byte_lookup_event(ByteLookupEvent {
                     opcode: ByteOpcode::LTU,
                     chunk,
-                    channel,
                     a1: 1,
                     a2: 0,
                     b: *a_byte,
@@ -70,8 +68,6 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
         builder: &mut CB,
         a: &[Ea],
         b: &[Eb],
-        chunk: impl Into<CB::Expr> + Clone,
-        channel: impl Into<CB::Expr> + Clone,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
         V: Into<CB::Expr>,
@@ -139,8 +135,6 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
             CB::F::one(),
             self.a_comparison_byte,
             self.b_comparison_byte,
-            chunk,
-            channel,
             is_real,
         )
     }
