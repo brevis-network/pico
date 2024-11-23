@@ -3,6 +3,7 @@ use crate::{
         alu_base::BaseAluChip,
         alu_ext::ExtAluChip,
         exp_reverse_bits_v2::ExpReverseBitsLenChip,
+        fri_fold_v2::FriFoldChip,
         poseidon2_skinny_v2::Poseidon2SkinnyChip,
         poseidon2_wide_v2::Poseidon2WideChip,
         recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
@@ -30,6 +31,7 @@ pub enum RecursionChipType<
     ExtAlu(ExtAluChip<F>),
     Poseidon2Skinny(Poseidon2SkinnyChip<DEGREE, F>),
     Poseidon2Wide(Poseidon2WideChip<DEGREE, F>),
+    FriFold(FriFoldChip<DEGREE, F>),
 }
 
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usize> ChipBehavior<F>
@@ -47,6 +49,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::ExtAlu(chip) => ChipBehavior::<F>::name(chip),
             Self::Poseidon2Skinny(chip) => ChipBehavior::<F>::name(chip),
             Self::Poseidon2Wide(chip) => ChipBehavior::<F>::name(chip),
+            Self::FriFold(chip) => ChipBehavior::<F>::name(chip),
         }
     }
 
@@ -59,6 +62,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::ExtAlu(chip) => chip.generate_preprocessed(program),
             Self::Poseidon2Skinny(chip) => chip.generate_preprocessed(program),
             Self::Poseidon2Wide(chip) => chip.generate_preprocessed(program),
+            Self::FriFold(chip) => chip.generate_preprocessed(program),
         }
     }
 
@@ -71,6 +75,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::ExtAlu(chip) => chip.generate_main(input, output),
             Self::Poseidon2Skinny(chip) => chip.generate_main(input, output),
             Self::Poseidon2Wide(chip) => chip.generate_main(input, output),
+            Self::FriFold(chip) => chip.generate_main(input, output),
         }
     }
 
@@ -83,6 +88,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::ExtAlu(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::Poseidon2Skinny(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::Poseidon2Wide(chip) => ChipBehavior::<F>::preprocessed_width(chip),
+            Self::FriFold(chip) => ChipBehavior::<F>::preprocessed_width(chip),
         }
     }
 
@@ -95,6 +101,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::ExtAlu(chip) => chip.extra_record(input, extra),
             Self::Poseidon2Skinny(chip) => chip.extra_record(input, extra),
             Self::Poseidon2Wide(chip) => chip.extra_record(input, extra),
+            Self::FriFold(chip) => chip.extra_record(input, extra),
         }
     }
 
@@ -107,6 +114,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::ExtAlu(chip) => chip.is_active(record),
             Self::Poseidon2Skinny(chip) => chip.is_active(record),
             Self::Poseidon2Wide(chip) => chip.is_active(record),
+            Self::FriFold(chip) => chip.is_active(record),
         }
     }
 }
@@ -123,6 +131,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::ExtAlu(chip) => BaseAir::<F>::width(chip),
             Self::Poseidon2Skinny(chip) => BaseAir::<F>::width(chip),
             Self::Poseidon2Wide(chip) => BaseAir::<F>::width(chip),
+            Self::FriFold(chip) => BaseAir::<F>::width(chip),
         }
     }
 
@@ -135,6 +144,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             Self::ExtAlu(chip) => chip.preprocessed_trace(),
             Self::Poseidon2Skinny(chip) => chip.preprocessed_trace(),
             Self::Poseidon2Wide(chip) => chip.preprocessed_trace(),
+            Self::FriFold(chip) => chip.preprocessed_trace(),
         }
     }
 }
@@ -157,6 +167,7 @@ where
             Self::ExtAlu(chip) => chip.eval(b),
             Self::Poseidon2Skinny(chip) => chip.eval(b),
             Self::Poseidon2Wide(chip) => chip.eval(b),
+            Self::FriFold(chip) => chip.eval(b),
         }
     }
 }
@@ -172,6 +183,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::FriFold(FriFoldChip::default())),
         ]
     }
 
@@ -184,6 +196,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::FriFold(FriFoldChip::default())),
         ]
     }
 
@@ -196,6 +209,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::FriFold(FriFoldChip::default())),
         ]
     }
 
@@ -208,6 +222,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::Poseidon2Skinny(Poseidon2SkinnyChip::default())),
+            MetaChip::new(Self::FriFold(FriFoldChip::default())),
         ]
     }
 }

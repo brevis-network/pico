@@ -14,7 +14,7 @@ use std::{
 };
 
 use crate::{
-    chips::chips::recursion_memory_v2::MemEvent,
+    chips::chips::{fri_fold_v2::event::FriFoldEvent, recursion_memory_v2::MemEvent},
     compiler::recursion_v2::program::RecursionProgram,
     recursion_v2::{air::Block, runtime::memory::MemVecMap},
 };
@@ -28,9 +28,8 @@ use p3_util::reverse_bits_len;
 
 use crate::recursion_v2::types::{
     BaseAluEvent, BaseAluInstr, CommitPublicValuesEvent, ExpReverseBitsEvent, ExpReverseBitsInstr,
-    ExpReverseBitsIo, ExtAluEvent, ExtAluInstr, FriFoldBaseIo, FriFoldEvent, FriFoldExtSingleIo,
-    FriFoldExtVecIo, FriFoldInstr, MemAccessKind, MemInstr, MemIo, Poseidon2Event, Poseidon2Instr,
-    Poseidon2Io,
+    ExpReverseBitsIo, ExtAluEvent, ExtAluInstr, FriFoldBaseIo, FriFoldExtSingleIo, FriFoldExtVecIo,
+    FriFoldInstr, MemAccessKind, MemInstr, MemIo, Poseidon2Event, Poseidon2Instr, Poseidon2Io,
 };
 use thiserror::Error;
 

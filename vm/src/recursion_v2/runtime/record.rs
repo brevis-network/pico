@@ -1,7 +1,7 @@
 use std::{array, sync::Arc};
 
 use crate::{
-    chips::chips::recursion_memory_v2::MemEvent,
+    chips::chips::{fri_fold_v2::event::FriFoldEvent, recursion_memory_v2::MemEvent},
     compiler::recursion_v2::program::RecursionProgram,
     emulator::record::RecordBehavior,
     machine::chip::ChipBehavior,
@@ -9,8 +9,7 @@ use crate::{
     recursion_v2::{
         air::RecursionPublicValues,
         types::{
-            BaseAluEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent, FriFoldEvent,
-            Poseidon2Event,
+            BaseAluEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent, Poseidon2Event,
         },
     },
 };
