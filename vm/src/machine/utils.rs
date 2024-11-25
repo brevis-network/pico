@@ -1,14 +1,18 @@
 use crate::{
     configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
+    instances::configs::riscv_config::StarkConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, SymbolicConstraintFolder},
+        keys::HashableKey,
     },
+    recursion::air::RecursionPublicValues,
 };
 use core::iter;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, PairCol};
+use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
 use p3_field::{AbstractExtensionField, AbstractField, Field, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -16,7 +20,9 @@ use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use rayon::ThreadPoolBuilder;
-use std::any::type_name;
+use std::{any::type_name, borrow::Borrow};
+
+use super::{keys::BaseVerifyingKey, proof::MetaProof};
 
 pub fn type_name_of<T>(_: &T) -> String {
     type_name::<T>().to_string()
@@ -321,4 +327,15 @@ where
     let mut builder = SymbolicConstraintFolder::new(preprocessed_width, air.width());
     air.eval(&mut builder);
     builder.constraints()
+}
+
+pub fn assert_vk_digest<SC: StarkGenericConfig>(
+    proof: &MetaProof<SC>,
+    riscv_vk: &BaseVerifyingKey<StarkConfig>,
+) where
+    <SC as StarkGenericConfig>::Val: PartialEq<BabyBear>,
+{
+    let public_values: &RecursionPublicValues<_> =
+        proof.proofs[0].public_values.as_slice().borrow();
+    assert_eq!(public_values.riscv_vk_digest, riscv_vk.hash_babybear());
 }

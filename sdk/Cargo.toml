@@ -10,6 +10,10 @@ categories = { workspace = true }
 [dependencies]
 bincode.workspace = true
 serde.workspace = true
+clap.workspace = true
+pico-vm.workspace = true
+p3-baby-bear.workspace = true
+p3-challenger.workspace = true
 
 [features]
 default = []

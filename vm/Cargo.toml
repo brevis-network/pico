@@ -9,7 +9,6 @@ categories.workspace = true
 [dependencies]
 # pico
 pico-derive.workspace = true
-pico-sdk.workspace = true
 
 # p3
 p3-air.workspace = true

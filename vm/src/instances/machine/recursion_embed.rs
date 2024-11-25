@@ -2,14 +2,11 @@ use crate::{
     compiler::recursion::program::RecursionProgram,
     configs::config::{Challenge, StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
-    instances::configs::{
-        embed_bb_bn254_poseidon2::StarkConfig as EmbedSC,
-        recur_bb_poseidon2::StarkConfig as RiscvSC,
-    },
+    instances::configs::embed_bb_bn254_poseidon2::StarkConfig as EmbedSC,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
+        keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -32,8 +29,6 @@ where
         > + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    vk: BaseVerifyingKey<RiscvSC>, // this is for the riscv pk
-
     base_machine: BaseMachine<SC, C>,
 
     phantom: std::marker::PhantomData<I>,
@@ -160,11 +155,6 @@ where
             panic!("flag_complete is not 1");
         }
 
-        // assert riscv vk
-        if public_values.riscv_vk_digest != self.get_vk().hash_babybear() {
-            panic!("riscv_vk is not equal to vk");
-        }
-
         // verify
         self.base_machine.verify_ensemble(vk, proof.proofs())?;
 
@@ -184,21 +174,11 @@ where
         > + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub fn new(
-        config: SC,
-        chips: Vec<MetaChip<Val<SC>, C>>,
-        num_public_values: usize,
-        vk: BaseVerifyingKey<RiscvSC>,
-    ) -> Self {
+    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         info!("PERF-machine=embed");
         Self {
-            vk,
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
             phantom: std::marker::PhantomData,
         }
-    }
-
-    pub fn get_vk(&self) -> &BaseVerifyingKey<RiscvSC> {
-        &self.vk
     }
 }

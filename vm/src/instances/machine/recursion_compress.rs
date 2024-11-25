@@ -4,12 +4,12 @@ use crate::{
     emulator::record::RecordBehavior,
     instances::{
         compiler::recursion_circuit::stdin::RecursionStdin,
-        configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
+        configs::recur_config::StarkConfig as RecursionSC,
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
+        keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -32,8 +32,6 @@ where
         > + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    vk: BaseVerifyingKey<RiscvSC>, // this is for the riscv pk
-
     base_machine: BaseMachine<SC, C>,
 }
 
@@ -161,11 +159,6 @@ where
             panic!("flag_complete is not 1");
         }
 
-        // assert riscv vk
-        if public_values.riscv_vk_digest != self.get_vk().hash_babybear() {
-            panic!("riscv_vk is not equal to vk");
-        }
-
         // verify
         self.base_machine.verify_ensemble(vk, proof.proofs())?;
 
@@ -185,20 +178,10 @@ where
         > + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub fn new(
-        config: SC,
-        chips: Vec<MetaChip<Val<SC>, C>>,
-        num_public_values: usize,
-        vk: BaseVerifyingKey<RiscvSC>,
-    ) -> Self {
+    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         info!("PERF-machine=compress");
         Self {
-            vk,
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }
-    }
-
-    pub fn get_vk(&self) -> &BaseVerifyingKey<RiscvSC> {
-        &self.vk
     }
 }

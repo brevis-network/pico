@@ -28,14 +28,17 @@ use pico_vm::{
             riscv_machine::RiscvMachine, riscv_recursion::RiscvRecursionMachine,
         },
     },
-    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
+    machine::{
+        keys::HashableKey, logger::setup_logger, machine::MachineBehavior, utils::assert_vk_digest,
+        witness::ProvingWitness,
+    },
     primitives::consts::{
         COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, EMBED_DEGREE, RECURSION_NUM_PVS,
         RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
     },
-    recursion::runtime::Runtime,
+    recursion::{air::RecursionPublicValues, runtime::Runtime},
 };
-use std::time::Instant;
+use std::{borrow::Borrow, time::Instant};
 use tracing::info;
 
 #[path = "common/parse_args.rs"]
@@ -158,7 +161,6 @@ fn main() {
         RecursionSC::new(),
         RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
         RECURSION_NUM_PVS,
-        riscv_vk,
     );
 
     let (combine_pk, combine_vk) = combine_machine.setup_keys(&combine_program);
@@ -187,6 +189,7 @@ fn main() {
     // Verify the proof.
     info!("Verifying combine proof (at {:?})..", start.elapsed());
     let combine_result = combine_machine.verify(&combine_vk, &combine_proof);
+    assert_vk_digest(&combine_proof, &riscv_vk);
     info!(
         "The combine proof is verified: {} (at {:?})",
         combine_result.is_ok(),
@@ -215,7 +218,6 @@ fn main() {
         RecursionSC::compress(),
         RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
         RECURSION_NUM_PVS,
-        riscv_vk,
     );
 
     let (compress_pk, compress_vk) = compress_machine.setup_keys(&compress_program);
@@ -259,6 +261,7 @@ fn main() {
         start.elapsed()
     );
     assert!(compress_result.is_ok());
+    assert_vk_digest(&compress_proof, &riscv_vk);
 
     if step == "recur_compress" {
         return;
@@ -311,7 +314,6 @@ fn main() {
         EmbedSC::new(),
         RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
         RECURSION_NUM_PVS,
-        riscv_vk,
     );
 
     let (embed_pk, embed_vk) = embed_machine.setup_keys(&embed_program);
@@ -323,6 +325,7 @@ fn main() {
     // Verify the proof.
     info!("Verifying embed proof (at {:?})..", start.elapsed());
     let embed_result = embed_machine.verify(&embed_vk, &embed_proof);
+    assert_vk_digest(&embed_proof, &riscv_vk);
     info!(
         "The embed proof is verified: {} (at {:?})",
         embed_result.is_ok(),

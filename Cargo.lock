@@ -1611,6 +1611,10 @@ name = "pico-sdk"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "clap",
+ "p3-baby-bear",
+ "p3-challenger",
+ "pico-vm",
  "serde",
 ]
 
@@ -1661,7 +1665,6 @@ dependencies = [
  "p3-uni-stark",
  "p3-util",
  "pico-derive",
- "pico-sdk",
  "rand",
  "rayon",
  "rayon-scan",
