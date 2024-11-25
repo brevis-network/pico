@@ -1,6 +1,6 @@
 use crate::{
     compiler::program::ProgramBehavior,
-    configs::config::{PackedChallenge, StarkGenericConfig},
+    configs::config::{Com, PackedChallenge, PcsProverData, StarkGenericConfig},
     emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -34,6 +34,8 @@ pub struct BaseProver<SC, C> {
 impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C>
 where
     C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     pub fn new() -> Self {
         Self {
@@ -438,7 +440,7 @@ where
             let quotient_values = debug_span!(parent: Span::current(), "compute_quotient_values")
                 .in_scope(|| {
                     quotient_domains
-                        .iter()
+                        .into_par_iter()
                         .enumerate()
                         .map(|(i, quotient_domain)| {
                             let begin_compute_quotient = Instant::now();

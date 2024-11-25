@@ -130,11 +130,12 @@ where
         program: C::Program,
         stdin: &'a EmulatorStdin<RiscvRecursionStdin<'a, RiscvSC, RiscvC>>,
         config: &'a RecursionSC,
+        opts: EmulatorOpts,
     ) -> Self {
         Self {
             program,
             stdin: Some(stdin),
-            opts: None,
+            opts: Some(opts),
             context: None,
             config: Some(config),
             vk: None,
@@ -165,11 +166,12 @@ where
         stdin: &'a EmulatorStdin<RecursionStdin<'a, RecursionSC, RecursionC>>,
         config: &'a RecursionSC,
         vk: &'a BaseVerifyingKey<RecursionSC>,
+        opts: EmulatorOpts,
     ) -> Self {
         Self {
             program,
             stdin: Some(stdin),
-            opts: None,
+            opts: Some(opts),
             context: None,
             config: Some(config),
             vk: Some(vk),

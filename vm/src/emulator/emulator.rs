@@ -36,7 +36,7 @@ pub struct MetaEmulator<'a, SC, C, I, E> {
     pub kind: EmulatorType,
     pub stdin: &'a EmulatorStdin<I>,
     pub emulator: E,
-    pub batch_size: usize,
+    pub batch_size: usize, // max parallelism
     ptr: usize,
     phantom: std::marker::PhantomData<(SC, C)>,
 }
@@ -49,20 +49,20 @@ where
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub fn setup_riscv(input: &'a ProvingWitness<'a, SC, C, Vec<u8>>, batch_size: usize) -> Self {
+    pub fn setup_riscv(input: &'a ProvingWitness<'a, SC, C, Vec<u8>>) -> Self {
         // create a new emulator based on the emulator type
-        let mut emulator = RiscvEmulator::new(input.program.clone(), input.opts.unwrap());
+        let opts = input.opts.unwrap();
+        let mut emulator = RiscvEmulator::new(input.program.clone(), opts);
         emulator.emulator_mode = EmulatorMode::Trace;
         for each in input.stdin.unwrap().buffer.clone() {
             emulator.state.input_stream.push(each);
         }
-        assert_eq!(emulator.chunk_batch_size, batch_size as u32);
 
         Self {
             kind: EmulatorType::Riscv,
             stdin: input.stdin.unwrap(),
             emulator,
-            batch_size,
+            batch_size: opts.chunk_batch_size,
             ptr: 0,
             phantom: std::marker::PhantomData,
         }
@@ -101,13 +101,16 @@ where
             C,
             RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
         >,
-        batch_size: usize,
     ) -> Self {
         let emulator = RecursionEmulator {
             recursion_program: input.program.clone(),
             config: input.config.unwrap(),
         };
 
+        let batch_size = match input.opts {
+            Some(opts) => opts.chunk_batch_size,
+            None => 0,
+        };
         Self {
             kind: EmulatorType::RiscvCompress,
             stdin: input.stdin.unwrap(),
@@ -124,6 +127,21 @@ where
         let record = self.emulator.run_riscv(stdin);
         self.ptr += 1;
         (record, done)
+    }
+
+    pub fn next_batch(&mut self) -> (Vec<RecursionRecord<Val<RecursionSC>>>, bool) {
+        let mut batch_records = Vec::new();
+        loop {
+            let (record, done) = self.next();
+            batch_records.push(record);
+            if done {
+                return (batch_records, true);
+            }
+            if batch_records.len() >= self.batch_size {
+                break;
+            }
+        }
+        (batch_records, false)
     }
 }
 
@@ -152,11 +170,15 @@ where
 {
     pub fn setup_recursion(
         input: &'a ProvingWitness<'a, RecursionSC, C, RecursionStdin<'a, RecursionSC, RecursionC>>,
-        batch_size: usize,
     ) -> Self {
         let emulator = RecursionEmulator {
             recursion_program: input.program.clone(),
             config: input.config.unwrap(),
+        };
+
+        let batch_size = match input.opts {
+            Some(opts) => opts.chunk_batch_size,
+            None => 0,
         };
 
         Self {
@@ -175,6 +197,21 @@ where
         let record = self.emulator.run_recursion(stdin);
         self.ptr += 1;
         (record, done)
+    }
+
+    pub fn next_batch(&mut self) -> (Vec<RecursionRecord<Val<RecursionSC>>>, bool) {
+        let mut batch_records = Vec::new();
+        loop {
+            let (record, done) = self.next();
+            batch_records.push(record);
+            if done {
+                return (batch_records, true);
+            }
+            if batch_records.len() >= self.batch_size {
+                break;
+            }
+        }
+        (batch_records, false)
     }
 
     pub fn num_stdin(&self) -> usize {

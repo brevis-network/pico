@@ -124,15 +124,15 @@ where
 
     /// Construct the recursion stdin for riscv_combine.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
-    /// batch_size should be greater than 1
+    /// combine_size should be greater than 1
     pub fn setup_for_riscv_combine(
         vk: &'a BaseVerifyingKey<RiscvSC>,
         machine: &'a BaseMachine<RiscvSC, C>,
         proofs: &[BaseProof<RiscvSC>],
         base_challenger: &'a mut <RiscvSC as StarkGenericConfig>::Challenger,
-        batch_size: usize,
+        combine_size: usize,
     ) -> Self {
-        assert!(batch_size > 1);
+        assert!(combine_size > 1);
 
         let num_public_values = machine.num_public_values();
 
@@ -150,7 +150,7 @@ where
         let mut reconstruct_challenger = machine.config().challenger();
         vk.observed_by(&mut reconstruct_challenger);
 
-        let proof_batches = proofs.chunks(batch_size);
+        let proof_batches = proofs.chunks(combine_size);
         let total = proof_batches.len();
 
         for (i, batch_proofs) in proof_batches.enumerate() {
@@ -195,12 +195,12 @@ where
         vk: &'a BaseVerifyingKey<RecursionSC>,
         machine: &'a BaseMachine<RecursionSC, C>,
         proofs: &[BaseProof<RecursionSC>],
-        batch_size: usize,
+        combine_size: usize,
         flag_complete: bool,
     ) -> Self {
         let mut stdin = Vec::new();
 
-        let proof_batches = proofs.chunks(batch_size);
+        let proof_batches = proofs.chunks(combine_size);
 
         for batch_proofs in proof_batches {
             let batch_proofs = batch_proofs.to_vec();

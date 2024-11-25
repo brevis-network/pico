@@ -7,7 +7,7 @@ use crate::{
             utils::{assert_challenger_eq_pv, felt2var, get_preprocessed_data},
         },
     },
-    configs::config::{Com, FieldGenericConfig, StarkGenericConfig},
+    configs::config::{Com, FieldGenericConfig, PcsProverData, StarkGenericConfig},
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -83,7 +83,8 @@ where
     A: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
-    Com<SC>: Into<[SC::Val; DIGEST_SIZE]>,
+    Com<SC>: Into<[SC::Val; DIGEST_SIZE]> + Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     let mut commitment = builder.dyn_array(DIGEST_SIZE);
     for (i, value) in vk.commit.clone().into().iter().enumerate() {

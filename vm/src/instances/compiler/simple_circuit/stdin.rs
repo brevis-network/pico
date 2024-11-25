@@ -8,7 +8,7 @@ use crate::{
             proof::BaseProofVariable,
         },
     },
-    configs::config::{FieldGenericConfig, StarkGenericConfig},
+    configs::config::{Com, FieldGenericConfig, PcsProverData, StarkGenericConfig},
     instances::configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
     machine::{
         chip::ChipBehavior,
@@ -53,6 +53,8 @@ where
     C: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     pub fn construct(
         machine: &'a BaseMachine<SC, C>,

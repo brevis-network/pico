@@ -3,7 +3,7 @@ use p3_field::AbstractField;
 
 // set it temporarily for now
 
-pub trait RecordBehavior: Default + Sync {
+pub trait RecordBehavior: Default + Send + Sync {
     fn name(&self) -> String;
 
     fn stats(&self) -> HashMap<String, usize>;

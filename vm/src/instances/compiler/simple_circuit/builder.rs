@@ -15,7 +15,7 @@ use crate::{
             },
         },
     },
-    configs::config::{Com, FieldGenericConfig, StarkGenericConfig},
+    configs::config::{Com, FieldGenericConfig, PcsProverData, StarkGenericConfig},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
         compiler::utils::commit_public_values,
@@ -68,7 +68,8 @@ where
         Challenge = FC::EF,
         Domain = TwoAdicMultiplicativeCoset<FC::F>,
     >,
-    Com<SC>: Into<[SC::Val; DIGEST_SIZE]>,
+    Com<SC>: Into<[SC::Val; DIGEST_SIZE]> + Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     pub fn build_verifier(
         builder: &mut Builder<FC>,

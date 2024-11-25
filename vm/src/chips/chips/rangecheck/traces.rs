@@ -43,7 +43,10 @@ where
             NUM_RANGECHECK_MULT_COLS,
         );
 
-        let chunk = input.chunk_index() as u32;
+        let mut chunk = input.chunk_index() as u32;
+        if input.name() == "RecursionRecord" {
+            chunk = 0;
+        }
         input
             .range_lookup_events(Some(chunk))
             .for_each(|(event, multi)| {

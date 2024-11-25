@@ -29,16 +29,16 @@ use pico_vm::{
         },
     },
     machine::{
-        keys::HashableKey, logger::setup_logger, machine::MachineBehavior, utils::assert_vk_digest,
+        logger::setup_logger, machine::MachineBehavior, utils::assert_vk_digest,
         witness::ProvingWitness,
     },
     primitives::consts::{
         COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, EMBED_DEGREE, RECURSION_NUM_PVS,
         RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
     },
-    recursion::{air::RecursionPublicValues, runtime::Runtime},
+    recursion::runtime::Runtime,
 };
-use std::{borrow::Borrow, time::Instant};
+use std::time::Instant;
 use tracing::info;
 
 #[path = "common/parse_args.rs"]
@@ -124,6 +124,7 @@ fn main() {
         riscv_compress_program,
         &riscv_compress_stdin,
         riscv_compress_machine.config(),
+        EmulatorOpts::default(),
     );
 
     // Generate the proof.
@@ -180,6 +181,7 @@ fn main() {
         &combine_stdin,
         combine_machine.config(),
         &combine_vk,
+        EmulatorOpts::default(),
     );
 
     // Generate the proof.

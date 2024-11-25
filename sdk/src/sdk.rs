@@ -237,6 +237,7 @@ impl SDKProverClient {
             &combine_stdin,
             self.combine_machine.config(),
             &combine_vk,
+            EmulatorOpts::default(),
         );
 
         let combine_proof = self.combine_machine.prove(&combine_pk, &combine_witness);
@@ -260,7 +261,7 @@ impl SDKProverClient {
             .setup_keys(&self.riscv_compress_program);
         let mut riscv_challenger = DuplexChallenger::new(self.riscv_machine.config().perm.clone());
         let riscv_compress_stdin = EmulatorStdin::setup_for_riscv_compress(
-            &riscv_vk,
+            riscv_vk,
             self.riscv_machine.base_machine(),
             riscv_proof.proofs(),
             &mut riscv_challenger,
@@ -270,6 +271,7 @@ impl SDKProverClient {
             self.riscv_compress_program.clone(),
             &riscv_compress_stdin,
             self.riscv_compress_machine.config(),
+            EmulatorOpts::default(),
         );
 
         // Generate the proof.

@@ -32,6 +32,9 @@ pub struct RecursionRecord<F: Default> {
 
     /// The public values.
     pub public_values: Vec<F>,
+
+    /// The index of the chunk.
+    pub index: u32,
 }
 
 impl<F: Default> RecursionRecord<F> {
@@ -97,11 +100,11 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
     }
 
     fn name(&self) -> String {
-        todo!()
+        "RecursionRecord".to_string()
     }
 
     fn chunk_index(&self) -> usize {
-        0
+        self.index as usize
     }
 }
 

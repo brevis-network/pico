@@ -19,7 +19,7 @@ pub mod tests {
     use crate::{
         compiler::recursion_v2::program::RecursionProgram,
         configs::{
-            config::StarkGenericConfig,
+            config::{Com, PcsProverData, StarkGenericConfig},
             stark_config::{bb_bn254_poseidon2::BbBn254Poseidon2, bb_poseidon2::BabyBearPoseidon2},
         },
         instances::{
@@ -60,7 +60,10 @@ pub mod tests {
     >(
         program: RecursionProgram<F>,
         chips: Vec<MetaChip<F, RecursionChipType<F, DEGREE>>>,
-    ) {
+    ) where
+        Com<SC>: Send + Sync,
+        PcsProverData<SC>: Send + Sync,
+    {
         // Execute the runtime and get the recursion record.
         let program = Arc::new(program);
         let record = {

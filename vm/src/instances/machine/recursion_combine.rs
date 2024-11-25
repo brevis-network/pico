@@ -1,6 +1,6 @@
 use crate::{
     compiler::recursion::program::RecursionProgram,
-    configs::config::{StarkGenericConfig, Val},
+    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{emulator::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
     instances::{
         compiler::recursion_circuit::stdin::RecursionStdin,
@@ -21,8 +21,9 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
+use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{info, instrument, trace};
+use tracing::{debug, info, instrument, trace};
 
 pub struct RecursionCombineMachine<SC, C>
 where
@@ -82,7 +83,7 @@ where
 
         let mut recursion_stdin;
         let mut recursion_witness;
-        let mut recursion_emulator = MetaEmulator::setup_recursion(witness, COMBINE_SIZE);
+        let mut recursion_emulator = MetaEmulator::setup_recursion(witness);
 
         let mut chunk_index = 1;
         let mut layer_index = 1;
@@ -95,53 +96,69 @@ where
 
         loop {
             loop {
-                info!("layer {}, chunk {}", layer_index, chunk_index);
                 // generate record
-                let (record, done) = recursion_emulator.next();
-                let mut records = vec![record];
+                let (mut batch_records, done) = recursion_emulator.next_batch();
 
-                self.complement_record(&mut records);
+                self.complement_record(batch_records.as_mut_slice());
 
+                info!(
+                    "recursion combine layer {}, chunk {}-{}",
+                    layer_index,
+                    chunk_index,
+                    chunk_index + batch_records.len() as u32 - 1
+                );
+
+                for record in &mut *batch_records {
+                    record.index = chunk_index;
+                    chunk_index += 1;
+                    debug!(
+                        "recursion combine record stats: chunk {}",
+                        record.chunk_index()
+                    );
+                    let stats = record.stats();
+                    for (key, value) in &stats {
+                        debug!("   |- {:<28}: {}", key, value);
+                    }
+                }
                 #[cfg(feature = "debug")]
                 {
-                    tracing::debug!("record stats");
-                    let stats = records[0].stats();
-                    for (key, value) in &stats {
-                        tracing::debug!("{:<25}: {}", key, value);
-                    }
                     if flag_complete {
-                        all_records.extend_from_slice(&records);
+                        all_records.extend_from_slice(&batch_records);
                     }
                 }
 
-                // commit main
-                let commitment = self.base_machine.commit(&records[0]);
+                let batch_proofs = batch_records
+                    .into_par_iter()
+                    .map(|record| {
+                        info!("PERF-phase=1-chunk={}", record.chunk_index());
 
-                // setup challenger
-                let mut challenger = self.config().challenger();
-                pk.observed_by(&mut challenger);
-                challenger.observe(commitment.commitment);
-                challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
+                        let commitment = self.base_machine.commit(&record);
 
-                let proof = self.base_machine.prove_plain(
-                    pk,
-                    &mut challenger.clone(),
-                    commitment,
-                    records[0].chunk_index(),
-                );
+                        let mut challenger = self.config().challenger();
+                        pk.observed_by(&mut challenger);
 
-                // extend all_proofs to include batch_proofs
-                all_proofs.push(proof);
+                        challenger.observe(commitment.commitment);
+                        challenger
+                            .observe_slice(&commitment.public_values[..self.num_public_values()]);
+
+                        self.base_machine.prove_plain(
+                            pk,
+                            &mut challenger.clone(),
+                            commitment,
+                            record.chunk_index(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                all_proofs.extend(batch_proofs);
 
                 if done {
                     break;
                 }
-
-                chunk_index += 1;
             }
 
             if flag_complete {
-                info!("combine finished");
+                info!("recursion combine finished");
                 break;
             }
             flag_complete = all_proofs.len() <= COMBINE_SIZE;
@@ -163,9 +180,10 @@ where
                 &recursion_stdin,
                 self.config(),
                 witness.vk.unwrap(),
+                witness.opts.unwrap(),
             );
 
-            recursion_emulator = MetaEmulator::setup_recursion(&recursion_witness, COMBINE_SIZE);
+            recursion_emulator = MetaEmulator::setup_recursion(&recursion_witness);
 
             all_proofs.clear();
         }
@@ -233,6 +251,8 @@ where
             Record = RecursionRecord<Val<SC>>,
         > + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         info!("PERF-machine=combine");

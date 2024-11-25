@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{StarkGenericConfig, Val},
+    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -31,6 +31,8 @@ where
     C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -83,6 +85,8 @@ where
     C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {
         info!("PERF-machine=simple");

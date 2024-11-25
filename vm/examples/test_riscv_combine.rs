@@ -18,7 +18,7 @@ use pico_vm::{
 use std::time::Instant;
 use tracing::info;
 
-const TEST_BATCH_SIZE: usize = 100;
+const TEST_COMBINE_SIZE: usize = 10;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
@@ -95,7 +95,7 @@ fn main() {
         riscv_machine.base_machine(),
         proof.proofs(),
         &mut challenger,
-        TEST_BATCH_SIZE,
+        TEST_COMBINE_SIZE,
     );
     assert_eq!(recursion_stdin.buffer.len(), 1);
 
@@ -103,6 +103,7 @@ fn main() {
         recursion_program,
         &recursion_stdin,
         recursion_machine.config(),
+        EmulatorOpts::test_opts(),
     );
 
     // Generate the proof.

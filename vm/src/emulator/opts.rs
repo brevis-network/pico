@@ -40,8 +40,14 @@ impl Default for EmulatorOpts {
 impl EmulatorOpts {
     pub fn test_opts() -> Self {
         Self {
-            chunk_size: TEST_CHUNK_SIZE,
-            chunk_batch_size: TEST_CHUNK_BATCH_SIZE,
+            chunk_size: env::var("CHUNK_SIZE").map_or_else(
+                |_| TEST_CHUNK_SIZE,
+                |s| s.parse::<usize>().unwrap_or(TEST_CHUNK_SIZE),
+            ),
+            chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
+                |_| TEST_CHUNK_BATCH_SIZE,
+                |s| s.parse::<usize>().unwrap_or(TEST_CHUNK_BATCH_SIZE),
+            ),
             split_opts: SplitOpts::new(TEST_DEFERRED_SPLIT_THRESHOLD),
         }
     }

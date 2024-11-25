@@ -1,6 +1,6 @@
 use super::folder::DebugConstraintFolder;
 use crate::{
-    configs::config::{StarkGenericConfig, Val},
+    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -16,6 +16,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::Field;
+use p3_maybe_rayon::prelude::*;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -26,6 +27,8 @@ where
     C: ChipBehavior<Val<SC>>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     /// Get the name of the machine.
     fn name(&self) -> String;
@@ -58,7 +61,7 @@ where
     fn complement_record(&self, records: &mut [C::Record]) {
         let begin = Instant::now();
         let chips = self.chips();
-        records.iter_mut().for_each(|record| {
+        records.par_iter_mut().for_each(|record| {
             chips.iter().for_each(|chip| {
                 let mut extra = C::Record::default();
                 chip.extra_record(record, &mut extra);
@@ -123,6 +126,8 @@ where
     C: ChipBehavior<Val<SC>>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     /// Create BaseMachine based on config and chip behavior.
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {

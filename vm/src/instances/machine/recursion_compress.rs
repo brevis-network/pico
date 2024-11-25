@@ -1,6 +1,6 @@
 use crate::{
     compiler::recursion::program::RecursionProgram,
-    configs::config::{StarkGenericConfig, Val},
+    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
     instances::{
         compiler::recursion_circuit::stdin::RecursionStdin,
@@ -20,7 +20,7 @@ use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{info, instrument, trace};
+use tracing::{debug, info, instrument, trace};
 
 pub struct RecursionCompressMachine<SC, C>
 where
@@ -90,13 +90,13 @@ where
 
         self.complement_record(&mut records);
 
+        debug!("recursion compress record stats");
+        let stats = records[0].stats();
+        for (key, value) in &stats {
+            debug!("   |- {:<28}: {}", key, value);
+        }
         #[cfg(feature = "debug")]
         {
-            tracing::debug!("record stats");
-            let stats = records[0].stats();
-            for (key, value) in &stats {
-                tracing::debug!("{:<25}: {}", key, value);
-            }
             all_records.extend_from_slice(&records);
         }
 
@@ -177,6 +177,8 @@ where
             Record = RecursionRecord<Val<SC>>,
         > + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         info!("PERF-machine=compress");

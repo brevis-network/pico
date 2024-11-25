@@ -1,11 +1,12 @@
 use crate::{
     compiler::{riscv::program::Program, word::Word},
-    configs::config::StarkGenericConfig,
+    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{
         emulator::MetaEmulator,
         record::RecordBehavior,
         riscv::{public_values::PublicValues, record::EmulationRecord},
     },
+    instances::configs::riscv_config::StarkConfig as RiscvSC,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -16,12 +17,11 @@ use crate::{
     },
     primitives::consts::MAX_LOG_CHUNK_SIZE,
 };
-
-use crate::{configs::config::Val, instances::configs::riscv_config::StarkConfig as RiscvSC};
 use anyhow::Result;
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::AbstractField;
+use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument};
 
@@ -70,30 +70,37 @@ where
         info!("PERF-machine=riscv");
         let begin = Instant::now();
 
-        let ProvingWitness { opts, .. } = witness;
-
         let mut challenger = self.config().challenger();
         pk.observed_by(&mut challenger);
+
+        // TODO: checkpoint batch records and apply pipeline parallelism
 
         // First phase
         // Generate batch records and commit to challenger
 
-        let mut emulator = MetaEmulator::setup_riscv(witness, opts.unwrap().chunk_batch_size);
+        let mut emulator = MetaEmulator::setup_riscv(witness);
         loop {
             let (batch_records, done) = emulator.next_batch();
 
             self.complement_record(batch_records);
 
-            for record in batch_records {
-                debug!("record stats: chunk {}", record.chunk_index());
+            for record in &mut *batch_records {
+                debug!("riscv record stats: chunk {}", record.chunk_index());
                 let stats = record.stats();
                 for (key, value) in &stats {
                     debug!("   |- {:<25}: {}", key, value);
                 }
+            }
 
-                info!("PERF-phase=1-chunk={}", record.chunk_index(),);
-                let commitment = self.base_machine.commit(record);
+            let commitments = batch_records
+                .into_par_iter()
+                .map(|record| {
+                    info!("PERF-phase=1-chunk={}", record.chunk_index(),);
+                    self.base_machine.commit(record)
+                })
+                .collect::<Vec<_>>();
 
+            for commitment in commitments {
                 challenger.observe(commitment.commitment);
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
             }
@@ -106,7 +113,7 @@ where
         // Second phase
         // Generate batch records and generate proofs
 
-        let mut emulator = MetaEmulator::setup_riscv(witness, opts.unwrap().chunk_batch_size);
+        let mut emulator = MetaEmulator::setup_riscv(witness);
 
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
         let mut all_proofs = vec![];
@@ -126,7 +133,7 @@ where
             }
 
             let batch_main_commitments = batch_records
-                .iter()
+                .into_par_iter()
                 .map(|record| {
                     info!("PERF-phase=2-chunk={}", record.chunk_index(),);
                     // generate and commit main trace
@@ -135,7 +142,7 @@ where
                 .collect::<Vec<_>>();
 
             let batch_proofs = batch_main_commitments
-                .into_iter()
+                .into_par_iter()
                 .enumerate()
                 .map(|(i, commitment)| {
                     info!("PERF-phase=2-chunk={}", batch_records[i].chunk_index(),);
@@ -350,6 +357,8 @@ where
     C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {
         info!("PERF-machine=riscv");
