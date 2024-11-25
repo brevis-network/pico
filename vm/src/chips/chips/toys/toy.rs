@@ -109,7 +109,7 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
     }
 
     fn preprocessed_width(&self) -> usize {
-        0
+        1
     }
 
     fn is_active(&self, _record: &Self::Record) -> bool {

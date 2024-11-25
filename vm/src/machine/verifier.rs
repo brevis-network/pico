@@ -186,9 +186,13 @@ where
             opened_values.chips_opened_values.iter(),
         ) {
             // Verify shapes, really necessary?
-            let valid_shape = values.main_local.len() == chip.width()
+            let valid_shape = values.preprocessed_local.len() == chip.preprocessed_width()
+                && values.preprocessed_next.len() == chip.preprocessed_width()
+                && values.main_local.len() == chip.width()
                 && values.main_next.len() == chip.width()
-                && values.quotient.len() == 1 << log_quotient_degree
+                && values.permutation_local.len() == chip.permutation_width() * SC::Challenge::D
+                && values.permutation_next.len() == chip.permutation_width() * SC::Challenge::D
+                && values.quotient.len() == (1 << log_quotient_degree)
                 && values
                     .quotient
                     .iter()
