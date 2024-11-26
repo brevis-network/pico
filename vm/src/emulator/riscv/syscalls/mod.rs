@@ -21,7 +21,10 @@ use crate::emulator::riscv::syscalls::{
     commit::CommitSyscall,
     deferred::CommitDeferredSyscall,
     halt::HaltSyscall,
-    precompiles::sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
+    precompiles::{
+        sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
+        uint256::syscall::Uint256MulSyscall,
+    },
     syscall_context::SyscallContext,
 };
 use write::WriteSyscall;
@@ -80,6 +83,8 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
         SyscallCode::KECCAK_PERMUTE,
         Arc::new(Keccak256PermuteSyscall),
     );
+
+    syscall_map.insert(SyscallCode::UINT256_MUL, Arc::new(Uint256MulSyscall));
 
     syscall_map
 }

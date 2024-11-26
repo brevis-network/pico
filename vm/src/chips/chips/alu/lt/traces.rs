@@ -117,9 +117,6 @@ impl<F: PrimeField32> LtChip<F> {
         cols.b_masked = F::from_canonical_u8(masked_b);
         cols.c_masked = F::from_canonical_u8(masked_c);
 
-        cols.bit_b = cols.msb_b * cols.is_slt;
-        cols.bit_c = cols.msb_c * cols.is_slt;
-
         // Send the masked interaction.
         blu.add_byte_lookup_event(ByteLookupEvent {
             chunk: event.chunk,
@@ -174,6 +171,9 @@ impl<F: PrimeField32> LtChip<F> {
 
         cols.is_slt = F::from_bool(event.opcode == Opcode::SLT);
         cols.is_slt_u = F::from_bool(event.opcode == Opcode::SLTU);
+
+        cols.bit_b = cols.msb_b * cols.is_slt;
+        cols.bit_c = cols.msb_c * cols.is_slt;
 
         // when case msb_b = 0; msb_c = 1(negative), a0 = 0;
         // when case msb_b = 1(negative); msg_c = 0, a0 = 1;

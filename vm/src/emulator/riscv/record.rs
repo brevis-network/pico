@@ -14,7 +14,10 @@ use crate::{
         record::RecordBehavior,
         riscv::{
             public_values::PublicValues,
-            syscalls::precompiles::sha256::event::{ShaCompressEvent, ShaExtendEvent},
+            syscalls::precompiles::{
+                sha256::event::{ShaCompressEvent, ShaExtendEvent},
+                uint256::event::Uint256MulEvent,
+            },
         },
     },
 };
@@ -65,6 +68,8 @@ pub struct EmulationRecord {
     pub sha_extend_events: Vec<ShaExtendEvent>,
     /// A trace of the sha256 compress events.
     pub sha_compress_events: Vec<ShaCompressEvent>,
+    /// A trace of the uint256 mul events.
+    pub uint256_mul_events: Vec<Uint256MulEvent>,
     /// Public values
     pub public_values: PublicValues<u32, u32>,
 }
@@ -147,6 +152,11 @@ impl EmulationRecord {
 
     pub fn add_sha256_extend_lookup_event(&mut self, event: ShaExtendEvent) {
         self.sha_extend_events.push(event);
+    }
+
+    /// Add a uint256 mul event to the execution record.
+    pub fn add_uint256_mul_event(&mut self, event: Uint256MulEvent) {
+        self.uint256_mul_events.push(event);
     }
 }
 

@@ -728,6 +728,7 @@ impl RiscvEmulator {
                 c = self.rr(Register::X11, MemoryAccessPosition::C);
                 b = self.rr(Register::X10, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
+                debug!("emulate syscall code: {:?}", syscall);
 
                 // `hint_slice` is allowed in unconstrained mode since it is used to write the hint.
                 // Other syscalls are not allowed because they can lead to non-deterministic

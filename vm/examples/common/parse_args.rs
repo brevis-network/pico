@@ -9,6 +9,9 @@ const ELF_KECCAK_PRECOMPILE: &[u8] =
 const ELF_FIB_WITH_SHA2: &[u8] =
     include_bytes!("../../src/compiler/test_data/riscv32im-sp1-sha2-fibonacci-elf");
 
+const ELF_UINT256MUL_PRECOMPILE: &[u8] =
+    include_bytes!("../../src/compiler/test_data/riscv32im-uint256-precompiled-elf");
+
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
@@ -55,6 +58,9 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String) {
             "Test precompile sha2 public inputs for Fibonacci, sequence n={}",
             &args.n
         );
+    } else if args.elf == "uint256_precompile" {
+        elf = ELF_UINT256MUL_PRECOMPILE;
+        info!("Test Uint256 Mul Precompile");
     } else {
         eprintln!("Invalid test elf. Accept: [ fibonacci | fib | f ], [ keccak | k ], [keccak_precompile]\n");
         std::process::exit(1);

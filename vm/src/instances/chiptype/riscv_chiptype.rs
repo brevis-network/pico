@@ -18,6 +18,7 @@ use crate::{
         precompiles::{
             keccak256::KeccakPermuteChip,
             sha256::{compress::ShaCompressChip, extend::ShaExtendChip},
+            uint256::Uint256MulChip,
         },
     },
     compiler::riscv::program::Program,
@@ -52,6 +53,7 @@ define_chip_type!(
         (Bitwise, BitwiseChip),
         (Byte, ByteChip),
         (Range, RangeCheckChip),
-        (KeecakP, KeccakPermuteChip)
+        (KeecakP, KeccakPermuteChip),
+        (U256Mul, Uint256MulChip)
     ]
 );
