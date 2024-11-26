@@ -1,6 +1,7 @@
 use crate::{
     chips::{
-        chips::riscv_cpu::event::CpuEvent, gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
+        chips::{riscv_cpu::event::CpuEvent, riscv_memory::event::MemoryRecordEnum},
+        gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
 };
@@ -132,6 +133,17 @@ impl<F: Field> MemoryInstructionCols<F> {
         *self.op_a_access.value_mut() = event.a.into();
         *self.op_b_access.value_mut() = event.b.into();
         *self.op_c_access.value_mut() = event.c.into();
+
+        // Set memory accesses for a, b, and c.
+        if let Some(record) = event.a_record {
+            *self.op_a_access.value_mut() = record.value().into();
+        }
+        if let Some(MemoryRecordEnum::Read(record)) = event.b_record {
+            *self.op_b_access.value_mut() = record.value.into();
+        }
+        if let Some(MemoryRecordEnum::Read(record)) = event.c_record {
+            *self.op_c_access.value_mut() = record.value.into();
+        }
     }
 }
 
