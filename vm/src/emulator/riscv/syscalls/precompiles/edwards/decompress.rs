@@ -1,0 +1,94 @@
+use std::marker::PhantomData;
+
+use crate::chips::gadgets::curves::{
+    curve25519_dalek::CompressedEdwardsY,
+    edwards::{ed25519::decompress, EdwardsParameters, WORDS_FIELD_ELEMENT},
+    COMPRESSED_POINT_BYTES,
+};
+
+use crate::{
+    chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
+    emulator::riscv::syscalls::{
+        precompiles::edwards::event::EdDecompressEvent, syscall_context::SyscallContext, Syscall,
+        SyscallCode,
+    },
+    primitives::consts::{bytes_to_words_le, words_to_bytes_le},
+};
+
+pub(crate) struct EdwardsDecompressSyscall<E: EdwardsParameters> {
+    _phantom: PhantomData<E>,
+}
+
+impl<E: EdwardsParameters> EdwardsDecompressSyscall<E> {
+    /// Create a new instance of the [`EdwardsDecompressSyscall`].
+    pub const fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
+    fn emulate(
+        &self,
+        ctx: &mut SyscallContext,
+        _syscall_code: SyscallCode,
+        arg1: u32,
+        sign: u32,
+    ) -> Option<u32> {
+        let start_clk = ctx.clk;
+        let slice_ptr = arg1;
+        assert!(slice_ptr % 4 == 0, "Pointer must be 4-byte aligned.");
+        assert!(sign <= 1, "Sign bit must be 0 or 1.");
+
+        let (y_memory_records_vec, y_vec) = ctx.mr_slice(
+            slice_ptr + (COMPRESSED_POINT_BYTES as u32),
+            WORDS_FIELD_ELEMENT,
+        );
+        let y_memory_records: [MemoryReadRecord; 8] = y_memory_records_vec.try_into().unwrap();
+
+        let sign_bool = sign != 0;
+
+        let y_bytes: [u8; COMPRESSED_POINT_BYTES] = words_to_bytes_le(&y_vec);
+
+        // Copy bytes into another array so we can modify the last byte and make CompressedEdwardsY,
+        // which we'll use to compute the expected X.
+        // Re-insert sign bit into last bit of Y for CompressedEdwardsY format
+        let mut compressed_edwards_y: [u8; COMPRESSED_POINT_BYTES] = y_bytes;
+        compressed_edwards_y[compressed_edwards_y.len() - 1] &= 0b0111_1111;
+        compressed_edwards_y[compressed_edwards_y.len() - 1] |= (sign as u8) << 7;
+
+        // Compute actual decompressed X
+        let compressed_y = CompressedEdwardsY(compressed_edwards_y);
+        let decompressed = decompress(&compressed_y);
+
+        let mut decompressed_x_bytes = decompressed.x.to_bytes_le();
+        decompressed_x_bytes.resize(32, 0u8);
+        let decompressed_x_words: [u32; WORDS_FIELD_ELEMENT] =
+            bytes_to_words_le(&decompressed_x_bytes);
+
+        // Write decompressed X into slice
+        let x_memory_records_vec = ctx.mw_slice(slice_ptr, &decompressed_x_words);
+        let x_memory_records: [MemoryWriteRecord; 8] = x_memory_records_vec.try_into().unwrap();
+
+        let lookup_id = ctx.syscall_lookup_id;
+        let chunk = ctx.current_chunk();
+        ctx.record_mut()
+            .add_ed_decompress_lookup_event(EdDecompressEvent {
+                lookup_id,
+                chunk,
+                clk: start_clk,
+                ptr: slice_ptr,
+                sign: sign_bool,
+                y_bytes,
+                decompressed_x_bytes: decompressed_x_bytes.try_into().unwrap(),
+                x_memory_records,
+                y_memory_records,
+            });
+        None
+    }
+
+    fn num_extra_cycles(&self) -> u32 {
+        0
+    }
+}

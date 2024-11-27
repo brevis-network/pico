@@ -1,3 +1,7 @@
+use p3_air::{Air, BaseAir};
+use p3_field::PrimeField32;
+use p3_matrix::dense::RowMajorMatrix;
+
 use crate::{
     chips::{
         chips::{
@@ -15,7 +19,9 @@ use crate::{
             },
             riscv_program::ProgramChip,
         },
+        gadgets::curves::edwards::ed25519::{Ed25519, Ed25519Parameters},
         precompiles::{
+            edwards::{EdAddAssignChip, EdDecompressChip},
             keccak256::KeccakPermuteChip,
             sha256::{compress::ShaCompressChip, extend::ShaExtendChip},
             uint256::Uint256MulChip,
@@ -29,9 +35,6 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
     },
 };
-use p3_air::{Air, BaseAir};
-use p3_field::PrimeField32;
-use p3_matrix::dense::RowMajorMatrix;
 
 define_chip_type!(
     RiscvChipType<F>,
@@ -40,6 +43,8 @@ define_chip_type!(
         (MemoryProgram, MemoryProgramChip),
         (Cpu, CpuChip),
         (ShaCompress, ShaCompressChip),
+        (Ed25519Add, EdAddAssignChip),
+        (Ed25519Decompress, EdDecompressChip),
         (ShaExtend, ShaExtendChip),
         (MemoryInitialize, MemoryInitializeFinalizeChip),
         (MemoryFinalize, MemoryInitializeFinalizeChip),

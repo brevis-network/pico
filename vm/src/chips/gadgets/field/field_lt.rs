@@ -1,3 +1,9 @@
+use itertools::izip;
+use num::BigUint;
+use p3_air::AirBuilder;
+use p3_field::{AbstractField, Field, PrimeField32};
+use pico_derive::AlignedBorrow;
+
 use crate::{
     chips::{
         chips::byte::event::{ByteLookupEvent, ByteRecordBehavior},
@@ -6,11 +12,6 @@ use crate::{
     compiler::riscv::opcode::ByteOpcode,
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
 };
-use itertools::izip;
-use num::BigUint;
-use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field, PrimeField32};
-use pico_derive::AlignedBorrow;
 
 /// Operation columns for verifying that `lhs < rhs`.
 #[derive(Debug, Clone, AlignedBorrow)]

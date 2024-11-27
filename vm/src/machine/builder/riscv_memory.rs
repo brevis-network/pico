@@ -63,6 +63,26 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
         ));
     }
 
+    /// Constraints a memory read or write to a slice of `MemoryAccessCols`.
+    fn eval_memory_access_slice<E: Into<Self::Expr> + Copy>(
+        &mut self,
+        chunk: impl Into<Self::Expr> + Copy,
+        clk: impl Into<Self::Expr> + Clone,
+        initial_addr: impl Into<Self::Expr> + Clone,
+        memory_access_slice: &[impl MemoryCols<E>],
+        verify_memory_access: impl Into<Self::Expr> + Copy,
+    ) {
+        for (i, access_slice) in memory_access_slice.iter().enumerate() {
+            self.eval_memory_access(
+                chunk,
+                clk.clone(),
+                initial_addr.clone().into() + Self::Expr::from_canonical_usize(i * 4),
+                access_slice,
+                verify_memory_access,
+            );
+        }
+    }
+
     /// Verifies the memory access timestamp.
     ///
     /// This method verifies that the current memory access happened after the previous one's.

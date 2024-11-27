@@ -72,11 +72,24 @@ tracing.workspace = true
 typenum.workspace = true
 vec_map.workspace = true
 zkhash.workspace = true
+curve25519-dalek.workspace = true
+k256.workspace = true
+p256.workspace = true
+elliptic-curve.workspace = true
+dashu.workspace = true
+cfg-if.workspace = true
+
+rug = { version = "1.26.1", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
+rand = "0.8.5"
+num = { version = "0.4.3", features = ["rand"] }
 
 [features]
 debug = []
 debug-lookups = ["debug"]
 single-threaded = []
+
+# curves
+bigint-rug = ["rug"]

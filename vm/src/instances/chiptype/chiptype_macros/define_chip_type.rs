@@ -18,5 +18,7 @@ macro_rules! define_chip_type {
 
         $crate::impl_all_chips!($enum_name, $F, [ $( ($variant, $chip_type) ),+ ]);
 
-    }
+    };
+
+
 }

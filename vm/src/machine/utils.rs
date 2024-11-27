@@ -1,14 +1,7 @@
-use crate::{
-    configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
-    instances::configs::riscv_config::StarkConfig,
-    machine::{
-        chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, SymbolicConstraintFolder},
-        keys::HashableKey,
-    },
-    recursion::air::RecursionPublicValues,
-};
+use std::{any::type_name, borrow::Borrow};
+
 use core::iter;
+use generic_array::ArrayLength;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, PairCol};
@@ -20,7 +13,18 @@ use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use rayon::ThreadPoolBuilder;
-use std::{any::type_name, borrow::Borrow};
+
+use crate::{
+    chips::{chips::riscv_memory::read_write::columns::MemoryCols, gadgets::utils::limbs::Limbs},
+    configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
+    instances::configs::riscv_config::StarkConfig,
+    machine::{
+        chip::{ChipBehavior, MetaChip},
+        folder::{ProverConstraintFolder, SymbolicConstraintFolder},
+        keys::HashableKey,
+    },
+    recursion::air::RecursionPublicValues,
+};
 
 use super::{keys::BaseVerifyingKey, proof::MetaProof};
 
@@ -35,6 +39,32 @@ pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<
         n_real_rows = 16;
     }
     values.resize(n_real_rows.next_power_of_two() * N, T::default());
+}
+
+pub fn limbs_from_prev_access<T: Copy, N: ArrayLength, M: MemoryCols<T>>(
+    cols: &[M],
+) -> Limbs<T, N> {
+    let vec = cols
+        .iter()
+        .flat_map(|access| access.prev_value().0)
+        .collect::<Vec<T>>();
+
+    let sized = vec
+        .try_into()
+        .unwrap_or_else(|_| panic!("failed to convert to limbs"));
+    Limbs(sized)
+}
+
+pub fn limbs_from_access<T: Copy, N: ArrayLength, M: MemoryCols<T>>(cols: &[M]) -> Limbs<T, N> {
+    let vec = cols
+        .iter()
+        .flat_map(|access| access.value().0)
+        .collect::<Vec<T>>();
+
+    let sized = vec
+        .try_into()
+        .unwrap_or_else(|_| panic!("failed to convert to limbs"));
+    Limbs(sized)
 }
 
 pub fn order_chips<'a, SC, C>(

@@ -14,20 +14,26 @@ use std::sync::Arc;
 pub use code::*;
 use hashbrown::HashMap;
 use hint::{HintLenSyscall, HintReadSyscall};
-use precompiles::keccak256::permute::Keccak256PermuteSyscall;
-use serde::{Deserialize, Serialize};
-
-use crate::emulator::riscv::syscalls::{
-    commit::CommitSyscall,
-    deferred::CommitDeferredSyscall,
-    halt::HaltSyscall,
-    precompiles::{
-        sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
-        uint256::syscall::Uint256MulSyscall,
-    },
-    syscall_context::SyscallContext,
+use precompiles::{
+    edwards::decompress::EdwardsDecompressSyscall, keccak256::permute::Keccak256PermuteSyscall,
 };
+use serde::{Deserialize, Serialize};
 use write::WriteSyscall;
+
+use crate::{
+    chips::gadgets::curves::edwards::ed25519::{Ed25519, Ed25519Parameters},
+    emulator::riscv::syscalls::{
+        commit::CommitSyscall,
+        deferred::CommitDeferredSyscall,
+        halt::HaltSyscall,
+        precompiles::{
+            edwards::add::EdwardsAddAssignSyscall,
+            sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
+            uint256::syscall::Uint256MulSyscall,
+        },
+        syscall_context::SyscallContext,
+    },
+};
 
 /// A system call in the Pico RISC-V zkVM.
 ///
@@ -82,6 +88,16 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     syscall_map.insert(
         SyscallCode::KECCAK_PERMUTE,
         Arc::new(Keccak256PermuteSyscall),
+    );
+
+    syscall_map.insert(
+        SyscallCode::ED_ADD,
+        Arc::new(EdwardsAddAssignSyscall::<Ed25519>::new()),
+    );
+
+    syscall_map.insert(
+        SyscallCode::ED_DECOMPRESS,
+        Arc::new(EdwardsDecompressSyscall::<Ed25519Parameters>::new()),
     );
 
     syscall_map.insert(SyscallCode::UINT256_MUL, Arc::new(Uint256MulSyscall));

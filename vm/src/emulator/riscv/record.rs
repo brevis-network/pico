@@ -26,6 +26,8 @@ use p3_field::AbstractField;
 use serde::{Deserialize, Serialize};
 use std::{iter, sync::Arc};
 
+use super::syscalls::precompiles::edwards::event::{EdDecompressEvent, EllipticCurveAddEvent};
+
 /// A record of the emulation of a program.
 ///
 /// The trace of the emulation is represented as a list of "events" that occur every cycle.
@@ -68,6 +70,10 @@ pub struct EmulationRecord {
     pub sha_extend_events: Vec<ShaExtendEvent>,
     /// A trace of the sha256 compress events.
     pub sha_compress_events: Vec<ShaCompressEvent>,
+    /// A trace of the ED Add events.
+    pub ed_add_events: Vec<EllipticCurveAddEvent>,
+    /// A trace of the ED Decompress events.
+    pub ed_decompress_events: Vec<EdDecompressEvent>,
     /// A trace of the uint256 mul events.
     pub uint256_mul_events: Vec<Uint256MulEvent>,
     /// Public values
@@ -146,6 +152,14 @@ impl EmulationRecord {
         self.keccak_permute_events.push(event);
     }
 
+    pub fn add_ed_add_lookup_event(&mut self, event: EllipticCurveAddEvent) {
+        self.ed_add_events.push(event);
+    }
+
+    pub fn add_ed_decompress_lookup_event(&mut self, event: EdDecompressEvent) {
+        self.ed_decompress_events.push(event);
+    }
+
     pub fn add_sha256_compress_lookup_event(&mut self, event: ShaCompressEvent) {
         self.sha_compress_events.push(event);
     }
@@ -204,6 +218,11 @@ impl RecordBehavior for EmulationRecord {
             "Keccak Permute lookups".to_string(),
             self.keccak_permute_events.len(),
         );
+        stats.insert("ED Add lookups".to_string(), self.ed_add_events.len());
+        stats.insert(
+            "ED Decompress lookups".to_string(),
+            self.ed_decompress_events.len(),
+        );
 
         // Filter out the empty events.
         stats.retain(|_, v| *v != 0);
@@ -227,6 +246,9 @@ impl RecordBehavior for EmulationRecord {
             .append(&mut extra.memory_finalize_events);
         self.keccak_permute_events
             .append(&mut extra.keccak_permute_events);
+        self.ed_add_events.append(&mut extra.ed_add_events);
+        self.ed_decompress_events
+            .append(&mut extra.ed_decompress_events);
         if self.byte_lookups.is_empty() {
             self.byte_lookups = std::mem::take(&mut extra.byte_lookups);
         } else {
@@ -327,12 +349,12 @@ impl ByteRecordBehavior for EmulationRecord {
 }
 
 impl RangeRecordBehavior for EmulationRecord {
-    fn add_range_lookup_event(&mut self, event: RangeLookupEvent) {
+    fn add_range_lookup_event(&mut self, rlu_event: RangeLookupEvent) {
         *self
             .range_lookups
-            .entry(event.chunk.unwrap_or_default())
+            .entry(rlu_event.chunk.unwrap_or_default())
             .or_default()
-            .entry(event)
+            .entry(rlu_event)
             .or_insert(0) += 1;
     }
 

@@ -1,21 +1,36 @@
-use crate::chips::gadgets::utils::{field_params::FieldParameters, limbs::Limbs};
+use std::fmt::Debug;
+
 use num::{BigUint, Zero};
+use p3_air::AirBuilder;
 use p3_field::{Field, PrimeField32};
 use pico_derive::AlignedBorrow;
+use serde::{Deserialize, Serialize};
+use typenum::Unsigned;
 
 use crate::{
     chips::{
         chips::rangecheck::event::RangeRecordBehavior,
         gadgets::{
             field::utils::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
-            utils::polynomial::Polynomial,
+            utils::{field_params::FieldParameters, limbs::Limbs, polynomial::Polynomial},
         },
     },
     machine::builder::{ChipBuilder, ChipRangeBuilder},
 };
-use p3_air::AirBuilder;
-use serde::{Deserialize, Serialize};
-use typenum::Unsigned;
+
+/// This is an arithmetic operation for emulating modular arithmetic.
+#[derive(Default, PartialEq, Copy, Clone, Debug, Serialize, Deserialize)]
+pub enum FieldOperation {
+    /// Addition.
+    #[default]
+    Add,
+    /// Multiplication.
+    Mul,
+    /// Subtraction.
+    Sub,
+    /// Division.
+    Div,
+}
 
 /// A set of columns to compute an emulated modular arithmetic operation.
 ///
@@ -40,21 +55,66 @@ pub struct FieldOpCols<T, P: FieldParameters> {
     pub(crate) witness_high: Limbs<T, P::Witness>,
 }
 
-/// This is an arithmetic operation for emulating modular arithmetic.
-#[derive(Default, PartialEq, Copy, Clone, Debug, Serialize, Deserialize)]
-pub enum FieldOperation {
-    /// Addition.
-    #[default]
-    Add,
-    /// Multiplication.
-    Mul,
-    /// Subtraction.
-    Sub,
-    /// Division.
-    Div,
-}
-
 impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
+    #[allow(clippy::too_many_arguments)]
+    /// Populate result and carry columns from the equation (a*b + c) % modulus
+    pub fn populate_mul_and_carry(
+        &mut self,
+        record: &mut impl RangeRecordBehavior,
+        chunk: u32,
+        a: &BigUint,
+        b: &BigUint,
+        c: &BigUint,
+        modulus: &BigUint,
+    ) -> (BigUint, BigUint) {
+        let p_a: Polynomial<F> = P::to_limbs_field::<F, _>(a).into();
+        let p_b: Polynomial<F> = P::to_limbs_field::<F, _>(b).into();
+        let p_c: Polynomial<F> = P::to_limbs_field::<F, _>(c).into();
+
+        let mul_add = a * b + c;
+        let result = &mul_add % modulus;
+        let carry = (mul_add - &result) / modulus;
+        debug_assert!(&result < modulus);
+        debug_assert!(&carry < modulus);
+        debug_assert_eq!(&carry * modulus, a * b + c - &result);
+
+        let p_modulus_limbs = modulus
+            .to_bytes_le()
+            .iter()
+            .map(|x| F::from_canonical_u8(*x))
+            .collect::<Vec<F>>();
+        let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
+        let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
+        let p_carry: Polynomial<F> = P::to_limbs_field::<F, _>(&carry).into();
+
+        let p_op = &p_a * &p_b + &p_c;
+        let p_vanishing = &p_op - &p_result - &p_carry * &p_modulus;
+
+        let p_witness = compute_root_quotient_and_shift(
+            &p_vanishing,
+            P::WITNESS_OFFSET,
+            P::NB_BITS_PER_LIMB as u32,
+            P::NB_WITNESS_LIMBS,
+        );
+
+        let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
+
+        self.result = p_result.into();
+        self.carry = p_carry.into();
+
+        p_witness_low.resize(P::Witness::USIZE, F::zero());
+        p_witness_high.resize(P::Witness::USIZE, F::zero());
+        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
+        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+
+        record.add_u8_range_checks_field(&self.result.0, Some(chunk));
+        record.add_u8_range_checks_field(&self.carry.0, Some(chunk));
+        record.add_u8_range_checks_field(&self.witness_low.0, Some(chunk));
+        record.add_u8_range_checks_field(&self.witness_high.0, Some(chunk));
+
+        (result, carry)
+    }
+
     pub fn populate_carry_and_witness(
         &mut self,
         a: &BigUint,
@@ -228,6 +288,30 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_mul = p_a_param.clone() * p_b.clone();
         let p_div = p_res_param * p_b.clone();
         let p_op = p_add * is_add + p_sub * is_sub + p_mul * is_mul + p_div * is_div;
+
+        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, chunk, is_real);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn eval_mul_and_carry<F: Field, CB: ChipBuilder<F, Var = V>>(
+        &self,
+        builder: &mut CB,
+        a: &(impl Into<Polynomial<CB::Expr>> + Clone),
+        b: &(impl Into<Polynomial<CB::Expr>> + Clone),
+        c: &(impl Into<Polynomial<CB::Expr>> + Clone),
+        modulus: &(impl Into<Polynomial<CB::Expr>> + Clone),
+        chunk: CB::Var,
+        is_real: impl Into<CB::Expr> + Clone,
+    ) where
+        V: Into<CB::Expr>,
+        Limbs<V, P::Limbs>: Copy,
+    {
+        let p_a: Polynomial<CB::Expr> = (a).clone().into();
+        let p_b: Polynomial<CB::Expr> = (b).clone().into();
+        let p_c: Polynomial<CB::Expr> = (c).clone().into();
+
+        let p_result: Polynomial<_> = self.result.into();
+        let p_op = p_a * p_b + p_c;
 
         self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, chunk, is_real);
     }

@@ -3,6 +3,7 @@ pub mod add4;
 pub mod add5;
 pub mod and;
 pub mod baby_bear;
+pub mod curves;
 pub mod field;
 pub mod fixed_rotate_right;
 pub mod fixed_shift_right;

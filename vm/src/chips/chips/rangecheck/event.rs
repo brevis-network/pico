@@ -26,6 +26,14 @@ pub trait RangeRecordBehavior {
     /// Adds a new [`RangeLookupEvent`] to the record.
     fn add_range_lookup_event(&mut self, event: RangeLookupEvent);
 
+    /// Adds a list of `RangeLookupEvent`s to the record.
+    #[inline]
+    fn add_range_lookup_events(&mut self, rlu_events: Vec<RangeLookupEvent>) {
+        for rlu_event in rlu_events {
+            self.add_range_lookup_event(rlu_event);
+        }
+    }
+
     fn range_lookup_events(
         &self,
         chunk: Option<u32>,
