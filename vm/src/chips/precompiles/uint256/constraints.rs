@@ -5,10 +5,10 @@ use crate::{
             field::field_op::FieldOperation,
             uint256::U256Field,
             utils::{
+                conversions::{limbs_from_access, limbs_from_prev_access},
                 field_params::NumLimbs,
                 limbs::Limbs,
                 polynomial::Polynomial,
-                utils::{limbs_from_access, limbs_from_prev_access},
             },
         },
         precompiles::uint256::{

@@ -2,7 +2,7 @@ use num::{BigUint, One, Zero};
 
 use crate::{
     chips::{
-        gadgets::utils::utils::{bytes_to_words_le, words_to_bytes_le_vec},
+        gadgets::utils::conversions::{bytes_to_words_le, words_to_bytes_le_vec},
         precompiles::uint256::UINT256_NUM_WORDS,
     },
     emulator::riscv::syscalls::{

@@ -2,10 +2,13 @@ use generic_array::GenericArray;
 use num::{BigUint, Zero};
 use serde::{Deserialize, Serialize};
 
-use super::{utils::biguint_to_bits_le, CurveType};
+use super::CurveType;
 use crate::chips::gadgets::{
     curves::{AffinePoint, EllipticCurve, EllipticCurveParameters},
-    utils::field_params::{FieldParameters, NumLimbs, NumWords},
+    utils::{
+        conversions::biguint_to_bits_le,
+        field_params::{FieldParameters, NumLimbs, NumWords},
+    },
 };
 
 #[cfg(feature = "bigint-rug")]

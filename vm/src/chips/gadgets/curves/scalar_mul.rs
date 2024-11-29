@@ -1,8 +1,10 @@
-use core::ops::Mul;
+use std::ops::Mul;
 
 use num::{BigUint, One};
 
-use super::{utils::biguint_to_bits_le, AffinePoint, EllipticCurve};
+use crate::chips::gadgets::utils::conversions::biguint_to_bits_le;
+
+use super::{AffinePoint, EllipticCurve};
 
 impl<E: EllipticCurve> AffinePoint<E> {
     pub fn scalar_mul(&self, scalar: &BigUint) -> Self {

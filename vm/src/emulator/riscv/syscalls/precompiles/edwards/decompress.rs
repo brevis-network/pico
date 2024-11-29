@@ -1,9 +1,12 @@
 use std::marker::PhantomData;
 
-use crate::chips::gadgets::curves::{
-    curve25519_dalek::CompressedEdwardsY,
-    edwards::{ed25519::decompress, EdwardsParameters, WORDS_FIELD_ELEMENT},
-    COMPRESSED_POINT_BYTES,
+use crate::chips::gadgets::{
+    curves::{
+        curve25519_dalek::CompressedEdwardsY,
+        edwards::{ed25519::decompress, EdwardsParameters, WORDS_FIELD_ELEMENT},
+        COMPRESSED_POINT_BYTES,
+    },
+    utils::conversions::{bytes_to_words_le, words_to_bytes_le},
 };
 
 use crate::{
@@ -12,7 +15,6 @@ use crate::{
         precompiles::edwards::event::EdDecompressEvent, syscall_context::SyscallContext, Syscall,
         SyscallCode,
     },
-    primitives::consts::{bytes_to_words_le, words_to_bytes_le},
 };
 
 pub(crate) struct EdwardsDecompressSyscall<E: EdwardsParameters> {

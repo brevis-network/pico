@@ -1,6 +1,5 @@
 pub mod edwards;
 pub mod scalar_mul;
-pub mod utils;
 pub mod weierstrass;
 
 pub mod curve25519_dalek {

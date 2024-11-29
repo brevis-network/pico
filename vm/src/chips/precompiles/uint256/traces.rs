@@ -4,7 +4,7 @@ use crate::{
         chips::byte::event::ByteRecordBehavior,
         gadgets::{
             field::field_op::FieldOperation,
-            utils::utils::{words_to_bytes_le, words_to_bytes_le_vec},
+            utils::conversions::{words_to_bytes_le, words_to_bytes_le_vec},
         },
         precompiles::uint256::{Uint256MulChip, UINT256_NUM_WORDS},
     },
