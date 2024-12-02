@@ -12,7 +12,7 @@ use crate::chips::gadgets::{
 };
 
 #[cfg(feature = "bigint-rug")]
-use crate::chips::gadgets::curves::utils::{biguint_to_rug, rug_to_biguint};
+use crate::chips::gadgets::utils::conversions::{biguint_to_rug, rug_to_biguint};
 
 /// Parameters that specify a short Weierstrass curve : y^2 = x^3 + ax + b.
 pub trait WeierstrassParameters: EllipticCurveParameters {
@@ -227,6 +227,7 @@ impl<E: WeierstrassParameters> AffinePoint<SwCurve<E>> {
     }
 
     #[cfg(feature = "bigint-rug")]
+    #[allow(unused_imports)]
     pub fn sw_add_rug(&self, other: &AffinePoint<SwCurve<E>>) -> AffinePoint<SwCurve<E>> {
         use rug::Complete;
         let p = biguint_to_rug(&E::BaseField::modulus());
