@@ -361,6 +361,10 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
         trace
     }
 
+    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+        self.generate_main(input, extra);
+    }
+
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.divrem_events.is_empty()
     }
