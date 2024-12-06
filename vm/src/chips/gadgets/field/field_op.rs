@@ -35,7 +35,7 @@ pub enum FieldOperation {
 /// A set of columns to compute an emulated modular arithmetic operation.
 ///
 /// *Safety* The input operands (a, b) (not included in the operation columns) are assumed to be
-/// elements within the range `[0, 2^{P::nb_bits()})`. the result is also assumed to be within the
+/// elements within the range `[0, 2^{P::num_bits()})`. the result is also assumed to be within the
 /// same range. Let `M = P:modulus()`. The constraints of the function [`FieldOpCols::eval`] assert
 /// that:
 /// * When `op` is `FieldOperation::Add`, then `result = a + b mod M`.
@@ -93,8 +93,8 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         let p_witness = compute_root_quotient_and_shift(
             &p_vanishing,
             P::WITNESS_OFFSET,
-            P::NB_BITS_PER_LIMB as u32,
-            P::NB_WITNESS_LIMBS,
+            P::NUM_BITS_PER_LIMB as u32,
+            P::NUM_WITNESS_LIMBS,
         );
 
         let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
@@ -104,8 +104,8 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
 
         p_witness_low.resize(P::Witness::USIZE, F::zero());
         p_witness_high.resize(P::Witness::USIZE, F::zero());
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
+        self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
 
         record.add_u8_range_checks_field(&self.result.0, Some(chunk));
         record.add_u8_range_checks_field(&self.carry.0, Some(chunk));
@@ -160,8 +160,8 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         let p_witness = compute_root_quotient_and_shift(
             &p_vanishing,
             P::WITNESS_OFFSET,
-            P::NB_BITS_PER_LIMB as u32,
-            P::NB_WITNESS_LIMBS,
+            P::NUM_BITS_PER_LIMB as u32,
+            P::NUM_WITNESS_LIMBS,
         );
         let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
 
@@ -170,8 +170,8 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
 
         p_witness_low.resize(P::Witness::USIZE, F::zero());
         p_witness_high.resize(P::Witness::USIZE, F::zero());
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
+        self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
 
         result
     }
@@ -393,6 +393,7 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
     }
 }
 
+#[inline]
 pub fn eval_field_operation<F: Field, CB: ChipBuilder<F>, P: FieldParameters>(
     builder: &mut CB,
     p_vanishing: &Polynomial<CB::Expr>,
@@ -400,7 +401,7 @@ pub fn eval_field_operation<F: Field, CB: ChipBuilder<F>, P: FieldParameters>(
     p_witness_high: &Polynomial<CB::Expr>,
 ) {
     // Reconstruct and shift back the witness polynomial
-    let limb: CB::Expr = CB::F::from_canonical_u32(2u32.pow(P::NB_BITS_PER_LIMB as u32)).into();
+    let limb: CB::Expr = CB::F::from_canonical_u32(2u32.pow(P::NUM_BITS_PER_LIMB as u32)).into();
 
     let p_witness_shifted = p_witness_low + &(p_witness_high * limb.clone());
 
@@ -410,7 +411,7 @@ pub fn eval_field_operation<F: Field, CB: ChipBuilder<F>, P: FieldParameters>(
     let len = p_witness_shifted.coefficients().len();
     let p_witness = p_witness_shifted - Polynomial::new(vec![offset; len]);
 
-    // Multiply by (x-2^NB_BITS_PER_LIMB) and make the constraint
+    // Multiply by (x-2^NUM_BITS_PER_LIMB) and make the constraint
     let root_monomial = Polynomial::new(vec![-limb, CB::F::one().into()]);
 
     let constraints = p_vanishing - &(p_witness * root_monomial);

@@ -1,3 +1,7 @@
+#[cfg(feature = "debug")]
+use crate::machine::debug::constraints::IncrementalConstraintDebugger;
+#[cfg(feature = "debug-lookups")]
+use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::recursion::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
@@ -92,7 +96,11 @@ where
 
         // used for collect all records for debugging
         #[cfg(feature = "debug")]
-        let mut all_records = Vec::new();
+        let mut debug_challenger = self.config().challenger();
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
+        #[cfg(feature = "debug-lookups")]
+        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
 
         loop {
             loop {
@@ -100,6 +108,11 @@ where
                 let (mut batch_records, done) = recursion_emulator.next_batch();
 
                 self.complement_record(batch_records.as_mut_slice());
+
+                #[cfg(feature = "debug")]
+                constraint_debugger.debug_incremental(self.chips(), &batch_records);
+                #[cfg(feature = "debug-lookups")]
+                lookup_debugger.debug_incremental(self.chips(), &batch_records);
 
                 info!(
                     "recursion combine layer {}, chunk {}-{}",
@@ -118,12 +131,6 @@ where
                     let stats = record.stats();
                     for (key, value) in &stats {
                         debug!("   |- {:<28}: {}", key, value);
-                    }
-                }
-                #[cfg(feature = "debug")]
-                {
-                    if flag_complete {
-                        all_records.extend_from_slice(&batch_records);
                     }
                 }
 
@@ -196,18 +203,9 @@ where
         info!("PERF-step=proof_size-{}", proof_size);
 
         #[cfg(feature = "debug")]
-        {
-            assert_eq!(all_records.len(), 1);
-            use crate::machine::debug::constraints::debug_all_constraints;
-            let mut debug_challenger = self.config().challenger();
-            debug_all_constraints(self.chips(), pk, &all_records, &mut debug_challenger);
-        }
-
+        constraint_debugger.print_results();
         #[cfg(feature = "debug-lookups")]
-        {
-            use crate::machine::debug::lookups::DebugLookup;
-            DebugLookup::debug_all_lookups(self.chips(), pk, &all_records, None);
-        }
+        lookup_debugger.print_results();
 
         proof
     }

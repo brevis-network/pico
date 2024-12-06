@@ -75,20 +75,20 @@ impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {
                 acc + &c * &d
             });
         let p_vanishing = p_inner_product - &p_result - &p_carry * &p_modulus;
-        assert_eq!(p_vanishing.degree(), P::NB_WITNESS_LIMBS);
+        assert_eq!(p_vanishing.degree(), P::NUM_WITNESS_LIMBS);
 
         let p_witness = compute_root_quotient_and_shift(
             &p_vanishing,
             P::WITNESS_OFFSET,
-            P::NB_BITS_PER_LIMB as u32,
-            P::NB_WITNESS_LIMBS,
+            P::NUM_BITS_PER_LIMB as u32,
+            P::NUM_WITNESS_LIMBS,
         );
         let (p_witness_low, p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
 
         self.result = p_result.into();
         self.carry = p_carry.into();
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
+        self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
 
         // Range checks
         record.add_u8_range_checks_field(&self.result.0, Some(chunk));

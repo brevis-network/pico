@@ -1,3 +1,7 @@
+#[cfg(feature = "debug")]
+use crate::machine::debug::constraints::IncrementalConstraintDebugger;
+#[cfg(feature = "debug-lookups")]
+use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::recursion::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
@@ -79,7 +83,11 @@ where
 
         // used for collect all records for debugging
         #[cfg(feature = "debug")]
-        let mut all_records = Vec::new();
+        let mut debug_challenger = self.config().challenger();
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
+        #[cfg(feature = "debug-lookups")]
+        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
 
         let mut records = witness.records().to_vec();
 
@@ -90,14 +98,15 @@ where
 
         self.complement_record(&mut records);
 
+        #[cfg(feature = "debug")]
+        constraint_debugger.debug_incremental(self.chips(), &records);
+        #[cfg(feature = "debug-lookups")]
+        lookup_debugger.debug_incremental(self.chips(), &records);
+
         debug!("recursion compress record stats");
         let stats = records[0].stats();
         for (key, value) in &stats {
             debug!("   |- {:<28}: {}", key, value);
-        }
-        #[cfg(feature = "debug")]
-        {
-            all_records.extend_from_slice(&records);
         }
 
         // commit main
@@ -124,17 +133,9 @@ where
         info!("PERF-step=proof_size-{}", proof_size);
 
         #[cfg(feature = "debug")]
-        {
-            use crate::machine::debug::constraints::debug_all_constraints;
-            let mut debug_challenger = self.config().challenger();
-            debug_all_constraints(self.chips(), pk, &all_records, &mut debug_challenger);
-        }
-
+        constraint_debugger.print_results();
         #[cfg(feature = "debug-lookups")]
-        {
-            use crate::machine::debug::lookups::DebugLookup;
-            DebugLookup::debug_all_lookups(self.chips(), pk, &all_records, None);
-        }
+        lookup_debugger.print_results();
 
         proof
     }

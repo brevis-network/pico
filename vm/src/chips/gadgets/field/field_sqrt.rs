@@ -14,7 +14,7 @@ use crate::{
         gadgets::{
             field::field_op::FieldOperation,
             utils::{
-                field_params::{limbs_from_vec, FieldParameters},
+                field_params::{limbs_from_slice, FieldParameters},
                 limbs::Limbs,
             },
         },
@@ -31,7 +31,12 @@ use super::{field_lt::FieldLtCols, field_op::FieldOpCols};
 /// input lying within the range `[0, modulus)` with the least significant bit `lsb`.
 #[derive(Debug, Clone, AlignedBorrow)]
 #[repr(C)]
-pub struct FieldSqrtCols<T, P: FieldParameters> {
+pub struct FieldSqrtCols<T, P: FieldParameters>
+where
+    P: FieldParameters,
+    P::Witness: Debug,
+    P::Limbs: Debug,
+{
     /// The multiplication operation to verify that the sqrt and the input match.
     ///
     /// In order to save space, we actually store the sqrt of the input in `multiplication.result`
@@ -44,7 +49,13 @@ pub struct FieldSqrtCols<T, P: FieldParameters> {
     pub lsb: T,
 }
 
-impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
+impl<F, P> FieldSqrtCols<F, P>
+where
+    F: PrimeField32,
+    P: FieldParameters,
+    P::Witness: Debug,
+    P::Limbs: Debug,
+{
     /// Populates the trace.
     ///
     /// `P` is the parameter of the field that each limb lives in.
@@ -106,7 +117,10 @@ impl<F: PrimeField32, P: FieldParameters> FieldSqrtCols<F, P> {
 
 impl<V: Copy, P: FieldParameters> FieldSqrtCols<V, P>
 where
+    V: Copy,
     Limbs<V, P::Limbs>: Copy,
+    P::Witness: Debug,
+    P::Limbs: Debug,
 {
     /// Calculates the square root of `a`.
     pub fn eval<F: Field, CB: ChipBuilder<F, Var = V>>(
@@ -136,11 +150,11 @@ where
             is_real.clone(),
         );
 
-        let modulus_limbs = P::to_limbs_field_vec(&P::modulus());
+        let modulus_limbs = P::to_limbs_field_slice(&P::modulus());
         self.range.eval(
             builder,
             &sqrt,
-            &limbs_from_vec::<CB::Expr, P::Limbs, CB::F>(modulus_limbs),
+            &limbs_from_slice::<CB::Expr, P::Limbs, CB::F>(modulus_limbs),
             is_real.clone(),
         );
 

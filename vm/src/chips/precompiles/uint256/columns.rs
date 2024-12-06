@@ -9,7 +9,7 @@ use crate::{
     },
     recursion::air::IsZeroOperation,
 };
-use generic_array::GenericArray;
+use hybrid_array::Array;
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
@@ -37,9 +37,9 @@ pub struct Uint256MulCols<T> {
 
     // Memory columns.
     // x_memory is written to with the result, which is why it is of type MemoryWriteCols.
-    pub x_memory: GenericArray<MemoryWriteCols<T>, Uint256NumWords>,
-    pub y_memory: GenericArray<MemoryReadCols<T>, Uint256NumWords>,
-    pub modulus_memory: GenericArray<MemoryReadCols<T>, Uint256NumWords>,
+    pub x_memory: Array<MemoryWriteCols<T>, Uint256NumWords>,
+    pub y_memory: Array<MemoryReadCols<T>, Uint256NumWords>,
+    pub modulus_memory: Array<MemoryReadCols<T>, Uint256NumWords>,
 
     /// Columns for checking if modulus is zero. If it's zero, then use 2^256 as the effective
     /// modulus.

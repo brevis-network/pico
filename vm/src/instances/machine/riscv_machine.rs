@@ -1,3 +1,7 @@
+#[cfg(feature = "debug")]
+use crate::machine::debug::constraints::IncrementalConstraintDebugger;
+#[cfg(feature = "debug-lookups")]
+use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::{riscv::program::Program, word::Word},
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
@@ -120,7 +124,11 @@ where
 
         // used for collect all records for debugging
         #[cfg(feature = "debug")]
-        let mut all_records = Vec::new();
+        let mut debug_challenger = self.config().challenger();
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
+        #[cfg(feature = "debug-lookups")]
+        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
 
         loop {
             let (batch_records, done) = emulator.next_batch();
@@ -128,9 +136,9 @@ where
             self.complement_record(batch_records);
 
             #[cfg(feature = "debug")]
-            {
-                all_records.extend_from_slice(batch_records);
-            }
+            constraint_debugger.debug_incremental(self.chips(), &batch_records);
+            #[cfg(feature = "debug-lookups")]
+            lookup_debugger.debug_incremental(self.chips(), &batch_records);
 
             let batch_main_commitments = batch_records
                 .into_par_iter()
@@ -171,17 +179,9 @@ where
         info!("PERF-step=proof_size-{}", proof_size);
 
         #[cfg(feature = "debug")]
-        {
-            use crate::machine::debug::constraints::debug_all_constraints;
-            let mut debug_challenger = self.config().challenger();
-            debug_all_constraints(self.chips(), pk, &all_records, &mut debug_challenger);
-        }
-
+        constraint_debugger.print_results();
         #[cfg(feature = "debug-lookups")]
-        {
-            use crate::machine::debug::lookups::DebugLookup;
-            DebugLookup::debug_all_lookups(self.chips(), pk, &all_records, None);
-        }
+        lookup_debugger.print_results();
 
         proof
     }

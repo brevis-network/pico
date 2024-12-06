@@ -1,17 +1,19 @@
-use crate::chips::gadgets::utils::limbs::{Limbs, NB_BITS_PER_LIMB};
-use generic_array::{sequence::GenericSequence, ArrayLength, GenericArray};
+use crate::chips::gadgets::utils::limbs::{Limbs, BITS_PER_LIMB};
+use core::ops::Div;
+use hybrid_array::{
+    typenum::{Unsigned, U2, U4},
+    Array, ArraySize,
+};
 use num::BigUint;
 use p3_field::Field;
 use serde::{de::DeserializeOwned, Serialize};
-use std::{fmt::Debug, ops::Div};
-use typenum::{Unsigned, U2, U4};
 
 pub trait FieldParameters:
-    Send + Sync + Copy + 'static + Debug + Serialize + DeserializeOwned + NumLimbs
+    Send + Sync + Copy + 'static + Serialize + DeserializeOwned + NumLimbs
 {
-    const NB_BITS_PER_LIMB: usize = NB_BITS_PER_LIMB;
-    const NB_LIMBS: usize = Self::Limbs::USIZE;
-    const NB_WITNESS_LIMBS: usize = Self::Witness::USIZE;
+    const NUM_BITS_PER_LIMB: usize = BITS_PER_LIMB;
+    const NUM_LIMBS: usize = Self::Limbs::USIZE;
+    const NUM_WITNESS_LIMBS: usize = Self::Witness::USIZE;
     const WITNESS_OFFSET: usize;
 
     /// The bytes of the modulus in little-endian order.
@@ -21,60 +23,74 @@ pub trait FieldParameters:
         BigUint::from_bytes_le(Self::MODULUS)
     }
 
-    fn nb_bits() -> usize {
-        Self::NB_BITS_PER_LIMB * Self::NB_LIMBS
+    fn num_bits() -> usize {
+        Self::NUM_BITS_PER_LIMB * Self::NUM_LIMBS
     }
 
     fn modulus_field_iter<F: Field>() -> impl Iterator<Item = F> {
         Self::MODULUS
             .iter()
             .map(|x| F::from_canonical_u8(*x))
-            .take(Self::NB_LIMBS)
+            .take(Self::NUM_LIMBS)
     }
 
-    /// Convert a BigUint to a Vec of u8 limbs (with len NB_LIMBS).
-    fn to_limbs(x: &BigUint) -> Vec<u8> {
+    /// Convert a BigUint to a Boxed u8 limb slice (with len NUM_LIMBS).
+    fn to_limbs(x: &BigUint) -> Box<[u8]> {
         let mut bytes = x.to_bytes_le();
-        bytes.resize(Self::NB_LIMBS, 0u8);
-        bytes
+        bytes.resize(Self::NUM_LIMBS, 0u8);
+        bytes.into_boxed_slice()
     }
 
-    /// Convert a BigUint to a Vec of F limbs (with len NB_LIMBS).
-    fn to_limbs_field_vec<E: From<F>, F: Field>(x: &BigUint) -> Vec<E> {
+    /// Convert a BigUint to a Boxed slice of E limbs (with len NUM_LIMBS) after coercing through F.
+    fn to_limbs_field_slice<E: From<F>, F: Field>(x: &BigUint) -> Box<[E]> {
         Self::to_limbs(x)
-            .into_iter()
-            .map(|x| F::from_canonical_u8(x).into())
-            .collect::<Vec<_>>()
+            .iter()
+            .map(|x| F::from_canonical_u8(*x).into())
+            .collect::<Box<[_]>>()
     }
 
-    /// Convert a BigUint to Limbs<F, Self::Limbs>.
+    /// Convert a BigUint to Limbs<E, Self::Limbs> after coercing through F.
     fn to_limbs_field<E: From<F>, F: Field>(x: &BigUint) -> Limbs<E, Self::Limbs> {
-        limbs_from_vec(Self::to_limbs_field_vec(x))
+        let limbs = Self::to_limbs(x);
+        let iter = limbs.iter().map(|x| F::from_canonical_u8(*x).into());
+        let result = Array::try_from_iter(iter).expect("wrong number of limbs in iter");
+        Limbs(result)
     }
 }
 
 /// Convert a vec of F limbs to a Limbs of N length.
-pub fn limbs_from_vec<E: From<F>, N: ArrayLength, F: Field>(limbs: Vec<F>) -> Limbs<E, N> {
+pub fn limbs_from_slice<E: From<F>, N: ArraySize, F: Field>(limbs: impl AsRef<[F]>) -> Limbs<E, N> {
+    let limbs = limbs.as_ref();
     debug_assert_eq!(limbs.len(), N::USIZE);
-    let mut result = GenericArray::<E, N>::generate(|_i| F::zero().into());
+    let mut result = Array::<E, N>::from_fn(|_| F::zero().into());
     for (i, limb) in limbs.into_iter().enumerate() {
-        result[i] = limb.into();
+        result[i] = (*limb).into();
     }
     Limbs(result)
 }
 
 /// Trait that holds the typenum values for # of limbs and # of witness limbs.
-pub trait NumLimbs: Clone + Debug {
-    type Limbs: ArrayLength + Debug;
-    type Witness: ArrayLength + Debug;
+pub trait NumLimbs: Clone {
+    type Limbs: ArraySize;
+    type Witness: ArraySize;
 }
 
 /// Trait that holds number of words needed to represent a field element and a curve point.
-pub trait NumWords: Clone + Debug {
+pub trait NumWords: Clone {
     /// The number of words needed to represent a field element.
-    type WordsFieldElement: ArrayLength + Debug;
+    type WordsFieldElement: ArraySize;
     /// The number of words needed to represent a curve point (two field elements).
-    type WordsCurvePoint: ArrayLength + Debug;
+    type WordsCurvePoint: ArraySize;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FieldType {
+    Bls381,
+    Bn254,
+}
+
+pub trait FpOpField: FieldParameters + NumWords {
+    const FIELD_TYPE: FieldType;
 }
 
 /// Implement NumWords for NumLimbs where # Limbs is divisible by 4.
@@ -85,8 +101,8 @@ impl<N: NumLimbs> NumWords for N
 where
     N::Limbs: Div<U4>,
     N::Limbs: Div<U2>,
-    <N::Limbs as Div<U4>>::Output: ArrayLength + Debug,
-    <N::Limbs as Div<U2>>::Output: ArrayLength + Debug,
+    <N::Limbs as Div<U4>>::Output: ArraySize,
+    <N::Limbs as Div<U2>>::Output: ArraySize,
 {
     /// Each word has 4 limbs so we divide by 4.
     type WordsFieldElement = <N::Limbs as Div<U4>>::Output;

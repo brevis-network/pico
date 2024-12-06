@@ -1,6 +1,5 @@
-use typenum::{U32, U63};
-
 use crate::chips::gadgets::utils::field_params::{FieldParameters, NumLimbs};
+use hybrid_array::typenum::{U32, U63};
 use num::{BigUint, One};
 use serde::{Deserialize, Serialize};
 

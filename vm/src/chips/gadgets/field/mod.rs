@@ -1,3 +1,5 @@
+pub mod bls381;
+pub mod bn254;
 pub mod field_den;
 pub mod field_inner_product;
 pub mod field_lt;

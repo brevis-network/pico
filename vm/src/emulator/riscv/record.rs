@@ -1,5 +1,7 @@
 use super::syscalls::precompiles::{
-    keccak256::event::KeccakPermuteEvent, poseidon2::event::Poseidon2PermuteEvent,
+    fptower::event::{Fp2AddSubEvent, Fp2MulEvent, FpEvent},
+    keccak256::event::KeccakPermuteEvent,
+    poseidon2::event::Poseidon2PermuteEvent,
 };
 use crate::{
     chips::chips::{
@@ -37,6 +39,7 @@ use super::syscalls::precompiles::edwards::event::{EdDecompressEvent, EllipticCu
 pub struct EmulationRecord {
     /// The program.
     pub program: Arc<Program>,
+    pub unconstrained: bool,
     /// The nonce lookup.
     pub nonce_lookup: HashMap<u128, u32>,
 
@@ -74,6 +77,14 @@ pub struct EmulationRecord {
     pub sha_extend_events: Vec<ShaExtendEvent>,
     /// A trace of the sha256 compress events.
     pub sha_compress_events: Vec<ShaCompressEvent>,
+    /// BN254 events
+    pub fp_bn254_events: Vec<FpEvent>,
+    pub fp2_bn254_addsub_events: Vec<Fp2AddSubEvent>,
+    pub fp2_bn254_mul_events: Vec<Fp2MulEvent>,
+    /// BLS381 events
+    pub fp_bls381_events: Vec<FpEvent>,
+    pub fp2_bls381_addsub_events: Vec<Fp2AddSubEvent>,
+    pub fp2_bls381_mul_events: Vec<Fp2MulEvent>,
     /// A trace of the ED Add events.
     pub ed_add_events: Vec<EllipticCurveAddEvent>,
     /// A trace of the ED Decompress events.
@@ -323,6 +334,10 @@ impl RecordBehavior for EmulationRecord {
 
     fn chunk_index(&self) -> usize {
         self.public_values.chunk as usize
+    }
+
+    fn unconstrained(&self) -> bool {
+        self.unconstrained
     }
 }
 

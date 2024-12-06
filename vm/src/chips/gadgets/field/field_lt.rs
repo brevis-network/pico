@@ -38,7 +38,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldLtCols<F, P> {
         let value_limbs = P::to_limbs(lhs);
         let modulus = P::to_limbs(rhs);
 
-        let mut byte_flags = vec![0u8; P::NB_LIMBS];
+        let mut byte_flags = vec![0u8; P::NUM_LIMBS];
 
         for (byte, modulus_byte, flag) in izip!(
             value_limbs.iter().rev(),

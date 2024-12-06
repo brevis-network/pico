@@ -1,3 +1,7 @@
+#[cfg(feature = "debug")]
+use crate::machine::debug::constraints::IncrementalConstraintDebugger;
+#[cfg(feature = "debug-lookups")]
+use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::recursion::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
@@ -90,13 +94,22 @@ where
 
         // used for collect all records for debugging
         #[cfg(feature = "debug")]
-        let mut all_records = Vec::new();
+        let mut debug_challenger = self.config().challenger();
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
+        #[cfg(feature = "debug-lookups")]
+        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
 
         let mut chunk_index = 1;
         loop {
             let (mut batch_records, done) = recursion_emulator.next_batch();
 
             self.complement_record(batch_records.as_mut_slice());
+
+            #[cfg(feature = "debug")]
+            constraint_debugger.debug_incremental(self.chips(), &batch_records);
+            #[cfg(feature = "debug-lookups")]
+            lookup_debugger.debug_incremental(self.chips(), &batch_records);
 
             for record in &mut *batch_records {
                 record.index = chunk_index;
@@ -109,10 +122,6 @@ where
                 for (key, value) in &stats {
                     debug!("   |- {:<28}: {}", key, value);
                 }
-            }
-            #[cfg(feature = "debug")]
-            {
-                all_records.extend_from_slice(&batch_records);
             }
 
             let batch_proofs = batch_records
@@ -145,17 +154,9 @@ where
         }
 
         #[cfg(feature = "debug")]
-        {
-            use crate::machine::debug::constraints::debug_all_constraints;
-            let mut debug_challenger = self.config().challenger();
-            debug_all_constraints(self.chips(), pk, &all_records, &mut debug_challenger);
-        }
-
+        constraint_debugger.print_results();
         #[cfg(feature = "debug-lookups")]
-        {
-            use crate::machine::debug::lookups::DebugLookup;
-            DebugLookup::debug_all_lookups(self.chips(), pk, &all_records, None);
-        }
+        lookup_debugger.print_results();
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 

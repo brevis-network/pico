@@ -1,4 +1,4 @@
-use generic_array::GenericArray;
+use hybrid_array::Array;
 use num::{BigUint, Zero};
 use serde::{Deserialize, Serialize};
 
@@ -16,8 +16,8 @@ use crate::chips::gadgets::utils::conversions::{biguint_to_rug, rug_to_biguint};
 
 /// Parameters that specify a short Weierstrass curve : y^2 = x^3 + ax + b.
 pub trait WeierstrassParameters: EllipticCurveParameters {
-    const A: GenericArray<u8, <Self::BaseField as NumLimbs>::Limbs>;
-    const B: GenericArray<u8, <Self::BaseField as NumLimbs>::Limbs>;
+    const A: Array<u8, <Self::BaseField as NumLimbs>::Limbs>;
+    const B: Array<u8, <Self::BaseField as NumLimbs>::Limbs>;
 
     fn generator() -> (BigUint, BigUint);
 
@@ -40,7 +40,7 @@ pub trait WeierstrassParameters: EllipticCurveParameters {
     }
 
     fn nb_scalar_bits() -> usize {
-        Self::BaseField::NB_LIMBS * 16
+        Self::BaseField::NUM_LIMBS * 16
     }
 }
 
@@ -48,8 +48,8 @@ pub trait WeierstrassParameters: EllipticCurveParameters {
 pub struct SwCurve<E>(pub E);
 
 impl<E: WeierstrassParameters> WeierstrassParameters for SwCurve<E> {
-    const A: GenericArray<u8, <Self::BaseField as NumLimbs>::Limbs> = E::A;
-    const B: GenericArray<u8, <Self::BaseField as NumLimbs>::Limbs> = E::B;
+    const A: Array<u8, <Self::BaseField as NumLimbs>::Limbs> = E::A;
+    const B: Array<u8, <Self::BaseField as NumLimbs>::Limbs> = E::B;
 
     fn a_int() -> BigUint {
         E::a_int()
@@ -79,8 +79,8 @@ impl<E: WeierstrassParameters> EllipticCurveParameters for SwCurve<E> {
 }
 
 impl<E: WeierstrassParameters> EllipticCurve for SwCurve<E> {
-    const NB_LIMBS: usize = Self::BaseField::NB_LIMBS;
-    const NB_WITNESS_LIMBS: usize = Self::BaseField::NB_WITNESS_LIMBS;
+    const NB_LIMBS: usize = Self::BaseField::NUM_LIMBS;
+    const NB_WITNESS_LIMBS: usize = Self::BaseField::NUM_WITNESS_LIMBS;
 
     fn ec_add(p: &AffinePoint<Self>, q: &AffinePoint<Self>) -> AffinePoint<Self> {
         p.sw_add(q)

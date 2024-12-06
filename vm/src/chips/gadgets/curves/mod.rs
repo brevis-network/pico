@@ -141,9 +141,9 @@ pub trait EllipticCurveParameters:
 
 /// An interface for elliptic curve groups.
 pub trait EllipticCurve: EllipticCurveParameters {
-    const NB_LIMBS: usize = Self::BaseField::NB_LIMBS;
+    const NB_LIMBS: usize = Self::BaseField::NUM_LIMBS;
 
-    const NB_WITNESS_LIMBS: usize = Self::BaseField::NB_WITNESS_LIMBS;
+    const NB_WITNESS_LIMBS: usize = Self::BaseField::NUM_WITNESS_LIMBS;
     /// Adds two different points on the curve.
     ///
     /// Warning: This method assumes that the two points are different.
@@ -164,7 +164,7 @@ pub trait EllipticCurve: EllipticCurveParameters {
 
     /// Returns the number of bits needed to represent a scalar in the group.
     fn nb_scalar_bits() -> usize {
-        Self::BaseField::NB_LIMBS * Self::BaseField::NB_BITS_PER_LIMB
+        Self::BaseField::NUM_LIMBS * Self::BaseField::NUM_BITS_PER_LIMB
     }
 }
 

@@ -162,7 +162,7 @@ impl<T: Copy> Poseidon2Mut<T> for PermutationNoSbox<T> {
 
 pub fn permutation_mut<'a, 'b: 'a, T, const DEGREE: usize>(
     row: &'b mut [T],
-) -> &mut (dyn Poseidon2Mut<T> + 'a)
+) -> &'b mut (dyn Poseidon2Mut<T> + 'a)
 where
     T: Copy,
 {

@@ -1,6 +1,6 @@
 pub mod ed25519;
 
-use generic_array::GenericArray;
+use hybrid_array::Array;
 use num::{BigUint, Zero};
 use serde::{Deserialize, Serialize};
 use typenum::Unsigned;
@@ -25,7 +25,7 @@ pub type WordsCurvePoint = <Ed25519BaseField as NumWords>::WordsCurvePoint;
 pub const WORDS_CURVE_POINT: usize = WordsCurvePoint::USIZE;
 
 pub trait EdwardsParameters: EllipticCurveParameters {
-    const D: GenericArray<u8, <Self::BaseField as NumLimbs>::Limbs>;
+    const D: Array<u8, <Self::BaseField as NumLimbs>::Limbs>;
 
     fn generator() -> (BigUint, BigUint);
 
@@ -49,7 +49,7 @@ pub trait EdwardsParameters: EllipticCurveParameters {
 pub struct EdwardsCurve<E: EdwardsParameters>(pub E);
 
 impl<E: EdwardsParameters> EdwardsParameters for EdwardsCurve<E> {
-    const D: GenericArray<u8, <Self::BaseField as NumLimbs>::Limbs> = E::D;
+    const D: Array<u8, <Self::BaseField as NumLimbs>::Limbs> = E::D;
 
     fn generator() -> (BigUint, BigUint) {
         E::generator()

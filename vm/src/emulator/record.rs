@@ -16,4 +16,8 @@ pub trait RecordBehavior: Default + Send + Sync {
     fn register_nonces(&mut self) {}
 
     fn chunk_index(&self) -> usize;
+
+    fn unconstrained(&self) -> bool {
+        false
+    }
 }

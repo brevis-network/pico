@@ -1,3 +1,4 @@
+use super::DebuggerMessageLevel;
 use crate::{
     configs::config::StarkGenericConfig,
     machine::{
@@ -151,68 +152,45 @@ where
 
         result
     }
+}
 
-    pub fn debug_all_lookups<'r, 'c, SC, C, CI, R>(
-        chips: CI,
-        pkey: &BaseProvingKey<SC>,
-        records: R,
-        types: Option<&[LookupType]>,
-    ) -> bool
-    where
-        SC: StarkGenericConfig<Val = F>,
-        C: ChipBehavior<F>
-            + for<'a> Air<ProverConstraintFolder<'a, SC>>
-            + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-            + 'r + 'c,
-        CI: IntoIterator<Item = &'c MetaChip<F, C>>,
-        R: IntoIterator<Item = &'r C::Record>,
-        <R as IntoIterator>::IntoIter: Clone,
-        <CI as IntoIterator>::IntoIter: Clone,
-    {
-        tracing::info_span!("debug lookups").in_scope(|| {
-            tracing::info!("Debugging all lookups");
-        });
-        // this stores (total balance, chip => local balance) per lookup key
-        let mut lookup_map: BTreeMap<DebugLookupKey<F>, (isize, BTreeMap<&str, isize>)> =
-            BTreeMap::new();
-        let mut total = 0;
-        let chips = chips.into_iter();
-        let records = records.into_iter();
+pub struct IncrementalLookupDebugger<'a, SC: StarkGenericConfig> {
+    messages: Vec<(DebuggerMessageLevel, String)>,
+    types: Option<&'a [LookupType]>,
+    pk: &'a BaseProvingKey<SC>,
+    lookup_map: BTreeMap<DebugLookupKey<SC::Val>, (isize, BTreeMap<String, isize>)>,
+    total: isize,
+}
 
-        // allocate the name strings exactly once
-        // TODO: maybe consider ChipBehavior::name -> &'static str
-        let names: Box<[String]> = chips.clone().map(ChipBehavior::name).collect();
+impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
+    pub fn new(pk: &'a BaseProvingKey<SC>, types: Option<&'a [LookupType]>) -> Self {
+        let messages = vec![(DebuggerMessageLevel::Info, "debugging all lookups".into())];
+        Self {
+            messages,
+            types,
+            pk,
+            lookup_map: BTreeMap::new(),
+            total: 0,
+        }
+    }
 
-        for (chip, name) in chips.zip(names.iter()) {
-            let mut chip_events = 0;
-            for record in records.clone() {
-                let data = Self::debug_lookups(chip, pkey, record, types).lookup_data;
-                chip_events += data.len();
-
-                // this loop consumes counts and thus the lookup key which allows us to use Box
-                // rather than Rc
-                for (k, (_, v)) in data {
-                    total += v;
-
-                    let entry = lookup_map.entry(k).or_default();
-
-                    // total balance
-                    entry.0 += v;
-                    // keyed balance
-                    *entry.1.entry(name).or_default() += v;
+    pub fn print_results(self) -> bool {
+        let mut result = false;
+        for message in self.messages {
+            match message {
+                (DebuggerMessageLevel::Info, msg) => log::info!("{}", msg),
+                (DebuggerMessageLevel::Debug, msg) => log::debug!("{}", msg),
+                (DebuggerMessageLevel::Error, msg) => {
+                    eprintln!("{}", msg);
+                    result = true;
                 }
             }
-
-            tracing::debug!("chip {} experienced {} events", name, chip_events);
         }
 
         tracing::info_span!("debug lookups").in_scope(|| {
-            let mut result = true;
-
             tracing::info!("Checking for imbalance");
-
             // checks the imbalance per lookup key
-            for (k, (v, cv)) in lookup_map {
+            for (k, (v, cv)) in self.lookup_map {
                 if v != 0 {
                     tracing::info!("lookup imbalance of {} for {}", v, k);
                     result = false;
@@ -230,8 +208,8 @@ where
             } else {
                 tracing::info!("positive values mean more looking than looked");
                 tracing::info!("negative values mean more looked than looking");
-                tracing::info!("total imbalance: {}", total);
-                if total == 0 {
+                tracing::info!("total imbalance: {}", self.total);
+                if self.total == 0 {
                     tracing::info!(
                         "total sends/receives match, but some lookups may have the wrong key"
                     );
@@ -240,5 +218,44 @@ where
 
             result
         })
+    }
+
+    pub fn debug_incremental<C>(&mut self, chips: &[MetaChip<SC::Val, C>], records: &[C::Record])
+    where
+        C: ChipBehavior<SC::Val>
+            + for<'b> Air<ProverConstraintFolder<'b, SC>>
+            + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        SC::Val: PrimeField64,
+    {
+        // this stores (total balance, chip => local balance) per lookup key
+        let chips = chips.into_iter();
+        let records = records.into_iter();
+
+        for chip in chips {
+            let mut chip_events = 0;
+            for record in records.clone() {
+                let data =
+                    DebugLookup::debug_lookups(chip, self.pk, record, self.types).lookup_data;
+                chip_events += data.len();
+
+                // this loop consumes counts and thus the lookup key which allows us to use Box
+                // rather than Rc
+                for (k, (_, v)) in data {
+                    self.total += v;
+
+                    let entry = self.lookup_map.entry(k).or_default();
+
+                    // total balance
+                    entry.0 += v;
+                    // keyed balance
+                    *entry.1.entry(chip.name()).or_default() += v;
+                }
+            }
+
+            self.messages.push((
+                DebuggerMessageLevel::Debug,
+                format!("chip {} experienced {} events", chip.name(), chip_events),
+            ));
+        }
     }
 }

@@ -689,6 +689,13 @@ where
     }
 }
 
+#[derive(Debug)]
+pub enum DebugConstraintFailure<F, EF> {
+    FieldInequality(F, F),
+    ExtensionNonzero(EF),
+    NonBoolean(F),
+}
+
 /// A folder for debugging constraints.
 pub struct DebugConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) preprocessed: ViewPair<'a, F>,
@@ -700,6 +707,7 @@ pub struct DebugConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) is_last_row: F,
     pub(crate) is_transition: F,
     pub(crate) public_values: &'a [F],
+    pub(crate) failures: Vec<DebugConstraintFailure<F, EF>>,
 }
 
 impl<'a, F, EF> DebugConstraintFolder<'a, F, EF>
@@ -709,11 +717,10 @@ where
 {
     #[allow(clippy::unused_self)]
     #[inline]
-    fn debug_eq_constraint(&self, x: F, y: F) {
+    fn debug_eq_constraint(&mut self, x: F, y: F) {
         if x != y {
-            let backtrace = std::backtrace::Backtrace::force_capture();
-            eprintln!("constraint failed: {x:?} != {y:?}\n{backtrace}");
-            panic!();
+            self.failures
+                .push(DebugConstraintFailure::FieldInequality(x, y));
         }
     }
 }
@@ -764,9 +771,7 @@ where
     fn assert_bool<I: Into<Self::Expr>>(&mut self, x: I) {
         let x = x.into();
         if x != F::zero() && x != F::one() {
-            let backtrace = std::backtrace::Backtrace::force_capture();
-            eprintln!("constraint failed: {x:?} is not a bool\n{backtrace}");
-            panic!();
+            self.failures.push(DebugConstraintFailure::NonBoolean(x));
         }
     }
 }
@@ -784,7 +789,11 @@ where
     where
         I: Into<Self::ExprEF>,
     {
-        assert_eq!(x.into(), EF::zero(), "constraints must evaluate to zero");
+        let x = x.into();
+        if x != EF::zero() {
+            self.failures
+                .push(DebugConstraintFailure::ExtensionNonzero(x));
+        }
     }
 }
 

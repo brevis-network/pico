@@ -4,13 +4,13 @@ use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
-use generic_array::GenericArray;
+use hybrid_array::Array;
 use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{AbstractField, Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
-use tracing::info;
+use tracing::debug;
 use typenum::U32;
 
 use crate::{
@@ -31,7 +31,7 @@ use crate::{
                 field_sqrt::FieldSqrtCols,
             },
             utils::{
-                field_params::{limbs_from_vec, FieldParameters},
+                field_params::{limbs_from_slice, FieldParameters},
                 limbs::Limbs,
             },
         },
@@ -65,8 +65,8 @@ pub struct EdDecompressCols<T> {
     pub nonce: T,
     pub ptr: T,
     pub sign: T,
-    pub x_access: GenericArray<MemoryWriteCols<T>, WordsFieldElement>,
-    pub y_access: GenericArray<MemoryReadCols<T>, WordsFieldElement>,
+    pub x_access: Array<MemoryWriteCols<T>, WordsFieldElement>,
+    pub y_access: Array<MemoryReadCols<T>, WordsFieldElement>,
     pub(crate) y_range: FieldLtCols<T, Ed25519BaseField>,
     pub(crate) yy: FieldOpCols<T, Ed25519BaseField>,
     pub(crate) u: FieldOpCols<T, Ed25519BaseField>,
@@ -157,11 +157,11 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.assert_bool(self.sign);
 
         let y: Limbs<V, U32> = limbs_from_prev_access(&self.y_access);
-        let max_num_limbs = P::to_limbs_field_vec(&Ed25519BaseField::modulus());
+        let max_num_limbs = P::to_limbs_field_slice(&Ed25519BaseField::modulus());
         self.y_range.eval(
             builder,
             &y,
-            &limbs_from_vec::<CB::Expr, P::Limbs, CB::F>(max_num_limbs),
+            &limbs_from_slice::<CB::Expr, P::Limbs, CB::F>(max_num_limbs),
             self.is_real,
         );
         self.yy.eval(
@@ -293,7 +293,7 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
     ) -> RowMajorMatrix<F> {
         let mut rows = Vec::new();
         let events = &input.ed_decompress_events;
-        info!("ed decompress precompile events: {:?}", events.len());
+        debug!("ed decompress precompile events: {:?}", events.len());
 
         for event in events {
             let mut row = [F::zero(); NUM_ED_DECOMPRESS_COLS];

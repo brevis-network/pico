@@ -2,6 +2,7 @@ use crate::chips::gadgets::utils::polynomial::Polynomial;
 use num::BigUint;
 use p3_field::PrimeField32;
 
+#[inline]
 fn biguint_to_field<F: PrimeField32>(num: BigUint) -> F {
     let mut x = F::zero();
     let mut power = F::from_canonical_u32(1u32);

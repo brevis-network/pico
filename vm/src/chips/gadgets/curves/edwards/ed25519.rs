@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use curve25519_dalek::edwards::CompressedEdwardsY;
-use generic_array::GenericArray;
+use hybrid_array::Array;
 use num::{BigUint, Num, One};
 use serde::{Deserialize, Serialize};
 use typenum::{U32, U62};
@@ -46,7 +46,7 @@ impl EllipticCurveParameters for Ed25519Parameters {
 }
 
 impl EdwardsParameters for Ed25519Parameters {
-    const D: GenericArray<u8, U32> = GenericArray::from_array([
+    const D: Array<u8, U32> = Array([
         163, 120, 89, 19, 202, 77, 235, 117, 171, 216, 65, 65, 77, 10, 112, 0, 152, 232, 121, 119,
         121, 64, 199, 140, 115, 254, 111, 43, 238, 108, 3, 82,
     ]);

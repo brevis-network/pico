@@ -22,7 +22,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2024-04-20
+          toolchain: nightly-2024-11-20
           override: true
       - run: rustup component add rustfmt
       - uses: actions-rs/cargo@v1
@@ -44,7 +44,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2024-04-20
+          toolchain: nightly-2024-11-20
           override: true
       - uses: actions/cache@v4
         with:
@@ -67,5 +67,6 @@ jobs:
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_combine -- --elf keccak
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf sha2_precompile --n 15 --step riscv
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf ed_precompile
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf uint256_precompile --step riscv
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf bls-simpler --step riscv
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf ed_precompile --step riscv

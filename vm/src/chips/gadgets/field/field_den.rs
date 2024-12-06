@@ -75,20 +75,20 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
         } else {
             &p_b * &p_result + &p_a - &p_result - &p_carry * &p_p
         };
-        debug_assert_eq!(vanishing_poly.degree(), P::NB_WITNESS_LIMBS);
+        debug_assert_eq!(vanishing_poly.degree(), P::NUM_WITNESS_LIMBS);
 
         let p_witness = compute_root_quotient_and_shift(
             &vanishing_poly,
             P::WITNESS_OFFSET,
-            P::NB_BITS_PER_LIMB as u32,
-            P::NB_WITNESS_LIMBS,
+            P::NUM_BITS_PER_LIMB as u32,
+            P::NUM_WITNESS_LIMBS,
         );
         let (p_witness_low, p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
 
         self.result = p_result.into();
         self.carry = p_carry.into();
-        self.witness_low = Limbs(p_witness_low.try_into().unwrap());
-        self.witness_high = Limbs(p_witness_high.try_into().unwrap());
+        self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
+        self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
 
         // Range checks
         record.add_u8_range_checks_field(&self.result.0, Some(chunk));

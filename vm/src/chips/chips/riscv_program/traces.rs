@@ -73,21 +73,33 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
                 .or_insert(1);
         });
 
+        let pc_base = input.program.pc_base;
+        let chunk = input.public_values.execution_chunk;
+        let row_fn: fn(u32, u32, usize, &HashMap<u32, usize>) -> [F; NUM_PROGRAM_MULT_COLS] =
+            if !input.unconstrained {
+                |pc_base: u32, chunk: u32, i: usize, instruction_counts: &HashMap<u32, usize>| {
+                    let pc = pc_base + (i as u32 * 4);
+                    let mut row = [F::zero(); NUM_PROGRAM_MULT_COLS];
+                    let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
+                    cols.chunk = F::from_canonical_u32(chunk);
+                    cols.multiplicity =
+                        F::from_canonical_usize(*instruction_counts.get(&pc).unwrap_or(&0));
+                    row
+                }
+                    as _
+            } else {
+                |_: u32, _: u32, _: usize, _: &HashMap<u32, usize>| {
+                    [F::zero(); NUM_PROGRAM_MULT_COLS] as _
+                }
+            };
+
         let rows = input
             .program
             .instructions
             .clone()
             .into_iter()
             .enumerate()
-            .map(|(i, _)| {
-                let pc = input.program.pc_base + (i as u32 * 4);
-                let mut row = [F::zero(); NUM_PROGRAM_MULT_COLS];
-                let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
-                cols.chunk = F::from_canonical_u32(input.public_values.execution_chunk);
-                cols.multiplicity =
-                    F::from_canonical_usize(*instruction_counts.get(&pc).unwrap_or(&0));
-                row
-            })
+            .map(|(i, _)| row_fn(pc_base, chunk, i, &instruction_counts))
             .collect::<Vec<_>>();
 
         // Convert the trace to a row major matrix.
