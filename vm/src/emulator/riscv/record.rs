@@ -1,4 +1,6 @@
-use super::syscalls::precompiles::keccak256::event::KeccakPermuteEvent;
+use super::syscalls::precompiles::{
+    keccak256::event::KeccakPermuteEvent, poseidon2::event::Poseidon2PermuteEvent,
+};
 use crate::{
     chips::chips::{
         alu::event::AluEvent,
@@ -66,6 +68,8 @@ pub struct EmulationRecord {
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the keccak256 permute events.
     pub keccak_permute_events: Vec<KeccakPermuteEvent>,
+    /// A trace of the Poseidon2 permute events.
+    pub poseidon2_permute_events: Vec<Poseidon2PermuteEvent>,
     /// A trace of the sha256 extend events.
     pub sha_extend_events: Vec<ShaExtendEvent>,
     /// A trace of the sha256 compress events.
@@ -150,6 +154,11 @@ impl EmulationRecord {
     /// Add a keccak permute event to the execution record.
     pub fn add_keccak_permute_lookup_event(&mut self, event: KeccakPermuteEvent) {
         self.keccak_permute_events.push(event);
+    }
+
+    /// Add a poseidon2 permute event to the execution record.
+    pub fn add_poseidon2_permute_lookup_event(&mut self, event: Poseidon2PermuteEvent) {
+        self.poseidon2_permute_events.push(event);
     }
 
     pub fn add_ed_add_lookup_event(&mut self, event: EllipticCurveAddEvent) {

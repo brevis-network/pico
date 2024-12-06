@@ -114,4 +114,7 @@ extern "C" {
 
     /// Executes a BN254 Fp2 multiplication on the given inputs.
     pub fn syscall_bn254_fp2_mulmod(p: *mut u32, q: *const u32);
+
+    /// Executes an poseidon2 permute on the given inputs.
+    pub fn syscall_poseidon2_permute(x: *const [u32; 16], y: *mut [u32; 16]);
 }

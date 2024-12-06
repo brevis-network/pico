@@ -750,6 +750,10 @@ impl RiscvEmulator {
                     _ => (self.opts.split_opts.deferred, 1),
                 };
                 let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
+                info!(
+                    ">>syscall_id: {:?}, syscall_count: {:?}, threshold: {:?} nonce: {:?} syscall_lookup_id: {:?}",
+                    syscall_id, syscall_count, threshold, nonce, syscall_lookup_id
+                );
                 self.record.nonce_lookup.insert(syscall_lookup_id, nonce);
                 *syscall_count += 1;
 

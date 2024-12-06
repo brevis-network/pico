@@ -23,6 +23,7 @@ use crate::{
         precompiles::{
             edwards::{EdAddAssignChip, EdDecompressChip},
             keccak256::KeccakPermuteChip,
+            poseidon2::Poseidon2PermuteChip,
             sha256::{compress::ShaCompressChip, extend::ShaExtendChip},
             uint256::Uint256MulChip,
         },
@@ -59,6 +60,7 @@ define_chip_type!(
         (Byte, ByteChip),
         (Range, RangeCheckChip),
         (KeecakP, KeccakPermuteChip),
-        (U256Mul, Uint256MulChip)
+        (U256Mul, Uint256MulChip),
+        (Poseidon2P, Poseidon2PermuteChip)
     ]
 );

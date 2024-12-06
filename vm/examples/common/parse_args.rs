@@ -14,6 +14,10 @@ const ELF_ED_PRECOMPILE: &[u8] =
     include_bytes!("../../src/compiler/test_data/riscv32im-ed25519-example-elf");
 const ELF_UINT256MUL_PRECOMPILE: &[u8] =
     include_bytes!("../../src/compiler/test_data/riscv32im-uint256-precompiled-elf");
+const ELF_POSEIDON2_PRECOMPILE: &[u8] =
+    include_bytes!("../../src/compiler/test_data/riscv32im-poseidon2-permute-elf");
+// const ELF_POSEIDON2_PRECOMPILE: &[u8] =
+//     include_bytes!("../../src/compiler/test_data/riscv32im-poseidon2-hash-elf");
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -70,6 +74,9 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String) {
     } else if args.elf == "uint256_precompile" {
         elf = ELF_UINT256MUL_PRECOMPILE;
         info!("Test Uint256 Mul Precompile");
+    } else if args.elf == "poseidon2_precompile" {
+        elf = ELF_POSEIDON2_PRECOMPILE;
+        info!("Test Poseidon2 Permute Precompile");
     } else {
         eprintln!("Invalid test elf. Accept: [ fibonacci | fib | f ], [ keccak | k ], [keccak_precompile], [ed_precompile]\n");
         std::process::exit(1);

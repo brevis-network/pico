@@ -219,7 +219,7 @@ where
 
                     // print the detailed per-chip balancing data
                     for (c, cv) in cv {
-                        tracing::info!("{} balance: {}", c, cv);
+                        tracing::info!("  {} balance: {}", c, cv);
                     }
                 }
             }

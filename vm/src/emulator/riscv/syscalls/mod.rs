@@ -16,6 +16,7 @@ use hashbrown::HashMap;
 use hint::{HintLenSyscall, HintReadSyscall};
 use precompiles::{
     edwards::decompress::EdwardsDecompressSyscall, keccak256::permute::Keccak256PermuteSyscall,
+    poseidon2::permute::Poseidon2PermuteSyscall,
 };
 use serde::{Deserialize, Serialize};
 use write::WriteSyscall;
@@ -101,6 +102,11 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     );
 
     syscall_map.insert(SyscallCode::UINT256_MUL, Arc::new(Uint256MulSyscall));
+
+    syscall_map.insert(
+        SyscallCode::POSEIDON2_PERMUTE,
+        Arc::new(Poseidon2PermuteSyscall),
+    );
 
     syscall_map
 }
