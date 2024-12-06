@@ -26,7 +26,7 @@ debug-assertions = true
 [workspace.dependencies]
 # pico
 pico-derive = { path = "derive" }
-pico-vm = { path = "vm", features = ["debug", "single-threaded"] }
+pico-vm = { path = "vm" }
 pico-sdk = { path = "sdk" }
 
 # p3
