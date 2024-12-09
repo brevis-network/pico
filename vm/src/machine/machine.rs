@@ -63,9 +63,11 @@ where
         let chips = self.chips();
         records.par_iter_mut().for_each(|record| {
             chips.iter().for_each(|chip| {
-                let mut extra = C::Record::default();
-                chip.extra_record(record, &mut extra);
-                record.append(&mut extra);
+                if chip.is_active(record) {
+                    let mut extra = C::Record::default();
+                    chip.extra_record(record, &mut extra);
+                    record.append(&mut extra);
+                }
             });
             record.register_nonces();
         });
