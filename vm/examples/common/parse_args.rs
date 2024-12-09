@@ -84,6 +84,9 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String, String) {
     } else if args.elf == "poseidon2_precompile" {
         elf = load_elf("poseidon2-permute");
         info!("Test Poseidon2 Permute Precompile");
+    } else if args.elf == "multiple-precompile" {
+        elf = load_elf("multiple-precompile");
+        info!("Test multiple precompiles in a single elf");
     } else {
         eprintln!("Invalid test elf. Accept: [ fibonacci | fib | f ], [ keccak | k ], [keccak_precompile], [ed_precompile]\n");
         std::process::exit(1);

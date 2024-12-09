@@ -66,7 +66,4 @@ jobs:
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_emulator
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_combine -- --elf keccak
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf sha2_precompile --n 15 --step riscv
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf uint256_precompile --step riscv
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf bls-simpler --step riscv
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf ed_precompile --step riscv
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf multiple-precompile --step riscv
