@@ -102,8 +102,8 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness_low.resize(P::Witness::USIZE, F::zero());
-        p_witness_high.resize(P::Witness::USIZE, F::zero());
+        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
+        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
         self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
         self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
 
@@ -168,8 +168,8 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness_low.resize(P::Witness::USIZE, F::zero());
-        p_witness_high.resize(P::Witness::USIZE, F::zero());
+        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
+        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
         self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
         self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
 
@@ -412,7 +412,7 @@ pub fn eval_field_operation<F: Field, CB: ChipBuilder<F>, P: FieldParameters>(
     let p_witness = p_witness_shifted - Polynomial::new(vec![offset; len]);
 
     // Multiply by (x-2^NUM_BITS_PER_LIMB) and make the constraint
-    let root_monomial = Polynomial::new(vec![-limb, CB::F::one().into()]);
+    let root_monomial = Polynomial::new(vec![-limb, CB::F::ONE.into()]);
 
     let constraints = p_vanishing - &(p_witness * root_monomial);
     for constraint in constraints.as_coefficients() {

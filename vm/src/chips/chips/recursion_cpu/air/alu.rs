@@ -8,7 +8,7 @@ use crate::{
     recursion::air::BinomialExtensionUtils,
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field, const L: usize> CpuChip<F, L> {
     /// Eval the ALU instructions.
@@ -19,7 +19,7 @@ impl<F: Field, const L: usize> CpuChip<F, L> {
     where
         AB: ChipBuilder<F>,
     {
-        let one = AB::Expr::one();
+        let one = AB::Expr::ONE;
         let is_alu_instruction = self.is_alu_instruction::<AB>(local);
 
         // Convert operand values from Block<Var> to BinomialExtension<Expr>.

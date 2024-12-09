@@ -17,7 +17,7 @@ use crate::{
     recursion::air::RecursionPublicValues,
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 
 impl<F: Field, AB, const L: usize> Air<AB> for CpuChip<F, L>
@@ -34,8 +34,8 @@ where
         let public_values: &RecursionPublicValues<AB::Expr> = pv_elms.as_slice().borrow();
         // let public_values: &RecursionPublicValues<AB::Expr> = &RecursionPublicValues::default();
 
-        let zero = AB::Expr::zero();
-        let one = AB::Expr::one();
+        let zero = AB::Expr::ZERO;
+        let one = AB::Expr::ONE;
 
         // Constrain the program.
 

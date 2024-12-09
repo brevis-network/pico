@@ -48,7 +48,7 @@ where
                 ),
                 ByteOpcode::LTU => builder.looked_byte(field_op, local.ltu, local.b, local.c, mult),
                 ByteOpcode::MSB => {
-                    builder.looked_byte(field_op, local.msb, local.b, CB::F::zero(), mult)
+                    builder.looked_byte(field_op, local.msb, local.b, CB::F::ZERO, mult)
                 }
             }
         }

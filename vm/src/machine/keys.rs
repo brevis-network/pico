@@ -6,7 +6,7 @@ use hashbrown::HashMap;
 use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
-use p3_field::{AbstractField, TwoAdicField};
+use p3_field::{FieldAlgebra, TwoAdicField};
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
 
 pub struct BaseProvingKey<SC: StarkGenericConfig> {

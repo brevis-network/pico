@@ -7,7 +7,7 @@ use crate::{
 };
 use itertools::izip;
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
 /// Gadget columns for verifying that an compress is within the range `[0, modulus)`.
@@ -83,7 +83,7 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
         // Check the flags are of valid form.
 
         // Verrify that only one flag is set to one.
-        let mut sum_flags: CB::Expr = CB::Expr::zero();
+        let mut sum_flags: CB::Expr = CB::Expr::ZERO;
         for &flag in self.byte_flags.iter() {
             // Assert that the flag is boolean.
             builder.assert_bool(flag);
@@ -97,15 +97,15 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
 
         // A flag to indicate whether an equality check is necessary (this is for all bytes from
         // most significant until the first inequality.
-        let mut is_inequality_visited = CB::Expr::zero();
+        let mut is_inequality_visited = CB::Expr::ZERO;
 
         // The bytes of the modulus.
 
         let a: [CB::Expr; N] = core::array::from_fn(|i| a[i].clone().into());
         let b: [CB::Expr; N] = core::array::from_fn(|i| b[i].clone().into());
 
-        let mut first_lt_byte = CB::Expr::zero();
-        let mut b_comparison_byte = CB::Expr::zero();
+        let mut first_lt_byte = CB::Expr::ZERO;
+        let mut b_comparison_byte = CB::Expr::ZERO;
         for (a_byte, b_byte, &flag) in
             izip!(a.iter().rev(), b.iter().rev(), self.byte_flags.iter().rev())
         {
@@ -132,7 +132,7 @@ impl<V: Copy, const N: usize> AssertLtColsBytes<V, N> {
         // Send the comparison interaction.
         builder.looking_byte(
             ByteOpcode::LTU.as_field::<CB::F>(),
-            CB::F::one(),
+            CB::F::ONE,
             self.a_comparison_byte,
             self.b_comparison_byte,
             is_real,
@@ -196,7 +196,7 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
         // Check the flags are of valid form.
 
         // Verrify that only one flag is set to one.
-        let mut sum_flags: CB::Expr = CB::Expr::zero();
+        let mut sum_flags: CB::Expr = CB::Expr::ZERO;
         for &flag in self.bit_flags.iter() {
             // Assert that the flag is boolean.
             builder.assert_bool(flag);
@@ -210,15 +210,15 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
 
         // A flag to indicate whether an equality check is necessary (this is for all bits from
         // most significant until the first inequality.
-        let mut is_inequality_visited = CB::Expr::zero();
+        let mut is_inequality_visited = CB::Expr::ZERO;
 
         // The bits of the elements.
         let a: [CB::Expr; N] = core::array::from_fn(|i| a[i].clone().into());
         let b: [CB::Expr; N] = core::array::from_fn(|i| b[i].clone().into());
 
         // Calculate the bit which is the first inequality.
-        let mut a_comparison_bit = CB::Expr::zero();
-        let mut b_comparison_bit = CB::Expr::zero();
+        let mut a_comparison_bit = CB::Expr::ZERO;
+        let mut b_comparison_bit = CB::Expr::ZERO;
         for (a_bit, b_bit, &flag) in
             izip!(a.iter().rev(), b.iter().rev(), self.bit_flags.iter().rev())
         {
@@ -237,9 +237,9 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
 
         builder
             .when(is_real.clone())
-            .assert_eq(a_comparison_bit, CB::F::zero());
+            .assert_eq(a_comparison_bit, CB::F::ZERO);
         builder
             .when(is_real.clone())
-            .assert_eq(b_comparison_bit, CB::F::one());
+            .assert_eq(b_comparison_bit, CB::F::ONE);
     }
 }

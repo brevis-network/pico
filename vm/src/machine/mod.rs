@@ -2,6 +2,7 @@ pub mod builder;
 pub mod chip;
 pub mod debug;
 pub mod extension;
+pub mod field;
 pub mod folder;
 pub mod keys;
 pub mod logger;

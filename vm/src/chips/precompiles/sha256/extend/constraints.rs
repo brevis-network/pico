@@ -1,5 +1,5 @@
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 
 use crate::{
@@ -33,7 +33,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         let i_start = CB::F::from_canonical_u32(16);
         let nb_bytes_in_word = CB::F::from_canonical_u32(4);
@@ -205,7 +205,7 @@ where
             local.nonce,
             CB::F::from_canonical_u32(SyscallCode::SHA_EXTEND.syscall_id()),
             local.w_ptr,
-            CB::Expr::zero(),
+            CB::Expr::ZERO,
             local.cycle_48_start,
         );
 

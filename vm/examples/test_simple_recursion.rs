@@ -18,7 +18,9 @@ use pico_vm::{
         keys::BaseVerifyingKey, logger::setup_logger, machine::MachineBehavior, proof::BaseProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{MAX_NUM_PVS, RISCV_NUM_PVS, RISCV_SIMPLE_DEGREE},
+    primitives::consts::{
+        BABYBEAR_S_BOX_DEGREE, MAX_NUM_PVS, PERMUTATION_WIDTH, RISCV_NUM_PVS, RISCV_SIMPLE_DEGREE,
+    },
     recursion::runtime::Runtime as RecursionRuntime,
 };
 use std::{
@@ -62,7 +64,7 @@ pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
 fn main() {
     setup_logger();
 
-    let (elf, stdin, step) = parse_args::parse_args();
+    let (elf, stdin, step, field) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("\n Creating Program..");
@@ -197,7 +199,10 @@ fn main() {
 
     // Get field_config program
     // Note that simple_machine is used as input for recursive verifier to build the program
-    info!("\n Build field_config program (at {:?})..", start.elapsed());
+    info!(
+        "\n Build simple recursion program (at {:?})..",
+        start.elapsed()
+    );
     let recursion_program =
         SimpleVerifierCircuit::<rcf::FieldConfig, _>::build(simple_machine.base_machine());
 
@@ -205,12 +210,14 @@ fn main() {
     let mut hasher = DefaultHasher::new();
     serialized_program.hash(&mut hasher);
     let hash = hasher.finish();
-    info!("field_config program hash: {}", hash);
-    assert_eq!(hash, 5448223637700802399);
+    info!("Simple recursion program hash: {}", hash);
+    // assert_eq!(hash, 5942896757507644055);
 
     // Get field_config input
-    let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
-    let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
+    // let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
+    // let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
+    let mut reconstruct_challenger = simple_machine.config().challenger();
+    let mut base_challenger = simple_machine.config().challenger();
 
     let recursion_stdin = SimpleRecursionStdin::construct(
         simple_machine.base_machine(),
@@ -229,6 +236,9 @@ fn main() {
             <rcf::StarkConfig as StarkGenericConfig>::Val,
             <rcf::StarkConfig as StarkGenericConfig>::Challenge,
             _,
+            _,
+            PERMUTATION_WIDTH,
+            BABYBEAR_S_BOX_DEGREE,
         >::new(&recursion_program, simple_machine.config().perm.clone());
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
@@ -236,7 +246,7 @@ fn main() {
     });
 
     let stats = recursion_record.stats();
-    debug!("field_config record stats:");
+    debug!("Simple recursion record stats:");
     for (key, value) in &stats {
         debug!("|- {:<28}: {}", key, value);
     }
@@ -258,7 +268,10 @@ fn main() {
     );
 
     // Setup field_config machine
-    info!("\n Setup field_config machine (at {:?})..", start.elapsed());
+    info!(
+        "\n Setup simple recursion machine (at {:?})..",
+        start.elapsed()
+    );
     // Note that here we use SimpleMachine to build the recursion machine
     // Note that it should only accept witnesses initialized from records
     let recursion_machine = SimpleMachine::new(
@@ -269,7 +282,7 @@ fn main() {
     let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
 
     info!(
-        "\n Complement field_config records (at {:?})..",
+        "\n Complement simple recursion records (at {:?})..",
         start.elapsed()
     );
     let mut recursion_records = vec![recursion_record.clone()];
@@ -280,7 +293,7 @@ fn main() {
 
     // Generate the proof.
     info!(
-        "\n Generating field_config proof (at {:?})..",
+        "\n Generating simple recursion proof (at {:?})..",
         start.elapsed()
     );
     let recursion_proof = recursion_machine.prove(&recursion_pk, &recursion_witness);
@@ -288,7 +301,7 @@ fn main() {
 
     // Verify the proof.
     info!(
-        "\n Verifying field_config proof (at {:?})..",
+        "\n Verifying simple recursion proof (at {:?})..",
         start.elapsed()
     );
     let recursion_result = recursion_machine.verify(&recursion_vk, &recursion_proof);

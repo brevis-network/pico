@@ -3,7 +3,7 @@ use crate::{
     primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, ExtensionField, Field};
+use p3_field::{ExtensionField, Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut};
@@ -50,7 +50,7 @@ impl<T: Clone> Block<T> {
     pub fn as_extension<F: Field, AB: ChipBuilder<F, Var = T>>(
         &self,
     ) -> BinomialExtension<AB::Expr> {
-        let arr: [AB::Expr; 4] = self.0.clone().map(|x| AB::Expr::zero() + x);
+        let arr: [AB::Expr; 4] = self.0.clone().map(|x| AB::Expr::ZERO + x);
         BinomialExtension(arr)
     }
 
@@ -58,7 +58,7 @@ impl<T: Clone> Block<T> {
         &self,
         base: AB::Expr,
     ) -> BinomialExtension<AB::Expr> {
-        let mut arr: [AB::Expr; 4] = self.0.clone().map(|_| AB::Expr::zero());
+        let mut arr: [AB::Expr; 4] = self.0.clone().map(|_| AB::Expr::ZERO);
         arr[0] = base;
 
         BinomialExtension(arr)
@@ -71,9 +71,9 @@ impl<T> From<[T; EXTENSION_DEGREE]> for Block<T> {
     }
 }
 
-impl<T: AbstractField> From<T> for Block<T> {
+impl<T: FieldAlgebra> From<T> for Block<T> {
     fn from(value: T) -> Self {
-        Self([value, T::zero(), T::zero(), T::zero()])
+        Self([value, T::ZERO, T::ZERO, T::ZERO])
     }
 }
 

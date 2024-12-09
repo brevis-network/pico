@@ -56,39 +56,39 @@ impl<F: Field> OpcodeSelectorCols<F> {
         self.imm_c = F::from_bool(instruction.imm_c);
 
         if instruction.is_alu_instruction() {
-            self.is_alu = F::one();
+            self.is_alu = F::ONE;
         } else if instruction.is_ecall_instruction() {
-            self.is_ecall = F::one();
+            self.is_ecall = F::ONE;
         } else if instruction.is_memory_instruction() {
             match instruction.opcode {
-                Opcode::LB => self.is_lb = F::one(),
-                Opcode::LBU => self.is_lbu = F::one(),
-                Opcode::LHU => self.is_lhu = F::one(),
-                Opcode::LH => self.is_lh = F::one(),
-                Opcode::LW => self.is_lw = F::one(),
-                Opcode::SB => self.is_sb = F::one(),
-                Opcode::SH => self.is_sh = F::one(),
-                Opcode::SW => self.is_sw = F::one(),
+                Opcode::LB => self.is_lb = F::ONE,
+                Opcode::LBU => self.is_lbu = F::ONE,
+                Opcode::LHU => self.is_lhu = F::ONE,
+                Opcode::LH => self.is_lh = F::ONE,
+                Opcode::LW => self.is_lw = F::ONE,
+                Opcode::SB => self.is_sb = F::ONE,
+                Opcode::SH => self.is_sh = F::ONE,
+                Opcode::SW => self.is_sw = F::ONE,
                 _ => unreachable!(),
             }
         } else if instruction.is_branch_instruction() {
             match instruction.opcode {
-                Opcode::BEQ => self.is_beq = F::one(),
-                Opcode::BNE => self.is_bne = F::one(),
-                Opcode::BLT => self.is_blt = F::one(),
-                Opcode::BGE => self.is_bge = F::one(),
-                Opcode::BLTU => self.is_bltu = F::one(),
-                Opcode::BGEU => self.is_bgeu = F::one(),
+                Opcode::BEQ => self.is_beq = F::ONE,
+                Opcode::BNE => self.is_bne = F::ONE,
+                Opcode::BLT => self.is_blt = F::ONE,
+                Opcode::BGE => self.is_bge = F::ONE,
+                Opcode::BLTU => self.is_bltu = F::ONE,
+                Opcode::BGEU => self.is_bgeu = F::ONE,
                 _ => unreachable!(),
             }
         } else if instruction.opcode == Opcode::JAL {
-            self.is_jal = F::one();
+            self.is_jal = F::ONE;
         } else if instruction.opcode == Opcode::JALR {
-            self.is_jalr = F::one();
+            self.is_jalr = F::ONE;
         } else if instruction.opcode == Opcode::AUIPC {
-            self.is_auipc = F::one();
+            self.is_auipc = F::ONE;
         } else if instruction.opcode == Opcode::UNIMP {
-            self.is_unimpl = F::one();
+            self.is_unimpl = F::ONE;
         }
     }
 }

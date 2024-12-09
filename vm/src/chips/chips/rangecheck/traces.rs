@@ -39,7 +39,7 @@ where
 
     fn generate_main(&self, input: &R, _: &mut R) -> RowMajorMatrix<F> {
         let mut trace = RowMajorMatrix::new(
-            vec![F::zero(); NUM_RANGECHECK_MULT_COLS * NUM_ROWS],
+            vec![F::ZERO; NUM_RANGECHECK_MULT_COLS * NUM_ROWS],
             NUM_RANGECHECK_MULT_COLS,
         );
 
@@ -73,7 +73,7 @@ impl<R, P, F: Field> RangeCheckChip<R, P, F> {
     pub fn preprocess() -> RowMajorMatrix<F> {
         // The trace containing all values, with all multiplicities set to zero.
         let mut initial_trace = RowMajorMatrix::new(
-            vec![F::zero(); NUM_ROWS * NUM_RANGECHECK_PREPROCESSED_COLS],
+            vec![F::ZERO; NUM_ROWS * NUM_RANGECHECK_PREPROCESSED_COLS],
             NUM_RANGECHECK_PREPROCESSED_COLS,
         );
 
@@ -83,8 +83,8 @@ impl<R, P, F: Field> RangeCheckChip<R, P, F> {
                 initial_trace.row_mut(row_index as usize).borrow_mut();
 
             let nbits = row_index.checked_ilog2().unwrap_or_default();
-            let zero = F::zero();
-            let one = F::one();
+            let zero = F::ZERO;
+            let one = F::ONE;
 
             // Set the column values
             row.value = F::from_canonical_u32(row_index);

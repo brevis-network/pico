@@ -74,7 +74,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
         };
 
         let num_columns = <Poseidon2WideChip<DEGREE, F> as BaseAir<F>>::width(self);
-        let mut rows = vec![F::zero(); nb_padded_rows * num_columns];
+        let mut rows = vec![F::ZERO; nb_padded_rows * num_columns];
 
         // Populate the hash events.  We do this serially, since each absorb event could populate a
         // different number of rows.  Also, most of the rows are populated by the compress
@@ -109,8 +109,8 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
         let padded_rows = trace.values.par_chunks_mut(num_columns).skip(nb_rows);
 
         if self.pad {
-            let mut dummy_row = vec![F::zero(); num_columns];
-            self.populate_permutation([F::zero(); WIDTH], None, &mut dummy_row);
+            let mut dummy_row = vec![F::ZERO; num_columns];
+            self.populate_permutation([F::ZERO; WIDTH], None, &mut dummy_row);
             padded_rows.for_each(|padded_row| {
                 padded_row.copy_from_slice(&dummy_row);
             });
@@ -131,8 +131,8 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
             let mut cols = self.convert_mut(input_row);
             let control_flow = cols.control_flow_mut();
 
-            control_flow.is_compress = F::one();
-            control_flow.is_syscall_row = F::one();
+            control_flow.is_compress = F::ONE;
+            control_flow.is_syscall_row = F::ONE;
         }
 
         // Populate the syscall params fields.
@@ -154,7 +154,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
             memory.start_addr = compress_event.left;
             // Populate the first half of the memory inputs in the memory struct.
             for i in 0..WIDTH / 2 {
-                memory.memory_slot_used[i] = F::one();
+                memory.memory_slot_used[i] = F::ONE;
                 memory.memory_accesses[i].populate(&compress_event.input_records[i]);
             }
         }
@@ -184,8 +184,8 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
             let mut cols = self.convert_mut(output_row);
             let control_flow = cols.control_flow_mut();
 
-            control_flow.is_compress = F::one();
-            control_flow.is_compress_output = F::one();
+            control_flow.is_compress = F::ONE;
+            control_flow.is_compress_output = F::ONE;
         }
 
         {
@@ -205,7 +205,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
             memory.start_addr = compress_event.dst;
             // Populate the first half of the memory inputs in the memory struct.
             for i in 0..WIDTH / 2 {
-                memory.memory_slot_used[i] = F::one();
+                memory.memory_slot_used[i] = F::ONE;
                 memory.memory_accesses[i].populate(&compress_event.result_records[i]);
             }
         }
@@ -233,7 +233,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
     ) {
         // We currently don't support an input_len of 0, since it will need special logic in the
         // AIR.
-        assert!(absorb_event.input_len > F::zero());
+        assert!(absorb_event.input_len > F::ZERO);
 
         let mut last_row_ending_cursor = 0;
         let num_absorb_rows = absorb_event.iterations.len();
@@ -248,7 +248,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
                 let mut cols = self.convert_mut(absorb_row);
                 let control_flow = cols.control_flow_mut();
 
-                control_flow.is_absorb = F::one();
+                control_flow.is_absorb = F::ONE;
                 control_flow.is_syscall_row = F::from_bool(is_syscall_row);
                 control_flow.is_absorb_no_perm = F::from_bool(!absorb_iter.do_perm);
                 control_flow.is_absorb_not_last_row = F::from_bool(!is_last_row);
@@ -279,7 +279,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
 
                 memory.start_addr = absorb_iter.start_addr;
                 for (i, input_record) in absorb_iter.input_records.iter().enumerate() {
-                    memory.memory_slot_used[i + absorb_iter.state_cursor] = F::one();
+                    memory.memory_slot_used[i + absorb_iter.state_cursor] = F::ONE;
                     memory.memory_accesses[i + absorb_iter.state_cursor].populate(input_record);
                 }
             }
@@ -360,11 +360,11 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
                 absorb_workspace.is_first_hash_row =
                     F::from_bool(iter_num == 0 && absorb_event.absorb_num.is_zero());
 
-                absorb_workspace.start_mem_idx_bitmap[absorb_iter.state_cursor] = F::one();
+                absorb_workspace.start_mem_idx_bitmap[absorb_iter.state_cursor] = F::ONE;
                 if is_last_row {
-                    absorb_workspace.end_mem_idx_bitmap[last_row_ending_cursor] = F::one();
+                    absorb_workspace.end_mem_idx_bitmap[last_row_ending_cursor] = F::ONE;
                 } else {
-                    absorb_workspace.end_mem_idx_bitmap[7] = F::one();
+                    absorb_workspace.end_mem_idx_bitmap[7] = F::ONE;
                 }
             }
 
@@ -390,8 +390,8 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
         {
             let mut cols = self.convert_mut(row);
             let control_flow = cols.control_flow_mut();
-            control_flow.is_finalize = F::one();
-            control_flow.is_syscall_row = F::one();
+            control_flow.is_finalize = F::ONE;
+            control_flow.is_syscall_row = F::ONE;
         }
 
         // Populate the syscall params fields.
@@ -411,7 +411,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
 
             memory.start_addr = finalize_event.output_ptr;
             for i in 0..WIDTH / 2 {
-                memory.memory_slot_used[i] = F::one();
+                memory.memory_slot_used[i] = F::ONE;
                 memory.memory_accesses[i].populate(&finalize_event.output_records[i]);
             }
         }
@@ -524,8 +524,8 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
             // avoid adding columns for the result of the sbox, and instead include the x^3 -> x^7
             // part of the sbox in the constraint for the linear layer
-            let mut sbox_deg_7: [F; 16] = [F::zero(); WIDTH];
-            let mut sbox_deg_3: [F; 16] = [F::zero(); WIDTH];
+            let mut sbox_deg_7: [F; 16] = [F::ZERO; WIDTH];
+            let mut sbox_deg_3: [F; 16] = [F::ZERO; WIDTH];
             for i in 0..WIDTH {
                 sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
                 sbox_deg_7[i] = sbox_deg_3[i] * sbox_deg_3[i] * add_rc[i];
@@ -550,7 +550,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2WideChip<DEGREE, F> {
         sbox: &mut Option<&mut [F; NUM_INTERNAL_ROUNDS]>,
     ) -> [F; WIDTH] {
         let mut state: [F; WIDTH] = *internal_rounds_state;
-        let mut sbox_deg_3: [F; NUM_INTERNAL_ROUNDS] = [F::zero(); NUM_INTERNAL_ROUNDS];
+        let mut sbox_deg_3: [F; NUM_INTERNAL_ROUNDS] = [F::ZERO; NUM_INTERNAL_ROUNDS];
         for r in 0..NUM_INTERNAL_ROUNDS {
             // Add the round constant to the 0th state element.
             // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding

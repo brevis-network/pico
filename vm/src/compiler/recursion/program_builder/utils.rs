@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     compiler::recursion::ir::{Array, Builder, Felt, Var},
-    configs::config::{FieldGenericConfig, StarkGenericConfig},
+    configs::config::{FieldGenericConfig, SimpleFriConfig, StarkGenericConfig},
     instances::configs::recur_config as rcf,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -17,18 +17,17 @@ use crate::{
         proof::{BaseProof, QuotientData},
         utils::order_chips,
     },
-    primitives::consts::DIGEST_SIZE,
-    recursion::{air::ChallengerPublicValues, runtime::PERMUTATION_WIDTH},
+    primitives::consts::{DIGEST_SIZE, PERMUTATION_WIDTH},
+    recursion::air::ChallengerPublicValues,
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{AbstractField, TwoAdicField};
-use p3_fri::FriConfig;
+use p3_field::{FieldAlgebra, TwoAdicField};
 
 pub fn const_fri_config(
     builder: &mut Builder<rcf::FieldConfig>,
-    config: &FriConfig<rcf::SC_ChallengeMmcs>,
+    config: &SimpleFriConfig,
 ) -> FriConfigVariable<rcf::FieldConfig> {
     let two_addicity = rcf::SC_Val::TWO_ADICITY;
     let mut generators = builder.dyn_array(two_addicity);
@@ -39,7 +38,7 @@ pub fn const_fri_config(
 
         let constant_domain = TwoAdicMultiplicativeCoset {
             log_n: i,
-            shift: rcf::SC_Val::one(),
+            shift: rcf::SC_Val::ONE,
         };
         let domain_value: TwoAdicMultiplicativeCosetVariable<_> = builder.constant(constant_domain);
         builder.set(&mut subgroups, i, domain_value);
@@ -158,7 +157,7 @@ pub fn hash_vkey<FC: FieldGenericConfig>(
     });
     builder.set(&mut inputs, DIGEST_SIZE, vk.pc_start);
     let four: Var<_> = builder.constant(FC::N::from_canonical_usize(4));
-    let one: Var<_> = builder.constant(FC::N::one());
+    let one: Var<_> = builder.constant(FC::N::ONE);
     builder
         .range(0, vk.preprocessed_domains.len())
         .for_each(|i, builder| {

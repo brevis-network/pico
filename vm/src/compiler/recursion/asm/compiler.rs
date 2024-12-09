@@ -150,10 +150,10 @@ impl<F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> AsmCo
                     self.push(AsmInstruction::SubFIN(dst.fp(), lhs, rhs.fp()), trace);
                 }
                 DslIr::NegV(dst, src) => {
-                    self.push(AsmInstruction::SubFIN(dst.fp(), F::zero(), src.fp()), trace);
+                    self.push(AsmInstruction::SubFIN(dst.fp(), F::ZERO, src.fp()), trace);
                 }
                 DslIr::NegF(dst, src) => {
-                    self.push(AsmInstruction::SubFIN(dst.fp(), F::zero(), src.fp()), trace);
+                    self.push(AsmInstruction::SubFIN(dst.fp(), F::ZERO, src.fp()), trace);
                 }
                 DslIr::DivF(dst, lhs, rhs) => {
                     self.push(AsmInstruction::DivF(dst.fp(), lhs.fp(), rhs.fp()), trace);
@@ -165,10 +165,10 @@ impl<F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> AsmCo
                     self.push(AsmInstruction::DivFIN(dst.fp(), lhs, rhs.fp()), trace);
                 }
                 DslIr::InvV(dst, src) => {
-                    self.push(AsmInstruction::DivFIN(dst.fp(), F::one(), src.fp()), trace);
+                    self.push(AsmInstruction::DivFIN(dst.fp(), F::ONE, src.fp()), trace);
                 }
                 DslIr::InvF(dst, src) => {
-                    self.push(AsmInstruction::DivFIN(dst.fp(), F::one(), src.fp()), trace);
+                    self.push(AsmInstruction::DivFIN(dst.fp(), F::ONE, src.fp()), trace);
                 }
                 DslIr::DivEF(dst, lhs, rhs) => {
                     self.push(AsmInstruction::DivE(dst.fp(), lhs.fp(), rhs.fp()), trace);
@@ -195,7 +195,7 @@ impl<F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> AsmCo
                     self.push(AsmInstruction::DivEI(dst.fp(), lhs.fp(), rhs), trace);
                 }
                 DslIr::InvE(dst, src) => {
-                    self.push(AsmInstruction::DivEIN(dst.fp(), EF::one(), src.fp()), trace);
+                    self.push(AsmInstruction::DivEIN(dst.fp(), EF::ONE, src.fp()), trace);
                 }
                 DslIr::SubEF(dst, lhs, rhs) => {
                     self.push(AsmInstruction::SubE(dst.fp(), lhs.fp(), rhs.fp()), trace);
@@ -216,10 +216,7 @@ impl<F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> AsmCo
                     self.push(AsmInstruction::SubEI(dst.fp(), lhs.fp(), rhs), trace);
                 }
                 DslIr::NegE(dst, src) => {
-                    self.push(
-                        AsmInstruction::SubEIN(dst.fp(), EF::zero(), src.fp()),
-                        trace,
-                    );
+                    self.push(AsmInstruction::SubEIN(dst.fp(), EF::ZERO, src.fp()), trace);
                 }
                 DslIr::MulV(dst, lhs, rhs) => {
                     self.push(AsmInstruction::MulF(dst.fp(), lhs.fp(), rhs.fp()), trace);
@@ -569,7 +566,7 @@ impl<F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> AsmCo
             Usize::Const(len) => {
                 let len = F::from_canonical_usize(len);
                 self.push(
-                    AsmInstruction::AddFI(ptr.fp(), HEAP_PTR, F::zero()),
+                    AsmInstruction::AddFI(ptr.fp(), HEAP_PTR, F::ZERO),
                     backtrace.clone(),
                 );
                 self.push(
@@ -579,7 +576,7 @@ impl<F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> AsmCo
             }
             Usize::Var(len) => {
                 self.push(
-                    AsmInstruction::AddFI(ptr.fp(), HEAP_PTR, F::zero()),
+                    AsmInstruction::AddFI(ptr.fp(), HEAP_PTR, F::ZERO),
                     backtrace.clone(),
                 );
                 self.push(AsmInstruction::MulFI(A0, len.fp(), size), backtrace.clone());
@@ -781,7 +778,7 @@ impl<'a, F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField>
         f(self.loop_var, self.compiler);
 
         // If the step size is just one, compile to the optimized branch instruction.
-        if self.step_size == F::one() {
+        if self.step_size == F::ONE {
             self.jump_to_loop_body_inc(loop_label);
         } else {
             // Increment the loop variable.
@@ -836,7 +833,7 @@ impl<'a, F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField>
             }
             Usize::Var(var) => {
                 self.compiler.push(
-                    AsmInstruction::AddFI(self.loop_var.fp(), var.fp(), F::zero()),
+                    AsmInstruction::AddFI(self.loop_var.fp(), var.fp(), F::ZERO),
                     None,
                 );
             }

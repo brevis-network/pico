@@ -7,7 +7,7 @@ use std::{fmt::Debug, marker::PhantomData};
 use hashbrown::HashMap;
 use num::{BigUint, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use pico_derive::AlignedBorrow;
@@ -150,7 +150,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
         let mut rows = events
             .par_iter()
             .map(|event| {
-                let mut row = [F::zero(); NUM_ED_ADD_COLS];
+                let mut row = [F::ZERO; NUM_ED_ADD_COLS];
                 let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
                 let mut rlu = Vec::new();
                 Self::event_to_row(event, cols, &mut rlu);
@@ -159,7 +159,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
             .collect::<Vec<_>>();
 
         pad_rows(&mut rows, || {
-            let mut row = [F::zero(); NUM_ED_ADD_COLS];
+            let mut row = [F::ZERO; NUM_ED_ADD_COLS];
             let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
             let zero = BigUint::zero();
             Self::populate_field_ops(
@@ -199,7 +199,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
             .map(|events| {
                 let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::zero(); NUM_ED_ADD_COLS];
+                    let mut row = [F::ZERO; NUM_ED_ADD_COLS];
                     let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
                     Self::event_to_row(event, cols, &mut range);
                 });
@@ -231,7 +231,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
         let (q_x, q_y) = (q.x, q.y);
 
         // Populate basic columns.
-        cols.is_real = F::one();
+        cols.is_real = F::ONE;
         cols.chunk = F::from_canonical_u32(event.chunk);
         cols.clk = F::from_canonical_u32(event.clk);
         cols.p_ptr = F::from_canonical_u32(event.p_ptr);
@@ -272,7 +272,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         let x1: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
             limbs_from_prev_access(&local.p_access[0..8]);

@@ -14,7 +14,7 @@ pub struct RecursionProgram<F> {
 
 impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
     fn pc_start(&self) -> F {
-        F::zero()
+        F::ZERO
     }
 
     fn default() -> Self {

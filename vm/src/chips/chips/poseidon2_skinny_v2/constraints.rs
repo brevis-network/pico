@@ -5,7 +5,7 @@ use super::{
 };
 use crate::machine::builder::{ChipBuilder, RecursionBuilder};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::{array, borrow::Borrow};
 
@@ -101,7 +101,7 @@ impl<const DEGREE: usize, F: Field> Poseidon2SkinnyChip<DEGREE, F> {
 
         // Apply the sboxes.
         // See `populate_external_round` for why we don't have columns for the sbox output here.
-        let mut sbox_deg_7: [CB::Expr; WIDTH] = core::array::from_fn(|_| CB::Expr::zero());
+        let mut sbox_deg_7: [CB::Expr; WIDTH] = core::array::from_fn(|_| CB::Expr::ZERO);
         for i in 0..WIDTH {
             let sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
             sbox_deg_7[i] = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc[i].clone();

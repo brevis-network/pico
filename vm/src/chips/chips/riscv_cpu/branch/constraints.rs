@@ -5,7 +5,7 @@ use crate::{
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a branch instruction.
@@ -61,6 +61,8 @@ impl<F: Field> CpuChip<F> {
                 .assert_eq(branch_cols.next_pc.reduce::<CB>(), local.next_pc);
 
             // Range check branch_cols.pc and branch_cols.next_pc.
+            // println!("marking field type: {:?}", CB::F::field_type());
+
             BabyBearWordRangeChecker::<CB::F>::range_check(
                 builder,
                 branch_cols.pc,
@@ -186,7 +188,7 @@ impl<F: Field> CpuChip<F> {
         let use_signed_comparison = local.opcode_selector.is_blt + local.opcode_selector.is_bge;
         builder.looking_alu(
             use_signed_comparison.clone() * Opcode::SLT.as_field::<CB::F>()
-                + (CB::Expr::one() - use_signed_comparison.clone())
+                + (CB::Expr::ONE - use_signed_comparison.clone())
                     * Opcode::SLTU.as_field::<CB::F>(),
             Word::extend_var::<CB>(branch_cols.a_lt_b),
             local.op_a_val(),
@@ -199,7 +201,7 @@ impl<F: Field> CpuChip<F> {
         // Calculate a_gt_b <==> a > b (using appropriate signedness).
         builder.looking_alu(
             use_signed_comparison.clone() * Opcode::SLT.as_field::<CB::F>()
-                + (CB::Expr::one() - use_signed_comparison) * Opcode::SLTU.as_field::<CB::F>(),
+                + (CB::Expr::ONE - use_signed_comparison) * Opcode::SLTU.as_field::<CB::F>(),
             Word::extend_var::<CB>(branch_cols.a_gt_b),
             local.op_b_val(),
             local.op_a_val(),

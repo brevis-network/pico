@@ -46,7 +46,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * NUM_EXT_ALU_PREPROCESSED_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_PREPROCESSED_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instructions.len() * NUM_EXT_ALU_ACCESS_COLS;
@@ -89,7 +89,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * NUM_EXT_ALU_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * NUM_EXT_ALU_VALUE_COLS;

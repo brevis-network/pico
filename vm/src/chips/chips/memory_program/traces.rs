@@ -33,11 +33,11 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
         let rows = program_memory
             .into_iter()
             .map(|(addr, word)| {
-                let mut row = [F::zero(); NUM_MEMORY_PROGRAM_PREPROCESSED_COLS];
+                let mut row = [F::ZERO; NUM_MEMORY_PROGRAM_PREPROCESSED_COLS];
                 let cols: &mut MemoryProgramPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
                 cols.addr = F::from_canonical_u32(addr);
                 cols.value = Word::from(word);
-                cols.is_real = F::one();
+                cols.is_real = F::ONE;
                 row
             })
             .collect::<Vec<_>>();
@@ -63,16 +63,16 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
             .collect::<Vec<_>>();
 
         let mult = if input.public_values.chunk == 1 {
-            F::one()
+            F::ONE
         } else {
-            F::zero()
+            F::ZERO
         };
 
         // Generate the trace rows for each event.
         let rows = program_memory_addrs
             .into_iter()
             .map(|_| {
-                let mut row = [F::zero(); NUM_MEMORY_PROGRAM_MULT_COLS];
+                let mut row = [F::ZERO; NUM_MEMORY_PROGRAM_MULT_COLS];
                 let cols: &mut MemoryProgramMultCols<F> = row.as_mut_slice().borrow_mut();
                 cols.multiplicity = mult;
                 cols.is_first_chunk.populate(input.public_values.chunk - 1);

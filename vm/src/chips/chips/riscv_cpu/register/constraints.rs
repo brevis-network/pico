@@ -3,7 +3,7 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     machine::builder::{ChipBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder},
 };
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a branch instruction.
@@ -27,7 +27,7 @@ impl<F: Field> CpuChip<F> {
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
             local.instruction.op_b[0],
             &local.op_b_access,
-            CB::Expr::one() - local.opcode_selector.imm_b,
+            CB::Expr::ONE - local.opcode_selector.imm_b,
         );
 
         builder.eval_memory_access(
@@ -35,7 +35,7 @@ impl<F: Field> CpuChip<F> {
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
             local.instruction.op_c[0],
             &local.op_c_access,
-            CB::Expr::one() - local.opcode_selector.imm_c,
+            CB::Expr::ONE - local.opcode_selector.imm_c,
         );
 
         // If we are writing to register 0, then the new value should be zero.

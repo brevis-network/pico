@@ -17,7 +17,7 @@ use crate::{
     primitives::consts::RISCV_NUM_PVS,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::{array, borrow::Borrow};
 
@@ -50,7 +50,7 @@ where
         // Constrain `is_first_chunk` to be 1 if and only if the chunk is the first chunk.
         IsZeroGadget::<CB::F>::eval(
             builder,
-            public_values.chunk.clone() - CB::F::one(),
+            public_values.chunk.clone() - CB::F::ONE,
             mult_local.is_first_chunk,
             prep_local.is_real.into(),
         );
@@ -68,7 +68,7 @@ where
             .when_not(mult_local.is_first_chunk.result)
             .assert_zero(mult_local.multiplicity);
 
-        let mut values = vec![CB::Expr::zero(), CB::Expr::zero(), prep_local.addr.into()];
+        let mut values = vec![CB::Expr::ZERO, CB::Expr::ZERO, prep_local.addr.into()];
         values.extend(prep_local.value.map(Into::into));
 
         builder.looked(SymbolicLookup::new(

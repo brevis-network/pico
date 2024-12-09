@@ -7,7 +7,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
@@ -26,7 +26,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Evaluate the addition operation.
         AddGadget::<CB::F>::eval(

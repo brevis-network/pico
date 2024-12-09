@@ -3,13 +3,13 @@
 use crate::machine::extension::BinomialExtension;
 use itertools::Itertools;
 use p3_air::{AirBuilder, FilteredAirBuilder};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use std::array;
 
 pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
     /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
     fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<Self> {
-        self.when_ne(condition, Self::F::one())
+        self.when_ne(condition, Self::F::ONE)
     }
 
     /// Asserts that an iterator of expressions are all equal.
@@ -37,7 +37,7 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
         a: impl Into<Self::Expr> + Clone,
         b: impl Into<Self::Expr> + Clone,
     ) -> Self::Expr {
-        condition.clone().into() * a.into() + (Self::Expr::one() - condition.into()) * b.into()
+        condition.clone().into() * a.into() + (Self::Expr::ONE - condition.into()) * b.into()
     }
 
     /// Index an array of expressions using an index bitmap.  This function assumes that the
@@ -47,7 +47,7 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
         array: &[impl Into<Self::Expr> + Clone],
         index_bitmap: &[impl Into<Self::Expr> + Clone],
     ) -> Self::Expr {
-        let mut result = Self::Expr::zero();
+        let mut result = Self::Expr::ZERO;
 
         for (value, i) in array.iter().zip_eq(index_bitmap) {
             result += value.clone().into() * i.clone().into();

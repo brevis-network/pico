@@ -1,7 +1,7 @@
 use super::{Builder, FromConstant, MemIndex, MemVariable, Ptr, Usize, Var, Variable};
 use crate::configs::config::FieldGenericConfig;
 use itertools::Itertools;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 
 /// An array that is either of static or dynamic size.
 #[derive(Debug, Clone)]
@@ -77,12 +77,12 @@ impl<FC: FieldGenericConfig, V: MemVariable<FC>> Array<FC, V> {
                     let start_v = start.materialize(builder);
                     let end_v = end.materialize(builder);
                     let valid = builder.lt(start_v, end_v);
-                    builder.assert_var_eq(valid, FC::N::one());
+                    builder.assert_var_eq(valid, FC::N::ONE);
 
                     let len_v = len.materialize(builder);
-                    let len_plus_1_v = builder.eval(len_v + FC::N::one());
+                    let len_plus_1_v = builder.eval(len_v + FC::N::ONE);
                     let valid = builder.lt(end_v, len_plus_1_v);
-                    builder.assert_var_eq(valid, FC::N::one());
+                    builder.assert_var_eq(valid, FC::N::ONE);
                 }
 
                 let slice_len: Usize<_> = builder.eval(end - start);
@@ -141,7 +141,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, FC::N::one());
+                    self.assert_var_eq(valid, FC::N::ONE);
                 }
                 let index = MemIndex {
                     index,
@@ -171,7 +171,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, FC::N::one());
+                    self.assert_var_eq(valid, FC::N::ONE);
                 }
                 let index = MemIndex {
                     index,
@@ -202,7 +202,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
                     let index_v = index.materialize(self);
                     let len_v = len.materialize(self);
                     let valid = self.lt(index_v, len_v);
-                    self.assert_var_eq(valid, FC::N::one());
+                    self.assert_var_eq(valid, FC::N::ONE);
                 }
                 let index = MemIndex {
                     index,

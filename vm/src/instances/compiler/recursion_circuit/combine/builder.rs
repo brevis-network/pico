@@ -38,7 +38,7 @@ use crate::{
     recursion::air::RecursionPublicValues,
 };
 use itertools::Itertools;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
@@ -66,7 +66,7 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
         );
 
         let pcs = TwoAdicFriPcsVariable {
-            config: const_fri_config(&mut builder, machine.config().pcs().fri_config()),
+            config: const_fri_config(&mut builder, machine.config().fri_config()),
         };
 
         Self::build_verifier(&mut builder, &pcs, machine, stdin);
@@ -131,7 +131,7 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
 
         // checkers
         let cumulative_sum: [Felt<_>; EXTENSION_DEGREE] =
-            array::from_fn(|_| builder.eval(<RecursionFC as FieldGenericConfig>::F::zero()));
+            array::from_fn(|_| builder.eval(<RecursionFC as FieldGenericConfig>::F::ZERO));
 
         // Iteratively verify proofs and check constraints
         builder.range(0, proofs.len()).for_each(|i, builder| {
@@ -183,7 +183,7 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
             The first proof in the batch
              */
             builder
-                .if_eq(i, <RecursionFC as FieldGenericConfig>::N::zero())
+                .if_eq(i, <RecursionFC as FieldGenericConfig>::N::ZERO)
                 .then(|builder| {
                     builder.assign(start_pc, public_values.start_pc);
                     builder.assign(current_pc, public_values.start_pc);
@@ -286,8 +286,8 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
             // digest constraints
             // ported from SP1
             {
-                let zero = <RecursionFC as FieldGenericConfig>::N::zero();
-                let one = <RecursionFC as FieldGenericConfig>::N::one();
+                let zero = <RecursionFC as FieldGenericConfig>::N::ZERO;
+                let one = <RecursionFC as FieldGenericConfig>::N::ONE;
 
                 // first compute is_zero for cvd
                 // the idea is to constrain cvd when cvd != 0, or is_zero == 0, so we assign is_zero = 0
@@ -401,19 +401,18 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
         completeness constraints
          */
         builder
-            .if_eq(flag_complete, <RecursionFC as FieldGenericConfig>::N::one())
+            .if_eq(flag_complete, <RecursionFC as FieldGenericConfig>::N::ONE)
             .then(|builder| {
-                builder.assert_felt_eq(current_pc, <RecursionFC as FieldGenericConfig>::F::zero());
-                builder.assert_felt_eq(start_chunk, <RecursionFC as FieldGenericConfig>::F::one());
-                builder
-                    .assert_felt_ne(current_chunk, <RecursionFC as FieldGenericConfig>::F::one());
+                builder.assert_felt_eq(current_pc, <RecursionFC as FieldGenericConfig>::F::ZERO);
+                builder.assert_felt_eq(start_chunk, <RecursionFC as FieldGenericConfig>::F::ONE);
+                builder.assert_felt_ne(current_chunk, <RecursionFC as FieldGenericConfig>::F::ONE);
                 builder.assert_felt_eq(
                     start_execution_chunk,
-                    <RecursionFC as FieldGenericConfig>::F::one(),
+                    <RecursionFC as FieldGenericConfig>::F::ONE,
                 );
                 builder.assert_felt_ne(
                     current_execution_chunk,
-                    <RecursionFC as FieldGenericConfig>::F::one(),
+                    <RecursionFC as FieldGenericConfig>::F::ONE,
                 );
 
                 assert_challenger_eq_pv(
@@ -423,14 +422,14 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
                 );
 
                 for b in cumulative_sum.iter() {
-                    builder.assert_felt_eq(*b, <RecursionFC as FieldGenericConfig>::F::zero());
+                    builder.assert_felt_eq(*b, <RecursionFC as FieldGenericConfig>::F::ZERO);
                 }
             });
 
         /*
         update public values and commit
          */
-        let zero: Felt<_> = builder.eval(<RecursionFC as FieldGenericConfig>::F::zero());
+        let zero: Felt<_> = builder.eval(<RecursionFC as FieldGenericConfig>::F::ZERO);
         let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
         let recursion_public_values: &mut RecursionPublicValues<_> =
             recursion_public_values_stream.as_mut_slice().borrow_mut();

@@ -14,7 +14,7 @@ use crate::{
 };
 use p3_air::Air;
 use p3_commit::LagrangeSelectors;
-use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 
 impl<FC: FieldGenericConfig, SC: StarkGenericConfig> StarkVerifier<FC, SC>
@@ -78,7 +78,7 @@ where
             is_last_row: selectors.is_last_row,
             is_transition: selectors.is_transition,
             alpha,
-            accumulator: SymbolicExt::zero(),
+            accumulator: SymbolicExt::ZERO,
             _marker: std::marker::PhantomData,
         };
 

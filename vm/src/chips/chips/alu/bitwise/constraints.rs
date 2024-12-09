@@ -8,7 +8,7 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 
 impl<F: Field> BaseAir<F> for BitwiseChip<F> {
@@ -32,7 +32,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Get the opcode for the operation.
         let opcode = local.is_xor * ByteOpcode::XOR.as_field::<CB::F>()

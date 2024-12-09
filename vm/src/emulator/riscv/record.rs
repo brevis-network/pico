@@ -26,7 +26,7 @@ use crate::{
     },
 };
 use hashbrown::HashMap;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{iter, sync::Arc};
 
@@ -328,7 +328,7 @@ impl RecordBehavior for EmulationRecord {
         });
     }
 
-    fn public_values<F: AbstractField>(&self) -> Vec<F> {
+    fn public_values<F: FieldAlgebra>(&self) -> Vec<F> {
         self.public_values.to_vec()
     }
 

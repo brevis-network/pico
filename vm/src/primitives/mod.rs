@@ -1,10 +1,14 @@
 //! pico-field_config-primitives contains types and functions that are used in both sp1-core and sp1-zkvm.
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
+use ff::PrimeField;
+pub use halo2curves::bn256::Fr as FFBn254Fr;
 use lazy_static::lazy_static;
-use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
-use p3_field::AbstractField;
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
+use p3_baby_bear::{BabyBear, Poseidon2BabyBear};
+use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};
+use p3_field::FieldAlgebra;
+use p3_mersenne_31::{Mersenne31, Poseidon2Mersenne31};
+use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::CryptographicHasher;
 
 pub mod consts;
@@ -12,12 +16,22 @@ pub mod consts_v2;
 pub mod types;
 use p3_symmetric::PaddingFreeSponge;
 
+use zkhash::{
+    ark_ff::{BigInteger, PrimeField as ark_PrimeField},
+    fields::bn256::FpBN256 as ark_FpBN256,
+    poseidon2::poseidon2_instance_bn256::RC3,
+};
+
+pub type PicoPoseidon2BabyBear = Poseidon2BabyBear<16>;
+pub type PicoPoseidon2Mersenne31 = Poseidon2Mersenne31<16>;
+pub type PicoPoseidon2Bn254 = Poseidon2Bn254<3>;
+
 lazy_static! {
     // These constants are created by a RNG.
 
     // This will be compatible with a poseidon2 permutation config with
     // a state width of 16 and total rounds (both full and partial) of 30.
-    pub static ref RC_16_30: [[BabyBear; 16]; 30] = [
+    pub static ref RC_16_30_BabyBear: [[BabyBear; 16]; 30] = [
         [
             BabyBear::from_wrapped_u32(2110014213),
             BabyBear::from_wrapped_u32(3964964605),
@@ -557,6 +571,549 @@ lazy_static! {
             BabyBear::from_wrapped_u32(2618031334),
             BabyBear::from_wrapped_u32(2040903247),
             BabyBear::from_wrapped_u32(3799795076),
+        ]
+    ];
+
+    pub static ref RC_16_30_M31: [[Mersenne31; 16]; 30] = [
+        [
+            Mersenne31::from_wrapped_u32(2110014213),
+            Mersenne31::from_wrapped_u32(3964964605),
+            Mersenne31::from_wrapped_u32(2190662774),
+            Mersenne31::from_wrapped_u32(2732996483),
+            Mersenne31::from_wrapped_u32(640767983),
+            Mersenne31::from_wrapped_u32(3403899136),
+            Mersenne31::from_wrapped_u32(1716033721),
+            Mersenne31::from_wrapped_u32(1606702601),
+            Mersenne31::from_wrapped_u32(3759873288),
+            Mersenne31::from_wrapped_u32(1466015491),
+            Mersenne31::from_wrapped_u32(1498308946),
+            Mersenne31::from_wrapped_u32(2844375094),
+            Mersenne31::from_wrapped_u32(3042463841),
+            Mersenne31::from_wrapped_u32(1969905919),
+            Mersenne31::from_wrapped_u32(4109944726),
+            Mersenne31::from_wrapped_u32(3925048366),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3706859504),
+            Mersenne31::from_wrapped_u32(759122502),
+            Mersenne31::from_wrapped_u32(3167665446),
+            Mersenne31::from_wrapped_u32(1131812921),
+            Mersenne31::from_wrapped_u32(1080754908),
+            Mersenne31::from_wrapped_u32(4080114493),
+            Mersenne31::from_wrapped_u32(893583089),
+            Mersenne31::from_wrapped_u32(2019677373),
+            Mersenne31::from_wrapped_u32(3128604556),
+            Mersenne31::from_wrapped_u32(580640471),
+            Mersenne31::from_wrapped_u32(3277620260),
+            Mersenne31::from_wrapped_u32(842931656),
+            Mersenne31::from_wrapped_u32(548879852),
+            Mersenne31::from_wrapped_u32(3608554714),
+            Mersenne31::from_wrapped_u32(3575647916),
+            Mersenne31::from_wrapped_u32(81826002),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(4289086263),
+            Mersenne31::from_wrapped_u32(1563933798),
+            Mersenne31::from_wrapped_u32(1440025885),
+            Mersenne31::from_wrapped_u32(184445025),
+            Mersenne31::from_wrapped_u32(2598651360),
+            Mersenne31::from_wrapped_u32(1396647410),
+            Mersenne31::from_wrapped_u32(1575877922),
+            Mersenne31::from_wrapped_u32(3303853401),
+            Mersenne31::from_wrapped_u32(137125468),
+            Mersenne31::from_wrapped_u32(765010148),
+            Mersenne31::from_wrapped_u32(633675867),
+            Mersenne31::from_wrapped_u32(2037803363),
+            Mersenne31::from_wrapped_u32(2573389828),
+            Mersenne31::from_wrapped_u32(1895729703),
+            Mersenne31::from_wrapped_u32(541515871),
+            Mersenne31::from_wrapped_u32(1783382863),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(2641856484),
+            Mersenne31::from_wrapped_u32(3035743342),
+            Mersenne31::from_wrapped_u32(3672796326),
+            Mersenne31::from_wrapped_u32(245668751),
+            Mersenne31::from_wrapped_u32(2025460432),
+            Mersenne31::from_wrapped_u32(201609705),
+            Mersenne31::from_wrapped_u32(286217151),
+            Mersenne31::from_wrapped_u32(4093475563),
+            Mersenne31::from_wrapped_u32(2519572182),
+            Mersenne31::from_wrapped_u32(3080699870),
+            Mersenne31::from_wrapped_u32(2762001832),
+            Mersenne31::from_wrapped_u32(1244250808),
+            Mersenne31::from_wrapped_u32(606038199),
+            Mersenne31::from_wrapped_u32(3182740831),
+            Mersenne31::from_wrapped_u32(73007766),
+            Mersenne31::from_wrapped_u32(2572204153),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(1196780786),
+            Mersenne31::from_wrapped_u32(3447394443),
+            Mersenne31::from_wrapped_u32(747167305),
+            Mersenne31::from_wrapped_u32(2968073607),
+            Mersenne31::from_wrapped_u32(1053214930),
+            Mersenne31::from_wrapped_u32(1074411832),
+            Mersenne31::from_wrapped_u32(4016794508),
+            Mersenne31::from_wrapped_u32(1570312929),
+            Mersenne31::from_wrapped_u32(113576933),
+            Mersenne31::from_wrapped_u32(4042581186),
+            Mersenne31::from_wrapped_u32(3634515733),
+            Mersenne31::from_wrapped_u32(1032701597),
+            Mersenne31::from_wrapped_u32(2364839308),
+            Mersenne31::from_wrapped_u32(3840286918),
+            Mersenne31::from_wrapped_u32(888378655),
+            Mersenne31::from_wrapped_u32(2520191583),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(36046858),
+            Mersenne31::from_wrapped_u32(2927525953),
+            Mersenne31::from_wrapped_u32(3912129105),
+            Mersenne31::from_wrapped_u32(4004832531),
+            Mersenne31::from_wrapped_u32(193772436),
+            Mersenne31::from_wrapped_u32(1590247392),
+            Mersenne31::from_wrapped_u32(4125818172),
+            Mersenne31::from_wrapped_u32(2516251696),
+            Mersenne31::from_wrapped_u32(4050945750),
+            Mersenne31::from_wrapped_u32(269498914),
+            Mersenne31::from_wrapped_u32(1973292656),
+            Mersenne31::from_wrapped_u32(891403491),
+            Mersenne31::from_wrapped_u32(1845429189),
+            Mersenne31::from_wrapped_u32(2611996363),
+            Mersenne31::from_wrapped_u32(2310542653),
+            Mersenne31::from_wrapped_u32(4071195740),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3505307391),
+            Mersenne31::from_wrapped_u32(786445290),
+            Mersenne31::from_wrapped_u32(3815313971),
+            Mersenne31::from_wrapped_u32(1111591756),
+            Mersenne31::from_wrapped_u32(4233279834),
+            Mersenne31::from_wrapped_u32(2775453034),
+            Mersenne31::from_wrapped_u32(1991257625),
+            Mersenne31::from_wrapped_u32(2940505809),
+            Mersenne31::from_wrapped_u32(2751316206),
+            Mersenne31::from_wrapped_u32(1028870679),
+            Mersenne31::from_wrapped_u32(1282466273),
+            Mersenne31::from_wrapped_u32(1059053371),
+            Mersenne31::from_wrapped_u32(834521354),
+            Mersenne31::from_wrapped_u32(138721483),
+            Mersenne31::from_wrapped_u32(3100410803),
+            Mersenne31::from_wrapped_u32(3843128331),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3878220780),
+            Mersenne31::from_wrapped_u32(4058162439),
+            Mersenne31::from_wrapped_u32(1478942487),
+            Mersenne31::from_wrapped_u32(799012923),
+            Mersenne31::from_wrapped_u32(496734827),
+            Mersenne31::from_wrapped_u32(3521261236),
+            Mersenne31::from_wrapped_u32(755421082),
+            Mersenne31::from_wrapped_u32(1361409515),
+            Mersenne31::from_wrapped_u32(392099473),
+            Mersenne31::from_wrapped_u32(3178453393),
+            Mersenne31::from_wrapped_u32(4068463721),
+            Mersenne31::from_wrapped_u32(7935614),
+            Mersenne31::from_wrapped_u32(4140885645),
+            Mersenne31::from_wrapped_u32(2150748066),
+            Mersenne31::from_wrapped_u32(1685210312),
+            Mersenne31::from_wrapped_u32(3852983224),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(2896943075),
+            Mersenne31::from_wrapped_u32(3087590927),
+            Mersenne31::from_wrapped_u32(992175959),
+            Mersenne31::from_wrapped_u32(970216228),
+            Mersenne31::from_wrapped_u32(3473630090),
+            Mersenne31::from_wrapped_u32(3899670400),
+            Mersenne31::from_wrapped_u32(3603388822),
+            Mersenne31::from_wrapped_u32(2633488197),
+            Mersenne31::from_wrapped_u32(2479406964),
+            Mersenne31::from_wrapped_u32(2420952999),
+            Mersenne31::from_wrapped_u32(1852516800),
+            Mersenne31::from_wrapped_u32(4253075697),
+            Mersenne31::from_wrapped_u32(979699862),
+            Mersenne31::from_wrapped_u32(1163403191),
+            Mersenne31::from_wrapped_u32(1608599874),
+            Mersenne31::from_wrapped_u32(3056104448),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3779109343),
+            Mersenne31::from_wrapped_u32(536205958),
+            Mersenne31::from_wrapped_u32(4183458361),
+            Mersenne31::from_wrapped_u32(1649720295),
+            Mersenne31::from_wrapped_u32(1444912244),
+            Mersenne31::from_wrapped_u32(3122230878),
+            Mersenne31::from_wrapped_u32(384301396),
+            Mersenne31::from_wrapped_u32(4228198516),
+            Mersenne31::from_wrapped_u32(1662916865),
+            Mersenne31::from_wrapped_u32(4082161114),
+            Mersenne31::from_wrapped_u32(2121897314),
+            Mersenne31::from_wrapped_u32(1706239958),
+            Mersenne31::from_wrapped_u32(4166959388),
+            Mersenne31::from_wrapped_u32(1626054781),
+            Mersenne31::from_wrapped_u32(3005858978),
+            Mersenne31::from_wrapped_u32(1431907253),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(1418914503),
+            Mersenne31::from_wrapped_u32(1365856753),
+            Mersenne31::from_wrapped_u32(3942715745),
+            Mersenne31::from_wrapped_u32(1429155552),
+            Mersenne31::from_wrapped_u32(3545642795),
+            Mersenne31::from_wrapped_u32(3772474257),
+            Mersenne31::from_wrapped_u32(1621094396),
+            Mersenne31::from_wrapped_u32(2154399145),
+            Mersenne31::from_wrapped_u32(826697382),
+            Mersenne31::from_wrapped_u32(1700781391),
+            Mersenne31::from_wrapped_u32(3539164324),
+            Mersenne31::from_wrapped_u32(652815039),
+            Mersenne31::from_wrapped_u32(442484755),
+            Mersenne31::from_wrapped_u32(2055299391),
+            Mersenne31::from_wrapped_u32(1064289978),
+            Mersenne31::from_wrapped_u32(1152335780),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3417648695),
+            Mersenne31::from_wrapped_u32(186040114),
+            Mersenne31::from_wrapped_u32(3475580573),
+            Mersenne31::from_wrapped_u32(2113941250),
+            Mersenne31::from_wrapped_u32(1779573826),
+            Mersenne31::from_wrapped_u32(1573808590),
+            Mersenne31::from_wrapped_u32(3235694804),
+            Mersenne31::from_wrapped_u32(2922195281),
+            Mersenne31::from_wrapped_u32(1119462702),
+            Mersenne31::from_wrapped_u32(3688305521),
+            Mersenne31::from_wrapped_u32(1849567013),
+            Mersenne31::from_wrapped_u32(667446787),
+            Mersenne31::from_wrapped_u32(753897224),
+            Mersenne31::from_wrapped_u32(1896396780),
+            Mersenne31::from_wrapped_u32(3143026334),
+            Mersenne31::from_wrapped_u32(3829603876),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(859661334),
+            Mersenne31::from_wrapped_u32(3898844357),
+            Mersenne31::from_wrapped_u32(180258337),
+            Mersenne31::from_wrapped_u32(2321867017),
+            Mersenne31::from_wrapped_u32(3599002504),
+            Mersenne31::from_wrapped_u32(2886782421),
+            Mersenne31::from_wrapped_u32(3038299378),
+            Mersenne31::from_wrapped_u32(1035366250),
+            Mersenne31::from_wrapped_u32(2038912197),
+            Mersenne31::from_wrapped_u32(2920174523),
+            Mersenne31::from_wrapped_u32(1277696101),
+            Mersenne31::from_wrapped_u32(2785700290),
+            Mersenne31::from_wrapped_u32(3806504335),
+            Mersenne31::from_wrapped_u32(3518858933),
+            Mersenne31::from_wrapped_u32(654843672),
+            Mersenne31::from_wrapped_u32(2127120275),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(1548195514),
+            Mersenne31::from_wrapped_u32(2378056027),
+            Mersenne31::from_wrapped_u32(390914568),
+            Mersenne31::from_wrapped_u32(1472049779),
+            Mersenne31::from_wrapped_u32(1552596765),
+            Mersenne31::from_wrapped_u32(1905886441),
+            Mersenne31::from_wrapped_u32(1611959354),
+            Mersenne31::from_wrapped_u32(3653263304),
+            Mersenne31::from_wrapped_u32(3423946386),
+            Mersenne31::from_wrapped_u32(340857935),
+            Mersenne31::from_wrapped_u32(2208879480),
+            Mersenne31::from_wrapped_u32(139364268),
+            Mersenne31::from_wrapped_u32(3447281773),
+            Mersenne31::from_wrapped_u32(3777813707),
+            Mersenne31::from_wrapped_u32(55640413),
+            Mersenne31::from_wrapped_u32(4101901741),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(104929687),
+            Mersenne31::from_wrapped_u32(1459980974),
+            Mersenne31::from_wrapped_u32(1831234737),
+            Mersenne31::from_wrapped_u32(457139004),
+            Mersenne31::from_wrapped_u32(2581487628),
+            Mersenne31::from_wrapped_u32(2112044563),
+            Mersenne31::from_wrapped_u32(3567013861),
+            Mersenne31::from_wrapped_u32(2792004347),
+            Mersenne31::from_wrapped_u32(576325418),
+            Mersenne31::from_wrapped_u32(41126132),
+            Mersenne31::from_wrapped_u32(2713562324),
+            Mersenne31::from_wrapped_u32(151213722),
+            Mersenne31::from_wrapped_u32(2891185935),
+            Mersenne31::from_wrapped_u32(546846420),
+            Mersenne31::from_wrapped_u32(2939794919),
+            Mersenne31::from_wrapped_u32(2543469905)
+        ],
+        [
+            Mersenne31::from_wrapped_u32(2191909784),
+            Mersenne31::from_wrapped_u32(3315138460),
+            Mersenne31::from_wrapped_u32(530414574),
+            Mersenne31::from_wrapped_u32(1242280418),
+            Mersenne31::from_wrapped_u32(1211740715),
+            Mersenne31::from_wrapped_u32(3993672165),
+            Mersenne31::from_wrapped_u32(2505083323),
+            Mersenne31::from_wrapped_u32(3845798801),
+            Mersenne31::from_wrapped_u32(538768466),
+            Mersenne31::from_wrapped_u32(2063567560),
+            Mersenne31::from_wrapped_u32(3366148274),
+            Mersenne31::from_wrapped_u32(1449831887),
+            Mersenne31::from_wrapped_u32(2408012466),
+            Mersenne31::from_wrapped_u32(294726285),
+            Mersenne31::from_wrapped_u32(3943435493),
+            Mersenne31::from_wrapped_u32(924016661),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3633138367),
+            Mersenne31::from_wrapped_u32(3222789372),
+            Mersenne31::from_wrapped_u32(809116305),
+            Mersenne31::from_wrapped_u32(30100013),
+            Mersenne31::from_wrapped_u32(2655172876),
+            Mersenne31::from_wrapped_u32(2564247117),
+            Mersenne31::from_wrapped_u32(2478649732),
+            Mersenne31::from_wrapped_u32(4113689151),
+            Mersenne31::from_wrapped_u32(4120146082),
+            Mersenne31::from_wrapped_u32(2512308515),
+            Mersenne31::from_wrapped_u32(650406041),
+            Mersenne31::from_wrapped_u32(4240012393),
+            Mersenne31::from_wrapped_u32(2683508708),
+            Mersenne31::from_wrapped_u32(951073977),
+            Mersenne31::from_wrapped_u32(3460081988),
+            Mersenne31::from_wrapped_u32(339124269),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(130182653),
+            Mersenne31::from_wrapped_u32(2755946749),
+            Mersenne31::from_wrapped_u32(542600513),
+            Mersenne31::from_wrapped_u32(2816103022),
+            Mersenne31::from_wrapped_u32(1931786340),
+            Mersenne31::from_wrapped_u32(2044470840),
+            Mersenne31::from_wrapped_u32(1709908013),
+            Mersenne31::from_wrapped_u32(2938369043),
+            Mersenne31::from_wrapped_u32(3640399693),
+            Mersenne31::from_wrapped_u32(1374470239),
+            Mersenne31::from_wrapped_u32(2191149676),
+            Mersenne31::from_wrapped_u32(2637495682),
+            Mersenne31::from_wrapped_u32(4236394040),
+            Mersenne31::from_wrapped_u32(2289358846),
+            Mersenne31::from_wrapped_u32(3833368530),
+            Mersenne31::from_wrapped_u32(974546524),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3306659113),
+            Mersenne31::from_wrapped_u32(2234814261),
+            Mersenne31::from_wrapped_u32(1188782305),
+            Mersenne31::from_wrapped_u32(223782844),
+            Mersenne31::from_wrapped_u32(2248980567),
+            Mersenne31::from_wrapped_u32(2309786141),
+            Mersenne31::from_wrapped_u32(2023401627),
+            Mersenne31::from_wrapped_u32(3278877413),
+            Mersenne31::from_wrapped_u32(2022138149),
+            Mersenne31::from_wrapped_u32(575851471),
+            Mersenne31::from_wrapped_u32(1612560780),
+            Mersenne31::from_wrapped_u32(3926656936),
+            Mersenne31::from_wrapped_u32(3318548977),
+            Mersenne31::from_wrapped_u32(2591863678),
+            Mersenne31::from_wrapped_u32(188109355),
+            Mersenne31::from_wrapped_u32(4217723909),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(1564209905),
+            Mersenne31::from_wrapped_u32(2154197895),
+            Mersenne31::from_wrapped_u32(2459687029),
+            Mersenne31::from_wrapped_u32(2870634489),
+            Mersenne31::from_wrapped_u32(1375012945),
+            Mersenne31::from_wrapped_u32(1529454825),
+            Mersenne31::from_wrapped_u32(306140690),
+            Mersenne31::from_wrapped_u32(2855578299),
+            Mersenne31::from_wrapped_u32(1246997295),
+            Mersenne31::from_wrapped_u32(3024298763),
+            Mersenne31::from_wrapped_u32(1915270363),
+            Mersenne31::from_wrapped_u32(1218245412),
+            Mersenne31::from_wrapped_u32(2479314020),
+            Mersenne31::from_wrapped_u32(2989827755),
+            Mersenne31::from_wrapped_u32(814378556),
+            Mersenne31::from_wrapped_u32(4039775921),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(1165280628),
+            Mersenne31::from_wrapped_u32(1203983801),
+            Mersenne31::from_wrapped_u32(3814740033),
+            Mersenne31::from_wrapped_u32(1919627044),
+            Mersenne31::from_wrapped_u32(600240215),
+            Mersenne31::from_wrapped_u32(773269071),
+            Mersenne31::from_wrapped_u32(486685186),
+            Mersenne31::from_wrapped_u32(4254048810),
+            Mersenne31::from_wrapped_u32(1415023565),
+            Mersenne31::from_wrapped_u32(502840102),
+            Mersenne31::from_wrapped_u32(4225648358),
+            Mersenne31::from_wrapped_u32(510217063),
+            Mersenne31::from_wrapped_u32(166444818),
+            Mersenne31::from_wrapped_u32(1430745893),
+            Mersenne31::from_wrapped_u32(1376516190),
+            Mersenne31::from_wrapped_u32(1775891321),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(1170945922),
+            Mersenne31::from_wrapped_u32(1105391877),
+            Mersenne31::from_wrapped_u32(261536467),
+            Mersenne31::from_wrapped_u32(1401687994),
+            Mersenne31::from_wrapped_u32(1022529847),
+            Mersenne31::from_wrapped_u32(2476446456),
+            Mersenne31::from_wrapped_u32(2603844878),
+            Mersenne31::from_wrapped_u32(3706336043),
+            Mersenne31::from_wrapped_u32(3463053714),
+            Mersenne31::from_wrapped_u32(1509644517),
+            Mersenne31::from_wrapped_u32(588552318),
+            Mersenne31::from_wrapped_u32(65252581),
+            Mersenne31::from_wrapped_u32(3696502656),
+            Mersenne31::from_wrapped_u32(2183330763),
+            Mersenne31::from_wrapped_u32(3664021233),
+            Mersenne31::from_wrapped_u32(1643809916),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(2922875898),
+            Mersenne31::from_wrapped_u32(3740690643),
+            Mersenne31::from_wrapped_u32(3932461140),
+            Mersenne31::from_wrapped_u32(161156271),
+            Mersenne31::from_wrapped_u32(2619943483),
+            Mersenne31::from_wrapped_u32(4077039509),
+            Mersenne31::from_wrapped_u32(2921201703),
+            Mersenne31::from_wrapped_u32(2085619718),
+            Mersenne31::from_wrapped_u32(2065264646),
+            Mersenne31::from_wrapped_u32(2615693812),
+            Mersenne31::from_wrapped_u32(3116555433),
+            Mersenne31::from_wrapped_u32(246100007),
+            Mersenne31::from_wrapped_u32(4281387154),
+            Mersenne31::from_wrapped_u32(4046141001),
+            Mersenne31::from_wrapped_u32(4027749321),
+            Mersenne31::from_wrapped_u32(111611860),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(2066954820),
+            Mersenne31::from_wrapped_u32(2502099969),
+            Mersenne31::from_wrapped_u32(2915053115),
+            Mersenne31::from_wrapped_u32(2362518586),
+            Mersenne31::from_wrapped_u32(366091708),
+            Mersenne31::from_wrapped_u32(2083204932),
+            Mersenne31::from_wrapped_u32(4138385632),
+            Mersenne31::from_wrapped_u32(3195157567),
+            Mersenne31::from_wrapped_u32(1318086382),
+            Mersenne31::from_wrapped_u32(521723799),
+            Mersenne31::from_wrapped_u32(702443405),
+            Mersenne31::from_wrapped_u32(2507670985),
+            Mersenne31::from_wrapped_u32(1760347557),
+            Mersenne31::from_wrapped_u32(2631999893),
+            Mersenne31::from_wrapped_u32(1672737554),
+            Mersenne31::from_wrapped_u32(1060867760),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(2359801781),
+            Mersenne31::from_wrapped_u32(2800231467),
+            Mersenne31::from_wrapped_u32(3010357035),
+            Mersenne31::from_wrapped_u32(1035997899),
+            Mersenne31::from_wrapped_u32(1210110952),
+            Mersenne31::from_wrapped_u32(1018506770),
+            Mersenne31::from_wrapped_u32(2799468177),
+            Mersenne31::from_wrapped_u32(1479380761),
+            Mersenne31::from_wrapped_u32(1536021911),
+            Mersenne31::from_wrapped_u32(358993854),
+            Mersenne31::from_wrapped_u32(579904113),
+            Mersenne31::from_wrapped_u32(3432144800),
+            Mersenne31::from_wrapped_u32(3625515809),
+            Mersenne31::from_wrapped_u32(199241497),
+            Mersenne31::from_wrapped_u32(4058304109),
+            Mersenne31::from_wrapped_u32(2590164234),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(1688530738),
+            Mersenne31::from_wrapped_u32(1580733335),
+            Mersenne31::from_wrapped_u32(2443981517),
+            Mersenne31::from_wrapped_u32(2206270565),
+            Mersenne31::from_wrapped_u32(2780074229),
+            Mersenne31::from_wrapped_u32(2628739677),
+            Mersenne31::from_wrapped_u32(2940123659),
+            Mersenne31::from_wrapped_u32(4145206827),
+            Mersenne31::from_wrapped_u32(3572278009),
+            Mersenne31::from_wrapped_u32(2779607509),
+            Mersenne31::from_wrapped_u32(1098718697),
+            Mersenne31::from_wrapped_u32(1424913749),
+            Mersenne31::from_wrapped_u32(2224415875),
+            Mersenne31::from_wrapped_u32(1108922178),
+            Mersenne31::from_wrapped_u32(3646272562),
+            Mersenne31::from_wrapped_u32(3935186184),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(820046587),
+            Mersenne31::from_wrapped_u32(1393386250),
+            Mersenne31::from_wrapped_u32(2665818575),
+            Mersenne31::from_wrapped_u32(2231782019),
+            Mersenne31::from_wrapped_u32(672377010),
+            Mersenne31::from_wrapped_u32(1920315467),
+            Mersenne31::from_wrapped_u32(1913164407),
+            Mersenne31::from_wrapped_u32(2029526876),
+            Mersenne31::from_wrapped_u32(2629271820),
+            Mersenne31::from_wrapped_u32(384320012),
+            Mersenne31::from_wrapped_u32(4112320585),
+            Mersenne31::from_wrapped_u32(3131824773),
+            Mersenne31::from_wrapped_u32(2347818197),
+            Mersenne31::from_wrapped_u32(2220997386),
+            Mersenne31::from_wrapped_u32(1772368609),
+            Mersenne31::from_wrapped_u32(2579960095),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3544930873),
+            Mersenne31::from_wrapped_u32(225847443),
+            Mersenne31::from_wrapped_u32(3070082278),
+            Mersenne31::from_wrapped_u32(95643305),
+            Mersenne31::from_wrapped_u32(3438572042),
+            Mersenne31::from_wrapped_u32(3312856509),
+            Mersenne31::from_wrapped_u32(615850007),
+            Mersenne31::from_wrapped_u32(1863868773),
+            Mersenne31::from_wrapped_u32(803582265),
+            Mersenne31::from_wrapped_u32(3461976859),
+            Mersenne31::from_wrapped_u32(2903025799),
+            Mersenne31::from_wrapped_u32(1482092434),
+            Mersenne31::from_wrapped_u32(3902972499),
+            Mersenne31::from_wrapped_u32(3872341868),
+            Mersenne31::from_wrapped_u32(1530411808),
+            Mersenne31::from_wrapped_u32(2214923584),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(3118792481),
+            Mersenne31::from_wrapped_u32(2241076515),
+            Mersenne31::from_wrapped_u32(3983669831),
+            Mersenne31::from_wrapped_u32(3180915147),
+            Mersenne31::from_wrapped_u32(3838626501),
+            Mersenne31::from_wrapped_u32(1921630011),
+            Mersenne31::from_wrapped_u32(3415351771),
+            Mersenne31::from_wrapped_u32(2249953859),
+            Mersenne31::from_wrapped_u32(3755081630),
+            Mersenne31::from_wrapped_u32(486327260),
+            Mersenne31::from_wrapped_u32(1227575720),
+            Mersenne31::from_wrapped_u32(3643869379),
+            Mersenne31::from_wrapped_u32(2982026073),
+            Mersenne31::from_wrapped_u32(2466043731),
+            Mersenne31::from_wrapped_u32(1982634375),
+            Mersenne31::from_wrapped_u32(3769609014),
+        ],
+        [
+            Mersenne31::from_wrapped_u32(2195455495),
+            Mersenne31::from_wrapped_u32(2596863283),
+            Mersenne31::from_wrapped_u32(4244994973),
+            Mersenne31::from_wrapped_u32(1983609348),
+            Mersenne31::from_wrapped_u32(4019674395),
+            Mersenne31::from_wrapped_u32(3469982031),
+            Mersenne31::from_wrapped_u32(1458697570),
+            Mersenne31::from_wrapped_u32(1593516217),
+            Mersenne31::from_wrapped_u32(1963896497),
+            Mersenne31::from_wrapped_u32(3115309118),
+            Mersenne31::from_wrapped_u32(1659132465),
+            Mersenne31::from_wrapped_u32(2536770756),
+            Mersenne31::from_wrapped_u32(3059294171),
+            Mersenne31::from_wrapped_u32(2618031334),
+            Mersenne31::from_wrapped_u32(2040903247),
+            Mersenne31::from_wrapped_u32(3799795076),
         ]
     ];
 
@@ -1105,52 +1662,117 @@ lazy_static! {
     ];
 }
 
-pub fn poseidon2_init(
-) -> Poseidon2<BabyBear, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7> {
+/*
+Poseidon2 on BabyBear
+ */
+pub fn pico_poseidon2bb_init() -> PicoPoseidon2BabyBear {
     const ROUNDS_F: usize = 8;
     const ROUNDS_P: usize = 13;
-    let mut round_constants = RC_16_30.to_vec();
+
+    let mut round_constants = RC_16_30_BabyBear.to_vec();
     let internal_start = ROUNDS_F / 2;
     let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
     let internal_round_constants = round_constants
         .drain(internal_start..internal_end)
         .map(|vec| vec[0])
         .collect::<Vec<_>>();
-    let external_round_constants = round_constants;
-    Poseidon2::new(
-        ROUNDS_F,
-        external_round_constants,
-        Poseidon2ExternalMatrixGeneral,
-        ROUNDS_P,
-        internal_round_constants,
-        DiffusionMatrixBabyBear,
-    )
+
+    let external_round_constants = ExternalLayerConstants::new(
+        round_constants[..(ROUNDS_F / 2)].to_vec(),
+        round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec(), // todo: need to double check this
+    );
+
+    PicoPoseidon2BabyBear::new(external_round_constants, internal_round_constants)
 }
 
 pub fn poseidon2_hash(input: Vec<BabyBear>) -> [BabyBear; 8] {
     POSEIDON2_HASHER.hash_iter(input)
 }
 
-pub fn poseidon2_hasher() -> PaddingFreeSponge<
-    Poseidon2<BabyBear, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>,
-    16,
-    8,
-    8,
-> {
-    let hasher = poseidon2_init();
-    PaddingFreeSponge::<
-        Poseidon2<BabyBear, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>,
-        16,
-        8,
-        8,
-    >::new(hasher)
+pub fn poseidon2_hasher() -> PaddingFreeSponge<PicoPoseidon2BabyBear, 16, 8, 8> {
+    let hasher = pico_poseidon2bb_init();
+    PaddingFreeSponge::<PicoPoseidon2BabyBear, 16, 8, 8>::new(hasher)
 }
 
 lazy_static! {
-    pub static ref POSEIDON2_HASHER: PaddingFreeSponge::<
-        Poseidon2<BabyBear, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>,
-        16,
-        8,
-        8,
-    > = poseidon2_hasher();
+    pub static ref POSEIDON2_HASHER: PaddingFreeSponge::<PicoPoseidon2BabyBear, 16, 8, 8> =
+        poseidon2_hasher();
+}
+
+/*
+Poseidon2 on M31
+ */
+pub fn pico_poseidon2m31_init() -> PicoPoseidon2Mersenne31 {
+    const ROUNDS_F: usize = 8;
+    const ROUNDS_P: usize = 13;
+
+    let mut round_constants = RC_16_30_M31.to_vec();
+    let internal_start = ROUNDS_F / 2;
+    let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
+    let internal_round_constants = round_constants
+        .drain(internal_start..internal_end)
+        .map(|vec| vec[0])
+        .collect::<Vec<_>>();
+
+    let external_round_constants = ExternalLayerConstants::new(
+        round_constants[..(ROUNDS_F / 2)].to_vec(),
+        round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec(), // todo: need to double check this
+    );
+
+    PicoPoseidon2Mersenne31::new(external_round_constants, internal_round_constants)
+}
+
+/*
+Poseidon2 on Bn254
+ */
+
+fn bn254_from_ark_ff(input: ark_FpBN256) -> Bn254Fr {
+    let bytes = input.into_bigint().to_bytes_le();
+
+    let mut res = <FFBn254Fr as PrimeField>::Repr::default();
+
+    for (i, digit) in res.as_mut().iter_mut().enumerate() {
+        *digit = bytes[i];
+    }
+
+    let value = FFBn254Fr::from_repr(res);
+
+    if value.is_some().into() {
+        Bn254Fr {
+            value: value.unwrap(),
+        }
+    } else {
+        panic!("Invalid field element")
+    }
+}
+
+pub fn pico_poseidon2bn254_init() -> PicoPoseidon2Bn254 {
+    const ROUNDS_F: usize = 8;
+    const ROUNDS_P: usize = 56;
+
+    // Copy over round constants from zkhash.
+    let mut round_constants: Vec<[Bn254Fr; 3]> = RC3
+        .iter()
+        .map(|vec| {
+            vec.iter()
+                .cloned()
+                .map(bn254_from_ark_ff)
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap()
+        })
+        .collect();
+
+    let internal_start = ROUNDS_F / 2;
+    let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
+    let internal_round_constants = round_constants
+        .drain(internal_start..internal_end)
+        .map(|vec| vec[0])
+        .collect::<Vec<_>>();
+    let external_round_constants = ExternalLayerConstants::new(
+        round_constants[..(ROUNDS_F / 2)].to_vec(),
+        round_constants[(ROUNDS_F / 2)..].to_vec(),
+    );
+    // Pico Poseidon2 implementation.
+    PicoPoseidon2Bn254::new(external_round_constants, internal_round_constants)
 }

@@ -61,7 +61,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
             .chunks(NUM_CONST_MEM_ENTRIES_PER_ROW)
             .into_iter()
             .map(|row_vs_as| {
-                let mut row = [F::zero(); NUM_MEM_PREPROCESSED_INIT_COLS];
+                let mut row = [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS];
                 let cols: &mut MemoryPreprocessedCols<_> = row.as_mut_slice().borrow_mut();
                 for (cell, access) in zip(&mut cols.values_and_accesses, row_vs_as) {
                     *cell = access;
@@ -89,7 +89,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
             .checked_sub(1)
             .map(|x| x / NUM_CONST_MEM_ENTRIES_PER_ROW + 1)
             .unwrap_or_default();
-        let rows = std::iter::repeat([F::zero(); NUM_MEM_INIT_COLS])
+        let rows = std::iter::repeat([F::ZERO; NUM_MEM_INIT_COLS])
             .take(num_rows)
             .collect_vec();
 

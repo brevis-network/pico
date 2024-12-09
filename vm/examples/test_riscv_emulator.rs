@@ -17,7 +17,7 @@ mod parse_args;
 fn main() {
     setup_logger();
 
-    let (elf, stdin, _) = parse_args::parse_args();
+    let (elf, stdin, _, _) = parse_args::parse_args();
 
     let start = Instant::now();
 

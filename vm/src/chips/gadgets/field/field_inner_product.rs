@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use num::{BigUint, Zero};
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use pico_derive::AlignedBorrow;
 
 use crate::{
@@ -71,7 +71,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {
         let p_inner_product = p_a_vec
             .into_iter()
             .zip(p_b_vec)
-            .fold(Polynomial::<F>::new(vec![F::zero()]), |acc, (c, d)| {
+            .fold(Polynomial::<F>::new(vec![F::ZERO]), |acc, (c, d)| {
                 acc + &c * &d
             });
         let p_vanishing = p_inner_product - &p_result - &p_carry * &p_modulus;
@@ -120,7 +120,7 @@ where
         let p_result: Polynomial<<CB as AirBuilder>::Expr> = self.result.into();
         let p_carry: Polynomial<<CB as AirBuilder>::Expr> = self.carry.into();
 
-        let p_zero = Polynomial::<CB::Expr>::new(vec![CB::Expr::zero()]);
+        let p_zero = Polynomial::<CB::Expr>::new(vec![CB::Expr::ZERO]);
 
         let p_inner_product = p_a_vec
             .iter()

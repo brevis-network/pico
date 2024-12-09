@@ -25,14 +25,14 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         proof::{BaseCommitments, BaseOpenedValues, ChipOpenedValues, QuotientData},
     },
-    primitives::consts::PV_DIGEST_NUM_WORDS,
-    recursion::{air::Block, runtime::PERMUTATION_WIDTH},
+    primitives::consts::{PERMUTATION_RATE, PV_DIGEST_NUM_WORDS},
+    recursion::air::Block,
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{AbstractExtensionField, AbstractField, TwoAdicField};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 
 // TODO: Walkthrough
 pub trait Hintable<FC: FieldGenericConfig> {
@@ -412,16 +412,17 @@ impl Hintable<rcf::FieldConfig> for DuplexChallenger<rcf::SC_Val, rcf::SC_Perm, 
         }
     }
 
+    // todo: update for permutation
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
         stream.extend(self.sponge_state.to_vec().write());
         stream.extend(self.input_buffer.len().write());
         let mut input_padded = self.input_buffer.to_vec();
-        input_padded.resize(PERMUTATION_WIDTH, rcf::SC_Val::zero());
+        input_padded.resize(PERMUTATION_RATE, rcf::SC_Val::ZERO);
         stream.extend(input_padded.write());
         stream.extend(self.output_buffer.len().write());
         let mut output_padded = self.output_buffer.to_vec();
-        output_padded.resize(PERMUTATION_WIDTH, rcf::SC_Val::zero());
+        output_padded.resize(PERMUTATION_RATE, rcf::SC_Val::ZERO);
         stream.extend(output_padded.write());
         stream
     }

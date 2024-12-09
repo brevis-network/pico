@@ -37,50 +37,50 @@ impl<F: PrimeField32> ExpReverseBitsLenEvent<F> {
         let mut events = Vec::new();
         let mut new_len = len;
         let mut new_exponent = exponent;
-        let mut accum = F::one();
+        let mut accum = F::ONE;
 
         for i in 0..len.as_canonical_u32() {
             let current_bit = new_exponent % 2;
             let prev_accum = accum;
-            accum = prev_accum * prev_accum * if current_bit == 0 { F::one() } else { x };
+            accum = prev_accum * prev_accum * if current_bit == 0 { F::ONE } else { x };
             events.push(Self {
                 clk: timestamp + F::from_canonical_u32(i),
                 x: MemoryRecord::new_write(
-                    F::one(),
+                    F::ONE,
                     Block::from([
                         if i == len.as_canonical_u32() - 1 {
                             accum
                         } else {
                             x
                         },
-                        F::zero(),
-                        F::zero(),
-                        F::zero(),
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
                     ]),
                     timestamp + F::from_canonical_u32(i),
-                    Block::from([x, F::zero(), F::zero(), F::zero()]),
-                    timestamp + F::from_canonical_u32(i) - F::one(),
+                    Block::from([x, F::ZERO, F::ZERO, F::ZERO]),
+                    timestamp + F::from_canonical_u32(i) - F::ONE,
                 ),
                 current_bit: MemoryRecord::new_read(
-                    F::zero(),
+                    F::ZERO,
                     Block::from([
                         F::from_canonical_u32(current_bit),
-                        F::zero(),
-                        F::zero(),
-                        F::zero(),
+                        F::ZERO,
+                        F::ZERO,
+                        F::ZERO,
                     ]),
                     timestamp + F::from_canonical_u32(i),
-                    timestamp + F::from_canonical_u32(i) - F::one(),
+                    timestamp + F::from_canonical_u32(i) - F::ONE,
                 ),
                 len: new_len,
                 prev_accum,
                 accum,
                 ptr: F::from_canonical_u32(i),
-                base_ptr: F::one(),
+                base_ptr: F::ONE,
                 iteration_num: F::from_canonical_u32(i),
             });
             new_exponent /= 2;
-            new_len -= F::one();
+            new_len -= F::ONE;
         }
         assert_eq!(
             accum,

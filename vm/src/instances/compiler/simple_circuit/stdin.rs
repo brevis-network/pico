@@ -62,7 +62,10 @@ where
         vk: &'a BaseVerifyingKey<SC>,
         base_challenger: &'a mut SC::Challenger,
         base_proof: BaseProof<SC>,
-    ) -> Self {
+    ) -> Self
+    where
+        <SC as StarkGenericConfig>::Challenger: std::fmt::Debug,
+    {
         let num_public_values = machine.num_public_values();
 
         vk.observed_by(reconstruct_challenger);
@@ -70,7 +73,7 @@ where
 
         let base_proofs = vec![base_proof.clone()];
 
-        base_challenger.observe(base_proof.commitments.main_commit);
+        base_challenger.observe(base_proof.commitments.main_commit.clone());
         base_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
 
         Self {

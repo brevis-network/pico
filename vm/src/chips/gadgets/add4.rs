@@ -5,7 +5,7 @@ use crate::{
     primitives::consts::WORD_SIZE,
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute the add of four words.
@@ -116,14 +116,14 @@ impl<F: Field> Add4Operation<F> {
                         + cols.is_carry_1[i]
                         + cols.is_carry_2[i]
                         + cols.is_carry_3[i],
-                    CB::Expr::one(),
+                    CB::Expr::ONE,
                 );
             }
         }
 
         // Calculates carry from is_carry_{0,1,2,3}.
         {
-            let one = CB::Expr::one();
+            let one = CB::Expr::ONE;
             let two = CB::F::from_canonical_u32(2);
             let three = CB::F::from_canonical_u32(3);
 

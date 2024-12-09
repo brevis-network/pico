@@ -36,7 +36,7 @@ use crate::{
     recursion::air::RecursionPublicValues,
 };
 use p3_baby_bear::BabyBear;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
@@ -58,7 +58,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
         RiscvRecursionStdin::<RiscvSC, RiscvChipType<BabyBear>>::witness(&stdin, &mut builder);
 
         let pcs = TwoAdicFriPcsVariable {
-            config: const_fri_config(&mut builder, machine.config().pcs().fri_config()),
+            config: const_fri_config(&mut builder, machine.config().fri_config()),
         };
 
         Self::build_verifier(&mut builder, &pcs, machine, stdin);
@@ -116,7 +116,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
             reconstruct_challenger.copy(builder);
 
         let cumulative_sum: Ext<_, _> =
-            builder.eval(<rcf::FieldConfig as FieldGenericConfig>::EF::zero().cons());
+            builder.eval(<rcf::FieldConfig as FieldGenericConfig>::EF::ZERO.cons());
 
         let exit_code: Felt<_> = builder.uninit();
 
@@ -153,22 +153,20 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
             /*
             Flags
              */
-            let flag_cpu: Var<_> =
-                builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::zero());
-            let index_cpu: Var<_> =
-                builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::zero());
+            let flag_cpu: Var<_> = builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::ZERO);
+            let index_cpu: Var<_> = builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::ZERO);
             let flag_memory_initialize: Var<_> =
-                builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::zero());
+                builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::ZERO);
             let flag_memory_finalize: Var<_> =
-                builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::zero());
+                builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::ZERO);
             let flag_starting_chunk: Var<_> =
-                builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::zero());
+                builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::ZERO);
 
             /*
             Initialize when on the first proof in the batch
              */
             builder
-                .if_eq(i, <rcf::FieldConfig as FieldGenericConfig>::N::zero())
+                .if_eq(i, <rcf::FieldConfig as FieldGenericConfig>::N::ZERO)
                 .then(|builder| {
                     builder.assign(start_pc, public_values.start_pc);
                     builder.assign(current_pc, public_values.start_pc);
@@ -213,10 +211,8 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
                             ),
                         )
                         .then(|builder| {
-                            builder.assign(
-                                flag_cpu,
-                                <rcf::FieldConfig as FieldGenericConfig>::N::one(),
-                            );
+                            builder
+                                .assign(flag_cpu, <rcf::FieldConfig as FieldGenericConfig>::N::ONE);
                             builder.assign(index_cpu, index);
                         });
                 }
@@ -231,7 +227,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
                         .then(|builder| {
                             builder.assign(
                                 flag_memory_initialize,
-                                <rcf::FieldConfig as FieldGenericConfig>::N::one(),
+                                <rcf::FieldConfig as FieldGenericConfig>::N::ONE,
                             );
                         });
                 }
@@ -246,18 +242,18 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
                         .then(|builder| {
                             builder.assign(
                                 flag_memory_finalize,
-                                <rcf::FieldConfig as FieldGenericConfig>::N::one(),
+                                <rcf::FieldConfig as FieldGenericConfig>::N::ONE,
                             );
                         });
                 }
             }
             let chunk = felt2var(builder, public_values.chunk);
             builder
-                .if_eq(chunk, <rcf::FieldConfig as FieldGenericConfig>::F::one())
+                .if_eq(chunk, <rcf::FieldConfig as FieldGenericConfig>::F::ONE)
                 .then(|builder| {
                     builder.assign(
                         flag_starting_chunk,
-                        <rcf::FieldConfig as FieldGenericConfig>::N::one(),
+                        <rcf::FieldConfig as FieldGenericConfig>::N::ONE,
                     );
                 });
 
@@ -267,27 +263,25 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
             builder
                 .if_eq(
                     flag_starting_chunk,
-                    <rcf::FieldConfig as FieldGenericConfig>::N::one(),
+                    <rcf::FieldConfig as FieldGenericConfig>::N::ONE,
                 )
                 .then(|builder| {
                     // first chunk start_pc should be vk.start_pc
                     builder.assert_felt_eq(public_values.start_pc, vk.pc_start);
 
                     // first chunk should include cpu
-                    builder.assert_var_eq(
-                        flag_cpu,
-                        <rcf::FieldConfig as FieldGenericConfig>::N::one(),
-                    );
+                    builder
+                        .assert_var_eq(flag_cpu, <rcf::FieldConfig as FieldGenericConfig>::N::ONE);
 
                     // initialize and finalize addr bits should be zero
                     for i in 0..ADDR_NUM_BITS {
                         builder.assert_felt_eq(
                             current_previous_initialize_addr_bits[i],
-                            <rcf::FieldConfig as FieldGenericConfig>::F::zero(),
+                            <rcf::FieldConfig as FieldGenericConfig>::F::ZERO,
                         );
                         builder.assert_felt_eq(
                             current_previous_finalize_addr_bits[i],
-                            <rcf::FieldConfig as FieldGenericConfig>::F::zero(),
+                            <rcf::FieldConfig as FieldGenericConfig>::F::ZERO,
                         );
                     }
 
@@ -305,17 +299,16 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
             builder.assert_felt_eq(current_chunk, public_values.chunk);
             builder.assign(
                 current_chunk,
-                current_chunk + <rcf::FieldConfig as FieldGenericConfig>::F::one(),
+                current_chunk + <rcf::FieldConfig as FieldGenericConfig>::F::ONE,
             );
 
             builder
-                .if_eq(flag_cpu, <rcf::FieldConfig as FieldGenericConfig>::N::one())
+                .if_eq(flag_cpu, <rcf::FieldConfig as FieldGenericConfig>::N::ONE)
                 .then(|builder| {
                     builder.assert_felt_eq(current_execution_chunk, public_values.execution_chunk);
                     builder.assign(
                         current_execution_chunk,
-                        current_execution_chunk
-                            + <rcf::FieldConfig as FieldGenericConfig>::F::one(),
+                        current_execution_chunk + <rcf::FieldConfig as FieldGenericConfig>::F::ONE,
                     );
                 });
 
@@ -324,7 +317,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
              */
 
             builder
-                .if_eq(flag_cpu, <rcf::FieldConfig as FieldGenericConfig>::N::one())
+                .if_eq(flag_cpu, <rcf::FieldConfig as FieldGenericConfig>::N::ONE)
                 .then_or_else(
                     |builder| {
                         // assert log_main_degree is in [0, MAX_LOG_CHUNK_SIZE]
@@ -333,26 +326,26 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
                             .log_main_degree;
 
                         let degree_match: Var<_> =
-                            builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::zero());
+                            builder.eval(<rcf::FieldConfig as FieldGenericConfig>::N::ZERO);
                         builder
                             .range(0, MAX_LOG_CHUNK_SIZE + 1)
                             .for_each(|j, builder| {
                                 builder.if_eq(log_main_degree, j).then(|builder| {
                                     builder.assign(
                                         degree_match,
-                                        <rcf::FieldConfig as FieldGenericConfig>::N::one(),
+                                        <rcf::FieldConfig as FieldGenericConfig>::N::ONE,
                                     );
                                 });
                             });
                         builder.assert_var_eq(
                             degree_match,
-                            <rcf::FieldConfig as FieldGenericConfig>::N::one(),
+                            <rcf::FieldConfig as FieldGenericConfig>::N::ONE,
                         );
 
                         // start_pc should not be zero
                         builder.assert_felt_ne(
                             public_values.start_pc,
-                            <rcf::FieldConfig as FieldGenericConfig>::F::zero(),
+                            <rcf::FieldConfig as FieldGenericConfig>::F::ZERO,
                         );
                     },
                     |builder| {
@@ -378,7 +371,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
             builder
                 .if_eq(
                     flag_memory_initialize,
-                    <rcf::FieldConfig as FieldGenericConfig>::N::zero(),
+                    <rcf::FieldConfig as FieldGenericConfig>::N::ZERO,
                 )
                 .then(|builder| {
                     for i in 0..ADDR_NUM_BITS {
@@ -392,7 +385,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
             builder
                 .if_eq(
                     flag_memory_finalize,
-                    <rcf::FieldConfig as FieldGenericConfig>::N::zero(),
+                    <rcf::FieldConfig as FieldGenericConfig>::N::ZERO,
                 )
                 .then(|builder| {
                     for i in 0..ADDR_NUM_BITS {
@@ -410,7 +403,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
             // all exit codes should be zeros
             builder.assert_felt_eq(
                 public_values.exit_code,
-                <rcf::FieldConfig as FieldGenericConfig>::F::zero(),
+                <rcf::FieldConfig as FieldGenericConfig>::F::ZERO,
             );
 
             // current_pc should be start_pc
@@ -466,13 +459,13 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
         builder
             .if_eq(
                 flag_complete,
-                <rcf::FieldConfig as FieldGenericConfig>::N::one(),
+                <rcf::FieldConfig as FieldGenericConfig>::N::ONE,
             )
             .then(|builder| {
                 // last pc should be zero
                 builder.assert_felt_eq(
                     current_pc,
-                    <rcf::FieldConfig as FieldGenericConfig>::F::zero(),
+                    <rcf::FieldConfig as FieldGenericConfig>::F::ZERO,
                 );
 
                 assert_challenger_eq_pv(
@@ -487,7 +480,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
                 // for each in cumulative_sum.iter() {
                 //     builder.assert_felt_eq(
                 //         *each,
-                //         <rcf::FieldConfig as FieldGenericConfig>::F::zero(),
+                //         <rcf::FieldConfig as FieldGenericConfig>::F::ZERO,
                 //     );
                 // }
             });
@@ -500,7 +493,7 @@ impl RiscvCombineVerifierCircuit<rcf::FieldConfig, RiscvSC> {
         let vk_digest: [Felt<_>; DIGEST_SIZE] = array::from_fn(|i| builder.get(&vk_digest, i));
 
         // Update public values
-        let zero: Felt<_> = builder.eval(<rcf::FieldConfig as FieldGenericConfig>::F::zero());
+        let zero: Felt<_> = builder.eval(<rcf::FieldConfig as FieldGenericConfig>::F::ZERO);
         let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
         let recursion_public_values: &mut RecursionPublicValues<_> =
             recursion_public_values_stream.as_mut_slice().borrow_mut();

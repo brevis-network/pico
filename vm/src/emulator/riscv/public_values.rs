@@ -2,7 +2,7 @@ use crate::{
     compiler::word::Word,
     primitives::consts::{MAX_NUM_PVS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
 };
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::borrow::{Borrow, BorrowMut};
 
@@ -46,8 +46,8 @@ pub struct PublicValues<W, T> {
 }
 
 impl PublicValues<u32, u32> {
-    pub fn to_vec<F: AbstractField>(&self) -> Vec<F> {
-        let mut pv = vec![F::zero(); MAX_NUM_PVS];
+    pub fn to_vec<F: FieldAlgebra>(&self) -> Vec<F> {
+        let mut pv = vec![F::ZERO; MAX_NUM_PVS];
         let field_values = PublicValues::<Word<F>, F>::from(*self);
         let pv_ref_mut: &mut PublicValues<Word<F>, F> = pv.as_mut_slice().borrow_mut();
         *pv_ref_mut = field_values;
@@ -80,7 +80,7 @@ impl<T: Clone> BorrowMut<PublicValues<Word<T>, T>> for [T] {
     }
 }
 
-impl<F: AbstractField> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> {
+impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> {
     fn from(value: PublicValues<u32, u32>) -> Self {
         let PublicValues {
             committed_value_digest,

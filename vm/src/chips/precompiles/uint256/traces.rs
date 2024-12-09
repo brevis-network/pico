@@ -43,7 +43,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 let mut new_range_check_events = HashMap::new();
                 let mut new_byte_lookup_events = HashMap::new();
 
-                let mut row: [F; NUM_UINT256_MUL_COLS] = [F::zero(); NUM_UINT256_MUL_COLS];
+                let mut row: [F; NUM_UINT256_MUL_COLS] = [F::ZERO; NUM_UINT256_MUL_COLS];
                 let cols: &mut Uint256MulCols<F> = row.as_mut_slice().borrow_mut();
 
                 // Decode uint256 points
@@ -52,7 +52,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 let modulus = BigUint::from_bytes_le(&words_to_bytes_le::<32>(&event.modulus));
 
                 // Assign basic values to the columns.
-                cols.is_real = F::one();
+                cols.is_real = F::ONE;
                 cols.chunk = F::from_canonical_u32(event.chunk);
                 cols.clk = F::from_canonical_u32(event.clk);
                 cols.x_ptr = F::from_canonical_u32(event.x_ptr);
@@ -90,8 +90,8 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                     FieldOperation::Mul,
                 );
 
-                cols.modulus_is_not_zero = F::one() - cols.modulus_is_zero.result;
-                if cols.modulus_is_not_zero == F::one() {
+                cols.modulus_is_not_zero = F::ONE - cols.modulus_is_zero.result;
+                if cols.modulus_is_not_zero == F::ONE {
                     cols.output_range_check.populate(
                         &mut new_byte_lookup_events,
                         event.chunk,
@@ -109,7 +109,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
         pad_rows_fixed(
             &mut rows,
             || {
-                let mut row: [F; NUM_UINT256_MUL_COLS] = [F::zero(); NUM_UINT256_MUL_COLS];
+                let mut row: [F; NUM_UINT256_MUL_COLS] = [F::ZERO; NUM_UINT256_MUL_COLS];
                 let cols: &mut Uint256MulCols<F> = row.as_mut_slice().borrow_mut();
 
                 let x = BigUint::zero();

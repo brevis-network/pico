@@ -77,7 +77,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
         let mut dummy_chunk = Vec::new();
         for i in 0..NUM_ROUNDS {
             let dummy_row = dummy_keccak_rows.row(i);
-            let mut row = [F::zero(); NUM_KECCAK_MEM_COLS];
+            let mut row = [F::ZERO; NUM_KECCAK_MEM_COLS];
             row[..NUM_KECCAK_COLS].copy_from_slice(dummy_row.collect::<Vec<_>>().as_slice());
             dummy_chunk.extend_from_slice(&row);
         }
@@ -140,7 +140,7 @@ impl<F: PrimeField32> KeccakPermuteChip<F> {
             cols.chunk = F::from_canonical_u32(chunk);
             cols.clk = F::from_canonical_u32(start_clk);
             cols.state_addr = F::from_canonical_u32(event.state_addr);
-            cols.is_real = F::one();
+            cols.is_real = F::ONE;
 
             // If this is the first row, then populate read memory accesses
             if i == 0 {
@@ -149,8 +149,8 @@ impl<F: PrimeField32> KeccakPermuteChip<F> {
                     new_byte_lookup_events
                         .add_u8_range_checks(read_record.value.to_le_bytes(), Some(chunk))
                 }
-                cols.do_memory_check = F::one();
-                cols.receive_ecall = F::one();
+                cols.do_memory_check = F::ONE;
+                cols.receive_ecall = F::ONE;
             }
 
             // If this is the last row, then populate write memory accesses
@@ -160,7 +160,7 @@ impl<F: PrimeField32> KeccakPermuteChip<F> {
                     new_byte_lookup_events
                         .add_u8_range_checks(write_record.value.to_le_bytes(), Some(chunk));
                 }
-                cols.do_memory_check = F::one();
+                cols.do_memory_check = F::ONE;
             }
         }
     }

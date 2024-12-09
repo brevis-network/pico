@@ -2,7 +2,7 @@ use super::Block;
 use crate::{machine::extension::BinomialExtension, primitives::consts::EXTENSION_DEGREE};
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    AbstractExtensionField, Field,
+    Field, FieldExtensionAlgebra,
 };
 
 pub trait BinomialExtensionUtils<T> {

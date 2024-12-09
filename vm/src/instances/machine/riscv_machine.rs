@@ -10,13 +10,12 @@ use crate::{
         record::RecordBehavior,
         riscv::{public_values::PublicValues, record::EmulationRecord},
     },
-    instances::configs::riscv_config::StarkConfig as RiscvSC,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
-        proof::MetaProof,
+        proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
     primitives::consts::MAX_LOG_CHUNK_SIZE,
@@ -24,7 +23,7 @@ use crate::{
 use anyhow::Result;
 use p3_air::Air;
 use p3_challenger::CanObserve;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument};
@@ -39,19 +38,23 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<C> MachineBehavior<RiscvSC, C, Vec<u8>> for RiscvMachine<RiscvSC, C>
+impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
 where
-    C: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-        + for<'a> Air<ProverConstraintFolder<'a, RiscvSC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, RiscvSC>>,
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+    BaseProof<SC>: Send + Sync,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!("RiscvMachine <{}>", type_name::<RiscvSC>())
+        format!("RiscvMachine <{}>", type_name::<SC>())
     }
 
     /// Get the base machine.
-    fn base_machine(&self) -> &BaseMachine<RiscvSC, C> {
+    fn base_machine(&self) -> &BaseMachine<SC, C> {
         &self.base_machine
     }
 
@@ -59,15 +62,15 @@ where
     #[instrument(name = "riscv_prove", level = "debug", skip_all)]
     fn prove(
         &self,
-        pk: &BaseProvingKey<RiscvSC>,
-        witness: &ProvingWitness<RiscvSC, C, Vec<u8>>,
-    ) -> MetaProof<RiscvSC>
+        pk: &BaseProvingKey<SC>,
+        witness: &ProvingWitness<SC, C, Vec<u8>>,
+    ) -> MetaProof<SC>
     where
         C: for<'a> Air<
             DebugConstraintFolder<
                 'a,
-                <RiscvSC as StarkGenericConfig>::Val,
-                <RiscvSC as StarkGenericConfig>::Challenge,
+                <SC as StarkGenericConfig>::Val,
+                <SC as StarkGenericConfig>::Challenge,
             >,
         >,
     {
@@ -99,7 +102,7 @@ where
             let commitments = batch_records
                 .into_par_iter()
                 .map(|record| {
-                    info!("PERF-phase=1-chunk={}", record.chunk_index(),);
+                    info!("PERF-phase=1-chunk={}", record.chunk_index());
                     self.base_machine.commit(record)
                 })
                 .collect::<Vec<_>>();
@@ -187,16 +190,16 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, vk: &BaseVerifyingKey<RiscvSC>, proof: &MetaProof<RiscvSC>) -> Result<()> {
+    fn verify(&self, vk: &BaseVerifyingKey<SC>, proof: &MetaProof<SC>) -> Result<()> {
         info!("PERF-machine=riscv");
         let begin = Instant::now();
 
         // initialize bookkeeping
-        let mut proof_count = <Val<RiscvSC>>::zero();
-        let mut execution_proof_count = <Val<RiscvSC>>::zero();
+        let mut proof_count = <Val<SC>>::ZERO;
+        let mut execution_proof_count = <Val<SC>>::ZERO;
         let mut prev_next_pc = vk.pc_start;
-        let mut prev_last_initialize_addr_bits = [<Val<RiscvSC>>::zero(); 32];
-        let mut prev_last_finalize_addr_bits = [<Val<RiscvSC>>::zero(); 32];
+        let mut prev_last_initialize_addr_bits = [<Val<SC>>::ZERO; 32];
+        let mut prev_last_finalize_addr_bits = [<Val<SC>>::ZERO; 32];
 
         let mut flag_extra = true;
         let mut committed_value_digest_prev = Default::default();
@@ -214,17 +217,17 @@ where
             }
 
             // conditional constraints
-            proof_count += <Val<RiscvSC>>::one();
+            proof_count += <Val<SC>>::ONE;
             // hack to make execution chunk consistent
 
             if each_proof.includes_chip("Cpu") {
-                execution_proof_count += <Val<RiscvSC>>::one();
+                execution_proof_count += <Val<SC>>::ONE;
 
                 if each_proof.log_main_degree() > MAX_LOG_CHUNK_SIZE {
                     panic!("Cpu log degree too large");
                 }
 
-                if public_values.start_pc == <Val<RiscvSC>>::zero() {
+                if public_values.start_pc == <Val<SC>>::ZERO {
                     panic!("First proof start_pc is zero");
                 }
             } else {
@@ -232,7 +235,7 @@ where
                     panic!("Non-Cpu proof start_pc is not equal to next_pc");
                 }
                 if flag_extra {
-                    execution_proof_count += <Val<RiscvSC>>::one();
+                    execution_proof_count += <Val<SC>>::ONE;
                     flag_extra = false;
                 }
             }
@@ -251,7 +254,7 @@ where
             }
 
             // ending constraints
-            if i == proof.proofs().len() - 1 && public_values.next_pc != <Val<RiscvSC>>::zero() {
+            if i == proof.proofs().len() - 1 && public_values.next_pc != <Val<SC>>::ZERO {
                 panic!("Last proof next_pc is not zero");
             }
 
@@ -265,7 +268,7 @@ where
             if public_values.execution_chunk != execution_proof_count {
                 panic!("Execution chunk number mismatch");
             }
-            if public_values.exit_code != <Val<RiscvSC>>::zero() {
+            if public_values.exit_code != <Val<SC>>::ZERO {
                 panic!("Exit code is not zero");
             }
             if public_values.previous_initialize_addr_bits != prev_last_initialize_addr_bits {

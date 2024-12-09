@@ -4,7 +4,7 @@ use crate::{
     machine::builder::{ChipBuilder, RecursionMemoryBuilder},
     recursion::runtime::HEAP_START_ADDRESS,
 };
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field, const L: usize> CpuChip<F, L> {
     /// Eval the heap ptr.

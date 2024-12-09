@@ -1,10 +1,10 @@
 use super::{Array, Builder, DslIr, Ext, Felt, Usize, Var};
 use crate::{
     configs::config::FieldGenericConfig,
-    primitives::consts::DIGEST_SIZE,
-    recursion::runtime::{HASH_RATE, PERMUTATION_WIDTH},
+    primitives::consts::{DIGEST_SIZE, PERMUTATION_WIDTH},
+    recursion::runtime::HASH_RATE,
 };
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 
 impl<FC: FieldGenericConfig> Builder<FC> {
     /// Applies the Poseidon2 permutation to the given array.
@@ -107,12 +107,12 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     pub fn poseidon2_hash(&mut self, array: &Array<FC, Felt<FC::F>>) -> Array<FC, Felt<FC::F>> {
         let mut state: Array<FC, Felt<FC::F>> = self.dyn_array(PERMUTATION_WIDTH);
 
-        let break_flag: Var<_> = self.eval(FC::N::zero());
+        let break_flag: Var<_> = self.eval(FC::N::ZERO);
         let last_index: Usize<_> = self.eval(array.len() - 1);
         self.range(0, array.len())
             .step_by(HASH_RATE)
             .for_each(|i, builder| {
-                builder.if_eq(break_flag, FC::N::one()).then(|builder| {
+                builder.if_eq(break_flag, FC::N::ONE).then(|builder| {
                     builder.break_loop();
                 });
                 // Insert elements of the chunk.
@@ -121,7 +121,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
                     let element = builder.get(array, index);
                     builder.set_value(&mut state, j, element);
                     builder.if_eq(index, last_index).then(|builder| {
-                        builder.assign(break_flag, FC::N::one());
+                        builder.assign(break_flag, FC::N::ONE);
                         builder.break_loop();
                     });
                 });
@@ -152,7 +152,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         let output: Array<FC, Felt<FC::F>> = self.dyn_array(DIGEST_SIZE);
         self.poseidon2_finalize_mut(self.p2_hash_num, &output);
 
-        self.assign(self.p2_hash_num, self.p2_hash_num + FC::N::one());
+        self.assign(self.p2_hash_num, self.p2_hash_num + FC::N::ONE);
 
         self.cycle_tracker("poseidon2-hash");
         output
@@ -165,7 +165,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         self.cycle_tracker("poseidon2-hash-ext");
         let mut state: Array<FC, Felt<FC::F>> = self.dyn_array(PERMUTATION_WIDTH);
 
-        let idx: Var<_> = self.eval(FC::N::zero());
+        let idx: Var<_> = self.eval(FC::N::ZERO);
         self.range(0, array.len()).for_each(|i, builder| {
             let subarray = builder.get(array, i);
             builder.range(0, subarray.len()).for_each(|j, builder| {
@@ -174,18 +174,18 @@ impl<FC: FieldGenericConfig> Builder<FC> {
                 for i in 0..4 {
                     let felt = builder.get(&felts, i);
                     builder.set_value(&mut state, idx, felt);
-                    builder.assign(idx, idx + FC::N::one());
+                    builder.assign(idx, idx + FC::N::ONE);
                     builder
                         .if_eq(idx, FC::N::from_canonical_usize(HASH_RATE))
                         .then(|builder| {
                             builder.poseidon2_permute_mut(&state);
-                            builder.assign(idx, FC::N::zero());
+                            builder.assign(idx, FC::N::ZERO);
                         });
                 }
             });
         });
 
-        self.if_ne(idx, FC::N::zero()).then(|builder| {
+        self.if_ne(idx, FC::N::ZERO).then(|builder| {
             builder.poseidon2_permute_mut(&state);
         });
 

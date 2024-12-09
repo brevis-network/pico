@@ -1,38 +1,35 @@
-use crate::{configs::config::StarkGenericConfig, primitives::RC_16_30};
-use p3_baby_bear::{BabyBear, DiffusionMatrixBabyBear};
+use crate::{
+    configs::config::{SimpleFriConfig, StarkGenericConfig},
+    primitives::{pico_poseidon2bb_init, PicoPoseidon2BabyBear},
+};
+use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use p3_commit::{ExtensionMmcs, Pcs};
 use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, Field};
 use p3_fri::{FriConfig, TwoAdicFriPcs};
-use p3_merkle_tree::FieldMerkleTreeMmcs;
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
+use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
 use tracing::info;
 
 pub type SC_Val = BabyBear;
-pub type SC_Perm =
-    Poseidon2<SC_Val, Poseidon2ExternalMatrixGeneral, DiffusionMatrixBabyBear, 16, 7>;
+pub type SC_Perm = PicoPoseidon2BabyBear;
 pub type SC_Hash = PaddingFreeSponge<SC_Perm, 16, 8, 8>;
 pub type SC_Compress = TruncatedPermutation<SC_Perm, 2, 8, 16>;
-pub type SC_ValMmcs = FieldMerkleTreeMmcs<
-    <SC_Val as Field>::Packing,
-    <SC_Val as Field>::Packing,
-    SC_Hash,
-    SC_Compress,
-    8,
->;
+pub type SC_ValMmcs =
+    MerkleTreeMmcs<<SC_Val as Field>::Packing, <SC_Val as Field>::Packing, SC_Hash, SC_Compress, 8>;
 pub type SC_Challenge = BinomialExtensionField<SC_Val, 4>;
 pub type SC_ChallengeMmcs = ExtensionMmcs<SC_Val, SC_Challenge, SC_ValMmcs>;
 
 pub type SC_Challenger = DuplexChallenger<SC_Val, SC_Perm, 16, 8>;
-pub type SC_Dft = Radix2DitParallel;
+pub type SC_Dft = Radix2DitParallel<SC_Val>;
 pub type SC_Pcs = TwoAdicFriPcs<SC_Val, SC_Dft, SC_ValMmcs, SC_ChallengeMmcs>;
 
 pub struct BabyBearPoseidon2 {
     pub perm: SC_Perm,
     pcs: SC_Pcs,
+    simple_fri_config: SimpleFriConfig,
 }
 
 impl Serialize for BabyBearPoseidon2 {
@@ -45,35 +42,13 @@ impl Serialize for BabyBearPoseidon2 {
 }
 
 impl BabyBearPoseidon2 {
-    #[must_use]
-    pub fn my_perm() -> SC_Perm {
-        const ROUNDS_F: usize = 8;
-        const ROUNDS_P: usize = 13;
-        let mut round_constants = RC_16_30.to_vec();
-        let internal_start = ROUNDS_F / 2;
-        let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
-        let internal_round_constants = round_constants
-            .drain(internal_start..internal_end)
-            .map(|vec| vec[0])
-            .collect::<Vec<_>>();
-        let external_round_constants = round_constants;
-        SC_Perm::new(
-            ROUNDS_F,
-            external_round_constants,
-            Poseidon2ExternalMatrixGeneral,
-            ROUNDS_P,
-            internal_round_constants,
-            DiffusionMatrixBabyBear,
-        )
-    }
-
     pub fn new() -> Self {
-        let perm = Self::my_perm();
+        let perm = pico_poseidon2bb_init();
         let hash = SC_Hash::new(perm.clone());
         let compress = SC_Compress::new(perm.clone());
         let val_mmcs = SC_ValMmcs::new(hash, compress);
         let challenge_mmcs = SC_ChallengeMmcs::new(val_mmcs.clone());
-        let dft = SC_Dft {};
+        let dft = SC_Dft::default();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
             Err(_) => 100,
@@ -86,18 +61,28 @@ impl BabyBearPoseidon2 {
             proof_of_work_bits: 16,
             mmcs: challenge_mmcs,
         };
-        let pcs = SC_Pcs::new(27, dft, val_mmcs, fri_config);
+        let pcs = SC_Pcs::new(dft, val_mmcs, fri_config);
 
-        Self { perm, pcs }
+        let simple_fri_config = SimpleFriConfig {
+            log_blowup: 1,
+            num_queries,
+            proof_of_work_bits: 16,
+        };
+
+        Self {
+            perm,
+            pcs,
+            simple_fri_config,
+        }
     }
 
     pub fn compress() -> Self {
-        let perm = Self::my_perm();
+        let perm = pico_poseidon2bb_init();
         let hash = SC_Hash::new(perm.clone());
         let compress = SC_Compress::new(perm.clone());
         let val_mmcs = SC_ValMmcs::new(hash, compress);
         let challenge_mmcs = SC_ChallengeMmcs::new(val_mmcs.clone());
-        let dft = SC_Dft {};
+        let dft = SC_Dft::default();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
             Err(_) => 33,
@@ -110,9 +95,23 @@ impl BabyBearPoseidon2 {
             proof_of_work_bits: 16,
             mmcs: challenge_mmcs,
         };
-        let pcs = SC_Pcs::new(27, dft, val_mmcs, fri_config);
+        let pcs = SC_Pcs::new(dft, val_mmcs, fri_config);
 
-        Self { perm, pcs }
+        let simple_fri_config = SimpleFriConfig {
+            log_blowup: 3,
+            num_queries,
+            proof_of_work_bits: 16,
+        };
+
+        Self {
+            perm,
+            pcs,
+            simple_fri_config,
+        }
+    }
+
+    pub fn fri_config(&self) -> &SimpleFriConfig {
+        &self.simple_fri_config
     }
 }
 
@@ -129,7 +128,7 @@ impl Default for BabyBearPoseidon2 {
 }
 
 impl StarkGenericConfig for BabyBearPoseidon2 {
-    type Val = BabyBear;
+    type Val = SC_Val;
     type Domain = <SC_Pcs as Pcs<SC_Challenge, SC_Challenger>>::Domain;
     type Challenge = SC_Challenge;
     type Challenger = SC_Challenger;

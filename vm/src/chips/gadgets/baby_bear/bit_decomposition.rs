@@ -1,5 +1,5 @@
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 use std::array;
 
@@ -36,7 +36,7 @@ impl<F: Field> BabyBearBitDecomposition<F> {
         cols: BabyBearBitDecomposition<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let mut reconstructed_value = AB::Expr::zero();
+        let mut reconstructed_value = AB::Expr::ZERO;
         for (i, bit) in cols.bits.iter().enumerate() {
             builder.when(is_real.clone()).assert_bool(*bit);
             reconstructed_value += AB::Expr::from_wrapped_u32(1 << i) * *bit;
@@ -74,7 +74,7 @@ impl<F: Field> BabyBearBitDecomposition<F> {
         );
 
         // If the top bits are all 0, then the lower bits must all be 0.
-        let mut lower_bits_sum: AB::Expr = AB::Expr::zero();
+        let mut lower_bits_sum: AB::Expr = AB::Expr::ZERO;
         for bit in cols.bits[0..27].iter() {
             lower_bits_sum = lower_bits_sum + *bit;
         }

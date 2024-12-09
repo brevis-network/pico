@@ -28,7 +28,7 @@ use crate::{
     },
     recursion::air::RecursionPublicValues,
 };
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use std::{borrow::Borrow, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +49,7 @@ impl RecursionEmbedVerifierCircuit<RecursionFC, RecursionSC> {
         );
 
         let pcs = TwoAdicFriPcsVariable {
-            config: const_fri_config(&mut builder, machine.config().pcs().fri_config()),
+            config: const_fri_config(&mut builder, machine.config().fri_config()),
         };
 
         Self::build_verifier(&mut builder, &pcs, machine, stdin);
@@ -116,7 +116,7 @@ impl RecursionEmbedVerifierCircuit<RecursionFC, RecursionSC> {
         // todo: Check that the public values digest is correct.
         verify_public_values_hash(builder, public_values);
 
-        builder.assert_felt_eq(public_values.flag_complete, <Val<RecursionSC>>::one());
+        builder.assert_felt_eq(public_values.flag_complete, <Val<RecursionSC>>::ONE);
 
         commit_public_values(builder, public_values);
     }

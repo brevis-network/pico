@@ -55,13 +55,14 @@ impl<FC: FieldGenericConfig> FriConfigVariable<FC> {
 #[derive(DslVariable, Clone)]
 pub struct FriProofVariable<FC: FieldGenericConfig> {
     pub commit_phase_commits: Array<FC, DigestVariable<FC>>,
-    pub query_proofs: Array<FC, FriQueryProofVariable<FC>>,
+    pub query_proofs: Array<FC, QueryProofVariable<FC>>,
     pub final_poly: Ext<FC::F, FC::EF>,
     pub pow_witness: Felt<FC::F>,
 }
 
 #[derive(DslVariable, Clone)]
-pub struct FriQueryProofVariable<FC: FieldGenericConfig> {
+pub struct QueryProofVariable<FC: FieldGenericConfig> {
+    pub input_proof: Array<FC, BatchOpeningVariable<FC>>,
     pub commit_phase_openings: Array<FC, FriCommitPhaseProofStepVariable<FC>>,
 }
 
@@ -82,11 +83,11 @@ pub struct DimensionsVariable<FC: FieldGenericConfig> {
     pub height: Var<FC::N>,
 }
 
-#[derive(DslVariable, Clone)]
-pub struct PcsProofVariable<FC: FieldGenericConfig> {
-    pub fri_proof: FriProofVariable<FC>,
-    pub query_openings: Array<FC, Array<FC, BatchOpeningVariable<FC>>>,
-}
+// #[derive(DslVariable, Clone)]
+// pub struct PcsProofVariable<FC: FieldGenericConfig> {
+//     pub fri_proof: FriProofVariable<FC>,
+//     pub query_openings: Array<FC, Array<FC, BatchOpeningVariable<FC>>>,
+// }
 
 #[derive(DslVariable, Clone)]
 pub struct BatchOpeningVariable<FC: FieldGenericConfig> {

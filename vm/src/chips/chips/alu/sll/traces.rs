@@ -36,7 +36,7 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         let rows = input.shift_left_events.clone().len();
-        let mut trace = RowMajorMatrix::new(vec![F::zero(); NUM_SLL_COLS * rows], NUM_SLL_COLS);
+        let mut trace = RowMajorMatrix::new(vec![F::ZERO; NUM_SLL_COLS * rows], NUM_SLL_COLS);
         trace
             .rows_mut()
             .zip(input.shift_left_events.clone())
@@ -49,11 +49,11 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
         // Create the template for the padded rows. These are fake rows that don't fail on some
         // sanity checks.
         let padded_row_template = {
-            let mut row = [F::zero(); NUM_SLL_COLS];
+            let mut row = [F::ZERO; NUM_SLL_COLS];
             let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
-            cols.shift_by_n_bits[0] = F::one();
-            cols.shift_by_n_bytes[0] = F::one();
-            cols.bit_shift_multiplier = F::one();
+            cols.shift_by_n_bits[0] = F::ONE;
+            cols.shift_by_n_bytes[0] = F::ONE;
+            cols.bit_shift_multiplier = F::ONE;
             row
         };
         debug_assert!(padded_row_template.len() == NUM_SLL_COLS);
@@ -79,7 +79,7 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
             .map(|events| {
                 let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::zero(); NUM_SLL_COLS];
+                    let mut row = [F::ZERO; NUM_SLL_COLS];
                     let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(event, cols, &mut range);
                 });
@@ -110,7 +110,7 @@ impl<F: Field> SLLChip<F> {
         cols.a = Word(a.map(F::from_canonical_u8));
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
-        cols.is_real = F::one();
+        cols.is_real = F::ONE;
 
         for i in 0..BYTE_SIZE {
             // get c least 8 bits (a byte)

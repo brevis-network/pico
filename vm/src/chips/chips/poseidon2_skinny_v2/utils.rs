@@ -1,5 +1,5 @@
-use p3_baby_bear::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
-use p3_field::{AbstractField, PrimeField32};
+use crate::primitives::consts::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_poseidon2::matmul_internal;
 
 /// The width of the permutation.
@@ -12,7 +12,7 @@ pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;
 
 pub(crate) fn apply_m_4<AF>(x: &mut [AF])
 where
-    AF: AbstractField,
+    AF: FieldAlgebra,
 {
     let t01 = x[0].clone() + x[1].clone();
     let t23 = x[2].clone() + x[3].clone();
@@ -26,7 +26,7 @@ where
     x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
 }
 
-pub(crate) fn external_linear_layer<AF: AbstractField>(state: &mut [AF; WIDTH]) {
+pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
     for j in (0..WIDTH).step_by(4) {
         apply_m_4(&mut state[j..j + 4]);
     }
@@ -42,11 +42,11 @@ pub(crate) fn external_linear_layer<AF: AbstractField>(state: &mut [AF; WIDTH]) 
     }
 }
 
-pub(crate) fn internal_linear_layer<F: AbstractField>(state: &mut [F; WIDTH]) {
-    let matmul_constants: [<F as AbstractField>::F; WIDTH] =
+pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
+    let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
         POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
             .iter()
-            .map(|x| <F as AbstractField>::F::from_wrapped_u32(x.as_canonical_u32()))
+            .map(|x| <F as FieldAlgebra>::F::from_wrapped_u32(x.as_canonical_u32()))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap();

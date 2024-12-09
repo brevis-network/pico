@@ -26,7 +26,7 @@ mod tests {
             program::RecursionProgram,
         },
         machine::chip::ChipBehavior,
-        primitives::poseidon2_init,
+        primitives::poseidon2bb_init,
         recursion_v2::{
             runtime::RecursionRecord,
             tests::run_recursion_wrap_test_machine,
@@ -34,7 +34,7 @@ mod tests {
         },
     };
     use p3_baby_bear::BabyBear;
-    use p3_field::{AbstractField, PrimeField32};
+    use p3_field::{FieldAlgebra, PrimeField32};
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
     use std::{array, iter::once};
@@ -43,8 +43,8 @@ mod tests {
     #[test]
     fn recursion_poseidon2_skinny_generate_main() {
         type F = BabyBear;
-        let input_0 = [F::one(); WIDTH];
-        let permuter = poseidon2_init();
+        let input_0 = [F::ONE; WIDTH];
+        let permuter = poseidon2bb_init();
         let output_0 = permuter.permute(input_0);
         let mut rng = rand::thread_rng();
 
@@ -72,13 +72,13 @@ mod tests {
     #[test]
     fn recursion_poseidon2_skinny_chip_prove() {
         let input = [1; WIDTH];
-        let output = poseidon2_init()
+        let output = poseidon2bb_init()
             .permute(input.map(BabyBear::from_canonical_u32))
             .map(|x| BabyBear::as_canonical_u32(&x));
 
         let rng = &mut rand::thread_rng();
         let input_1: [BabyBear; WIDTH] = std::array::from_fn(|_| BabyBear::rand(rng));
-        let output_1 = poseidon2_init()
+        let output_1 = poseidon2bb_init()
             .permute(input_1)
             .map(|x| BabyBear::as_canonical_u32(&x));
         let input_1 = input_1.map(|x| BabyBear::as_canonical_u32(&x));

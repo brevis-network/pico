@@ -1,5 +1,5 @@
 use hashbrown::HashMap;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 
 // set it temporarily for now
 
@@ -10,7 +10,7 @@ pub trait RecordBehavior: Default + Send + Sync {
 
     fn append(&mut self, extra: &mut Self);
 
-    fn public_values<F: AbstractField>(&self) -> Vec<F>;
+    fn public_values<F: FieldAlgebra>(&self) -> Vec<F>;
 
     /// Registers the nonces of the record.
     fn register_nonces(&mut self) {}

@@ -49,10 +49,8 @@ impl<F: Field> ChipBehavior<F> for AddLookingChip<F> {
         // because of just test lookup feature, hardcode test data instead of the inputs are not from emulation records
         let row_num = 8;
 
-        let mut trace = RowMajorMatrix::new(
-            vec![F::zero(); ADD_LOOKING_COLS * row_num],
-            ADD_LOOKING_COLS,
-        );
+        let mut trace =
+            RowMajorMatrix::new(vec![F::ZERO; ADD_LOOKING_COLS * row_num], ADD_LOOKING_COLS);
         let rows: &mut [AddLookingCols<F>] = trace.borrow_rows_mut::<AddLookingCols<F>>();
         rows.iter_mut().enumerate().for_each(|(i, row)| {
             let a = i as u32;
@@ -101,7 +99,7 @@ where
         // no constraints for main trace, addition result is constrained by lookup
         builder.looking(SymbolicLookup::new(
             vec![local.a.into(), local.b.into(), local.result.into()],
-            F::one().into(),
+            F::ONE.into(),
             LookupType::Byte,
         ))
     }
@@ -122,10 +120,8 @@ impl<F: Field> ChipBehavior<F> for AddLookedChip<F> {
         // because of just test lookup feature, hardcode test data instead of the inputs are not from emulation records
         let row_num = 8;
 
-        let mut trace = RowMajorMatrix::new(
-            vec![F::zero(); ADD_LOOKING_COLS * row_num],
-            ADD_LOOKING_COLS,
-        );
+        let mut trace =
+            RowMajorMatrix::new(vec![F::ZERO; ADD_LOOKING_COLS * row_num], ADD_LOOKING_COLS);
         let rows: &mut [AddLookedCols<F>] = trace.borrow_rows_mut::<AddLookedCols<F>>();
         rows.iter_mut().enumerate().for_each(|(i, row)| {
             let a = i as u32;
@@ -169,7 +165,7 @@ where
 
         builder.looked(SymbolicLookup::new(
             vec![local.a.into(), local.b.into(), local.result.into()],
-            F::one().into(),
+            F::ONE.into(),
             LookupType::Byte,
         ))
     }

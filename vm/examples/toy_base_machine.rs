@@ -11,7 +11,9 @@ use pico_vm::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
     },
-    instances::configs::riscv_config::StarkConfig as RiscvSC,
+    instances::configs::{
+        riscv_config::StarkConfig as RiscvBbSC, riscv_m31_config::StarkConfig as RiscvM31SC,
+    },
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -102,11 +104,50 @@ fn main() {
     info!("\n Creating Program..");
     const ELF: &[u8] = include_bytes!("../src/compiler/test_data/riscv32im-pico-fibonacci-elf");
     let compiler = Compiler::new(SourceType::RiscV, ELF);
+
+    /*
+    BabyBear Test
+    */
+
+    info!("\n *********** Testing for BabyBear Config ***********");
     let program = compiler.compile();
 
     // Create the prover.
-    info!("\n Creating Base Machine");
-    let config = RiscvSC::new();
+    info!("\n Creating Base Machine for BabyBear Config");
+    let config = RiscvBbSC::new();
+    let chips = ToyChipType::all_chips();
+    let base_machine = BaseMachine::new(config, chips, RISCV_NUM_PVS);
+
+    // Setup PK and VK.
+    info!("\n Setup PK and VK");
+    let (pk, vk) = base_machine.setup_keys(&program);
+
+    info!("\n Creating Runtime..");
+    let mut runtime = RiscvEmulator::new(program, EmulatorOpts::default());
+    runtime.state.input_stream.push(vec![2, 0, 0, 0]);
+    runtime.run().unwrap();
+
+    let records = &mut vec![runtime.records[0].clone()];
+
+    info!("\n Generating proof");
+    // Generate the proof.
+    let proof = base_machine.prove_ensemble(&pk, records);
+
+    // Verify the proof.
+    info!("\n Verifying proof");
+    let result = base_machine.verify_ensemble(&vk, &proof);
+    info!("\n The proof is verified: {}", result.is_ok());
+    assert!(result.is_ok());
+
+    /*
+    M31 Test
+    */
+    info!("\n *********** Testing for M31 Config ***********");
+    let program = compiler.compile();
+
+    // Create the prover.
+    info!("\n Creating Base Machine for M31 Config");
+    let config = RiscvM31SC::new();
     let chips = ToyChipType::all_chips();
     let base_machine = BaseMachine::new(config, chips, RISCV_NUM_PVS);
 

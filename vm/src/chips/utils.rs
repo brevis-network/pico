@@ -74,7 +74,7 @@ where
     table_with_string_counts.map(move |(label, count)| format!("{count:>width$} {label}"))
 }
 
-/// Returns a vector of zeros of the given length. This is faster than vec![F::zero(); len] which
+/// Returns a vector of zeros of the given length. This is faster than vec![F::ZERO; len] which
 /// requires copying.
 ///
 /// This function is safe to use only for fields that can be transmuted from 0u32.

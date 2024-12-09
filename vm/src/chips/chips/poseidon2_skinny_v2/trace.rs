@@ -53,7 +53,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for Poseidon2SkinnyCh
         let num_instructions = instructions.clone().count();
 
         let mut rows = vec![
-            [F::zero(); NUM_POSEIDON2_PREPROCESSED_COLS];
+            [F::ZERO; NUM_POSEIDON2_PREPROCESSED_COLS];
             num_instructions * (NUM_EXTERNAL_ROUNDS + 3)
         ];
 
@@ -90,7 +90,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for Poseidon2SkinnyCh
                         } else if i == INTERNAL_ROUND_IDX {
                             F::from_wrapped_u32(RC_16_30_U32[NUM_EXTERNAL_ROUNDS / 2 + j][0])
                         } else {
-                            F::zero()
+                            F::ZERO
                         };
                     });
 
@@ -100,7 +100,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for Poseidon2SkinnyCh
                         cols.memory_preprocessed =
                             instruction.addrs.input.map(|addr| MemoryAccessCols {
                                 addr,
-                                mult: F::neg_one(),
+                                mult: F::NEG_ONE,
                             });
                     } else if i == OUTPUT_ROUND_IDX {
                         cols.memory_preprocessed = array::from_fn(|i| MemoryAccessCols {
@@ -126,7 +126,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for Poseidon2SkinnyCh
         for event in &input.poseidon2_events {
             // We have one row for input, one row for output, NUM_EXTERNAL_ROUNDS rows for the
             // external rounds, and one row for all internal rounds.
-            let mut row_add = [[F::zero(); NUM_POSEIDON2_COLS]; NUM_EXTERNAL_ROUNDS + 3];
+            let mut row_add = [[F::ZERO; NUM_POSEIDON2_COLS]; NUM_EXTERNAL_ROUNDS + 3];
 
             // The first row should have event.input and [event.input[0].clone();
             // NUM_INTERNAL_ROUNDS-1] in its state columns. The sbox_state will be
@@ -207,7 +207,7 @@ impl<const DEGREE: usize, F: PrimeField32> Poseidon2SkinnyChip<DEGREE, F> {
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
             // avoid adding columns for the result of the sbox, and instead include the x^3 -> x^7
             // part of the sbox in the constraint for the linear layer
-            let mut sbox_deg_7: [F; 16] = [F::zero(); WIDTH];
+            let mut sbox_deg_7: [F; 16] = [F::ZERO; WIDTH];
             for i in 0..WIDTH {
                 let sbox_deg_3 = add_rc[i] * add_rc[i] * add_rc[i];
                 sbox_deg_7[i] = sbox_deg_3 * sbox_deg_3 * add_rc[i];

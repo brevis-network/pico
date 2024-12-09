@@ -19,7 +19,7 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{borrow::BorrowMut, marker::PhantomData};
@@ -105,7 +105,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         } else {
             nb_events
         };
-        let mut values = vec![F::zero(); nb_rows * NUM_EXP_REVERSE_BITS_LEN_COLS];
+        let mut values = vec![F::ZERO; nb_rows * NUM_EXP_REVERSE_BITS_LEN_COLS];
 
         par_for_each_row(&mut values, NUM_EXP_REVERSE_BITS_LEN_COLS, |i, row| {
             if i >= nb_events {
@@ -121,22 +121,22 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
             cols.len = event.len;
             cols.accum = event.accum;
             cols.prev_accum_squared = event.prev_accum * event.prev_accum;
-            cols.is_last.populate(F::one() - event.len);
+            cols.is_last.populate(F::ONE - event.len);
             cols.is_first.populate(event.iteration_num);
-            cols.is_real = F::one();
+            cols.is_real = F::ONE;
             cols.iteration_num = event.iteration_num;
             cols.multiplier =
-                if event.current_bit.value == Block([F::one(), F::zero(), F::zero(), F::zero()]) {
+                if event.current_bit.value == Block([F::ONE, F::ZERO, F::ZERO, F::ZERO]) {
                     // The event may change the value stored in the x memory access, and we need to
                     // use the previous value.
                     event.x.prev_value[0]
                 } else {
-                    F::one()
+                    F::ONE
                 };
             cols.ptr = event.ptr;
             cols.base_ptr = event.base_ptr;
             cols.x_mem_access_flag =
-                F::from_bool(cols.len == F::one() || cols.iteration_num == F::zero());
+                F::from_bool(cols.len == F::ONE || cols.iteration_num == F::ZERO);
         });
 
         // Convert the trace to a row major matrix.
@@ -197,7 +197,7 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
 
         IsZeroOperation::<AB::F>::eval(
             builder,
-            AB::Expr::one() - local.len,
+            AB::Expr::ONE - local.len,
             local.is_last,
             local.is_real.into(),
         );
@@ -212,7 +212,7 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
         // All real columns need to be in succession.
         builder
             .when_transition()
-            .assert_zero((AB::Expr::one() - local.is_real) * next.is_real);
+            .assert_zero((AB::Expr::ONE - local.is_real) * next.is_real);
 
         // Assert that the boolean columns are boolean.
         builder.assert_bool(local.is_real);
@@ -239,7 +239,7 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
         // Assert that the last real row has `is_last` on.
         builder
             .when_transition()
-            .when(local.is_real * (AB::Expr::one() - next.is_real))
+            .when(local.is_real * (AB::Expr::ONE - next.is_real))
             .assert_one(local.is_last.result);
 
         builder
@@ -254,7 +254,7 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
         builder
             .when(local.is_real)
             .when_not(current_bit_val)
-            .assert_eq(local.multiplier, AB::Expr::one());
+            .assert_eq(local.multiplier, AB::Expr::ONE);
 
         // To get `next.accum`, we multiply `local.prev_accum_squared` by `local.multiplier` when
         // not `is_first`.
@@ -281,26 +281,26 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
             .when_transition()
             .when(next.is_real)
             .when_not(local.is_last.result)
-            .assert_eq(next.ptr, local.ptr + AB::Expr::one());
+            .assert_eq(next.ptr, local.ptr + AB::Expr::ONE);
 
         // The `len` counter must decrement when not `is_last`.
         builder
             .when_transition()
             .when(local.is_real)
             .when_not(local.is_last.result)
-            .assert_eq(local.len, next.len + AB::Expr::one());
+            .assert_eq(local.len, next.len + AB::Expr::ONE);
 
         // The `iteration_num` counter must increment when not `is_last`.
         builder
             .when_transition()
             .when(local.is_real)
             .when_not(local.is_last.result)
-            .assert_eq(local.iteration_num + AB::Expr::one(), next.iteration_num);
+            .assert_eq(local.iteration_num + AB::Expr::ONE, next.iteration_num);
 
         // The `iteration_num` counter must be 0 iff `is_first` is on.
         builder
             .when(local.is_first.result)
-            .assert_eq(local.iteration_num, AB::Expr::zero());
+            .assert_eq(local.iteration_num, AB::Expr::ZERO);
 
         // Access the memory for current_bit.
         builder.recursion_eval_memory_access_single(
@@ -343,7 +343,7 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
             .when_transition()
             .when_not(local.is_last.result)
             .when(next.is_real)
-            .assert_eq(local.clk + AB::Expr::one(), next.clk);
+            .assert_eq(local.clk + AB::Expr::ONE, next.clk);
 
         // Ensure that the value at the x memory access is unchanged when not `is_last`.
         builder

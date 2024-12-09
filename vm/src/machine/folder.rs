@@ -12,7 +12,7 @@ use crate::{
     primitives::consts::MAX_NUM_PVS,
 };
 use p3_air::{AirBuilder, ExtensionBuilder, PairBuilder};
-use p3_field::{AbstractField, ExtensionField, Field};
+use p3_field::{ExtensionField, Field, FieldAlgebra};
 use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
     stack::VerticalPair,
@@ -411,7 +411,7 @@ impl<'a, F, EF, PubVar, Var, Expr> AirBuilder
 where
     F: Field,
     EF: ExtensionField<F>,
-    Expr: AbstractField
+    Expr: FieldAlgebra
         + From<F>
         + Add<Var, Output = Expr>
         + Add<F, Output = Expr>
@@ -472,7 +472,7 @@ impl<'a, F, EF, PubVar, Var, Expr> ExtensionBuilder
 where
     F: Field,
     EF: ExtensionField<F>,
-    Expr: AbstractField<F = EF>
+    Expr: FieldAlgebra<F = EF>
         + From<F>
         + Add<Var, Output = Expr>
         + Add<F, Output = Expr>
@@ -513,7 +513,7 @@ impl<'a, F, EF, PubVar, Var, Expr> PermutationBuilder
 where
     F: Field,
     EF: ExtensionField<F>,
-    Expr: AbstractField<F = EF>
+    Expr: FieldAlgebra<F = EF>
         + From<F>
         + Add<Var, Output = Expr>
         + Add<F, Output = Expr>
@@ -559,7 +559,7 @@ impl<'a, F, EF, PubVar, Var, Expr> PairBuilder
 where
     F: Field,
     EF: ExtensionField<F>,
-    Expr: AbstractField<F = EF>
+    Expr: FieldAlgebra<F = EF>
         + From<F>
         + Add<Var, Output = Expr>
         + Add<F, Output = Expr>
@@ -593,7 +593,7 @@ impl<'a, F, EF, PubVar, Var, Expr> EmptyLookupBuilder
 where
     F: Field,
     EF: ExtensionField<F>,
-    Expr: AbstractField<F = EF>
+    Expr: FieldAlgebra<F = EF>
         + From<F>
         + Add<Var, Output = Expr>
         + Add<F, Output = Expr>
@@ -624,7 +624,7 @@ impl<'a, F, EF, PubVar, Var, Expr> PublicValuesBuilder
 where
     F: Field,
     EF: ExtensionField<F>,
-    Expr: AbstractField<F = EF>
+    Expr: FieldAlgebra<F = EF>
         + From<F>
         + Add<Var, Output = Expr>
         + Add<F, Output = Expr>
@@ -660,7 +660,7 @@ impl<'a, F, EF, PubVar, Var, Expr> ChipBuilder<F>
 where
     F: Field,
     EF: ExtensionField<F>,
-    Expr: AbstractField<F = EF>
+    Expr: FieldAlgebra<F = EF>
         + From<F>
         + Add<Var, Output = Expr>
         + Add<F, Output = Expr>
@@ -756,11 +756,11 @@ where
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.debug_eq_constraint(x.into(), F::zero());
+        self.debug_eq_constraint(x.into(), F::ZERO);
     }
 
     fn assert_one<I: Into<Self::Expr>>(&mut self, x: I) {
-        self.debug_eq_constraint(x.into(), F::one());
+        self.debug_eq_constraint(x.into(), F::ONE);
     }
 
     fn assert_eq<I1: Into<Self::Expr>, I2: Into<Self::Expr>>(&mut self, x: I1, y: I2) {
@@ -770,8 +770,15 @@ where
     /// Assert that `x` is a boolean, i.e. either 0 or 1.
     fn assert_bool<I: Into<Self::Expr>>(&mut self, x: I) {
         let x = x.into();
-        if x != F::zero() && x != F::one() {
+        // <<<<<<< HEAD
+        //         if x != F::ZERO && x != F::ONE {
+        //             let backtrace = std::backtrace::Backtrace::force_capture();
+        //             eprintln!("constraint failed: {x:?} is not a bool\n{backtrace}");
+        //             panic!();
+        // =======
+        if x != F::ZERO && x != F::ONE {
             self.failures.push(DebugConstraintFailure::NonBoolean(x));
+            // >>>>>>> main
         }
     }
 }
@@ -789,11 +796,15 @@ where
     where
         I: Into<Self::ExprEF>,
     {
+        // <<<<<<< HEAD
+        //         assert_eq!(x.into(), EF::ZERO, "constraints must evaluate to zero");
+        // =======
         let x = x.into();
-        if x != EF::zero() {
+        if x != EF::ZERO {
             self.failures
                 .push(DebugConstraintFailure::ExtensionNonzero(x));
         }
+        // >>>>>>> main
     }
 }
 

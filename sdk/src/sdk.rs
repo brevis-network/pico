@@ -50,8 +50,8 @@ use pico_vm::{
     },
     machine::proof::MetaProof,
     primitives::consts::{
-        COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, EMBED_DEGREE, RECURSION_NUM_PVS,
-        RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
+        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, EMBED_DEGREE,
+        PERMUTATION_WIDTH, RECURSION_NUM_PVS, RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
     },
     recursion::runtime::Runtime,
 };
@@ -306,7 +306,14 @@ impl SDKProverClient {
             let mut witness_stream = Vec::new();
             witness_stream.extend(stdin.write());
 
-            let mut runtime = Runtime::<Val<RecursionSC>, Challenge<RecursionSC>, _>::new(
+            let mut runtime = Runtime::<
+                Val<RecursionSC>,
+                Challenge<RecursionSC>,
+                _,
+                _,
+                PERMUTATION_WIDTH,
+                BABYBEAR_S_BOX_DEGREE,
+            >::new(
                 &self.compress_program,
                 self.compress_machine.config().perm.clone(),
             );
@@ -345,7 +352,14 @@ impl SDKProverClient {
             let mut witness_stream = Vec::new();
             witness_stream.extend(stdin.write());
 
-            let mut runtime = Runtime::<Val<RecursionSC>, Challenge<RecursionSC>, _>::new(
+            let mut runtime = Runtime::<
+                Val<RecursionSC>,
+                Challenge<RecursionSC>,
+                _,
+                _,
+                PERMUTATION_WIDTH,
+                BABYBEAR_S_BOX_DEGREE,
+            >::new(
                 &self.embed_program,
                 self.compress_machine.config().perm.clone(),
             );

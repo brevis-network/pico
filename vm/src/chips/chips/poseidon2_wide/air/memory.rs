@@ -10,7 +10,7 @@ use crate::{
     machine::builder::{ChipBaseBuilder, ChipBuilder, RecursionMemoryBuilder},
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
     /// Eval the memory related columns.
@@ -134,7 +134,7 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
                     *compress_workspace.memory_accesses[i].value(),
                 );
 
-                addr = addr.clone() + AB::Expr::one();
+                addr = addr.clone() + AB::Expr::ONE;
             }
         }
     }
@@ -167,7 +167,7 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
             let is_start_mem_idx = start_mem_idx_bitmap[i].into();
 
             let is_previous_end_mem_idx = if i == 0 {
-                AB::Expr::zero()
+                AB::Expr::ZERO
             } else {
                 end_mem_idx_bitmap[i - 1].into()
             };
@@ -178,7 +178,7 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
 
             absorb_builder
                 .when(is_previous_end_mem_idx.clone())
-                .assert_zero(derivative.clone() + AB::Expr::one());
+                .assert_zero(derivative.clone() + AB::Expr::ONE);
 
             absorb_builder
                 .when_not(is_start_mem_idx + is_previous_end_mem_idx)
@@ -188,14 +188,14 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
         // Verify that all elements of start_mem_idx_bitmap and end_mem_idx_bitmap are bool.
         // Also verify that exactly one of the bits in start_mem_idx_bitmap and end_mem_idx_bitmap
         // is one.
-        let mut start_mem_idx_bitmap_sum = AB::Expr::zero();
+        let mut start_mem_idx_bitmap_sum = AB::Expr::ZERO;
         start_mem_idx_bitmap.iter().for_each(|bit| {
             absorb_builder.assert_bool(*bit);
             start_mem_idx_bitmap_sum += (*bit).into();
         });
         absorb_builder.assert_one(start_mem_idx_bitmap_sum);
 
-        let mut end_mem_idx_bitmap_sum = AB::Expr::zero();
+        let mut end_mem_idx_bitmap_sum = AB::Expr::ZERO;
         end_mem_idx_bitmap.iter().for_each(|bit| {
             absorb_builder.assert_bool(*bit);
             end_mem_idx_bitmap_sum += (*bit).into();

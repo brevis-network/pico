@@ -45,7 +45,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        let mut values = vec![F::zero(); input.cpu_events.len() * NUM_CPU_COLS];
+        let mut values = vec![F::ZERO; input.cpu_events.len() * NUM_CPU_COLS];
 
         let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
         values
@@ -88,7 +88,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
                 // The range map stores range (u8) lookup event -> multiplicity.
                 let mut range_events: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 ops.iter().for_each(|op| {
-                    let mut row = [F::zero(); NUM_CPU_COLS];
+                    let mut row = [F::ZERO; NUM_CPU_COLS];
                     let cols: &mut CpuCols<F> = row.as_mut_slice().borrow_mut();
                     let alu_events =
                         self.event_to_row(op, &HashMap::new(), cols, &mut range_events);
@@ -199,7 +199,7 @@ impl<F: PrimeField32> CpuChip<F> {
         );
 
         // Assert that the instruction is not a no-op.
-        cols.is_real = F::one();
+        cols.is_real = F::ONE;
 
         new_alu_events
     }
@@ -211,7 +211,7 @@ impl<F: PrimeField32> CpuChip<F> {
         } else {
             n_real_rows.next_power_of_two()
         };
-        values.resize(padded_nb_rows * NUM_CPU_COLS, F::zero());
+        values.resize(padded_nb_rows * NUM_CPU_COLS, F::ZERO);
 
         // Interpret values as a slice of arrays of length `NUM_CPU_COLS`
         let rows = unsafe {
@@ -222,8 +222,8 @@ impl<F: PrimeField32> CpuChip<F> {
         };
 
         rows[n_real_rows..].par_iter_mut().for_each(|padded_row| {
-            padded_row[CPU_COL_MAP.opcode_selector.imm_b] = F::one();
-            padded_row[CPU_COL_MAP.opcode_selector.imm_c] = F::one();
+            padded_row[CPU_COL_MAP.opcode_selector.imm_b] = F::ONE;
+            padded_row[CPU_COL_MAP.opcode_selector.imm_c] = F::ONE;
         });
     }
 }

@@ -10,7 +10,7 @@ use crate::{
         lookup::{LookupType, SymbolicLookup},
     },
 };
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use std::iter::once;
 
 /// message builder for the chips.
@@ -152,7 +152,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.looking_byte_pair(opcode, a, Self::Expr::zero(), b, c, multiplicity);
+        self.looking_byte_pair(opcode, a, Self::Expr::ZERO, b, c, multiplicity);
     }
 
     /// Sends a byte operation with two outputs to be processed.
@@ -221,7 +221,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.looked_byte_pair(opcode, a, Self::Expr::zero(), b, c, multiplicity);
+        self.looked_byte_pair(opcode, a, Self::Expr::ZERO, b, c, multiplicity);
     }
 
     /// Receives a byte operation with two outputs to be processed.

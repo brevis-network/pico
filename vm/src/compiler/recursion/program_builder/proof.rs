@@ -1,4 +1,4 @@
-use super::p3::fri::types::{DigestVariable, PcsProofVariable};
+use super::p3::fri::types::{DigestVariable, FriProofVariable};
 use crate::{
     compiler::recursion::prelude::*,
     configs::config::FieldGenericConfig,
@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use p3_air::BaseAir;
-use p3_field::{AbstractExtensionField, AbstractField};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use pico_derive::DslVariable;
 
 /// Reference: [pico_machine::stark::BaseProof]
@@ -16,11 +16,10 @@ use pico_derive::DslVariable;
 pub struct BaseProofVariable<FC: FieldGenericConfig> {
     pub commitment: BaseCommitmentsVariable<FC>,
     pub opened_values: BaseOpenedValuesVariable<FC>,
-    pub opening_proof: PcsProofVariable<FC>,
+    pub opening_proof: FriProofVariable<FC>,
     pub public_values: Array<FC, Felt<FC::F>>,
     pub quotient_data: Array<FC, QuotientDataVariable<FC>>,
     pub sorted_indices: Array<FC, Var<FC::N>>,
-    // todo: public values?
 }
 
 /// Reference: [pico_machine::BaseCommitments]

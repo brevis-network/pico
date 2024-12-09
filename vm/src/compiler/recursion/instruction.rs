@@ -62,11 +62,11 @@ impl<F: PrimeField32> Instruction<F> {
     pub fn dummy() -> Self {
         Instruction::new(
             Opcode::ADD,
-            F::zero(),
-            [F::zero(); 4],
-            [F::zero(); 4],
-            F::zero(),
-            F::zero(),
+            F::ZERO,
+            [F::ZERO; 4],
+            [F::ZERO; 4],
+            F::ZERO,
+            F::ZERO,
             false,
             false,
             "".to_string(),

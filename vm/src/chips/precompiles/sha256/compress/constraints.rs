@@ -16,7 +16,7 @@ use crate::{
     },
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 
 impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for ShaCompressChip<F>
@@ -33,7 +33,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         self.eval_control_flow_flags(builder, local, next);
 
@@ -72,7 +72,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         }
 
         // Verify that exactly one of the octet columns is true.
-        let mut octet_sum = CB::Expr::zero();
+        let mut octet_sum = CB::Expr::ZERO;
         for i in 0..8 {
             octet_sum += local.octet[i].into();
         }
@@ -95,7 +95,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         }
 
         // Verify that exactly one of the octet_num columns is true.
-        let mut octet_num_sum = CB::Expr::zero();
+        let mut octet_num_sum = CB::Expr::ZERO;
         for i in 0..10 {
             octet_num_sum += local.octet_num[i].into();
         }
@@ -133,7 +133,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             // last cycle is an exception since the next row must be a new 80-cycle loop or nonreal.
             builder
                 .when_transition()
-                .when(local.octet_num[0] + local.octet_num[9] * (CB::Expr::one() - local.octet[7]))
+                .when(local.octet_num[0] + local.octet_num[9] * (CB::Expr::ONE - local.octet[7]))
                 .assert_word_eq(*var, next_vars[i]);
 
             // When column is read from memory during init, is should be equal to the memory value.
@@ -222,13 +222,13 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         );
 
         // Calculate the current cycle_num.
-        let mut cycle_num = CB::Expr::zero();
+        let mut cycle_num = CB::Expr::ZERO;
         for i in 0..10 {
             cycle_num += local.octet_num[i] * CB::Expr::from_canonical_usize(i);
         }
 
         // Calculate the current step of the cycle 8.
-        let mut cycle_step = CB::Expr::zero();
+        let mut cycle_step = CB::Expr::ZERO;
         for i in 0..8 {
             cycle_step += local.octet[i] * CB::Expr::from_canonical_usize(i);
         }
@@ -243,7 +243,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         builder.when(local.is_compression).assert_eq(
             local.mem_addr,
             local.w_ptr
-                + (((cycle_num - CB::Expr::one()) * CB::Expr::from_canonical_u32(8))
+                + (((cycle_num - CB::Expr::ONE) * CB::Expr::from_canonical_u32(8))
                     + cycle_step.clone())
                     * CB::Expr::from_canonical_u32(4),
         );
@@ -560,7 +560,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         let add_operands = [
             local.a, local.b, local.c, local.d, local.e, local.f, local.g, local.h,
         ];
-        let zero = CB::Expr::zero();
+        let zero = CB::Expr::ZERO;
         let mut filtered_operand = Word([zero.clone(), zero.clone(), zero.clone(), zero]);
         for (i, operand) in local.octet.iter().zip(add_operands.iter()) {
             for j in 0..4 {

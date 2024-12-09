@@ -75,7 +75,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
         }
 
         for i in nb_rows..padded_nb_rows {
-            let mut row = [F::zero(); NUM_SHA_EXTEND_COLS];
+            let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
             cols.populate_flags(i);
             rows.push(row);
@@ -131,9 +131,9 @@ impl<F: PrimeField32> ShaExtendChip<F> {
     ) {
         let chunk = event.chunk;
         for j in 0..48usize {
-            let mut row = [F::zero(); NUM_SHA_EXTEND_COLS];
+            let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
-            cols.is_real = F::one();
+            cols.is_real = F::ONE;
             cols.populate_flags(j);
             cols.chunk = F::from_canonical_u32(event.chunk);
             cols.clk = F::from_canonical_u32(event.clk);

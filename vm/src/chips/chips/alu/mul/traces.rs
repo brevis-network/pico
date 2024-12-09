@@ -63,7 +63,7 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                                 || event.opcode == Opcode::MULH
                                 || event.opcode == Opcode::MULHSU
                         );
-                        let mut row = [F::zero(); NUM_MUL_COLS];
+                        let mut row = [F::ZERO; NUM_MUL_COLS];
                         let cols: &mut MulCols<F> = row.as_mut_slice().borrow_mut();
 
                         let a_word = event.a.to_le_bytes();
@@ -84,13 +84,13 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                             if (event.opcode == Opcode::MULH || event.opcode == Opcode::MULHSU)
                                 && b_msb == 1
                             {
-                                cols.b_sign_extend = F::one();
+                                cols.b_sign_extend = F::ONE;
                                 b.resize(PRODUCT_SIZE, BYTE_MASK);
                             }
 
                             // If c is signed and it is negative, sign extend c.
                             if event.opcode == Opcode::MULH && c_msb == 1 {
-                                cols.c_sign_extend = F::one();
+                                cols.c_sign_extend = F::ONE;
                                 c.resize(PRODUCT_SIZE, BYTE_MASK);
                             }
 
@@ -139,7 +139,7 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
                         cols.a = Word(a_word.map(F::from_canonical_u8));
                         cols.b = Word(b_word.map(F::from_canonical_u8));
                         cols.c = Word(c_word.map(F::from_canonical_u8));
-                        cols.is_real = F::one();
+                        cols.is_real = F::ONE;
                         cols.is_mul = F::from_bool(event.opcode == Opcode::MUL);
                         cols.is_mulh = F::from_bool(event.opcode == Opcode::MULH);
                         cols.is_mulhu = F::from_bool(event.opcode == Opcode::MULHU);

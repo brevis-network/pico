@@ -32,7 +32,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const L: usize> C
     ) -> RowMajorMatrix<F> {
         let nb_events = input.cpu_events.len();
         let padded_nb_rows = next_power_of_two(nb_events, self.fixed_log2_rows);
-        let mut values = vec![F::zero(); padded_nb_rows * NUM_CPU_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_CPU_COLS];
 
         par_for_each_row(&mut values, NUM_CPU_COLS, |i, row| {
             if i >= nb_events {
@@ -104,7 +104,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const L: usize> C
                 branch_cols.next_pc = if do_branch {
                     event.pc + event.instruction.op_c[0]
                 } else {
-                    event.pc + F::one()
+                    event.pc + F::ONE
                 };
             }
 
@@ -112,10 +112,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const L: usize> C
             if event.instruction.opcode == Opcode::Commit {
                 let public_values_cols = cols.opcode_specific.public_values_mut();
                 let idx = cols.b.prev_value()[0].as_canonical_u32() as usize;
-                public_values_cols.idx_bitmap[idx] = F::one();
+                public_values_cols.idx_bitmap[idx] = F::ONE;
             }
 
-            cols.is_real = F::one();
+            cols.is_real = F::ONE;
         });
 
         let mut trace = RowMajorMatrix::new(values, NUM_CPU_COLS);
@@ -128,9 +128,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const L: usize> C
             .skip(input.cpu_events.len());
         padded_rows.for_each(|(i, row)| {
             let cols: &mut CpuCols<F> = row.borrow_mut();
-            cols.selectors.is_noop = F::one();
-            cols.instruction.imm_b = F::one();
-            cols.instruction.imm_c = F::one();
+            cols.selectors.is_noop = F::ONE;
+            cols.instruction.imm_b = F::ONE;
+            cols.instruction.imm_c = F::ONE;
             cols.clk = F::from_canonical_u32(4) * F::from_canonical_usize(i);
             cols.instruction.imm_b = F::from_canonical_u32(1);
             cols.instruction.imm_c = F::from_canonical_u32(1);

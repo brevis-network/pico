@@ -26,7 +26,7 @@ mod tests {
         },
     };
     use itertools::Itertools;
-    use p3_field::{AbstractExtensionField, AbstractField};
+    use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
     use p3_matrix::dense::RowMajorMatrix;
     use rand::{rngs::ThreadRng, thread_rng, Rng};
     use std::mem::size_of;

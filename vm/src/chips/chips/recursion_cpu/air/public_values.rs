@@ -4,7 +4,7 @@ use crate::{
     primitives::consts::DIGEST_SIZE, recursion::air::BlockBuilder,
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field, const L: usize> CpuChip<F, L> {
     /// Eval the COMMIT instructions.
@@ -22,7 +22,7 @@ impl<F: Field, const L: usize> CpuChip<F, L> {
         let is_commit_instruction = self.is_commit_instruction::<AB>(local);
 
         // Verify all elements in the index bitmap are bools.
-        let mut bitmap_sum = AB::Expr::zero();
+        let mut bitmap_sum = AB::Expr::ZERO;
         for bit in public_values_cols.idx_bitmap.iter() {
             builder
                 .when(is_commit_instruction.clone())

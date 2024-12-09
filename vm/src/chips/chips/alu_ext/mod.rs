@@ -26,7 +26,7 @@ mod tests {
         },
     };
     use p3_baby_bear::BabyBear;
-    use p3_field::{extension::BinomialExtensionField, AbstractExtensionField, AbstractField};
+    use p3_field::{extension::BinomialExtensionField, FieldAlgebra, FieldExtensionAlgebra};
     use p3_matrix::dense::RowMajorMatrix;
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -36,9 +36,9 @@ mod tests {
 
         let chunk = RecursionRecord {
             ext_alu_events: vec![ExtAluIo {
-                out: F::one().into(),
-                in1: F::one().into(),
-                in2: F::one().into(),
+                out: F::ONE.into(),
+                in1: F::ONE.into(),
+                in2: F::ONE.into(),
             }],
             ..Default::default()
         };

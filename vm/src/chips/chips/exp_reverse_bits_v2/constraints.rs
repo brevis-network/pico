@@ -1,6 +1,6 @@
 use crate::machine::builder::{ChipBaseBuilder, ChipBuilder, RecursionBuilder};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
@@ -70,7 +70,7 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
         builder
             .when(local_preprocess.is_real)
             .when_not(local.current_bit)
-            .assert_eq(local.multiplier, CB::Expr::one());
+            .assert_eq(local.multiplier, CB::Expr::ONE);
 
         // To get `next.accum`, we multiply `local.prev_accum_squared` by `local.multiplier` when
         // not `is_last`.

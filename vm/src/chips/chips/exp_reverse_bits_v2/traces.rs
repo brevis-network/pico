@@ -45,21 +45,21 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
             .for_each(|instruction| {
                 let ExpReverseBitsInstr { addrs, mult } = instruction;
                 let mut row_add =
-                    vec![[F::zero(); NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]; addrs.exp.len()];
+                    vec![[F::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS]; addrs.exp.len()];
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut ExpReverseBitsLenPreprocessedCols<F> =
                         row.as_mut_slice().borrow_mut();
                     row.iteration_num = F::from_canonical_u32(i as u32);
                     row.is_first = F::from_bool(i == 0);
                     row.is_last = F::from_bool(i == addrs.exp.len() - 1);
-                    row.is_real = F::one();
+                    row.is_real = F::ONE;
                     row.x_mem = MemoryAccessCols {
                         addr: addrs.base,
                         mult: -F::from_bool(i == 0),
                     };
                     row.exponent_mem = MemoryAccessCols {
                         addr: addrs.exp[i],
-                        mult: F::neg_one(),
+                        mult: F::NEG_ONE,
                     };
                     row.result_mem = MemoryAccessCols {
                         addr: addrs.result,
@@ -72,7 +72,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         // Pad the trace to a power of two.
         pad_rows_fixed(
             &mut rows,
-            || [F::zero(); NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
+            || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
             program.fixed_log2_rows(self),
         );
 
@@ -90,9 +90,9 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
     ) -> RowMajorMatrix<F> {
         let mut overall_rows = Vec::new();
         input.exp_reverse_bits_len_events.iter().for_each(|event| {
-            let mut rows = vec![vec![F::zero(); NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
+            let mut rows = vec![vec![F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS]; event.exp.len()];
 
-            let mut accum = F::one();
+            let mut accum = F::ONE;
 
             rows.iter_mut().enumerate().for_each(|(i, row)| {
                 let cols: &mut ExpReverseBitsLenCols<F> = row.as_mut_slice().borrow_mut();
@@ -100,10 +100,10 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
                 let prev_accum = accum;
                 accum = prev_accum
                     * prev_accum
-                    * if event.exp[i] == F::one() {
+                    * if event.exp[i] == F::ONE {
                         event.base
                     } else {
-                        F::one()
+                        F::ONE
                     };
 
                 cols.x = event.base;
@@ -111,10 +111,10 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
                 cols.accum = accum;
                 cols.accum_squared = accum * accum;
                 cols.prev_accum_squared = prev_accum * prev_accum;
-                cols.multiplier = if event.exp[i] == F::one() {
+                cols.multiplier = if event.exp[i] == F::ONE {
                     event.base
                 } else {
-                    F::one()
+                    F::ONE
                 };
                 cols.prev_accum_squared_times_multiplier =
                     cols.prev_accum_squared * cols.multiplier;
@@ -129,7 +129,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         // Pad the trace to a power of two.
         pad_rows_fixed(
             &mut overall_rows,
-            || [F::zero(); NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
+            || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
             input.fixed_log2_rows(self),
         );
 

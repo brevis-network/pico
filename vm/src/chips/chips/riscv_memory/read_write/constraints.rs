@@ -15,7 +15,7 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 
 impl<F: Field> BaseAir<F> for MemoryReadWriteChip<F> {
@@ -41,7 +41,7 @@ where
             local.op_b_val(),
             local.op_c_val(),
             local.chunk,
-            CB::Expr::zero(), // local.nonce,
+            CB::Expr::ZERO, // local.nonce,
             is_memory_instruction.clone(),
         );
 
@@ -137,10 +137,10 @@ impl<F: Field> MemoryReadWriteChip<F> {
         ]
         .iter()
         .enumerate()
-        .fold(CB::Expr::zero(), |acc, (index, &value)| {
+        .fold(CB::Expr::ZERO, |acc, (index, &value)| {
             acc + CB::Expr::from_canonical_usize(index + 1) * value
         });
-        let mut recomposed_byte = CB::Expr::zero();
+        let mut recomposed_byte = CB::Expr::ZERO;
         local
             .aa_least_sig_byte_decomp
             .iter()
@@ -195,16 +195,16 @@ impl<F: Field> MemoryReadWriteChip<F> {
             local.mem_value_is_neg_not_x0,
             (local.instruction.is_lb + local.instruction.is_lh)
                 * local.most_sig_byte_decomp[7]
-                * (CB::Expr::one() - local.instruction.op_a_0),
+                * (CB::Expr::ONE - local.instruction.op_a_0),
         );
 
         // When the memory value is negative and not writing to x0, use the SUB opcode to compute
         // the signed value of the memory value and verify that the op_a value is correct.
         let signed_value = Word([
-            CB::Expr::zero(),
-            CB::Expr::one() * local.instruction.is_lb,
-            CB::Expr::one() * local.instruction.is_lh,
-            CB::Expr::zero(),
+            CB::Expr::ZERO,
+            CB::Expr::ONE * local.instruction.is_lb,
+            CB::Expr::ONE * local.instruction.is_lh,
+            CB::Expr::ZERO,
         ]);
 
         builder.looking_alu(
@@ -219,13 +219,13 @@ impl<F: Field> MemoryReadWriteChip<F> {
 
         // Assert that correct value of `mem_value_is_pos_not_x0`.
         let mem_value_is_pos = (local.instruction.is_lb + local.instruction.is_lh)
-            * (CB::Expr::one() - local.most_sig_byte_decomp[7])
+            * (CB::Expr::ONE - local.most_sig_byte_decomp[7])
             + local.instruction.is_lbu
             + local.instruction.is_lhu
             + local.instruction.is_lw;
         builder.assert_eq(
             local.mem_value_is_pos_not_x0,
-            mem_value_is_pos * (CB::Expr::one() - local.instruction.op_a_0),
+            mem_value_is_pos * (CB::Expr::ONE - local.instruction.op_a_0),
         );
 
         // When the memory value is not positive and not writing to x0, assert that op_a value is
@@ -247,10 +247,10 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // method `eval_memory_address_and_access`, which is called in
         // `eval_memory_address_and_access`.
         let offset_is_zero =
-            CB::Expr::one() - local.offset_is_one - local.offset_is_two - local.offset_is_three;
+            CB::Expr::ONE - local.offset_is_one - local.offset_is_two - local.offset_is_three;
 
         // Compute the expected stored value for a SB instruction.
-        let one = CB::Expr::one();
+        let one = CB::Expr::ONE;
         let a_val = local.op_a_val();
         let mem_val = *local.memory_access.value();
         let prev_mem_val = *local.memory_access.prev_value();
@@ -311,7 +311,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // method `eval_memory_address_and_access`, which is called in
         // `eval_memory_address_and_access`.
         let offset_is_zero =
-            CB::Expr::one() - local.offset_is_one - local.offset_is_two - local.offset_is_three;
+            CB::Expr::ONE - local.offset_is_one - local.offset_is_two - local.offset_is_three;
 
         // Compute the byte value.
         let mem_byte = mem_val[0] * offset_is_zero.clone()
@@ -340,8 +340,8 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let half_value = Word([
             use_lower_half.clone() * mem_val[0] + use_upper_half * mem_val[2],
             use_lower_half * mem_val[1] + use_upper_half * mem_val[3],
-            CB::Expr::zero(),
-            CB::Expr::zero(),
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
         ]);
 
         builder
@@ -362,7 +362,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         unsigned_mem_val: &Word<CB::Var>,
     ) {
         let is_mem = self.is_memory_instruction::<CB>(&local.instruction);
-        let mut recomposed_byte = CB::Expr::zero();
+        let mut recomposed_byte = CB::Expr::ZERO;
         for i in 0..8 {
             builder
                 .when(is_mem.clone())
@@ -385,7 +385,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
     ) {
         let is_mem_op = self.is_memory_instruction::<CB>(&local.instruction);
         let offset_is_zero =
-            CB::Expr::one() - local.offset_is_one - local.offset_is_two - local.offset_is_three;
+            CB::Expr::ONE - local.offset_is_one - local.offset_is_two - local.offset_is_three;
 
         let mut filtered_builder = builder.when(is_mem_op);
 
@@ -411,7 +411,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
             .assert_one(local.addr_offset);
         filtered_builder
             .when(local.offset_is_two)
-            .assert_eq(local.addr_offset, CB::Expr::two());
+            .assert_eq(local.addr_offset, CB::Expr::TWO);
         filtered_builder
             .when(local.offset_is_three)
             .assert_eq(local.addr_offset, CB::Expr::from_canonical_u8(3));

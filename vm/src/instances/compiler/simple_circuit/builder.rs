@@ -30,7 +30,7 @@ use crate::{
 };
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{AbstractField, PrimeField32, TwoAdicField};
+use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
 use std::{array, borrow::BorrowMut, marker::PhantomData};
 
 /// A program for recursively verifying a batch of Pico proofs.
@@ -50,7 +50,7 @@ impl SimpleVerifierCircuit<rcf::FieldConfig, RiscvSC> {
         SimpleRecursionStdin::<RiscvSC, RiscvChipType<_>>::witness(&input, &mut builder);
 
         let pcs = TwoAdicFriPcsVariable {
-            config: const_fri_config(&mut builder, machine.config().pcs().fri_config()),
+            config: const_fri_config(&mut builder, machine.config().fri_config()),
         };
         Self::build_verifier(&mut builder, &pcs, machine, input);
 
@@ -87,16 +87,15 @@ where
         } = input;
 
         // Initialize the challenger variables.
-        let leaf_challenger_public_values = get_challenger_public_values(builder, &base_challenger);
+        let base_challenger_public_values = get_challenger_public_values(builder, &base_challenger);
         let mut reconstruct_challenger: DuplexChallengerVariable<_> =
             initial_reconstruct_challenger.copy(builder);
 
         // Initialize the cumulative sum.
-        let cumulative_sum: Ext<_, _> = builder.eval(FC::EF::zero().cons());
+        let cumulative_sum: Ext<_, _> = builder.eval(FC::EF::ZERO.cons());
 
-        // Assert that the number of proofs is not zero.
-        // builder.assert_usize_eq(base_proofs.len(), 1);
-        builder.assert_usize_ne(base_proofs.len(), 0);
+        // Assert that the number of proofs is 1.
+        builder.assert_usize_eq(base_proofs.len(), 1);
 
         // Verify proofs, validate transitions, and update accumulation variables.
         builder.range(0, base_proofs.len()).for_each(|i, builder| {
@@ -145,25 +144,25 @@ where
             let is_complete_felt = var2felt(builder, flag_complete);
 
             // Initialize the public values we will commit to.
-            let zero: Felt<_> = builder.eval(FC::F::zero());
+            let zero: Felt<_> = builder.eval(FC::F::ZERO);
 
             let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
             let recursion_public_values: &mut RecursionPublicValues<_> =
                 recursion_public_values_stream.as_mut_slice().borrow_mut();
 
-            recursion_public_values.base_challenger = leaf_challenger_public_values;
+            recursion_public_values.base_challenger = base_challenger_public_values;
             recursion_public_values.cumulative_sum = cumulative_sum_array;
             recursion_public_values.flag_complete = is_complete_felt;
 
             // Assert complete
-            builder.if_eq(flag_complete, FC::N::one()).then(|builder| {
+            builder.if_eq(flag_complete, FC::N::ONE).then(|builder| {
                 Self::assert_simple_complete(
                     builder,
                     recursion_public_values,
                     &reconstruct_challenger,
                 )
             });
-
+            //
             commit_public_values(builder, recursion_public_values);
         }
     }
@@ -184,7 +183,7 @@ where
 
         // Assert that the cumulative sum is zero.
         for b in cumulative_sum.iter() {
-            builder.assert_felt_eq(*b, FC::F::zero());
+            builder.assert_felt_eq(*b, FC::F::ZERO);
         }
     }
 }

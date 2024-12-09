@@ -21,7 +21,7 @@ use crate::{
     recursion::air::IsZeroOperation,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
@@ -47,7 +47,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // We are computing (x * y) % modulus. The value of x is stored in the "prev_value" of
         // the x_memory, since we write to it later.
@@ -61,7 +61,7 @@ where
         let modulus_byte_sum = modulus_limbs
             .0
             .iter()
-            .fold(CB::Expr::zero(), |acc, &limb| acc + limb);
+            .fold(CB::Expr::ZERO, |acc, &limb| acc + limb);
         IsZeroOperation::<CB::F>::eval(
             builder,
             modulus_byte_sum,
@@ -73,11 +73,11 @@ where
         // Otherwise, we use the modulus passed in.
         let modulus_is_zero = local.modulus_is_zero.result;
         let mut coeff_2_256 = Vec::new();
-        coeff_2_256.resize(32, CB::Expr::zero());
-        coeff_2_256.push(CB::Expr::one());
+        coeff_2_256.resize(32, CB::Expr::ZERO);
+        coeff_2_256.push(CB::Expr::ONE);
         let modulus_polynomial: Polynomial<CB::Expr> = modulus_limbs.into();
         let p_modulus: Polynomial<CB::Expr> = modulus_polynomial
-            * (CB::Expr::one() - modulus_is_zero.into())
+            * (CB::Expr::ONE - modulus_is_zero.into())
             + Polynomial::from_coefficients(&coeff_2_256) * modulus_is_zero.into();
 
         // Evaluate the uint256 multiplication
@@ -101,7 +101,7 @@ where
         );
         builder.assert_eq(
             local.modulus_is_not_zero,
-            local.is_real * (CB::Expr::one() - modulus_is_zero.into()),
+            local.is_real * (CB::Expr::ONE - modulus_is_zero.into()),
         );
 
         // Assert that the correct result is being written to x_memory.
@@ -113,7 +113,7 @@ where
         for (i, access) in local.x_memory.iter().enumerate() {
             builder.eval_memory_access(
                 local.chunk,
-                local.clk.into() + CB::Expr::one(),
+                local.clk.into() + CB::Expr::ONE,
                 local.x_ptr + CB::Expr::from_canonical_usize(i * 4),
                 access,
                 local.is_real,

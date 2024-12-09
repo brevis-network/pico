@@ -8,7 +8,7 @@ use crate::{
 use core::borrow::Borrow;
 use p3_air::AirBuilder;
 use p3_baby_bear::BabyBear;
-use p3_field::{AbstractField, PrimeField32, TwoAdicField};
+use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
 use p3_matrix::Matrix;
 
 impl<F: PrimeField32> ShaExtendCols<F> {
@@ -25,7 +25,7 @@ impl<F: PrimeField32> ShaExtendCols<F> {
 
         // Populate the columns needed to track the end of a cycle of 16 rows.
         self.cycle_16_end
-            .populate_from_field_element(self.cycle_16 - F::one());
+            .populate_from_field_element(self.cycle_16 - F::ONE);
 
         // Populate the columns needed to keep track of cycles of 48 rows.
         let j = 16 + (i % 48);
@@ -45,7 +45,7 @@ impl<F: PrimeField32> ShaExtendChip<F> {
         let local: &ShaExtendCols<CB::Var> = (*local).borrow();
         let next: &ShaExtendCols<CB::Var> = (*next).borrow();
 
-        let one = CB::Expr::from(CB::F::one());
+        let one = CB::Expr::from(CB::F::ONE);
 
         // Generator with order 16 within BabyBear.
         let g = CB::F::from_canonical_u32(BabyBear::two_adic_generator(4).as_canonical_u32());
@@ -74,7 +74,7 @@ impl<F: PrimeField32> ShaExtendChip<F> {
         // Constrain `cycle_16_end.result` to be `cycle_16 - 1 == 0`. Intuitively g^16 is 1.
         IsZeroGadget::<CB::F>::eval(
             builder,
-            local.cycle_16 - CB::Expr::one(),
+            local.cycle_16 - CB::Expr::ONE,
             local.cycle_16_end,
             one.clone(),
         );
@@ -82,13 +82,13 @@ impl<F: PrimeField32> ShaExtendChip<F> {
         // Constrain `cycle_48` to be [1, 0, 0] in the first row.
         builder
             .when_first_row()
-            .assert_eq(local.cycle_48[0], CB::F::one());
+            .assert_eq(local.cycle_48[0], CB::F::ONE);
         builder
             .when_first_row()
-            .assert_eq(local.cycle_48[1], CB::F::zero());
+            .assert_eq(local.cycle_48[1], CB::F::ZERO);
         builder
             .when_first_row()
-            .assert_eq(local.cycle_48[2], CB::F::zero());
+            .assert_eq(local.cycle_48[2], CB::F::ZERO);
 
         // Shift the indices of `cycles_48` at the end of each 16 rows. Otherwise, keep them the
         // same.

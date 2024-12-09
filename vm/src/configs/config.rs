@@ -1,8 +1,8 @@
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{ExtensionField, Field, PrimeField, TwoAdicField};
+use serde::Serialize;
 use std::marker::PhantomData;
-
 // Resembling Plonky3: https://github.com/Plonky3/Plonky3/blob/main/uni-stark/src/config.rs
 
 pub type PackedVal<SC> = <Val<SC> as Field>::Packing;
@@ -29,10 +29,10 @@ pub type Challenge<SC> = <SC as StarkGenericConfig>::Challenge;
 pub type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
 
 /// A generic config for machines
-pub trait StarkGenericConfig: Sync + Clone {
+pub trait StarkGenericConfig: Clone + Serialize + Sync {
     type Val: Field;
 
-    type Domain: PolynomialSpace<Val = Self::Val> + Sync;
+    type Domain: PolynomialSpace<Val = Self::Val> + Copy + Sync;
 
     /// The field from which most random challenges are drawn.
     type Challenge: ExtensionField<Self::Val>;
@@ -71,4 +71,10 @@ impl<F: PrimeField + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> FieldGe
     type N = F;
     type F = F;
     type EF = EF;
+}
+
+pub struct SimpleFriConfig {
+    pub log_blowup: usize,
+    pub num_queries: usize,
+    pub proof_of_work_bits: usize,
 }

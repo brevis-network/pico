@@ -1,4 +1,4 @@
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 
 #[allow(clippy::upper_case_acronyms)]
@@ -58,7 +58,7 @@ pub enum Opcode {
 }
 
 impl Opcode {
-    pub fn as_field<F: AbstractField>(&self) -> F {
+    pub fn as_field<F: FieldAlgebra>(&self) -> F {
         F::from_canonical_u32(*self as u32)
     }
 }

@@ -7,7 +7,7 @@ use crate::{
 };
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{marker::PhantomData, mem::size_of};
 
@@ -56,7 +56,7 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
     fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
         // NOTE: It's not reasonable, just to enable testing.
         // `4096` is the column number equalled to main trace.
-        Some(RowMajorMatrix::new(vec![F::zero(); 4096], 1))
+        Some(RowMajorMatrix::new(vec![F::ZERO; 4096], 1))
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
@@ -137,7 +137,7 @@ where
         let row = main.row_slice(0);
         let local = ToyCols::new(&row[0], &row[1], &row[2], &row[3]);
 
-        let one = CB::Expr::one();
+        let one = CB::Expr::ONE;
 
         let [a, b, result, is_add] = [*local.a, *local.b, *local.result, *local.is_add];
 
@@ -150,7 +150,7 @@ where
 mod tests {
     use super::*;
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use rand::{thread_rng, Rng};
     use std::array;
 

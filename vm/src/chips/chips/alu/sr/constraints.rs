@@ -19,8 +19,8 @@ where
         let local: &ShiftRightCols<CB::Var> = (*local).borrow();
         let next = main.row_slice(1);
         let next: &ShiftRightCols<CB::Var> = (*next).borrow();
-        let zero: CB::Expr = CB::F::zero().into();
-        let one: CB::Expr = CB::F::one().into();
+        let zero: CB::Expr = CB::F::ZERO.into();
+        let one: CB::Expr = CB::F::ONE.into();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);

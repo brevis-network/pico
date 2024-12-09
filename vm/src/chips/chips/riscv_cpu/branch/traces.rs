@@ -107,7 +107,7 @@ impl<F: Field> CpuChip<F> {
             branch_columns.next_pc_range_checker.populate(next_pc);
 
             if branching {
-                cols.branching = F::one();
+                cols.branching = F::ONE;
 
                 let add_event = AluEvent {
                     lookup_id: event.branch_add_lookup_id,
@@ -131,7 +131,7 @@ impl<F: Field> CpuChip<F> {
                     .and_modify(|op_new_events| op_new_events.push(add_event))
                     .or_insert(vec![add_event]);
             } else {
-                cols.not_branching = F::one();
+                cols.not_branching = F::ONE;
             }
         }
     }

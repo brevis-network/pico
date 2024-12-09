@@ -3,6 +3,8 @@
 For word and bytes
  */
 use crate::{compiler::word::Word, emulator::riscv::public_values::PublicValues};
+use p3_baby_bear::BabyBear;
+use p3_field::PrimeField32;
 use std::mem::size_of;
 // todo: further cleanup since these might be repetitive
 /*
@@ -83,3 +85,94 @@ pub const RISCV_COMBINE_DEGREE: usize = 3;
 pub const COMBINE_DEGREE: usize = 3;
 pub const COMPRESS_DEGREE: usize = 3;
 pub const EMBED_DEGREE: usize = 9;
+
+/// Converts a slice of words to a slice of bytes in little endian.
+pub fn words_to_bytes_le<const B: usize>(words: &[u32]) -> [u8; B] {
+    debug_assert_eq!(words.len() * 4, B);
+    words
+        .iter()
+        .flat_map(|word| word.to_le_bytes().to_vec())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}
+
+/// Converts a byte array in little endian to a slice of words.
+pub fn bytes_to_words_le<const W: usize>(bytes: &[u8]) -> [u32; W] {
+    debug_assert_eq!(bytes.len(), W * 4);
+    bytes
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap()
+}
+
+/*
+BabyBear consts
+ */
+
+pub const MONTY_INVERSE: BabyBear = BabyBear::new(1);
+
+// <https://github.com/Plonky3/Plonky3/blob/e61ed4aed488f8cef5618914042d8eb515b74ebb/baby-bear/src/poseidon2.rs#L66>
+pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
+    BabyBear::ORDER_U32 - 2,
+    1,
+    2,
+    (BabyBear::ORDER_U32 + 1) >> 1,
+    3,
+    4,
+    (BabyBear::ORDER_U32 - 1) >> 1,
+    BabyBear::ORDER_U32 - 3,
+    BabyBear::ORDER_U32 - 4,
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
+    BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
+    BabyBear::ORDER_U32 - 15,
+    (BabyBear::ORDER_U32 - 1) >> 8,
+    (BabyBear::ORDER_U32 - 1) >> 4,
+    15,
+]);
+
+// const INTERNAL_DIAG_MONTY_24: [BabyBear; 24] = BabyBear::new_array([
+//     BabyBear::ORDER_U32 - 2,
+//     1,
+//     2,
+//     (BabyBear::ORDER_U32 + 1) >> 1,
+//     3,
+//     4,
+//     (BabyBear::ORDER_U32 - 1) >> 1,
+//     BabyBear::ORDER_U32 - 3,
+//     BabyBear::ORDER_U32 - 4,
+//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
+//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
+//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
+//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 4),
+//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 7),
+//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 9),
+//     BabyBear::ORDER_U32 - 15,
+//     (BabyBear::ORDER_U32 - 1) >> 8,
+//     (BabyBear::ORDER_U32 - 1) >> 2,
+//     (BabyBear::ORDER_U32 - 1) >> 3,
+//     (BabyBear::ORDER_U32 - 1) >> 4,
+//     (BabyBear::ORDER_U32 - 1) >> 5,
+//     (BabyBear::ORDER_U32 - 1) >> 6,
+//     (BabyBear::ORDER_U32 - 1) >> 7,
+//     15,
+// ]);
+
+/*
+Poseidon2
+ */
+
+pub const POSEIDON2_PERM_SEED: usize = 42;
+
+pub const PERMUTATION_WIDTH: usize = 16;
+
+pub const PERMUTATION_RATE: usize = 8;
+
+pub const BABYBEAR_S_BOX_DEGREE: u64 = 7;
+
+pub const MERSENNE31_S_BOX_DEGREE: u64 = 5;
+
+pub const BN254_S_BOX_DEGREE: u64 = 5;

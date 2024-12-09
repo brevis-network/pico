@@ -18,7 +18,7 @@ mod tests {
     use std::iter::once;
 
     use p3_baby_bear::BabyBear;
-    use p3_field::{AbstractField, PrimeField32};
+    use p3_field::{FieldAlgebra, PrimeField32};
     use p3_matrix::dense::RowMajorMatrix;
 
     use crate::{
@@ -113,9 +113,9 @@ mod tests {
 
         let chunk = RecursionRecord {
             exp_reverse_bits_len_events: vec![ExpReverseBitsEvent {
-                base: F::two(),
-                exp: vec![F::zero(), F::one(), F::one()],
-                result: F::two().exp_u64(0b110),
+                base: F::TWO,
+                exp: vec![F::ZERO, F::ONE, F::ONE],
+                result: F::TWO.exp_u64(0b110),
             }],
             ..Default::default()
         };

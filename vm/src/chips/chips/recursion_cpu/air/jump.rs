@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field, const L: usize> CpuChip<F, L> {
     /// Eval the JUMP instructions.
@@ -29,7 +29,7 @@ impl<F: Field, const L: usize> CpuChip<F, L> {
         builder
             .when_first_row()
             .assert_eq(local.fp, F::from_canonical_usize(STACK_SIZE));
-        let not_jump_instruction = AB::Expr::one() - is_jump_instr.clone();
+        let not_jump_instruction = AB::Expr::ONE - is_jump_instr.clone();
         let expected_next_fp = local.selectors.is_jal * (local.fp + local.c.value()[0])
             + local.selectors.is_jalr * local.c.value()[0]
             + not_jump_instruction * local.fp;
@@ -40,7 +40,7 @@ impl<F: Field, const L: usize> CpuChip<F, L> {
 
         // Verify the a operand values.
         let expected_a_val = local.selectors.is_jal * local.pc
-            + local.selectors.is_jalr * (local.pc + AB::Expr::one());
+            + local.selectors.is_jalr * (local.pc + AB::Expr::ONE);
         let expected_a_val_block = Block::from(expected_a_val);
         builder
             .when(is_jump_instr)

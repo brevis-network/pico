@@ -8,7 +8,7 @@ use crate::{
     recursion::air::{BinomialExtensionUtils, Block, BlockBuilder, IsExtZeroOperation},
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field, const L: usize> CpuChip<F, L> {
     /// Eval the BRANCH operations.
@@ -22,7 +22,7 @@ impl<F: Field, const L: usize> CpuChip<F, L> {
     {
         let branch_cols = local.opcode_specific.branch();
         let is_branch_instruction = self.is_branch_instruction::<AB>(local);
-        let one = AB::Expr::one();
+        let one = AB::Expr::ONE;
 
         // Convert operand values from Block<Var> to BinomialExtension<Expr>.  Note that it gets the
         // previous value of the `a` and `b` operands, since BNENIC will modify `a`.

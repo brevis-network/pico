@@ -45,7 +45,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                     used,
                 } = memory_events[i];
 
-                let mut row = [F::zero(); NUM_MEMORY_INITIALIZE_FINALIZE_COLS];
+                let mut row = [F::ZERO; NUM_MEMORY_INITIALIZE_FINALIZE_COLS];
                 let cols: &mut MemoryInitializeFinalizeCols<F> = row.as_mut_slice().borrow_mut();
                 cols.addr = F::from_canonical_u32(addr);
                 cols.addr_bits.populate(addr);
@@ -81,7 +81,7 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                 }
 
                 if i == memory_events.len() - 1 {
-                    cols.is_last_addr = F::one();
+                    cols.is_last_addr = F::ONE;
                 }
 
                 row

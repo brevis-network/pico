@@ -33,7 +33,7 @@ mod tests {
         },
     };
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
     #[test]
@@ -41,10 +41,10 @@ mod tests {
         let shard = RecursionRecord::<BabyBear> {
             mem_var_events: vec![
                 MemEvent {
-                    inner: BabyBear::one().into(),
+                    inner: BabyBear::ONE.into(),
                 },
                 MemEvent {
-                    inner: BabyBear::one().into(),
+                    inner: BabyBear::ONE.into(),
                 },
             ],
             ..Default::default()

@@ -21,8 +21,8 @@ where
         let next = main.row_slice(1);
         let next: &ShiftLeftCols<CB::Var> = (*next).borrow();
 
-        let zero: CB::Expr = CB::F::zero().into();
-        let one: CB::Expr = CB::F::one().into();
+        let zero: CB::Expr = CB::F::ZERO.into();
+        let one: CB::Expr = CB::F::ONE.into();
         let base: CB::Expr = CB::F::from_canonical_u32(1 << BYTE_SIZE).into();
 
         // Constrain the incrementing nonce.

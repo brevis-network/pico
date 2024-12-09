@@ -169,7 +169,7 @@ where
             ByteOpcode::AND.as_field::<CB::F>(),
             self.lsb,
             sqrt[0],
-            CB::F::one(),
+            CB::F::ONE,
             is_real,
         );
     }

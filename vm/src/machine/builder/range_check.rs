@@ -6,7 +6,7 @@ use crate::{
     machine::lookup::{LookupType, SymbolicLookup},
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
     /// Check that each limb of the given slice is a u8.

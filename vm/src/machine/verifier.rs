@@ -13,7 +13,7 @@ use itertools::{izip, Itertools};
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::{AbstractExtensionField, AbstractField, Field};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use tracing::debug;
 
@@ -196,7 +196,7 @@ where
                 && values
                     .quotient
                     .iter()
-                    .all(|qc| qc.len() == <SC::Challenge as AbstractExtensionField<SC::Val>>::D);
+                    .all(|qc| qc.len() == <SC::Challenge as FieldExtensionAlgebra<SC::Val>>::D);
 
             if !valid_shape {
                 panic!("Invalid proof shape");
@@ -273,7 +273,7 @@ where
                 is_last_row: sels.is_last_row,
                 is_transition: sels.is_transition,
                 alpha,
-                accumulator: SC::Challenge::zero(),
+                accumulator: SC::Challenge::ZERO,
             };
 
             chip.eval(&mut folder);

@@ -59,7 +59,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
             .enumerate()
             .map(|(i, instruction)| {
                 let pc = i as u32;
-                let mut row = [F::zero(); NUM_PROGRAM_PREPROCESSED_COLS];
+                let mut row = [F::ZERO; NUM_PROGRAM_PREPROCESSED_COLS];
                 let cols: &mut ProgramPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
                 cols.pc = F::from_canonical_u32(pc);
                 cols.selectors.populate(instruction);
@@ -69,11 +69,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
             .collect::<Vec<_>>();
 
         // Pad the trace to a power of two.
-        pad_rows_fixed(
-            &mut rows,
-            || [F::zero(); NUM_PROGRAM_PREPROCESSED_COLS],
-            None,
-        );
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_PROGRAM_PREPROCESSED_COLS], None);
 
         // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(
@@ -104,7 +100,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
             .enumerate()
             .map(|(i, _)| {
                 let pc = i as u32;
-                let mut row = [F::zero(); NUM_PROGRAM_MULT_COLS];
+                let mut row = [F::ZERO; NUM_PROGRAM_MULT_COLS];
                 let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
                 cols.multiplicity =
                     F::from_canonical_usize(*instruction_counts.get(&pc).unwrap_or(&0));
@@ -113,7 +109,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
             .collect::<Vec<_>>();
 
         // Pad the trace to a power of two.
-        pad_rows_fixed(&mut rows, || [F::zero(); NUM_PROGRAM_MULT_COLS], None);
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_PROGRAM_MULT_COLS], None);
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(

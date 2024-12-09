@@ -18,7 +18,7 @@ use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
@@ -458,7 +458,7 @@ where
                                 })
                                 .unwrap_or_else(|| {
                                     RowMajorMatrix::new_col(vec![
-                                        <SC::Val>::zero();
+                                        <SC::Val>::ZERO;
                                         quotient_domain.size()
                                     ])
                                 });
@@ -479,6 +479,7 @@ where
                                 .map(|c| PackedChallenge::<SC>::from_f(*c))
                                 .collect::<Vec<_>>();
 
+                            // todo: consider optimize quotient domain
                             let qv = compute_quotient_values(
                                 ordered_chips[i],
                                 &main_commitments.public_values,

@@ -10,7 +10,7 @@ use crate::{
     chips::chips::recursion_memory::MemoryCols, machine::builder::ChipBuilder,
     primitives::RC_16_30_U32,
 };
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use std::array;
 
 impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
@@ -99,8 +99,8 @@ impl<const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
 
         // Apply the sboxes.
         // See `populate_external_round` for why we don't have columns for the sbox output here.
-        let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
-        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::zero());
+        let mut sbox_deg_7: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
+        let mut sbox_deg_3: [AB::Expr; WIDTH] = core::array::from_fn(|_| AB::Expr::ZERO);
         for i in 0..WIDTH {
             let calculated_sbox_deg_3 = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
 

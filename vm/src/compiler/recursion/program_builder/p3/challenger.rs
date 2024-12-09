@@ -4,10 +4,10 @@ use crate::{
         program_builder::{keys::BaseVerifyingKeyVariable, p3::fri::types::DigestVariable},
     },
     configs::config::FieldGenericConfig,
-    primitives::consts::DIGEST_SIZE,
-    recursion::runtime::{HASH_RATE, PERMUTATION_WIDTH},
+    primitives::consts::{DIGEST_SIZE, PERMUTATION_RATE, PERMUTATION_WIDTH},
+    recursion::runtime::HASH_RATE,
 };
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 
 /// Reference: [p3_challenger::CanObserve].
 pub trait CanObserveVariable<FC: FieldGenericConfig, V> {
@@ -50,17 +50,17 @@ impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
     pub fn new(builder: &mut Builder<FC>) -> Self {
         let mut result = DuplexChallengerVariable::<FC> {
             sponge_state: builder.dyn_array(PERMUTATION_WIDTH),
-            nb_inputs: builder.eval(FC::N::zero()),
+            nb_inputs: builder.eval(FC::N::ZERO),
             input_buffer: builder.dyn_array(PERMUTATION_WIDTH),
-            nb_outputs: builder.eval(FC::N::zero()),
+            nb_outputs: builder.eval(FC::N::ZERO),
             output_buffer: builder.dyn_array(PERMUTATION_WIDTH),
         };
 
         // Constrain the state of the challenger to contain all zeroes.
         builder.range(0, PERMUTATION_WIDTH).for_each(|i, builder| {
-            builder.set(&mut result.sponge_state, i, FC::F::zero());
-            builder.set(&mut result.input_buffer, i, FC::F::zero());
-            builder.set(&mut result.output_buffer, i, FC::F::zero());
+            builder.set(&mut result.sponge_state, i, FC::F::ZERO);
+            builder.set(&mut result.input_buffer, i, FC::F::ZERO);
+            builder.set(&mut result.output_buffer, i, FC::F::ZERO);
         });
         result
     }
@@ -115,8 +115,8 @@ impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
     }
 
     pub fn reset(&mut self, builder: &mut Builder<FC>) {
-        let zero: Var<_> = builder.eval(FC::N::zero());
-        let zero_felt: Felt<_> = builder.eval(FC::F::zero());
+        let zero: Var<_> = builder.eval(FC::N::ZERO);
+        let zero_felt: Felt<_> = builder.eval(FC::F::ZERO);
         builder.range(0, PERMUTATION_WIDTH).for_each(|i, builder| {
             builder.set(&mut self.sponge_state, i, zero_felt);
         });
@@ -135,24 +135,25 @@ impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
             let element = builder.get(&self.input_buffer, i);
             builder.set(&mut self.sponge_state, i, element);
         });
-        builder.assign(self.nb_inputs, FC::N::zero());
+        builder.assign(self.nb_inputs, FC::N::ZERO);
 
         builder.poseidon2_permute_mut(&self.sponge_state);
 
-        builder.assign(self.nb_outputs, FC::N::zero());
+        builder.assign(self.nb_outputs, FC::N::ZERO);
 
-        for i in 0..PERMUTATION_WIDTH {
+        // todo: update for permutation
+        for i in 0..PERMUTATION_RATE {
             let element = builder.get(&self.sponge_state, i);
             builder.set(&mut self.output_buffer, i, element);
-            builder.assign(self.nb_outputs, self.nb_outputs + FC::N::one());
+            builder.assign(self.nb_outputs, self.nb_outputs + FC::N::ONE);
         }
     }
 
     fn observe(&mut self, builder: &mut Builder<FC>, value: Felt<FC::F>) {
-        builder.assign(self.nb_outputs, FC::N::zero());
+        builder.assign(self.nb_outputs, FC::N::ZERO);
 
         builder.set(&mut self.input_buffer, self.nb_inputs, value);
-        builder.assign(self.nb_inputs, self.nb_inputs + FC::N::one());
+        builder.assign(self.nb_inputs, self.nb_inputs + FC::N::ONE);
 
         builder
             .if_eq(self.nb_inputs, FC::N::from_canonical_usize(HASH_RATE))
@@ -169,7 +170,7 @@ impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
     }
 
     fn sample(&mut self, builder: &mut Builder<FC>) -> Felt<FC::F> {
-        let zero: Var<_> = builder.eval(FC::N::zero());
+        let zero: Var<_> = builder.eval(FC::N::ZERO);
         builder.if_ne(self.nb_inputs, zero).then_or_else(
             |builder| {
                 self.clone().duplexing(builder);
@@ -180,9 +181,9 @@ impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
                 });
             },
         );
-        let idx: Var<_> = builder.eval(self.nb_outputs - FC::N::one());
+        let idx: Var<_> = builder.eval(self.nb_outputs - FC::N::ONE);
         let output = builder.get(&self.output_buffer, idx);
-        builder.assign(self.nb_outputs, self.nb_outputs - FC::N::one());
+        builder.assign(self.nb_outputs, self.nb_outputs - FC::N::ONE);
         output
     }
 
@@ -203,7 +204,7 @@ impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
         let mut bits = builder.num2bits_f(rand_f);
 
         builder.range(nb_bits, bits.len()).for_each(|i, builder| {
-            builder.set(&mut bits, i, FC::N::zero());
+            builder.set(&mut bits, i, FC::N::ZERO);
         });
 
         bits
@@ -219,7 +220,7 @@ impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
         let element_bits = self.sample_bits(builder, nb_bits.into());
         builder.range(0, nb_bits).for_each(|i, builder| {
             let element = builder.get(&element_bits, i);
-            builder.assert_var_eq(element, FC::N::zero());
+            builder.assert_var_eq(element, FC::N::ZERO);
         });
     }
 }

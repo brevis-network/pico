@@ -60,7 +60,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                     || event.opcode == Opcode::REM
                     || event.opcode == Opcode::DIV
             );
-            let mut row = [F::zero(); NUM_DIVREM_COLS];
+            let mut row = [F::ZERO; NUM_DIVREM_COLS];
             let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
 
             // Initialize cols with basic operands and flags derived from the current event.
@@ -69,7 +69,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                 cols.b = Word::from(event.b);
                 cols.c = Word::from(event.c);
                 cols.chunk = F::from_canonical_u32(event.chunk);
-                cols.is_real = F::one();
+                cols.is_real = F::ONE;
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
                 cols.is_remu = F::from_bool(event.opcode == Opcode::REMU);
                 cols.is_div = F::from_bool(event.opcode == Opcode::DIV);
@@ -142,7 +142,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
 
             // Calculate the modified multiplicity
             {
-                cols.remainder_check_multiplicity = cols.is_real * (F::one() - cols.is_c_0.result);
+                cols.remainder_check_multiplicity = cols.is_real * (F::ONE - cols.is_c_0.result);
             }
 
             // Calculate c * quotient + remainder.
@@ -185,7 +185,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                     // Insert the absolute value computation events.
                     {
                         let mut add_events: Vec<AluEvent> = vec![];
-                        if cols.abs_c_alu_event == F::one() {
+                        if cols.abs_c_alu_event == F::ONE {
                             add_events.push(AluEvent {
                                 lookup_id: event.sub_lookups[4],
                                 chunk: event.chunk,
@@ -197,7 +197,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                                 sub_lookups: create_alu_lookups(),
                             })
                         }
-                        if cols.abs_rem_alu_event == F::one() {
+                        if cols.abs_rem_alu_event == F::ONE {
                             add_events.push(AluEvent {
                                 lookup_id: event.sub_lookups[5],
                                 chunk: event.chunk,
@@ -305,7 +305,7 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
                         }
                     };
 
-                    if cols.remainder_check_multiplicity == F::one() {
+                    if cols.remainder_check_multiplicity == F::ONE {
                         output.add_lt_event(lt_event);
                     }
                 }
@@ -334,13 +334,13 @@ impl<F: Field> ChipBehavior<F> for DivRemChip<F> {
         // Create the template for the padded rows. These are fake rows that don't fail on some
         // sanity checks.
         let padded_row_template = {
-            let mut row = [F::zero(); NUM_DIVREM_COLS];
+            let mut row = [F::ZERO; NUM_DIVREM_COLS];
             let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
             // 0 divided by 1. quotient = remainder = 0.
-            cols.is_divu = F::one();
-            cols.c[0] = F::one();
-            cols.abs_c[0] = F::one();
-            cols.max_abs_c_or_1[0] = F::one();
+            cols.is_divu = F::ONE;
+            cols.c[0] = F::ONE;
+            cols.abs_c[0] = F::ONE;
+            cols.max_abs_c_or_1[0] = F::ONE;
 
             cols.is_c_0.populate(1);
 

@@ -35,7 +35,7 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         let mut trace = RowMajorMatrix::new(
-            vec![F::zero(); NUM_BYTE_MULT_COLS * NUM_ROWS],
+            vec![F::ZERO; NUM_BYTE_MULT_COLS * NUM_ROWS],
             NUM_BYTE_MULT_COLS,
         );
 
@@ -68,7 +68,7 @@ impl<F: Field> ByteChip<F> {
     pub fn preprocess() -> RowMajorMatrix<F> {
         // The trace containing all values, with all multiplicities set to zero.
         let mut initial_trace = RowMajorMatrix::new(
-            vec![F::zero(); NUM_ROWS * NUM_BYTE_PREPROCESSED_COLS],
+            vec![F::ZERO; NUM_ROWS * NUM_BYTE_PREPROCESSED_COLS],
             NUM_BYTE_PREPROCESSED_COLS,
         );
 

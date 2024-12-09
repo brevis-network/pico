@@ -2,9 +2,10 @@ use crate::{
     chips::utils::indices_arr,
     compiler::word::Word,
     primitives::consts::{
-        DIGEST_SIZE, MAX_NUM_PVS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
+        DIGEST_SIZE, MAX_NUM_PVS, PERMUTATION_WIDTH, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS,
+        RECURSION_NUM_PVS,
     },
-    recursion::runtime::{HASH_RATE, PERMUTATION_WIDTH},
+    recursion::runtime::HASH_RATE,
 };
 use core::fmt::Debug;
 use p3_challenger::DuplexChallenger;

@@ -3,7 +3,7 @@ use crate::{
     chips::{chips::recursion_memory::MemoryReadWriteSingleCols, gadgets::is_zero::IsZeroGadget},
     machine::builder::ChipBuilder,
 };
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
 /// Workspace columns.  They are different for each opcode.
@@ -117,10 +117,10 @@ impl<T: Copy> AbsorbWorkspace<T> {
         self.is_syscall_not_last_row.into()
             * (AB::Expr::from_canonical_usize(RATE) - self.state_cursor.into())
             + self.is_syscall_is_last_row.into()
-                * (self.last_row_ending_cursor.into() - self.state_cursor.into() + AB::Expr::one())
+                * (self.last_row_ending_cursor.into() - self.state_cursor.into() + AB::Expr::ONE)
             + self.not_syscall_not_last_row.into() * AB::Expr::from_canonical_usize(RATE)
             + self.not_syscall_is_last_row.into()
-                * (self.last_row_ending_cursor.into() + AB::Expr::one())
+                * (self.last_row_ending_cursor.into() + AB::Expr::ONE)
     }
 }
 
@@ -140,6 +140,6 @@ impl<T: Copy> FinalizeWorkspace<T> {
     where
         T: Into<AB::Expr>,
     {
-        AB::Expr::one() - self.state_cursor_is_zero.result.into()
+        AB::Expr::ONE - self.state_cursor_is_zero.result.into()
     }
 }

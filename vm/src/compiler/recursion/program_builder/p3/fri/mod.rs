@@ -5,7 +5,7 @@ pub mod types;
 
 use self::types::{
     DigestVariable, DimensionsVariable, FriChallengesVariable, FriConfigVariable, FriProofVariable,
-    FriQueryProofVariable,
+    QueryProofVariable,
 };
 use super::challenger::{
     CanObserveVariable, CanSampleBitsVariable, DuplexChallengerVariable, FeltChallenger,
@@ -18,7 +18,7 @@ use crate::{
     primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
 };
 pub use domain::*;
-use p3_field::{AbstractField, Field, TwoAdicField};
+use p3_field::{Field, FieldAlgebra, TwoAdicField};
 pub use two_adic_pcs::*;
 
 /// Reference: https://github.com/Plonky3/Plonky3/blob/4809fa7bedd9ba8f6f5d3267b1592618e3776c57/fri/src/verifier.rs#L27
@@ -118,7 +118,7 @@ pub fn verify_query<FC: FieldGenericConfig>(
     config: &FriConfigVariable<FC>,
     commit_phase_commits: &Array<FC, DigestVariable<FC>>,
     index_bits: &Array<FC, Var<FC::N>>,
-    proof: &FriQueryProofVariable<FC>,
+    proof: &QueryProofVariable<FC>,
     betas: &Array<FC, Ext<FC::F, FC::EF>>,
     reduced_openings: &Array<FC, Ext<FC::F, FC::EF>>,
     log_max_height: Usize<FC::N>,
@@ -128,7 +128,7 @@ where
     FC::EF: TwoAdicField,
 {
     builder.cycle_tracker("verify-query");
-    let folded_eval: Ext<FC::F, FC::EF> = builder.eval(FC::F::zero());
+    let folded_eval: Ext<FC::F, FC::EF> = builder.eval(FC::F::ZERO);
     let two_adic_generator_f = config.get_two_adic_generator(builder, log_max_height);
 
     let x = if matches!(builder.program_type, RecursionProgramType::Embed) {
@@ -141,8 +141,8 @@ where
     builder
         .range(0, commit_phase_commits.len())
         .for_each(|i, builder| {
-            let log_folded_height: Var<_> = builder.eval(log_max_height - i - FC::N::one());
-            let log_folded_height_plus_one: Var<_> = builder.eval(log_folded_height + FC::N::one());
+            let log_folded_height: Var<_> = builder.eval(log_max_height - i - FC::N::ONE);
+            let log_folded_height_plus_one: Var<_> = builder.eval(log_folded_height + FC::N::ONE);
             let commit = builder.get(commit_phase_commits, i);
             let step = builder.get(&proof.commit_phase_openings, i);
             let beta = builder.get(betas, i);
@@ -152,8 +152,8 @@ where
 
             let index_bit = builder.get(index_bits, i);
             let index_sibling_mod_2: Var<FC::N> =
-                builder.eval(SymbolicVar::from(FC::N::one()) - index_bit);
-            let i_plus_one = builder.eval(i + FC::N::one());
+                builder.eval(SymbolicVar::from(FC::N::ONE) - index_bit);
+            let i_plus_one = builder.eval(i + FC::N::ONE);
             let index_pair = index_bits.shift(builder, i_plus_one);
 
             let mut evals: Array<FC, Ext<FC::F, FC::EF>> = builder.array(2);
@@ -162,7 +162,7 @@ where
             builder.set_value(&mut evals, index_sibling_mod_2, step.sibling_value);
 
             let dims = DimensionsVariable::<FC> {
-                height: builder.sll(FC::N::one(), Usize::Var(log_folded_height)),
+                height: builder.sll(FC::N::ONE, Usize::Var(log_folded_height)),
             };
             let mut dims_slice: Array<FC, DimensionsVariable<FC>> = builder.array(1);
             builder.set_value(&mut dims_slice, 0, dims);
@@ -182,7 +182,7 @@ where
             let xs_0: Ext<_, _> = builder.eval(x);
             let xs_1: Ext<_, _> = builder.eval(x);
             builder
-                .if_eq(index_sibling_mod_2, FC::N::zero())
+                .if_eq(index_sibling_mod_2, FC::N::ZERO)
                 .then_or_else(
                     |builder| {
                         builder.assign(xs_0, x * two_adic_generator_one.to_operand().symbolic());
@@ -223,7 +223,7 @@ pub fn verify_batch<FC: FieldGenericConfig, const D: usize>(
 ) {
     builder.cycle_tracker("verify-batch");
     // The index of which table to process next.
-    let index: Var<FC::N> = builder.eval(FC::N::zero());
+    let index: Var<FC::N> = builder.eval(FC::N::ZERO);
 
     // The height of the current layer (padded).
     let current_height = builder.get(&dimensions, index).height;
@@ -236,14 +236,14 @@ pub fn verify_batch<FC: FieldGenericConfig, const D: usize>(
     };
 
     // For each sibling in the proof, reconstruct the root.
-    let one: Var<_> = builder.eval(FC::N::one());
+    let one: Var<_> = builder.eval(FC::N::ONE);
     let left: Ptr<FC::N> = builder.uninit();
     let right: Ptr<FC::N> = builder.uninit();
     builder.range(0, proof.len()).for_each(|i, builder| {
         let sibling = builder.get_ptr(proof, i);
         let bit = builder.get(&index_bits, i);
 
-        builder.if_eq(bit, FC::N::one()).then_or_else(
+        builder.if_eq(bit, FC::N::ONE).then_or_else(
             |builder| {
                 builder.assign(left, sibling);
                 builder.assign(right, root_ptr);
@@ -259,7 +259,7 @@ pub fn verify_batch<FC: FieldGenericConfig, const D: usize>(
             &Array::Dyn(left, Usize::Const(0)),
             &Array::Dyn(right, Usize::Const(0)),
         );
-        builder.assign(current_height, current_height * (FC::N::two().inverse()));
+        builder.assign(current_height, current_height * (FC::N::TWO.inverse()));
 
         builder.if_ne(index, dimensions.len()).then(|builder| {
             let next_height = builder.get(&dimensions, index).height;
@@ -297,7 +297,7 @@ pub fn reduce_fast<FC: FieldGenericConfig, const D: usize>(
     opened_values: &Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,
 ) -> Array<FC, Felt<FC::F>> {
     builder.cycle_tracker("verify-batch-reduce-fast");
-    let nb_opened_values: Var<_> = builder.eval(FC::N::zero());
+    let nb_opened_values: Var<_> = builder.eval(FC::N::ZERO);
     let mut nested_opened_values: Array<_, Array<_, Ext<_, _>>> = builder.dyn_array(8192);
     let start_dim_idx: Var<_> = builder.eval(dim_idx);
     builder.cycle_tracker("verify-batch-reduce-fast-setup");
@@ -312,8 +312,8 @@ pub fn reduce_fast<FC: FieldGenericConfig, const D: usize>(
                     nb_opened_values,
                     opened_values.clone(),
                 );
-                builder.assign(nb_opened_values, nb_opened_values + FC::N::one());
-                builder.assign(dim_idx, dim_idx + FC::N::one());
+                builder.assign(nb_opened_values, nb_opened_values + FC::N::ONE);
+                builder.assign(dim_idx, dim_idx + FC::N::ONE);
             });
         });
     builder.cycle_tracker("verify-batch-reduce-fast-setup");

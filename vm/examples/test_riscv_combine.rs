@@ -27,7 +27,7 @@ fn main() {
     setup_logger();
 
     // run with default fibo
-    let (elf, stdin, _) = parse_args::parse_args();
+    let (elf, stdin, _, _) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("Begin RiscV..");

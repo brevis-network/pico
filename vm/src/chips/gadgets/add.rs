@@ -6,7 +6,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipRangeBuilder},
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute the add of two words.
@@ -36,15 +36,15 @@ impl<F: Field> AddGadget<F> {
         let mut carry = [0u8, 0u8, 0u8];
         if (a[0] as u32) + (b[0] as u32) > 255 {
             carry[0] = 1;
-            self.carry[0] = F::one();
+            self.carry[0] = F::ONE;
         }
         if (a[1] as u32) + (b[1] as u32) + (carry[0] as u32) > 255 {
             carry[1] = 1;
-            self.carry[1] = F::one();
+            self.carry[1] = F::ONE;
         }
         if (a[2] as u32) + (b[2] as u32) + (carry[1] as u32) > 255 {
             carry[2] = 1;
-            self.carry[2] = F::one();
+            self.carry[2] = F::ONE;
         }
 
         let base = 256u32;
@@ -70,7 +70,7 @@ impl<F: Field> AddGadget<F> {
         chunk: AB::Var,
         is_real: AB::Expr,
     ) {
-        let one = AB::Expr::one();
+        let one = AB::Expr::ONE;
         let base = AB::F::from_canonical_u32(256);
 
         let mut builder_is_real = builder.when(is_real.clone());

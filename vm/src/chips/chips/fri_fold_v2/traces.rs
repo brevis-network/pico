@@ -48,7 +48,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for FriFoldChip<DEGRE
                     ro_mults,
                 } = instruction.as_ref();
                 let mut row_add =
-                    vec![[F::zero(); NUM_FRI_FOLD_PREPROCESSED_COLS]; ext_vec_addrs.ps_at_z.len()];
+                    vec![[F::ZERO; NUM_FRI_FOLD_PREPROCESSED_COLS]; ext_vec_addrs.ps_at_z.len()];
 
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut FriFoldPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
@@ -72,19 +72,19 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for FriFoldChip<DEGRE
                     // Read the memory for the input vectors.
                     row.alpha_pow_input_mem = MemoryAccessCols {
                         addr: ext_vec_addrs.alpha_pow_input[i],
-                        mult: F::neg_one(),
+                        mult: F::NEG_ONE,
                     };
                     row.ro_input_mem = MemoryAccessCols {
                         addr: ext_vec_addrs.ro_input[i],
-                        mult: F::neg_one(),
+                        mult: F::NEG_ONE,
                     };
                     row.p_at_z_mem = MemoryAccessCols {
                         addr: ext_vec_addrs.ps_at_z[i],
-                        mult: F::neg_one(),
+                        mult: F::NEG_ONE,
                     };
                     row.p_at_x_mem = MemoryAccessCols {
                         addr: ext_vec_addrs.mat_opening[i],
-                        mult: F::neg_one(),
+                        mult: F::NEG_ONE,
                     };
 
                     // Write the memory for the output vectors.
@@ -97,7 +97,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for FriFoldChip<DEGRE
                         mult: ro_mults[i],
                     };
 
-                    row.is_real = F::one();
+                    row.is_real = F::ONE;
                 });
                 rows.extend(row_add);
             });
@@ -118,7 +118,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for FriFoldChip<DEGRE
             .fri_fold_events
             .iter()
             .map(|event| {
-                let mut row = [F::zero(); NUM_FRI_FOLD_MAIN_COLS];
+                let mut row = [F::ZERO; NUM_FRI_FOLD_MAIN_COLS];
 
                 let cols: &mut FriFoldMainCols<F> = row.as_mut_slice().borrow_mut();
 

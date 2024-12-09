@@ -32,28 +32,32 @@ pico-sdk = { path = "sdk" }
 # p3
 
 # NOTE: Pin to known a "good" commit without recent API changes
-p3-air = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-field = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-commit = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-matrix = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
+
+p3-air = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-field = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-commit = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-matrix = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
 p3-baby-bear = { git = "https://github.com/brevis-network/p3.git", features = [
-    "nightly-features",
-], rev = "d6cbea6" }
-p3-util = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-challenger = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-dft = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-fri = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-goldilocks = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-keccak = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-keccak-air = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-blake3 = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-mds = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-merkle-tree = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-poseidon2 = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-symmetric = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-uni-stark = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-maybe-rayon = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
-p3-bn254-fr = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6" }
+  "nightly-features",
+], rev = "e6a63c5" }
+p3-util = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-challenger = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-dft = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-fri = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-goldilocks = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-keccak = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-keccak-air = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-blake3 = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-mds = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-merkle-tree = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-poseidon2 = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-symmetric = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-uni-stark = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-maybe-rayon = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-bn254-fr = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-mersenne-31 = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-circle = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+
 
 # For local debugging
 # p3-air = { path = "../p3/air" }
@@ -76,6 +80,8 @@ p3-bn254-fr = { git = "https://github.com/brevis-network/p3.git", rev = "d6cbea6
 # p3-uni-stark = { path = "../p3/uni-stark" }
 # p3-maybe-rayon = { path = "../p3/maybe-rayon" }
 # p3-bn254-fr = { path = "../p3/bn254-fr" }
+# p3-mersenne-31 = { path = "../p3/mersenne-31" }
+# p3-circle = { path = "../p3/circle" }
 
 # misc
 anyhow = { version = "1.0.40", default-features = false }
@@ -126,3 +132,4 @@ p256 = { version = "0.13.2", features = ["expose-field"] }
 elliptic-curve = "0.13.8"
 dashu = "0.4.2"
 cfg-if = "1.0.0"
+halo2curves = "0.7.0"

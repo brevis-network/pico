@@ -9,7 +9,7 @@ use crate::{
 use core::borrow::Borrow;
 use itertools::izip;
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 
 impl<F: Field, CB> Air<CB> for LtChip<F>
@@ -31,7 +31,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         b_cmp[3] = local.b[3] * local.is_slt_u + local.b_masked * local.is_slt;
         c_cmp[3] = local.c[3] * local.is_slt_u + local.c_masked * local.is_slt;
@@ -62,7 +62,7 @@ where
         // when case msb_b and msb_c both is 0 or 1, a0 depends on SLTU.
         builder.assert_eq(
             local.a[0],
-            local.bit_b * (CB::Expr::one() - local.bit_c) + local.is_sign_bit_same * local.slt_u,
+            local.bit_b * (CB::Expr::ONE - local.bit_c) + local.is_sign_bit_same * local.slt_u,
         );
 
         // just keeping the b < c result to a0
@@ -81,13 +81,13 @@ where
         builder.assert_bool(sum_flags.clone());
         builder
             .when(is_real.clone())
-            .assert_eq(CB::Expr::one() - local.is_cmp_eq, sum_flags);
+            .assert_eq(CB::Expr::ONE - local.is_cmp_eq, sum_flags);
 
-        let mut is_not_equal = CB::Expr::zero();
+        let mut is_not_equal = CB::Expr::ZERO;
 
         // Expressions for computing the comparison bytes.
-        let mut b_cmp_byte = CB::Expr::zero();
-        let mut c_cmp_byte = CB::Expr::zero();
+        let mut b_cmp_byte = CB::Expr::ZERO;
+        let mut c_cmp_byte = CB::Expr::ZERO;
         // Iterate over the bytes in reverse order and select the differing bytes using the byte
         // flag columns values.
         for (b_byte, c_byte, &flag) in izip!(

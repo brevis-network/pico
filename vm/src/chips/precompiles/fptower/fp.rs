@@ -28,7 +28,7 @@ use hybrid_array::Array;
 use itertools::Itertools;
 use num::{BigUint, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 
@@ -134,7 +134,7 @@ where
         let mut new_byte_lookup_events = Vec::new();
 
         for event in events {
-            let mut row = vec![F::zero(); num_fp_cols::<P>()];
+            let mut row = vec![F::ZERO; num_fp_cols::<P>()];
             let cols: &mut FpOpCols<F, P> = row.as_mut_slice().borrow_mut();
 
             let modulus = &BigUint::from_bytes_le(P::MODULUS);
@@ -144,7 +144,7 @@ where
             cols.is_add = F::from_canonical_u8((event.op == FieldOperation::Add) as u8);
             cols.is_sub = F::from_canonical_u8((event.op == FieldOperation::Sub) as u8);
             cols.is_mul = F::from_canonical_u8((event.op == FieldOperation::Mul) as u8);
-            cols.is_real = F::one();
+            cols.is_real = F::ONE;
             cols.chunk = F::from_canonical_u32(event.chunk);
             cols.clk = F::from_canonical_u32(event.clk);
             cols.x_ptr = F::from_canonical_u32(event.x_ptr);
@@ -174,7 +174,7 @@ where
             .for_each(|x| output.add_range_lookup_event(*x));
 
         pad_rows(&mut rows, || {
-            let mut row = vec![F::zero(); num_fp_cols::<P>()];
+            let mut row = vec![F::ZERO; num_fp_cols::<P>()];
             let cols: &mut FpOpCols<F, P> = row.as_mut_slice().borrow_mut();
             let zero = BigUint::zero();
             cols.is_add = F::from_canonical_u8(1);
@@ -250,7 +250,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Check that operations flags are boolean.
         builder.assert_bool(local.is_add);
@@ -258,7 +258,7 @@ where
         builder.assert_bool(local.is_mul);
 
         // Check that only one of them is set.
-        builder.assert_eq(local.is_add + local.is_sub + local.is_mul, CB::Expr::one());
+        builder.assert_eq(local.is_add + local.is_sub + local.is_mul, CB::Expr::ONE);
 
         let p = limbs_from_prev_access(&local.x_access);
         let q = limbs_from_prev_access(&local.y_access);
@@ -277,7 +277,7 @@ where
             local.is_add,
             local.is_sub,
             local.is_mul,
-            CB::F::zero(),
+            CB::F::ZERO,
             local.chunk,
             local.is_real,
         );

@@ -4,7 +4,7 @@ use crate::machine::{
 };
 use itertools::Itertools;
 use p3_air::ExtensionBuilder;
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field, Powers};
+use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra, Powers};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use rayon_scan::ScanParallelIterator;
@@ -33,7 +33,7 @@ pub fn generate_permutation_trace<F: Field, EF: ExtensionField<F>>(
 
     let height = main.height();
     let mut permutation_trace = RowMajorMatrix::new(
-        vec![EF::zero(); permutation_trace_width * height],
+        vec![EF::ZERO; permutation_trace_width * height],
         permutation_trace_width,
     );
 
@@ -76,7 +76,7 @@ pub fn generate_permutation_trace<F: Field, EF: ExtensionField<F>>(
         }
     }
 
-    let zero = EF::zero();
+    let zero = EF::ZERO;
     let cumulative_sums = permutation_trace
         .par_rows_mut()
         .map(|row| {
@@ -178,7 +178,7 @@ pub fn eval_permutation_constraints<F, AB>(
             }
             rlcs.push(rlc);
 
-            let send_factor = if is_send { AB::F::one() } else { -AB::F::one() };
+            let send_factor = if is_send { AB::F::ONE } else { -AB::F::ONE };
             multiplicities.push(
                 message
                     .mult
@@ -188,14 +188,14 @@ pub fn eval_permutation_constraints<F, AB>(
         }
 
         // Now we can calculate the numerator and denominator of the combined batch.
-        let mut product = AB::ExprEF::one();
-        let mut numerator = AB::ExprEF::zero();
+        let mut product = AB::ExprEF::ONE;
+        let mut numerator = AB::ExprEF::ZERO;
         for (i, (m, rlc)) in multiplicities.into_iter().zip(rlcs.iter()).enumerate() {
             // Calculate the running product of all rlcs.
             product *= rlc.clone();
 
             // Calculate the product of all but the current rlc.
-            let mut all_but_current = AB::ExprEF::one();
+            let mut all_but_current = AB::ExprEF::ONE;
             for other_rlc in rlcs
                 .iter()
                 .enumerate()

@@ -2,7 +2,7 @@ use crate::{
     primitives::consts::EXTENSION_DEGREE,
     recursion_v2::{air::*, runtime::*, types::*},
 };
-use p3_field::{AbstractExtensionField, AbstractField};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 
@@ -55,7 +55,7 @@ pub enum FieldEltType {
     Extension,
 }
 
-pub fn base_alu<F: AbstractField>(
+pub fn base_alu<F: FieldAlgebra>(
     opcode: BaseAluOpcode,
     mult: u32,
     out: u32,
@@ -73,7 +73,7 @@ pub fn base_alu<F: AbstractField>(
     })
 }
 
-pub fn ext_alu<F: AbstractField>(
+pub fn ext_alu<F: FieldAlgebra>(
     opcode: ExtAluOpcode,
     mult: u32,
     out: u32,
@@ -91,16 +91,11 @@ pub fn ext_alu<F: AbstractField>(
     })
 }
 
-pub fn mem<F: AbstractField>(
-    kind: MemAccessKind,
-    mult: u32,
-    addr: u32,
-    val: u32,
-) -> Instruction<F> {
+pub fn mem<F: FieldAlgebra>(kind: MemAccessKind, mult: u32, addr: u32, val: u32) -> Instruction<F> {
     mem_single(kind, mult, addr, F::from_canonical_u32(val))
 }
 
-pub fn mem_single<F: AbstractField>(
+pub fn mem_single<F: FieldAlgebra>(
     kind: MemAccessKind,
     mult: u32,
     addr: u32,
@@ -109,7 +104,7 @@ pub fn mem_single<F: AbstractField>(
     mem_block(kind, mult, addr, Block::from(val))
 }
 
-pub fn mem_ext<F: AbstractField + Copy, EF: AbstractExtensionField<F>>(
+pub fn mem_ext<F: FieldAlgebra + Copy, EF: FieldExtensionAlgebra<F>>(
     kind: MemAccessKind,
     mult: u32,
     addr: u32,
@@ -118,7 +113,7 @@ pub fn mem_ext<F: AbstractField + Copy, EF: AbstractExtensionField<F>>(
     mem_block(kind, mult, addr, val.as_base_slice().into())
 }
 
-pub fn mem_block<F: AbstractField>(
+pub fn mem_block<F: FieldAlgebra>(
     kind: MemAccessKind,
     mult: u32,
     addr: u32,
@@ -134,7 +129,7 @@ pub fn mem_block<F: AbstractField>(
     })
 }
 
-pub fn poseidon2<F: AbstractField>(
+pub fn poseidon2<F: FieldAlgebra>(
     mults: [u32; WIDTH],
     output: [u32; WIDTH],
     input: [u32; WIDTH],
@@ -148,7 +143,7 @@ pub fn poseidon2<F: AbstractField>(
     }))
 }
 
-pub fn exp_reverse_bits_len<F: AbstractField>(
+pub fn exp_reverse_bits_len<F: FieldAlgebra>(
     mult: u32,
     base: F,
     exp: Vec<F>,
@@ -165,7 +160,7 @@ pub fn exp_reverse_bits_len<F: AbstractField>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn fri_fold<F: AbstractField>(
+pub fn fri_fold<F: FieldAlgebra>(
     z: u32,
     alpha: u32,
     x: u32,
@@ -223,7 +218,7 @@ pub fn fri_fold<F: AbstractField>(
     }))
 }
 
-pub fn commit_public_values<F: AbstractField>(
+pub fn commit_public_values<F: FieldAlgebra>(
     public_values_a: &RecursionPublicValues<u32>,
 ) -> Instruction<F> {
     let pv_a = public_values_a

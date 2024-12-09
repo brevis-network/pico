@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 
 use crate::{
@@ -34,7 +34,7 @@ where
         // builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(next.is_real * (local.nonce + CB::Expr::one()), next.nonce);
+            .assert_eq(next.is_real * (local.nonce + CB::Expr::ONE), next.nonce);
 
         // Load from memory to the state
         for (i, word) in local.input_memory.iter().enumerate() {
@@ -102,7 +102,7 @@ where
         // Write output_memory.
         builder.eval_memory_access_slice(
             local.chunk,
-            local.clk.into() + CB::Expr::one(),
+            local.clk.into() + CB::Expr::ONE,
             local.output_memory_ptr,
             &local.output_memory,
             local.is_real,

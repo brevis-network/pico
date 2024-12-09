@@ -31,6 +31,8 @@ p3-symmetric.workspace = true
 p3-uni-stark.workspace = true
 p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 p3-bn254-fr.workspace = true
+p3-mersenne-31.workspace = true
+p3-circle.workspace = true
 
 # misc
 anyhow.workspace = true
@@ -79,6 +81,7 @@ p256.workspace = true
 elliptic-curve.workspace = true
 dashu.workspace = true
 cfg-if.workspace = true
+halo2curves.workspace = true
 
 rug = { version = "1.26.1", optional = true }
 

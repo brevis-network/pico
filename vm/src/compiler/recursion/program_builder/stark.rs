@@ -21,7 +21,7 @@ use crate::{
 };
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{AbstractField, TwoAdicField};
+use p3_field::{FieldAlgebra, TwoAdicField};
 
 // todo: move and unify
 pub const EMPTY: usize = 0x_1111_1111;
@@ -99,7 +99,7 @@ where
         let mut main_mats: Array<_, TwoAdicPcsMatsVariable<_>> = builder.dyn_array(num_chunk_chips);
         let mut perm_mats: Array<_, TwoAdicPcsMatsVariable<_>> = builder.dyn_array(num_chunk_chips);
 
-        let num_quotient_mats: Var<_> = builder.eval(FC::N::zero());
+        let num_quotient_mats: Var<_> = builder.eval(FC::N::ZERO);
         builder.range(0, num_chunk_chips).for_each(|i, builder| {
             let num_quotient_chunks = builder.get(&proof.quotient_data, i).quotient_size;
             builder.assign(num_quotient_mats, num_quotient_mats + num_quotient_chunks);
@@ -140,7 +140,7 @@ where
             builder.set_value(&mut prep_mats, preprocessed_sorted_id, main_mat);
         }
 
-        let qc_index: Var<_> = builder.eval(FC::N::zero());
+        let qc_index: Var<_> = builder.eval(FC::N::ZERO);
         builder.range(0, num_chunk_chips).for_each(|i, builder| {
             let opening = builder.get(&opened_values.chips_opened_values, i);
             let QuotientDataVariable {
@@ -200,7 +200,7 @@ where
                     points: qc_points.clone(),
                 };
                 builder.set_value(&mut quotient_mats, qc_index, qc_mat);
-                builder.assign(qc_index, qc_index + FC::N::one());
+                builder.assign(qc_index, qc_index + FC::N::ONE);
             });
         });
 
@@ -236,7 +236,7 @@ where
 
         builder.cycle_tracker("stage-e-verify-constraints");
 
-        let num_chunk_chips_enabled: Var<_> = builder.eval(FC::N::zero());
+        let num_chunk_chips_enabled: Var<_> = builder.eval(FC::N::ZERO);
         for (i, chip) in chips.iter().enumerate() {
             tracing::debug!("verifying constraints for chip: {}", chip.name());
             let index = builder.get(&proof.sorted_indices, i);
@@ -286,7 +286,7 @@ where
                     // Increment the number of chunk chips that are enabled.
                     builder.assign(
                         num_chunk_chips_enabled,
-                        num_chunk_chips_enabled + FC::N::one(),
+                        num_chunk_chips_enabled + FC::N::ONE,
                     );
                 });
         }
@@ -297,7 +297,7 @@ where
 
         // If we're checking the cumulative sum, assert that the sum of the cumulative sums is zero.
         if check_cumulative_sum {
-            let sum: Ext<_, _> = builder.eval(FC::EF::zero().cons());
+            let sum: Ext<_, _> = builder.eval(FC::EF::ZERO.cons());
             builder
                 .range(0, proof.opened_values.chips_opened_values.len())
                 .for_each(|i, builder| {
@@ -306,7 +306,7 @@ where
                         .cumulative_sum;
                     builder.assign(sum, sum + cumulative_sum);
                 });
-            builder.assert_ext_eq(sum, FC::EF::zero().cons());
+            builder.assert_ext_eq(sum, FC::EF::ZERO.cons());
         }
 
         builder.cycle_tracker("stage-e-verify-constraints");

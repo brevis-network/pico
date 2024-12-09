@@ -18,14 +18,15 @@ use crate::{
         recursion::{instruction::Instruction, opcode::Opcode, program::RecursionProgram},
         riscv::opcode::RangeCheckOpcode,
     },
-    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
+    primitives::consts::{DIGEST_SIZE, PERMUTATION_WIDTH, RECURSION_NUM_PVS},
     recursion::air::{Block, RECURSION_PUBLIC_VALUES_COL_MAP},
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::{ExtensionField, PrimeField32};
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
-use p3_symmetric::{CryptographicPermutation, Permutation};
+use log::debug;
+use p3_field::{ExtensionField, Field, PrimeField32};
+use p3_poseidon2::{ExternalLayer, InternalLayer, Poseidon2};
+use p3_symmetric::Permutation;
 pub use record::*;
 use std::{array, collections::VecDeque, fmt, marker::PhantomData, sync::Arc};
 pub use utils::*;
@@ -38,7 +39,6 @@ pub const STACK_SIZE: usize = 1 << 24;
 pub const MEMORY_SIZE: usize = 1 << 28;
 
 /// The width of the Poseidon2 permutation.
-pub const PERMUTATION_WIDTH: usize = 16;
 pub const POSEIDON2_SBOX_DEGREE: u64 = 7;
 pub const HASH_RATE: usize = 8;
 
@@ -68,7 +68,13 @@ pub struct CycleTrackerEntry {
     pub cumulative_cycles: usize,
 }
 
-pub struct Runtime<F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
+pub struct Runtime<F, EF, ExternalPerm, InternalPerm, const WIDTH: usize, const D: u64>
+where
+    F: PrimeField32 + Field,
+    EF: ExtensionField<F>,
+    ExternalPerm: ExternalLayer<F, PERMUTATION_WIDTH, D>,
+    InternalPerm: InternalLayer<F, PERMUTATION_WIDTH, D>,
+{
     pub timestamp: usize,
 
     pub nb_poseidons: usize,
@@ -124,15 +130,7 @@ pub struct Runtime<F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     pub cycle_tracker: HashMap<String, CycleTrackerEntry>,
 
     // pub witness_stream: Vec<Witness<F, EF>>,
-    perm: Option<
-        Poseidon2<
-            F,
-            Poseidon2ExternalMatrixGeneral,
-            Diffusion,
-            PERMUTATION_WIDTH,
-            POSEIDON2_SBOX_DEGREE,
-        >,
-    >,
+    perm: Option<Poseidon2<<F as Field>::Packing, ExternalPerm, InternalPerm, WIDTH, D>>,
 
     p2_hash_state: [F; PERMUTATION_WIDTH],
 
@@ -158,25 +156,17 @@ impl fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-impl<F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<F, EF, Diffusion>
+impl<F, EF, ExternalPerm, InternalPerm, const D: u64>
+    Runtime<F, EF, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>
 where
-    Poseidon2<
-        F,
-        Poseidon2ExternalMatrixGeneral,
-        Diffusion,
-        PERMUTATION_WIDTH,
-        POSEIDON2_SBOX_DEGREE,
-    >: CryptographicPermutation<[F; PERMUTATION_WIDTH]>,
+    F: PrimeField32 + Field,
+    EF: ExtensionField<F>,
+    ExternalPerm: ExternalLayer<F, PERMUTATION_WIDTH, D>,
+    InternalPerm: InternalLayer<F, PERMUTATION_WIDTH, D>,
 {
     pub fn new(
         program: &RecursionProgram<F>,
-        perm: Poseidon2<
-            F,
-            Poseidon2ExternalMatrixGeneral,
-            Diffusion,
-            PERMUTATION_WIDTH,
-            POSEIDON2_SBOX_DEGREE,
-        >,
+        perm: Poseidon2<<F as Field>::Packing, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>, // todo: update to support switching
     ) -> Self {
         let record = RecursionRecord::<F> {
             program: Arc::new(program.clone()),
@@ -195,10 +185,10 @@ where
             nb_branch_ops: 0,
             nb_print_f: 0,
             nb_print_e: 0,
-            clk: F::zero(),
+            clk: F::ZERO,
             program: program.clone(),
             fp: F::from_canonical_usize(STACK_SIZE),
-            pc: F::zero(),
+            pc: F::ZERO,
             memory: HashMap::new(),
             uninitialized_memory: HashMap::new(),
             record,
@@ -206,7 +196,7 @@ where
             access: CpuRecord::default(),
             witness_stream: VecDeque::new(),
             cycle_tracker: HashMap::new(),
-            p2_hash_state: [F::zero(); PERMUTATION_WIDTH],
+            p2_hash_state: [F::ZERO; PERMUTATION_WIDTH],
             p2_hash_state_cursor: 0,
             p2_current_hash_num: None,
             _marker: PhantomData,
@@ -231,10 +221,10 @@ where
             nb_print_f: 0,
             nb_print_e: 0,
             nb_branch_ops: 0,
-            clk: F::zero(),
+            clk: F::ZERO,
             program: program.clone(),
             fp: F::from_canonical_usize(STACK_SIZE),
-            pc: F::zero(),
+            pc: F::ZERO,
             memory: HashMap::new(),
             uninitialized_memory: HashMap::new(),
             record,
@@ -242,7 +232,7 @@ where
             access: CpuRecord::default(),
             witness_stream: VecDeque::new(),
             cycle_tracker: HashMap::new(),
-            p2_hash_state: [F::zero(); PERMUTATION_WIDTH],
+            p2_hash_state: [F::ZERO; PERMUTATION_WIDTH],
             p2_hash_state_cursor: 0,
             p2_current_hash_num: None,
             _marker: PhantomData,
@@ -288,7 +278,7 @@ where
             .and_modify(|_| panic!("address already initialized {}", addr))
             .or_insert(MemoryEntry {
                 value,
-                timestamp: F::zero(),
+                timestamp: F::ZERO,
             });
     }
 
@@ -474,7 +464,7 @@ where
             let instruction = self.program.instructions[idx].clone();
 
             let mut next_clk = self.clk + F::from_canonical_u32(4);
-            let mut next_pc = self.pc + F::one();
+            let mut next_pc = self.pc + F::ONE;
             let (a, b, c): (Block<F>, Block<F>, Block<F>);
             match instruction.opcode {
                 Opcode::PrintF => {
@@ -620,7 +610,7 @@ where
                     self.nb_branch_ops += 1;
                     let (_, b_val, c_offset) = self.alu_rr(&instruction);
                     let (a_ptr, mut a_val) = self.peek_a(&instruction);
-                    a_val[0] += F::one();
+                    a_val[0] += F::ONE;
                     if a_val != b_val {
                         next_pc = self.pc + c_offset[0];
                     }
@@ -639,17 +629,15 @@ where
                 Opcode::JALR => {
                     self.nb_branch_ops += 1;
                     let (a_ptr, b_val, c_val) = self.alu_rr(&instruction);
-                    let a_val = Block::from(self.pc + F::one());
+                    let a_val = Block::from(self.pc + F::ONE);
                     self.mw_cpu(a_ptr, a_val, MemoryAccessPosition::A);
                     next_pc = b_val[0];
                     self.fp = c_val[0];
                     (a, b, c) = (a_val, b_val, c_val);
                 }
                 Opcode::TRAP => {
-                    self.record
-                        .public_values
-                        .resize(RECURSION_NUM_PVS, F::zero());
-                    self.record.public_values[RECURSION_PUBLIC_VALUES_COL_MAP.exit_code] = F::one();
+                    self.record.public_values.resize(RECURSION_NUM_PVS, F::ZERO);
+                    self.record.public_values[RECURSION_PUBLIC_VALUES_COL_MAP.exit_code] = F::ONE;
 
                     let trap_pc = self.pc.as_canonical_u32() as usize;
                     let trace = self.program.traces[trap_pc].clone();
@@ -671,11 +659,8 @@ where
                     }
                 }
                 Opcode::HALT => {
-                    self.record
-                        .public_values
-                        .resize(RECURSION_NUM_PVS, F::zero());
-                    self.record.public_values[RECURSION_PUBLIC_VALUES_COL_MAP.exit_code] =
-                        F::zero();
+                    self.record.public_values.resize(RECURSION_NUM_PVS, F::ZERO);
+                    self.record.public_values[RECURSION_PUBLIC_VALUES_COL_MAP.exit_code] = F::ZERO;
 
                     let (a_val, b_val, c_val) = self.all_rr(&instruction);
                     (a, b, c) = (a_val, b_val, c_val);
@@ -706,9 +691,9 @@ where
                     let mut left_records = vec![];
                     let mut right_records = vec![];
                     let mut left_array: [F; PERMUTATION_WIDTH / 2] =
-                        [F::zero(); PERMUTATION_WIDTH / 2];
+                        [F::ZERO; PERMUTATION_WIDTH / 2];
                     let mut right_array: [F; PERMUTATION_WIDTH / 2] =
-                        [F::zero(); PERMUTATION_WIDTH / 2];
+                        [F::ZERO; PERMUTATION_WIDTH / 2];
 
                     for i in 0..PERMUTATION_WIDTH / 2 {
                         let f_i = F::from_canonical_u32(i as u32);
@@ -725,7 +710,11 @@ where
                         [left_records, right_records].concat().try_into().unwrap();
 
                     // Perform the permutation.
-                    let result = self.perm.as_ref().unwrap().permute(array);
+                    let result = self.perm.as_ref().unwrap().permute(array.clone()); // todo: double check
+                    debug!(
+                        "recursion-emulator: poseidon2 permutation result: {:?}",
+                        result,
+                    );
 
                     // Write the value back to the array at ptr.
                     let mut result_records = vec![];
@@ -733,7 +722,7 @@ where
                         result_records.push(self.mw(
                             dst + F::from_canonical_usize(i),
                             Block::from(*value),
-                            timestamp + F::one(),
+                            timestamp + F::ONE,
                         ));
                     }
 
@@ -775,7 +764,7 @@ where
 
                     // We currently don't support an input_len of 0, since it will need special
                     // logic in the AIR.
-                    assert!(input_len > F::zero());
+                    assert!(input_len > F::ZERO);
 
                     let mut absorb_event = Poseidon2AbsorbEvent::new(
                         timestamp,
@@ -846,7 +835,7 @@ where
                         }));
 
                     self.p2_hash_state_cursor = 0;
-                    self.p2_hash_state = [F::zero(); PERMUTATION_WIDTH];
+                    self.p2_hash_state = [F::ZERO; PERMUTATION_WIDTH];
 
                     (a, b, c) = (a_val, b_val, c_val);
                 }
@@ -901,25 +890,25 @@ where
                         let mut ptr = input_ptr;
                         let (z_record, z) = self.mr(ptr, timestamp);
                         let z: EF = z.ext();
-                        ptr += F::one();
+                        ptr += F::ONE;
                         let (alpha_record, alpha) = self.mr(ptr, timestamp);
                         let alpha: EF = alpha.ext();
-                        ptr += F::one();
+                        ptr += F::ONE;
                         let (x_record, x) = self.mr(ptr, timestamp);
                         let x = x[0];
-                        ptr += F::one();
+                        ptr += F::ONE;
                         let (log_height_record, log_height) = self.mr(ptr, timestamp);
                         let log_height = log_height[0];
-                        ptr += F::one();
+                        ptr += F::ONE;
                         let (mat_opening_ptr_record, mat_opening_ptr) = self.mr(ptr, timestamp);
                         let mat_opening_ptr = mat_opening_ptr[0];
-                        ptr += F::two();
+                        ptr += F::TWO;
                         let (ps_at_z_ptr_record, ps_at_z_ptr) = self.mr(ptr, timestamp);
                         let ps_at_z_ptr = ps_at_z_ptr[0];
-                        ptr += F::two();
+                        ptr += F::TWO;
                         let (alpha_pow_ptr_record, alpha_pow_ptr) = self.mr(ptr, timestamp);
                         let alpha_pow_ptr = alpha_pow_ptr[0];
-                        ptr += F::two();
+                        ptr += F::TWO;
                         let (ro_ptr_record, ro_ptr) = self.mr(ptr, timestamp);
                         let ro_ptr = ro_ptr[0];
 
@@ -980,7 +969,7 @@ where
                             alpha_pow_at_log_height: alpha_pow_at_log_height_record,
                             ro_at_log_height: ro_at_log_height_record,
                         });
-                        timestamp += F::one();
+                        timestamp += F::ONE;
                     }
 
                     next_clk = timestamp;
@@ -1001,7 +990,7 @@ where
 
                     let mut timestamp = self.clk;
 
-                    let mut accum = F::one();
+                    let mut accum = F::ONE;
 
                     // Read the value at the pointer `base`.
                     let mut x_record = self.mr(base, timestamp).0;
@@ -1024,14 +1013,14 @@ where
                         let prev_accum = accum;
                         accum = prev_accum
                             * prev_accum
-                            * if current_bit == F::one() {
+                            * if current_bit == F::ONE {
                                 current_x_val
                             } else {
-                                F::one()
+                                F::ONE
                             };
 
                         // On the last iteration, write accum to the address pointed to in `base`.
-                        if m == len - F::one() {
+                        if m == len - F::ONE {
                             x_record = self.mw(base, Block::from(accum), timestamp);
                         };
 
@@ -1049,7 +1038,7 @@ where
                                 base_ptr: base,
                                 iteration_num: m,
                             });
-                        timestamp += F::one();
+                        timestamp += F::ONE;
                     }
 
                     next_clk = timestamp;
@@ -1091,7 +1080,7 @@ where
             }
         }
 
-        let zero_block = Block::from(F::zero());
+        let zero_block = Block::from(F::ZERO);
         // Collect all used memory addresses.
         for (addr, entry) in self.memory.iter() {
             // Get the initial value of the memory address from either the uninitialized memory
@@ -1120,11 +1109,11 @@ where
                 self.record.last_memory_record[i + 1].0,
                 true,
             );
-            self.track_addr_range_check(F::zero(), self.record.last_memory_record[i].0, false);
+            self.track_addr_range_check(F::ZERO, self.record.last_memory_record[i].0, false);
         }
         // Add the last range check event for the last memory address.
         self.track_addr_range_check(
-            F::zero(),
+            F::ZERO,
             self.record.last_memory_record.last().unwrap().0,
             false,
         );

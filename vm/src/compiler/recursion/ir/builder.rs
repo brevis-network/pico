@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{configs::config::FieldGenericConfig, primitives::types::RecursionProgramType};
 use backtrace::Backtrace;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use std::{iter::Zip, vec::IntoIter};
 
 /// TracedVec is a Vec wrapper that records a trace whenever an element is pushed. When extending
@@ -471,12 +471,12 @@ impl<FC: FieldGenericConfig> Builder<FC> {
             "Cannot commit to a public value with a sub builder"
         );
         if self.nb_public_values.is_none() {
-            self.nb_public_values = Some(self.eval(FC::N::zero()));
+            self.nb_public_values = Some(self.eval(FC::N::ZERO));
         }
         let nb_public_values = *self.nb_public_values.as_ref().unwrap();
 
         self.operations.push(DslIr::Commit(val, nb_public_values));
-        self.assign(nb_public_values, nb_public_values + FC::N::one());
+        self.assign(nb_public_values, nb_public_values + FC::N::ONE);
     }
 
     /// Commits an array of felts in public values.

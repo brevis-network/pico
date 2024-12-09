@@ -24,9 +24,14 @@ struct Args {
     // all | riscv | riscv_compress | riscv_combine | recur_combine | recur_compress | recur_embed
     #[clap(long, default_value = "all")]
     step: String,
+
+    // Field to work on.
+    // bb | m31
+    #[clap(long, default_value = "bb")]
+    field: String,
 }
 
-pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String) {
+pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String, String) {
     let args = Args::parse();
     let mut stdin = EmulatorStdin::default();
 
@@ -34,15 +39,19 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String) {
     if args.elf == "fibonacci" || args.elf == "fib" || args.elf == "f" {
         elf = load_elf("sp1-fibonacci");
         stdin.write(&args.n);
-        info!("Test Fibonacci, sequence n={}, step={}", args.n, args.step);
+        info!(
+            "Test Fibonacci, sequence n={}, step={}, field={}",
+            args.n, args.step, args.field
+        );
     } else if args.elf == "keccak" || args.elf == "k" {
         elf = load_elf("pico-keccak");
         let input_str = (0..args.n).map(|_| "x").collect::<String>();
         stdin.write(&input_str);
         info!(
-            "Test Keccak, string len n={}, step={}",
+            "Test Keccak, string len n={}, step={}, field={}",
             input_str.len(),
-            args.step
+            args.step,
+            args.field
         );
     } else if args.elf == "keccak_precompile" {
         elf = load_elf("keccak-example");
@@ -80,5 +89,5 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String) {
         std::process::exit(1);
     }
 
-    (elf, stdin, args.step)
+    (elf, stdin, args.step, args.field)
 }

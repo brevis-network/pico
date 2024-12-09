@@ -37,7 +37,7 @@ use crate::{
     primitives::consts::WORD_SIZE,
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 
 impl<F: Field, CB> Air<CB> for MulChip<F>
@@ -52,15 +52,15 @@ where
         let next: &MulCols<CB::Var> = (*next).borrow();
         let base = CB::F::from_canonical_u32(1 << 8);
 
-        let zero: CB::Expr = CB::F::zero().into();
-        let one: CB::Expr = CB::F::one().into();
+        let zero: CB::Expr = CB::F::ZERO.into();
+        let one: CB::Expr = CB::F::ONE.into();
         let byte_mask = CB::F::from_canonical_u8(BYTE_MASK);
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Calculate the MSBs.
         let (b_msb, c_msb) = {
@@ -91,8 +91,8 @@ where
 
         // Sign extend local.b and local.c whenever appropriate.
         let (b, c) = {
-            let mut b: Vec<CB::Expr> = vec![CB::F::zero().into(); PRODUCT_SIZE];
-            let mut c: Vec<CB::Expr> = vec![CB::F::zero().into(); PRODUCT_SIZE];
+            let mut b: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
+            let mut c: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
             for i in 0..PRODUCT_SIZE {
                 if i < WORD_SIZE {
                     b[i] = local.b[i].into();
@@ -106,7 +106,7 @@ where
         };
 
         // Compute the uncarried product b(x) * c(x) = m(x).
-        let mut m: Vec<CB::Expr> = vec![CB::F::zero().into(); PRODUCT_SIZE];
+        let mut m: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
         for i in 0..PRODUCT_SIZE {
             for j in 0..PRODUCT_SIZE {
                 if i + j < PRODUCT_SIZE {

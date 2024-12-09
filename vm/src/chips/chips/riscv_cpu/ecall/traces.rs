@@ -16,7 +16,7 @@ impl<F: Field> CpuChip<F> {
     ) -> bool {
         let mut is_halt = false;
 
-        if cols.opcode_selector.is_ecall == F::one() {
+        if cols.opcode_selector.is_ecall == F::ONE {
             // The send_to_table column is the 1st entry of the op_a_access column prev_value field.
             // Look at `ecall_eval` in cpu/air/mod.rs for the corresponding constraint and
             // explanation.
@@ -67,7 +67,7 @@ impl<F: Field> CpuChip<F> {
                     == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
             {
                 let digest_idx = cols.op_b_access.value().to_u32() as usize;
-                ecall_cols.index_bitmap[digest_idx] = F::one();
+                ecall_cols.index_bitmap[digest_idx] = F::ONE;
             }
 
             // Write the syscall nonce.
@@ -85,14 +85,14 @@ impl<F: Field> CpuChip<F> {
             if is_halt {
                 ecall_cols.operand_to_check = event.b.into();
                 ecall_cols.operand_range_check_cols.populate(event.b);
-                cols.ecall_range_check_operand = F::one();
+                cols.ecall_range_check_operand = F::ONE;
             }
 
             if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
             {
                 ecall_cols.operand_to_check = event.c.into();
                 ecall_cols.operand_range_check_cols.populate(event.c);
-                cols.ecall_range_check_operand = F::one();
+                cols.ecall_range_check_operand = F::ONE;
             }
         }
 

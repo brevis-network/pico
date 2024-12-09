@@ -12,7 +12,7 @@ use crate::{
     recursion::air::Block,
 };
 use hashbrown::HashMap;
-use p3_field::{AbstractField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32};
 use std::{array, sync::Arc};
 
 #[derive(Default, Debug, Clone)]
@@ -87,12 +87,12 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
         }
     }
 
-    fn public_values<T: AbstractField>(&self) -> Vec<T> {
+    fn public_values<T: FieldAlgebra>(&self) -> Vec<T> {
         let ret: [T; MAX_NUM_PVS] = array::from_fn(|i| {
             if i < self.public_values.len() {
                 T::from_canonical_u32(self.public_values[i].as_canonical_u32())
             } else {
-                T::zero()
+                T::ZERO
             }
         });
 

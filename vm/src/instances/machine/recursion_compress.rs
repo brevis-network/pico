@@ -22,7 +22,7 @@ use crate::{
 };
 use p3_air::Air;
 use p3_challenger::CanObserve;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument, trace};
 
@@ -156,7 +156,7 @@ where
         trace!("public values: {:?}", public_values);
 
         // assert completion
-        if public_values.flag_complete != <Val<RecursionSC>>::one() {
+        if public_values.flag_complete != <Val<RecursionSC>>::ONE {
             panic!("flag_complete is not 1");
         }
 

@@ -10,7 +10,7 @@ use crate::{
 };
 use itertools::Itertools;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{
@@ -108,13 +108,13 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for MultiChip<DEGREE,
             .map(|(i, instruction_row)| {
                 let process_fri_fold = i < fri_fold_trace.height();
 
-                let mut row = vec![F::zero(); num_columns];
+                let mut row = vec![F::ZERO; num_columns];
                 row[NUM_MULTI_COLS..NUM_MULTI_COLS + instruction_row.len()]
                     .copy_from_slice(instruction_row);
 
                 if process_fri_fold {
                     let multi_cols: &mut MultiCols<F> = row[0..NUM_MULTI_COLS].borrow_mut();
-                    multi_cols.is_fri_fold = F::one();
+                    multi_cols.is_fri_fold = F::ONE;
 
                     let fri_fold_cols: &FriFoldCols<F> = (*instruction_row).borrow();
                     multi_cols.fri_fold_receive_table =
@@ -122,11 +122,11 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for MultiChip<DEGREE,
                     multi_cols.fri_fold_memory_access =
                         FriFoldChip::<DEGREE, F>::do_memory_access(fri_fold_cols);
                     if i == fri_fold_trace.height() - 1 {
-                        multi_cols.fri_fold_last_row = F::one();
+                        multi_cols.fri_fold_last_row = F::ONE;
                     }
                 } else {
                     let multi_cols: &mut MultiCols<F> = row[0..NUM_MULTI_COLS].borrow_mut();
-                    multi_cols.is_poseidon2 = F::one();
+                    multi_cols.is_poseidon2 = F::ONE;
 
                     let poseidon2_cols =
                         Poseidon2WideChip::<DEGREE, F>::convert::<F>(instruction_row);
@@ -151,7 +151,7 @@ impl<const DEGREE: usize, F: PrimeField32> ChipBehavior<F> for MultiChip<DEGREE,
         // Pad the trace to a power of two.
         pad_rows_fixed(
             &mut rows,
-            || vec![F::zero(); num_columns],
+            || vec![F::ZERO; num_columns],
             self.fixed_log2_rows,
         );
 
@@ -202,7 +202,7 @@ where
 
         // Constrain that the flags are computed correctly.
         builder.when_transition().assert_eq(
-            local_multi_cols.is_fri_fold * (AB::Expr::one() - next_multi_cols.is_fri_fold),
+            local_multi_cols.is_fri_fold * (AB::Expr::ONE - next_multi_cols.is_fri_fold),
             local_multi_cols.fri_fold_last_row,
         );
         builder.when_last_row().assert_eq(
@@ -218,7 +218,7 @@ where
             local_multi_cols.is_fri_fold * next_multi_cols.is_poseidon2,
         );
         builder.when_transition().assert_eq(
-            local_multi_cols.is_poseidon2 * (AB::Expr::one() - next_multi_cols.is_poseidon2),
+            local_multi_cols.is_poseidon2 * (AB::Expr::ONE - next_multi_cols.is_poseidon2),
             local_multi_cols.poseidon2_last_row,
         );
         builder.when_last_row().assert_eq(

@@ -7,7 +7,7 @@ use crate::{
 };
 use itertools::Itertools;
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use std::iter::once;
 
 pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
@@ -125,7 +125,7 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
         // `current_comp_val, prev_comp_val` are range-checked to be `<2^24` and as long as we're
         // working in a field larger than `2 * 2^24` (which is true of the BabyBear and Mersenne31
         // prime).
-        let diff_minus_one = current_comp_val - prev_comp_value - Self::Expr::one();
+        let diff_minus_one = current_comp_val - prev_comp_value - Self::Expr::ONE;
 
         // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
         // + mem_access.ts_diff_8bit_limb * 2^16.

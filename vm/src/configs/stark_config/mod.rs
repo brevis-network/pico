@@ -2,4 +2,5 @@
 
 pub mod bb_bn254_poseidon2;
 pub mod bb_poseidon2;
+pub mod m31_poseidon2;
 mod utils;

@@ -14,7 +14,7 @@ use crate::{
 };
 use core::mem::size_of;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::borrow::{Borrow, BorrowMut};
 
@@ -35,7 +35,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryGlobalChip<F> {
     ) -> RowMajorMatrix<F> {
         let nb_events = input.first_memory_record.len() + input.last_memory_record.len();
         let nb_rows = next_power_of_two(nb_events, self.fixed_log2_rows);
-        let mut values = vec![F::zero(); nb_rows * NUM_MEMORY_INIT_COLS];
+        let mut values = vec![F::ZERO; nb_rows * NUM_MEMORY_INIT_COLS];
 
         par_for_each_row(&mut values, NUM_MEMORY_INIT_COLS, |i, row| {
             if i >= nb_events {
@@ -46,33 +46,33 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryGlobalChip<F> {
             if i < input.first_memory_record.len() {
                 let (addr, value) = &input.first_memory_record[i];
                 cols.addr = *addr;
-                cols.timestamp = F::zero();
+                cols.timestamp = F::ZERO;
                 cols.value = *value;
-                cols.is_initialize = F::one();
+                cols.is_initialize = F::ONE;
 
-                cols.is_real = F::one();
+                cols.is_real = F::ONE;
             } else {
                 let (addr, timestamp, value) =
                     &input.last_memory_record[i - input.first_memory_record.len()];
                 let last = i == nb_events - 1;
                 let (next_addr, _, _) = if last {
-                    &(F::zero(), F::zero(), Block::from(F::zero()))
+                    &(F::ZERO, F::ZERO, Block::from(F::ZERO))
                 } else {
                     &input.last_memory_record[i - input.first_memory_record.len() + 1]
                 };
                 cols.addr = *addr;
                 cols.timestamp = *timestamp;
                 cols.value = *value;
-                cols.is_finalize = F::one();
+                cols.is_finalize = F::ONE;
                 (cols.diff_16bit_limb, cols.diff_12bit_limb) = if !last {
                     compute_addr_diff(*next_addr, *addr, true)
                 } else {
-                    (F::zero(), F::zero())
+                    (F::ZERO, F::ZERO)
                 };
                 (cols.addr_16bit_limb, cols.addr_12bit_limb) =
-                    compute_addr_diff(*addr, F::zero(), false);
+                    compute_addr_diff(*addr, F::ZERO, false);
 
-                cols.is_real = F::one();
+                cols.is_real = F::ONE;
                 cols.is_range_check = F::from_bool(!last);
             }
         });
@@ -123,9 +123,8 @@ where
         builder.assert_bool(local.is_initialize);
         builder.assert_bool(local.is_finalize);
         builder.assert_bool(local.is_real);
-        builder.assert_bool(
-            local.is_initialize + local.is_finalize + (AB::Expr::one() - local.is_real),
-        );
+        builder
+            .assert_bool(local.is_initialize + local.is_finalize + (AB::Expr::ONE - local.is_real));
         builder.assert_bool(local.is_range_check);
 
         // Assert the is_initialize rows come before the is_finalize rows, and those come before the
@@ -143,18 +142,18 @@ where
         builder
             .when_transition()
             .when(local.is_finalize)
-            .assert_one(next.is_finalize + (AB::Expr::one() - next.is_real));
+            .assert_one(next.is_finalize + (AB::Expr::ONE - next.is_real));
 
         // After a padding row, we should only have another padding row.
         builder
             .when_transition()
-            .when(AB::Expr::one() - local.is_real)
+            .when(AB::Expr::ONE - local.is_real)
             .assert_zero(next.is_real);
 
         // The last row should be a padding row or a finalize row.
         builder
             .when_last_row()
-            .assert_one(local.is_finalize + AB::Expr::one() - local.is_real);
+            .assert_one(local.is_finalize + AB::Expr::ONE - local.is_real);
 
         // Ensure that the is_range_check column is properly computed.
         // The flag column `is_range_check` is set iff is_finalize is set AND next.is_finalize is
@@ -169,7 +168,7 @@ where
         // Send requests for the 28-bit range checks and ensure that the limbs are correctly
         // computed.
         builder.recursion_eval_range_check_28bits(
-            next.addr - local.addr - AB::Expr::one(),
+            next.addr - local.addr - AB::Expr::ONE,
             local.diff_16bit_limb,
             local.diff_12bit_limb,
             local.is_range_check,

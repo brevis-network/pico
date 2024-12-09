@@ -1,6 +1,6 @@
 use crate::compiler::word::Word;
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 use std::array;
 
@@ -38,7 +38,7 @@ impl<F: Field> BabyBearWordRangeChecker<F> {
         cols: BabyBearWordRangeChecker<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let mut recomposed_byte = AB::Expr::zero();
+        let mut recomposed_byte = AB::Expr::ZERO;
         cols.most_sig_byte_decomp
             .iter()
             .enumerate()

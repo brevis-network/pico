@@ -62,7 +62,7 @@ pub trait FieldParameters:
 pub fn limbs_from_slice<E: From<F>, N: ArraySize, F: Field>(limbs: impl AsRef<[F]>) -> Limbs<E, N> {
     let limbs = limbs.as_ref();
     debug_assert_eq!(limbs.len(), N::USIZE);
-    let mut result = Array::<E, N>::from_fn(|_| F::zero().into());
+    let mut result = Array::<E, N>::from_fn(|_| F::ZERO.into());
     for (i, limb) in limbs.into_iter().enumerate() {
         result[i] = (*limb).into();
     }

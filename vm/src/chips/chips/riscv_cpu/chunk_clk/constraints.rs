@@ -4,7 +4,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field> CpuChip<F> {
     /// Constraints related to the chunk and clk.

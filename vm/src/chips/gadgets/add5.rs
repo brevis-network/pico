@@ -5,7 +5,7 @@ use crate::{
     primitives::consts::WORD_SIZE,
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute the sum of five words.
@@ -119,14 +119,14 @@ impl<F: Field> Add5Operation<F> {
                         + cols.is_carry_2[i]
                         + cols.is_carry_3[i]
                         + cols.is_carry_4[i],
-                    CB::Expr::one(),
+                    CB::Expr::ONE,
                 );
             }
         }
 
         // Calculates carry from is_carry_{0,1,2,3,4}.
         {
-            let one = CB::Expr::one();
+            let one = CB::Expr::ONE;
             let two = CB::F::from_canonical_u32(2);
             let three = CB::F::from_canonical_u32(3);
             let four = CB::F::from_canonical_u32(4);
@@ -148,7 +148,7 @@ impl<F: Field> Add5Operation<F> {
             // For each limb, assert that difference between the carried result and the non-carried
             // result is the product of carry and base.
             for i in 0..WORD_SIZE {
-                let mut overflow: CB::Expr = CB::F::zero().into();
+                let mut overflow: CB::Expr = CB::F::ZERO.into();
                 for word in words {
                     overflow += word[i].into();
                 }

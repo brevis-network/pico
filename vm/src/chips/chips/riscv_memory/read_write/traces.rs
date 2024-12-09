@@ -49,7 +49,7 @@ impl<F: Field> ChipBehavior<F> for MemoryReadWriteChip<F> {
             .iter()
             .filter(|e| e.instruction.is_memory_instruction())
             .collect_vec();
-        let mut values = vec![F::zero(); mem_events.len() * NUM_MEMORY_CHIP_COLS];
+        let mut values = vec![F::ZERO; mem_events.len() * NUM_MEMORY_CHIP_COLS];
 
         let chunk_size = std::cmp::max(mem_events.len() / num_cpus::get(), 1);
         values
@@ -97,7 +97,7 @@ impl<F: Field> ChipBehavior<F> for MemoryReadWriteChip<F> {
                 // The range map stores range (u8) lookup event -> multiplicity.
                 let mut range_events: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 ops.iter().for_each(|op| {
-                    let mut row = [F::zero(); NUM_MEMORY_CHIP_COLS];
+                    let mut row = [F::ZERO; NUM_MEMORY_CHIP_COLS];
                     let cols: &mut MemoryChipCols<F> = row.as_mut_slice().borrow_mut();
                     let alu_events =
                         self.event_to_row(op, &HashMap::new(), cols, &mut range_events);
@@ -258,7 +258,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
                     cols.most_sig_byte_decomp[i] =
                         F::from_canonical_u8(most_sig_mem_value_byte >> i & 0x01);
                 }
-                if cols.most_sig_byte_decomp[7] == F::one() {
+                if cols.most_sig_byte_decomp[7] == F::ONE {
                     cols.mem_value_is_neg_not_x0 =
                         F::from_bool(event.instruction.op_a != (X0 as u32));
                     let sub_event = AluEvent {
@@ -288,7 +288,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
             // Set the `mem_value_is_pos_not_x0` composite flag.
             cols.mem_value_is_pos_not_x0 = F::from_bool(
                 ((matches!(event.instruction.opcode, Opcode::LB | Opcode::LH)
-                    && (cols.most_sig_byte_decomp[7] == F::zero()))
+                    && (cols.most_sig_byte_decomp[7] == F::ZERO))
                     || matches!(
                         event.instruction.opcode,
                         Opcode::LBU | Opcode::LHU | Opcode::LW

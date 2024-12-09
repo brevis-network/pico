@@ -5,7 +5,7 @@ use crate::{
     machine::lookup::{LookupType, SymbolicLookup},
     recursion_v2::{air::Block, types::Address},
 };
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use std::iter::once;
 
 pub trait RecursionBuilder<F: Field>: ChipBuilder<F> {
@@ -15,7 +15,7 @@ pub trait RecursionBuilder<F: Field>: ChipBuilder<F> {
         val: E,
         mult: impl Into<Self::Expr>,
     ) {
-        let mut padded_value = core::array::from_fn(|_| Self::Expr::zero());
+        let mut padded_value = core::array::from_fn(|_| Self::Expr::ZERO);
         padded_value[0] = val.into();
         self.looking_block(Address(addr.0.into()), Block(padded_value), mult)
     }
@@ -39,7 +39,7 @@ pub trait RecursionBuilder<F: Field>: ChipBuilder<F> {
         val: E,
         mult: impl Into<Self::Expr>,
     ) {
-        let mut padded_value = core::array::from_fn(|_| Self::Expr::zero());
+        let mut padded_value = core::array::from_fn(|_| Self::Expr::ZERO);
         padded_value[0] = val.into();
         self.looked_block(Address(addr.0.into()), Block(padded_value), mult)
     }

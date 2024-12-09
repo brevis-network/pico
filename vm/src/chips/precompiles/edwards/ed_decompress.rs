@@ -7,7 +7,7 @@ use core::{
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use tracing::debug;
@@ -175,7 +175,7 @@ impl<V: Copy> EdDecompressCols<V> {
         self.u.eval(
             builder,
             &self.yy.result,
-            &[CB::Expr::one()].iter(),
+            &[CB::Expr::ONE].iter(),
             FieldOperation::Sub,
             self.chunk,
             self.is_real,
@@ -192,7 +192,7 @@ impl<V: Copy> EdDecompressCols<V> {
         );
         self.v.eval(
             builder,
-            &[CB::Expr::one()].iter(),
+            &[CB::Expr::ONE].iter(),
             &self.dyy.result,
             FieldOperation::Add,
             self.chunk,
@@ -209,13 +209,13 @@ impl<V: Copy> EdDecompressCols<V> {
         self.x.eval(
             builder,
             &self.u_div_v.result,
-            CB::F::zero(),
+            CB::F::ZERO,
             self.chunk,
             self.is_real,
         );
         self.neg_x.eval(
             builder,
-            &[CB::Expr::zero()].iter(),
+            &[CB::Expr::ZERO].iter(),
             &self.x.multiplication.result,
             FieldOperation::Sub,
             self.chunk,
@@ -296,7 +296,7 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
         debug!("ed decompress precompile events: {:?}", events.len());
 
         for event in events {
-            let mut row = [F::zero(); NUM_ED_DECOMPRESS_COLS];
+            let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
             let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
             cols.populate::<E::BaseField, E>(event.clone(), output);
 
@@ -304,7 +304,7 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
         }
 
         pad_rows(&mut rows, || {
-            let mut row = [F::zero(); NUM_ED_DECOMPRESS_COLS];
+            let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
             let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
             let zero = BigUint::zero();
             cols.populate_field_ops::<E>(&mut vec![], &mut vec![], 0, &zero);
@@ -355,7 +355,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         local.eval::<F, CB, E::BaseField, E>(builder);
     }

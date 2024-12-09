@@ -17,7 +17,7 @@ use crate::{
 use core::fmt::Debug;
 use itertools::Itertools;
 use p3_field::{
-    AbstractExtensionField, AbstractField, Field, PrimeField, PrimeField64, TwoAdicField,
+    Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField, PrimeField64, TwoAdicField,
 };
 use std::{borrow::Borrow, collections::HashMap, mem::transmute};
 use vec_map::VecMap;
@@ -42,7 +42,7 @@ where
     /// Allocate a fresh address. Checks that the address space is not full.
     pub fn alloc(next_addr: &mut C::F) -> Address<C::F> {
         let id = Address(*next_addr);
-        *next_addr += C::F::one();
+        *next_addr += C::F::ONE;
         if next_addr.is_zero() {
             panic!("out of address space");
         }
@@ -71,7 +71,7 @@ where
                 if increment_mult {
                     // This is a read, so we increment the mult.
                     match self.addr_to_mult.get_mut(entry.get().as_usize()) {
-                        Some(mult) => *mult += C::F::one(),
+                        Some(mult) => *mult += C::F::ONE,
                         None => panic!("expected entry: virtual_physical[{:?}]", vaddr),
                     }
                 }
@@ -89,7 +89,7 @@ where
             Entry::Vacant(entry) => {
                 let addr = Self::alloc(&mut self.next_addr);
                 // This is a write, so we set the mult to zero.
-                if let Some(x) = self.addr_to_mult.insert(addr.as_usize(), C::F::zero()) {
+                if let Some(x) = self.addr_to_mult.insert(addr.as_usize(), C::F::ZERO) {
                     panic!("unexpected entry in addr_to_mult: {x:?}");
                 }
                 *entry.insert(addr)
@@ -126,7 +126,7 @@ where
                 // This is a read, so we increment the mult.
                 let mult = entry.into_mut();
                 if increment_mult {
-                    *mult += C::F::one();
+                    *mult += C::F::ONE;
                 }
                 mult
             }
@@ -139,7 +139,7 @@ where
     pub fn write_addr(&mut self, addr: Address<C::F>) -> &mut C::F {
         use vec_map::Entry;
         match self.addr_to_mult.entry(addr.as_usize()) {
-            Entry::Vacant(entry) => entry.insert(C::F::zero()),
+            Entry::Vacant(entry) => entry.insert(C::F::ZERO),
             Entry::Occupied(entry) => {
                 panic!(
                     "unexpected entry: addr_to_mult[{:?}] = {:?}",
@@ -156,8 +156,8 @@ where
     pub fn read_const(&mut self, imm: Imm<C::F, C::EF>) -> Address<C::F> {
         self.consts
             .entry(imm)
-            .and_modify(|(_, x)| *x += C::F::one())
-            .or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::one()))
+            .and_modify(|(_, x)| *x += C::F::ONE)
+            .or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::ONE))
             .0
     }
 
@@ -167,7 +167,7 @@ where
     pub fn read_ghost_const(&mut self, imm: Imm<C::F, C::EF>) -> Address<C::F> {
         self.consts
             .entry(imm)
-            .or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::zero()))
+            .or_insert_with(|| (Self::alloc(&mut self.next_addr), C::F::ZERO))
             .0
     }
 
@@ -179,7 +179,7 @@ where
             vals: MemIo {
                 inner: src.as_block(),
             },
-            mult: C::F::zero(),
+            mult: C::F::ZERO,
             kind: MemAccessKind::Write,
         })
     }
@@ -193,7 +193,7 @@ where
     ) -> Instruction<C::F> {
         Instruction::BaseAlu(BaseAluInstr {
             opcode,
-            mult: C::F::zero(),
+            mult: C::F::ZERO,
             addrs: BaseAluIo {
                 out: dst.write(self),
                 in1: lhs.read(self),
@@ -211,7 +211,7 @@ where
     ) -> Instruction<C::F> {
         Instruction::ExtAlu(ExtAluInstr {
             opcode,
-            mult: C::F::zero(),
+            mult: C::F::ZERO,
             addrs: ExtAluIo {
                 out: dst.write(self),
                 in1: lhs.read(self),
@@ -229,7 +229,7 @@ where
         use BaseAluOpcode::*;
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
         f(self.base_alu(SubF, diff, lhs, rhs));
-        f(self.base_alu(DivF, out, diff, Imm::F(C::F::zero())));
+        f(self.base_alu(DivF, out, diff, Imm::F(C::F::ZERO)));
     }
 
     fn base_assert_ne(
@@ -242,7 +242,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.base_alu(SubF, diff, lhs, rhs));
-        f(self.base_alu(DivF, out, Imm::F(C::F::one()), diff));
+        f(self.base_alu(DivF, out, Imm::F(C::F::ONE), diff));
     }
 
     fn ext_assert_eq(
@@ -255,7 +255,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
-        f(self.ext_alu(DivE, out, diff, Imm::EF(C::EF::zero())));
+        f(self.ext_alu(DivE, out, diff, Imm::EF(C::EF::ZERO)));
     }
 
     fn ext_assert_ne(
@@ -268,7 +268,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
-        f(self.ext_alu(DivE, out, Imm::EF(C::EF::one()), diff));
+        f(self.ext_alu(DivE, out, Imm::EF(C::EF::ONE), diff));
     }
 
     fn poseidon2_permute(
@@ -281,7 +281,7 @@ where
                 input: src.map(|r| r.read(self)),
                 output: dst.map(|r| r.write(self)),
             },
-            mults: [C::F::zero(); WIDTH],
+            mults: [C::F::ZERO; WIDTH],
         }))
     }
 
@@ -297,7 +297,7 @@ where
                 base: base.read(self),
                 exp: exp.into_iter().map(|r| r.read(self)).collect(),
             },
-            mult: C::F::zero(),
+            mult: C::F::ZERO,
         })
     }
 
@@ -309,7 +309,7 @@ where
         Instruction::HintBits(HintBitsInstr {
             output_addrs_mults: output
                 .into_iter()
-                .map(|r| (r.write(self), C::F::zero()))
+                .map(|r| (r.write(self), C::F::ZERO))
                 .collect(),
             input_addr: value.read_ghost(self),
         })
@@ -333,8 +333,8 @@ where
     ) -> Instruction<C::F> {
         Instruction::FriFold(Box::new(FriFoldInstr {
             // Calculate before moving the vecs.
-            alpha_pow_mults: vec![C::F::zero(); alpha_pow_output.len()],
-            ro_mults: vec![C::F::zero(); ro_output.len()],
+            alpha_pow_mults: vec![C::F::ZERO; alpha_pow_output.len()],
+            ro_mults: vec![C::F::ZERO; ro_output.len()],
 
             base_single_addrs: FriFoldBaseIo { x: x.read(self) },
             ext_single_addrs: FriFoldExtSingleIo {
@@ -395,17 +395,14 @@ where
         ext: impl Reg<C>,
     ) -> Instruction<C::F> {
         Instruction::HintExt2Felts(HintExt2FeltsInstr {
-            output_addrs_mults: felts.map(|r| (r.write(self), C::F::zero())),
+            output_addrs_mults: felts.map(|r| (r.write(self), C::F::ZERO)),
             input_addr: ext.read_ghost(self),
         })
     }
 
     fn hint(&mut self, output: &[impl Reg<C>]) -> Instruction<C::F> {
         Instruction::Hint(HintInstr {
-            output_addrs_mults: output
-                .iter()
-                .map(|r| (r.write(self), C::F::zero()))
-                .collect(),
+            output_addrs_mults: output.iter().map(|r| (r.write(self), C::F::ZERO)).collect(),
         })
     }
 
@@ -472,12 +469,12 @@ where
             DslIr::DivEFIN(dst, lhs, rhs) => f(self.ext_alu(DivE, dst, Imm::F(lhs), rhs)),
             DslIr::DivEF(dst, lhs, rhs) => f(self.ext_alu(DivE, dst, lhs, rhs)),
 
-            DslIr::NegV(dst, src) => f(self.base_alu(SubF, dst, Imm::F(C::F::zero()), src)),
-            DslIr::NegF(dst, src) => f(self.base_alu(SubF, dst, Imm::F(C::F::zero()), src)),
-            DslIr::NegE(dst, src) => f(self.ext_alu(SubE, dst, Imm::EF(C::EF::zero()), src)),
-            DslIr::InvV(dst, src) => f(self.base_alu(DivF, dst, Imm::F(C::F::one()), src)),
-            DslIr::InvF(dst, src) => f(self.base_alu(DivF, dst, Imm::F(C::F::one()), src)),
-            DslIr::InvE(dst, src) => f(self.ext_alu(DivE, dst, Imm::F(C::F::one()), src)),
+            DslIr::NegV(dst, src) => f(self.base_alu(SubF, dst, Imm::F(C::F::ZERO), src)),
+            DslIr::NegF(dst, src) => f(self.base_alu(SubF, dst, Imm::F(C::F::ZERO), src)),
+            DslIr::NegE(dst, src) => f(self.ext_alu(SubE, dst, Imm::EF(C::EF::ZERO), src)),
+            DslIr::InvV(dst, src) => f(self.base_alu(DivF, dst, Imm::F(C::F::ONE), src)),
+            DslIr::InvF(dst, src) => f(self.base_alu(DivF, dst, Imm::F(C::F::ONE), src)),
+            DslIr::InvE(dst, src) => f(self.ext_alu(DivE, dst, Imm::F(C::F::ONE), src)),
 
             DslIr::AssertEqV(lhs, rhs) => self.base_assert_eq(lhs, rhs, f),
             DslIr::AssertEqF(lhs, rhs) => self.base_assert_eq(lhs, rhs, f),
@@ -705,8 +702,8 @@ pub enum Imm<F, EF> {
 
 impl<F, EF> Imm<F, EF>
 where
-    F: AbstractField + Copy,
-    EF: AbstractExtensionField<F>,
+    F: FieldAlgebra + Copy,
+    EF: FieldExtensionAlgebra<F>,
 {
     // Get a `Block` of memory representing this immediate.
     pub fn as_block(&self) -> Block<F> {

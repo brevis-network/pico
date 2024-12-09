@@ -57,7 +57,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * NUM_MEM_PREPROCESSED_INIT_COLS];
+        let mut values = vec![F::ZERO; padded_nb_rows * NUM_MEM_PREPROCESSED_INIT_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = accesses.len() * NUM_MEM_ACCESS_COLS;
@@ -80,7 +80,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
             .mem_var_events
             .chunks(NUM_VAR_MEM_ENTRIES_PER_ROW)
             .map(|row_events| {
-                let mut row = [F::zero(); NUM_MEM_INIT_COLS];
+                let mut row = [F::ZERO; NUM_MEM_INIT_COLS];
                 let cols: &mut MemoryCols<_> = row.as_mut_slice().borrow_mut();
                 for (cell, vals) in zip(&mut cols.values, row_events) {
                     *cell = vals.inner;

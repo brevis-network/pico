@@ -3,7 +3,7 @@ use core::{
     any::Any,
     ops::{Add, Div, Mul, Neg, Sub},
 };
-use p3_field::{AbstractField, ExtensionField, Field};
+use p3_field::{ExtensionField, Field, FieldAlgebra};
 use std::{
     any::TypeId,
     iter::{Product, Sum},
@@ -17,10 +17,17 @@ pub enum SymbolicVar<N: Field> {
     Val(Var<N>),
 }
 
+impl<N: Field> SymbolicVar<N> {
+    // const GENERATOR: Self = SymbolicVar::Const(N::GENERATOR);
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum SymbolicFelt<F: Field> {
     Const(F),
     Val(Felt<F>),
+}
+impl<F: Field> SymbolicFelt<F> {
+    // const GENERATOR: Self = SymbolicFelt::Const(F::GENERATOR);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -28,6 +35,9 @@ pub enum SymbolicExt<F: Field, EF: Field> {
     Const(EF),
     Base(SymbolicFelt<F>),
     Val(Ext<F, EF>),
+}
+impl<F: Field, EF: Field> SymbolicExt<F, EF> {
+    // const GENERATOR: Self = SymbolicExt::Const(EF::GENERATOR);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -73,24 +83,13 @@ pub trait ExtensionOperand<F: Field, EF: ExtensionField<F>> {
     fn to_operand(self) -> ExtOperand<F, EF>;
 }
 
-impl<N: Field> AbstractField for SymbolicVar<N> {
+impl<N: Field> FieldAlgebra for SymbolicVar<N> {
     type F = N;
 
-    fn zero() -> Self {
-        SymbolicVar::from(N::zero())
-    }
-
-    fn one() -> Self {
-        SymbolicVar::from(N::one())
-    }
-
-    fn two() -> Self {
-        SymbolicVar::from(N::two())
-    }
-
-    fn neg_one() -> Self {
-        SymbolicVar::from(N::neg_one())
-    }
+    const ZERO: Self = SymbolicVar::Const(N::ZERO);
+    const ONE: Self = SymbolicVar::Const(N::ONE);
+    const TWO: Self = SymbolicVar::Const(N::TWO);
+    const NEG_ONE: Self = SymbolicVar::Const(N::NEG_ONE);
 
     fn from_f(f: Self::F) -> Self {
         SymbolicVar::from(f)
@@ -120,31 +119,15 @@ impl<N: Field> AbstractField for SymbolicVar<N> {
     fn from_wrapped_u64(n: u64) -> Self {
         SymbolicVar::from(N::from_wrapped_u64(n))
     }
-
-    /// A generator of this field's entire multiplicative group.
-    fn generator() -> Self {
-        SymbolicVar::from(N::generator())
-    }
 }
 
-impl<F: Field> AbstractField for SymbolicFelt<F> {
+impl<F: Field> FieldAlgebra for SymbolicFelt<F> {
     type F = F;
 
-    fn zero() -> Self {
-        SymbolicFelt::from(F::zero())
-    }
-
-    fn one() -> Self {
-        SymbolicFelt::from(F::one())
-    }
-
-    fn two() -> Self {
-        SymbolicFelt::from(F::two())
-    }
-
-    fn neg_one() -> Self {
-        SymbolicFelt::from(F::neg_one())
-    }
+    const ZERO: Self = SymbolicFelt::Const(F::ZERO);
+    const ONE: Self = SymbolicFelt::Const(F::ONE);
+    const TWO: Self = SymbolicFelt::Const(F::TWO);
+    const NEG_ONE: Self = SymbolicFelt::Const(F::NEG_ONE);
 
     fn from_f(f: Self::F) -> Self {
         SymbolicFelt::from(f)
@@ -174,31 +157,15 @@ impl<F: Field> AbstractField for SymbolicFelt<F> {
     fn from_wrapped_u64(n: u64) -> Self {
         SymbolicFelt::from(F::from_wrapped_u64(n))
     }
-
-    /// A generator of this field's entire multiplicative group.
-    fn generator() -> Self {
-        SymbolicFelt::from(F::generator())
-    }
 }
 
-impl<F: Field, EF: ExtensionField<F>> AbstractField for SymbolicExt<F, EF> {
+impl<F: Field, EF: ExtensionField<F>> FieldAlgebra for SymbolicExt<F, EF> {
     type F = EF;
 
-    fn zero() -> Self {
-        SymbolicExt::from_f(EF::zero())
-    }
-
-    fn one() -> Self {
-        SymbolicExt::from_f(EF::one())
-    }
-
-    fn two() -> Self {
-        SymbolicExt::from_f(EF::two())
-    }
-
-    fn neg_one() -> Self {
-        SymbolicExt::from_f(EF::neg_one())
-    }
+    const ZERO: Self = SymbolicExt::Const(EF::ZERO);
+    const ONE: Self = SymbolicExt::Const(EF::ONE);
+    const TWO: Self = SymbolicExt::Const(EF::TWO);
+    const NEG_ONE: Self = SymbolicExt::Const(EF::NEG_ONE);
 
     fn from_f(f: Self::F) -> Self {
         SymbolicExt::Const(f)
@@ -227,11 +194,6 @@ impl<F: Field, EF: ExtensionField<F>> AbstractField for SymbolicExt<F, EF> {
     }
     fn from_wrapped_u64(n: u64) -> Self {
         SymbolicExt::from_f(EF::from_wrapped_u64(n))
-    }
-
-    /// A generator of this field's entire multiplicative group.
-    fn generator() -> Self {
-        SymbolicExt::from_f(EF::generator())
     }
 }
 
@@ -1093,13 +1055,13 @@ impl<N: Field> Mul<usize> for Usize<N> {
 
 impl<N: Field> Product for SymbolicVar<N> {
     fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(SymbolicVar::one(), |acc, x| acc * x)
+        iter.fold(SymbolicVar::ONE, |acc, x| acc * x)
     }
 }
 
 impl<N: Field> Sum for SymbolicVar<N> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(SymbolicVar::zero(), |acc, x| acc + x)
+        iter.fold(SymbolicVar::ZERO, |acc, x| acc + x)
     }
 }
 
@@ -1123,19 +1085,19 @@ impl<N: Field> MulAssign for SymbolicVar<N> {
 
 impl<N: Field> Default for SymbolicVar<N> {
     fn default() -> Self {
-        SymbolicVar::zero()
+        SymbolicVar::ZERO
     }
 }
 
 impl<F: Field> Sum for SymbolicFelt<F> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(SymbolicFelt::zero(), |acc, x| acc + x)
+        iter.fold(SymbolicFelt::ZERO, |acc, x| acc + x)
     }
 }
 
 impl<F: Field> Product for SymbolicFelt<F> {
     fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(SymbolicFelt::one(), |acc, x| acc * x)
+        iter.fold(SymbolicFelt::ONE, |acc, x| acc * x)
     }
 }
 
@@ -1159,25 +1121,25 @@ impl<F: Field> MulAssign for SymbolicFelt<F> {
 
 impl<F: Field> Default for SymbolicFelt<F> {
     fn default() -> Self {
-        SymbolicFelt::zero()
+        SymbolicFelt::ZERO
     }
 }
 
 impl<F: Field, EF: ExtensionField<F>> Sum for SymbolicExt<F, EF> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(SymbolicExt::zero(), |acc, x| acc + x)
+        iter.fold(SymbolicExt::ZERO, |acc, x| acc + x)
     }
 }
 
 impl<F: Field, EF: ExtensionField<F>> Product for SymbolicExt<F, EF> {
     fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(SymbolicExt::one(), |acc, x| acc * x)
+        iter.fold(SymbolicExt::ONE, |acc, x| acc * x)
     }
 }
 
 impl<F: Field, EF: ExtensionField<F>> Default for SymbolicExt<F, EF> {
     fn default() -> Self {
-        SymbolicExt::zero()
+        SymbolicExt::ZERO
     }
 }
 

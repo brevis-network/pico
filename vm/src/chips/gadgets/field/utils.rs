@@ -4,7 +4,7 @@ use p3_field::PrimeField32;
 
 #[inline]
 fn biguint_to_field<F: PrimeField32>(num: BigUint) -> F {
-    let mut x = F::zero();
+    let mut x = F::ZERO;
     let mut power = F::from_canonical_u32(1u32);
     let base = F::from_canonical_u64((1 << 32) % F::ORDER_U64);
     let digits = num.iter_u32_digits();
@@ -32,7 +32,7 @@ pub fn compute_root_quotient_and_shift<F: PrimeField32>(
             biguint_to_field::<F>(BigUint::from(2u32) << (nb_bits_per_limb * i as u32)) * *x
         })
         .sum::<F>();
-    debug_assert_eq!(p_vanishing_eval, F::zero());
+    debug_assert_eq!(p_vanishing_eval, F::ZERO);
 
     // Compute the witness polynomial by witness(x) = vanishing(x) / (x - 2^nb_bits_per_limb).
     let root_monomial = F::from_canonical_u32(2u32.pow(nb_bits_per_limb));
@@ -46,11 +46,11 @@ pub fn compute_root_quotient_and_shift<F: PrimeField32>(
     }
 
     // Sanity Check #2: w(x) * (x - 2^nb_bits_per_limb) = vanishing(x).
-    let x_minus_root = Polynomial::<F>::from_coefficients(&[-root_monomial, F::one()]);
+    let x_minus_root = Polynomial::<F>::from_coefficients(&[-root_monomial, F::ONE]);
     debug_assert_eq!((&p_quotient * &x_minus_root), *p_vanishing);
 
     let mut p_quotient_coefficients = p_quotient.as_coefficients();
-    p_quotient_coefficients.resize(nb_limbs, F::zero());
+    p_quotient_coefficients.resize(nb_limbs, F::ZERO);
 
     // Shifting the witness polynomial to make it positive
     p_quotient_coefficients

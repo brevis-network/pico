@@ -1,7 +1,7 @@
 use core::borrow::Borrow;
 
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
 use p3_matrix::Matrix;
 
@@ -31,11 +31,11 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         let first_step = local.keccak.step_flags[0];
         let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
-        let not_final_step = CB::Expr::one() - final_step;
+        let not_final_step = CB::Expr::ONE - final_step;
 
         // Constrain memory in the first and last cycles.
         builder.assert_eq(
@@ -71,7 +71,7 @@ where
             local.nonce,
             CB::F::from_canonical_u32(SyscallCode::KECCAK_PERMUTE.syscall_id()),
             local.state_addr,
-            CB::Expr::zero(),
+            CB::Expr::ZERO,
             local.receive_ecall,
         );
 

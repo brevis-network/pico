@@ -20,7 +20,7 @@ use pico_vm::{
         configs::{
             embed_config::StarkConfig as EmbedSC,
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
-            riscv_config::StarkConfig as RiscvSC,
+            riscv_config::StarkConfig as RiscvBbSC,
         },
         machine::{
             recursion_combine::RecursionCombineMachine,
@@ -33,8 +33,8 @@ use pico_vm::{
         witness::ProvingWitness,
     },
     primitives::consts::{
-        COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, EMBED_DEGREE, RECURSION_NUM_PVS,
-        RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
+        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, EMBED_DEGREE,
+        PERMUTATION_WIDTH, RECURSION_NUM_PVS, RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
     },
     recursion::runtime::Runtime,
 };
@@ -51,17 +51,19 @@ fn main() {
 
     info!("\n Begin RiscV..");
 
-    let (elf, riscv_stdin, step) = parse_args::parse_args();
+    let (elf, riscv_stdin, step, _field) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("Creating Program..");
     let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
     let riscv_program = riscv_compiler.compile();
+    let riscv_config = RiscvBbSC::new();
+    let riscv_chips = RiscvChipType::<BabyBear>::all_chips();
 
     // Setup config and chips.
     info!("Creating RiscVMachine (at {:?})..", start.elapsed());
-    let riscv_machine =
-        RiscvMachine::new(RiscvSC::new(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
+
+    let riscv_machine = RiscvMachine::new(riscv_config, riscv_chips, RISCV_NUM_PVS);
 
     // Setup machine prover, verifier, pk and vk.
     info!("Setup RiscV machine (at {:?})..", start.elapsed());
@@ -98,7 +100,7 @@ fn main() {
 
     info!("Build riscv_compress program (at {:?})..", start.elapsed());
     let riscv_compress_program =
-        RiscvCompressVerifierCircuit::<RecursionFC, RiscvSC>::build(riscv_machine.base_machine());
+        RiscvCompressVerifierCircuit::<RecursionFC, RiscvBbSC>::build(riscv_machine.base_machine());
 
     // Setup machine
     info!("Setup recursion machine (at {:?})..", start.elapsed());
@@ -238,10 +240,14 @@ fn main() {
         let mut witness_stream = Vec::new();
         witness_stream.extend(stdin.write());
 
-        let mut runtime = Runtime::<Val<RecursionSC>, Challenge<RecursionSC>, _>::new(
-            &compress_program,
-            compress_machine.config().perm.clone(),
-        );
+        let mut runtime = Runtime::<
+            Val<RecursionSC>,
+            Challenge<RecursionSC>,
+            _,
+            _,
+            PERMUTATION_WIDTH,
+            BABYBEAR_S_BOX_DEGREE,
+        >::new(&compress_program, compress_machine.config().perm.clone());
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
         tracing::debug!("Compress program stats");
@@ -289,10 +295,14 @@ fn main() {
         let mut witness_stream = Vec::new();
         witness_stream.extend(stdin.write());
 
-        let mut runtime = Runtime::<Val<RecursionSC>, Challenge<RecursionSC>, _>::new(
-            &embed_program,
-            compress_machine.config().perm.clone(),
-        );
+        let mut runtime = Runtime::<
+            Val<RecursionSC>,
+            Challenge<RecursionSC>,
+            _,
+            _,
+            PERMUTATION_WIDTH,
+            BABYBEAR_S_BOX_DEGREE,
+        >::new(&embed_program, compress_machine.config().perm.clone());
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
         tracing::debug!("Embed program stats");

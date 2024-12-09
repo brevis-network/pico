@@ -2,7 +2,7 @@ use crate::primitives::consts::WORD_SIZE;
 use arrayref::array_ref;
 use itertools::Itertools;
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use serde::{Deserialize, Serialize};
 use std::{
     array::IntoIter,
@@ -26,22 +26,22 @@ impl<T> Word<T> {
     /// Extends a variable to a word.
     pub fn extend_var<AB: AirBuilder<Var = T>>(var: T) -> Word<AB::Expr> {
         Word([
-            AB::Expr::zero() + var,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO + var,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
         ])
     }
 }
 
-impl<T: AbstractField> Word<T> {
+impl<T: FieldAlgebra> Word<T> {
     /// Extends a variable to a word.
     pub fn extend_expr<AB: AirBuilder<Expr = T>>(expr: T) -> Word<AB::Expr> {
         Word([
-            AB::Expr::zero() + expr,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO + expr,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
         ])
     }
 
@@ -49,10 +49,10 @@ impl<T: AbstractField> Word<T> {
     #[must_use]
     pub fn zero<AB: AirBuilder<Expr = T>>() -> Word<T> {
         Word([
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
         ])
     }
 }
@@ -96,7 +96,7 @@ impl<T> IndexMut<usize> for Word<T> {
     }
 }
 
-impl<F: AbstractField> From<u32> for Word<F> {
+impl<F: FieldAlgebra> From<u32> for Word<F> {
     fn from(value: u32) -> Self {
         Word(value.to_le_bytes().map(F::from_canonical_u8))
     }

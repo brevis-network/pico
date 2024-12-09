@@ -7,7 +7,7 @@ use itertools::Itertools;
 use p3_air::{Air, PairCol};
 use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
-use p3_field::{AbstractExtensionField, AbstractField, Field, PackedValue};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Entry, SymbolicExpression};
@@ -98,9 +98,9 @@ pub fn eval_symbolic_to_virtual_pair<F: Field>(
         SymbolicExpression::Constant(c) => (vec![], *c),
         SymbolicExpression::Variable(v) => match v.entry {
             Entry::Preprocessed { offset: 0 } => {
-                (vec![(PairCol::Preprocessed(v.index), F::one())], F::zero())
+                (vec![(PairCol::Preprocessed(v.index), F::ONE)], F::ZERO)
             }
-            Entry::Main { offset: 0 } => (vec![(PairCol::Main(v.index), F::one())], F::zero()),
+            Entry::Main { offset: 0 } => (vec![(PairCol::Main(v.index), F::ONE)], F::ZERO),
             _ => panic!(
                 "not an affine expression in current row elements {:?}",
                 v.entry
@@ -254,7 +254,7 @@ where
                     perm_vertical_width,
                 );
 
-                let accumulator = PackedChallenge::<SC>::zero();
+                let accumulator = PackedChallenge::<SC>::ZERO;
 
                 let mut folder = ProverConstraintFolder {
                     preprocessed: preprocessed_trace_on_quotient_domain,
@@ -278,7 +278,7 @@ where
                 (0..core::cmp::min(quotient_size, PackedVal::<SC>::WIDTH)).map(
                     move |idx_in_packing| {
                         let quotient_value =
-                            (0..<SC::Challenge as AbstractExtensionField<SC::Val>>::D)
+                            (0..<SC::Challenge as FieldExtensionAlgebra<SC::Val>>::D)
                                 .map(|coeff_idx| {
                                     quotient.as_base_slice()[coeff_idx].as_slice()[idx_in_packing]
                                 })

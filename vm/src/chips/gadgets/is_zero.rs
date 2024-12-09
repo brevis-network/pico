@@ -5,7 +5,7 @@
 //! is 0.
 
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute whether the given word is 0.
@@ -25,16 +25,16 @@ impl<F: Field> IsZeroGadget<F> {
     }
 
     pub fn populate_from_field_element(&mut self, a: F) -> u32 {
-        if a == F::zero() {
-            self.inverse = F::zero();
-            self.result = F::one();
+        if a == F::ZERO {
+            self.inverse = F::ZERO;
+            self.result = F::ONE;
         } else {
             self.inverse = a.inverse();
-            self.result = F::zero();
+            self.result = F::ZERO;
         }
         let prod = self.inverse * a;
-        debug_assert!(prod == F::one() || prod == F::zero());
-        (a == F::zero()) as u32
+        debug_assert!(prod == F::ONE || prod == F::ZERO);
+        (a == F::ZERO) as u32
     }
 
     pub fn eval<AB: AirBuilder>(
@@ -43,7 +43,7 @@ impl<F: Field> IsZeroGadget<F> {
         cols: IsZeroGadget<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let one: AB::Expr = AB::F::one().into();
+        let one: AB::Expr = AB::F::ONE.into();
 
         // 1. Input == 0 => is_zero = 1 regardless of the inverse.
         // 2. Input != 0

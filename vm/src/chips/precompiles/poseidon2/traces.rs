@@ -51,7 +51,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Poseidon2PermuteChip<F> {
             .poseidon2_permute_events
             .iter()
             .map(|event| {
-                let mut row: [F; NUM_POSEIDON2_COLS] = [F::zero(); NUM_POSEIDON2_COLS];
+                let mut row: [F; NUM_POSEIDON2_COLS] = [F::ZERO; NUM_POSEIDON2_COLS];
 
                 Poseidon2PermuteChip::event_to_row(
                     event,
@@ -68,7 +68,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Poseidon2PermuteChip<F> {
 
         let mut rows = _rows.clone();
 
-        pad_rows_fixed(&mut rows, || [F::zero(); NUM_POSEIDON2_COLS], None);
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_POSEIDON2_COLS], None);
 
         // Convert the trace to a row major matrix.
         let mut trace = RowMajorMatrix::new(
@@ -125,11 +125,11 @@ impl<F: PrimeField32> Poseidon2PermuteChip<F> {
         input_row: Option<&mut [F; NUM_POSEIDON2_COLS]>,
         blu: &mut impl RangeRecordBehavior,
     ) {
-        let mut row: [F; NUM_POSEIDON2_COLS] = [F::zero(); NUM_POSEIDON2_COLS];
+        let mut row: [F; NUM_POSEIDON2_COLS] = [F::ZERO; NUM_POSEIDON2_COLS];
         let cols: &mut Poseidon2Cols<F> = row.as_mut_slice().borrow_mut();
 
         // Assign basic values to the columns.
-        cols.is_real = F::one();
+        cols.is_real = F::ONE;
         cols.chunk = F::from_canonical_u32(event.chunk);
         cols.clk = F::from_canonical_u32(event.clk);
         cols.input_memory_ptr = F::from_canonical_u32(event.input_memory_ptr);

@@ -119,14 +119,14 @@ impl<F: Field> MemoryInstructionCols<F> {
         self.op_a_0 = F::from_bool(event.instruction.op_a == REGISTER_X0);
 
         match opcode {
-            Opcode::LB => self.is_lb = F::one(),
-            Opcode::LBU => self.is_lbu = F::one(),
-            Opcode::LHU => self.is_lhu = F::one(),
-            Opcode::LH => self.is_lh = F::one(),
-            Opcode::LW => self.is_lw = F::one(),
-            Opcode::SB => self.is_sb = F::one(),
-            Opcode::SH => self.is_sh = F::one(),
-            Opcode::SW => self.is_sw = F::one(),
+            Opcode::LB => self.is_lb = F::ONE,
+            Opcode::LBU => self.is_lbu = F::ONE,
+            Opcode::LHU => self.is_lhu = F::ONE,
+            Opcode::LH => self.is_lh = F::ONE,
+            Opcode::LW => self.is_lw = F::ONE,
+            Opcode::SB => self.is_sb = F::ONE,
+            Opcode::SH => self.is_sh = F::ONE,
+            Opcode::SW => self.is_sw = F::ONE,
             _ => unreachable!(),
         }
 

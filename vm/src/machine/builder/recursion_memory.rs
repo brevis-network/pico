@@ -8,7 +8,7 @@ use crate::{
     recursion::air::Block,
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use std::iter::{once, repeat};
 
 pub trait RecursionMemoryBuilder<F: Field>: ChipBuilder<F> {
@@ -70,12 +70,12 @@ pub trait RecursionMemoryBuilder<F: Field>: ChipBuilder<F> {
         let prev_values = once(prev_timestamp)
             .chain(once(addr.clone()))
             .chain(once(memory_access.prev_value().clone().into()))
-            .chain(repeat(Self::Expr::zero()).take(3))
+            .chain(repeat(Self::Expr::ZERO).take(3))
             .collect();
         let current_values = once(timestamp)
             .chain(once(addr.clone()))
             .chain(once(memory_access.value().clone().into()))
-            .chain(repeat(Self::Expr::zero()).take(3))
+            .chain(repeat(Self::Expr::ZERO).take(3))
             .collect();
 
         self.looked(SymbolicLookup::new(
@@ -99,7 +99,7 @@ pub trait RecursionMemoryBuilder<F: Field>: ChipBuilder<F> {
     ) {
         // We subtract one since a diff of zero is not valid.
         let diff_minus_one: Self::Expr =
-            timestamp.into() - mem_access.prev_timestamp().clone().into() - Self::Expr::one();
+            timestamp.into() - mem_access.prev_timestamp().clone().into() - Self::Expr::ONE;
 
         // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
         // + mem_access.ts_diff_12bit_limb * 2^16.
@@ -135,9 +135,9 @@ pub trait RecursionMemoryBuilder<F: Field>: ChipBuilder<F> {
         self.looking_rangecheck(
             RangeCheckOpcode::U16,
             limb_16,
-            Self::Expr::zero(),
+            Self::Expr::ZERO,
             is_real.clone(),
         );
-        self.looking_rangecheck(RangeCheckOpcode::U12, limb_12, Self::Expr::zero(), is_real);
+        self.looking_rangecheck(RangeCheckOpcode::U12, limb_12, Self::Expr::ZERO, is_real);
     }
 }

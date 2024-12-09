@@ -21,9 +21,9 @@ use crate::{
 use backtrace::Backtrace as Trace;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::{AbstractField, ExtensionField, PrimeField32};
-use p3_poseidon2::{Poseidon2, Poseidon2ExternalMatrixGeneral};
-use p3_symmetric::{CryptographicPermutation, Permutation};
+use p3_field::{ExtensionField, Field, FieldAlgebra, PrimeField32};
+use p3_poseidon2::{ExternalLayer, InternalLayer, Poseidon2};
+use p3_symmetric::Permutation;
 use p3_util::reverse_bits_len;
 
 use crate::recursion_v2::types::{
@@ -37,7 +37,7 @@ use crate::{
     compiler::recursion_v2::instruction::{
         FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction, PrintInstr,
     },
-    primitives::consts_v2::RECURSION_NUM_PVS,
+    primitives::{consts::PERMUTATION_WIDTH, consts_v2::RECURSION_NUM_PVS},
 };
 use memory::*;
 pub use opcode::*;
@@ -50,8 +50,6 @@ pub const STACK_SIZE: usize = 1 << 24;
 pub const MEMORY_SIZE: usize = 1 << 28;
 
 /// The width of the Poseidon2 permutation.
-pub const PERMUTATION_WIDTH: usize = 16;
-pub const POSEIDON2_SBOX_DEGREE: u64 = 7;
 pub const HASH_RATE: usize = 8;
 pub const NUM_BITS: usize = 31;
 
@@ -67,7 +65,13 @@ pub struct CycleTrackerEntry {
 /// TODO fully document.
 /// Taken from [`sp1_recursion_core::runtime::Runtime`].
 /// Many missing things (compared to the old `Runtime`) will need to be implemented.
-pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
+pub struct Runtime<'a, F, EF, ExternalPerm, InternalPerm, const WIDTH: usize, const D: u64>
+where
+    F: PrimeField32 + Field,
+    EF: ExtensionField<F>,
+    ExternalPerm: ExternalLayer<F, PERMUTATION_WIDTH, D>,
+    InternalPerm: InternalLayer<F, PERMUTATION_WIDTH, D>,
+{
     pub timestamp: usize,
 
     pub nb_poseidons: usize,
@@ -115,19 +119,9 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     pub debug_stdout: Box<dyn Write + 'a>,
 
     /// Entries for dealing with the Poseidon2 hash state.
-    perm: Option<
-        Poseidon2<
-            F,
-            Poseidon2ExternalMatrixGeneral,
-            Diffusion,
-            PERMUTATION_WIDTH,
-            POSEIDON2_SBOX_DEGREE,
-        >,
-    >,
+    perm: Option<Poseidon2<<F as Field>::Packing, ExternalPerm, InternalPerm, WIDTH, D>>,
 
     _marker_ef: PhantomData<EF>,
-
-    _marker_diffusion: PhantomData<Diffusion>,
 }
 
 #[derive(Error, Debug)]
@@ -160,25 +154,17 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
     EmptyWitnessStream,
 }
 
-impl<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<'a, F, EF, Diffusion>
+impl<'a, F, EF, ExternalPerm, InternalPerm, const D: u64>
+    Runtime<'a, F, EF, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>
 where
-    Poseidon2<
-        F,
-        Poseidon2ExternalMatrixGeneral,
-        Diffusion,
-        PERMUTATION_WIDTH,
-        POSEIDON2_SBOX_DEGREE,
-    >: CryptographicPermutation<[F; PERMUTATION_WIDTH]>,
+    F: PrimeField32 + Field,
+    EF: ExtensionField<F>,
+    ExternalPerm: ExternalLayer<F, PERMUTATION_WIDTH, D>,
+    InternalPerm: InternalLayer<F, PERMUTATION_WIDTH, D>,
 {
     pub fn new(
         program: Arc<RecursionProgram<F>>,
-        perm: Poseidon2<
-            F,
-            Poseidon2ExternalMatrixGeneral,
-            Diffusion,
-            PERMUTATION_WIDTH,
-            POSEIDON2_SBOX_DEGREE,
-        >,
+        perm: Poseidon2<<F as Field>::Packing, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>, // todo: update to support switching
     ) -> Self {
         let record = RecursionRecord::<F> {
             program: program.clone(),
@@ -198,9 +184,9 @@ where
             nb_fri_fold: 0,
             nb_print_f: 0,
             nb_print_e: 0,
-            clk: F::zero(),
+            clk: F::ZERO,
             program,
-            pc: F::zero(),
+            pc: F::ZERO,
             memory,
             record,
             witness_stream: VecDeque::new(),
@@ -208,7 +194,6 @@ where
             debug_stdout: Box::new(stdout()),
             perm: Some(perm),
             _marker_ef: PhantomData,
-            _marker_diffusion: PhantomData,
         }
     }
 
@@ -254,7 +239,7 @@ where
             let instruction = self.program.instructions[idx].clone();
 
             let next_clk = self.clk + F::from_canonical_u32(4);
-            let next_pc = self.pc + F::one();
+            let next_pc = self.pc + F::ONE;
             match instruction {
                 Instruction::BaseAlu(
                     instr @ BaseAluInstr {
@@ -271,13 +256,13 @@ where
                         BaseAluOpcode::AddF => in1 + in2,
                         BaseAluOpcode::SubF => in1 - in2,
                         BaseAluOpcode::MulF => in1 * in2,
-                        BaseAluOpcode::DivF => match in1.try_div(in2) {
-                            Some(x) => x,
+                        BaseAluOpcode::DivF => match in2.try_inverse() {
+                            Some(x) => in1 * x,
                             None => {
                                 // Check for division exceptions and error. Note that 0/0 is defined
                                 // to be 1.
                                 if in1.is_zero() {
-                                    AbstractField::one()
+                                    FieldAlgebra::ONE
                                 } else {
                                     return Err(RuntimeError::DivFOutOfDomain {
                                         in1,
@@ -312,13 +297,13 @@ where
                         ExtAluOpcode::AddE => in1_ef + in2_ef,
                         ExtAluOpcode::SubE => in1_ef - in2_ef,
                         ExtAluOpcode::MulE => in1_ef * in2_ef,
-                        ExtAluOpcode::DivE => match in1_ef.try_div(in2_ef) {
-                            Some(x) => x,
+                        ExtAluOpcode::DivE => match in2_ef.try_inverse() {
+                            Some(x) => in1_ef * x,
                             None => {
                                 // Check for division exceptions and error. Note that 0/0 is defined
                                 // to be 1.
                                 if in1_ef.is_zero() {
-                                    AbstractField::one()
+                                    FieldAlgebra::ONE
                                 } else {
                                     return Err(RuntimeError::DivEOutOfDomain {
                                         in1: in1_ef,
@@ -405,7 +390,7 @@ where
                     input_addr,
                 }) => {
                     self.nb_bit_decompositions += 1;
-                    let num = self.memory.mr_mult(input_addr, F::zero()).val[0].as_canonical_u32();
+                    let num = self.memory.mr_mult(input_addr, F::ZERO).val[0].as_canonical_u32();
                     // Decompose the num into LE bits.
                     let bits = (0..output_addrs_mults.len())
                         .map(|i| Block::from(F::from_canonical_u32((num >> i) & 1)))
@@ -510,12 +495,12 @@ where
                 }) => match field_elt_type {
                     FieldEltType::Base => {
                         self.nb_print_f += 1;
-                        let f = self.memory.mr_mult(addr, F::zero()).val[0];
+                        let f = self.memory.mr_mult(addr, F::ZERO).val[0];
                         writeln!(self.debug_stdout, "PRINTF={f}")
                     }
                     FieldEltType::Extension => {
                         self.nb_print_e += 1;
-                        let ef = self.memory.mr_mult(addr, F::zero()).val;
+                        let ef = self.memory.mr_mult(addr, F::ZERO).val;
                         writeln!(self.debug_stdout, "PRINTEF={ef:?}")
                     }
                 }
@@ -525,7 +510,7 @@ where
                     input_addr,
                 }) => {
                     self.nb_bit_decompositions += 1;
-                    let fs = self.memory.mr_mult(input_addr, F::zero()).val;
+                    let fs = self.memory.mr_mult(input_addr, F::ZERO).val;
                     // Write the bits to the array at dst.
                     for (f, (addr, mult)) in fs.into_iter().zip(output_addrs_mults) {
                         let felt = Block::from(f);

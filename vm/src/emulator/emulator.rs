@@ -21,6 +21,7 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         witness::ProvingWitness,
     },
+    primitives::consts::{BABYBEAR_S_BOX_DEGREE, PERMUTATION_WIDTH},
     recursion::runtime::{RecursionRecord, Runtime},
 };
 use p3_air::Air;
@@ -242,10 +243,14 @@ impl<'a> RecursionEmulator<'a, RecursionSC> {
         let mut witness_stream = Vec::new();
         witness_stream.extend(stdin.write());
 
-        let mut runtime = Runtime::<Val<RecursionSC>, Challenge<RecursionSC>, _>::new(
-            &self.recursion_program,
-            self.config.perm.clone(),
-        );
+        let mut runtime = Runtime::<
+            Val<RecursionSC>,
+            Challenge<RecursionSC>,
+            _,
+            _,
+            PERMUTATION_WIDTH,
+            BABYBEAR_S_BOX_DEGREE,
+        >::new(&self.recursion_program, self.config.perm.clone());
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
         runtime.record
@@ -266,10 +271,14 @@ impl<'a> RecursionEmulator<'a, RecursionSC> {
         let mut witness_stream = Vec::new();
         witness_stream.extend(stdin.write());
 
-        let mut runtime = Runtime::<Val<RecursionSC>, Challenge<RecursionSC>, _>::new(
-            &self.recursion_program,
-            self.config.perm.clone(),
-        );
+        let mut runtime = Runtime::<
+            Val<RecursionSC>,
+            Challenge<RecursionSC>,
+            _,
+            _,
+            PERMUTATION_WIDTH,
+            BABYBEAR_S_BOX_DEGREE,
+        >::new(&self.recursion_program, self.config.perm.clone());
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
         runtime.record

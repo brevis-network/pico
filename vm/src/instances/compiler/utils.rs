@@ -19,7 +19,7 @@ use crate::{
 };
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use std::mem::transmute;
 
 /// Assertions on the public values describing a complete recursive proof state.
@@ -43,28 +43,28 @@ pub(crate) fn assert_complete<FC: FieldGenericConfig>(
     } = public_values;
 
     // Assert that `next_pc` is equal to zero (so program execution has completed)
-    // builder.assert_felt_eq(*next_pc, FC::F::zero());
+    // builder.assert_felt_eq(*next_pc, FC::F::ZERO);
 
     // Assert that start chunk is equal to 1.
-    // builder.assert_felt_eq(*start_chunk, FC::F::one());
+    // builder.assert_felt_eq(*start_chunk, FC::F::ONE);
 
     // Assert that the next chunk is not equal to one. This guarantees that there is at least one
     // chunk.
-    // builder.assert_felt_ne(*next_chunk, FC::F::one());
+    // builder.assert_felt_ne(*next_chunk, FC::F::ONE);
 
     // Assert that the start execution chunk is equal to 1.
-    // builder.assert_felt_eq(*start_execution_chunk, FC::F::one());
+    // builder.assert_felt_eq(*start_execution_chunk, FC::F::ONE);
 
     // Assert that next chunk is not equal to one. This guarantees that there is at least one chunk
     // with CPU.
-    // builder.assert_felt_ne(*next_execution_chunk, FC::F::one());
+    // builder.assert_felt_ne(*next_execution_chunk, FC::F::ONE);
 
     // Assert that the end reconstruct challenger is equal to the leaf challenger.
     assert_challenger_eq_pv(builder, end_reconstruct_challenger, *base_challenger);
 
     // Assert that the cumulative sum is zero.
     for b in cumulative_sum.iter() {
-        builder.assert_felt_eq(*b, FC::F::zero());
+        builder.assert_felt_eq(*b, FC::F::ZERO);
     }
 }
 
@@ -141,7 +141,7 @@ pub(crate) fn verify_public_values_hash<FC: FieldGenericConfig>(
 ) {
     let var_exit_code = felt2var(builder, public_values.exit_code);
     // Check that the public values digest is correct if the exit_code is 0.
-    builder.if_eq(var_exit_code, FC::N::zero()).then(|builder| {
+    builder.if_eq(var_exit_code, FC::N::ZERO).then(|builder| {
         let calculated_digest = calculate_public_values_digest(builder, public_values);
 
         let expected_digest = public_values.digest;

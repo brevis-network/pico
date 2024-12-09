@@ -4,7 +4,7 @@ use crate::{
     machine::builder::{ChipBuilder, RecursionMemoryBuilder},
     recursion::air::BlockBuilder,
 };
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field, const L: usize> CpuChip<F, L> {
     /// Eval the operands.
@@ -39,14 +39,14 @@ impl<F: Field, const L: usize> CpuChip<F, L> {
             local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
             local.fp.into() + local.instruction.op_b[0].into(),
             &local.b,
-            AB::Expr::one() - local.instruction.imm_b.into(),
+            AB::Expr::ONE - local.instruction.imm_b.into(),
         );
 
         builder.recursion_eval_memory_access(
             local.clk + AB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
             local.fp.into() + local.instruction.op_c[0].into(),
             &local.c,
-            AB::Expr::one() - local.instruction.imm_c.into(),
+            AB::Expr::ONE - local.instruction.imm_c.into(),
         );
     }
 }

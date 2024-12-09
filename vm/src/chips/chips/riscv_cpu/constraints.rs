@@ -14,7 +14,7 @@ use crate::{
     primitives::consts::RISCV_NUM_PVS,
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 use std::{array, borrow::Borrow, iter::once};
 
@@ -61,7 +61,7 @@ where
             local.op_b_val(),
             local.op_c_val(),
             local.chunk,
-            CB::Expr::zero(), // local.nonce,
+            CB::Expr::ZERO, // local.nonce,
             is_memory_instruction,
         );
 
@@ -119,15 +119,15 @@ where
             .for_each(|(i, selector)| {
                 if i == OPCODE_SELECTORS_COL_MAP.imm_b {
                     builder
-                        .when(CB::Expr::one() - local.is_real)
+                        .when(CB::Expr::ONE - local.is_real)
                         .assert_one(local.opcode_selector.imm_b);
                 } else if i == OPCODE_SELECTORS_COL_MAP.imm_c {
                     builder
-                        .when(CB::Expr::one() - local.is_real)
+                        .when(CB::Expr::ONE - local.is_real)
                         .assert_one(local.opcode_selector.imm_c);
                 } else {
                     builder
-                        .when(CB::Expr::one() - local.is_real)
+                        .when(CB::Expr::ONE - local.is_real)
                         .assert_zero(selector);
                 }
             });
@@ -183,7 +183,7 @@ impl<F: Field> CpuChip<F> {
         let is_halt = self.get_is_halt_syscall::<CB>(builder, local);
         builder.when(local.is_real).assert_eq(
             local.is_sequential_instr,
-            CB::Expr::one()
+            CB::Expr::ONE
                 - (is_branch_instruction
                     + local.opcode_selector.is_jal
                     + local.opcode_selector.is_jalr

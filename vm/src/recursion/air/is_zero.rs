@@ -6,7 +6,7 @@
 //! is 0.
 use crate::machine::builder::ChipBuilder;
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute whether the given word is 0.
@@ -23,16 +23,16 @@ pub struct IsZeroOperation<T> {
 impl<F: Field> IsZeroOperation<F> {
     pub fn populate(&mut self, a: F) -> F {
         let (inverse, result) = if a.is_zero() {
-            (F::zero(), F::one())
+            (F::ZERO, F::ONE)
         } else {
-            (a.inverse(), F::zero())
+            (a.inverse(), F::ZERO)
         };
 
         self.inverse = inverse;
         self.result = result;
 
         let prod = inverse * a;
-        debug_assert!(prod == F::one() || prod.is_zero());
+        debug_assert!(prod == F::ONE || prod.is_zero());
 
         result
     }
@@ -61,7 +61,7 @@ impl<F: Field> IsZeroOperation<F> {
         // If the input is 0, then any product involving it is 0. If it is nonzero and its inverse
         // is correctly set, then the product is 1.
 
-        let one = AB::Expr::one();
+        let one = AB::Expr::ONE;
         let inverse = cols.inverse;
 
         let is_zero = one.clone() - inverse * a.clone();

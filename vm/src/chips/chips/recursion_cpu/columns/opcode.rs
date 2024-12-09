@@ -64,26 +64,26 @@ impl<F: PrimeField32> OpcodeSelectorCols<F> {
     /// need to set the relevant opcode column to 1.
     pub fn populate(&mut self, instruction: &Instruction<F>) {
         match instruction.opcode {
-            Opcode::ADD | Opcode::EADD => self.is_add = F::one(),
-            Opcode::SUB | Opcode::ESUB => self.is_sub = F::one(),
-            Opcode::MUL | Opcode::EMUL => self.is_mul = F::one(),
-            Opcode::DIV | Opcode::EDIV => self.is_div = F::one(),
-            Opcode::LOAD => self.is_load = F::one(),
-            Opcode::STORE => self.is_store = F::one(),
-            Opcode::BEQ => self.is_beq = F::one(),
-            Opcode::BNE => self.is_bne = F::one(),
-            Opcode::BNEINC => self.is_bneinc = F::one(),
-            Opcode::JAL => self.is_jal = F::one(),
-            Opcode::JALR => self.is_jalr = F::one(),
-            Opcode::TRAP => self.is_trap = F::one(),
-            Opcode::HALT => self.is_halt = F::one(),
-            Opcode::FRIFold => self.is_fri_fold = F::one(),
+            Opcode::ADD | Opcode::EADD => self.is_add = F::ONE,
+            Opcode::SUB | Opcode::ESUB => self.is_sub = F::ONE,
+            Opcode::MUL | Opcode::EMUL => self.is_mul = F::ONE,
+            Opcode::DIV | Opcode::EDIV => self.is_div = F::ONE,
+            Opcode::LOAD => self.is_load = F::ONE,
+            Opcode::STORE => self.is_store = F::ONE,
+            Opcode::BEQ => self.is_beq = F::ONE,
+            Opcode::BNE => self.is_bne = F::ONE,
+            Opcode::BNEINC => self.is_bneinc = F::ONE,
+            Opcode::JAL => self.is_jal = F::ONE,
+            Opcode::JALR => self.is_jalr = F::ONE,
+            Opcode::TRAP => self.is_trap = F::ONE,
+            Opcode::HALT => self.is_halt = F::ONE,
+            Opcode::FRIFold => self.is_fri_fold = F::ONE,
             Opcode::Poseidon2Compress | Opcode::Poseidon2Absorb | Opcode::Poseidon2Finalize => {
-                self.is_poseidon = F::one()
+                self.is_poseidon = F::ONE
             }
-            Opcode::ExpReverseBitsLen => self.is_exp_reverse_bits_len = F::one(),
-            Opcode::Commit => self.is_commit = F::one(),
-            Opcode::HintExt2Felt => self.is_ext_to_felt = F::one(),
+            Opcode::ExpReverseBitsLen => self.is_exp_reverse_bits_len = F::ONE,
+            Opcode::Commit => self.is_commit = F::ONE,
+            Opcode::HintExt2Felt => self.is_ext_to_felt = F::ONE,
 
             Opcode::Hint
             | Opcode::HintBits
@@ -91,7 +91,7 @@ impl<F: PrimeField32> OpcodeSelectorCols<F> {
             | Opcode::PrintE
             | Opcode::RegisterPublicValue
             | Opcode::CycleTracker => {
-                self.is_noop = F::one();
+                self.is_noop = F::ONE;
             }
 
             Opcode::HintLen | Opcode::LessThanF => {}
@@ -101,11 +101,11 @@ impl<F: PrimeField32> OpcodeSelectorCols<F> {
             instruction.opcode,
             Opcode::EADD | Opcode::ESUB | Opcode::EMUL | Opcode::EDIV
         ) {
-            self.is_ext = F::one();
+            self.is_ext = F::ONE;
         }
 
         if instruction_is_heap_expand(instruction) {
-            self.is_heap_expand = F::one();
+            self.is_heap_expand = F::ONE;
         }
     }
 }

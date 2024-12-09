@@ -7,7 +7,7 @@ use crate::{
     machine::builder::ChipLookupBuilder,
     primitives::consts::WORD_SIZE,
 };
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute `rotateright` of a word with a fixed offset R.
@@ -65,8 +65,8 @@ impl<F: Field> FixedRotateRightOperation<F> {
 
         // For each byte, calculate the shift and carry. If it's not the first byte, calculate the
         // new byte value using the current shifted byte and the last carry.
-        let mut first_shift = F::zero();
-        let mut last_carry = F::zero();
+        let mut first_shift = F::ZERO;
+        let mut last_carry = F::ZERO;
         for i in (0..WORD_SIZE).rev() {
             let b = input_bytes_rotated[i].to_string().parse::<u8>().unwrap();
             let c = nb_bits_to_shift as u8;
@@ -126,8 +126,8 @@ impl<F: Field> FixedRotateRightOperation<F> {
 
         // For each byte, calculate the shift and carry. If it's not the first byte, calculate the
         // new byte value using the current shifted byte and the last carry.
-        let mut first_shift = CB::Expr::zero();
-        let mut last_carry = CB::Expr::zero();
+        let mut first_shift = CB::Expr::ZERO;
+        let mut last_carry = CB::Expr::ZERO;
         for i in (0..WORD_SIZE).rev() {
             builder.looking_byte_pair(
                 CB::F::from_canonical_u32(ByteOpcode::ShrCarry as u32),

@@ -4,7 +4,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 use crate::primitives::consts::EXTENSION_DEGREE;
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    AbstractExtensionField, AbstractField, Field,
+    Field, FieldAlgebra, FieldExtensionAlgebra,
 };
 use pico_derive::AlignedBorrow;
 
@@ -17,9 +17,9 @@ impl<T> BinomialExtension<T> {
     /// Creates a new binomial extension element from a base element.
     pub fn from_base(b: T) -> Self
     where
-        T: AbstractField,
+        T: FieldAlgebra,
     {
-        let mut arr: [T; EXTENSION_DEGREE] = core::array::from_fn(|_| T::zero());
+        let mut arr: [T; EXTENSION_DEGREE] = core::array::from_fn(|_| T::ZERO);
         arr[0] = b;
         Self(arr)
     }
@@ -56,11 +56,11 @@ impl<T: Sub<Output = T> + Clone> Sub for BinomialExtension<T> {
     }
 }
 
-impl<T: Add<Output = T> + Mul<Output = T> + AbstractField> Mul for BinomialExtension<T> {
+impl<T: Add<Output = T> + Mul<Output = T> + FieldAlgebra> Mul for BinomialExtension<T> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut result = [T::zero(), T::zero(), T::zero(), T::zero()];
+        let mut result = [T::ZERO, T::ZERO, T::ZERO, T::ZERO];
         let w = T::from_canonical_u32(11);
 
         for i in 0..EXTENSION_DEGREE {
@@ -113,7 +113,7 @@ where
     }
 }
 
-impl<T: AbstractField + Copy> Neg for BinomialExtension<T> {
+impl<T: FieldAlgebra + Copy> Neg for BinomialExtension<T> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -123,7 +123,7 @@ impl<T: AbstractField + Copy> Neg for BinomialExtension<T> {
 
 impl<AF> From<BinomialExtensionField<AF, EXTENSION_DEGREE>> for BinomialExtension<AF>
 where
-    AF: AbstractField + Copy,
+    AF: FieldAlgebra + Copy,
     AF::F: BinomiallyExtendable<EXTENSION_DEGREE>,
 {
     fn from(value: BinomialExtensionField<AF, EXTENSION_DEGREE>) -> Self {
@@ -134,7 +134,7 @@ where
 
 impl<AF> From<BinomialExtension<AF>> for BinomialExtensionField<AF, EXTENSION_DEGREE>
 where
-    AF: AbstractField + Copy,
+    AF: FieldAlgebra + Copy,
     AF::F: BinomiallyExtendable<EXTENSION_DEGREE>,
 {
     fn from(value: BinomialExtension<AF>) -> Self {

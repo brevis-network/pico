@@ -1,5 +1,5 @@
 use backtrace::Backtrace;
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use super::{
@@ -496,12 +496,12 @@ impl<FC: FieldGenericConfig> Builder<FC> {
             "Cannot commit to a public value with a sub builder"
         );
         if self.nb_public_values.is_none() {
-            self.nb_public_values = Some(self.eval(FC::N::zero()));
+            self.nb_public_values = Some(self.eval(FC::N::ZERO));
         }
         let nb_public_values = *self.nb_public_values.as_ref().unwrap();
 
         self.push_op(DslIr::Commit(val, nb_public_values));
-        self.assign(nb_public_values, nb_public_values + FC::N::one());
+        self.assign(nb_public_values, nb_public_values + FC::N::ONE);
     }
 
     /// Commits an array of felts in public values.

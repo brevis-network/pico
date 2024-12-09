@@ -1,6 +1,6 @@
 use super::{Array, Builder, DslIr, Ext, Felt, SymbolicExt, Usize, Var, Variable};
 use crate::configs::config::FieldGenericConfig;
-use p3_field::{AbstractExtensionField, AbstractField};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use std::ops::{Add, Mul, MulAssign};
 
 impl<FC: FieldGenericConfig> Builder<FC> {
@@ -56,15 +56,15 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     /// Exponentializes a variable to an array of bits in little endian.
     pub fn exp_bits<V>(&mut self, x: V, power_bits: &Array<FC, Var<FC::N>>) -> V
     where
-        V::Expression: AbstractField,
+        V::Expression: FieldAlgebra,
         V: Copy + Mul<Output = V::Expression> + Variable<FC>,
     {
-        let result = self.eval(V::Expression::one());
+        let result = self.eval(V::Expression::ONE);
         let power_f: V = self.eval(x);
         self.range(0, power_bits.len()).for_each(|i, builder| {
             let bit = builder.get(power_bits, i);
             builder
-                .if_eq(bit, FC::N::one())
+                .if_eq(bit, FC::N::ONE)
                 .then(|builder| builder.assign(result, result * power_f));
             builder.assign(power_f, power_f * power_f);
         });
@@ -73,7 +73,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
 
     /// Exponentiates a felt to a list of bits in little endian.
     pub fn exp_f_bits(&mut self, x: Felt<FC::F>, power_bits: Vec<Var<FC::N>>) -> Felt<FC::F> {
-        let mut result = self.eval(FC::F::one());
+        let mut result = self.eval(FC::F::ONE);
         let mut power_f: Felt<_> = self.eval(x);
         for i in 0..power_bits.len() {
             let bit = power_bits[i];
@@ -90,7 +90,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         x: Ext<FC::F, FC::EF>,
         power_bits: Vec<Var<FC::N>>,
     ) -> Ext<FC::F, FC::EF> {
-        let mut result = self.eval(SymbolicExt::from_f(FC::EF::one()));
+        let mut result = self.eval(SymbolicExt::from_f(FC::EF::ONE));
         let mut power_f: Ext<_, _> = self.eval(x);
         for i in 0..power_bits.len() {
             let bit = power_bits[i];
@@ -111,19 +111,19 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         bit_len: impl Into<Usize<FC::N>>,
     ) -> V
     where
-        V::Expression: AbstractField,
+        V::Expression: FieldAlgebra,
         V: Copy + Mul<Output = V::Expression> + Variable<FC>,
     {
-        let result = self.eval(V::Expression::one());
+        let result = self.eval(V::Expression::ONE);
         let power_f: V = self.eval(x);
         let bit_len = bit_len.into().materialize(self);
-        let bit_len_plus_one: Var<_> = self.eval(bit_len + FC::N::one());
+        let bit_len_plus_one: Var<_> = self.eval(bit_len + FC::N::ONE);
 
         self.range(1, bit_len_plus_one).for_each(|i, builder| {
             let index: Var<FC::N> = builder.eval(bit_len - i);
             let bit = builder.get(power_bits, index);
             builder
-                .if_eq(bit, FC::N::one())
+                .if_eq(bit, FC::N::ONE)
                 .then(|builder| builder.assign(result, result * power_f));
             builder.assign(power_f, power_f * power_f);
         });
@@ -221,8 +221,8 @@ impl<FC: FieldGenericConfig> Builder<FC> {
 
     /// Creates an ext from a slice of felts.
     pub fn ext_from_base_slice(&mut self, arr: &[Felt<FC::F>]) -> Ext<FC::F, FC::EF> {
-        assert!(arr.len() <= <FC::EF as AbstractExtensionField::<FC::F>>::D);
-        let mut res = SymbolicExt::from_f(FC::EF::zero());
+        assert!(arr.len() <= <FC::EF as FieldExtensionAlgebra::<FC::F>>::D);
+        let mut res = SymbolicExt::from_f(FC::EF::ZERO);
         for i in 0..arr.len() {
             res += arr[i] * SymbolicExt::from_f(FC::EF::monomial(i));
         }
@@ -243,7 +243,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
             .push(DslIr::HintExt2Felt(result.clone(), value));
 
         // Verify that the decomposed extension element is correct.
-        let mut reconstructed_ext: Ext<FC::F, FC::EF> = self.constant(FC::EF::zero());
+        let mut reconstructed_ext: Ext<FC::F, FC::EF> = self.constant(FC::EF::ZERO);
         for i in 0..4 {
             let felt = self.get(&result, i);
             let monomial: Ext<FC::F, FC::EF> = self.constant(FC::EF::monomial(i));

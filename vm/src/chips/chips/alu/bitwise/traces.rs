@@ -38,7 +38,7 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
             .bitwise_events
             .par_iter()
             .map(|event| {
-                let mut row = [F::zero(); NUM_BITWISE_COLS];
+                let mut row = [F::ZERO; NUM_BITWISE_COLS];
                 let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
                 let mut blu = Vec::new();
                 self.event_to_row(event, cols, &mut blu);
@@ -73,7 +73,7 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
             .map(|events| {
                 let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::zero(); NUM_BITWISE_COLS];
+                    let mut row = [F::ZERO; NUM_BITWISE_COLS];
                     let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(event, cols, &mut blu);
                 });

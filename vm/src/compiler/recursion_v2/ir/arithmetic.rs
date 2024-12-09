@@ -1,6 +1,6 @@
 use super::{DslIr, Ext, Felt, InnerBuilder, Var};
 use crate::configs::config::FieldGenericConfig;
-use p3_field::{AbstractExtensionField, AbstractField, Field};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 use std::{cell::UnsafeCell, mem::ManuallyDrop};
 
 #[derive(Debug)]
@@ -644,7 +644,7 @@ impl<FC: FieldGenericConfig> ExtOperations<FC::F, FC::EF> for UnsafeCell<InnerBu
         handle: *mut ExtHandle<FC::F, FC::EF>,
     ) -> Ext<FC::F, FC::EF> {
         // TODO: optimize to one opcode.
-        let lhs = Self::add_felt_const_ext(ptr, lhs, FC::EF::zero(), handle);
+        let lhs = Self::add_felt_const_ext(ptr, lhs, FC::EF::ZERO, handle);
         Self::mul_const_ext(ptr, lhs, rhs)
     }
 
@@ -682,7 +682,7 @@ impl<FC: FieldGenericConfig> ExtOperations<FC::F, FC::EF> for UnsafeCell<InnerBu
 
     fn div_base_ext(ptr: *mut (), lhs: Felt<FC::F>, rhs: Ext<FC::F, FC::EF>) -> Ext<FC::F, FC::EF> {
         // TODO: optimize to one opcode.
-        let lhs = Self::add_felt_const_ext(ptr, lhs, FC::EF::zero(), rhs.handle);
+        let lhs = Self::add_felt_const_ext(ptr, lhs, FC::EF::ZERO, rhs.handle);
         Self::div_ext(ptr, lhs, rhs)
     }
 
@@ -816,7 +816,7 @@ impl<F> FeltHandle<F> {
     }
 }
 
-impl<F: Field, EF: AbstractExtensionField<F>> ExtHandle<F, EF> {
+impl<F: Field, EF: FieldExtensionAlgebra<F>> ExtHandle<F, EF> {
     pub fn add_e(&self, lhs: Ext<F, EF>, rhs: Ext<F, EF>) -> Ext<F, EF> {
         (self.add_ext)(self.ptr, lhs, rhs)
     }
@@ -891,7 +891,7 @@ impl<F: Field, EF: AbstractExtensionField<F>> ExtHandle<F, EF> {
         handle: *mut ExtHandle<F, EF>,
     ) -> Ext<F, EF> {
         // TODO: optimize to one opcode.
-        let rhs = self.add_f_const_e(rhs, EF::zero(), handle);
+        let rhs = self.add_f_const_e(rhs, EF::ZERO, handle);
         self.sub_e_const(lhs, rhs)
     }
 

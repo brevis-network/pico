@@ -12,7 +12,7 @@ pub struct BaseAluChip<F> {
 #[cfg(test)]
 mod tests {
     use p3_baby_bear::BabyBear;
-    use p3_field::AbstractField;
+    use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
 
     use super::*;
@@ -37,9 +37,9 @@ mod tests {
 
         let chunk = RecursionRecord {
             base_alu_events: vec![BaseAluIo {
-                out: F::one(),
-                in1: F::one(),
-                in2: F::one(),
+                out: F::ONE,
+                in1: F::ONE,
+                in2: F::ONE,
             }],
             ..Default::default()
         };

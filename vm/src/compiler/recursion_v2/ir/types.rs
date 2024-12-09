@@ -4,7 +4,7 @@ use super::{
 };
 use crate::configs::config::FieldGenericConfig;
 use alloc::format;
-use p3_field::{AbstractExtensionField, AbstractField, ExtensionField, Field};
+use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra};
 use serde::{Deserialize, Serialize};
 
 /// A variable that represents a native field element.
@@ -136,7 +136,7 @@ impl<F> Felt<F> {
     where
         F: Field,
     {
-        SymbolicFelt::<F>::one() / *self
+        SymbolicFelt::<F>::ONE / *self
     }
 }
 
@@ -158,7 +158,7 @@ impl<F, EF> Ext<F, EF> {
         F: Field,
         EF: ExtensionField<F>,
     {
-        SymbolicExt::<F, EF>::one() / *self
+        SymbolicExt::<F, EF>::ONE / *self
     }
 }
 
@@ -248,7 +248,7 @@ impl<FC: FieldGenericConfig> Variable<FC> for Var<FC::N> {
                 builder.push_op(DslIr::ImmV(*self, src));
             }
             SymbolicVar::Val(src) => {
-                builder.push_op(DslIr::AddVI(*self, src, FC::N::zero()));
+                builder.push_op(DslIr::AddVI(*self, src, FC::N::ZERO));
             }
         }
     }
@@ -337,7 +337,7 @@ impl<FC: FieldGenericConfig> Variable<FC> for Felt<FC::F> {
                 builder.push_op(DslIr::ImmF(*self, src));
             }
             SymbolicFelt::Val(src) => {
-                builder.push_op(DslIr::AddFI(*self, src, FC::F::zero()));
+                builder.push_op(DslIr::AddFI(*self, src, FC::F::ZERO));
             }
         }
     }
@@ -430,11 +430,11 @@ impl<FC: FieldGenericConfig> Variable<FC> for Ext<FC::F, FC::EF> {
                     builder.push_op(DslIr::ImmE(*self, FC::EF::from_base(src)));
                 }
                 SymbolicFelt::Val(src) => {
-                    builder.push_op(DslIr::AddEFFI(*self, src, FC::EF::zero()));
+                    builder.push_op(DslIr::AddEFFI(*self, src, FC::EF::ZERO));
                 }
             },
             SymbolicExt::Val(src) => {
-                builder.push_op(DslIr::AddEI(*self, src, FC::EF::zero()));
+                builder.push_op(DslIr::AddEI(*self, src, FC::EF::ZERO));
             }
         }
     }

@@ -60,7 +60,7 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
                 let rows = events
                     .iter()
                     .map(|event| {
-                        let mut row = [F::zero(); NUM_ADD_SUB_COLS];
+                        let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                         let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
                         let mut blu = Vec::new();
                         self.event_to_row(event, cols, &mut blu);
@@ -111,7 +111,7 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
             .map(|events| {
                 let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::zero(); NUM_ADD_SUB_COLS];
+                    let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                     let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(event, cols, &mut range);
                 });

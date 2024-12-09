@@ -19,7 +19,7 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{borrow::BorrowMut, marker::PhantomData};
@@ -91,7 +91,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for FriFoldChip<DEGRE
         } else {
             nb_events
         };
-        let mut values = vec![F::zero(); nb_rows * NUM_FRI_FOLD_COLS];
+        let mut values = vec![F::ZERO; nb_rows * NUM_FRI_FOLD_COLS];
 
         par_for_each_row(&mut values, NUM_FRI_FOLD_COLS, |i, row| {
             if i >= nb_events {
@@ -104,7 +104,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for FriFoldChip<DEGRE
             cols.m = event.m;
             cols.input_ptr = event.input_ptr;
             cols.is_last_iteration = event.is_last_iteration;
-            cols.is_real = F::one();
+            cols.is_real = F::ONE;
 
             cols.z.populate(&event.z);
             cols.alpha.populate(&event.alpha);
@@ -152,12 +152,12 @@ impl<const DEGREE: usize, F: Field> FriFoldChip<DEGREE, F> {
     ) {
         // Constraint that the operands are sent from the CPU table.
         let first_iteration_clk = local.clk.into() - local.m.into();
-        let total_num_iterations = local.m.into() + AB::Expr::one();
+        let total_num_iterations = local.m.into() + AB::Expr::ONE;
         let operands = [
             first_iteration_clk,
             total_num_iterations,
             local.input_ptr.into(),
-            AB::Expr::zero(),
+            AB::Expr::ZERO,
         ];
         builder.recursion_looked_table(
             Opcode::FRIFold.as_field::<AB::F>(),
@@ -201,7 +201,7 @@ impl<const DEGREE: usize, F: Field> FriFoldChip<DEGREE, F> {
             .when_transition()
             .when_not(local.is_last_iteration)
             .when(next.is_real)
-            .assert_eq(next.m, local.m + AB::Expr::one());
+            .assert_eq(next.m, local.m + AB::Expr::ONE);
         builder
             .when_transition()
             .when_not(local.is_last_iteration)
@@ -211,12 +211,12 @@ impl<const DEGREE: usize, F: Field> FriFoldChip<DEGREE, F> {
             .when_transition()
             .when_not(local.is_last_iteration)
             .when(next.is_real)
-            .assert_eq(local.clk + AB::Expr::one(), next.clk);
+            .assert_eq(local.clk + AB::Expr::ONE, next.clk);
 
         // Constrain read for `z` at `input_ptr`
         builder.recursion_eval_memory_access(
             local.clk,
-            local.input_ptr + AB::Expr::zero(),
+            local.input_ptr + AB::Expr::ZERO,
             &local.z,
             memory_access,
         );
@@ -224,7 +224,7 @@ impl<const DEGREE: usize, F: Field> FriFoldChip<DEGREE, F> {
         // Constrain read for `alpha`
         builder.recursion_eval_memory_access(
             local.clk,
-            local.input_ptr + AB::Expr::one(),
+            local.input_ptr + AB::Expr::ONE,
             &local.alpha,
             memory_access,
         );

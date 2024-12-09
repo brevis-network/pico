@@ -157,7 +157,7 @@ impl<F: Field, R: RecordBehavior, P: ProgramBehavior<F>> ChipBehavior<F>
         let (_, event_map) = Self::trace_and_map();
 
         let mut trace = RowMajorMatrix::new(
-            vec![F::zero(); NUM_RANGE_CHECK_MULT_COLS * NUM_ROWS],
+            vec![F::ZERO; NUM_RANGE_CHECK_MULT_COLS * NUM_ROWS],
             NUM_RANGE_CHECK_MULT_COLS,
         );
 
@@ -183,7 +183,7 @@ impl<F: Field, R, P> RangeCheckChip<F, R, P> {
 
         // The trace is initialized with the all zeros.
         let mut trace = RowMajorMatrix::new(
-            vec![F::zero(); NUM_ROWS * NUM_RANGE_CHECK_PREPROCESSED_COLS],
+            vec![F::ZERO; NUM_ROWS * NUM_RANGE_CHECK_PREPROCESSED_COLS],
             NUM_RANGE_CHECK_PREPROCESSED_COLS,
         );
 

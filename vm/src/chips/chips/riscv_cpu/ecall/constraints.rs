@@ -10,7 +10,7 @@ use crate::{
     primitives::consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
 };
 use p3_air::AirBuilder;
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 
 impl<F: Field> CpuChip<F> {
     /// Whether the instruction is an ECALL instruction.
@@ -126,7 +126,7 @@ impl<F: Field> CpuChip<F> {
         let ecall_columns = local.opcode_specific.ecall();
 
         // Verify the index bitmap.
-        let mut bitmap_sum = CB::Expr::zero();
+        let mut bitmap_sum = CB::Expr::ZERO;
         // They should all be bools.
         for bit in ecall_columns.index_bitmap.iter() {
             builder
@@ -145,7 +145,7 @@ impl<F: Field> CpuChip<F> {
         builder
             .when(
                 local.opcode_selector.is_ecall
-                    * (CB::Expr::one() - (is_commit.clone() + is_commit_deferred_proofs.clone())),
+                    * (CB::Expr::ONE - (is_commit.clone() + is_commit_deferred_proofs.clone())),
             )
             .assert_zero(bitmap_sum);
 

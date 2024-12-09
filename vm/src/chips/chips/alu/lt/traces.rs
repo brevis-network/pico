@@ -44,7 +44,7 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         let mut trace = RowMajorMatrix::new(
-            vec![F::zero(); NUM_LT_COLS * input.clone().lt_events.len()],
+            vec![F::ZERO; NUM_LT_COLS * input.clone().lt_events.len()],
             NUM_LT_COLS,
         );
 
@@ -78,7 +78,7 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
             .map(|events| {
                 let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::zero(); NUM_LT_COLS];
+                    let mut row = [F::ZERO; NUM_LT_COLS];
                     let cols: &mut LtCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(event, cols, &mut blu);
                 });
@@ -151,7 +151,7 @@ impl<F: PrimeField32> LtChip<F> {
             cols.byte_flags.iter_mut().rev()
         ) {
             if c_byte != b_byte {
-                *flag = F::one();
+                *flag = F::ONE;
                 cols.slt_u = F::from_bool(b_byte < c_byte);
                 let b_byte = F::from_canonical_u8(*b_byte);
                 let c_byte = F::from_canonical_u8(*c_byte);
@@ -166,7 +166,7 @@ impl<F: PrimeField32> LtChip<F> {
         cols.is_sign_bit_same = if event.opcode == Opcode::SLT {
             F::from_bool((b[3] >> 7) == (c[3] >> 7))
         } else {
-            F::one()
+            F::ONE
         };
 
         cols.is_slt = F::from_bool(event.opcode == Opcode::SLT);
@@ -180,7 +180,7 @@ impl<F: PrimeField32> LtChip<F> {
         // when case msb_b and msb_c both is 0 or 1, a0 depends on SLTU.
         assert_eq!(
             cols.a[0],
-            cols.msb_b * cols.is_slt * (F::one() - cols.msb_c * cols.is_slt)
+            cols.msb_b * cols.is_slt * (F::ONE - cols.msb_c * cols.is_slt)
                 + cols.is_sign_bit_same * cols.slt_u
         );
 

@@ -16,7 +16,7 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::array;
 
@@ -42,10 +42,10 @@ where
             builder.assert_bool(local.value[i]);
         }
 
-        let mut byte1 = CB::Expr::zero();
-        let mut byte2 = CB::Expr::zero();
-        let mut byte3 = CB::Expr::zero();
-        let mut byte4 = CB::Expr::zero();
+        let mut byte1 = CB::Expr::ZERO;
+        let mut byte2 = CB::Expr::ZERO;
+        let mut byte3 = CB::Expr::ZERO;
+        let mut byte4 = CB::Expr::ZERO;
         for i in 0..8 {
             byte1 += local.value[i].into() * CB::F::from_canonical_u8(1 << i);
             byte2 += local.value[i + 8].into() * CB::F::from_canonical_u8(1 << i);
@@ -55,7 +55,7 @@ where
         let value = [byte1, byte2, byte3, byte4];
 
         if self.kind == MemoryChipType::Initialize {
-            let mut values = vec![CB::Expr::zero(), CB::Expr::zero(), local.addr.into()];
+            let mut values = vec![CB::Expr::ZERO, CB::Expr::ZERO, local.addr.into()];
             values.extend(value.map(Into::into));
             builder.looked(SymbolicLookup::new(
                 values,
@@ -158,7 +158,7 @@ where
         builder.assert_bool(local.is_first_comp);
         builder.when_first_row().assert_eq(
             local.is_first_comp,
-            CB::Expr::one() - local.is_prev_addr_zero.result,
+            CB::Expr::ONE - local.is_prev_addr_zero.result,
         );
 
         // Ensure at least one real row.
@@ -188,7 +188,7 @@ where
         if self.kind == MemoryChipType::Initialize {
             builder
                 .when(local.is_real)
-                .assert_eq(local.timestamp, CB::F::one());
+                .assert_eq(local.timestamp, CB::F::ONE);
         }
 
         // Constraints related to register %x0.
@@ -215,7 +215,7 @@ where
         // Constrain the `is_last_addr` flag.
         builder.when_transition().assert_eq(
             local.is_last_addr,
-            local.is_real * (CB::Expr::one() - next.is_real),
+            local.is_real * (CB::Expr::ONE - next.is_real),
         );
 
         // Make assertions for the final value. We need to connect the final valid address to the

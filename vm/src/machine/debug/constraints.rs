@@ -11,7 +11,7 @@ use crate::{
 };
 use p3_air::Air;
 use p3_challenger::FieldChallenger;
-use p3_field::{AbstractExtensionField, AbstractField, Field};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 use p3_matrix::{
     dense::{RowMajorMatrix, RowMajorMatrixView},
     stack::VerticalPair,
@@ -34,7 +34,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 challenger.sample_ext_element(),
             ],
             messages: Vec::new(),
-            sum: SC::Challenge::zero(),
+            sum: SC::Challenge::ZERO,
             pk,
         }
     }
@@ -121,7 +121,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 let main_width = traces[i].0.width();
                 let preprocessed_width = traces[i].1.map_or(0, p3_matrix::Matrix::width);
                 let permutation_width = permutation_traces[i].width()
-                    * <SC::Challenge as AbstractExtensionField<SC::Val>>::D;
+                    * <SC::Challenge as FieldExtensionAlgebra<SC::Val>>::D;
                 let total_width = main_width + preprocessed_width + permutation_width;
                 self.messages.push((DebuggerMessageLevel::Debug, format!(
                     "{:<11} | Main Cols = {:<5} | Preprocessed Cols = {:<5} | Permutation Cols = {:<5} | Rows = {:<10} | Cells = {:<10}",
@@ -218,18 +218,18 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 ),
                 permutation_challenges: &self.challenges,
                 cumulative_sum,
-                is_first_row: SC::Val::zero(),
-                is_last_row: SC::Val::zero(),
-                is_transition: SC::Val::one(),
+                is_first_row: SC::Val::ZERO,
+                is_last_row: SC::Val::ZERO,
+                is_transition: SC::Val::ONE,
                 public_values: &public_values,
                 failures: Vec::new(),
             };
             if i == 0 {
-                builder.is_first_row = SC::Val::one();
+                builder.is_first_row = SC::Val::ONE;
             }
             if i == height - 1 {
-                builder.is_last_row = SC::Val::one();
-                builder.is_transition = SC::Val::zero();
+                builder.is_last_row = SC::Val::ONE;
+                builder.is_transition = SC::Val::ZERO;
             }
             chip.eval(&mut builder);
             for err in builder.failures.drain(..) {

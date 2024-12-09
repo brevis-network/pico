@@ -73,7 +73,7 @@ use crate::{
     primitives::consts::{LONG_WORD_SIZE, WORD_SIZE},
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{AbstractField, Field};
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
@@ -88,14 +88,14 @@ where
         let next = main.row_slice(1);
         let next: &DivRemCols<CB::Var> = (*next).borrow();
         let base = CB::F::from_canonical_u32(1 << 8);
-        let one: CB::Expr = CB::F::one().into();
-        let zero: CB::Expr = CB::F::zero().into();
+        let one: CB::Expr = CB::F::ONE.into();
+        let zero: CB::Expr = CB::F::ZERO.into();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Calculate whether b, remainder, and c are negative.
         {
@@ -192,7 +192,7 @@ where
         {
             let sign_extension = local.rem_neg * CB::F::from_canonical_u8(u8::MAX);
             let mut c_times_quotient_plus_remainder: Vec<CB::Expr> =
-                vec![CB::F::zero().into(); LONG_WORD_SIZE];
+                vec![CB::F::ZERO.into(); LONG_WORD_SIZE];
 
             c_times_quotient_plus_remainder
                 .iter_mut()
@@ -359,7 +359,7 @@ where
             // - If is_real == 1 then is_c_0_result must be the expected one, so
             //   remainder_check_multiplicity = (1 - is_c_0_result) * is_real.
             builder.assert_eq(
-                (CB::Expr::one() - local.is_c_0.result) * local.is_real,
+                (CB::Expr::ONE - local.is_c_0.result) * local.is_real,
                 local.remainder_check_multiplicity,
             );
 

@@ -35,7 +35,7 @@ use crate::{
     },
     recursion::air::RecursionPublicValues,
 };
-use p3_field::AbstractField;
+use p3_field::FieldAlgebra;
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
@@ -58,7 +58,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         RiscvRecursionStdin::<RiscvSC, RiscvChipType<Val<RiscvSC>>>::witness(&stdin, &mut builder);
 
         let pcs = TwoAdicFriPcsVariable {
-            config: const_fri_config(&mut builder, machine.config().pcs().fri_config()),
+            config: const_fri_config(&mut builder, machine.config().fri_config()),
         };
 
         Self::build_verifier(&mut builder, &pcs, machine, stdin);
@@ -109,7 +109,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
             reconstruct_challenger.copy(builder);
 
         let cumulative_sum: Ext<_, _> =
-            builder.eval(<RecursionFC as FieldGenericConfig>::EF::zero().cons());
+            builder.eval(<RecursionFC as FieldGenericConfig>::EF::ZERO.cons());
 
         let exit_code: Felt<_> = builder.uninit();
 
@@ -144,14 +144,14 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         /*
         Flags
          */
-        let flag_cpu: Var<_> = builder.eval(<RecursionFC as FieldGenericConfig>::N::zero());
-        let index_cpu: Var<_> = builder.eval(<RecursionFC as FieldGenericConfig>::N::zero());
+        let flag_cpu: Var<_> = builder.eval(<RecursionFC as FieldGenericConfig>::N::ZERO);
+        let index_cpu: Var<_> = builder.eval(<RecursionFC as FieldGenericConfig>::N::ZERO);
         let flag_memory_initialize: Var<_> =
-            builder.eval(<RecursionFC as FieldGenericConfig>::N::zero());
+            builder.eval(<RecursionFC as FieldGenericConfig>::N::ZERO);
         let flag_memory_finalize: Var<_> =
-            builder.eval(<RecursionFC as FieldGenericConfig>::N::zero());
+            builder.eval(<RecursionFC as FieldGenericConfig>::N::ZERO);
         let flag_starting_chunk: Var<_> =
-            builder.eval(<RecursionFC as FieldGenericConfig>::N::zero());
+            builder.eval(<RecursionFC as FieldGenericConfig>::N::ZERO);
 
         /*
         Initialization
@@ -191,7 +191,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
                         <RecursionFC as FieldGenericConfig>::N::from_canonical_usize(EMPTY),
                     )
                     .then(|builder| {
-                        builder.assign(flag_cpu, <RecursionFC as FieldGenericConfig>::N::one());
+                        builder.assign(flag_cpu, <RecursionFC as FieldGenericConfig>::N::ONE);
                         builder.assign(index_cpu, index);
                     });
             }
@@ -204,7 +204,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
                     .then(|builder| {
                         builder.assign(
                             flag_memory_initialize,
-                            <RecursionFC as FieldGenericConfig>::N::one(),
+                            <RecursionFC as FieldGenericConfig>::N::ONE,
                         );
                     });
             }
@@ -217,18 +217,18 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
                     .then(|builder| {
                         builder.assign(
                             flag_memory_finalize,
-                            <RecursionFC as FieldGenericConfig>::N::one(),
+                            <RecursionFC as FieldGenericConfig>::N::ONE,
                         );
                     });
             }
         }
         let chunk = felt2var(builder, public_values.chunk);
         builder
-            .if_eq(chunk, <RecursionFC as FieldGenericConfig>::F::one())
+            .if_eq(chunk, <RecursionFC as FieldGenericConfig>::F::ONE)
             .then(|builder| {
                 builder.assign(
                     flag_starting_chunk,
-                    <RecursionFC as FieldGenericConfig>::N::one(),
+                    <RecursionFC as FieldGenericConfig>::N::ONE,
                 );
             });
 
@@ -238,24 +238,24 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         builder
             .if_eq(
                 flag_starting_chunk,
-                <RecursionFC as FieldGenericConfig>::N::one(),
+                <RecursionFC as FieldGenericConfig>::N::ONE,
             )
             .then(|builder| {
                 // first chunk start_pc should be vk.start_pc
                 builder.assert_felt_eq(public_values.start_pc, vk.pc_start);
 
                 // first chunk should include cpu
-                builder.assert_var_eq(flag_cpu, <RecursionFC as FieldGenericConfig>::N::one());
+                builder.assert_var_eq(flag_cpu, <RecursionFC as FieldGenericConfig>::N::ONE);
 
                 // initialize and finalize addr bits should be zero
                 for i in 0..ADDR_NUM_BITS {
                     builder.assert_felt_eq(
                         current_previous_initialize_addr_bits[i],
-                        <RecursionFC as FieldGenericConfig>::F::zero(),
+                        <RecursionFC as FieldGenericConfig>::F::ZERO,
                     );
                     builder.assert_felt_eq(
                         current_previous_finalize_addr_bits[i],
-                        <RecursionFC as FieldGenericConfig>::F::zero(),
+                        <RecursionFC as FieldGenericConfig>::F::ZERO,
                     );
                 }
 
@@ -272,15 +272,15 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
 
         builder.assign(
             current_chunk,
-            current_chunk + <RecursionFC as FieldGenericConfig>::F::one(),
+            current_chunk + <RecursionFC as FieldGenericConfig>::F::ONE,
         );
 
         builder
-            .if_eq(flag_cpu, <RecursionFC as FieldGenericConfig>::N::one())
+            .if_eq(flag_cpu, <RecursionFC as FieldGenericConfig>::N::ONE)
             .then(|builder| {
                 builder.assign(
                     current_execution_chunk,
-                    current_execution_chunk + <RecursionFC as FieldGenericConfig>::F::one(),
+                    current_execution_chunk + <RecursionFC as FieldGenericConfig>::F::ONE,
                 );
             });
 
@@ -289,7 +289,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
          */
 
         builder
-            .if_eq(flag_cpu, <RecursionFC as FieldGenericConfig>::N::one())
+            .if_eq(flag_cpu, <RecursionFC as FieldGenericConfig>::N::ONE)
             .then_or_else(
                 |builder| {
                     // assert log_main_degree is in [0, MAX_LOG_CHUNK_SIZE]
@@ -298,24 +298,24 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
                         .log_main_degree;
 
                     let degree_match: Var<_> =
-                        builder.eval(<RecursionFC as FieldGenericConfig>::N::zero());
+                        builder.eval(<RecursionFC as FieldGenericConfig>::N::ZERO);
                     builder
                         .range(0, MAX_LOG_CHUNK_SIZE + 1)
                         .for_each(|j, builder| {
                             builder.if_eq(log_main_degree, j).then(|builder| {
                                 builder.assign(
                                     degree_match,
-                                    <RecursionFC as FieldGenericConfig>::N::one(),
+                                    <RecursionFC as FieldGenericConfig>::N::ONE,
                                 );
                             });
                         });
                     builder
-                        .assert_var_eq(degree_match, <RecursionFC as FieldGenericConfig>::N::one());
+                        .assert_var_eq(degree_match, <RecursionFC as FieldGenericConfig>::N::ONE);
 
                     // start_pc should not be zero
                     builder.assert_felt_ne(
                         public_values.start_pc,
-                        <RecursionFC as FieldGenericConfig>::F::zero(),
+                        <RecursionFC as FieldGenericConfig>::F::ZERO,
                     );
                 },
                 |builder| {
@@ -331,7 +331,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         builder
             .if_eq(
                 flag_memory_initialize,
-                <RecursionFC as FieldGenericConfig>::N::zero(),
+                <RecursionFC as FieldGenericConfig>::N::ZERO,
             )
             .then(|builder| {
                 for i in 0..ADDR_NUM_BITS {
@@ -345,7 +345,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         builder
             .if_eq(
                 flag_memory_finalize,
-                <RecursionFC as FieldGenericConfig>::N::zero(),
+                <RecursionFC as FieldGenericConfig>::N::ZERO,
             )
             .then(|builder| {
                 for i in 0..ADDR_NUM_BITS {
@@ -361,7 +361,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         // all exit codes should be zeros
         builder.assert_felt_eq(
             public_values.exit_code,
-            <RecursionFC as FieldGenericConfig>::F::zero(),
+            <RecursionFC as FieldGenericConfig>::F::ZERO,
         );
 
         // update reconstruct challenger
@@ -409,10 +409,10 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         let cumulative_sum = array::from_fn(|i| builder.get(&cumulative_sum, i));
 
         builder
-            .if_eq(flag_complete, <RecursionFC as FieldGenericConfig>::N::one())
+            .if_eq(flag_complete, <RecursionFC as FieldGenericConfig>::N::ONE)
             .then(|builder| {
                 // last pc should be zero
-                builder.assert_felt_eq(current_pc, <RecursionFC as FieldGenericConfig>::F::zero());
+                builder.assert_felt_eq(current_pc, <RecursionFC as FieldGenericConfig>::F::ZERO);
 
                 assert_challenger_eq_pv(
                     builder,
@@ -432,7 +432,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         let vk_digest: [Felt<_>; DIGEST_SIZE] = array::from_fn(|i| builder.get(&vk_digest, i));
 
         // Update public values
-        let zero: Felt<_> = builder.eval(<RecursionFC as FieldGenericConfig>::F::zero());
+        let zero: Felt<_> = builder.eval(<RecursionFC as FieldGenericConfig>::F::ZERO);
         let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
         let recursion_public_values: &mut RecursionPublicValues<_> =
             recursion_public_values_stream.as_mut_slice().borrow_mut();

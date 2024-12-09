@@ -28,7 +28,7 @@ use hybrid_array::{typenum::Unsigned, Array};
 use itertools::Itertools;
 use num::{BigUint, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{AbstractField, Field, PrimeField32};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 
@@ -136,7 +136,7 @@ where
         let mut new_byte_lookup_events = Vec::new();
 
         for event in events {
-            let mut row = vec![F::zero(); num_fp2_addsub_cols::<P>()];
+            let mut row = vec![F::ZERO; num_fp2_addsub_cols::<P>()];
             let cols: &mut Fp2AddSubCols<F, P> = row.as_mut_slice().borrow_mut();
 
             let p = &event.x;
@@ -146,7 +146,7 @@ where
             let q_x = BigUint::from_bytes_le(&words_to_bytes_le_slice(&q[..q.len() / 2]));
             let q_y = BigUint::from_bytes_le(&words_to_bytes_le_slice(&q[q.len() / 2..]));
 
-            cols.is_real = F::one();
+            cols.is_real = F::ONE;
             cols.is_add = F::from_bool(event.op == FieldOperation::Add);
             cols.chunk = F::from_canonical_u32(event.chunk);
             cols.clk = F::from_canonical_u32(event.clk);
@@ -179,9 +179,9 @@ where
             .for_each(|x| output.add_range_lookup_event(*x));
 
         pad_rows(&mut rows, || {
-            let mut row = vec![F::zero(); num_fp2_addsub_cols::<P>()];
+            let mut row = vec![F::ZERO; num_fp2_addsub_cols::<P>()];
             let cols: &mut Fp2AddSubCols<F, P> = row.as_mut_slice().borrow_mut();
-            cols.is_add = F::one();
+            cols.is_add = F::ONE;
             let zero = BigUint::zero();
             Self::populate_field_ops(
                 &mut vec![],
@@ -260,7 +260,7 @@ where
         builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::one(), next.nonce);
+            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
         let num_words_field_element = <P as NumLimbs>::Limbs::USIZE / 4;
 
         let p_x = limbs_from_prev_access(&local.x_access[0..num_words_field_element]);
@@ -282,9 +282,9 @@ where
                 &q_x,
                 &p_modulus,
                 local.is_add,
-                CB::Expr::one() - local.is_add,
-                CB::F::zero(),
-                CB::F::zero(),
+                CB::Expr::ONE - local.is_add,
+                CB::F::ZERO,
+                CB::F::ZERO,
                 local.chunk,
                 local.is_real,
             );
@@ -295,9 +295,9 @@ where
                 &q_y,
                 &p_modulus,
                 local.is_add,
-                CB::Expr::one() - local.is_add,
-                CB::F::zero(),
-                CB::F::zero(),
+                CB::Expr::ONE - local.is_add,
+                CB::F::ZERO,
+                CB::F::ZERO,
                 local.chunk,
                 local.is_real,
             );
@@ -339,7 +339,7 @@ where
         };
 
         let syscall_id_felt =
-            local.is_add * add_syscall_id + (CB::Expr::one() - local.is_add) * sub_syscall_id;
+            local.is_add * add_syscall_id + (CB::Expr::ONE - local.is_add) * sub_syscall_id;
 
         builder.looked_syscall(
             local.chunk,

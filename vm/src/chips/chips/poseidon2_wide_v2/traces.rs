@@ -46,7 +46,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for Poseidon2WideChip
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(instructions.len(), None),
         };
-        let mut values = vec![F::zero(); padded_nb_rows * PREPROCESSED_POSEIDON2_WIDTH];
+        let mut values = vec![F::ZERO; padded_nb_rows * PREPROCESSED_POSEIDON2_WIDTH];
 
         let populate_len = instructions.len() * PREPROCESSED_POSEIDON2_WIDTH;
         values[..populate_len]
@@ -62,7 +62,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for Poseidon2WideChip
                         addr: instruction.addrs.output[j],
                         mult: instruction.mults[j],
                     }),
-                    is_real_neg: F::neg_one(),
+                    is_real_neg: F::NEG_ONE,
                 }
             });
         Some(RowMajorMatrix::new(values, PREPROCESSED_POSEIDON2_WIDTH))
@@ -79,7 +79,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for Poseidon2WideChip
             None => next_power_of_two(events.len(), None),
         };
         let num_columns = <Self as BaseAir<F>>::width(self);
-        let mut values = vec![F::zero(); padded_nb_rows * num_columns];
+        let mut values = vec![F::ZERO; padded_nb_rows * num_columns];
 
         let populate_len = events.len() * num_columns;
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
@@ -93,8 +93,8 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for Poseidon2WideChip
                     })
             },
             || {
-                let mut dummy_row = vec![F::zero(); num_columns];
-                self.populate_perm([F::zero(); WIDTH], None, &mut dummy_row);
+                let mut dummy_row = vec![F::ZERO; num_columns];
+                self.populate_perm([F::ZERO; WIDTH], None, &mut dummy_row);
                 values_dummy
                     .par_chunks_mut(num_columns)
                     .for_each(|row| row.copy_from_slice(&dummy_row))
@@ -204,8 +204,8 @@ impl<F: PrimeField32, const DEGREE: usize> Poseidon2WideChip<DEGREE, F> {
             // Optimization: since the linear layer that comes after the sbox is degree 1, we can
             // avoid adding columns for the result of the sbox, and instead include the x^3 -> x^7
             // part of the sbox in the constraint for the linear layer
-            let mut sbox_deg_7: [F; 16] = [F::zero(); WIDTH];
-            let mut sbox_deg_3: [F; 16] = [F::zero(); WIDTH];
+            let mut sbox_deg_7: [F; 16] = [F::ZERO; WIDTH];
+            let mut sbox_deg_3: [F; 16] = [F::ZERO; WIDTH];
             for i in 0..WIDTH {
                 sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
                 sbox_deg_7[i] = sbox_deg_3[i] * sbox_deg_3[i] * add_rc[i];
@@ -230,7 +230,7 @@ impl<F: PrimeField32, const DEGREE: usize> Poseidon2WideChip<DEGREE, F> {
         sbox: &mut Option<&mut [F; NUM_INTERNAL_ROUNDS]>,
     ) -> [F; WIDTH] {
         let mut state: [F; WIDTH] = *internal_rounds_state;
-        let mut sbox_deg_3: [F; NUM_INTERNAL_ROUNDS] = [F::zero(); NUM_INTERNAL_ROUNDS];
+        let mut sbox_deg_3: [F; NUM_INTERNAL_ROUNDS] = [F::ZERO; NUM_INTERNAL_ROUNDS];
         for r in 0..NUM_INTERNAL_ROUNDS {
             // Add the round constant to the 0th state element.
             // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding

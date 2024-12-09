@@ -52,7 +52,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
         _: &mut EmulationRecord,
     ) -> p3_matrix::dense::RowMajorMatrix<F> {
         let rows = input.shift_right_events.clone().len();
-        let mut trace = RowMajorMatrix::new(vec![F::zero(); NUM_SLR_COLS * rows], NUM_SLR_COLS);
+        let mut trace = RowMajorMatrix::new(vec![F::ZERO; NUM_SLR_COLS * rows], NUM_SLR_COLS);
         trace
             .rows_mut()
             .zip(input.shift_right_events.clone())
@@ -67,12 +67,12 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
         // Create the template for the padded rows. These are fake rows that don't fail on some
         // sanity checks.
         let padded_row_template = {
-            let mut row = [F::zero(); NUM_SLR_COLS];
+            let mut row = [F::ZERO; NUM_SLR_COLS];
             let cols: &mut ShiftRightCols<F> = row.as_mut_slice().borrow_mut();
             // Shift 0 by 0 bits and 0 bytes.
-            // cols.is_srl = F::one();
-            cols.shift_by_n_bits[0] = F::one();
-            cols.shift_by_n_bytes[0] = F::one();
+            // cols.is_srl = F::ONE;
+            cols.shift_by_n_bits[0] = F::ONE;
+            cols.shift_by_n_bytes[0] = F::ONE;
             row
         };
 
@@ -100,7 +100,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
                 let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
                 let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::zero(); NUM_SLR_COLS];
+                    let mut row = [F::ZERO; NUM_SLR_COLS];
                     let cols: &mut ShiftRightCols<F> = row.as_mut_slice().borrow_mut();
                     self.event_to_row(event, cols, &mut blu, &mut range);
                 });
@@ -138,7 +138,7 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             cols.is_srl = F::from_bool(event.opcode == Opcode::SRL);
             cols.is_sra = F::from_bool(event.opcode == Opcode::SRA);
 
-            cols.is_real = F::one();
+            cols.is_real = F::ONE;
 
             for i in 0..BYTE_SIZE {
                 cols.c_least_sig_byte[i] = F::from_canonical_u32((event.c >> i) & 1);
