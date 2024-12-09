@@ -217,8 +217,12 @@ where
         self.generate_main(input, extra);
     }
 
-    fn is_active(&self, _: &Self::Record) -> bool {
-        true
+    fn is_active(&self, input: &Self::Record) -> bool {
+        let events = match P::FIELD_TYPE {
+            FieldType::Bn254 => &input.fp2_bn254_addsub_events,
+            FieldType::Bls381 => &input.fp2_bls381_addsub_events,
+        };
+        !events.is_empty()
     }
 }
 
