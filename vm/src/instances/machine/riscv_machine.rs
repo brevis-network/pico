@@ -23,7 +23,7 @@ use crate::{
 use anyhow::Result;
 use p3_air::Air;
 use p3_challenger::CanObserve;
-use p3_field::FieldAlgebra;
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument};
@@ -41,6 +41,7 @@ where
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
 where
     SC: Send + StarkGenericConfig,
+    Val<SC>: PrimeField32,
     C: Send
         + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>

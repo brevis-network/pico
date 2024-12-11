@@ -2,7 +2,7 @@ use super::super::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCol
 use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::MemoryCols,
-        gadgets::{baby_bear::word_range::BabyBearWordRangeChecker, is_zero::IsZeroGadget},
+        gadgets::{field_range_check::word_range::FieldWordRangeChecker, is_zero::IsZeroGadget},
     },
     compiler::word::Word,
     emulator::riscv::{public_values::PublicValues, syscalls::SyscallCode},
@@ -103,7 +103,7 @@ impl<F: Field> CpuChip<F> {
         );
 
         // Babybear range check the operand_to_check word.
-        BabyBearWordRangeChecker::<CB::F>::range_check::<CB>(
+        FieldWordRangeChecker::<CB::F>::range_check::<CB>(
             builder,
             ecall_cols.operand_to_check,
             ecall_cols.operand_range_check_cols,

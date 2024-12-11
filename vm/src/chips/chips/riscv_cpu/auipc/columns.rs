@@ -1,5 +1,5 @@
 use crate::{
-    chips::gadgets::baby_bear::word_range::BabyBearWordRangeChecker, compiler::word::Word,
+    chips::gadgets::field_range_check::word_range::FieldWordRangeChecker, compiler::word::Word,
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
@@ -11,6 +11,6 @@ pub const NUM_AUIPC_COLS: usize = size_of::<AuipcCols<u8>>();
 pub struct AuipcCols<T> {
     /// The current program counter.
     pub pc: Word<T>,
-    pub pc_range_checker: BabyBearWordRangeChecker<T>,
+    pub pc_range_checker: FieldWordRangeChecker<T>,
     pub auipc_nonce: T,
 }

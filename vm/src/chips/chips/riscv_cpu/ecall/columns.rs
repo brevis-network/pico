@@ -1,5 +1,5 @@
 use crate::{
-    chips::gadgets::{baby_bear::word_range::BabyBearWordRangeChecker, is_zero::IsZeroGadget},
+    chips::gadgets::{field_range_check::word_range::FieldWordRangeChecker, is_zero::IsZeroGadget},
     compiler::word::Word,
     primitives::consts::PV_DIGEST_NUM_WORDS,
 };
@@ -34,7 +34,7 @@ pub struct EcallCols<T> {
     pub syscall_nonce: T,
 
     /// Columns to babybear range check the halt/commit_deferred_proofs operand.
-    pub operand_range_check_cols: BabyBearWordRangeChecker<T>,
+    pub operand_range_check_cols: FieldWordRangeChecker<T>,
 
     /// The operand value to babybear range check.
     pub operand_to_check: Word<T>,

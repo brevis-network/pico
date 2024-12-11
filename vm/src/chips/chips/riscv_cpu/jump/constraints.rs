@@ -1,6 +1,6 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    chips::gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
+    chips::gadgets::field_range_check::word_range::FieldWordRangeChecker,
     compiler::riscv::opcode::Opcode,
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
 };
@@ -52,20 +52,20 @@ impl<F: Field> CpuChip<F> {
             .assert_eq(jump_columns.next_pc.reduce::<CB>(), local.next_pc);
 
         // Range check op_a, pc, and next_pc.
-        BabyBearWordRangeChecker::<CB::F>::range_check(
+        FieldWordRangeChecker::<CB::F>::range_check(
             builder,
             local.op_a_val(),
             jump_columns.op_a_range_checker,
             is_jump_instruction.clone(),
         );
 
-        BabyBearWordRangeChecker::<CB::F>::range_check(
+        FieldWordRangeChecker::<CB::F>::range_check(
             builder,
             jump_columns.pc,
             jump_columns.pc_range_checker,
             local.opcode_selector.is_jal.into(),
         );
-        BabyBearWordRangeChecker::<CB::F>::range_check(
+        FieldWordRangeChecker::<CB::F>::range_check(
             builder,
             jump_columns.next_pc,
             jump_columns.next_pc_range_checker,

@@ -7,17 +7,16 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::AirBuilder;
-use p3_baby_bear::BabyBear;
-use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 
 impl<F: PrimeField32> ShaExtendCols<F> {
     pub fn populate_flags(&mut self, i: usize) {
         // The generator of the multiplicative subgroup.
-        let g = F::from_canonical_u32(BabyBear::two_adic_generator(4).as_canonical_u32());
+        let g = F::ONE;
 
         // Populate the columns needed to keep track of cycles of 16 rows.
-        self.cycle_16 = g.exp_u64((i + 1) as u64);
+        self.cycle_16 = F::from_canonical_u32((i as u32 + 1) % 16);
 
         // Populate the columns needed to track the start of a cycle of 16 rows.
         self.cycle_16_start
@@ -25,7 +24,7 @@ impl<F: PrimeField32> ShaExtendCols<F> {
 
         // Populate the columns needed to track the end of a cycle of 16 rows.
         self.cycle_16_end
-            .populate_from_field_element(self.cycle_16 - F::ONE);
+            .populate_from_field_element(self.cycle_16 - F::ZERO);
 
         // Populate the columns needed to keep track of cycles of 48 rows.
         let j = 16 + (i % 48);
@@ -47,10 +46,11 @@ impl<F: PrimeField32> ShaExtendChip<F> {
 
         let one = CB::Expr::from(CB::F::ONE);
 
-        // Generator with order 16 within BabyBear.
-        let g = CB::F::from_canonical_u32(BabyBear::two_adic_generator(4).as_canonical_u32());
+        // Generator with order 16.
+        let g = CB::F::ONE;
+        let g_inv = CB::F::from_canonical_u32(15);
 
-        // First row of the table must have g^1.
+        // First row of the table must have g * 1.
         builder.when_first_row().assert_eq(local.cycle_16, g);
 
         // First row of the table must have i = 16.
@@ -59,9 +59,9 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             .assert_eq(local.i, CB::F::from_canonical_u32(16));
 
         // Every row's `cycle_16` must be previous multiplied by `g`.
-        builder
-            .when_transition()
-            .assert_eq(local.cycle_16 * g, next.cycle_16);
+        builder.when_transition().assert_zero(
+            (local.cycle_16 + g - next.cycle_16) * (local.cycle_16 - g_inv - next.cycle_16),
+        );
 
         // Constrain `cycle_16_start.result` to be `cycle_16 - g == 0`.
         IsZeroGadget::<CB::F>::eval(
@@ -71,10 +71,10 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             one.clone(),
         );
 
-        // Constrain `cycle_16_end.result` to be `cycle_16 - 1 == 0`. Intuitively g^16 is 1.
+        // Constrain `cycle_16_end.result` to be `cycle_16 == 0`. Intuitively g * 16 is 0.
         IsZeroGadget::<CB::F>::eval(
             builder,
-            local.cycle_16 - CB::Expr::ONE,
+            local.cycle_16 - CB::Expr::ZERO,
             local.cycle_16_end,
             one.clone(),
         );

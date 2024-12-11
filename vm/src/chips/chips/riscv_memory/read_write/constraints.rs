@@ -6,7 +6,7 @@ use super::{
 use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::MemoryCols,
-        gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
+        gadgets::field_range_check::word_range::FieldWordRangeChecker,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
     machine::builder::{
@@ -104,7 +104,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         );
 
         // Range check the addr_word to be a valid babybear word.
-        BabyBearWordRangeChecker::<CB::F>::range_check(
+        FieldWordRangeChecker::<CB::F>::range_check(
             builder,
             local.addr_word,
             local.addr_word_range_checker,

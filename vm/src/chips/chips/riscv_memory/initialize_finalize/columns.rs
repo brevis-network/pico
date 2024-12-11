@@ -1,5 +1,5 @@
 use crate::chips::gadgets::{
-    baby_bear::bit_decomposition::BabyBearBitDecomposition, is_zero::IsZeroGadget,
+    field_range_check::bit_decomposition::FieldBitDecomposition, is_zero::IsZeroGadget,
     lt::AssertLtColsBits,
 };
 use core::mem::size_of;
@@ -24,7 +24,7 @@ pub struct MemoryInitializeFinalizeCols<T> {
     pub lt_cols: AssertLtColsBits<T, 32>,
 
     /// A bit decomposition of `addr`.
-    pub addr_bits: BabyBearBitDecomposition<T>,
+    pub addr_bits: FieldBitDecomposition<T>,
 
     /// The value of the memory access.
     pub value: [T; 32],

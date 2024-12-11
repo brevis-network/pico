@@ -26,7 +26,7 @@ struct Args {
     step: String,
 
     // Field to work on.
-    // bb | m31
+    // bb | m31 | kb
     #[clap(long, default_value = "bb")]
     field: String,
 }

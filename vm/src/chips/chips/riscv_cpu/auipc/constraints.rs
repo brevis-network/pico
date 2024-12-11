@@ -1,6 +1,6 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    chips::gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
+    chips::gadgets::field_range_check::word_range::FieldWordRangeChecker,
     compiler::riscv::opcode::Opcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
@@ -23,7 +23,7 @@ impl<F: PrimeField32> CpuChip<F> {
             .assert_eq(auipc_columns.pc.reduce::<CB>(), local.pc);
 
         // Range check the pc.
-        BabyBearWordRangeChecker::<CB::F>::range_check(
+        FieldWordRangeChecker::<CB::F>::range_check(
             builder,
             auipc_columns.pc,
             auipc_columns.pc_range_checker,

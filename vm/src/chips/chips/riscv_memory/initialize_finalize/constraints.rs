@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     chips::gadgets::{
-        baby_bear::bit_decomposition::BabyBearBitDecomposition, is_zero::IsZeroGadget,
+        field_range_check::bit_decomposition::FieldBitDecomposition, is_zero::IsZeroGadget,
     },
     compiler::word::Word,
     emulator::riscv::public_values::PublicValues,
@@ -77,7 +77,7 @@ where
         }
 
         // Canonically decompose the address into bits so we can do comparisons.
-        BabyBearBitDecomposition::<CB::F>::range_check(
+        FieldBitDecomposition::<CB::F>::range_check(
             builder,
             local.addr,
             local.addr_bits,

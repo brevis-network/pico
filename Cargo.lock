@@ -1591,7 +1591,7 @@ dependencies = [
 [[package]]
 name = "p3-air"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -1600,7 +1600,7 @@ dependencies = [
 [[package]]
 name = "p3-baby-bear"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -1614,7 +1614,7 @@ dependencies = [
 [[package]]
 name = "p3-blake3"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "blake3",
  "p3-symmetric",
@@ -1624,7 +1624,7 @@ dependencies = [
 [[package]]
 name = "p3-bn254-fr"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "ff 0.13.0",
  "halo2curves",
@@ -1639,7 +1639,7 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -1651,7 +1651,7 @@ dependencies = [
 [[package]]
 name = "p3-circle"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1669,7 +1669,7 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1683,7 +1683,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1696,7 +1696,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1713,7 +1713,7 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -1732,7 +1732,7 @@ dependencies = [
 [[package]]
 name = "p3-goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "num-bigint 0.4.6",
  "p3-dft",
@@ -1748,7 +1748,7 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -1759,7 +1759,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1771,7 +1771,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak-air"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -1782,9 +1782,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-koala-bear"
+version = "0.1.0"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+dependencies = [
+ "p3-field",
+ "p3-mds",
+ "p3-monty-31",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "rand",
+ "serde",
+]
+
+[[package]]
 name = "p3-matrix"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1799,7 +1813,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "rayon",
 ]
@@ -1807,7 +1821,7 @@ dependencies = [
 [[package]]
 name = "p3-mds"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-dft",
@@ -1821,7 +1835,7 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-commit",
@@ -1838,7 +1852,7 @@ dependencies = [
 [[package]]
 name = "p3-mersenne-31"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1857,7 +1871,7 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -1878,7 +1892,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "gcd",
  "p3-field",
@@ -1890,7 +1904,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -1900,7 +1914,7 @@ dependencies = [
 [[package]]
 name = "p3-uni-stark"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "itertools 0.13.0",
  "p3-air",
@@ -1918,7 +1932,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
+source = "git+ssh://git@github.com/brevis-network/p3.git?rev=e6a63c5#e6a63c5efd695d476db2c8d10952b3caf37c9920"
 dependencies = [
  "serde",
 ]
@@ -2069,6 +2083,7 @@ dependencies = [
  "p3-goldilocks",
  "p3-keccak",
  "p3-keccak-air",
+ "p3-koala-bear",
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-mds",

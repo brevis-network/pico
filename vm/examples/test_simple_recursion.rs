@@ -72,7 +72,7 @@ fn main() {
     let program = compiler.compile();
 
     info!("\n Creating emulator (at {:?})..", start.elapsed());
-    let mut emulator = RiscvEmulator::new(program, EmulatorOpts::default());
+    let mut emulator = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
     emulator.run_with_stdin(stdin).unwrap();
 
     // TRICKY: We copy the memory initialize and finalize events from the second (last)

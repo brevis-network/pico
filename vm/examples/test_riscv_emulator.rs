@@ -1,4 +1,5 @@
 use itertools::enumerate;
+use p3_baby_bear::BabyBear;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     emulator::{
@@ -27,7 +28,7 @@ fn main() {
     let pc_start = program.pc_start;
 
     info!("\n Creating emulator (at {:?})..", start.elapsed());
-    let mut emulator = RiscvEmulator::new(program, EmulatorOpts::test_opts());
+    let mut emulator = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::test_opts());
     info!(
         "Running with chunk size: {}, batch size: {}",
         emulator.chunk_size, emulator.chunk_batch_size

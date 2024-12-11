@@ -217,7 +217,7 @@ impl SDKProverClient {
 
     pub fn dry_run(&self) {
         let mut emulator =
-            RiscvEmulator::new(self.riscv_program.clone(), EmulatorOpts::test_opts());
+            RiscvEmulator::new::<BabyBear>(self.riscv_program.clone(), EmulatorOpts::test_opts());
         for input in &*self.stdin.buffer {
             emulator.state.input_stream.push(input.clone());
         }

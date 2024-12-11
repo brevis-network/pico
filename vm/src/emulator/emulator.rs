@@ -26,6 +26,7 @@ use crate::{
 };
 use alloc::sync::Arc;
 use p3_air::Air;
+use p3_field::PrimeField32;
 
 pub enum EmulatorType {
     Riscv,
@@ -50,11 +51,12 @@ where
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    Val<SC>: PrimeField32,
 {
     pub fn setup_riscv(input: &'a ProvingWitness<SC, C, Vec<u8>>) -> Self {
         // create a new emulator based on the emulator type
         let opts = input.opts.unwrap();
-        let mut emulator = RiscvEmulator::new(input.program.clone(), opts);
+        let mut emulator = RiscvEmulator::new::<Val<SC>>(input.program.clone(), opts);
         emulator.emulator_mode = EmulatorMode::Trace;
         for each in input.stdin.as_ref().unwrap().buffer.iter() {
             emulator.state.input_stream.push(each.clone());

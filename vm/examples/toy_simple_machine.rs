@@ -1,4 +1,5 @@
 use p3_air::{Air, BaseAir};
+use p3_baby_bear::BabyBear;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
@@ -110,7 +111,7 @@ fn main() {
     let program = compiler.compile();
 
     info!("\n Creating Runtime..");
-    let mut runtime = RiscvEmulator::new(program, EmulatorOpts::default());
+    let mut runtime = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     runtime.run().unwrap();
 

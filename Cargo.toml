@@ -39,6 +39,9 @@ p3-matrix = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" 
 p3-baby-bear = { git = "https://github.com/brevis-network/p3.git", features = [
   "nightly-features",
 ], rev = "e6a63c5" }
+p3-koala-bear = { git = "https://github.com/brevis-network/p3.git", features = [
+  "nightly-features",
+], rev = "e6a63c5" }
 p3-util = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
 p3-challenger = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
 p3-dft = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }

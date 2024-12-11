@@ -23,6 +23,7 @@ use crate::{
 pub use code::*;
 use hashbrown::HashMap;
 use hint::{HintLenSyscall, HintReadSyscall};
+use p3_field::PrimeField32;
 use precompiles::{
     edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
     fptower::{fp::FpSyscall, fp2_addsub::Fp2AddSubSyscall, fp2_mul::Fp2MulSyscall},
@@ -32,7 +33,7 @@ use precompiles::{
     uint256::syscall::Uint256MulSyscall,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
 use write::WriteSyscall;
 
@@ -64,7 +65,7 @@ pub trait Syscall: Send + Sync {
 
 /// Creates the default syscall map.
 #[must_use]
-pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
+pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
     use crate::chips::gadgets::field::{bls381::Bls381BaseField, bn254::Bn254BaseField};
 
     let mut syscall_map = HashMap::<SyscallCode, Arc<dyn Syscall>>::default();
@@ -172,7 +173,7 @@ pub fn default_syscall_map() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
 
     syscall_map.insert(
         SyscallCode::POSEIDON2_PERMUTE,
-        Arc::new(Poseidon2PermuteSyscall),
+        Arc::new(Poseidon2PermuteSyscall::<F>(PhantomData)),
     );
 
     syscall_map

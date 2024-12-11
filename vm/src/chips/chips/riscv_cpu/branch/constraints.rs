@@ -1,6 +1,6 @@
 use super::super::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCols, CpuChip};
 use crate::{
-    chips::gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
+    chips::gadgets::field_range_check::word_range::FieldWordRangeChecker,
     compiler::{riscv::opcode::Opcode, word::Word},
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
 };
@@ -63,13 +63,13 @@ impl<F: Field> CpuChip<F> {
             // Range check branch_cols.pc and branch_cols.next_pc.
             // println!("marking field type: {:?}", CB::F::field_type());
 
-            BabyBearWordRangeChecker::<CB::F>::range_check(
+            FieldWordRangeChecker::<CB::F>::range_check(
                 builder,
                 branch_cols.pc,
                 branch_cols.pc_range_checker,
                 is_branch_instruction.clone(),
             );
-            BabyBearWordRangeChecker::<CB::F>::range_check(
+            FieldWordRangeChecker::<CB::F>::range_check(
                 builder,
                 branch_cols.next_pc,
                 branch_cols.next_pc_range_checker,

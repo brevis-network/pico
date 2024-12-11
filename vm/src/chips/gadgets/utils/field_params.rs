@@ -63,7 +63,7 @@ pub fn limbs_from_slice<E: From<F>, N: ArraySize, F: Field>(limbs: impl AsRef<[F
     let limbs = limbs.as_ref();
     debug_assert_eq!(limbs.len(), N::USIZE);
     let mut result = Array::<E, N>::from_fn(|_| F::ZERO.into());
-    for (i, limb) in limbs.into_iter().enumerate() {
+    for (i, limb) in limbs.iter().enumerate() {
         result[i] = (*limb).into();
     }
     Limbs(result)

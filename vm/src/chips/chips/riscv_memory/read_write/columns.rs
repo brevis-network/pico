@@ -1,7 +1,7 @@
 use crate::{
     chips::{
         chips::{riscv_cpu::event::CpuEvent, riscv_memory::event::MemoryRecordEnum},
-        gadgets::baby_bear::word_range::BabyBearWordRangeChecker,
+        gadgets::field_range_check::word_range::FieldWordRangeChecker,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
 };
@@ -30,7 +30,7 @@ pub struct MemoryChipCols<T> {
     // addr_offset = addr_word % 4
     // Note that this all needs to be verified in the AIR
     pub addr_word: Word<T>,
-    pub addr_word_range_checker: BabyBearWordRangeChecker<T>,
+    pub addr_word_range_checker: FieldWordRangeChecker<T>,
     pub addr_aligned: T,
 
     /// The LE bit decomp of the least significant byte of address aligned.

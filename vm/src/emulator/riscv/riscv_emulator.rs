@@ -29,6 +29,7 @@ use crate::{
 };
 use hashbrown::{hash_map::Entry, HashMap};
 use nohash_hasher::BuildNoHashHasher;
+use p3_field::PrimeField32;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Instant};
 use thiserror::Error;
@@ -169,8 +170,8 @@ macro_rules! assert_valid_memory_access {
 
 impl RiscvEmulator {
     #[must_use]
-    pub fn new(program: Arc<Program>, opts: EmulatorOpts) -> Self {
-        Self::with_context(program, opts, EmulatorContext::default())
+    pub fn new<F: PrimeField32>(program: Arc<Program>, opts: EmulatorOpts) -> Self {
+        Self::with_context::<F>(program, opts, EmulatorContext::default())
     }
 
     fn initialize(&mut self) {
@@ -194,7 +195,7 @@ impl RiscvEmulator {
     ///
     /// This function may panic if it fails to create the trace file if `TRACE_FILE` is set.
     #[must_use]
-    pub fn with_context(
+    pub fn with_context<F: PrimeField32>(
         program: Arc<Program>,
         opts: EmulatorOpts,
         context: EmulatorContext,
@@ -205,7 +206,7 @@ impl RiscvEmulator {
         };
 
         // Determine the maximum number of cycles for any syscall.
-        let syscall_map = default_syscall_map();
+        let syscall_map = default_syscall_map::<F>();
         let max_syscall_cycles = syscall_map
             .values()
             .map(|syscall| syscall.num_extra_cycles())
@@ -1294,8 +1295,12 @@ impl RiscvEmulator {
 
     /// Recover runtime state from a program and existing emulation state.
     #[must_use]
-    pub fn recover(program: Arc<Program>, state: RiscvEmulationState, opts: EmulatorOpts) -> Self {
-        let mut runtime = Self::new(program, opts);
+    pub fn recover<F: PrimeField32>(
+        program: Arc<Program>,
+        state: RiscvEmulationState,
+        opts: EmulatorOpts,
+    ) -> Self {
+        let mut runtime = Self::new::<F>(program, opts);
         runtime.state = state;
         runtime
     }
@@ -1521,7 +1526,7 @@ mod tests {
         let program = simple_fibo_program();
         let mut stdin = EmulatorStdin::default();
         stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);
-        let mut emulator = RiscvEmulator::new(program, EmulatorOpts::default());
+        let mut emulator = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
         emulator.run_with_stdin(stdin).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
@@ -1533,7 +1538,7 @@ mod tests {
         let n = "a"; // do keccak(b"abcdefg")
         let mut stdin = EmulatorStdin::default();
         stdin.write(&n);
-        let mut emulator = RiscvEmulator::new(program, EmulatorOpts::default());
+        let mut emulator = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
         emulator.run_with_stdin(stdin).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
