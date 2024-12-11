@@ -17,35 +17,43 @@ use crate::{
     },
     recursion::runtime::RecursionRecord,
 };
+use alloc::sync::Arc;
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use serde::Serialize;
 
-#[derive(Clone, Serialize)]
-pub struct EmulatorStdin<I> {
+#[derive(Clone, Default, Serialize)]
+pub struct EmulatorStdinBuilder<I> {
     pub buffer: Vec<I>,
+}
+
+#[derive(Default, Serialize)]
+pub struct EmulatorStdin<I> {
+    pub buffer: Arc<[I]>,
     pub cursor: usize,
+}
+
+impl<I> Clone for EmulatorStdin<I> {
+    fn clone(&self) -> Self {
+        Self {
+            buffer: self.buffer.clone(),
+            cursor: self.cursor,
+        }
+    }
 }
 
 #[allow(clippy::should_implement_trait)]
 impl<I> EmulatorStdin<I> {
-    pub fn default() -> Self {
-        Self {
-            buffer: Vec::new(),
-            cursor: 0,
-        }
-    }
-
-    pub fn next(&mut self) -> (&mut I, bool) {
-        let flag_last = self.cursor == self.buffer.len() - 1;
-        if self.cursor < self.buffer.len() {
-            let cursor = self.cursor;
-            self.cursor += 1;
-            (&mut self.buffer[cursor], flag_last)
-        } else {
-            panic!("EmulatorStdin: out of bounds");
-        }
-    }
+    //pub fn next(&mut self) -> (&mut I, bool) {
+    //    let flag_last = self.cursor == self.buffer.len() - 1;
+    //    if self.cursor < self.buffer.len() {
+    //        let cursor = self.cursor;
+    //        self.cursor += 1;
+    //        (&mut self.buffer[cursor], flag_last)
+    //    } else {
+    //        panic!("EmulatorStdin: out of bounds");
+    //    }
+    //}
 
     pub fn get(&self, index: usize) -> (&I, bool) {
         let flag_last = index == self.buffer.len() - 1;
@@ -55,43 +63,59 @@ impl<I> EmulatorStdin<I> {
             panic!("EmulatorStdin: out of bounds");
         }
     }
+
+    pub fn new_builder() -> EmulatorStdinBuilder<I>
+    where
+        I: Default,
+    {
+        EmulatorStdinBuilder::default()
+    }
 }
 
 // for riscv machine stdin
-impl EmulatorStdin<Vec<u8>> {
+impl EmulatorStdinBuilder<Vec<u8>> {
     pub fn write<T: Serialize>(&mut self, data: &T) {
         let mut tmp = Vec::new();
         bincode::serialize_into(&mut tmp, data).expect("serialization failed");
         self.buffer.push(tmp);
     }
+
+    pub fn finalize(self) -> EmulatorStdin<Vec<u8>> {
+        EmulatorStdin {
+            buffer: self.buffer.into(),
+            cursor: 0,
+        }
+    }
 }
 
 // for riscv recursion stdin, both compress and combine
-impl<'a, C> EmulatorStdin<RiscvRecursionStdin<'a, RiscvSC, C>>
+impl<C> EmulatorStdin<RiscvRecursionStdin<RiscvSC, C>>
 where
     C: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
+        + for<'a> Air<ProverConstraintFolder<'a, RiscvSC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, RiscvSC>>,
 {
     /// Construct the recursion stdin for riscv_compress.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// batch_size should be greater than 1
     pub fn setup_for_riscv_compress(
-        vk: &'a BaseVerifyingKey<RiscvSC>,
-        machine: &'a BaseMachine<RiscvSC, C>,
+        vk: &BaseVerifyingKey<RiscvSC>,
+        machine: &BaseMachine<RiscvSC, C>,
         proofs: &[BaseProof<RiscvSC>],
-        base_challenger: &'a mut Challenger<RiscvSC>,
+        mut base_challenger: Challenger<RiscvSC>,
     ) -> Self {
         let num_public_values = machine.num_public_values();
 
         let mut stdin = Vec::new();
 
         // phase 1 for base_challenger
-        vk.observed_by(base_challenger);
+        vk.observed_by(&mut base_challenger);
         for each_proof in proofs.iter() {
             base_challenger.observe(each_proof.clone().commitments.main_commit);
             base_challenger.observe_slice(&each_proof.public_values[0..num_public_values]);
         }
+
+        let base_challenger = Arc::new(base_challenger);
 
         // base_challenger is ready for use in phase 2
         // reconstruct challenger is initialized here
@@ -103,10 +127,10 @@ where
         for (i, proof) in proofs.iter().enumerate() {
             let flag_complete = i == total - 1;
             stdin.push(RiscvRecursionStdin {
-                vk,
-                machine,
-                proofs: vec![proof.clone()],
-                base_challenger,
+                vk: vk.clone(),
+                machine: machine.clone(),
+                proofs: Arc::new([proof.clone()]),
+                base_challenger: base_challenger.clone(),
                 reconstruct_challenger: reconstruct_challenger.clone(),
                 flag_complete,
             });
@@ -117,7 +141,7 @@ where
         }
 
         Self {
-            buffer: stdin,
+            buffer: stdin.into(),
             cursor: 0,
         }
     }
@@ -126,10 +150,10 @@ where
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// combine_size should be greater than 1
     pub fn setup_for_riscv_combine(
-        vk: &'a BaseVerifyingKey<RiscvSC>,
-        machine: &'a BaseMachine<RiscvSC, C>,
+        vk: &BaseVerifyingKey<RiscvSC>,
+        machine: &BaseMachine<RiscvSC, C>,
         proofs: &[BaseProof<RiscvSC>],
-        base_challenger: &'a mut <RiscvSC as StarkGenericConfig>::Challenger,
+        mut base_challenger: Challenger<RiscvSC>,
         combine_size: usize,
     ) -> Self {
         assert!(combine_size > 1);
@@ -139,11 +163,13 @@ where
         let mut stdin = Vec::new();
 
         // phase 1 for base_challenger
-        vk.observed_by(base_challenger);
+        vk.observed_by(&mut base_challenger);
         for each_proof in proofs.iter() {
             base_challenger.observe(each_proof.clone().commitments.main_commit);
             base_challenger.observe_slice(&each_proof.public_values[0..num_public_values]);
         }
+
+        let base_challenger = Arc::new(base_challenger);
 
         // base_challenger is ready for use in phase 2
         // reconstruct challenger is initialized here
@@ -154,13 +180,13 @@ where
         let total = proof_batches.len();
 
         for (i, batch_proofs) in proof_batches.enumerate() {
-            let batch_proofs = batch_proofs.to_vec();
+            let batch_proofs: Arc<[_]> = Arc::from(batch_proofs);
             let flag_complete = i == total - 1;
             stdin.push(RiscvRecursionStdin {
-                vk,
-                machine,
+                vk: vk.clone(),
+                machine: machine.clone(),
                 proofs: batch_proofs.clone(),
-                base_challenger,
+                base_challenger: base_challenger.clone(),
                 reconstruct_challenger: reconstruct_challenger.clone(),
                 flag_complete,
             });
@@ -174,14 +200,14 @@ where
         }
 
         Self {
-            buffer: stdin,
+            buffer: stdin.into(),
             cursor: 0,
         }
     }
 }
 
 // for recursion stdin
-impl<'a, C> EmulatorStdin<RecursionStdin<'a, RecursionSC, C>>
+impl<C> EmulatorStdin<RecursionStdin<RecursionSC, C>>
 where
     C: ChipBehavior<
             Val<RecursionSC>,
@@ -192,8 +218,8 @@ where
 {
     /// Construct the recursion stdin for one layer of combine.
     pub fn setup_for_combine(
-        vk: &'a BaseVerifyingKey<RecursionSC>,
-        machine: &'a BaseMachine<RecursionSC, C>,
+        vk: &BaseVerifyingKey<RecursionSC>,
+        machine: &BaseMachine<RecursionSC, C>,
         proofs: &[BaseProof<RecursionSC>],
         combine_size: usize,
         flag_complete: bool,
@@ -203,24 +229,23 @@ where
         let proof_batches = proofs.chunks(combine_size);
 
         for batch_proofs in proof_batches {
-            let batch_proofs = batch_proofs.to_vec();
             stdin.push(RecursionStdin {
-                vk,
-                machine,
-                proofs: batch_proofs.clone(),
+                vk: vk.clone(),
+                machine: machine.clone(),
+                proofs: batch_proofs.into(),
                 flag_complete,
             });
         }
 
         Self {
-            buffer: stdin,
+            buffer: stdin.into(),
             cursor: 0,
         }
     }
 
     pub fn setup_for_single(
-        vk: &'a BaseVerifyingKey<RecursionSC>,
-        machine: &'a BaseMachine<RecursionSC, C>,
+        vk: &BaseVerifyingKey<RecursionSC>,
+        machine: &BaseMachine<RecursionSC, C>,
         proofs: &[BaseProof<RecursionSC>],
     ) -> Self {
         let mut stdin = Vec::new();
@@ -228,14 +253,14 @@ where
         assert_eq!(proofs.len(), 1);
 
         stdin.push(RecursionStdin {
-            vk,
-            machine,
-            proofs: proofs.to_vec().clone(),
+            vk: vk.clone(),
+            machine: machine.clone(),
+            proofs: proofs.into(),
             flag_complete: true,
         });
 
         Self {
-            buffer: stdin,
+            buffer: stdin.into(),
             cursor: 0,
         }
     }

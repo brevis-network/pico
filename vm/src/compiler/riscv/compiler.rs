@@ -1,4 +1,5 @@
 use crate::compiler::riscv::{disassembler::Elf, program::Program};
+use alloc::sync::Arc;
 use tracing::info;
 
 pub enum SourceType {
@@ -10,7 +11,7 @@ pub enum Compilable {
 }
 
 impl Compilable {
-    fn compile(&self) -> Program {
+    fn compile(&self) -> Arc<Program> {
         // match on self
         match self {
             Compilable::RiscV(elf) => elf.compile(),
@@ -43,7 +44,7 @@ impl Compiler {
         }
     }
 
-    pub fn compile(&self) -> Program {
+    pub fn compile(&self) -> Arc<Program> {
         info!("Compiling {} source...", self.name());
         self.source.compile()
     }

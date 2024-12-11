@@ -15,7 +15,7 @@ use pico_vm::{
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{RECURSION_NUM_PVS, RISCV_COMBINE_DEGREE, RISCV_NUM_PVS},
 };
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 use tracing::info;
 
 const TEST_COMBINE_SIZE: usize = 10;
@@ -77,6 +77,7 @@ fn main() {
     info!("Build field_config program (at {:?})..", start.elapsed());
     let recursion_program =
         RiscvCombineVerifierCircuit::<RecursionFC, RiscvSC>::build(riscv_machine.base_machine());
+    let recursion_program = Arc::new(recursion_program);
 
     // Setup recursion machine
     info!("\n Setup recursion machine (at {:?})..", start.elapsed());
@@ -89,12 +90,12 @@ fn main() {
 
     // Setup stdin and witnesses
     info!("\n Construct riscv_combine recursion stdin and witnesses..");
-    let mut challenger = DuplexChallenger::new(riscv_machine.config().perm.clone());
+    let challenger = DuplexChallenger::new(riscv_machine.config().perm.clone());
     let recursion_stdin = EmulatorStdin::setup_for_riscv_combine(
         &vk,
         riscv_machine.base_machine(),
         proof.proofs(),
-        &mut challenger,
+        challenger,
         TEST_COMBINE_SIZE,
     );
     assert_eq!(recursion_stdin.buffer.len(), 1);

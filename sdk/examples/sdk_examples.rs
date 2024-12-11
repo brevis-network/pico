@@ -14,10 +14,10 @@ const ELF_FIB: &[u8] = include_bytes!("riscv32im-sp1-fibonacci-elf");
 
 fn main() {
     let args = Args::parse();
-    let mut stdin = EmulatorStdin::default();
+    let mut stdin = EmulatorStdin::new_builder();
     stdin.write(&args.n);
 
-    let client = SDKProverClient::new(ELF_FIB.to_vec(), stdin);
+    let client = SDKProverClient::new(ELF_FIB.to_vec(), stdin.finalize());
 
     // dry run the program in simple mode
     // client.dry_run();

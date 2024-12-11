@@ -43,10 +43,11 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<'a, RecursionSC, C>>
+impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<RecursionSC, C>>
     for RecursionCombineMachine<RecursionSC, C>
 where
-    C: ChipBehavior<
+    C: Send
+        + ChipBehavior<
             Val<RecursionSC>,
             Program = RecursionProgram<Val<RecursionSC>>,
             Record = RecursionRecord<Val<RecursionSC>>,
@@ -110,9 +111,9 @@ where
                 self.complement_record(batch_records.as_mut_slice());
 
                 #[cfg(feature = "debug")]
-                constraint_debugger.debug_incremental(self.chips(), &batch_records);
+                constraint_debugger.debug_incremental(&self.chips(), &batch_records);
                 #[cfg(feature = "debug-lookups")]
-                lookup_debugger.debug_incremental(self.chips(), &batch_records);
+                lookup_debugger.debug_incremental(&self.chips(), &batch_records);
 
                 info!(
                     "recursion combine layer {}, chunk {}-{}",
@@ -155,7 +156,7 @@ where
                             record.chunk_index(),
                         )
                     })
-                    .collect::<Vec<_>>();
+                    .collect::<Box<[_]>>();
 
                 all_proofs.extend(batch_proofs);
 
@@ -175,7 +176,7 @@ where
 
             // more than one proofs, need to combine another round
             recursion_stdin = EmulatorStdin::setup_for_combine(
-                witness.vk.unwrap(),
+                witness.vk.as_ref().unwrap(),
                 self.base_machine(),
                 &all_proofs,
                 COMBINE_SIZE,
@@ -186,7 +187,7 @@ where
                 witness.program.clone(),
                 &recursion_stdin,
                 self.config(),
-                witness.vk.unwrap(),
+                witness.vk.as_ref().unwrap(),
                 witness.opts.unwrap(),
             );
 
@@ -198,7 +199,7 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(all_proofs);
+        let proof = MetaProof::new(all_proofs.into());
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
@@ -222,7 +223,7 @@ where
         assert_eq!(proof.proofs().len(), 1);
 
         let public_values: &RecursionPublicValues<_> =
-            proof.proofs[0].public_values.as_slice().borrow();
+            proof.proofs[0].public_values.as_ref().borrow();
         trace!("public values: {:?}", public_values);
 
         // assert completion

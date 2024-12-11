@@ -24,6 +24,7 @@ use crate::{
     primitives::consts::{BABYBEAR_S_BOX_DEGREE, PERMUTATION_WIDTH},
     recursion::runtime::{RecursionRecord, Runtime},
 };
+use alloc::sync::Arc;
 use p3_air::Air;
 
 pub enum EmulatorType {
@@ -50,18 +51,18 @@ where
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub fn setup_riscv(input: &'a ProvingWitness<'a, SC, C, Vec<u8>>) -> Self {
+    pub fn setup_riscv(input: &'a ProvingWitness<SC, C, Vec<u8>>) -> Self {
         // create a new emulator based on the emulator type
         let opts = input.opts.unwrap();
         let mut emulator = RiscvEmulator::new(input.program.clone(), opts);
         emulator.emulator_mode = EmulatorMode::Trace;
-        for each in input.stdin.unwrap().buffer.clone() {
-            emulator.state.input_stream.push(each);
+        for each in input.stdin.as_ref().unwrap().buffer.iter() {
+            emulator.state.input_stream.push(each.clone());
         }
 
         Self {
             kind: EmulatorType::Riscv,
-            stdin: input.stdin.unwrap(),
+            stdin: input.stdin.as_ref().unwrap(),
             emulator,
             batch_size: opts.chunk_batch_size,
             ptr: 0,
@@ -84,8 +85,8 @@ impl<'a, C>
         'a,
         RecursionSC,
         C,
-        RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
-        RecursionEmulator<'a, RecursionSC>,
+        RiscvRecursionStdin<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+        RecursionEmulator<RecursionSC>,
     >
 where
     C: ChipBehavior<
@@ -97,15 +98,14 @@ where
 {
     pub fn setup_riscv_compress(
         input: &'a ProvingWitness<
-            'a,
             RecursionSC,
             C,
-            RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+            RiscvRecursionStdin<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
         >,
     ) -> Self {
         let emulator = RecursionEmulator {
             recursion_program: input.program.clone(),
-            config: input.config.unwrap(),
+            config: input.config.clone().unwrap(),
         };
 
         let batch_size = match input.opts {
@@ -114,7 +114,7 @@ where
         };
         Self {
             kind: EmulatorType::RiscvCompress,
-            stdin: input.stdin.unwrap(),
+            stdin: input.stdin.as_ref().unwrap(),
             emulator,
             batch_size,
             ptr: 0,
@@ -152,8 +152,8 @@ impl<'a, C, RecursionC>
         'a,
         RecursionSC,
         C,
-        RecursionStdin<'a, RecursionSC, RecursionC>,
-        RecursionEmulator<'a, RecursionSC>,
+        RecursionStdin<RecursionSC, RecursionC>,
+        RecursionEmulator<RecursionSC>,
     >
 where
     C: ChipBehavior<
@@ -170,11 +170,11 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
 {
     pub fn setup_recursion(
-        input: &'a ProvingWitness<'a, RecursionSC, C, RecursionStdin<'a, RecursionSC, RecursionC>>,
+        input: &'a ProvingWitness<RecursionSC, C, RecursionStdin<RecursionSC, RecursionC>>,
     ) -> Self {
         let emulator = RecursionEmulator {
             recursion_program: input.program.clone(),
-            config: input.config.unwrap(),
+            config: input.config.clone().unwrap(),
         };
 
         let batch_size = match input.opts {
@@ -184,7 +184,7 @@ where
 
         Self {
             kind: EmulatorType::Combine,
-            stdin: input.stdin.unwrap(),
+            stdin: input.stdin.as_ref().unwrap(),
             emulator,
             batch_size,
             ptr: 0,
@@ -221,24 +221,24 @@ where
 }
 
 // Recursion emulator
-pub struct RecursionEmulator<'a, SC>
+pub struct RecursionEmulator<SC>
 where
     SC: StarkGenericConfig,
 {
-    pub recursion_program: RecursionProgram<Val<SC>>,
+    pub recursion_program: Arc<RecursionProgram<Val<SC>>>,
 
-    pub config: &'a SC,
+    pub config: Arc<SC>,
 }
 
-impl<'a> RecursionEmulator<'a, RecursionSC> {
+impl RecursionEmulator<RecursionSC> {
     pub fn run_riscv<RiscvC>(
         &mut self,
         stdin: &RiscvRecursionStdin<RiscvSC, RiscvC>,
     ) -> RecursionRecord<Val<RecursionSC>>
     where
         RiscvC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-            + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
+            + for<'a> Air<ProverConstraintFolder<'a, RiscvSC>>
+            + for<'a> Air<VerifierConstraintFolder<'a, RiscvSC>>,
     {
         let mut witness_stream = Vec::new();
         witness_stream.extend(stdin.write());

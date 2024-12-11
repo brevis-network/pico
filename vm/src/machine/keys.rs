@@ -2,6 +2,7 @@ use crate::{
     configs::config::{Com, PcsProverData, StarkGenericConfig},
     primitives::{consts::DIGEST_SIZE, poseidon2_hash},
 };
+use alloc::sync::Arc;
 use hashbrown::HashMap;
 use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
@@ -19,7 +20,7 @@ pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// The pcs data for the preprocessed traces.
     pub preprocessed_prover_data: PcsProverData<SC>,
     /// the index of for chips, chip name for key
-    pub preprocessed_chip_ordering: HashMap<String, usize>,
+    pub preprocessed_chip_ordering: Arc<HashMap<String, usize>>,
 }
 
 impl<SC: StarkGenericConfig> BaseProvingKey<SC> {
@@ -30,15 +31,16 @@ impl<SC: StarkGenericConfig> BaseProvingKey<SC> {
     }
 }
 
+#[derive(Clone)]
 pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     /// The commitment to the preprocessed traces.
     pub commit: Com<SC>,
     /// start pc of program
     pub pc_start: SC::Val,
     /// The preprocessed information.
-    pub preprocessed_info: Vec<(String, SC::Domain, Dimensions)>,
+    pub preprocessed_info: Arc<[(String, SC::Domain, Dimensions)]>,
     /// the index of for chips, chip name for key
-    pub preprocessed_chip_ordering: HashMap<String, usize>,
+    pub preprocessed_chip_ordering: Arc<HashMap<String, usize>>,
 }
 
 impl<SC: StarkGenericConfig> BaseVerifyingKey<SC> {

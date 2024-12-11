@@ -12,6 +12,7 @@ use crate::{
         witness::ProvingWitness,
     },
 };
+use alloc::sync::Arc;
 use anyhow::Result;
 use p3_air::Air;
 use p3_challenger::CanObserve;
@@ -37,10 +38,7 @@ where
     fn base_machine(&self) -> &BaseMachine<SC, C>;
 
     /// Get the configuration of the machine.
-    fn config<'a>(&'a self) -> &'a SC
-    where
-        C: 'a,
-    {
+    fn config(&self) -> Arc<SC> {
         self.base_machine().config()
     }
 
@@ -50,17 +48,15 @@ where
     }
 
     /// Get the chips of the machine.
-    fn chips<'a>(&'a self) -> &'a [MetaChip<SC::Val, C>]
-    where
-        SC: 'a,
-    {
+    fn chips(&self) -> Arc<[MetaChip<SC::Val, C>]> {
         self.base_machine().chips()
     }
 
     /// Complete the record after emulation.
     fn complement_record(&self, records: &mut [C::Record]) {
         let begin = Instant::now();
-        let chips = self.chips();
+        let chips_arc = self.chips();
+        let chips = chips_arc.as_ref();
         records.par_iter_mut().for_each(|record| {
             chips.iter().for_each(|chip| {
                 if chip.is_active(record) {
@@ -107,10 +103,10 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
     /// Configuration of the machine
-    config: SC,
+    config: Arc<SC>,
 
     /// Chips of the machine
-    chips: Vec<MetaChip<Val<SC>, C>>,
+    chips: Arc<[MetaChip<Val<SC>, C>]>,
 
     /// Base prover
     prover: BaseProver<SC, C>,
@@ -120,6 +116,24 @@ where
 
     /// Number of public values
     num_public_values: usize,
+}
+
+impl<SC, C> Clone for BaseMachine<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            chips: self.chips.clone(),
+            prover: self.prover.clone(),
+            verifier: self.verifier.clone(),
+            num_public_values: self.num_public_values,
+        }
+    }
 }
 
 impl<SC, C> BaseMachine<SC, C>
@@ -134,8 +148,8 @@ where
     /// Create BaseMachine based on config and chip behavior.
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {
-            config,
-            chips,
+            config: config.into(),
+            chips: chips.into(),
             prover: BaseProver::<SC, C>::new(),
             verifier: BaseVerifier::<SC, C>::new(),
             num_public_values,
@@ -148,13 +162,13 @@ where
     }
 
     /// Get the configuration of the machine.
-    pub fn config(&self) -> &SC {
-        &self.config
+    pub fn config(&self) -> Arc<SC> {
+        self.config.clone()
     }
 
     /// Get the chips of the machine.
-    pub fn chips(&self) -> &[MetaChip<Val<SC>, C>] {
-        &self.chips
+    pub fn chips(&self) -> Arc<[MetaChip<Val<SC>, C>]> {
+        self.chips.clone()
     }
 
     /// Get the number of public values.
@@ -173,16 +187,18 @@ where
 
     /// setup proving and verifying keys.
     pub fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        let (pk, vk) = self.prover.setup_keys(self.config(), self.chips(), program);
+        let (pk, vk) = self
+            .prover
+            .setup_keys(&self.config(), &self.chips(), program);
 
         (pk, vk)
     }
 
     pub fn commit(&self, record: &C::Record) -> MainTraceCommitments<SC> {
         self.prover.commit_main(
-            self.config(),
+            &self.config(),
             record,
-            self.prover.generate_main(self.chips(), record),
+            self.prover.generate_main(&self.chips(), record),
         )
     }
 
@@ -191,7 +207,7 @@ where
         &self,
         pk: &BaseProvingKey<SC>,
         records: &[C::Record],
-    ) -> Vec<BaseProof<SC>>
+    ) -> Arc<[BaseProof<SC>]>
     where
         C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
     {
@@ -206,9 +222,9 @@ where
                 info!("PERF-chunk={}", i + 1);
 
                 let commitment = self.prover.commit_main(
-                    self.config(),
+                    &self.config(),
                     record,
-                    self.prover.generate_main(self.chips(), record),
+                    self.prover.generate_main(&self.chips(), record),
                 );
                 challenger.observe(commitment.commitment.clone());
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values]);
@@ -223,15 +239,15 @@ where
                 info!("PERF-chunk={}", i + 1);
 
                 self.prover.prove(
-                    self.config(),
-                    self.chips(),
+                    &self.config(),
+                    &self.chips(),
                     pk,
                     &mut challenger.clone(),
                     commitment,
                     records[i].chunk_index(),
                 )
             })
-            .collect::<Vec<_>>()
+            .collect::<Arc<[_]>>()
     }
 
     /// Prove assuming that challenger has already observed pk & main commitments and pv's
@@ -243,8 +259,8 @@ where
         chunk_index: usize,
     ) -> BaseProof<SC> {
         self.prover.prove(
-            self.config(),
-            self.chips(),
+            &self.config(),
+            &self.chips(),
             pk,
             challenger,
             commitment,
@@ -273,8 +289,8 @@ where
         // verify all proofs
         for proof in proofs {
             self.verifier.verify(
-                self.config(),
-                self.chips(),
+                &self.config(),
+                &self.chips(),
                 vk,
                 &mut challenger.clone(),
                 proof,
@@ -301,6 +317,6 @@ where
         proof: &BaseProof<SC>,
     ) -> Result<()> {
         self.verifier
-            .verify(self.config(), self.chips(), vk, challenger, proof)
+            .verify(&self.config(), &self.chips(), vk, challenger, proof)
     }
 }

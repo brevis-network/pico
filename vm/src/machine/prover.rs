@@ -12,6 +12,7 @@ use crate::{
         utils::{compute_quotient_values, order_chips},
     },
 };
+use alloc::sync::Arc;
 use dashmap::DashMap;
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -28,6 +29,14 @@ use tracing::{debug, debug_span, info, instrument, Span};
 
 pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
+}
+
+impl<SC, C> Clone for BaseProver<SC, C> {
+    fn clone(&self) -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
+    }
 }
 
 #[allow(clippy::new_without_default)]
@@ -57,20 +66,22 @@ where
             .enumerate()
             .map(|(i, (name, _))| (name.to_owned(), i))
             .collect::<HashMap<_, _>>();
+        let preprocessed_chip_ordering = Arc::new(preprocessed_chip_ordering);
 
         let pcs = config.pcs();
 
-        let (preprocessed_info, domains_and_preprocessed): (Vec<_>, Vec<_>) =
-            chips_and_preprocessed
-                .iter()
-                .map(|(name, trace)| {
-                    let domain = pcs.natural_domain_for_degree(trace.height());
-                    (
-                        (name.to_owned(), domain, trace.dimensions()),
-                        (domain, trace.to_owned()),
-                    )
-                })
-                .unzip();
+        //let (preprocessed_info, domains_and_preprocessed): (Arc<[_]>, Vec<_>) =
+        let preprocessed_iter = chips_and_preprocessed.iter().map(|(name, trace)| {
+            let domain = pcs.natural_domain_for_degree(trace.height());
+            (name, trace, domain)
+        });
+        let preprocessed_info: Arc<[_]> = preprocessed_iter
+            .clone()
+            .map(|(name, trace, domain)| (name.to_owned(), domain, trace.dimensions()))
+            .collect();
+        let domains_and_preprocessed: Vec<_> = preprocessed_iter
+            .map(|(_, trace, domain)| (domain, trace.to_owned()))
+            .collect();
 
         // Commit to the batch of traces.
         let (commit, preprocessed_prover_data) = pcs.commit(domains_and_preprocessed);
@@ -228,12 +239,13 @@ where
             .iter()
             .enumerate()
             .map(|(i, (name, _))| (name.to_owned(), i))
-            .collect::<HashMap<_, _>>();
+            .collect::<HashMap<_, _>>()
+            .into();
 
         let main_traces = chips_and_main
             .into_iter()
             .map(|(_, trace)| trace)
-            .collect::<Vec<_>>();
+            .collect::<Arc<[_]>>();
 
         info!(
             "PERF-step=commit_main-chunk={}-user_time={}",
@@ -245,7 +257,7 @@ where
             main_chip_ordering,
             commitment,
             data,
-            public_values: record.public_values(),
+            public_values: record.public_values().into(),
         }
     }
 
@@ -363,7 +375,7 @@ where
         let log_main_degrees = main_degrees
             .iter()
             .map(|degree| log2_strict_usize(*degree))
-            .collect::<Vec<_>>();
+            .collect::<Arc<[_]>>();
 
         let main_domains = main_degrees
             .iter()
@@ -419,7 +431,7 @@ where
         let log_quotient_degrees = ordered_chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
-            .collect::<Vec<_>>();
+            .collect::<Arc<[_]>>();
         let quotient_degrees = log_quotient_degrees
             .iter()
             .map(|log_degree| 1 << log_degree)
@@ -609,7 +621,7 @@ where
             .zip_eq(permutation_opened_values)
             .zip_eq(quotient_opened_values)
             .zip_eq(cumulative_sums.clone())
-            .zip_eq(log_main_degrees.clone())
+            .zip_eq(log_main_degrees.iter().copied())
             .enumerate()
             .map(
                 |(i, ((((main, permutation), quotient), cumulative_sum), log_main_degree))| {
@@ -622,7 +634,7 @@ where
                     let (preprocessed_local, preprocessed_next) = preprocessed;
                     let (main_local, main_next) = main;
                     let (permutation_local, permutation_next) = permutation;
-                    ChipOpenedValues {
+                    Arc::new(ChipOpenedValues {
                         preprocessed_local,
                         preprocessed_next,
                         main_local,
@@ -632,10 +644,10 @@ where
                         quotient,
                         cumulative_sum,
                         log_main_degree,
-                    }
+                    })
                 },
             )
-            .collect::<Vec<_>>();
+            .collect::<Arc<[_]>>();
 
         info!(
             "PERF-step=open-chunk={}-user_time={}",

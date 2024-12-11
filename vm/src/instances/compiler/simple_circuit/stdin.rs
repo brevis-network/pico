@@ -30,8 +30,8 @@ where
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub vk: &'a BaseVerifyingKey<SC>,
-    pub machine: &'a BaseMachine<SC, C>,
+    pub vk: BaseVerifyingKey<SC>,
+    pub machine: BaseMachine<SC, C>,
     pub base_proofs: Vec<BaseProof<SC>>,
     pub base_challenger: &'a SC::Challenger,
     pub initial_reconstruct_challenger: SC::Challenger,
@@ -57,9 +57,9 @@ where
     PcsProverData<SC>: Send + Sync,
 {
     pub fn construct(
-        machine: &'a BaseMachine<SC, C>,
+        machine: &BaseMachine<SC, C>,
         reconstruct_challenger: &mut SC::Challenger,
-        vk: &'a BaseVerifyingKey<SC>,
+        vk: &BaseVerifyingKey<SC>,
         base_challenger: &'a mut SC::Challenger,
         base_proof: BaseProof<SC>,
     ) -> Self
@@ -77,8 +77,8 @@ where
         base_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
 
         Self {
-            vk,
-            machine,
+            vk: vk.clone(),
+            machine: machine.clone(),
             base_proofs,
             base_challenger,
             initial_reconstruct_challenger: reconstruct_challenger.clone(),
@@ -96,7 +96,7 @@ where
     type HintVariable = SimpleRecursionStdinVariable<rcf::FieldConfig>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
-        let vk = VerifyingKeyHint::<'a, RiscvSC, A>::read(builder);
+        let vk = VerifyingKeyHint::<RiscvSC, A>::read(builder);
         let base_proofs = Vec::<BaseProofHint<'a, RiscvSC, A>>::read(builder);
         let base_challenger = DuplexChallenger::<rcf::SC_Val, rcf::SC_Perm, 16, 8>::read(builder);
         let initial_reconstruct_challenger =
@@ -115,10 +115,10 @@ where
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let vk_hint = VerifyingKeyHint::<'a, RiscvSC, _>::new(
+        let vk_hint = VerifyingKeyHint::<RiscvSC, _>::new(
             self.machine.chips(),
             self.machine.preprocessed_chip_ids(),
-            self.vk,
+            self.vk.clone(),
         );
 
         let proof_hints = self

@@ -1,6 +1,7 @@
 //! Programs that can be emulated by the Pico zkVM.
 
 use crate::compiler::{program::ProgramBehavior, riscv::instruction::Instruction};
+use alloc::sync::Arc;
 use p3_field::Field;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -14,24 +15,24 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Program {
     /// The instructions of the program.
-    pub instructions: Vec<Instruction>,
+    pub instructions: Arc<[Instruction]>,
     /// The start address of the program.
     pub pc_start: u32,
     /// The base address of the program.
     pub pc_base: u32,
     /// The initial memory image, useful for global constants.
-    pub memory_image: BTreeMap<u32, u32>,
+    pub memory_image: Arc<BTreeMap<u32, u32>>,
 }
 
 impl Program {
     /// Create a new [Program].
     #[must_use]
-    pub const fn new(instructions: Vec<Instruction>, pc_start: u32, pc_base: u32) -> Self {
+    pub fn new(instructions: Vec<Instruction>, pc_start: u32, pc_base: u32) -> Self {
         Self {
-            instructions,
+            instructions: instructions.into(),
             pc_start,
             pc_base,
-            memory_image: BTreeMap::new(),
+            memory_image: BTreeMap::new().into(),
         }
     }
 }
@@ -39,15 +40,6 @@ impl Program {
 impl<F: Field> ProgramBehavior<F> for Program {
     fn pc_start(&self) -> F {
         F::from_canonical_u32(self.pc_start)
-    }
-
-    fn default() -> Self {
-        Self {
-            instructions: Vec::new(),
-            pc_start: 0,
-            pc_base: 0,
-            memory_image: BTreeMap::new(),
-        }
     }
 
     fn clone(&self) -> Self {

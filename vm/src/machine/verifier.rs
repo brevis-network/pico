@@ -22,6 +22,14 @@ pub struct BaseVerifier<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
 }
 
+impl<SC, C> Clone for BaseVerifier<SC, C> {
+    fn clone(&self) -> Self {
+        Self {
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
 impl<SC, C> BaseVerifier<SC, C>
 where
     SC: StarkGenericConfig,
@@ -101,8 +109,11 @@ where
                 (
                     *domain,
                     vec![
-                        (zeta, values.preprocessed_local),
-                        (domain.next_point(zeta).unwrap(), values.preprocessed_next),
+                        (zeta, values.preprocessed_local.clone()),
+                        (
+                            domain.next_point(zeta).unwrap(),
+                            values.preprocessed_next.clone(),
+                        ),
                     ],
                 )
             })

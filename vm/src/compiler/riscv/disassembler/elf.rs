@@ -1,4 +1,5 @@
 use crate::compiler::riscv::{disassembler::transpile, program::Program};
+use alloc::sync::Arc;
 use elf::{
     abi::{EM_RISCV, ET_EXEC, PF_X, PT_LOAD},
     endian::LittleEndian,
@@ -30,7 +31,7 @@ pub struct Elf {
     /// The base address of the program.
     pub(crate) pc_base: u32,
     /// The initial memory image, useful for global constants.
-    pub(crate) memory_image: BTreeMap<u32, u32>,
+    pub(crate) memory_image: Arc<BTreeMap<u32, u32>>,
 }
 
 impl Elf {
@@ -147,11 +148,11 @@ impl Elf {
             instructions,
             pc_start: entry,
             pc_base: base_address,
-            memory_image: image,
+            memory_image: image.into(),
         })
     }
 
-    pub fn compile(&self) -> Program {
+    pub fn compile(&self) -> Arc<Program> {
         // Transpile the RV32IM instructions.
         let instructions = transpile(&self.instructions);
 
@@ -163,5 +164,6 @@ impl Elf {
             pc_base: self.pc_base,
             memory_image: self.memory_image.clone(),
         }
+        .into()
     }
 }

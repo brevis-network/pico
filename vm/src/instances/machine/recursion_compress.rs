@@ -39,7 +39,7 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<'a, RecursionSC, C>>
+impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<RecursionSC, C>>
     for RecursionCompressMachine<RecursionSC, C>
 where
     C: ChipBehavior<
@@ -99,9 +99,9 @@ where
         self.complement_record(&mut records);
 
         #[cfg(feature = "debug")]
-        constraint_debugger.debug_incremental(self.chips(), &records);
+        constraint_debugger.debug_incremental(&self.chips(), &records);
         #[cfg(feature = "debug-lookups")]
-        lookup_debugger.debug_incremental(self.chips(), &records);
+        lookup_debugger.debug_incremental(&self.chips(), &records);
 
         debug!("recursion compress record stats");
         let stats = records[0].stats();
@@ -128,7 +128,7 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(vec![proof]);
+        let proof = MetaProof::new([proof].into());
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
@@ -152,7 +152,7 @@ where
         assert_eq!(proof.num_proofs(), 1);
 
         let public_values: &RecursionPublicValues<_> =
-            proof.proofs[0].public_values.as_slice().borrow();
+            proof.proofs[0].public_values.as_ref().borrow();
         trace!("public values: {:?}", public_values);
 
         // assert completion

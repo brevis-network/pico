@@ -27,16 +27,16 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
     }
 
     fn generate_preprocessed(&self, program: &Program) -> Option<RowMajorMatrix<F>> {
-        let program_memory = program.memory_image.clone();
         // Note that BTreeMap is guaranteed to be sorted by key. This makes the row order
         // deterministic.
-        let rows = program_memory
-            .into_iter()
+        let rows = program
+            .memory_image
+            .iter()
             .map(|(addr, word)| {
                 let mut row = [F::ZERO; NUM_MEMORY_PROGRAM_PREPROCESSED_COLS];
                 let cols: &mut MemoryProgramPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
-                cols.addr = F::from_canonical_u32(addr);
-                cols.value = Word::from(word);
+                cols.addr = F::from_canonical_u32(*addr);
+                cols.value = Word::from(*word);
                 cols.is_real = F::ONE;
                 row
             })

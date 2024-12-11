@@ -108,6 +108,9 @@ pub struct RiscvEmulator {
 
     /// The maximum number of cycles for a syscall.
     pub max_syscall_cycles: u32,
+
+    /// whether or not to log syscalls
+    log_syscalls: bool,
 }
 
 /// The different modes the emulator can run in.
@@ -166,14 +169,14 @@ macro_rules! assert_valid_memory_access {
 
 impl RiscvEmulator {
     #[must_use]
-    pub fn new(program: Program, opts: EmulatorOpts) -> Self {
+    pub fn new(program: Arc<Program>, opts: EmulatorOpts) -> Self {
         Self::with_context(program, opts, EmulatorContext::default())
     }
 
     fn initialize(&mut self) {
         self.state.clk = 0;
         tracing::debug!("loading memory image");
-        for (addr, value) in &self.program.memory_image {
+        for (addr, value) in self.program.memory_image.iter() {
             self.state.memory.insert(
                 *addr,
                 MemoryRecord {
@@ -191,10 +194,11 @@ impl RiscvEmulator {
     ///
     /// This function may panic if it fails to create the trace file if `TRACE_FILE` is set.
     #[must_use]
-    pub fn with_context(program: Program, opts: EmulatorOpts, context: EmulatorContext) -> Self {
-        // Create a shared reference to the program.
-        let program = Arc::new(program);
-
+    pub fn with_context(
+        program: Arc<Program>,
+        opts: EmulatorOpts,
+        context: EmulatorContext,
+    ) -> Self {
         let record = EmulationRecord {
             program: program.clone(),
             ..Default::default()
@@ -207,6 +211,7 @@ impl RiscvEmulator {
             .map(|syscall| syscall.num_extra_cycles())
             .max()
             .unwrap_or(0);
+        let log_syscalls = std::env::var_os("LOG_SYSCALLS").is_some();
 
         Self {
             syscall_map,
@@ -228,6 +233,7 @@ impl RiscvEmulator {
             emulator_mode: EmulatorMode::Simple,
             memory_checkpoint: HashMap::default(),
             max_syscall_cycles,
+            log_syscalls,
         }
     }
 
@@ -339,7 +345,7 @@ impl RiscvEmulator {
     // todo: refactor
     pub fn run_with_stdin(&mut self, stdin: EmulatorStdin<Vec<u8>>) -> Result<(), EmulationError> {
         self.emulator_mode = EmulatorMode::Trace;
-        for input in &stdin.buffer {
+        for input in &*stdin.buffer {
             self.state.input_stream.push(input.clone());
         }
         self.run()
@@ -782,10 +788,12 @@ impl RiscvEmulator {
                     _ => (self.opts.split_opts.deferred, 1),
                 };
                 let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
-                debug!(
-                    ">>syscall_id: {:?}, syscall_count: {:?}, threshold: {:?} nonce: {:?} syscall_lookup_id: {:?}",
-                    syscall_id, syscall_count, threshold, nonce, syscall_lookup_id
-                );
+                if self.log_syscalls {
+                    debug!(
+                        ">>syscall_id: {:?}, syscall_count: {:?}, threshold: {:?} nonce: {:?} syscall_lookup_id: {:?}",
+                        syscall_id, syscall_count, threshold, nonce, syscall_lookup_id
+                    );
+                }
                 self.record.nonce_lookup.insert(syscall_lookup_id, nonce);
                 *syscall_count += 1;
 
@@ -1286,7 +1294,7 @@ impl RiscvEmulator {
 
     /// Recover runtime state from a program and existing emulation state.
     #[must_use]
-    pub fn recover(program: Program, state: RiscvEmulationState, opts: EmulatorOpts) -> Self {
+    pub fn recover(program: Arc<Program>, state: RiscvEmulationState, opts: EmulatorOpts) -> Self {
         let mut runtime = Self::new(program, opts);
         runtime.state = state;
         runtime
@@ -1467,9 +1475,9 @@ impl Default for EmulatorMode {
 }
 
 mod tests {
-    #[allow(unused_imports)]
-    use super::{EmulatorOpts, EmulatorStdin, Program, RiscvEmulator};
+    use super::{Program, RiscvEmulator};
     use crate::compiler::riscv::compiler::{Compiler, SourceType};
+    use alloc::sync::Arc;
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =
@@ -1481,7 +1489,7 @@ mod tests {
     #[must_use]
     #[allow(clippy::unreadable_literal)]
     #[allow(dead_code)]
-    pub fn simple_fibo_program() -> Program {
+    pub fn simple_fibo_program() -> Arc<Program> {
         let compiler = Compiler::new(SourceType::RiscV, FIBONACCI_ELF);
 
         compiler.compile()
@@ -1490,7 +1498,7 @@ mod tests {
     #[must_use]
     #[allow(clippy::unreadable_literal)]
     #[allow(dead_code)]
-    pub fn simple_keccak_program() -> Program {
+    pub fn simple_keccak_program() -> Arc<Program> {
         let compiler = Compiler::new(SourceType::RiscV, KECCAK_ELF);
 
         compiler.compile()

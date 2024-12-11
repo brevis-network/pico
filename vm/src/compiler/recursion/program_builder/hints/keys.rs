@@ -6,31 +6,32 @@ use crate::{
         keys::BaseVerifyingKey,
     },
 };
+use alloc::sync::Arc;
 use p3_air::Air;
 
-pub struct VerifyingKeyHint<'a, SC, C>
+pub struct VerifyingKeyHint<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    pub chips: &'a [MetaChip<SC::Val, C>],
+    pub chips: Arc<[MetaChip<SC::Val, C>]>,
     pub preprocessed_chip_ids: Vec<usize>,
-    pub vk: &'a BaseVerifyingKey<SC>,
+    pub vk: BaseVerifyingKey<SC>,
 }
 
-impl<'a, SC, C> VerifyingKeyHint<'a, SC, C>
+impl<SC, C> VerifyingKeyHint<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
     pub const fn new(
-        chips: &'a [MetaChip<SC::Val, C>],
+        chips: Arc<[MetaChip<SC::Val, C>]>,
         preprocessed_chip_ids: Vec<usize>,
-        vk: &'a BaseVerifyingKey<SC>,
+        vk: BaseVerifyingKey<SC>,
     ) -> Self {
         Self {
             chips,

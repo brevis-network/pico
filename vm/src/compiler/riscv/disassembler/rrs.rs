@@ -1,4 +1,5 @@
 use crate::compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register};
+use alloc::sync::Arc;
 use rrs_lib::{
     instruction_formats::{BType, IType, ITypeCSR, ITypeShamt, JType, RType, SType, UType},
     process_instruction, InstructionProcessor,
@@ -426,12 +427,17 @@ impl InstructionProcessor for InstructionTranspiler {
 ///
 /// This function will return an error if the [`Instruction`] cannot be processed.
 #[must_use]
-pub(crate) fn transpile(instructions_u32: &[u32]) -> Vec<Instruction> {
-    let mut instructions = Vec::new();
+pub(crate) fn transpile(instructions_u32: &[u32]) -> Arc<[Instruction]> {
+    //let mut instructions = Vec::new();
     let mut transpiler = InstructionTranspiler;
-    for instruction_u32 in instructions_u32 {
-        let instruction = process_instruction(&mut transpiler, *instruction_u32).unwrap();
-        instructions.push(instruction);
-    }
-    instructions
+    //for instruction_u32 in instructions_u32 {
+    //    let instruction = process_instruction(&mut transpiler, *instruction_u32).unwrap();
+    //    instructions.push(instruction);
+    //}
+    //instructions;
+    instructions_u32
+        .iter()
+        .copied()
+        .map(|inst| process_instruction(&mut transpiler, inst).unwrap())
+        .collect()
 }

@@ -42,16 +42,16 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<'a, C>
-    MachineBehavior<RecursionSC, C, RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>>
+impl<C> MachineBehavior<RecursionSC, C, RiscvRecursionStdin<RiscvSC, RiscvChipType<Val<RiscvSC>>>>
     for RiscvRecursionMachine<RecursionSC, C>
 where
-    C: ChipBehavior<
+    C: Send
+        + ChipBehavior<
             Val<RecursionSC>,
             Program = RecursionProgram<Val<RecursionSC>>,
             Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+        > + for<'a> Air<ProverConstraintFolder<'a, RecursionSC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, RecursionSC>>,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -107,9 +107,9 @@ where
             self.complement_record(batch_records.as_mut_slice());
 
             #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(self.chips(), &batch_records);
+            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
             #[cfg(feature = "debug-lookups")]
-            lookup_debugger.debug_incremental(self.chips(), &batch_records);
+            lookup_debugger.debug_incremental(&self.chips(), &batch_records);
 
             for record in &mut *batch_records {
                 record.index = chunk_index;
@@ -161,7 +161,7 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(all_proofs);
+        let proof = MetaProof::new(all_proofs.into());
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
@@ -179,7 +179,7 @@ where
 
         for each_proof in proof.proofs().iter() {
             let public_values: &RecursionPublicValues<_> =
-                each_proof.public_values.as_slice().borrow();
+                each_proof.public_values.as_ref().borrow();
 
             trace!("public values: {:?}", public_values);
 

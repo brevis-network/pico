@@ -32,16 +32,15 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
 
         let rows = program
             .instructions
-            .clone()
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(i, instruction)| {
                 let pc = program.pc_base + (i as u32 * 4);
                 let mut row = [F::ZERO; NUM_PROGRAM_PREPROCESSED_COLS];
                 let cols: &mut ProgramPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
                 cols.pc = F::from_canonical_u32(pc);
-                cols.instruction.populate(instruction);
-                cols.selectors.populate(instruction);
+                cols.instruction.populate(*instruction);
+                cols.selectors.populate(*instruction);
 
                 row
             })

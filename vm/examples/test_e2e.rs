@@ -38,7 +38,7 @@ use pico_vm::{
     },
     recursion::runtime::Runtime,
 };
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 use tracing::info;
 
 #[path = "common/parse_args.rs"]
@@ -101,6 +101,7 @@ fn main() {
     info!("Build riscv_compress program (at {:?})..", start.elapsed());
     let riscv_compress_program =
         RiscvCompressVerifierCircuit::<RecursionFC, RiscvBbSC>::build(riscv_machine.base_machine());
+    let riscv_compress_program = Arc::new(riscv_compress_program);
 
     // Setup machine
     info!("Setup recursion machine (at {:?})..", start.elapsed());
@@ -114,12 +115,12 @@ fn main() {
 
     // Setup stdin and witnesses
     info!("Construct recursion stdin and witnesses..");
-    let mut riscv_challenger = DuplexChallenger::new(riscv_machine.config().perm.clone());
+    let riscv_challenger = DuplexChallenger::new(riscv_machine.config().perm.clone());
     let riscv_compress_stdin = EmulatorStdin::setup_for_riscv_compress(
         &riscv_vk,
         riscv_machine.base_machine(),
         riscv_proof.proofs(),
-        &mut riscv_challenger,
+        riscv_challenger,
     );
 
     let riscv_compress_witness = ProvingWitness::setup_for_riscv_recursion(
@@ -157,6 +158,7 @@ fn main() {
     let combine_program = RecursionCombineVerifierCircuit::<RecursionFC, RecursionSC>::build(
         riscv_compress_machine.base_machine(),
     );
+    let combine_program = Arc::new(combine_program);
 
     // Setup machine
     info!("Setup combine machine (at {:?})..", start.elapsed());
@@ -231,9 +233,9 @@ fn main() {
 
     let compress_record = {
         let stdin = RecursionStdin {
-            vk: &combine_vk,
-            machine: combine_machine.base_machine(),
-            proofs: combine_proof.proofs().to_vec(),
+            vk: combine_vk.clone(),
+            machine: combine_machine.base_machine().clone(),
+            proofs: combine_proof.proofs().into(),
             flag_complete: true,
         };
 
@@ -286,9 +288,9 @@ fn main() {
 
     let embed_record = {
         let stdin = RecursionStdin {
-            vk: &compress_vk,
-            machine: compress_machine.base_machine(),
-            proofs: compress_proof.proofs().to_vec(),
+            vk: compress_vk.clone(),
+            machine: compress_machine.base_machine().clone(),
+            proofs: compress_proof.proofs().into(),
             flag_complete: true,
         };
 
@@ -312,12 +314,8 @@ fn main() {
     };
 
     // todo: consider simplify in the future. currently Vec<u8> is not necessary
-    let embed_witness: ProvingWitness<
-        '_,
-        EmbedSC,
-        RecursionChipType<BabyBear, EMBED_DEGREE>,
-        Vec<u8>,
-    > = ProvingWitness::setup_with_records(vec![embed_record]);
+    let embed_witness: ProvingWitness<EmbedSC, RecursionChipType<BabyBear, EMBED_DEGREE>, Vec<u8>> =
+        ProvingWitness::setup_with_records(vec![embed_record]);
 
     // Setup machine
     info!("Setup embed machine (at {:?})..", start.elapsed());

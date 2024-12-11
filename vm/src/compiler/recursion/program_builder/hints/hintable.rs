@@ -28,6 +28,7 @@ use crate::{
     primitives::consts::{PERMUTATION_RATE, PV_DIGEST_NUM_WORDS},
     recursion::air::Block,
 };
+use alloc::sync::Arc;
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
@@ -226,7 +227,7 @@ impl Hintable<rcf::FieldConfig> for Vec<usize> {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for Vec<rcf::SC_Val> {
+impl Hintable<rcf::FieldConfig> for &[rcf::SC_Val] {
     type HintVariable = Array<rcf::FieldConfig, Felt<rcf::SC_Val>>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
@@ -235,6 +236,18 @@ impl Hintable<rcf::FieldConfig> for Vec<rcf::SC_Val> {
 
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         vec![self.iter().map(|x| Block::from(*x)).collect()]
+    }
+}
+
+impl Hintable<rcf::FieldConfig> for Vec<rcf::SC_Val> {
+    type HintVariable = Array<rcf::FieldConfig, Felt<rcf::SC_Val>>;
+
+    fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
+        builder.hint_felts()
+    }
+
+    fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
+        self.as_slice().write()
     }
 }
 
@@ -323,7 +336,7 @@ impl Hintable<rcf::FieldConfig> for ChipOpenedValues<rcf::SC_Challenge> {
     }
 }
 
-impl Hintable<rcf::FieldConfig> for Vec<ChipOpenedValues<rcf::SC_Challenge>> {
+impl Hintable<rcf::FieldConfig> for &[Arc<ChipOpenedValues<rcf::SC_Challenge>>] {
     type HintVariable = Array<rcf::FieldConfig, ChipOpenedValuesVariable<rcf::FieldConfig>>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
@@ -355,16 +368,14 @@ impl Hintable<rcf::FieldConfig> for BaseOpenedValues<rcf::SC_Challenge> {
     type HintVariable = BaseOpenedValuesVariable<rcf::FieldConfig>;
 
     fn read(builder: &mut Builder<rcf::FieldConfig>) -> Self::HintVariable {
-        let chips_opened_values = Vec::<ChipOpenedValues<rcf::SC_Challenge>>::read(builder);
+        let chips_opened_values = <&[Arc<ChipOpenedValues<rcf::SC_Challenge>>]>::read(builder);
         BaseOpenedValuesVariable {
             chips_opened_values,
         }
     }
 
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
-        let mut stream = Vec::new();
-        stream.extend(self.chips_opened_values.write());
-        stream
+        self.chips_opened_values.as_ref().write()
     }
 }
 
@@ -428,7 +439,7 @@ impl Hintable<rcf::FieldConfig> for DuplexChallenger<rcf::SC_Val, rcf::SC_Perm, 
     }
 }
 
-impl<'a, C: ChipBehavior<BabyBear>> Hintable<rcf::FieldConfig> for VerifyingKeyHint<'a, RiscvSC, C>
+impl<C: ChipBehavior<BabyBear>> Hintable<rcf::FieldConfig> for VerifyingKeyHint<RiscvSC, C>
 where
     C: ChipBehavior<BabyBear>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
@@ -451,7 +462,7 @@ where
 
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let (preprocessed_sorted_idxs, prep_domains) =
-            get_preprocessed_data(self.chips, &self.preprocessed_chip_ids, self.vk);
+            get_preprocessed_data(&self.chips, &self.preprocessed_chip_ids, &self.vk);
 
         let mut stream = Vec::new();
         let h: rcf::SC_Digest = self.vk.commit.into();
@@ -491,14 +502,14 @@ where
     }
 
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
-        let quotient_data = get_chip_quotient_data(self.chips, self.proof);
-        let sorted_indices = get_sorted_indices(self.chips, self.proof);
+        let quotient_data = get_chip_quotient_data(&self.chips, self.proof);
+        let sorted_indices = get_sorted_indices(&self.chips, self.proof);
 
         [
             self.proof.commitments.write(),
             self.proof.opened_values.write(),
             self.proof.opening_proof.write(),
-            self.proof.public_values.write(),
+            self.proof.public_values.as_ref().write(),
             quotient_data.write(),
             sorted_indices.write(),
         ]

@@ -40,8 +40,9 @@ where
 
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
 where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
+    SC: Send + StarkGenericConfig,
+    C: Send
+        + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
     Com<SC>: Send + Sync,
@@ -139,9 +140,9 @@ where
             self.complement_record(batch_records);
 
             #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(self.chips(), &batch_records);
+            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
             #[cfg(feature = "debug-lookups")]
-            lookup_debugger.debug_incremental(self.chips(), &batch_records);
+            lookup_debugger.debug_incremental(&self.chips(), &batch_records);
 
             let batch_main_commitments = batch_records
                 .into_par_iter()
@@ -177,7 +178,7 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(all_proofs);
+        let proof = MetaProof::new(all_proofs.into());
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
@@ -209,7 +210,7 @@ where
 
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
-                each_proof.public_values.as_slice().borrow();
+                each_proof.public_values.as_ref().borrow();
 
             // beginning constraints
             if i == 0 && !each_proof.includes_chip("Cpu") {

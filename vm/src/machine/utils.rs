@@ -363,7 +363,6 @@ pub fn assert_vk_digest<SC: StarkGenericConfig>(
 ) where
     <SC as StarkGenericConfig>::Val: PartialEq<BabyBear>,
 {
-    let public_values: &RecursionPublicValues<_> =
-        proof.proofs[0].public_values.as_slice().borrow();
+    let public_values: &RecursionPublicValues<_> = proof.proofs[0].public_values.as_ref().borrow();
     assert_eq!(public_values.riscv_vk_digest, riscv_vk.hash_babybear());
 }

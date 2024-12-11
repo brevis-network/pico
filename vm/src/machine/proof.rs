@@ -1,5 +1,5 @@
 use crate::configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig};
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use hashbrown::HashMap;
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ where
     SC: StarkGenericConfig,
 {
     /// The proof that impls ProofBehavior
-    pub proofs: Vec<BaseProof<SC>>,
+    pub proofs: Arc<[BaseProof<SC>]>,
 }
 
 impl<SC> MetaProof<SC>
@@ -20,8 +20,10 @@ where
     SC: StarkGenericConfig,
 {
     /// Create a new MetaProof
-    pub fn new(proofs: Vec<BaseProof<SC>>) -> Self {
-        Self { proofs }
+    pub fn new(proofs: Arc<[BaseProof<SC>]>) -> Self {
+        Self {
+            proofs: proofs.into(),
+        }
     }
 
     /// Get the number of the proof and config
@@ -31,7 +33,7 @@ where
 
     /// Get the proofs
     pub fn proofs(&self) -> &[BaseProof<SC>] {
-        self.proofs.as_slice()
+        self.proofs.as_ref()
     }
 
     /// Get the number of proofs
@@ -48,10 +50,10 @@ pub struct BaseProof<SC: StarkGenericConfig> {
     pub commitments: BaseCommitments<Com<SC>>,
     pub opened_values: BaseOpenedValues<SC::Challenge>,
     pub opening_proof: PcsProof<SC>,
-    pub log_main_degrees: Vec<usize>,
-    pub log_quotient_degrees: Vec<usize>,
-    pub main_chip_ordering: HashMap<String, usize>,
-    pub public_values: Vec<SC::Val>,
+    pub log_main_degrees: Arc<[usize]>,
+    pub log_quotient_degrees: Arc<[usize]>,
+    pub main_chip_ordering: Arc<HashMap<String, usize>>,
+    pub public_values: Arc<[SC::Val]>,
 }
 
 impl<SC: StarkGenericConfig> BaseProof<SC> {
@@ -86,16 +88,16 @@ pub struct BaseCommitments<Com> {
 }
 
 pub struct MainTraceCommitments<SC: StarkGenericConfig> {
-    pub main_traces: Vec<RowMajorMatrix<SC::Val>>,
-    pub main_chip_ordering: HashMap<String, usize>,
+    pub main_traces: Arc<[RowMajorMatrix<SC::Val>]>,
+    pub main_chip_ordering: Arc<HashMap<String, usize>>,
     pub commitment: Com<SC>,
     pub data: PcsProverData<SC>,
-    pub public_values: Vec<SC::Val>,
+    pub public_values: Arc<[SC::Val]>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BaseOpenedValues<Challenge> {
-    pub chips_opened_values: Vec<ChipOpenedValues<Challenge>>,
+    pub chips_opened_values: Arc<[Arc<ChipOpenedValues<Challenge>>]>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -109,7 +109,7 @@ where
                 builder,
                 &vk,
                 pcs,
-                machine.chips(),
+                &machine.chips(),
                 &machine.preprocessed_chip_ids(),
                 &mut challenger,
                 &proof,

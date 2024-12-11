@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
 use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
+use p3_challenger::CanObserve;
 use pico_vm::{
     compiler::{
         recursion::program_builder::hints::hintable::Hintable,
@@ -35,9 +35,9 @@ mod parse_args;
 // todo: refactor the whole test
 
 pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
-    machine: &'a SimpleMachine<RiscvSC, RiscvChipType<BabyBear>>,
+    machine: &SimpleMachine<RiscvSC, RiscvChipType<BabyBear>>,
     reconstruct_challenger: &mut <RiscvSC as StarkGenericConfig>::Challenger,
-    vk: &'a BaseVerifyingKey<RiscvSC>,
+    vk: &BaseVerifyingKey<RiscvSC>,
     base_challenger: &'a mut <RiscvSC as StarkGenericConfig>::Challenger,
     base_proof: BaseProof<RiscvSC>,
 ) -> SimpleRecursionStdin<'a, RiscvSC, RiscvChipType<BabyBear>> {
@@ -50,8 +50,8 @@ pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
     base_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
 
     let stdin = SimpleRecursionStdin {
-        vk,
-        machine: machine.base_machine(),
+        vk: vk.clone(),
+        machine: machine.base_machine().clone(),
         base_proofs: vec![base_proof.clone()],
         base_challenger,
         initial_reconstruct_challenger: reconstruct_challenger.clone(),
@@ -64,7 +64,7 @@ pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
 fn main() {
     setup_logger();
 
-    let (elf, stdin, step, field) = parse_args::parse_args();
+    let (elf, stdin, step, _field) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("\n Creating Program..");

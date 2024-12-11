@@ -34,7 +34,7 @@ fn main() {
     );
 
     emulator.emulator_mode = EmulatorMode::Trace;
-    for input in &stdin.buffer {
+    for input in &*stdin.buffer {
         emulator.state.input_stream.push(input.clone());
     }
 

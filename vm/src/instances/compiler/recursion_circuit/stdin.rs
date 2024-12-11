@@ -23,20 +23,21 @@ use crate::{
     },
     recursion::{air::Block, runtime::RecursionRecord},
 };
+use alloc::sync::Arc;
 use p3_air::Air;
 use pico_derive::DslVariable;
 
 #[derive(Clone)]
-pub struct RecursionStdin<'a, SC, C>
+pub struct RecursionStdin<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    pub vk: &'a BaseVerifyingKey<SC>,
-    pub machine: &'a BaseMachine<SC, C>,
-    pub proofs: Vec<BaseProof<SC>>,
+    pub vk: BaseVerifyingKey<SC>,
+    pub machine: BaseMachine<SC, C>,
+    pub proofs: Arc<[BaseProof<SC>]>,
     pub flag_complete: bool,
 }
 
@@ -47,7 +48,7 @@ pub struct RecursionStdinVariable<FC: FieldGenericConfig> {
     pub flag_complete: Var<FC::N>,
 }
 
-impl<'a, C> Hintable<RecursionFC> for RecursionStdin<'a, RecursionSC, C>
+impl<'a, C> Hintable<RecursionFC> for RecursionStdin<RecursionSC, C>
 where
     C: ChipBehavior<
             Val<RecursionSC>,
@@ -59,7 +60,7 @@ where
     type HintVariable = RecursionStdinVariable<RecursionFC>;
 
     fn read(builder: &mut Builder<RecursionFC>) -> Self::HintVariable {
-        let vk = VerifyingKeyHint::<'a, RecursionSC, C>::read(builder);
+        let vk = VerifyingKeyHint::<RecursionSC, C>::read(builder);
         let proofs = Vec::<BaseProofHint<'a, RecursionSC, C>>::read(builder);
         let flag_complete = builder.hint_var();
 
@@ -73,10 +74,10 @@ where
     fn write(&self) -> Vec<Vec<Block<<RecursionFC as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
 
-        let vk_hint = VerifyingKeyHint::<'a, RecursionSC, _>::new(
+        let vk_hint = VerifyingKeyHint::<RecursionSC, _>::new(
             self.machine.chips(),
             self.machine.preprocessed_chip_ids(),
-            self.vk,
+            self.vk.clone(),
         );
 
         let proof_hints = self

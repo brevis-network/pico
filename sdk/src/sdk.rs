@@ -56,6 +56,8 @@ use pico_vm::{
     recursion::runtime::Runtime,
 };
 
+use std::sync::Arc;
+
 type CombineMachine =
     RecursionCombineMachine<BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>>;
 
@@ -76,19 +78,19 @@ struct ProvingKeys<SC: StarkGenericConfig> {
 pub struct SDKProverClient {
     stdin: EmulatorStdin<Vec<u8>>,
 
-    riscv_program: Program,
+    riscv_program: Arc<Program>,
     riscv_machine: RiscvMachine<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
 
-    riscv_compress_program: RecursionProgram<BabyBear>,
+    riscv_compress_program: Arc<RecursionProgram<BabyBear>>,
     riscv_compress_machine: RiscvCompressMachine,
 
-    combine_program: RecursionProgram<BabyBear>,
+    combine_program: Arc<RecursionProgram<BabyBear>>,
     combine_machine: CombineMachine,
 
-    compress_program: RecursionProgram<BabyBear>,
+    compress_program: Arc<RecursionProgram<BabyBear>>,
     compress_machine: CompressMachine,
 
-    embed_program: RecursionProgram<BabyBear>,
+    embed_program: Arc<RecursionProgram<BabyBear>>,
     embed_machine: EmbedMachine,
 }
 
@@ -98,11 +100,12 @@ impl SDKProverClient {
             RiscvMachine::new(RiscvSC::new(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
 
         let riscv_compiler = Compiler::new(SourceType::RiscV, elf.as_slice());
-        let riscv_program = riscv_compiler.compile();
+        let riscv_program = riscv_compiler.compile().into();
 
         let riscv_compress_program = RiscvCompressVerifierCircuit::<RecursionFC, RiscvSC>::build(
             riscv_machine.base_machine(),
-        );
+        )
+        .into();
         let riscv_compress_machine = RiscvRecursionMachine::new(
             RecursionSC::new(),
             RecursionChipType::<BabyBear, RISCV_COMPRESS_DEGREE>::all_chips(),
@@ -111,7 +114,8 @@ impl SDKProverClient {
 
         let combine_program = RecursionCombineVerifierCircuit::<RecursionFC, RecursionSC>::build(
             riscv_compress_machine.base_machine(),
-        );
+        )
+        .into();
         let combine_machine = RecursionCombineMachine::new(
             RecursionSC::new(),
             RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
@@ -120,7 +124,8 @@ impl SDKProverClient {
 
         let compress_program = RecursionCompressVerifierCircuit::<RecursionFC, RecursionSC>::build(
             combine_machine.base_machine(),
-        );
+        )
+        .into();
         let compress_machine = RecursionCompressMachine::new(
             RecursionSC::compress(),
             RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
@@ -129,7 +134,8 @@ impl SDKProverClient {
 
         let embed_program = RecursionEmbedVerifierCircuit::<RecursionFC, RecursionSC>::build(
             compress_machine.base_machine(),
-        );
+        )
+        .into();
         let embed_machine = RecursionEmbedMachine::new(
             EmbedSC::new(),
             RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
@@ -212,7 +218,7 @@ impl SDKProverClient {
     pub fn dry_run(&self) {
         let mut emulator =
             RiscvEmulator::new(self.riscv_program.clone(), EmulatorOpts::test_opts());
-        for input in &self.stdin.buffer {
+        for input in &*self.stdin.buffer {
             emulator.state.input_stream.push(input.clone());
         }
         emulator.run_fast().expect("dry run program failed");
@@ -259,12 +265,12 @@ impl SDKProverClient {
         let (compress_pk, compress_vk) = self
             .riscv_compress_machine
             .setup_keys(&self.riscv_compress_program);
-        let mut riscv_challenger = DuplexChallenger::new(self.riscv_machine.config().perm.clone());
+        let riscv_challenger = DuplexChallenger::new(self.riscv_machine.config().perm.clone());
         let riscv_compress_stdin = EmulatorStdin::setup_for_riscv_compress(
             riscv_vk,
             self.riscv_machine.base_machine(),
             riscv_proof.proofs(),
-            &mut riscv_challenger,
+            riscv_challenger,
         );
 
         let riscv_compress_witness = ProvingWitness::setup_for_riscv_recursion(
@@ -297,9 +303,9 @@ impl SDKProverClient {
 
         let compress_record = {
             let stdin = RecursionStdin {
-                vk: &combine_vk,
-                machine: self.combine_machine.base_machine(),
-                proofs: combine_proof.proofs().to_vec(),
+                vk: combine_vk.clone(),
+                machine: self.combine_machine.base_machine().clone(),
+                proofs: combine_proof.proofs().into(),
                 flag_complete: true,
             };
 
@@ -343,9 +349,9 @@ impl SDKProverClient {
 
         let embed_record = {
             let stdin = RecursionStdin {
-                vk: &compress_vk,
-                machine: self.compress_machine.base_machine(),
-                proofs: compress_proof.proofs().to_vec(),
+                vk: compress_vk.clone(),
+                machine: self.compress_machine.base_machine().clone(),
+                proofs: compress_proof.proofs().into(),
                 flag_complete: true,
             };
 
@@ -371,7 +377,6 @@ impl SDKProverClient {
         };
 
         let embed_witness: ProvingWitness<
-            '_,
             EmbedSC,
             RecursionChipType<BabyBear, EMBED_DEGREE>,
             Vec<u8>,

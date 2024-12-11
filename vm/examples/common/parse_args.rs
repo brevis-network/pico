@@ -33,7 +33,7 @@ struct Args {
 
 pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String, String) {
     let args = Args::parse();
-    let mut stdin = EmulatorStdin::default();
+    let mut stdin = EmulatorStdin::new_builder();
 
     let elf: &[u8];
     if args.elf == "fibonacci" || args.elf == "fib" || args.elf == "f" {
@@ -92,5 +92,5 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String, String) {
         std::process::exit(1);
     }
 
-    (elf, stdin, args.step, args.field)
+    (elf, stdin.finalize(), args.step, args.field)
 }

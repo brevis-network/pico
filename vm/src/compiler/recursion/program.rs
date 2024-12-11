@@ -16,13 +16,6 @@ impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
         F::ZERO
     }
 
-    fn default() -> Self {
-        Self {
-            instructions: Vec::new(),
-            traces: Vec::new(),
-        }
-    }
-
     fn clone(&self) -> Self {
         Self {
             instructions: self.instructions.clone(),
