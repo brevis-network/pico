@@ -1,9 +1,8 @@
 use crate::{
     chips::chips::poseidon2_wide_v2::WIDTH,
-    primitives::consts::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY},
+    primitives::consts::POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY,
 };
 use p3_field::{FieldAlgebra, PrimeField32};
-use p3_poseidon2::matmul_internal;
 
 pub fn apply_m_4<AF>(x: &mut [AF])
 where
@@ -46,14 +45,29 @@ pub(crate) fn external_linear_layer_immut<AF: FieldAlgebra + Copy>(
 }
 
 pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
-    let matmul_constants: [<F as FieldAlgebra>::F; WIDTH] =
-        POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
-            .iter()
-            .map(|x| <F as FieldAlgebra>::F::from_wrapped_u32(x.as_canonical_u32()))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-    matmul_internal(state, matmul_constants);
-    let monty_inverse = F::from_wrapped_u32(MONTY_INVERSE.as_canonical_u32());
-    state.iter_mut().for_each(|i| *i *= monty_inverse.clone());
+    let part_sum: F = state[1..].iter().cloned().sum();
+    let full_sum = part_sum.clone() + state[0].clone();
+
+    // The first three diagonal elements are -2, 1, 2 so we do something custom.
+    state[0] = part_sum - state[0].clone();
+    state[1] = full_sum.clone() + state[1].clone();
+    state[2] = full_sum.clone() + state[2].double();
+
+    let matmul_constants: [F; WIDTH] = POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
+        .iter()
+        .map(|x| F::from_wrapped_u32(x.as_canonical_u32()))
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+
+    // For the remaining elements we use multiplication.
+    // This could probably be improved slightly by making use of the
+    // mul_2exp_u64 and div_2exp_u64 but this would involve porting div_2exp_u64 to FieldAlgebra.
+    state
+        .iter_mut()
+        .zip(matmul_constants)
+        .skip(3)
+        .for_each(|(val, diag_elem)| {
+            *val = full_sum.clone() + val.clone() * diag_elem;
+        });
 }
