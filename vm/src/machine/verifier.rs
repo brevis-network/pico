@@ -4,11 +4,12 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::VerifierConstraintFolder,
         keys::BaseVerifyingKey,
+        lookup::LookupScope,
         proof::{BaseCommitments, BaseProof},
         utils::order_chips,
     },
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use itertools::{izip, Itertools};
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
@@ -51,6 +52,7 @@ where
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,
+        global_permutation_challenges: &[SC::Challenge],
     ) -> Result<()> {
         let BaseProof {
             commitments,
@@ -63,26 +65,67 @@ where
         } = proof;
 
         let ordered_chips = order_chips::<SC, C>(chips, main_chip_ordering).collect::<Vec<_>>();
+        let chip_scopes = ordered_chips
+            .iter()
+            .map(|chip| chip.lookup_scope())
+            .collect::<Vec<_>>();
 
         let pcs = config.pcs();
 
         let BaseCommitments {
-            main_commit,
+            global_main_commit,
+            regional_main_commit,
             permutation_commit,
             quotient_commit,
         } = commitments;
 
-        // get permutation challenges
-        let permutation_challenges = (0..2)
+        challenger.observe(regional_main_commit.clone());
+
+        let regional_permutation_challenges = (0..2)
             .map(|_| challenger.sample_ext_element::<SC::Challenge>())
             .collect::<Vec<_>>();
 
-        debug!(
-            "VERIFIER: permutation challenges: {:?}",
-            permutation_challenges
-        );
-
         challenger.observe(permutation_commit.clone());
+
+        // Observe the cumulative sums and constrain any sum without a corresponding scope to be
+        // zero.
+        for (opening, chip) in opened_values
+            .chips_opened_values
+            .iter()
+            .zip_eq(ordered_chips.iter())
+        {
+            let global_sum = opening.global_cumulative_sum;
+            let regional_sum = opening.regional_cumulative_sum;
+            challenger.observe_slice(global_sum.as_base_slice());
+            challenger.observe_slice(regional_sum.as_base_slice());
+
+            let has_global_lookups = chip
+                .looking
+                .iter()
+                .chain(chip.looked.iter())
+                .any(|i| i.scope == LookupScope::Global);
+            if !has_global_lookups && !global_sum.is_zero() {
+                bail!(
+                    "chip-{}: has_global_lookups = {}, global_sum_is_zero = {}, global cumulative sum is non-zero, but no global interactions",
+                    chip.name(),
+                    has_global_lookups,
+                    global_sum.is_zero(),
+                );
+            }
+            let has_regional_lookups = chip
+                .looking
+                .iter()
+                .chain(chip.looked.iter())
+                .any(|i| i.scope == LookupScope::Regional);
+            if !has_regional_lookups && !regional_sum.is_zero() {
+                bail!(
+                    "chip-{}: has_regional_lookups = {}, regional_sum_is_zero = {}, regional cumulative sum is non-zero, but no local interactions",
+                    chip.name(),
+                    has_regional_lookups,
+                    regional_sum.is_zero(),
+                );
+            }
+        }
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
 
@@ -173,21 +216,50 @@ where
             })
             .collect::<Vec<_>>();
 
-        // verify openings
-        pcs.verify(
+        // Split the main_domains_points_and_opens to the global and local chips.
+        let mut global_trace_points_and_openings = Vec::new();
+        let mut local_trace_points_and_openings = Vec::new();
+        for (i, points_and_openings) in main_domains_and_opens.clone().into_iter().enumerate() {
+            let scope = chip_scopes[i];
+            if scope == LookupScope::Global {
+                global_trace_points_and_openings.push(points_and_openings);
+            } else {
+                local_trace_points_and_openings.push(points_and_openings);
+            }
+        }
+
+        let rounds = if !global_trace_points_and_openings.is_empty() {
             vec![
                 (vk.commit.clone(), preprocessed_domains_points_and_opens),
-                (main_commit.clone(), main_domains_and_opens),
+                (global_main_commit.clone(), global_trace_points_and_openings),
+                (
+                    regional_main_commit.clone(),
+                    local_trace_points_and_openings,
+                ),
                 (
                     permutation_commit.clone(),
                     permutation_domains_points_and_opens,
                 ),
                 (quotient_commit.clone(), quotient_domains_and_opens),
-            ],
-            opening_proof,
-            challenger,
-        )
-        .map_err(|e| anyhow!("{e:?}"))?;
+            ]
+        } else {
+            vec![
+                (vk.commit.clone(), preprocessed_domains_points_and_opens),
+                (
+                    regional_main_commit.clone(),
+                    local_trace_points_and_openings,
+                ),
+                (
+                    permutation_commit.clone(),
+                    permutation_domains_points_and_opens,
+                ),
+                (quotient_commit.clone(), quotient_domains_and_opens),
+            ]
+        };
+
+        // verify openings
+        pcs.verify(rounds, opening_proof, challenger)
+            .map_err(|e| anyhow!("{e:?}"))?;
 
         for (chip, main_domain, quotient_chunk_domain, log_quotient_degree, values) in izip!(
             ordered_chips.iter(),
@@ -273,12 +345,20 @@ where
                 RowMajorMatrixView::new_row(&perm_next_ext),
             );
 
+            let perm_challenges = &global_permutation_challenges
+                .iter()
+                .chain(regional_permutation_challenges.iter())
+                .copied()
+                .collect::<Vec<_>>();
+
+            let cumulative_sums = [values.global_cumulative_sum, values.regional_cumulative_sum];
+            let cumulative_sums = cumulative_sums.as_slice();
             let mut folder = VerifierConstraintFolder {
                 preprocessed,
                 main,
                 perm,
-                perm_challenges: &permutation_challenges,
-                cumulative_sum: values.cumulative_sum,
+                perm_challenges,
+                cumulative_sums,
                 public_values,
                 is_first_row: sels.is_first_row,
                 is_last_row: sels.is_last_row,

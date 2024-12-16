@@ -5,9 +5,9 @@ use crate::{
 use p3_fri::{BatchOpening, CommitPhaseProofStep, FriProof, QueryProof};
 use p3_symmetric::Hash;
 
-/// A configuration for field_config, with BabyBear field and Poseidon2 hash
+/// A configuration for recursion, with BabyBear field and Poseidon2 hash
 
-// Each field_config config mod should have public types with the same names as below.
+// Each recursion config mod should have public types with the same names as below.
 
 pub type FieldConfig = bb_simple::BabyBearSimple;
 pub type StarkConfig = bb_poseidon2::BabyBearPoseidon2;

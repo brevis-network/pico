@@ -28,12 +28,9 @@ use crate::{
         configs::recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
     },
     machine::machine::BaseMachine,
-    primitives::{
-        consts::{
-            ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
-            RISCV_COMPRESS_DEGREE,
-        },
-        types::RecursionProgramType,
+    primitives::consts::{
+        ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
+        RISCV_COMPRESS_DEGREE,
     },
     recursion::air::RecursionPublicValues,
 };
@@ -57,7 +54,7 @@ impl RecursionCombineVerifierCircuit<RecursionFC, RecursionSC> {
             RecursionChipType<Val<RecursionSC>, RISCV_COMPRESS_DEGREE>,
         >,
     ) -> RecursionProgram<Val<RecursionSC>> {
-        let mut builder = Builder::<RecursionFC>::new(RecursionProgramType::Combine);
+        let mut builder = Builder::<RecursionFC>::new();
 
         let stdin: RecursionStdinVariable<_> = builder.uninit();
         RecursionStdin::<RecursionSC, RecursionChipType<Val<RecursionSC>, RISCV_COMPRESS_DEGREE>>::witness(

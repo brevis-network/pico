@@ -2,6 +2,7 @@ mod arithmetic;
 mod bits;
 mod builder;
 mod collections;
+pub mod compiler;
 mod fold;
 mod instructions;
 mod poseidon;

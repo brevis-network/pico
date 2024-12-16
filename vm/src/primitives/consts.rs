@@ -10,7 +10,6 @@ use std::mem::size_of;
 /*
 For word and bytes
  */
-use crate::recursion::air::RecursionPublicValues;
 
 /// The size of a byte in bits.
 pub const BYTE_SIZE: usize = 8;
@@ -29,7 +28,7 @@ pub const MAX_NUM_PVS: usize = 370;
 
 pub const RISCV_NUM_PVS: usize = size_of::<PublicValues<Word<u8>, u8>>();
 
-pub const RECURSION_NUM_PVS: usize = size_of::<RecursionPublicValues<u8>>();
+pub const RECURSION_NUM_PVS: usize = size_of::<crate::recursion::air::RecursionPublicValues<u8>>();
 
 /*
 For Extensions
@@ -67,7 +66,13 @@ pub const TEST_CHUNK_BATCH_SIZE: usize = 2;
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 
 /*
-For field_config
+For RiscV
+ */
+pub const MAX_LOG_NUMBER_OF_CHUNKS: usize = 16;
+pub const MAX_NUMBER_OF_CHUNKS: usize = 1 << MAX_LOG_NUMBER_OF_CHUNKS;
+
+/*
+For recursion
  */
 
 pub const COMBINE_SIZE: usize = 2;

@@ -15,7 +15,7 @@ use crate::{
         },
     },
     configs::config::FieldGenericConfig,
-    primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
+    primitives::consts::DIGEST_SIZE,
 };
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
@@ -118,20 +118,12 @@ pub fn verify_two_adic_pcs<FC: FieldGenericConfig>(
                         let two_adic_generator = config.get_two_adic_generator(builder, log_height);
                         builder.cycle_tracker("exp_reverse_bits_len");
 
-                        let two_adic_generator_exp: Felt<FC::F> =
-                            if matches!(builder.program_type, RecursionProgramType::Embed) {
-                                builder.exp_reverse_bits_len(
-                                    two_adic_generator,
-                                    &index_bits_shifted,
-                                    log_height,
-                                )
-                            } else {
-                                builder.exp_reverse_bits_len_fast(
-                                    two_adic_generator,
-                                    &index_bits_shifted,
-                                    log_height,
-                                )
-                            };
+                        let two_adic_generator_exp: Felt<FC::F> = builder
+                            .exp_reverse_bits_len_fast(
+                                two_adic_generator,
+                                &index_bits_shifted,
+                                log_height,
+                            );
 
                         builder.cycle_tracker("exp_reverse_bits_len");
                         let x: Felt<FC::F> = builder.eval(two_adic_generator_exp * g);

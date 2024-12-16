@@ -1,17 +1,17 @@
 use crate::{
-    configs::config::{SimpleFriConfig, StarkGenericConfig},
-    primitives::{pico_poseidon2bb_init, PicoPoseidon2BabyBear},
+    configs::config::{Com, SimpleFriConfig, StarkGenericConfig, ZeroCommitment},
+    primitives::{consts::DIGEST_SIZE, pico_poseidon2bb_init, PicoPoseidon2BabyBear},
 };
+use log::info;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use p3_commit::{ExtensionMmcs, Pcs};
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::BinomialExtensionField, Field};
+use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
 use p3_fri::{FriConfig, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
-use tracing::info;
 
 pub type SC_Val = BabyBear;
 pub type SC_Perm = PicoPoseidon2BabyBear;
@@ -25,6 +25,7 @@ pub type SC_ChallengeMmcs = ExtensionMmcs<SC_Val, SC_Challenge, SC_ValMmcs>;
 pub type SC_Challenger = DuplexChallenger<SC_Val, SC_Perm, 16, 8>;
 pub type SC_Dft = Radix2DitParallel<SC_Val>;
 pub type SC_Pcs = TwoAdicFriPcs<SC_Val, SC_Dft, SC_ValMmcs, SC_ChallengeMmcs>;
+pub type SC_DigestHash = p3_symmetric::Hash<SC_Val, SC_Val, DIGEST_SIZE>;
 
 pub struct BabyBearPoseidon2 {
     pub perm: SC_Perm,
@@ -144,5 +145,11 @@ impl StarkGenericConfig for BabyBearPoseidon2 {
 
     fn name(&self) -> String {
         "BabyBearPoseidon2".to_string()
+    }
+}
+
+impl ZeroCommitment<BabyBearPoseidon2> for SC_Pcs {
+    fn zero_commitment(&self) -> Com<BabyBearPoseidon2> {
+        SC_DigestHash::from([SC_Val::ZERO; DIGEST_SIZE])
     }
 }

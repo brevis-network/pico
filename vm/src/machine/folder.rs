@@ -9,7 +9,7 @@ use crate::{
         },
         lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
     },
-    primitives::consts::MAX_NUM_PVS,
+    primitives::consts_v2::MAX_NUM_PVS_V2,
 };
 use p3_air::{AirBuilder, ExtensionBuilder, PairBuilder};
 use p3_field::{ExtensionField, Field, FieldAlgebra};
@@ -56,7 +56,7 @@ impl<F: Field> SymbolicConstraintFolder<F> {
             })
             .collect();
 
-        let public_values = (0..MAX_NUM_PVS)
+        let public_values = (0..MAX_NUM_PVS_V2)
             .map(move |index| SymbolicVariable::new(Entry::Public, index))
             .collect();
 
@@ -131,8 +131,12 @@ impl<F: Field> LookupBuilder<SymbolicLookup<SymbolicExpression<F>>>
 
         let multiplicity = symbolic_to_virtual_pair(&message.multiplicity);
 
-        self.looking
-            .push(VirtualPairLookup::new(values, multiplicity, message.kind));
+        self.looking.push(VirtualPairLookup::new(
+            values,
+            multiplicity,
+            message.kind,
+            message.scope,
+        ));
     }
 
     fn looked(&mut self, message: SymbolicLookup<SymbolicExpression<F>>) {
@@ -144,8 +148,12 @@ impl<F: Field> LookupBuilder<SymbolicLookup<SymbolicExpression<F>>>
 
         let multiplicity = symbolic_to_virtual_pair(&message.multiplicity);
 
-        self.looked
-            .push(VirtualPairLookup::new(values, multiplicity, message.kind));
+        self.looked.push(VirtualPairLookup::new(
+            values,
+            multiplicity,
+            message.kind,
+            message.scope,
+        ));
     }
 }
 
@@ -169,7 +177,7 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub perm: RowMajorMatrix<PackedChallenge<SC>>,
     pub public_values: &'a [SC::Val],
     pub perm_challenges: &'a [PackedChallenge<SC>],
-    pub cumulative_sum: SC::Challenge,
+    pub cumulative_sums: &'a [PackedChallenge<SC>],
     pub is_first_row: PackedVal<SC>,
     pub is_last_row: PackedVal<SC>,
     pub is_transition: PackedVal<SC>,
@@ -232,8 +240,8 @@ impl<'a, SC: StarkGenericConfig> PermutationBuilder for ProverConstraintFolder<'
 
     type Sum = PackedChallenge<SC>;
 
-    fn cumulative_sum(&self) -> Self::Sum {
-        PackedChallenge::<SC>::from_f(self.cumulative_sum)
+    fn cumulative_sums(&self) -> &'a [Self::Sum] {
+        self.cumulative_sums
     }
 }
 
@@ -273,7 +281,7 @@ pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
     pub main: ViewPair<'a, SC::Challenge>,
     pub perm: ViewPair<'a, SC::Challenge>,
     pub perm_challenges: &'a [SC::Challenge],
-    pub cumulative_sum: SC::Challenge,
+    pub cumulative_sums: &'a [SC::Challenge],
     pub public_values: &'a [SC::Val],
     pub is_first_row: SC::Challenge,
     pub is_last_row: SC::Challenge,
@@ -344,8 +352,8 @@ impl<'a, SC: StarkGenericConfig> PermutationBuilder for VerifierConstraintFolder
 
     type Sum = SC::Challenge;
 
-    fn cumulative_sum(&self) -> Self::Sum {
-        self.cumulative_sum
+    fn cumulative_sums(&self) -> &[Self::Sum] {
+        self.cumulative_sums
     }
 }
 
@@ -389,7 +397,7 @@ pub struct GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr> {
     /// The challenges for the permutation.
     pub perm_challenges: &'a [Var],
     /// The cumulative sum of the permutation.
-    pub cumulative_sum: Var,
+    pub cumulative_sums: &'a [Var],
     /// The selector for the first row.
     pub is_first_row: Var,
     /// The selector for the last row.
@@ -549,8 +557,8 @@ where
         self.perm_challenges
     }
 
-    fn cumulative_sum(&self) -> Self::Sum {
-        self.cumulative_sum
+    fn cumulative_sums(&self) -> &[Self::Sum] {
+        self.cumulative_sums
     }
 }
 
@@ -701,7 +709,7 @@ pub struct DebugConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) preprocessed: ViewPair<'a, F>,
     pub(crate) main: ViewPair<'a, F>,
     pub(crate) permutation: ViewPair<'a, EF>,
-    pub(crate) cumulative_sum: EF,
+    pub(crate) cumulative_sums: &'a [EF],
     pub(crate) permutation_challenges: &'a [EF],
     pub(crate) is_first_row: F,
     pub(crate) is_last_row: F,
@@ -827,8 +835,8 @@ where
         self.permutation_challenges
     }
 
-    fn cumulative_sum(&self) -> Self::Sum {
-        self.cumulative_sum
+    fn cumulative_sums(&self) -> &[Self::Sum] {
+        self.cumulative_sums
     }
 }
 

@@ -32,34 +32,33 @@ pico-sdk = { path = "sdk" }
 
 # NOTE: Pin to known a "good" commit without recent API changes
 
-p3-air = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-field = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-commit = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-matrix = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
+p3-air = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-field = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-commit = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-matrix = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
 p3-baby-bear = { git = "https://github.com/brevis-network/p3.git", features = [
   "nightly-features",
-], rev = "e6a63c5" }
+], rev = "5eb4598" }
 p3-koala-bear = { git = "https://github.com/brevis-network/p3.git", features = [
   "nightly-features",
-], rev = "e6a63c5" }
-p3-util = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-challenger = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-dft = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-fri = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-goldilocks = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-keccak = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-keccak-air = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-blake3 = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-mds = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-merkle-tree = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-poseidon2 = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-symmetric = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-uni-stark = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-maybe-rayon = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-bn254-fr = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-mersenne-31 = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-p3-circle = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" }
-
+], rev = "5eb4598" }
+p3-util = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-challenger = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-dft = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-fri = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-goldilocks = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-keccak = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-keccak-air = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-blake3 = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-mds = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-merkle-tree = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-poseidon2 = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-symmetric = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-uni-stark = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-maybe-rayon = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-bn254-fr = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-mersenne-31 = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
+p3-circle = { git = "https://github.com/brevis-network/p3.git", rev = "5eb4598" }
 
 # For local debugging
 # p3-air = { path = "../p3/air" }
@@ -67,6 +66,7 @@ p3-circle = { git = "https://github.com/brevis-network/p3.git", rev = "e6a63c5" 
 # p3-commit = { path = "../p3/commit" }
 # p3-matrix = { path = "../p3/matrix" }
 # p3-baby-bear = { path = "../p3/baby-bear", features = ["nightly-features"] }
+# p3-koala-bear = { path = "../p3/koala-bear", features = ["nightly-features"] }
 # p3-util = { path = "../p3/util" }
 # p3-challenger = { path = "../p3/challenger" }
 # p3-dft = { path = "../p3/dft" }

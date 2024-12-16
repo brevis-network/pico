@@ -2,7 +2,7 @@ use super::{AsmCompiler, AsmConfig};
 use crate::compiler::recursion::{ir::Builder, program::RecursionProgram};
 use p3_field::{ExtensionField, PrimeField32, TwoAdicField};
 
-/// A builder that compiles field_config program assembly code.
+/// A builder that compiles recursion program assembly code.
 impl<F, EF> Builder<AsmConfig<F, EF>>
 where
     F: PrimeField32 + TwoAdicField,

@@ -2,7 +2,7 @@ use crate::{
     chips::chips::riscv_memory::read_write::columns::{MemoryAccessCols, MemoryCols},
     machine::{
         builder::{ChipBuilder, ChipRangeBuilder},
-        lookup::{LookupType, SymbolicLookup},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
 use itertools::Itertools;
@@ -53,6 +53,7 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
             prev_values.clone(),
             do_check.clone(),
             LookupType::Memory,
+            LookupScope::Regional,
         ));
 
         // The current values get "received", i.e. multiplicity = -1
@@ -60,6 +61,7 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
             current_values,
             do_check.clone(),
             LookupType::Memory,
+            LookupScope::Regional,
         ));
     }
 

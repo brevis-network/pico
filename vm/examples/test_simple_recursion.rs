@@ -1,27 +1,36 @@
 use hashbrown::HashMap;
 use p3_baby_bear::BabyBear;
-use p3_challenger::CanObserve;
+use p3_challenger::{CanObserve, DuplexChallenger};
 use pico_vm::{
     compiler::{
-        recursion::program_builder::hints::hintable::Hintable,
+        recursion_v2::circuit::witness::Witnessable,
         riscv::compiler::{Compiler, SourceType},
     },
-    configs::config::StarkGenericConfig,
+    configs::{
+        config::{Challenge, StarkGenericConfig, Val},
+        stark_config::bb_poseidon2::BabyBearPoseidon2,
+    },
     emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator},
     instances::{
-        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler::simple_circuit::{builder::SimpleVerifierCircuit, stdin::SimpleRecursionStdin},
-        configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
+        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler_v2::simple_circuit::{
+            builder::SimpleVerifierCircuit, stdin::SimpleRecursionStdin,
+        },
+        configs::{
+            recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
+            riscv_config::StarkConfig as RiscvSC,
+        },
         machine::simple_machine::SimpleMachine,
     },
-    machine::{
-        keys::BaseVerifyingKey, logger::setup_logger, machine::MachineBehavior, proof::BaseProof,
-        witness::ProvingWitness,
+    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
+    primitives::{
+        consts::{
+            BABYBEAR_S_BOX_DEGREE, MAX_NUM_PVS, PERMUTATION_WIDTH, RISCV_NUM_PVS,
+            RISCV_SIMPLE_DEGREE,
+        },
+        consts_v2::MAX_NUM_PVS_V2,
     },
-    primitives::consts::{
-        BABYBEAR_S_BOX_DEGREE, MAX_NUM_PVS, PERMUTATION_WIDTH, RISCV_NUM_PVS, RISCV_SIMPLE_DEGREE,
-    },
-    recursion::runtime::Runtime as RecursionRuntime,
+    recursion_v2::runtime::Runtime as RecursionRuntime,
 };
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -34,6 +43,7 @@ mod parse_args;
 
 // todo: refactor the whole test
 
+/*
 pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
     machine: &SimpleMachine<RiscvSC, RiscvChipType<BabyBear>>,
     reconstruct_challenger: &mut <RiscvSC as StarkGenericConfig>::Challenger,
@@ -60,11 +70,12 @@ pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
 
     stdin
 }
+*/
 
 fn main() {
     setup_logger();
 
-    let (elf, stdin, step, _field) = parse_args::parse_args();
+    let (elf, stdin, step, field) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("\n Creating Program..");
@@ -197,27 +208,32 @@ fn main() {
 
     let base_proof = proof.proofs()[0].clone();
 
-    // Get field_config program
-    // Note that simple_machine is used as input for recursive verifier to build the program
-    info!(
-        "\n Build simple recursion program (at {:?})..",
-        start.elapsed()
-    );
-    let recursion_program =
-        SimpleVerifierCircuit::<rcf::FieldConfig, _>::build(simple_machine.base_machine());
+    // Get recursion input
+    let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
+    let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
+    /*
+        // Get field_config program
+        // Note that simple_machine is used as input for recursive verifier to build the program
+        info!(
+            "\n Build simple recursion program (at {:?})..",
+            start.elapsed()
+        );
+        let recursion_program =
+            SimpleVerifierCircuit::<rcf::FieldConfig, _>::build(simple_machine.base_machine());
 
-    let serialized_program = bincode::serialize(&recursion_program).unwrap();
-    let mut hasher = DefaultHasher::new();
-    serialized_program.hash(&mut hasher);
-    let hash = hasher.finish();
-    info!("Simple recursion program hash: {}", hash);
-    // assert_eq!(hash, 5942896757507644055);
+        let serialized_program = bincode::serialize(&recursion_program).unwrap();
+        let mut hasher = DefaultHasher::new();
+        serialized_program.hash(&mut hasher);
+        let hash = hasher.finish();
+        info!("Simple recursion program hash: {}", hash);
+        // assert_eq!(hash, 5942896757507644055);
 
-    // Get field_config input
-    // let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
-    // let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
-    let mut reconstruct_challenger = simple_machine.config().challenger();
-    let mut base_challenger = simple_machine.config().challenger();
+        // Get field_config input
+        // let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
+        // let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
+        let mut reconstruct_challenger = simple_machine.config().challenger();
+        let mut base_challenger = simple_machine.config().challenger();
+    */
 
     let recursion_stdin = SimpleRecursionStdin::construct(
         simple_machine.base_machine(),
@@ -227,19 +243,37 @@ fn main() {
         base_proof.clone(),
     );
 
+    // Get recursion program
+    // Note that simple_machine is used as input for recursive verifier to build the program
+    info!("\n Build recursion program (at {:?})..", start.elapsed());
+    let recursion_program = SimpleVerifierCircuit::<RecursionFC, BabyBearPoseidon2>::build(
+        simple_machine.base_machine(),
+        &recursion_stdin,
+    );
+
+    let serialized_program = bincode::serialize(&recursion_program).unwrap();
+    let mut hasher = DefaultHasher::new();
+    serialized_program.hash(&mut hasher);
+    let hash = hasher.finish();
+    info!("Recursion program hash: {}", hash);
+    // assert_eq!(hash, 560573883904547356);
+
     // Execute the runtime.
     let recursion_record = tracing::debug_span!("execute runtime").in_scope(|| {
         let mut witness_stream = Vec::new();
-        witness_stream.extend(recursion_stdin.write());
+        Witnessable::<RecursionFC>::write(&recursion_stdin, &mut witness_stream);
 
         let mut runtime = RecursionRuntime::<
-            <rcf::StarkConfig as StarkGenericConfig>::Val,
-            <rcf::StarkConfig as StarkGenericConfig>::Challenge,
+            <RecursionSC as StarkGenericConfig>::Val,
+            <RecursionSC as StarkGenericConfig>::Challenge,
             _,
             _,
             PERMUTATION_WIDTH,
             BABYBEAR_S_BOX_DEGREE,
-        >::new(&recursion_program, simple_machine.config().perm.clone());
+        >::new(
+            recursion_program.clone().into(),
+            simple_machine.config().perm.clone(),
+        );
         runtime.witness_stream = witness_stream.into();
         runtime.run().unwrap();
         runtime.record
@@ -251,12 +285,13 @@ fn main() {
         debug!("|- {:<28}: {}", key, value);
     }
 
-    // TODO: The number of CPU and range_check events keeps changing
+    // // TODO: The number of CPU and range_check events keeps changing
     let mut expected_stats = HashMap::<String, usize>::new();
+    expected_stats.insert("poseidon2_events".to_string(), 495);
     expected_stats.insert("poseidon2_hash_events".to_string(), 8000);
     expected_stats.insert("poseidon2_compress_events".to_string(), 24598);
     expected_stats.insert("fri_fold_events".to_string(), 280000);
-    // expected_stats.insert("range_check_events".to_string(), 67000);
+    expected_stats.insert("range_check_events".to_string(), 67000);
     expected_stats.insert("exp_reverse_bits_len_events".to_string(), 660);
     assert_eq!(
         stats.get("poseidon2_events"),
@@ -275,9 +310,9 @@ fn main() {
     // Note that here we use SimpleMachine to build the recursion machine
     // Note that it should only accept witnesses initialized from records
     let recursion_machine = SimpleMachine::new(
-        rcf::StarkConfig::new(),
+        RecursionSC::new(),
         RecursionChipType::<BabyBear, RISCV_SIMPLE_DEGREE>::all_chips(),
-        MAX_NUM_PVS,
+        MAX_NUM_PVS_V2,
     );
     let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
 

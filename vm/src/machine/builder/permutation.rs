@@ -16,8 +16,8 @@ pub trait PermutationBuilder: AirBuilder + ExtensionBuilder {
 
     /// for cumulative sum
     // The type of the cumulative sum.
-    type Sum: Into<Self::ExprEF>;
+    type Sum: Into<Self::ExprEF> + Copy;
 
     // Returns the cumulative sum of the permutation.
-    fn cumulative_sum(&self) -> Self::Sum;
+    fn cumulative_sums(&self) -> &[Self::Sum];
 }

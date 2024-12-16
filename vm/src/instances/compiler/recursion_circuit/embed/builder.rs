@@ -22,10 +22,7 @@ use crate::{
         configs::recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
     },
     machine::machine::BaseMachine,
-    primitives::{
-        consts::{COMPRESS_DEGREE, RECURSION_NUM_PVS},
-        types::RecursionProgramType,
-    },
+    primitives::consts::{COMPRESS_DEGREE, RECURSION_NUM_PVS},
     recursion::air::RecursionPublicValues,
 };
 use p3_field::FieldAlgebra;
@@ -40,7 +37,7 @@ impl RecursionEmbedVerifierCircuit<RecursionFC, RecursionSC> {
     pub fn build(
         machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>,
     ) -> RecursionProgram<Val<RecursionSC>> {
-        let mut builder = Builder::<RecursionFC>::new(RecursionProgramType::Embed);
+        let mut builder = Builder::<RecursionFC>::new();
 
         let stdin: RecursionStdinVariable<_> = builder.uninit();
         RecursionStdin::<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>::witness(

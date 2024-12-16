@@ -53,6 +53,14 @@ macro_rules! impl_chip_behavior {
                     )+
                 }
             }
+
+            fn lookup_scope(&self) -> LookupScope {
+                match self {
+                    $(
+                        Self::$variant(chip) => chip.lookup_scope(),
+                    )+
+                }
+            }
         }
 
     };

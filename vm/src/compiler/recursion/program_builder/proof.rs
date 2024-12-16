@@ -47,7 +47,8 @@ pub struct ChipOpening<FC: FieldGenericConfig> {
     pub permutation_local: Vec<Ext<FC::F, FC::EF>>,
     pub permutation_next: Vec<Ext<FC::F, FC::EF>>,
     pub quotient: Vec<Vec<Ext<FC::F, FC::EF>>>,
-    pub cumulative_sum: Ext<FC::F, FC::EF>,
+    pub global_cumulative_sum: Ext<FC::F, FC::EF>,
+    pub regional_cumulative_sum: Ext<FC::F, FC::EF>,
     pub log_main_degree: Var<FC::N>,
 }
 
@@ -61,7 +62,8 @@ pub struct ChipOpenedValuesVariable<FC: FieldGenericConfig> {
     pub permutation_local: Array<FC, Ext<FC::F, FC::EF>>,
     pub permutation_next: Array<FC, Ext<FC::F, FC::EF>>,
     pub quotient: Array<FC, Array<FC, Ext<FC::F, FC::EF>>>,
-    pub cumulative_sum: Ext<FC::F, FC::EF>,
+    pub global_cumulative_sum: Ext<FC::F, FC::EF>,
+    pub regional_cumulative_sum: Ext<FC::F, FC::EF>,
     pub log_main_degree: Var<FC::N>,
 }
 
@@ -149,7 +151,8 @@ impl<FC: FieldGenericConfig> ChipOpening<FC> {
             permutation_local,
             permutation_next,
             quotient,
-            cumulative_sum: opening.cumulative_sum,
+            global_cumulative_sum: opening.global_cumulative_sum,
+            regional_cumulative_sum: opening.regional_cumulative_sum,
             log_main_degree: opening.log_main_degree,
         }
     }
@@ -167,7 +170,8 @@ impl<FC: FieldGenericConfig> FromConstant<FC> for ChipOpenedValuesVariable<FC> {
             permutation_local: builder.constant(value.permutation_local),
             permutation_next: builder.constant(value.permutation_next),
             quotient: builder.constant(value.quotient),
-            cumulative_sum: builder.eval(value.cumulative_sum.cons()),
+            global_cumulative_sum: builder.eval(value.global_cumulative_sum.cons()),
+            regional_cumulative_sum: builder.eval(value.regional_cumulative_sum.cons()),
             log_main_degree: builder.eval(FC::N::from_canonical_usize(value.log_main_degree)),
         }
     }

@@ -2,7 +2,7 @@
 
 use super::ChipBuilder;
 use crate::{
-    machine::lookup::{LookupType, SymbolicLookup},
+    machine::lookup::{LookupScope, LookupType, SymbolicLookup},
     recursion_v2::{air::Block, types::Address},
 };
 use p3_field::{Field, FieldAlgebra};
@@ -30,6 +30,7 @@ pub trait RecursionBuilder<F: Field>: ChipBuilder<F> {
             once(addr.0).chain(val).map(Into::into).collect(),
             mult.into(),
             LookupType::Memory,
+            LookupScope::Regional,
         ));
     }
 
@@ -54,6 +55,7 @@ pub trait RecursionBuilder<F: Field>: ChipBuilder<F> {
             once(addr.0).chain(val).map(Into::into).collect(),
             mult.into(),
             LookupType::Memory,
+            LookupScope::Regional,
         ));
     }
 }

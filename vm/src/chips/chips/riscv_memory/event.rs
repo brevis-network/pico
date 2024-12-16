@@ -196,3 +196,14 @@ impl From<MemoryWriteRecord> for MemoryRecordEnum {
         MemoryRecordEnum::Write(write_record)
     }
 }
+
+/// Memory Local Event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryLocalEvent {
+    /// The address
+    pub addr: u32,
+    /// The initial memory access
+    pub initial_mem_access: MemoryRecord,
+    /// The final memory access
+    pub final_mem_access: MemoryRecord,
+}

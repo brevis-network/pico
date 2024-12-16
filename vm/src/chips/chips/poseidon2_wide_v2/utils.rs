@@ -1,8 +1,9 @@
 use crate::{
     chips::chips::poseidon2_wide_v2::WIDTH,
-    primitives::consts::POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY,
+    primitives::consts::{MONTY_INVERSE, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY},
 };
 use p3_field::{FieldAlgebra, PrimeField32};
+use p3_poseidon2::matmul_internal;
 
 pub fn apply_m_4<AF>(x: &mut [AF])
 where

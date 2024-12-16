@@ -1,6 +1,6 @@
+use p3_baby_bear::BabyBear;
+use p3_field::{FieldAlgebra, PrimeField32};
 use std::marker::PhantomData;
-
-use p3_field::PrimeField32;
 
 use crate::{
     chips::chips::{

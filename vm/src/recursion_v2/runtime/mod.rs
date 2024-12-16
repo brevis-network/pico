@@ -37,7 +37,7 @@ use crate::{
     compiler::recursion_v2::instruction::{
         FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction, PrintInstr,
     },
-    primitives::{consts::PERMUTATION_WIDTH, consts_v2::RECURSION_NUM_PVS},
+    primitives::{consts::PERMUTATION_WIDTH, consts_v2::RECURSION_NUM_PVS_V2},
 };
 use memory::*;
 pub use opcode::*;
@@ -52,8 +52,6 @@ pub const MEMORY_SIZE: usize = 1 << 28;
 /// The width of the Poseidon2 permutation.
 pub const HASH_RATE: usize = 8;
 pub const NUM_BITS: usize = 31;
-
-pub const D: usize = 4;
 
 #[derive(Debug, Clone, Default)]
 pub struct CycleTrackerEntry {
@@ -479,7 +477,7 @@ where
 
                 Instruction::CommitPublicValues(instr) => {
                     let pv_addrs = instr.pv_addrs.as_array();
-                    let pv_values: [F; RECURSION_NUM_PVS] =
+                    let pv_values: [F; RECURSION_NUM_PVS_V2] =
                         array::from_fn(|i| self.memory.mr(pv_addrs[i]).val[0]);
                     self.record.public_values = *pv_values.as_slice().borrow();
                     self.record

@@ -1,5 +1,6 @@
 pub mod context;
 pub mod emulator;
+pub mod emulator_v2;
 pub mod opts;
 pub mod record;
 pub mod recursion;

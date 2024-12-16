@@ -12,7 +12,7 @@ use crate::{
     emulator::riscv::public_values::PublicValues,
     machine::{
         builder::ChipBuilder,
-        lookup::{LookupType, SymbolicLookup},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
     primitives::consts::RISCV_NUM_PVS,
 };
@@ -75,6 +75,7 @@ where
             values,
             mult_local.multiplicity.into(),
             LookupType::Memory,
+            LookupScope::Global,
         ));
     }
 }

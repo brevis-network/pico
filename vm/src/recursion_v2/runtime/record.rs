@@ -5,7 +5,7 @@ use crate::{
     compiler::recursion_v2::program::RecursionProgram,
     emulator::record::RecordBehavior,
     machine::chip::ChipBehavior,
-    primitives::consts_v2::MAX_NUM_PVS,
+    primitives::consts_v2::MAX_NUM_PVS_V2,
     recursion_v2::{
         air::RecursionPublicValues,
         types::{
@@ -87,7 +87,7 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
     fn public_values<T: FieldAlgebra>(&self) -> Vec<T> {
         let pv_elms = self.public_values.as_array();
 
-        let ret: [T; MAX_NUM_PVS] = array::from_fn(|i| {
+        let ret: [T; MAX_NUM_PVS_V2] = array::from_fn(|i| {
             if i < pv_elms.len() {
                 T::from_canonical_u32(pv_elms[i].as_canonical_u32())
             } else {

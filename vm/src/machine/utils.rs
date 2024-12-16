@@ -150,21 +150,21 @@ pub fn eval_symbolic_to_virtual_pair<F: Field>(
 /// Compute quotient values for opening proof
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::let_and_return)]
-pub fn compute_quotient_values<'a, SC, C, Mat>(
+pub fn compute_quotient_values<SC, C, Mat>(
     chip: &MetaChip<SC::Val, C>,
-    public_values: &'a [SC::Val],
+    public_values: &[SC::Val],
     trace_domain: SC::Domain,
     quotient_domain: SC::Domain,
     preprocessed_on_quotient_domain: Mat,
     main_trace_on_quotient_domain: Mat,
     permutation_trace_on_quotient_domain: Mat,
-    perm_challenges: &'a [PackedChallenge<SC>],
-    cumulative_sum: SC::Challenge,
+    perm_challenges: &[PackedChallenge<SC>],
+    cumulative_sums: &[SC::Challenge],
     alpha: SC::Challenge,
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
-    C: Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
+    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
     Mat: Matrix<SC::Val> + Sync,
 {
     let quotient_size = quotient_domain.size();
@@ -256,13 +256,18 @@ where
 
                 let accumulator = PackedChallenge::<SC>::ZERO;
 
+                let packed_cumulative_sums = cumulative_sums
+                    .iter()
+                    .map(|c| PackedChallenge::<SC>::from_f(*c))
+                    .collect::<Vec<_>>();
+
                 let mut folder = ProverConstraintFolder {
                     preprocessed: preprocessed_trace_on_quotient_domain,
                     main: main_on_quotient_domain,
                     perm: permutation_on_quotient_domain,
                     public_values,
                     perm_challenges,
-                    cumulative_sum,
+                    cumulative_sums: &packed_cumulative_sums,
                     is_first_row,
                     is_last_row,
                     is_transition,

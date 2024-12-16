@@ -1,6 +1,9 @@
 use crate::{
     compiler::word::Word,
-    primitives::consts::{MAX_NUM_PVS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
+    primitives::{
+        consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
+        consts_v2::MAX_NUM_PVS_V2,
+    },
 };
 use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
@@ -47,7 +50,7 @@ pub struct PublicValues<W, T> {
 
 impl PublicValues<u32, u32> {
     pub fn to_vec<F: FieldAlgebra>(&self) -> Vec<F> {
-        let mut pv = vec![F::ZERO; MAX_NUM_PVS];
+        let mut pv = vec![F::ZERO; MAX_NUM_PVS_V2];
         let field_values = PublicValues::<Word<F>, F>::from(*self);
         let pv_ref_mut: &mut PublicValues<Word<F>, F> = pv.as_mut_slice().borrow_mut();
         *pv_ref_mut = field_values;

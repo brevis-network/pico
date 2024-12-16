@@ -7,7 +7,8 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::AirBuilder;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_baby_bear::BabyBear;
+use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
 use p3_matrix::Matrix;
 
 impl<F: PrimeField32> ShaExtendCols<F> {

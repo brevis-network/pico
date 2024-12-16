@@ -10,9 +10,9 @@ use crate::{
     emulator::riscv::public_values::PublicValues,
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder},
-        lookup::{LookupType, SymbolicLookup},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
-    primitives::consts::MAX_NUM_PVS,
+    primitives::consts_v2::MAX_NUM_PVS_V2,
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
@@ -61,6 +61,7 @@ where
                 values,
                 local.is_real.into(),
                 LookupType::Memory,
+                LookupScope::Global,
             ));
         } else {
             let mut values = vec![
@@ -73,6 +74,7 @@ where
                 values,
                 local.is_real.into(),
                 LookupType::Memory,
+                LookupScope::Global,
             ));
         }
 
@@ -123,7 +125,7 @@ where
 
         let local_addr_bits = local.addr_bits.bits;
 
-        let public_values_array: [CB::Expr; MAX_NUM_PVS] =
+        let public_values_array: [CB::Expr; MAX_NUM_PVS_V2] =
             array::from_fn(|i| builder.public_values()[i].into());
         let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
             public_values_array.as_slice().borrow();

@@ -5,7 +5,7 @@ use crate::{
     machine::{
         builder::ChipBuilder,
         chip::ChipBehavior,
-        lookup::{LookupType, SymbolicLookup},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
 use core::borrow::Borrow;
@@ -101,6 +101,7 @@ where
             vec![local.a.into(), local.b.into(), local.result.into()],
             F::ONE.into(),
             LookupType::Byte,
+            LookupScope::Regional,
         ))
     }
 }
@@ -167,6 +168,7 @@ where
             vec![local.a.into(), local.b.into(), local.result.into()],
             F::ONE.into(),
             LookupType::Byte,
+            LookupScope::Regional,
         ))
     }
 }

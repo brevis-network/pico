@@ -4,8 +4,8 @@ use crate::{
             alu::event::AluEvent,
             riscv_cpu::event::CpuEvent,
             riscv_memory::event::{
-                MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryReadRecord,
-                MemoryRecord, MemoryWriteRecord,
+                MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
+                MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
             },
         },
         utils::{create_alu_lookup_id, create_alu_lookups},
@@ -109,6 +109,9 @@ pub struct RiscvEmulator {
 
     /// The maximum number of cycles for a syscall.
     pub max_syscall_cycles: u32,
+
+    /// Local memory access events.
+    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
 
     /// whether or not to log syscalls
     log_syscalls: bool,
@@ -234,6 +237,7 @@ impl RiscvEmulator {
             emulator_mode: EmulatorMode::Simple,
             memory_checkpoint: HashMap::default(),
             max_syscall_cycles,
+            local_memory_access: HashMap::new(),
             log_syscalls,
         }
     }
@@ -954,7 +958,13 @@ impl RiscvEmulator {
     }
 
     /// Read a word from memory and create an access record.
-    pub fn mr(&mut self, addr: u32, chunk: u32, timestamp: u32) -> MemoryReadRecord {
+    pub fn mr(
+        &mut self,
+        addr: u32,
+        chunk: u32,
+        timestamp: u32,
+        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+    ) -> MemoryReadRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
         if self.emulator_mode != EmulatorMode::Simple || self.unconstrained.is_some() {
@@ -995,15 +1005,43 @@ impl RiscvEmulator {
         let value = record.value;
         let prev_chunk = record.chunk;
         let prev_timestamp = record.timestamp;
+
+        let prev_record = *record;
         record.chunk = chunk;
         record.timestamp = timestamp;
+
+        {
+            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
+                local_memory_access
+            } else {
+                &mut self.local_memory_access
+            };
+
+            local_memory_access
+                .entry(addr)
+                .and_modify(|e| {
+                    e.final_mem_access = *record;
+                })
+                .or_insert(MemoryLocalEvent {
+                    addr,
+                    initial_mem_access: prev_record,
+                    final_mem_access: *record,
+                });
+        }
 
         // Construct the memory read record.
         MemoryReadRecord::new(value, chunk, timestamp, prev_chunk, prev_timestamp)
     }
 
     /// Write a word to memory and create an access record.
-    pub fn mw(&mut self, addr: u32, value: u32, chunk: u32, timestamp: u32) -> MemoryWriteRecord {
+    pub fn mw(
+        &mut self,
+        addr: u32,
+        value: u32,
+        chunk: u32,
+        timestamp: u32,
+        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+    ) -> MemoryWriteRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
         if self.emulator_mode != EmulatorMode::Simple || self.unconstrained.is_some() {
@@ -1045,9 +1083,30 @@ impl RiscvEmulator {
         let prev_value = record.value;
         let prev_chunk = record.chunk;
         let prev_timestamp = record.timestamp;
+
+        let prev_record = *record;
         record.value = value;
         record.chunk = chunk;
         record.timestamp = timestamp;
+
+        {
+            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
+                local_memory_access
+            } else {
+                &mut self.local_memory_access
+            };
+
+            local_memory_access
+                .entry(addr)
+                .and_modify(|e| {
+                    e.final_mem_access = *record;
+                })
+                .or_insert(MemoryLocalEvent {
+                    addr,
+                    initial_mem_access: prev_record,
+                    final_mem_access: *record,
+                });
+        }
 
         // Construct the memory write record.
         MemoryWriteRecord::new(
@@ -1066,7 +1125,7 @@ impl RiscvEmulator {
         assert_valid_memory_access!(addr, position);
 
         // Read the address from memory and create a memory read record.
-        let record = self.mr(addr, self.chunk(), self.timestamp(&position));
+        let record = self.mr(addr, self.chunk(), self.timestamp(&position), None);
 
         // If we're not in unconstrained mode, record the access for the current cycle.
         if self.unconstrained.is_none() && self.emulator_mode == EmulatorMode::Trace {
@@ -1091,7 +1150,7 @@ impl RiscvEmulator {
         assert_valid_memory_access!(addr, position);
 
         // Read the address from memory and create a memory read record.
-        let record = self.mw(addr, value, self.chunk(), self.timestamp(&position));
+        let record = self.mw(addr, value, self.chunk(), self.timestamp(&position), None);
 
         // If we're not in unconstrained mode, record the access for the current cycle.
         if self.unconstrained.is_none() && self.emulator_mode == EmulatorMode::Trace {
@@ -1387,6 +1446,11 @@ impl RiscvEmulator {
 
     /// Bump the record.
     pub fn bump_record(&mut self) {
+        // Copy all of the existing local memory accesses to the record's local_memory_access vec.
+        for (_, event) in self.local_memory_access.drain() {
+            self.record.cpu_local_memory_access.push(event);
+        }
+
         let removed_record =
             std::mem::replace(&mut self.record, EmulationRecord::new(self.program.clone()));
         let public_values = removed_record.public_values;
@@ -1397,6 +1461,11 @@ impl RiscvEmulator {
 
     /// Bump the records to self.batch_records.
     pub fn bump_record_to_batch(&mut self) {
+        // Copy all of the existing local memory accesses to the record's local_memory_access vec.
+        for (_, event) in self.local_memory_access.drain() {
+            self.record.cpu_local_memory_access.push(event);
+        }
+
         let removed_record =
             std::mem::replace(&mut self.record, EmulationRecord::new(self.program.clone()));
         let public_values = removed_record.public_values;
@@ -1409,7 +1478,7 @@ impl RiscvEmulator {
         // Ensure that all proofs and input bytes were read, otherwise warn the user.
         // if self.state.proof_stream_ptr != self.state.proof_stream.len() {
         //     panic!(
-        //         "Not all proofs were read. Proving will fail during field_config. Did you pass too
+        //         "Not all proofs were read. Proving will fail during recursion. Did you pass too
         // many proofs in or forget to call verify_sp1_proof?"     );
         // }
         if self.state.input_stream_ptr != self.state.input_stream.len() {

@@ -4,7 +4,7 @@ use super::{ChipBuilder, ChipLookupBuilder};
 use crate::{
     chips::chips::recursion_memory::{MemoryAccessTimestampCols, MemoryCols},
     compiler::riscv::opcode::RangeCheckOpcode,
-    machine::lookup::{LookupType, SymbolicLookup},
+    machine::lookup::{LookupScope, LookupType, SymbolicLookup},
     recursion::air::Block,
 };
 use p3_air::AirBuilder;
@@ -42,11 +42,13 @@ pub trait RecursionMemoryBuilder<F: Field>: ChipBuilder<F> {
             prev_values,
             is_real.clone(),
             LookupType::Memory,
+            LookupScope::Regional,
         ));
         self.looking(SymbolicLookup::new(
             current_values,
             is_real,
             LookupType::Memory,
+            LookupScope::Regional,
         ));
     }
 
@@ -82,11 +84,13 @@ pub trait RecursionMemoryBuilder<F: Field>: ChipBuilder<F> {
             prev_values,
             is_real.clone(),
             LookupType::Memory,
+            LookupScope::Regional,
         ));
         self.looking(SymbolicLookup::new(
             current_values,
             is_real,
             LookupType::Memory,
+            LookupScope::Regional,
         ));
     }
 

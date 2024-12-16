@@ -6,7 +6,7 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryInitializeFinalizeEvent,
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::{chip::ChipBehavior, lookup::LookupScope, utils::pad_to_power_of_two},
 };
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
@@ -103,5 +103,9 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
             MemoryChipType::Initialize => !record.memory_initialize_events.is_empty(),
             MemoryChipType::Finalize => !record.memory_finalize_events.is_empty(),
         }
+    }
+
+    fn lookup_scope(&self) -> LookupScope {
+        LookupScope::Global
     }
 }

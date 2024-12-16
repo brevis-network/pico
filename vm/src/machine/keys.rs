@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{Com, PcsProverData, StarkGenericConfig},
+    configs::config::{Com, Dom, PcsProverData, StarkGenericConfig},
     primitives::{consts::DIGEST_SIZE, poseidon2_hash},
 };
 use alloc::sync::Arc;

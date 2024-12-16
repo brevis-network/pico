@@ -1,3 +1,4 @@
+/*
 use super::DebuggerMessageLevel;
 use crate::{
     configs::config::StarkGenericConfig,
@@ -249,3 +250,4 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         });
     }
 }
+*/

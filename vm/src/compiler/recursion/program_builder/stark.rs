@@ -22,6 +22,7 @@ use crate::{
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
+use std::array;
 
 // todo: move and unify
 pub const EMPTY: usize = 0x_1111_1111;
@@ -297,16 +298,20 @@ where
 
         // If we're checking the cumulative sum, assert that the sum of the cumulative sums is zero.
         if check_cumulative_sum {
-            let sum: Ext<_, _> = builder.eval(FC::EF::ZERO.cons());
+            let [regional_sum, global_sum]: [Ext<_, _>; 2] =
+                array::from_fn(|_| builder.eval(FC::EF::ZERO.cons()));
             builder
                 .range(0, proof.opened_values.chips_opened_values.len())
                 .for_each(|i, builder| {
-                    let cumulative_sum = builder
-                        .get(&proof.opened_values.chips_opened_values, i)
-                        .cumulative_sum;
-                    builder.assign(sum, sum + cumulative_sum);
+                    let opened_values = builder.get(&proof.opened_values.chips_opened_values, i);
+                    builder.assign(
+                        regional_sum,
+                        regional_sum + opened_values.regional_cumulative_sum,
+                    );
+                    builder.assign(global_sum, global_sum + opened_values.global_cumulative_sum);
                 });
-            builder.assert_ext_eq(sum, FC::EF::ZERO.cons());
+            builder.assert_ext_eq(regional_sum, FC::EF::ZERO.cons());
+            builder.assert_ext_eq(global_sum, FC::EF::ZERO.cons());
         }
 
         builder.cycle_tracker("stage-e-verify-constraints");

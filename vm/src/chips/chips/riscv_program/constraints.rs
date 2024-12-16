@@ -10,7 +10,7 @@ use crate::{
     },
     machine::{
         builder::ChipBuilder,
-        lookup::{LookupType, SymbolicLookup},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
 use core::borrow::Borrow;
@@ -71,6 +71,7 @@ impl<F: Field> ProgramChip<F> {
             values,
             multiplicity.into(),
             LookupType::Program,
+            LookupScope::Regional,
         ))
     }
 }

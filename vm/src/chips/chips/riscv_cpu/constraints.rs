@@ -9,7 +9,7 @@ use crate::{
     emulator::riscv::public_values::PublicValues,
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
-        lookup::{LookupType, SymbolicLookup},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
     primitives::consts::RISCV_NUM_PVS,
 };
@@ -247,6 +247,7 @@ impl<F: Field> CpuChip<F> {
             values,
             multiplicity.into(),
             LookupType::Program,
+            LookupScope::Regional,
         ));
     }
 }

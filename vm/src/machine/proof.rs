@@ -57,11 +57,19 @@ pub struct BaseProof<SC: StarkGenericConfig> {
 }
 
 impl<SC: StarkGenericConfig> BaseProof<SC> {
-    pub fn cumulative_sum(&self) -> SC::Challenge {
+    pub fn regional_cumulative_sum(&self) -> SC::Challenge {
         self.opened_values
             .chips_opened_values
             .iter()
-            .map(|v| v.cumulative_sum)
+            .map(|v| v.regional_cumulative_sum)
+            .sum()
+    }
+
+    pub fn global_cumulative_sum(&self) -> SC::Challenge {
+        self.opened_values
+            .chips_opened_values
+            .iter()
+            .map(|v| v.global_cumulative_sum)
             .sum()
     }
 
@@ -82,7 +90,8 @@ impl<SC: StarkGenericConfig> BaseProof<SC> {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BaseCommitments<Com> {
-    pub main_commit: Com,
+    pub global_main_commit: Com,
+    pub regional_main_commit: Com,
     pub permutation_commit: Com,
     pub quotient_commit: Com,
 }
@@ -109,7 +118,8 @@ pub struct ChipOpenedValues<Challenge> {
     pub permutation_local: Vec<Challenge>,
     pub permutation_next: Vec<Challenge>,
     pub quotient: Vec<Vec<Challenge>>,
-    pub cumulative_sum: Challenge,
+    pub global_cumulative_sum: Challenge,
+    pub regional_cumulative_sum: Challenge,
     pub log_main_degree: usize,
 }
 

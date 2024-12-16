@@ -612,7 +612,7 @@ impl<F: PrimeField32 + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> AsmCo
 
     pub fn compile(self) -> RecursionProgram<F> {
         let code = self.code();
-        tracing::debug!("field_config program size: {}", code.size());
+        tracing::debug!("Recursion program size: {}", code.size());
         code.machine_code()
     }
 

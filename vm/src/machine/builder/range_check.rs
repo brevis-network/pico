@@ -3,7 +3,7 @@
 use super::{ChipBuilder, ChipLookupBuilder};
 use crate::{
     compiler::riscv::opcode::RangeCheckOpcode,
-    machine::lookup::{LookupType, SymbolicLookup},
+    machine::lookup::{LookupScope, LookupType, SymbolicLookup},
 };
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
@@ -85,6 +85,7 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
             vec![range_check_opcode.into(), val.into()],
             is_real.into(),
             LookupType::Range,
+            LookupScope::Global,
         ));
     }
 
@@ -99,6 +100,7 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
             vec![range_check_opcode.into(), val.into()],
             is_real.into(),
             LookupType::Range,
+            LookupScope::Global,
         ));
     }
 }

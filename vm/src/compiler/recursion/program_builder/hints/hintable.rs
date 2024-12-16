@@ -306,7 +306,8 @@ impl Hintable<rcf::FieldConfig> for ChipOpenedValues<rcf::SC_Challenge> {
         let permutation_local = Vec::<rcf::SC_Challenge>::read(builder);
         let permutation_next = Vec::<rcf::SC_Challenge>::read(builder);
         let quotient = Vec::<Vec<rcf::SC_Challenge>>::read(builder);
-        let cumulative_sum = rcf::SC_Challenge::read(builder);
+        let global_cumulative_sum = rcf::SC_Challenge::read(builder);
+        let regional_cumulative_sum = rcf::SC_Challenge::read(builder);
         let log_main_degree = builder.hint_var();
         ChipOpenedValuesVariable {
             preprocessed_local,
@@ -316,7 +317,8 @@ impl Hintable<rcf::FieldConfig> for ChipOpenedValues<rcf::SC_Challenge> {
             permutation_local,
             permutation_next,
             quotient,
-            cumulative_sum,
+            global_cumulative_sum,
+            regional_cumulative_sum,
             log_main_degree,
         }
     }
@@ -330,7 +332,8 @@ impl Hintable<rcf::FieldConfig> for ChipOpenedValues<rcf::SC_Challenge> {
         stream.extend(self.permutation_local.write());
         stream.extend(self.permutation_next.write());
         stream.extend(self.quotient.write());
-        stream.extend(self.cumulative_sum.write());
+        stream.extend(self.global_cumulative_sum.write());
+        stream.extend(self.regional_cumulative_sum.write());
         stream.extend(self.log_main_degree.write());
         stream
     }
@@ -395,7 +398,10 @@ impl Hintable<rcf::FieldConfig> for BaseCommitments<rcf::SC_DigestHash> {
 
     fn write(&self) -> Vec<Vec<Block<<rcf::FieldConfig as FieldGenericConfig>::F>>> {
         let mut stream = Vec::new();
-        let h: rcf::SC_Digest = self.main_commit.into();
+        let h: rcf::SC_Digest = self.global_main_commit.into();
+        stream.extend(h.write());
+        let mut stream = Vec::new();
+        let h: rcf::SC_Digest = self.regional_main_commit.into();
         stream.extend(h.write());
         let h: rcf::SC_Digest = self.permutation_commit.into();
         stream.extend(h.write());

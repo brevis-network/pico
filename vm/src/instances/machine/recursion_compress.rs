@@ -3,26 +3,30 @@ use crate::machine::debug::constraints::IncrementalConstraintDebugger;
 #[cfg(feature = "debug-lookups")]
 use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
-    compiler::recursion::program::RecursionProgram,
+    compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
-    emulator::record::RecordBehavior,
+    emulator::{emulator_v2::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
     instances::{
-        compiler::recursion_circuit::stdin::RecursionStdin,
+        compiler_v2::recursion_circuit::stdin::RecursionStdin,
         configs::recur_config::StarkConfig as RecursionSC,
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey},
+        keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
+        lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
+    primitives::consts::COMBINE_SIZE,
+    recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
+use anyhow::Result;
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::FieldAlgebra;
+use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument, trace};
 
@@ -39,7 +43,7 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<RecursionSC, C>>
+impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<'_, RecursionSC, C>>
     for RecursionCompressMachine<RecursionSC, C>
 where
     C: ChipBehavior<
@@ -90,18 +94,12 @@ where
         let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
 
         let mut records = witness.records().to_vec();
-
-        // let mut recursion_emulator = MetaEmulator::setup_recursion(witness, 1);
-        //
-        // let (record, _) = recursion_emulator.next();
-        // let mut records = vec![record];
-
         self.complement_record(&mut records);
 
         #[cfg(feature = "debug")]
-        constraint_debugger.debug_incremental(&self.chips(), &records);
+        constraint_debugger.debug_incremental(self.chips(), &records);
         #[cfg(feature = "debug-lookups")]
-        lookup_debugger.debug_incremental(&self.chips(), &records);
+        lookup_debugger.debug_incremental(self.chips(), &records);
 
         debug!("recursion compress record stats");
         let stats = records[0].stats();
@@ -109,33 +107,20 @@ where
             debug!("   |- {:<28}: {}", key, value);
         }
 
-        // commit main
-        let commitment = self.base_machine.commit(&records[0]);
-
-        // setup challenger
-        let mut challenger = self.config().challenger();
-        pk.observed_by(&mut challenger);
-        challenger.observe(commitment.commitment);
-        challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
-
-        let proof = self.base_machine.prove_plain(
-            pk,
-            &mut challenger.clone(),
-            commitment,
-            records[0].chunk_index(),
-        );
-
-        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
+        let proofs = self.base_machine.prove_ensemble(pk, &records);
+        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
         // construct meta proof
-        let proof = MetaProof::new([proof].into());
+        let proof = MetaProof::new(proofs);
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
-        #[cfg(feature = "debug")]
-        constraint_debugger.print_results();
-        #[cfg(feature = "debug-lookups")]
-        lookup_debugger.print_results();
+        /*
+                #[cfg(feature = "debug")]
+                constraint_debugger.print_results();
+                #[cfg(feature = "debug-lookups")]
+                lookup_debugger.print_results();
+        */
 
         proof
     }

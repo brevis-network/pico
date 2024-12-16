@@ -72,7 +72,10 @@ where
                 RowMajorMatrixView::new_row(&permutation_opening_next),
             ),
             perm_challenges: permutation_challenges,
-            cumulative_sum: opening.cumulative_sum,
+            cumulative_sums: &[
+                opening.global_cumulative_sum,
+                opening.regional_cumulative_sum,
+            ],
             public_values: &folder_pv,
             is_first_row: selectors.is_first_row,
             is_last_row: selectors.is_last_row,

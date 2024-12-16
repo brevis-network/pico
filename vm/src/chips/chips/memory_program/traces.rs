@@ -8,7 +8,7 @@ use crate::{
     },
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::{chip::ChipBehavior, lookup::LookupScope, utils::pad_to_power_of_two},
 };
 use core::borrow::BorrowMut;
 use p3_field::Field;
@@ -94,5 +94,9 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
 
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
+    }
+
+    fn lookup_scope(&self) -> LookupScope {
+        LookupScope::Global
     }
 }

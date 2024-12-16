@@ -27,7 +27,7 @@ pub mod tests {
             machine::simple_machine::SimpleMachine,
         },
         machine::{chip::MetaChip, machine::MachineBehavior, witness::ProvingWitness},
-        primitives::consts_v2::MAX_NUM_PVS,
+        primitives::consts_v2::MAX_NUM_PVS_V2,
     };
     use std::sync::Arc;
 
@@ -76,7 +76,7 @@ pub mod tests {
 
         // Setup the machine and get the PK and VK.
         // Set the different configuration for the degrees by SC.
-        let machine = SimpleMachine::new(SC::default(), chips, MAX_NUM_PVS);
+        let machine = SimpleMachine::new(SC::default(), chips, MAX_NUM_PVS_V2);
         let (pk, vk) = machine.setup_keys(&program);
 
         // Prove with witness.

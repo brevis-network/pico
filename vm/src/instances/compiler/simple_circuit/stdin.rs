@@ -73,7 +73,7 @@ where
 
         let base_proofs = vec![base_proof.clone()];
 
-        base_challenger.observe(base_proof.commitments.main_commit.clone());
+        base_challenger.observe(base_proof.commitments.global_main_commit);
         base_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
 
         Self {

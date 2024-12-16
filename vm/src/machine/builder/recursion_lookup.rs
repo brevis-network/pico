@@ -3,7 +3,7 @@
 use super::ChipBuilder;
 use crate::{
     chips::chips::recursion_cpu::{InstructionCols, OpcodeSelectorCols},
-    machine::lookup::{LookupType, SymbolicLookup},
+    machine::lookup::{LookupScope, LookupType, SymbolicLookup},
 };
 use p3_field::Field;
 use std::iter::once;
@@ -24,6 +24,7 @@ pub trait RecursionLookupBuilder<F: Field>: ChipBuilder<F> {
             program_interaction_vals,
             is_real.into(),
             LookupType::Program,
+            LookupScope::Global,
         ));
     }
 
@@ -42,6 +43,7 @@ pub trait RecursionLookupBuilder<F: Field>: ChipBuilder<F> {
             program_interaction_vals,
             is_real.into(),
             LookupType::Program,
+            LookupScope::Global,
         ));
     }
 
@@ -57,6 +59,7 @@ pub trait RecursionLookupBuilder<F: Field>: ChipBuilder<F> {
             values,
             is_real.into(),
             LookupType::Syscall,
+            LookupScope::Regional,
         ));
     }
 
@@ -72,6 +75,7 @@ pub trait RecursionLookupBuilder<F: Field>: ChipBuilder<F> {
             values,
             is_real.into(),
             LookupType::Syscall,
+            LookupScope::Regional,
         ));
     }
 }

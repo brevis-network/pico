@@ -1,15 +1,27 @@
 use crate::{
     chips::utils::indices_arr,
-    compiler::word::Word,
-    primitives::{
-        consts::{DIGEST_SIZE, PERMUTATION_WIDTH, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-        consts_v2::{MAX_NUM_PVS, RECURSION_NUM_PVS},
+    compiler::{
+        recursion_v2::{circuit, prelude::*},
+        word::Word,
     },
-    recursion_v2::runtime::HASH_RATE,
+    configs::config::FieldGenericConfig,
+    instances::configs::recur_config::StarkConfig as RecursionSC,
+    primitives::{
+        consts::{
+            DIGEST_SIZE, PERMUTATION_RATE, PERMUTATION_WIDTH, POSEIDON_NUM_WORDS,
+            PV_DIGEST_NUM_WORDS,
+        },
+        consts_v2::{MAX_NUM_PVS_V2, RECURSION_NUM_PVS_V2},
+    },
+    recursion_v2::air::public_values::circuit::{
+        config::CircuitConfig, hash::Posedion2BabyBearHasherVariable,
+    },
 };
 use core::fmt::Debug;
+use itertools::Itertools;
+use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
-use p3_field::PrimeField32;
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_symmetric::CryptographicPermutation;
 use pico_derive::AlignedBorrow;
 use serde::{Deserialize, Serialize};
@@ -20,10 +32,11 @@ use std::{
 };
 
 pub const CHALLENGER_STATE_NUM_ELTS: usize = size_of::<ChallengerPublicValues<u8>>();
+pub const RECURSIVE_PROOF_NUM_PV_ELTS: usize = size_of::<RecursionPublicValues<u8>>();
 
 const fn make_col_map() -> RecursionPublicValues<usize> {
-    let indices_arr = indices_arr::<RECURSION_NUM_PVS>();
-    unsafe { transmute::<[usize; RECURSION_NUM_PVS], RecursionPublicValues<usize>>(indices_arr) }
+    let indices_arr = indices_arr::<RECURSION_NUM_PVS_V2>();
+    unsafe { transmute::<[usize; RECURSION_NUM_PVS_V2], RecursionPublicValues<usize>>(indices_arr) }
 }
 
 pub const RECURSION_PUBLIC_VALUES_COL_MAP: RecursionPublicValues<usize> = make_col_map();
@@ -33,7 +46,7 @@ pub const NUM_PV_ELMS_TO_HASH: usize = RECURSION_PUBLIC_VALUES_COL_MAP.digest[0]
 
 // Recursive proof has more public values than core proof, so the max number constant defined in
 // pico_core should be set to `RECURSION_NUM_PVS`.
-const_assert_eq!(RECURSION_NUM_PVS, MAX_NUM_PVS);
+const_assert_eq!(RECURSION_NUM_PVS_V2, MAX_NUM_PVS_V2);
 
 #[derive(AlignedBorrow, Serialize, Deserialize, Clone, Copy, Default, Debug)]
 #[repr(C)]
@@ -48,7 +61,7 @@ pub struct ChallengerPublicValues<T> {
 impl<T: Clone> ChallengerPublicValues<T> {
     pub fn set_challenger<P: CryptographicPermutation<[T; PERMUTATION_WIDTH]>>(
         &self,
-        challenger: &mut DuplexChallenger<T, P, PERMUTATION_WIDTH, HASH_RATE>,
+        challenger: &mut DuplexChallenger<T, P, PERMUTATION_WIDTH, PERMUTATION_RATE>,
     ) where
         T: PrimeField32,
     {
@@ -79,9 +92,6 @@ pub struct RecursionPublicValues<T> {
     /// The hash of all the bytes that the program has written to public values.
     pub committed_value_digest: [Word<T>; PV_DIGEST_NUM_WORDS],
 
-    /// The hash of all deferred proofs that have been witnessed in the VM.
-    pub deferred_proofs_digest: [T; POSEIDON_NUM_WORDS],
-
     /// The start pc of chunks being proven.
     pub start_pc: T,
 
@@ -101,10 +111,10 @@ pub struct RecursionPublicValues<T> {
     pub next_execution_chunk: T,
 
     /// Previous MemoryInit address bits.
-    pub previous_init_addr_bits: [T; 32],
+    pub previous_initialize_addr_bits: [T; 32],
 
     /// Last MemoryInit address bits.
-    pub last_init_addr_bits: [T; 32],
+    pub last_initialize_addr_bits: [T; 32],
 
     /// Previous MemoryFinalize address bits.
     pub previous_finalize_addr_bits: [T; 32],
@@ -118,14 +128,8 @@ pub struct RecursionPublicValues<T> {
     /// End state of reconstruct_challenger.
     pub end_reconstruct_challenger: ChallengerPublicValues<T>,
 
-    /// Start state of reconstruct_deferred_digest.
-    pub start_reconstruct_deferred_digest: [T; POSEIDON_NUM_WORDS],
-
-    /// End state of reconstruct_deferred_digest.
-    pub end_reconstruct_deferred_digest: [T; POSEIDON_NUM_WORDS],
-
     /// The commitment to the Pico program being proven.
-    pub pico_vk_digest: [T; DIGEST_SIZE],
+    pub riscv_vk_digest: [T; DIGEST_SIZE],
 
     /// The root of the vk merkle tree.
     pub vk_root: [T; DIGEST_SIZE],
@@ -153,8 +157,8 @@ pub struct RecursionPublicValues<T> {
 
 /// Converts the public values to an array of elements.
 impl<F: Default + Copy> RecursionPublicValues<F> {
-    pub fn to_vec(&self) -> [F; RECURSION_NUM_PVS] {
-        let mut ret = [F::default(); RECURSION_NUM_PVS];
+    pub fn to_vec(&self) -> [F; RECURSION_NUM_PVS_V2] {
+        let mut ret = [F::default(); RECURSION_NUM_PVS_V2];
         let pv: &mut RecursionPublicValues<F> = ret.as_mut_slice().borrow_mut();
 
         *pv = *self;
@@ -164,9 +168,9 @@ impl<F: Default + Copy> RecursionPublicValues<F> {
 
 /// Converts the public values to an array of elements.
 impl<F: Copy> RecursionPublicValues<F> {
-    pub fn as_array(&self) -> [F; RECURSION_NUM_PVS] {
+    pub fn as_array(&self) -> [F; RECURSION_NUM_PVS_V2] {
         unsafe {
-            let mut ret = [MaybeUninit::<F>::zeroed().assume_init(); RECURSION_NUM_PVS];
+            let mut ret = [MaybeUninit::<F>::zeroed().assume_init(); RECURSION_NUM_PVS_V2];
             let pv: &mut RecursionPublicValues<F> = ret.as_mut_slice().borrow_mut();
             *pv = *self;
             ret
@@ -176,7 +180,7 @@ impl<F: Copy> RecursionPublicValues<F> {
 
 impl<T: Copy> IntoIterator for RecursionPublicValues<T> {
     type Item = T;
-    type IntoIter = std::array::IntoIter<T, RECURSION_NUM_PVS>;
+    type IntoIter = std::array::IntoIter<T, RECURSION_NUM_PVS_V2>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.as_array().into_iter()
@@ -191,3 +195,100 @@ impl<T: Copy> IntoIterator for ChallengerPublicValues<T> {
         self.as_array().into_iter()
     }
 }
+
+/// Compute the digest of the root public values.
+pub(crate) fn embed_public_values_digest<C, H>(
+    builder: &mut Builder<C>,
+    public_values: &RecursionPublicValues<Felt<C::F>>,
+) -> [Felt<C::F>; DIGEST_SIZE]
+where
+    C: CircuitConfig,
+    H: Posedion2BabyBearHasherVariable<C>,
+{
+    let input = public_values
+        .riscv_vk_digest
+        .into_iter()
+        .chain(
+            public_values
+                .committed_value_digest
+                .into_iter()
+                .flat_map(|word| word.0.into_iter()),
+        )
+        .collect::<Vec<_>>();
+    H::poseidon2_hash(builder, &input)
+}
+
+/// Compute the digest of a recursive public values Struct.
+pub(crate) fn recursion_public_values_digest<C, H>(
+    builder: &mut Builder<C>,
+    public_values: &RecursionPublicValues<Felt<C::F>>,
+) -> [Felt<C::F>; DIGEST_SIZE]
+where
+    C: CircuitConfig,
+    H: Posedion2BabyBearHasherVariable<C>,
+{
+    let pv_slice = public_values.as_array();
+    H::poseidon2_hash(builder, &pv_slice[..NUM_PV_ELMS_TO_HASH])
+}
+
+/// Verifies the digest of a recursive public values struct.
+pub(crate) fn assert_recursion_public_values_valid<C, H>(
+    builder: &mut Builder<C>,
+    public_values: &RecursionPublicValues<Felt<C::F>>,
+) where
+    C: CircuitConfig,
+    H: Posedion2BabyBearHasherVariable<C>,
+{
+    let digest = recursion_public_values_digest::<C, H>(builder, public_values);
+    for (value, expected) in public_values.digest.iter().copied().zip_eq(digest) {
+        builder.assert_felt_eq(value, expected);
+    }
+}
+
+// /// Assertions on recursion public values which represent a complete proof.
+// ///
+// /// The assertions consist of checking all the expected boundary conditions from a compress proof
+// /// that represents the end of the recursion tower.
+// pub(crate) fn assert_complete<C: CircuitConfig>(
+//     builder: &mut Builder<C>,
+//     public_values: &RecursionPublicValues<Felt<C::F>>,
+//     is_complete: Felt<C::F>,
+// ) {
+//     let zero = <C::F as FieldAlgebra>::ZERO;
+//     let one = <C::F as FieldAlgebra>::ONE;
+//
+//     let RecursionPublicValues {
+//         next_pc,
+//         start_chunk,
+//         next_chunk,
+//         start_execution_chunk,
+//         cumulative_sum,
+//         contains_execution_chunk,
+//         ..
+//     } = public_values;
+//
+//     // Assert that the `is_complete` flag is boolean.
+//     builder.assert_felt_eq(is_complete * (is_complete - one), zero);
+//
+//     // Assert that `next_pc` is equal to zero (so program execution has completed)
+//     builder.assert_felt_eq(is_complete * *next_pc, zero);
+//
+//     // Assert that start shard is equal to 1.
+//     builder.assert_felt_eq(is_complete * (*start_chunk - one), zero);
+//
+//     // Assert that the next shard is not equal to one. This guarantees that there is at least one
+//     // shard that contains CPU.
+//     //
+//     // TODO: figure out if this is needed.
+//     builder.assert_felt_ne(is_complete * *next_chunk, one);
+//
+//     // Assert that that an execution shard is present.
+//     builder.assert_felt_eq(is_complete * (*contains_execution_chunk - one), zero);
+//     // Assert that the start execution shard is equal to 1.
+//     builder.assert_felt_eq(is_complete * (*start_execution_chunk - one), zero);
+//
+//     // Assert that the cumulative sum is zero.
+//     for b in cumulative_sum.iter() {
+//         builder.assert_felt_eq(is_complete * *b, zero);
+//     }
+// }

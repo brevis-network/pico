@@ -29,9 +29,8 @@ use crate::{
         configs::{recur_config::FieldConfig as RecursionFC, riscv_config::StarkConfig as RiscvSC},
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
-    primitives::{
-        consts::{ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, RECURSION_NUM_PVS},
-        types::RecursionProgramType,
+    primitives::consts::{
+        ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, RECURSION_NUM_PVS,
     },
     recursion::air::RecursionPublicValues,
 };
@@ -52,7 +51,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
     pub fn build(
         machine: &BaseMachine<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
     ) -> RecursionProgram<Val<RiscvSC>> {
-        let mut builder = Builder::<RecursionFC>::new(RecursionProgramType::Riscv);
+        let mut builder = Builder::<RecursionFC>::new();
 
         let stdin: RiscvRecursionStdinVariable<_> = builder.uninit();
         RiscvRecursionStdin::<RiscvSC, RiscvChipType<Val<RiscvSC>>>::witness(&stdin, &mut builder);
@@ -66,7 +65,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         builder.compile_program()
     }
 
-    // Non-field_config version: vm/src/instances/machine/riscv_machine.rs
+    // Non-recursion version: vm/src/instances/machine/riscv_machine.rs
     pub fn build_verifier(
         builder: &mut Builder<RecursionFC>,
         pcs: &TwoAdicFriPcsVariable<RecursionFC>,
@@ -108,7 +107,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         let mut current_reconstruct_challenger: DuplexChallengerVariable<_> =
             reconstruct_challenger.copy(builder);
 
-        let cumulative_sum: Ext<_, _> =
+        let global_cumulative_sum: Ext<_, _> =
             builder.eval(<RecursionFC as FieldGenericConfig>::EF::ZERO.cons());
 
         let exit_code: Felt<_> = builder.uninit();
@@ -376,8 +375,10 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         builder
             .range(0, opened_values.len())
             .for_each(|k, builder| {
-                let sum = builder.get(&opened_values, k).cumulative_sum;
-                builder.assign(cumulative_sum, cumulative_sum + sum);
+                // We only need to cumulate the global sum here.
+                let opened_values = builder.get(&opened_values, k);
+                let sum = opened_values.global_cumulative_sum;
+                builder.assign(global_cumulative_sum, global_cumulative_sum + sum);
             });
 
         /*
@@ -405,8 +406,8 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
             get_challenger_public_values(builder, &current_reconstruct_challenger);
 
         // cumulative sum
-        let cumulative_sum = builder.ext2felt(cumulative_sum);
-        let cumulative_sum = array::from_fn(|i| builder.get(&cumulative_sum, i));
+        let global_cumulative_sum = builder.ext2felt(global_cumulative_sum);
+        let global_cumulative_sum = array::from_fn(|i| builder.get(&global_cumulative_sum, i));
 
         builder
             .if_eq(flag_complete, <RecursionFC as FieldGenericConfig>::N::ONE)
@@ -453,7 +454,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, RiscvSC> {
         recursion_public_values.start_reconstruct_challenger = start_challenger_public_values;
         recursion_public_values.end_reconstruct_challenger = end_challenger_public_values;
 
-        recursion_public_values.cumulative_sum = cumulative_sum;
+        recursion_public_values.cumulative_sum = global_cumulative_sum;
         recursion_public_values.exit_code = exit_code;
         recursion_public_values.flag_complete = var2felt(builder, flag_complete);
 

@@ -1,11 +1,11 @@
 use crate::{
-    configs::config::StarkGenericConfig,
-    primitives::{pico_poseidon2m31_init, PicoPoseidon2Mersenne31},
+    configs::config::{Com, StarkGenericConfig, ZeroCommitment},
+    primitives::{consts::DIGEST_SIZE, pico_poseidon2m31_init, PicoPoseidon2Mersenne31},
 };
 use p3_challenger::DuplexChallenger;
 use p3_circle::CirclePcs;
 use p3_commit::{ExtensionMmcs, Pcs};
-use p3_field::{extension::BinomialExtensionField, Field};
+use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
 use p3_fri::FriConfig;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_mersenne_31::Mersenne31;
@@ -24,6 +24,7 @@ pub type SC_ChallengeMmcs = ExtensionMmcs<SC_Val, SC_Challenge, SC_ValMmcs>;
 
 pub type SC_Challenger = DuplexChallenger<SC_Val, SC_Perm, 16, 8>;
 pub type SC_Pcs = CirclePcs<SC_Val, SC_ValMmcs, SC_ChallengeMmcs>;
+pub type SC_DigestHash = p3_symmetric::Hash<SC_Val, SC_Val, DIGEST_SIZE>;
 
 pub struct M31Poseidon2 {
     pub perm: SC_Perm,
@@ -89,5 +90,11 @@ impl StarkGenericConfig for M31Poseidon2 {
 
     fn name(&self) -> String {
         "M31Poseidon2".to_string()
+    }
+}
+
+impl ZeroCommitment<M31Poseidon2> for SC_Pcs {
+    fn zero_commitment(&self) -> Com<M31Poseidon2> {
+        SC_DigestHash::from([SC_Val::ZERO; DIGEST_SIZE])
     }
 }

@@ -3,7 +3,9 @@
 use crate::{
     compiler::riscv::{opcode::Opcode, program::Program},
     emulator::riscv::record::EmulationRecord,
-    machine::{builder::ChipBuilder, chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::{
+        builder::ChipBuilder, chip::ChipBehavior, lookup::LookupScope, utils::pad_to_power_of_two,
+    },
 };
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
@@ -114,6 +116,10 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
 
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
+    }
+
+    fn lookup_scope(&self) -> LookupScope {
+        LookupScope::Global
     }
 }
 

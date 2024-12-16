@@ -1,7 +1,14 @@
-mod builder;
-mod compiler;
+pub mod builder;
+pub mod challenger;
+pub mod config;
+pub mod constraints;
+pub mod domain;
+pub mod fri;
+pub mod hash;
+pub mod merkle_tree;
+pub mod stark;
+pub mod types;
+pub mod utils;
+pub mod witness;
 
 pub use builder::*;
-pub use compiler::*;
-
-pub use crate::configs::config::FieldSimpleConfig as AsmConfig;

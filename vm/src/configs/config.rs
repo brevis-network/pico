@@ -12,6 +12,9 @@ pub type PackedChallenge<SC> = <Challenge<SC> as ExtensionField<Val<SC>>>::Exten
 pub type Com<SC> =
     <<SC as StarkGenericConfig>::Pcs as Pcs<Challenge<SC>, Challenger<SC>>>::Commitment;
 
+// todo: this is confusing and should be considered for refactor
+pub type Dom<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<Challenge<SC>, Challenger<SC>>>::Domain;
+
 pub type PcsProverData<SC> =
     <<SC as StarkGenericConfig>::Pcs as Pcs<Challenge<SC>, Challenger<SC>>>::ProverData;
 
@@ -44,7 +47,9 @@ pub trait StarkGenericConfig: Clone + Serialize + Sync {
         + Clone;
 
     /// The PCS used to commit to trace polynomials.
-    type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain> + Sync;
+    type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain>
+        + Sync
+        + ZeroCommitment<Self>;
 
     /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;
@@ -71,6 +76,10 @@ impl<F: PrimeField + TwoAdicField, EF: ExtensionField<F> + TwoAdicField> FieldGe
     type N = F;
     type F = F;
     type EF = EF;
+}
+
+pub trait ZeroCommitment<SC: StarkGenericConfig> {
+    fn zero_commitment(&self) -> Com<SC>;
 }
 
 pub struct SimpleFriConfig {

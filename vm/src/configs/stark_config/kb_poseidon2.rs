@@ -1,11 +1,11 @@
 use crate::{
-    configs::config::{SimpleFriConfig, StarkGenericConfig},
-    primitives::{pico_poseidon2kb_init, PicoPoseidon2KoalaBear},
+    configs::config::{Com, SimpleFriConfig, StarkGenericConfig, ZeroCommitment},
+    primitives::{consts::DIGEST_SIZE, pico_poseidon2kb_init, PicoPoseidon2KoalaBear},
 };
 use p3_challenger::DuplexChallenger;
 use p3_commit::{ExtensionMmcs, Pcs};
 use p3_dft::Radix2DitParallel;
-use p3_field::{extension::BinomialExtensionField, Field};
+use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
 use p3_fri::{FriConfig, TwoAdicFriPcs};
 use p3_koala_bear::KoalaBear;
 use p3_merkle_tree::MerkleTreeMmcs;
@@ -25,6 +25,7 @@ pub type SC_ChallengeMmcs = ExtensionMmcs<SC_Val, SC_Challenge, SC_ValMmcs>;
 pub type SC_Challenger = DuplexChallenger<SC_Val, SC_Perm, 16, 8>;
 pub type SC_Dft = Radix2DitParallel<SC_Val>;
 pub type SC_Pcs = TwoAdicFriPcs<SC_Val, SC_Dft, SC_ValMmcs, SC_ChallengeMmcs>;
+pub type SC_DigestHash = p3_symmetric::Hash<SC_Val, SC_Val, DIGEST_SIZE>;
 
 pub struct KoalaBearPoseidon2 {
     pub perm: SC_Perm,
@@ -144,5 +145,11 @@ impl StarkGenericConfig for KoalaBearPoseidon2 {
 
     fn name(&self) -> String {
         "KoalaBearPoseidon2".to_string()
+    }
+}
+
+impl ZeroCommitment<KoalaBearPoseidon2> for SC_Pcs {
+    fn zero_commitment(&self) -> Com<KoalaBearPoseidon2> {
+        SC_DigestHash::from([SC_Val::ZERO; DIGEST_SIZE])
     }
 }

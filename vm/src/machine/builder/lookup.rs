@@ -7,7 +7,7 @@ use crate::{
     machine::{
         builder::{AirBuilder, FilteredAirBuilder},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        lookup::{LookupType, SymbolicLookup},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
 use p3_field::{Field, FieldAlgebra};
@@ -58,6 +58,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             values,
             multiplicity.into(),
             LookupType::Instruction,
+            LookupScope::Regional,
         ));
     }
 
@@ -85,6 +86,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             values,
             multiplicity.into(),
             LookupType::Instruction,
+            LookupScope::Regional,
         ));
     }
 
@@ -112,6 +114,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             values,
             multiplicity.into(),
             LookupType::Alu,
+            LookupScope::Regional,
         ));
     }
 
@@ -139,6 +142,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             values,
             multiplicity.into(),
             LookupType::Alu,
+            LookupScope::Regional,
         ));
     }
 
@@ -170,6 +174,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             vec![opcode.into(), a1.into(), a2.into(), b.into(), c.into()],
             multiplicity.into(),
             LookupType::Byte,
+            LookupScope::Regional,
         ));
     }
 
@@ -189,6 +194,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             ],
             multiplicity.into(),
             LookupType::RangeUnified,
+            LookupScope::Regional,
         ))
     }
 
@@ -208,6 +214,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             ],
             multiplicity.into(),
             LookupType::RangeUnified,
+            LookupScope::Regional,
         ))
     }
 
@@ -239,6 +246,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             vec![opcode.into(), a1.into(), a2.into(), b.into(), c.into()],
             multiplicity.into(),
             LookupType::Byte,
+            LookupScope::Regional,
         ));
     }
 
@@ -264,6 +272,8 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             ],
             multiplicity.into(),
             LookupType::Syscall,
+            // We only have the local syscall for now.
+            LookupScope::Regional,
         ))
     }
 
@@ -289,6 +299,8 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             ],
             multiplicity.into(),
             LookupType::Syscall,
+            // We only have the local syscall for now.
+            LookupScope::Regional,
         ))
     }
 }

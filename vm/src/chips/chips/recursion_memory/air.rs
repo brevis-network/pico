@@ -4,7 +4,7 @@ use crate::{
     machine::{
         builder::{ChipBuilder, RecursionMemoryBuilder},
         chip::ChipBehavior,
-        lookup::{LookupType, SymbolicLookup},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
     recursion::{
         air::Block,
@@ -192,6 +192,7 @@ where
             ],
             local.is_initialize.into(),
             LookupType::Memory,
+            LookupScope::Regional,
         ));
         builder.looked(SymbolicLookup::new(
             vec![
@@ -204,6 +205,7 @@ where
             ],
             local.is_finalize.into(),
             LookupType::Memory,
+            LookupScope::Regional,
         ));
     }
 }

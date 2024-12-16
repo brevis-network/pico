@@ -1,0 +1,274 @@
+use crate::{
+    compiler::recursion_v2::{
+        circuit::{
+            config::{BabyBearFriConfigVariable, CircuitConfig},
+            hash::FieldHasherVariable,
+            stark::BaseProofVariable,
+        },
+        ir::{Builder, Ext, Felt},
+    },
+    configs::{
+        config::{Com, PcsProof},
+        stark_config::bb_poseidon2::BabyBearPoseidon2,
+    },
+    instances::configs::recur_config as rcf,
+    machine::proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
+};
+use itertools::Itertools;
+use p3_baby_bear::BabyBear;
+use p3_matrix::dense::DenseStorage;
+use std::sync::Arc;
+
+pub trait WitnessWriter<CC: CircuitConfig>: Sized {
+    fn write_bit(&mut self, value: bool);
+
+    fn write_var(&mut self, value: CC::N);
+
+    fn write_felt(&mut self, value: CC::F);
+
+    fn write_ext(&mut self, value: CC::EF);
+}
+
+/// TODO (from sp1) change the name. For now, the name is unique to prevent confusion.
+pub trait Witnessable<CC: CircuitConfig> {
+    type WitnessVariable;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable;
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>);
+}
+
+impl<CC: CircuitConfig> Witnessable<CC> for bool {
+    type WitnessVariable = CC::Bit;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        CC::read_bit(builder)
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        witness.write_bit(*self);
+    }
+}
+
+impl<'a, CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for &'a T {
+    type WitnessVariable = T::WitnessVariable;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        (*self).read(builder)
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        (*self).write(witness)
+    }
+}
+
+impl<CC: CircuitConfig, T: Witnessable<CC>, U: Witnessable<CC>> Witnessable<CC> for (T, U) {
+    type WitnessVariable = (T::WitnessVariable, U::WitnessVariable);
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        (self.0.read(builder), self.1.read(builder))
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        self.0.write(witness);
+        self.1.write(witness);
+    }
+}
+
+impl<CC: CircuitConfig<F = rcf::SC_Val>> Witnessable<CC> for rcf::SC_Val {
+    type WitnessVariable = Felt<rcf::SC_Val>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        CC::read_felt(builder)
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        witness.write_felt(*self);
+    }
+}
+
+impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
+    for rcf::SC_Challenge
+{
+    type WitnessVariable = Ext<rcf::SC_Val, rcf::SC_Challenge>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        CC::read_ext(builder)
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        // vec![Block::from(self.as_base_slice())]
+        witness.write_ext(*self);
+    }
+}
+
+impl<CC: CircuitConfig, T: Witnessable<CC>, const N: usize> Witnessable<CC> for [T; N] {
+    type WitnessVariable = [T::WitnessVariable; N];
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        self.iter()
+            .map(|x| x.read(builder))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap_or_else(|x: Vec<_>| {
+                // Cannot just `.unwrap()` without requiring Debug bounds.
+                panic!(
+                    "could not coerce vec of len {} into array of len {N}",
+                    x.len()
+                )
+            })
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        for x in self.iter() {
+            x.write(witness);
+        }
+    }
+}
+
+impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for Vec<T> {
+    type WitnessVariable = Vec<T::WitnessVariable>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        self.iter().map(|x| x.read(builder)).collect()
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        for x in self.iter() {
+            x.write(witness);
+        }
+    }
+}
+
+impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge, Bit = Felt<BabyBear>>>
+    Witnessable<CC> for BaseProof<BabyBearPoseidon2>
+{
+    type WitnessVariable = BaseProofVariable<CC, BabyBearPoseidon2>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        let commitments = self.commitments.read(builder);
+        let opened_values = self.opened_values.read(builder);
+        let fri_proof = self.opening_proof.read(builder);
+        let log_main_degrees = self.log_main_degrees.to_vec();
+        let log_quotient_degrees = self.log_main_degrees.to_vec();
+        let main_chip_ordering = (*self.main_chip_ordering).clone();
+        let public_values = self.public_values.to_vec().read(builder);
+
+        BaseProofVariable {
+            commitments,
+            opened_values,
+            opening_proof: fri_proof,
+            log_main_degrees,
+            log_quotient_degrees,
+            main_chip_ordering,
+            public_values,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        self.commitments.write(witness);
+        self.opened_values.write(witness);
+        self.opening_proof.write(witness);
+        self.public_values.to_vec().write(witness);
+    }
+}
+
+impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for BaseCommitments<T> {
+    type WitnessVariable = BaseCommitments<T::WitnessVariable>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        let global_main_commit = self.global_main_commit.read(builder);
+        let regional_main_commit = self.regional_main_commit.read(builder);
+        let permutation_commit = self.permutation_commit.read(builder);
+        let quotient_commit = self.quotient_commit.read(builder);
+        Self::WitnessVariable {
+            global_main_commit,
+            regional_main_commit,
+            permutation_commit,
+            quotient_commit,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        self.global_main_commit.write(witness);
+        self.regional_main_commit.write(witness);
+        self.permutation_commit.write(witness);
+        self.quotient_commit.write(witness);
+    }
+}
+
+impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
+    for BaseOpenedValues<rcf::SC_Challenge>
+{
+    type WitnessVariable = BaseOpenedValues<Ext<CC::F, CC::EF>>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        let chips_opened_values = self
+            .chips_opened_values
+            .iter()
+            .map(|opened_value| (**opened_value).clone())
+            .collect_vec();
+        let chips_opened_values = chips_opened_values.read(builder);
+        let chips_opened_values = Arc::from(
+            chips_opened_values
+                .into_iter()
+                .map(|opened_value| Arc::new(opened_value))
+                .collect_vec(),
+        );
+        Self::WitnessVariable {
+            chips_opened_values,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        let chips_opened_values = self
+            .chips_opened_values
+            .iter()
+            .map(|opened_value| (**opened_value).clone())
+            .collect_vec();
+        chips_opened_values.to_vec().write(witness);
+    }
+}
+
+impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
+    for ChipOpenedValues<rcf::SC_Challenge>
+{
+    type WitnessVariable = ChipOpenedValues<Ext<CC::F, CC::EF>>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        let preprocessed_local = self.preprocessed_local.read(builder);
+        let preprocessed_next = self.preprocessed_next.read(builder);
+        let main_local = self.main_local.read(builder);
+        let main_next = self.main_next.read(builder);
+        let permutation_local = self.permutation_local.read(builder);
+        let permutation_next = self.permutation_next.read(builder);
+        let quotient = self.quotient.read(builder);
+        let global_cumulative_sum = self.global_cumulative_sum.read(builder);
+        let regional_cumulative_sum = self.regional_cumulative_sum.read(builder);
+        let log_main_degree = self.log_main_degree;
+        Self::WitnessVariable {
+            preprocessed_local,
+            preprocessed_next,
+            main_local,
+            main_next,
+            permutation_local,
+            permutation_next,
+            quotient,
+            global_cumulative_sum,
+            regional_cumulative_sum,
+            log_main_degree,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        self.preprocessed_local.write(witness);
+        self.preprocessed_next.write(witness);
+        self.main_local.write(witness);
+        self.main_next.write(witness);
+        self.permutation_local.write(witness);
+        self.permutation_next.write(witness);
+        self.quotient.write(witness);
+        self.global_cumulative_sum.write(witness);
+        self.regional_cumulative_sum.write(witness);
+    }
+}

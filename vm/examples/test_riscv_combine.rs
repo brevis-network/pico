@@ -1,24 +1,15 @@
-use p3_baby_bear::BabyBear;
-use p3_challenger::DuplexChallenger;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
-    emulator::{context::EmulatorContext, opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{context::EmulatorContext, opts::EmulatorOpts},
     instances::{
-        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler::riscv_circuit::combine::builder::RiscvCombineVerifierCircuit,
-        configs::{
-            recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
-            riscv_config::StarkConfig as RiscvSC,
-        },
-        machine::{riscv_machine::RiscvMachine, riscv_recursion::RiscvRecursionMachine},
+        chiptype::riscv_chiptype::RiscvChipType, configs::riscv_config::StarkConfig as RiscvSC,
+        machine::riscv_machine::RiscvMachine,
     },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
-    primitives::consts::{RECURSION_NUM_PVS, RISCV_COMBINE_DEGREE, RISCV_NUM_PVS},
+    primitives::consts::RISCV_NUM_PVS,
 };
 use std::{sync::Arc, time::Instant};
 use tracing::info;
-
-const TEST_COMBINE_SIZE: usize = 10;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
@@ -73,20 +64,22 @@ fn main() {
     //////////////////////////////////////
 
     info!("\n Begin Recursion..");
+    panic!("We will not support RiscV combine later");
 
+    /*
     info!("Build field_config program (at {:?})..", start.elapsed());
     let recursion_program =
         RiscvCombineVerifierCircuit::<RecursionFC, RiscvSC>::build(riscv_machine.base_machine());
     let recursion_program = Arc::new(recursion_program);
 
-    // Setup recursion machine
-    info!("\n Setup recursion machine (at {:?})..", start.elapsed());
-    let recursion_machine = RiscvRecursionMachine::new(
-        RecursionSC::new(),
-        RecursionChipType::<BabyBear, RISCV_COMBINE_DEGREE>::all_chips(),
-        RECURSION_NUM_PVS,
-    );
-    let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
+        // Setup recursion machine
+        info!("\n Setup recursion machine (at {:?})..", start.elapsed());
+        let recursion_machine = RiscvRecursionMachine::new(
+            RecursionSC::new(),
+            RecursionChipType::<BabyBear, RISCV_COMBINE_DEGREE>::all_chips(),
+            RECURSION_NUM_PVS,
+        );
+        let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
 
     // Setup stdin and witnesses
     info!("\n Construct riscv_combine recursion stdin and witnesses..");
@@ -100,27 +93,28 @@ fn main() {
     );
     assert_eq!(recursion_stdin.buffer.len(), 1);
 
-    let recursion_witness = ProvingWitness::setup_for_riscv_recursion(
-        recursion_program,
-        &recursion_stdin,
-        recursion_machine.config(),
-        EmulatorOpts::test_opts(),
-    );
+        let recursion_witness = ProvingWitness::setup_for_riscv_recursion(
+            recursion_program,
+            &recursion_stdin,
+            recursion_machine.config(),
+            EmulatorOpts::test_opts(),
+        );
 
-    // Generate the proof.
-    info!("\n Generating recursion proof (at {:?})..", start.elapsed());
-    let recursion_proof = recursion_machine.prove(&recursion_pk, &recursion_witness);
+        // Generate the proof.
+        info!("\n Generating recursion proof (at {:?})..", start.elapsed());
+        let recursion_proof = recursion_machine.prove(&recursion_pk, &recursion_witness);
 
-    // Verify the proof.
-    info!(
-        "\n Verifying field_config proof (at {:?})..",
-        start.elapsed()
-    );
-    let recursion_result = recursion_machine.verify(&recursion_vk, &recursion_proof);
-    info!(
-        "The proof is verified: {} (at {:?})",
-        recursion_result.is_ok(),
-        start.elapsed()
-    );
-    assert!(recursion_result.is_ok());
+        // Verify the proof.
+        info!(
+            "\n Verifying field_config proof (at {:?})..",
+            start.elapsed()
+        );
+        let recursion_result = recursion_machine.verify(&recursion_vk, &recursion_proof);
+        info!(
+            "The proof is verified: {} (at {:?})",
+            recursion_result.is_ok(),
+            start.elapsed()
+        );
+        assert!(recursion_result.is_ok());
+    */
 }

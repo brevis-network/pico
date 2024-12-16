@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{SimpleFriConfig, StarkGenericConfig},
+    configs::config::{Com, SimpleFriConfig, StarkGenericConfig, ZeroCommitment},
     primitives::pico_poseidon2bn254_init,
 };
 use p3_baby_bear::BabyBear;
@@ -7,17 +7,23 @@ use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::extension::BinomialExtensionField;
+use p3_field::{extension::BinomialExtensionField, FieldAlgebra};
 use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
 use tracing::info;
 
+pub const DIGEST_SIZE: usize = 1;
+
+pub const MULTI_FIELD_CHALLENGER_WIDTH: usize = 3;
+pub const MULTI_FIELD_CHALLENGER_RATE: usize = 2; // TODO: use it with upgraged p3
+pub const MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
+
 pub type SC_Val = BabyBear;
 pub type SC_Perm = Poseidon2Bn254<3>;
 pub type SC_Hash = MultiField32PaddingFreeSponge<SC_Val, Bn254Fr, SC_Perm, 3, 16, 1>;
-pub type SC_DigestHash = Hash<Bn254Fr, Bn254Fr, 1>;
+pub type SC_DigestHash = Hash<SC_Val, Bn254Fr, 1>;
 pub type SC_Digest = [Bn254Fr; 1];
 pub type SC_Compress = TruncatedPermutation<SC_Perm, 2, 1, 3>;
 pub type SC_ValMmcs = MerkleTreeMmcs<BabyBear, Bn254Fr, SC_Hash, SC_Compress, 1>;
@@ -117,5 +123,11 @@ impl StarkGenericConfig for BbBn254Poseidon2 {
 
     fn name(&self) -> String {
         "BbBn254Poseidon2".to_string()
+    }
+}
+
+impl ZeroCommitment<BbBn254Poseidon2> for SC_Pcs {
+    fn zero_commitment(&self) -> Com<BbBn254Poseidon2> {
+        SC_DigestHash::from([Bn254Fr::ZERO; 1])
     }
 }

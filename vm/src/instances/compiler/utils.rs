@@ -152,7 +152,7 @@ pub(crate) fn verify_public_values_hash<FC: FieldGenericConfig>(
     });
 }
 
-/// Register and commits the field_config public values.
+/// Register and commits the recursion public values.
 pub fn commit_public_values<FC: FieldGenericConfig>(
     builder: &mut Builder<FC>,
     public_values: &RecursionPublicValues<Felt<FC::F>>,

@@ -4,9 +4,10 @@ use crate::{
     machine::{
         builder::{ChipBuilder, PermutationBuilder},
         folder::SymbolicConstraintFolder,
-        lookup::VirtualPairLookup,
+        lookup::{LookupScope, VirtualPairLookup},
         permutation::{
-            eval_permutation_constraints, generate_permutation_trace, permutation_trace_width,
+            eval_permutation_constraints, generate_permutation_trace, get_grouped_maps,
+            permutation_trace_width,
         },
         utils::get_log_quotient_degree,
     },
@@ -39,6 +40,12 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool;
+
+    /// Get the lookup scope for the chip. It's used in core prover.
+    /// Set to local scope as default.
+    fn lookup_scope(&self) -> LookupScope {
+        LookupScope::Regional
+    }
 }
 
 /// Chip wrapper, includes interactions
@@ -91,22 +98,15 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         preprocessed: Option<&RowMajorMatrix<F>>,
         main: &RowMajorMatrix<F>,
         perm_challenges: &[EF],
-    ) -> RowMajorMatrix<EF> {
+    ) -> (RowMajorMatrix<EF>, EF, EF) {
         let batch_size = 1 << self.log_quotient_degree;
-
-        // Generate the RLC elements to uniquely identify each interaction.
-        let alpha = perm_challenges[0];
-
-        // Generate the RLC elements to uniquely identify each item in the looked up tuple.
-        let beta = perm_challenges[1];
 
         generate_permutation_trace(
             &self.looking,
             &self.looked,
             preprocessed,
             main,
-            alpha,
-            beta,
+            perm_challenges,
             batch_size,
         )
     }
@@ -114,10 +114,10 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
     /// Returns the width of the permutation trace.
     #[inline]
     pub fn permutation_width(&self) -> usize {
-        permutation_trace_width(
-            self.looking.len() + self.looked.len(),
-            self.logup_batch_size(),
-        )
+        let (_, _, grouped_widths) =
+            get_grouped_maps(&self.looking, &self.looked, self.logup_batch_size());
+
+        grouped_widths.values().sum()
     }
 
     /// Returns the log2 of the batch size.
@@ -128,6 +128,10 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
 
     pub fn get_log_quotient_degree(&self) -> usize {
         self.log_quotient_degree
+    }
+
+    pub fn lookup_scope(&self) -> LookupScope {
+        self.chip.lookup_scope()
     }
 }
 
@@ -197,6 +201,3 @@ where
         self.chip.is_active(record)
     }
 }
-
-#[cfg(test)]
-mod test {}

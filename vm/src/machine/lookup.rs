@@ -2,6 +2,8 @@ use crate::machine::utils::eval_symbolic_to_virtual_pair;
 use p3_air::VirtualPairCol;
 use p3_field::Field;
 use p3_uni_stark::SymbolicExpression;
+use serde::{Deserialize, Serialize};
+use strum_macros::{Display, EnumIter};
 
 #[derive(Clone, Debug)]
 pub struct VirtualPairLookup<F: Field> {
@@ -11,11 +13,23 @@ pub struct VirtualPairLookup<F: Field> {
     pub mult: VirtualPairCol<F>,
     /// The kind of interaction.
     pub kind: LookupType,
+    /// The scope of the interaction.
+    pub scope: LookupScope,
 }
 
 impl<F: Field> VirtualPairLookup<F> {
-    pub fn new(values: Vec<VirtualPairCol<F>>, mult: VirtualPairCol<F>, kind: LookupType) -> Self {
-        Self { values, mult, kind }
+    pub fn new(
+        values: Vec<VirtualPairCol<F>>,
+        mult: VirtualPairCol<F>,
+        kind: LookupType,
+        scope: LookupScope,
+    ) -> Self {
+        Self {
+            values,
+            mult,
+            kind,
+            scope,
+        }
     }
 }
 
@@ -51,6 +65,27 @@ pub enum LookupType {
     RangeUnified = 9,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+    EnumIter,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
+pub enum LookupScope {
+    /// Global scope
+    Global = 0,
+    /// Regional scope
+    Regional,
+}
+
 pub(crate) fn symbolic_to_virtual_pair<F: Field>(
     expression: &SymbolicExpression<F>,
 ) -> VirtualPairCol<F> {
@@ -73,15 +108,23 @@ pub struct SymbolicLookup<E> {
     pub multiplicity: E,
     /// The kind of interaction.
     pub kind: LookupType,
+    /// The scope of the interaction.
+    pub scope: LookupScope,
 }
 
 impl<E> SymbolicLookup<E> {
     /// Create a new [`SymbolicLookup`].
-    pub const fn new(values: Vec<E>, multiplicity: E, kind: LookupType) -> Self {
+    pub const fn new(
+        values: Vec<E>,
+        multiplicity: E,
+        kind: LookupType,
+        scope: LookupScope,
+    ) -> Self {
         Self {
             values,
             multiplicity,
             kind,
+            scope,
         }
     }
 }

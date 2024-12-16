@@ -4,7 +4,10 @@ use crate::machine::debug::constraints::IncrementalConstraintDebugger;
 use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::{riscv::program::Program, word::Word},
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    configs::{
+        config::{Com, PcsProverData, StarkGenericConfig, Val},
+        stark_config::bb_poseidon2::SC_Challenge,
+    },
     emulator::{
         emulator::MetaEmulator,
         record::RecordBehavior,
@@ -14,6 +17,7 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
+        lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
@@ -21,11 +25,12 @@ use crate::{
     primitives::consts::MAX_LOG_CHUNK_SIZE,
 };
 use anyhow::Result;
+use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::*;
-use std::{any::type_name, borrow::Borrow, time::Instant};
+use std::{any::type_name, array, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument};
 
 pub struct RiscvMachine<SC, C>
@@ -79,6 +84,7 @@ where
         info!("PERF-machine=riscv");
         let begin = Instant::now();
 
+        // Initialize the challenger.
         let mut challenger = self.config().challenger();
         pk.observed_by(&mut challenger);
 
@@ -90,7 +96,6 @@ where
         let mut emulator = MetaEmulator::setup_riscv(witness);
         loop {
             let (batch_records, done) = emulator.next_batch();
-
             self.complement_record(batch_records);
 
             for record in &mut *batch_records {
@@ -105,7 +110,9 @@ where
                 .into_par_iter()
                 .map(|record| {
                     info!("PERF-phase=1-chunk={}", record.chunk_index());
-                    self.base_machine.commit(record)
+                    self.base_machine
+                        .commit(record, LookupScope::Global)
+                        .unwrap()
                 })
                 .collect::<Vec<_>>();
 
@@ -129,42 +136,41 @@ where
 
         // used for collect all records for debugging
         #[cfg(feature = "debug")]
-        let mut debug_challenger = self.config().challenger();
-        #[cfg(feature = "debug")]
-        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
-        #[cfg(feature = "debug-lookups")]
-        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
+        let mut all_records = vec![];
+        /*
+                let mut debug_challenger = self.config().challenger();
+                #[cfg(feature = "debug")]
+                let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
+                #[cfg(feature = "debug-lookups")]
+                let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
+        */
 
         loop {
             let (batch_records, done) = emulator.next_batch();
-
             self.complement_record(batch_records);
 
-            #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
-            #[cfg(feature = "debug-lookups")]
-            lookup_debugger.debug_incremental(&self.chips(), &batch_records);
+            /*
+                        #[cfg(feature = "debug")]
+                        constraint_debugger.debug_incremental(&self.chips(), &batch_records);
+                        #[cfg(feature = "debug-lookups")]
+                        lookup_debugger.debug_incremental(&self.chips(), &batch_records);
+            */
 
-            let batch_main_commitments = batch_records
+            let batch_proofs = batch_records
                 .into_par_iter()
                 .map(|record| {
-                    info!("PERF-phase=2-chunk={}", record.chunk_index(),);
-                    // generate and commit main trace
-                    self.base_machine.commit(record)
-                })
-                .collect::<Vec<_>>();
-
-            let batch_proofs = batch_main_commitments
-                .into_par_iter()
-                .enumerate()
-                .map(|(i, commitment)| {
-                    info!("PERF-phase=2-chunk={}", batch_records[i].chunk_index(),);
+                    let regional_commitment = self
+                        .base_machine
+                        .commit(record, LookupScope::Regional)
+                        .unwrap();
+                    let global_commitment = self.base_machine.commit(record, LookupScope::Global);
 
                     self.base_machine.prove_plain(
                         pk,
                         &mut challenger.clone(),
-                        commitment,
-                        batch_records[i].chunk_index(),
+                        record.chunk_index(),
+                        regional_commitment,
+                        global_commitment,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -183,10 +189,12 @@ where
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
-        #[cfg(feature = "debug")]
-        constraint_debugger.print_results();
-        #[cfg(feature = "debug-lookups")]
-        lookup_debugger.print_results();
+        /*
+                #[cfg(feature = "debug")]
+                constraint_debugger.print_results();
+                #[cfg(feature = "debug-lookups")]
+                lookup_debugger.print_results();
+        */
 
         proof
     }
@@ -305,9 +313,10 @@ where
             );
         }
 
+        // Verify the proofs.
         self.base_machine.verify_ensemble(vk, proof.proofs())?;
 
-        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
+        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
         Ok(())
     }

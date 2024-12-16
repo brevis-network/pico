@@ -7,7 +7,7 @@ use super::{
     SymbolicExt, SymbolicFelt, SymbolicUsize, SymbolicVar, Usize, Var, VarHandle, VarOperations,
     Variable,
 };
-use crate::{configs::config::FieldGenericConfig, primitives::types::RecursionProgramType};
+use crate::configs::config::FieldGenericConfig;
 
 /// TracedVec is a Vec wrapper that records a trace whenever an element is pushed. When extending
 /// from another TracedVec, the traces are copied over.
@@ -99,17 +99,16 @@ pub struct Builder<FC: FieldGenericConfig> {
     pub(crate) p2_hash_num: Var<FC::N>,
     pub(crate) debug: bool,
     pub(crate) is_sub_builder: bool,
-    pub program_type: RecursionProgramType,
 }
 
 impl<FC: FieldGenericConfig> Default for Builder<FC> {
     fn default() -> Self {
-        Self::new(RecursionProgramType::Riscv)
+        Self::new()
     }
 }
 
 impl<FC: FieldGenericConfig> Builder<FC> {
-    pub fn new(program_type: RecursionProgramType) -> Self {
+    pub fn new() -> Self {
         // We need to create a temporary placeholder for the p2_hash_num variable.
         let placeholder_p2_hash_num = Var::new(0, ptr::null_mut());
 
@@ -137,7 +136,6 @@ impl<FC: FieldGenericConfig> Builder<FC> {
             p2_hash_num: placeholder_p2_hash_num,
             debug: false,
             is_sub_builder: false,
-            program_type,
         };
 
         new_builder.p2_hash_num = new_builder.uninit();
@@ -150,9 +148,8 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         nb_public_values: Option<Var<FC::N>>,
         p2_hash_num: Var<FC::N>,
         debug: bool,
-        program_type: RecursionProgramType,
     ) -> Self {
-        let mut builder = Self::new(program_type);
+        let mut builder = Self::new();
         builder.inner.get_mut().variable_count = variable_count;
         builder.nb_public_values = nb_public_values;
         builder.p2_hash_num = p2_hash_num;
@@ -575,7 +572,6 @@ impl<'a, FC: FieldGenericConfig> IfBuilder<'a, FC> {
             self.builder.nb_public_values,
             self.builder.p2_hash_num,
             self.builder.debug,
-            self.builder.program_type,
         );
         f(&mut f_builder);
         self.builder.p2_hash_num = f_builder.p2_hash_num;
@@ -625,7 +621,6 @@ impl<'a, FC: FieldGenericConfig> IfBuilder<'a, FC> {
             self.builder.nb_public_values,
             self.builder.p2_hash_num,
             self.builder.debug,
-            self.builder.program_type,
         );
 
         // Execute the `then` and `else_then` blocks and collect the instructions.
@@ -639,7 +634,6 @@ impl<'a, FC: FieldGenericConfig> IfBuilder<'a, FC> {
             self.builder.nb_public_values,
             self.builder.p2_hash_num,
             self.builder.debug,
-            self.builder.program_type,
         );
         else_f(&mut else_builder);
         self.builder.p2_hash_num = else_builder.p2_hash_num;
@@ -776,7 +770,6 @@ impl<'a, FC: FieldGenericConfig> RangeBuilder<'a, FC> {
             self.builder.nb_public_values,
             self.builder.p2_hash_num,
             self.builder.debug,
-            self.builder.program_type,
         );
 
         f(loop_variable, &mut loop_body_builder);

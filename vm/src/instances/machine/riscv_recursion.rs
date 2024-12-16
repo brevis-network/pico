@@ -3,23 +3,24 @@ use crate::machine::debug::constraints::IncrementalConstraintDebugger;
 #[cfg(feature = "debug-lookups")]
 use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
-    compiler::recursion::program::RecursionProgram,
+    compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
-    emulator::{emulator::MetaEmulator, record::RecordBehavior},
+    emulator::{emulator_v2::MetaEmulator, record::RecordBehavior},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
-        compiler::riscv_circuit::stdin::RiscvRecursionStdin,
+        compiler_v2::riscv_circuit::stdin::RiscvRecursionStdin,
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
+        lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
+    recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use anyhow::Result;
 use p3_air::Air;
@@ -42,7 +43,8 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<C> MachineBehavior<RecursionSC, C, RiscvRecursionStdin<RiscvSC, RiscvChipType<Val<RiscvSC>>>>
+impl<C>
+    MachineBehavior<RecursionSC, C, RiscvRecursionStdin<'_, RiscvSC, RiscvChipType<Val<RiscvSC>>>>
     for RiscvRecursionMachine<RecursionSC, C>
 where
     C: Send
@@ -86,30 +88,31 @@ where
         info!("PERF-machine=recursion");
         let begin = Instant::now();
 
-        // First
-        // Generate batch records and commit to challenger
-
-        let mut recursion_emulator = MetaEmulator::setup_riscv_compress(witness);
+        let mut emulator = MetaEmulator::setup_riscv_compress(witness);
         let mut all_proofs = vec![];
 
         // used for collect all records for debugging
         #[cfg(feature = "debug")]
-        let mut debug_challenger = self.config().challenger();
-        #[cfg(feature = "debug")]
-        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
-        #[cfg(feature = "debug-lookups")]
-        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
+        let mut all_records = vec![];
+        /*
+                let mut debug_challenger = self.config().challenger();
+                #[cfg(feature = "debug")]
+                let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
+                #[cfg(feature = "debug-lookups")]
+                let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
+        */
 
         let mut chunk_index = 1;
         loop {
-            let (mut batch_records, done) = recursion_emulator.next_batch();
-
+            let (mut batch_records, done) = emulator.next_batch();
             self.complement_record(batch_records.as_mut_slice());
 
+            /*
             #[cfg(feature = "debug")]
             constraint_debugger.debug_incremental(&self.chips(), &batch_records);
             #[cfg(feature = "debug-lookups")]
             lookup_debugger.debug_incremental(&self.chips(), &batch_records);
+            */
 
             for record in &mut *batch_records {
                 record.index = chunk_index;
@@ -124,41 +127,22 @@ where
                 }
             }
 
-            let batch_proofs = batch_records
-                .into_par_iter()
-                .map(|record| {
-                    info!("PERF-phase=1-chunk={}", record.chunk_index());
-
-                    let commitment = self.base_machine.commit(&record);
-
-                    let mut challenger = self.config().challenger();
-                    pk.observed_by(&mut challenger);
-
-                    challenger.observe(commitment.commitment);
-                    challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
-
-                    self.base_machine.prove_plain(
-                        pk,
-                        &mut challenger.clone(),
-                        commitment,
-                        record.chunk_index(),
-                    )
-                })
-                .collect::<Vec<_>>();
-
-            all_proofs.extend(batch_proofs);
+            let batch_proofs = self.base_machine.prove_ensemble(pk, &batch_records);
+            all_proofs.extend(batch_proofs.to_vec());
 
             if done {
                 break;
             }
         }
 
-        #[cfg(feature = "debug")]
-        constraint_debugger.print_results();
-        #[cfg(feature = "debug-lookups")]
-        lookup_debugger.print_results();
+        /*
+                #[cfg(feature = "debug")]
+                constraint_debugger.print_results();
+                #[cfg(feature = "debug-lookups")]
+                lookup_debugger.print_results();
+        */
 
-        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
+        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
         // construct meta proof
         let proof = MetaProof::new(all_proofs.into());
@@ -177,34 +161,9 @@ where
         info!("PERF-machine=recursion");
         let begin = Instant::now();
 
-        for each_proof in proof.proofs().iter() {
-            let public_values: &RecursionPublicValues<_> =
-                each_proof.public_values.as_ref().borrow();
+        self.base_machine.verify_ensemble(vk, proof.proofs())?;
 
-            trace!("public values: {:?}", public_values);
-
-            let mut challenger = self.config().challenger();
-            // observe all preprocessed and main commits and pv's
-            vk.observed_by(&mut challenger);
-            challenger.observe(each_proof.commitments.main_commit);
-            challenger.observe_slice(&each_proof.public_values[..self.num_public_values()]);
-
-            self.base_machine
-                .verify_plain(vk, &mut challenger, each_proof)?;
-        }
-
-        // compute sum of each proof.cumulative_sum() and add them up and judge if it is zero
-        let sum = proof
-            .proofs()
-            .iter()
-            .map(|proof| proof.cumulative_sum())
-            .sum::<<RecursionSC as StarkGenericConfig>::Challenge>();
-
-        if !sum.is_zero() {
-            panic!("verify_ensemble:lookup cumulative sum is not zero");
-        }
-
-        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
+        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
         Ok(())
     }

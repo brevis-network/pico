@@ -11,7 +11,7 @@ use crate::{
             add_chunked_range_lookup_events, RangeLookupEvent, RangeRecordBehavior,
         },
         riscv_cpu::event::CpuEvent,
-        riscv_memory::event::{MemoryInitializeFinalizeEvent, MemoryRecordEnum},
+        riscv_memory::event::{MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum},
     },
     compiler::riscv::{opcode::Opcode, program::Program},
     emulator::{
@@ -69,6 +69,8 @@ pub struct EmulationRecord {
     pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the memory finalize events.
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
+    /// A trace of all the shard's local memory events.
+    pub cpu_local_memory_access: Vec<MemoryLocalEvent>,
     /// A trace of the keccak256 permute events.
     pub keccak_permute_events: Vec<KeccakPermuteEvent>,
     /// A trace of the Poseidon2 permute events.
@@ -192,6 +194,12 @@ impl EmulationRecord {
     pub fn add_uint256_mul_event(&mut self, event: Uint256MulEvent) {
         self.uint256_mul_events.push(event);
     }
+
+    /// Get all the local memory events.
+    #[inline]
+    pub fn get_local_mem_events(&self) -> impl Iterator<Item = &MemoryLocalEvent> {
+        self.cpu_local_memory_access.iter()
+    }
 }
 
 impl RecordBehavior for EmulationRecord {
@@ -223,6 +231,10 @@ impl RecordBehavior for EmulationRecord {
         stats.insert(
             "Memory Finalize Events".to_string(),
             self.memory_finalize_events.len(),
+        );
+        stats.insert(
+            "local_memory_access_events".to_string(),
+            self.cpu_local_memory_access.len(),
         );
         if !self.cpu_events.is_empty() {
             let chunk = self.cpu_events[0].chunk;
@@ -264,6 +276,8 @@ impl RecordBehavior for EmulationRecord {
             .append(&mut extra.memory_initialize_events);
         self.memory_finalize_events
             .append(&mut extra.memory_finalize_events);
+        self.cpu_local_memory_access
+            .append(&mut extra.cpu_local_memory_access);
         self.keccak_permute_events
             .append(&mut extra.keccak_permute_events);
         self.ed_add_events.append(&mut extra.ed_add_events);

@@ -22,10 +22,7 @@ use crate::{
         configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
     },
     machine::machine::BaseMachine,
-    primitives::{
-        consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
-        types::RecursionProgramType,
-    },
+    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
     recursion::air::RecursionPublicValues,
 };
 use p3_baby_bear::BabyBear;
@@ -44,7 +41,7 @@ impl SimpleVerifierCircuit<rcf::FieldConfig, RiscvSC> {
     pub fn build(
         machine: &BaseMachine<RiscvSC, RiscvChipType<BabyBear>>,
     ) -> RecursionProgram<BabyBear> {
-        let mut builder = Builder::<rcf::FieldConfig>::new(RecursionProgramType::Riscv);
+        let mut builder = Builder::<rcf::FieldConfig>::new();
 
         let input: SimpleRecursionStdinVariable<_> = builder.uninit();
         SimpleRecursionStdin::<RiscvSC, RiscvChipType<_>>::witness(&input, &mut builder);
@@ -92,7 +89,7 @@ where
             initial_reconstruct_challenger.copy(builder);
 
         // Initialize the cumulative sum.
-        let cumulative_sum: Ext<_, _> = builder.eval(FC::EF::ZERO.cons());
+        let global_cumulative_sum: Ext<_, _> = builder.eval(FC::EF::ZERO.cons());
 
         // Assert that the number of proofs is 1.
         builder.assert_usize_eq(base_proofs.len(), 1);
@@ -129,16 +126,17 @@ where
                 .range(0, opened_values.len())
                 .for_each(|k, builder| {
                     let values = builder.get(&opened_values, k);
-                    let sum = values.cumulative_sum;
-                    builder.assign(cumulative_sum, cumulative_sum + sum);
+                    let sum = values.global_cumulative_sum;
+                    builder.assign(global_cumulative_sum, global_cumulative_sum + sum);
                 });
         });
 
         // Write all values to the public values struct and commit to them.
         {
             // Collect the cumulative sum.
-            let cumulative_sum_array = builder.ext2felt(cumulative_sum);
-            let cumulative_sum_array = array::from_fn(|i| builder.get(&cumulative_sum_array, i));
+            let global_cumulative_sum_array = builder.ext2felt(global_cumulative_sum);
+            let global_cumulative_sum_array =
+                array::from_fn(|i| builder.get(&global_cumulative_sum_array, i));
 
             // Collect the flag_complete flag.
             let is_complete_felt = var2felt(builder, flag_complete);
@@ -151,7 +149,7 @@ where
                 recursion_public_values_stream.as_mut_slice().borrow_mut();
 
             recursion_public_values.base_challenger = base_challenger_public_values;
-            recursion_public_values.cumulative_sum = cumulative_sum_array;
+            recursion_public_values.cumulative_sum = global_cumulative_sum_array;
             recursion_public_values.flag_complete = is_complete_felt;
 
             // Assert complete

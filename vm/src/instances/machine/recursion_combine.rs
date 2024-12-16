@@ -3,23 +3,24 @@ use crate::machine::debug::constraints::IncrementalConstraintDebugger;
 #[cfg(feature = "debug-lookups")]
 use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
-    compiler::recursion::program::RecursionProgram,
+    compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
-    emulator::{emulator::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
+    emulator::{emulator_v2::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
     instances::{
-        compiler::recursion_circuit::stdin::RecursionStdin,
+        compiler_v2::recursion_circuit::stdin::RecursionStdin,
         configs::recur_config::StarkConfig as RecursionSC,
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey},
+        keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
+        lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
     primitives::consts::COMBINE_SIZE,
-    recursion::{air::RecursionPublicValues, runtime::RecursionRecord},
+    recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use anyhow::Result;
 use p3_air::Air;
@@ -43,7 +44,7 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<RecursionSC, C>>
+impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<'_, RecursionSC, C>>
     for RecursionCombineMachine<RecursionSC, C>
 where
     C: Send
@@ -83,17 +84,7 @@ where
         info!("PERF-machine=combine");
         let begin = Instant::now();
 
-        // First
-        // Generate batch records and commit to challenger
-
-        let mut recursion_stdin;
-        let mut recursion_witness;
         let mut recursion_emulator = MetaEmulator::setup_recursion(witness);
-
-        let mut chunk_index = 1;
-        let mut layer_index = 1;
-        let mut all_proofs = vec![];
-        let mut flag_complete = false;
 
         // used for collect all records for debugging
         #[cfg(feature = "debug")]
@@ -103,97 +94,22 @@ where
         #[cfg(feature = "debug-lookups")]
         let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
 
+        let mut all_proofs = vec![];
         loop {
-            loop {
-                // generate record
-                let (mut batch_records, done) = recursion_emulator.next_batch();
+            let (mut batch_records, done) = recursion_emulator.next_batch();
+            self.complement_record(batch_records.as_mut_slice());
 
-                self.complement_record(batch_records.as_mut_slice());
+            #[cfg(feature = "debug")]
+            constraint_debugger.debug_incremental(self.chips(), &batch_records);
+            #[cfg(feature = "debug-lookups")]
+            lookup_debugger.debug_incremental(self.chips(), &batch_records);
 
-                #[cfg(feature = "debug")]
-                constraint_debugger.debug_incremental(&self.chips(), &batch_records);
-                #[cfg(feature = "debug-lookups")]
-                lookup_debugger.debug_incremental(&self.chips(), &batch_records);
+            let batch_proofs = self.base_machine.prove_ensemble(pk, &batch_records);
+            all_proofs.extend(batch_proofs.to_vec());
 
-                info!(
-                    "recursion combine layer {}, chunk {}-{}",
-                    layer_index,
-                    chunk_index,
-                    chunk_index + batch_records.len() as u32 - 1
-                );
-
-                for record in &mut *batch_records {
-                    record.index = chunk_index;
-                    chunk_index += 1;
-                    debug!(
-                        "recursion combine record stats: chunk {}",
-                        record.chunk_index()
-                    );
-                    let stats = record.stats();
-                    for (key, value) in &stats {
-                        debug!("   |- {:<28}: {}", key, value);
-                    }
-                }
-
-                let batch_proofs = batch_records
-                    .into_par_iter()
-                    .map(|record| {
-                        info!("PERF-phase=1-chunk={}", record.chunk_index());
-
-                        let commitment = self.base_machine.commit(&record);
-
-                        let mut challenger = self.config().challenger();
-                        pk.observed_by(&mut challenger);
-
-                        challenger.observe(commitment.commitment);
-                        challenger
-                            .observe_slice(&commitment.public_values[..self.num_public_values()]);
-
-                        self.base_machine.prove_plain(
-                            pk,
-                            &mut challenger.clone(),
-                            commitment,
-                            record.chunk_index(),
-                        )
-                    })
-                    .collect::<Box<[_]>>();
-
-                all_proofs.extend(batch_proofs);
-
-                if done {
-                    break;
-                }
-            }
-
-            if flag_complete {
-                info!("recursion combine finished");
+            if done {
                 break;
             }
-            flag_complete = all_proofs.len() <= COMBINE_SIZE;
-
-            layer_index += 1;
-            chunk_index = 1;
-
-            // more than one proofs, need to combine another round
-            recursion_stdin = EmulatorStdin::setup_for_combine(
-                witness.vk.as_ref().unwrap(),
-                self.base_machine(),
-                &all_proofs,
-                COMBINE_SIZE,
-                all_proofs.len() <= COMBINE_SIZE,
-            );
-
-            recursion_witness = ProvingWitness::setup_for_recursion(
-                witness.program.clone(),
-                &recursion_stdin,
-                self.config(),
-                witness.vk.as_ref().unwrap(),
-                witness.opts.unwrap(),
-            );
-
-            recursion_emulator = MetaEmulator::setup_recursion(&recursion_witness);
-
-            all_proofs.clear();
         }
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
@@ -203,10 +119,12 @@ where
         let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
-        #[cfg(feature = "debug")]
-        constraint_debugger.print_results();
-        #[cfg(feature = "debug-lookups")]
-        lookup_debugger.print_results();
+        /*
+                #[cfg(feature = "debug")]
+                constraint_debugger.print_results();
+                #[cfg(feature = "debug-lookups")]
+                lookup_debugger.print_results();
+        */
 
         proof
     }

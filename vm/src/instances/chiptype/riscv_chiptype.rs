@@ -15,6 +15,7 @@ use crate::{
             riscv_cpu::CpuChip,
             riscv_memory::{
                 initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
+                local::MemoryLocalChip,
                 read_write::MemoryReadWriteChip,
             },
             riscv_program::ProgramChip,
@@ -38,6 +39,7 @@ use crate::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
+        lookup::LookupScope,
     },
 };
 
@@ -60,6 +62,7 @@ define_chip_type!(
         (ShaExtend, ShaExtendChip),
         (MemoryInitialize, MemoryInitializeFinalizeChip),
         (MemoryFinalize, MemoryInitializeFinalizeChip),
+        (MemoryLocal, MemoryLocalChip),
         (MemoryReadWrite, MemoryReadWriteChip),
         (DivRem, DivRemChip),
         (Mul, MulChip),

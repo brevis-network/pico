@@ -15,7 +15,7 @@ use crate::{
         Array, Builder, Ext, ExtensionOperand, Felt, Ptr, SymbolicVar, Usize, Var,
     },
     configs::config::FieldGenericConfig,
-    primitives::{consts::DIGEST_SIZE, types::RecursionProgramType},
+    primitives::consts::DIGEST_SIZE,
 };
 pub use domain::*;
 use p3_field::{Field, FieldAlgebra, TwoAdicField};
@@ -131,11 +131,7 @@ where
     let folded_eval: Ext<FC::F, FC::EF> = builder.eval(FC::F::ZERO);
     let two_adic_generator_f = config.get_two_adic_generator(builder, log_max_height);
 
-    let x = if matches!(builder.program_type, RecursionProgramType::Embed) {
-        builder.exp_reverse_bits_len(two_adic_generator_f, index_bits, log_max_height)
-    } else {
-        builder.exp_reverse_bits_len_fast(two_adic_generator_f, index_bits, log_max_height)
-    };
+    let x = builder.exp_reverse_bits_len_fast(two_adic_generator_f, index_bits, log_max_height);
 
     let log_max_height = log_max_height.materialize(builder);
     builder

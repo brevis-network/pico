@@ -1,4 +1,4 @@
-use super::folder::DebugConstraintFolder;
+use super::{folder::DebugConstraintFolder, lookup::LookupScope};
 use crate::{
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
@@ -14,11 +14,12 @@ use crate::{
 };
 use alloc::sync::Arc;
 use anyhow::Result;
+use itertools::Itertools;
 use p3_air::Air;
-use p3_challenger::CanObserve;
-use p3_field::Field;
+use p3_challenger::{CanObserve, FieldChallenger};
+use p3_field::{Field, FieldAlgebra};
 use p3_maybe_rayon::prelude::*;
-use std::time::Instant;
+use std::{array, time::Instant};
 use tracing::{debug, info};
 
 /// Functions that each machine instance should implement.
@@ -116,6 +117,9 @@ where
 
     /// Number of public values
     num_public_values: usize,
+
+    /// Contains global scopes.
+    has_global: bool,
 }
 
 impl<SC, C> Clone for BaseMachine<SC, C>
@@ -127,6 +131,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
+            has_global: self.has_global,
             config: self.config.clone(),
             chips: self.chips.clone(),
             prover: self.prover.clone(),
@@ -142,20 +147,7 @@ where
     C: ChipBehavior<Val<SC>>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
-    /// Create BaseMachine based on config and chip behavior.
-    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
-        Self {
-            config: config.into(),
-            chips: chips.into(),
-            prover: BaseProver::<SC, C>::new(),
-            verifier: BaseVerifier::<SC, C>::new(),
-            num_public_values,
-        }
-    }
-
     /// Name of BaseMachine.
     pub fn name(&self) -> String {
         "BaseMachine".to_string()
@@ -174,6 +166,32 @@ where
     /// Get the number of public values.
     pub fn num_public_values(&self) -> usize {
         self.num_public_values
+    }
+}
+
+impl<SC, C> BaseMachine<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+{
+    /// Create BaseMachine based on config and chip behavior.
+    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
+        let has_global = chips
+            .iter()
+            .any(|chip| chip.lookup_scope() == LookupScope::Global);
+
+        Self {
+            config: config.into(),
+            chips: chips.into(),
+            prover: BaseProver::<SC, C>::new(),
+            verifier: BaseVerifier::<SC, C>::new(),
+            num_public_values,
+            has_global,
+        }
     }
 
     pub fn preprocessed_chip_ids(&self) -> Vec<usize> {
@@ -194,11 +212,16 @@ where
         (pk, vk)
     }
 
-    pub fn commit(&self, record: &C::Record) -> MainTraceCommitments<SC> {
+    pub fn commit(
+        &self,
+        record: &C::Record,
+        lookup_scope: LookupScope,
+    ) -> Option<MainTraceCommitments<SC>> {
         self.prover.commit_main(
             &self.config(),
             record,
-            self.prover.generate_main(&self.chips(), record),
+            self.prover
+                .generate_main(&self.chips(), record, lookup_scope),
         )
     }
 
@@ -212,38 +235,64 @@ where
         C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
     {
         let mut challenger = self.config().challenger();
+
         // observe preprocessed
         pk.observed_by(&mut challenger);
 
-        let main_commitments = records
+        // Generate and commit the global traces for each chunk.
+        let global_data = records
             .iter()
-            .enumerate()
-            .map(|(i, record)| {
-                info!("PERF-chunk={}", i + 1);
-
-                let commitment = self.prover.commit_main(
-                    &self.config(),
-                    record,
-                    self.prover.generate_main(&self.chips(), record),
-                );
-                challenger.observe(commitment.commitment.clone());
-                challenger.observe_slice(&commitment.public_values[..self.num_public_values]);
-                commitment
+            .map(|record| {
+                if self.has_global {
+                    self.commit(record, LookupScope::Global)
+                } else {
+                    None
+                }
             })
-            .collect::<Vec<_>>();
+            .collect_vec();
 
-        main_commitments
+        // Observe the challenges for each segment.
+        global_data
+            .iter()
+            .zip_eq(records.iter())
+            .for_each(|(global_data, record)| {
+                if self.has_global {
+                    challenger.observe(
+                        global_data
+                            .as_ref()
+                            .expect("must have a global commitment")
+                            .commitment
+                            .clone(),
+                    );
+                }
+                challenger
+                    .observe_slice(&record.public_values::<SC::Val>()[0..self.num_public_values()]);
+            });
+
+        // Obtain the challenges used for the global permutation argument.
+        let global_permutation_challenges: [SC::Challenge; 2] = array::from_fn(|_| {
+            if self.has_global {
+                challenger.sample_ext_element()
+            } else {
+                SC::Challenge::ZERO
+            }
+        });
+
+        global_data
             .into_iter()
+            .zip_eq(records.iter())
             .enumerate()
-            .map(|(i, commitment)| {
+            .map(|(i, (global_data, record))| {
                 info!("PERF-chunk={}", i + 1);
-
+                let regional_data = self.commit(record, LookupScope::Regional).unwrap();
                 self.prover.prove(
                     &self.config(),
                     &self.chips(),
                     pk,
+                    regional_data,
+                    global_data,
                     &mut challenger.clone(),
-                    commitment,
+                    &global_permutation_challenges,
                     records[i].chunk_index(),
                 )
             })
@@ -255,15 +304,25 @@ where
         &self,
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
-        commitment: MainTraceCommitments<SC>,
         chunk_index: usize,
+        local_commitment: MainTraceCommitments<SC>,
+        global_commitment: Option<MainTraceCommitments<SC>>,
     ) -> BaseProof<SC> {
+        // Sample for the global permutation challenges.
+        // Obtain the challenges used for the global permutation argument.
+        let mut global_permutation_challenges: Vec<SC::Challenge> = Vec::new();
+        for _ in 0..2 {
+            global_permutation_challenges.push(challenger.sample_ext_element());
+        }
+
         self.prover.prove(
             &self.config(),
             &self.chips(),
             pk,
+            local_commitment,
+            global_commitment,
             challenger,
-            commitment,
+            &global_permutation_challenges,
             chunk_index,
         )
     }
@@ -282,8 +341,19 @@ where
         vk.observed_by(&mut challenger);
 
         proofs.iter().for_each(|proof| {
-            challenger.observe(proof.commitments.main_commit.clone());
+            if self.has_global {
+                challenger.observe(proof.commitments.global_main_commit.clone());
+            }
             challenger.observe_slice(&proof.public_values[..self.num_public_values]);
+        });
+
+        // Obtain the challenges used for the global permutation argument.
+        let global_permutation_challenges: [SC::Challenge; 2] = array::from_fn(|_| {
+            if self.has_global {
+                challenger.sample_ext_element()
+            } else {
+                SC::Challenge::ZERO
+            }
         });
 
         // verify all proofs
@@ -294,16 +364,21 @@ where
                 vk,
                 &mut challenger.clone(),
                 proof,
+                &global_permutation_challenges,
             )?;
+
+            if !proof.regional_cumulative_sum().is_zero() {
+                panic!("verify_ensemble: local lookup cumulative sum is not zero");
+            }
         }
 
         let sum = proofs
             .iter()
-            .map(|proof| proof.cumulative_sum())
+            .map(|proof| proof.global_cumulative_sum())
             .sum::<SC::Challenge>();
 
         if !sum.is_zero() {
-            panic!("verify_ensemble:lookup cumulative sum is not zero");
+            panic!("verify_ensemble: global lookup cumulative sum is not zero");
         }
 
         Ok(())
@@ -316,7 +391,22 @@ where
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,
     ) -> Result<()> {
-        self.verifier
-            .verify(&self.config(), &self.chips(), vk, challenger, proof)
+        // Obtain the challenges used for the global permutation argument.
+        let global_permutation_challenges: [SC::Challenge; 2] = array::from_fn(|_| {
+            if self.has_global {
+                challenger.sample_ext_element()
+            } else {
+                SC::Challenge::ZERO
+            }
+        });
+
+        self.verifier.verify(
+            &self.config(),
+            &self.chips(),
+            vk,
+            challenger,
+            proof,
+            &global_permutation_challenges,
+        )
     }
 }
