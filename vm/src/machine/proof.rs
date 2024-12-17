@@ -1,4 +1,7 @@
-use crate::configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig};
+use crate::{
+    configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig},
+    machine::keys::BaseVerifyingKey,
+};
 use alloc::{sync::Arc, vec::Vec};
 use hashbrown::HashMap;
 use p3_matrix::dense::RowMajorMatrix;
@@ -6,13 +9,14 @@ use serde::{Deserialize, Serialize};
 
 /// Wrapper for all proof types
 /// The top layer of abstraction (the most abstract layer)
-#[derive(Serialize)]
 pub struct MetaProof<SC>
 where
     SC: StarkGenericConfig,
 {
     /// The proof that impls ProofBehavior
     pub proofs: Arc<[BaseProof<SC>]>,
+
+    pub vks: Arc<[BaseVerifyingKey<SC>]>,
 }
 
 impl<SC> MetaProof<SC>
@@ -20,9 +24,10 @@ where
     SC: StarkGenericConfig,
 {
     /// Create a new MetaProof
-    pub fn new(proofs: Arc<[BaseProof<SC>]>) -> Self {
+    pub fn new(proofs: Arc<[BaseProof<SC>]>, vks: Arc<[BaseVerifyingKey<SC>]>) -> Self {
         Self {
             proofs: proofs.into(),
+            vks: vks.into(),
         }
     }
 
@@ -34,6 +39,11 @@ where
     /// Get the proofs
     pub fn proofs(&self) -> &[BaseProof<SC>] {
         self.proofs.as_ref()
+    }
+
+    /// Get the vks
+    pub fn vks(&self) -> &[BaseVerifyingKey<SC>] {
+        self.vks.as_ref()
     }
 
     /// Get the number of proofs

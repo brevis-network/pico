@@ -41,37 +41,6 @@ use tracing::{debug, info};
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
-// todo: refactor the whole test
-
-/*
-pub fn get_simple_recursion_stdin<'a, SC: StarkGenericConfig>(
-    machine: &SimpleMachine<RiscvSC, RiscvChipType<BabyBear>>,
-    reconstruct_challenger: &mut <RiscvSC as StarkGenericConfig>::Challenger,
-    vk: &BaseVerifyingKey<RiscvSC>,
-    base_challenger: &'a mut <RiscvSC as StarkGenericConfig>::Challenger,
-    base_proof: BaseProof<RiscvSC>,
-) -> SimpleRecursionStdin<'a, RiscvSC, RiscvChipType<BabyBear>> {
-    let num_public_values = machine.num_public_values();
-
-    vk.observed_by(reconstruct_challenger);
-    vk.observed_by(base_challenger);
-
-    base_challenger.observe(base_proof.commitments.main_commit);
-    base_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
-
-    let stdin = SimpleRecursionStdin {
-        vk: vk.clone(),
-        machine: machine.base_machine().clone(),
-        base_proofs: vec![base_proof.clone()],
-        base_challenger,
-        initial_reconstruct_challenger: reconstruct_challenger.clone(),
-        flag_complete: true,
-    };
-
-    stdin
-}
-*/
-
 fn main() {
     setup_logger();
 
@@ -140,11 +109,11 @@ fn main() {
     }
 
     info!("\n Construct proving witness..");
-    let witness = ProvingWitness::setup_with_records(records);
+    let witness = ProvingWitness::setup_with_keys_and_records(pk, vk.clone(), records);
 
     // Generate the proof.
     info!("\n Generating proof (at {:?})..", start.elapsed());
-    let proof = simple_machine.prove(&pk, &witness);
+    let proof = simple_machine.prove(&witness);
     info!("{} generated.", proof.name());
 
     debug!(
@@ -192,7 +161,7 @@ fn main() {
 
     // Verify the proof.
     info!("\n Verifying proof (at {:?})..", start.elapsed());
-    let result = simple_machine.verify(&vk, &proof);
+    let result = simple_machine.verify(&proof);
     info!(
         "The proof is verified: {} (at {:?})",
         result.is_ok(),
@@ -324,14 +293,15 @@ fn main() {
     recursion_machine.complement_record(&mut recursion_records);
 
     info!("\n Construct proving witness..");
-    let recursion_witness = ProvingWitness::setup_with_records(recursion_records);
+    let recursion_witness =
+        ProvingWitness::setup_with_keys_and_records(recursion_pk, recursion_vk, recursion_records);
 
     // Generate the proof.
     info!(
         "\n Generating simple recursion proof (at {:?})..",
         start.elapsed()
     );
-    let recursion_proof = recursion_machine.prove(&recursion_pk, &recursion_witness);
+    let recursion_proof = recursion_machine.prove(&recursion_witness);
     info!("{} generated.", recursion_proof.name());
 
     // Verify the proof.
@@ -339,7 +309,7 @@ fn main() {
         "\n Verifying simple recursion proof (at {:?})..",
         start.elapsed()
     );
-    let recursion_result = recursion_machine.verify(&recursion_vk, &recursion_proof);
+    let recursion_result = recursion_machine.verify(&recursion_proof);
     info!(
         "The proof is verified: {} (at {:?})",
         recursion_result.is_ok(),

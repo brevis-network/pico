@@ -9,7 +9,7 @@ use crate::{
         stark_config::bb_poseidon2::SC_Challenge,
     },
     emulator::{
-        emulator::MetaEmulator,
+        emulator_v2::MetaEmulator,
         record::RecordBehavior,
         riscv::{public_values::PublicValues, record::EmulationRecord},
     },
@@ -67,11 +67,7 @@ where
 
     /// Get the prover of the machine.
     #[instrument(name = "riscv_prove", level = "debug", skip_all)]
-    fn prove(
-        &self,
-        pk: &BaseProvingKey<SC>,
-        witness: &ProvingWitness<SC, C, Vec<u8>>,
-    ) -> MetaProof<SC>
+    fn prove(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> MetaProof<SC>
     where
         C: for<'a> Air<
             DebugConstraintFolder<
@@ -86,6 +82,9 @@ where
 
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
+
+        // Get pk from witness and observe with challenger
+        let pk = witness.pk();
         pk.observed_by(&mut challenger);
 
         // TODO: checkpoint batch records and apply pipeline parallelism
@@ -95,7 +94,7 @@ where
 
         let mut emulator = MetaEmulator::setup_riscv(witness);
         loop {
-            let (batch_records, done) = emulator.next_batch();
+            let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
 
             for record in &mut *batch_records {
@@ -146,7 +145,7 @@ where
         */
 
         loop {
-            let (batch_records, done) = emulator.next_batch();
+            let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
 
             /*
@@ -156,8 +155,9 @@ where
                         lookup_debugger.debug_incremental(&self.chips(), &batch_records);
             */
 
+            // todo: parallel
             let batch_proofs = batch_records
-                .into_par_iter()
+                .into_iter()
                 .map(|record| {
                     let regional_commitment = self
                         .base_machine
@@ -166,7 +166,7 @@ where
                     let global_commitment = self.base_machine.commit(record, LookupScope::Global);
 
                     self.base_machine.prove_plain(
-                        pk,
+                        witness.pk(),
                         &mut challenger.clone(),
                         record.chunk_index(),
                         regional_commitment,
@@ -185,8 +185,9 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(all_proofs.into());
-        let proof_size = bincode::serialize(&proof).unwrap().len();
+        let vks = vec![witness.vk.clone().unwrap()];
+        let proof_size = bincode::serialize(all_proofs.as_slice()).unwrap().len();
+        let proof = MetaProof::new(all_proofs.into(), vks.into());
         info!("PERF-step=proof_size-{}", proof_size);
 
         /*
@@ -200,9 +201,15 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, vk: &BaseVerifyingKey<SC>, proof: &MetaProof<SC>) -> Result<()> {
+    fn verify(&self, proof: &MetaProof<SC>) -> Result<()> {
         info!("PERF-machine=riscv");
         let begin = Instant::now();
+
+        // Assert single vk
+        assert_eq!(proof.vks().len(), 1);
+
+        // Get vk from proof
+        let vk = proof.vks().first().unwrap();
 
         // initialize bookkeeping
         let mut proof_count = <Val<SC>>::ZERO;
@@ -292,7 +299,6 @@ where
             prev_next_pc = public_values.next_pc;
             prev_last_initialize_addr_bits = public_values.last_initialize_addr_bits;
             prev_last_finalize_addr_bits = public_values.last_finalize_addr_bits;
-            // println!("public values: {:?}", public_values);
 
             // committed_value_digest and deferred_proofs_digest checks
             transition_with_condition(

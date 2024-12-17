@@ -70,14 +70,13 @@ where
     // todo: I is actually not used here
     /// Get the prover of the machine.
     #[instrument(name = "embed_prove", level = "debug", skip_all)]
-    fn prove(
-        &self,
-        pk: &BaseProvingKey<EmbedSC>,
-        witness: &ProvingWitness<EmbedSC, C, I>,
-    ) -> MetaProof<EmbedSC>
+    fn prove(&self, witness: &ProvingWitness<EmbedSC, C, I>) -> MetaProof<EmbedSC>
     where
         C: for<'c> Air<DebugConstraintFolder<'c, Val<EmbedSC>, Challenge<EmbedSC>>>,
     {
+        // todo: keys
+        let pk = witness.pk();
+
         info!("PERF-machine=embed");
         let begin = Instant::now();
 
@@ -107,8 +106,12 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
         // construct meta proof
-        let proof = MetaProof::new(proofs);
-        let proof_size = bincode::serialize(&proof).unwrap().len();
+        // todo: keys
+        let vks = vec![witness.vk.clone().unwrap()].into();
+        let proof = MetaProof::new(proofs.into(), vks);
+        let proof_size = bincode::serialize(proof.proofs()).unwrap().len();
+        // let proof = MetaProof::new(proofs);
+        // let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
         /*
@@ -122,11 +125,10 @@ where
     }
 
     /// Verify the proof.
-    fn verify(
-        &self,
-        vk: &BaseVerifyingKey<EmbedSC>,
-        proof: &MetaProof<EmbedSC>,
-    ) -> anyhow::Result<()> {
+    fn verify(&self, proof: &MetaProof<EmbedSC>) -> anyhow::Result<()> {
+        // todo: keys
+        let vk = proof.vks().first().unwrap();
+
         info!("PERF-machine=embed");
         let begin = Instant::now();
 

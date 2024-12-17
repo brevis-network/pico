@@ -3,12 +3,14 @@ use crate::machine::debug::constraints::IncrementalConstraintDebugger;
 #[cfg(feature = "debug-lookups")]
 use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
-    compiler::recursion_v2::program::RecursionProgram,
+    compiler::recursion_v2::{
+        circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
+    },
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{emulator_v2::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
     instances::{
         compiler_v2::recursion_circuit::stdin::RecursionStdin,
-        configs::recur_config::StarkConfig as RecursionSC,
+        configs::recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -40,7 +42,6 @@ where
         > + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    // vk: BaseVerifyingKey<RiscvSC>, // this is for the riscv pk
     base_machine: BaseMachine<SC, C>,
 }
 
@@ -53,7 +54,8 @@ where
             Program = RecursionProgram<Val<RecursionSC>>,
             Record = RecursionRecord<Val<RecursionSC>>,
         > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, RecursionFC>>,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -69,8 +71,7 @@ where
     #[instrument(name = "combine_prove", level = "debug", skip_all)]
     fn prove(
         &self,
-        pk: &BaseProvingKey<RecursionSC>,
-        witness: &ProvingWitness<RecursionSC, C, RecursionStdin<RecursionSC, C>>,
+        proving_witness: &ProvingWitness<RecursionSC, C, RecursionStdin<RecursionSC, C>>,
     ) -> MetaProof<RecursionSC>
     where
         C: for<'c> Air<
@@ -84,74 +85,127 @@ where
         info!("PERF-machine=combine");
         let begin = Instant::now();
 
-        let mut recursion_emulator = MetaEmulator::setup_recursion(witness);
-
-        // used for collect all records for debugging
-        #[cfg(feature = "debug")]
-        let mut debug_challenger = self.config().challenger();
-        #[cfg(feature = "debug")]
-        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
-        #[cfg(feature = "debug-lookups")]
-        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
+        let mut recursion_emulator =
+            MetaEmulator::setup_combine(proving_witness, self.base_machine());
+        let mut recursion_witness;
+        let mut recursion_stdin;
 
         let mut all_proofs = vec![];
+        let mut all_vks = vec![];
+
+        let mut chunk_index = 1;
+        let mut layer_index = 1;
+        let mut flag_complete = false;
+
         loop {
-            let (mut batch_records, done) = recursion_emulator.next_batch();
-            self.complement_record(batch_records.as_mut_slice());
+            loop {
+                let (mut batch_records, batch_pks, batch_vks, done) =
+                    recursion_emulator.next_record_keys_batch();
 
-            #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(self.chips(), &batch_records);
-            #[cfg(feature = "debug-lookups")]
-            lookup_debugger.debug_incremental(self.chips(), &batch_records);
+                self.complement_record(batch_records.as_mut_slice());
 
-            let batch_proofs = self.base_machine.prove_ensemble(pk, &batch_records);
-            all_proofs.extend(batch_proofs.to_vec());
+                info!(
+                    "recursion combine layer {}, chunk {}-{}",
+                    layer_index,
+                    chunk_index,
+                    chunk_index + batch_records.len() as u32 - 1
+                );
 
-            if done {
+                // set index for each record
+                for record in batch_records.as_mut_slice() {
+                    record.index = chunk_index;
+                    chunk_index += 1;
+                    debug!(
+                        "riscv recursion record stats: chunk {}",
+                        record.chunk_index()
+                    );
+                    let stats = record.stats();
+                    for (key, value) in &stats {
+                        debug!("   |- {:<28}: {}", key, value);
+                    }
+                }
+
+                // prove records in parallel
+                let batch_proofs = batch_records
+                    .par_iter()
+                    .zip(batch_pks.par_iter())
+                    .flat_map(|(record, pk)| {
+                        self.base_machine
+                            .prove_ensemble(pk, std::slice::from_ref(record))
+                    })
+                    .collect::<Vec<_>>();
+
+                all_proofs.extend(batch_proofs);
+                all_vks.extend(batch_vks);
+
+                if done {
+                    break;
+                }
+            }
+
+            if flag_complete {
+                info!("recursion combine finished");
                 break;
             }
+
+            flag_complete = all_proofs.len() <= COMBINE_SIZE;
+
+            layer_index += 1;
+            chunk_index = 1;
+
+            // more than one proofs, need to combine another round
+            recursion_stdin = EmulatorStdin::setup_for_combine(
+                proving_witness.vk_root.unwrap(),
+                &all_vks,
+                &all_proofs,
+                self.base_machine(),
+                COMBINE_SIZE,
+                flag_complete,
+            );
+
+            recursion_witness = ProvingWitness::setup_for_recursion(
+                proving_witness.vk_root.unwrap(),
+                recursion_stdin,
+                self.config(),
+                proving_witness.opts.unwrap(),
+            );
+
+            recursion_emulator =
+                MetaEmulator::setup_combine(&recursion_witness, self.base_machine());
+            all_proofs.clear();
+            all_vks.clear();
         }
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
-        let proof = MetaProof::new(all_proofs.into());
-        let proof_size = bincode::serialize(&proof).unwrap().len();
-        info!("PERF-step=proof_size-{}", proof_size);
+        let proof = MetaProof::new(all_proofs.into(), all_vks.into());
+        let proof_size = bincode::serialize(proof.proofs()).unwrap().len();
 
-        /*
-                #[cfg(feature = "debug")]
-                constraint_debugger.print_results();
-                #[cfg(feature = "debug-lookups")]
-                lookup_debugger.print_results();
-        */
+        info!("PERF-step=proof_size-{}", proof_size);
 
         proof
     }
 
     /// Verify the proof.
-    fn verify(
-        &self,
-        combine_vk: &BaseVerifyingKey<RecursionSC>, // note that this is the vk of riscv machine
-        proof: &MetaProof<RecursionSC>,
-    ) -> Result<()> {
+    fn verify(&self, proof: &MetaProof<RecursionSC>) -> Result<()> {
         info!("PERF-machine=combine");
         let begin = Instant::now();
 
         assert_eq!(proof.proofs().len(), 1);
 
+        // assert completion
+
         let public_values: &RecursionPublicValues<_> =
             proof.proofs[0].public_values.as_ref().borrow();
-        trace!("public values: {:?}", public_values);
 
-        // assert completion
         if public_values.flag_complete != <Val<RecursionSC>>::ONE {
             panic!("flag_complete is not 1");
         }
 
         // verify
         self.base_machine
-            .verify_ensemble(combine_vk, proof.proofs())?;
+            .verify_ensemble(proof.vks().first().unwrap(), proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
@@ -174,7 +228,6 @@ where
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         info!("PERF-machine=combine");
         Self {
-            // vk,
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }
     }

@@ -93,7 +93,7 @@ where
     ) {
         // Read input.
         let RiscvRecursionStdinVariable {
-            vk,
+            riscv_vk,
             proofs,
             base_challenger,
             reconstruct_challenger,
@@ -138,7 +138,7 @@ where
 
             StarkVerifier::verify_chunk(
                 builder,
-                &vk,
+                &riscv_vk,
                 machine,
                 &mut challenger,
                 &proofs[0],
@@ -168,7 +168,7 @@ where
 
             // Starting challenger assertion
             let mut starting_challenger = machine.config().challenger_variable(builder);
-            vk.observed_by(builder, &mut starting_challenger);
+            riscv_vk.observed_by(builder, &mut starting_challenger);
             let starting_challenger_public_values = starting_challenger.public_values(builder);
             let reconstruct_challenger_public_values =
                 reconstruct_challenger.public_values(builder);
@@ -181,7 +181,7 @@ where
 
             // `start_pc` equals `vk.pc_start`.
             builder.assert_felt_eq(
-                flag_first_chunk * (public_values.start_pc - vk.pc_start),
+                flag_first_chunk * (public_values.start_pc - riscv_vk.pc_start),
                 CC::F::ZERO,
             );
 
@@ -284,7 +284,7 @@ where
         */
         {
             // Compute the vk digest.
-            let vk_digest = vk.hash_babybear(builder);
+            let vk_digest = riscv_vk.hash_babybear(builder);
 
             // challenger pvs
             let base_challenger_public_values = base_challenger.public_values(builder);

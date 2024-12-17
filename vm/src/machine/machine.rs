@@ -86,12 +86,12 @@ where
     }
 
     /// Get the prover of the machine.
-    fn prove(&self, pk: &BaseProvingKey<SC>, witness: &ProvingWitness<SC, C, I>) -> MetaProof<SC>
+    fn prove(&self, witness: &ProvingWitness<SC, C, I>) -> MetaProof<SC>
     where
         C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>;
 
     /// Verify the proof.
-    fn verify(&self, vk: &BaseVerifyingKey<SC>, proof: &MetaProof<SC>) -> Result<()>;
+    fn verify(&self, proof: &MetaProof<SC>) -> Result<()>;
 }
 
 /// A basic machine that includes elemental proving gadgets.
@@ -131,12 +131,12 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            has_global: self.has_global,
             config: self.config.clone(),
             chips: self.chips.clone(),
             prover: self.prover.clone(),
             verifier: self.verifier.clone(),
             num_public_values: self.num_public_values,
+            has_global: self.has_global,
         }
     }
 }
@@ -225,12 +225,12 @@ where
         )
     }
 
-    /// prove a batch of records
+    /// prove a batch of records with a single pk
     pub fn prove_ensemble(
         &self,
         pk: &BaseProvingKey<SC>,
         records: &[C::Record],
-    ) -> Arc<[BaseProof<SC>]>
+    ) -> Vec<BaseProof<SC>>
     where
         C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
     {
@@ -296,7 +296,7 @@ where
                     records[i].chunk_index(),
                 )
             })
-            .collect::<Arc<[_]>>()
+            .collect::<Vec<_>>()
     }
 
     /// Prove assuming that challenger has already observed pk & main commitments and pv's
@@ -310,10 +310,13 @@ where
     ) -> BaseProof<SC> {
         // Sample for the global permutation challenges.
         // Obtain the challenges used for the global permutation argument.
-        let mut global_permutation_challenges: Vec<SC::Challenge> = Vec::new();
-        for _ in 0..2 {
-            global_permutation_challenges.push(challenger.sample_ext_element());
-        }
+        let global_permutation_challenges: [SC::Challenge; 2] = array::from_fn(|_| {
+            if self.has_global {
+                challenger.sample_ext_element()
+            } else {
+                SC::Challenge::ZERO
+            }
+        });
 
         self.prover.prove(
             &self.config(),
@@ -327,7 +330,7 @@ where
         )
     }
 
-    /// Verify a batch of BaseProofs e2e
+    /// Verify a batch of BaseProofs with a single vk
     pub fn verify_ensemble(
         &self,
         vk: &BaseVerifyingKey<SC>,

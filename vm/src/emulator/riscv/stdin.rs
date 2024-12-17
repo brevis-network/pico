@@ -1,13 +1,30 @@
 use crate::{
-    compiler::{recursion_v2::program::RecursionProgram, riscv::program::Program},
-    configs::config::{Challenger, StarkGenericConfig, Val},
+    compiler::{
+        recursion_v2::{
+            circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
+        },
+        riscv::program::Program,
+    },
+    configs::{
+        config::{Challenger, StarkGenericConfig, Val},
+        stark_config::bb_poseidon2::BabyBearPoseidon2,
+    },
     emulator::riscv::record::EmulationRecord,
     instances::{
+        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
-            recursion_circuit::stdin::RecursionStdin,
-            riscv_circuit::{challenger::RiscvRecursionChallengers, stdin::RiscvRecursionStdin},
+            recursion_circuit::{
+                combine::builder::RecursionCombineVerifierCircuit, stdin::RecursionStdin,
+            },
+            riscv_circuit::{
+                challenger::RiscvRecursionChallengers,
+                compress::builder::RiscvCompressVerifierCircuit, stdin::RiscvRecursionStdin,
+            },
         },
-        configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
+        configs::{
+            recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
+            riscv_config::StarkConfig as RiscvSC,
+        },
     },
     machine::{
         chip::ChipBehavior,
@@ -16,7 +33,7 @@ use crate::{
         machine::BaseMachine,
         proof::BaseProof,
     },
-    primitives::consts::DIGEST_SIZE,
+    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
     recursion_v2::runtime::RecursionRecord,
 };
 use alloc::sync::Arc;
@@ -25,6 +42,7 @@ use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
 use p3_field::FieldAlgebra;
 use serde::Serialize;
+use std::array;
 
 #[derive(Clone, Default, Serialize)]
 pub struct EmulatorStdinBuilder<I> {
@@ -32,37 +50,43 @@ pub struct EmulatorStdinBuilder<I> {
 }
 
 #[derive(Default, Serialize)]
-pub struct EmulatorStdin<I> {
-    pub buffer: Arc<[I]>,
-    pub cursor: usize,
+pub struct EmulatorStdin<P, I> {
+    pub programs: Vec<P>,
+    pub inputs: Vec<I>,
+    pub pointer: usize,
 }
 
-impl<I> Clone for EmulatorStdin<I> {
+impl<P, I> Clone for EmulatorStdin<P, I>
+where
+    P: Clone,
+    I: Clone,
+{
     fn clone(&self) -> Self {
         Self {
-            buffer: self.buffer.clone(),
-            cursor: self.cursor,
+            programs: self.programs.clone(),
+            inputs: self.inputs.clone(),
+            pointer: self.pointer,
         }
     }
 }
 
 #[allow(clippy::should_implement_trait)]
-impl<I> EmulatorStdin<I> {
-    //pub fn next(&mut self) -> (&mut I, bool) {
-    //    let flag_last = self.cursor == self.buffer.len() - 1;
-    //    if self.cursor < self.buffer.len() {
-    //        let cursor = self.cursor;
-    //        self.cursor += 1;
-    //        (&mut self.buffer[cursor], flag_last)
-    //    } else {
-    //        panic!("EmulatorStdin: out of bounds");
-    //    }
-    //}
+impl<P, I> EmulatorStdin<P, I> {
+    // get both program and input for emulator
+    pub fn get_program_and_input(&self, index: usize) -> (&P, &I, bool) {
+        let flag_last = index == self.inputs.len() - 1;
+        if index < self.programs.len() && index < self.inputs.len() {
+            (&self.programs[index], &self.inputs[index], flag_last)
+        } else {
+            panic!("EmulatorStdin: out of bounds");
+        }
+    }
 
-    pub fn get(&self, index: usize) -> (&I, bool) {
-        let flag_last = index == self.buffer.len() - 1;
-        if index < self.buffer.len() {
-            (&self.buffer[index], flag_last)
+    // get input of the program for emulator
+    pub fn get_input(&self, index: usize) -> (&I, bool) {
+        let flag_last = index == self.inputs.len() - 1;
+        if index < self.inputs.len() {
+            (&self.inputs[index], flag_last)
         } else {
             panic!("EmulatorStdin: out of bounds");
         }
@@ -84,81 +108,134 @@ impl EmulatorStdinBuilder<Vec<u8>> {
         self.buffer.push(tmp);
     }
 
-    pub fn finalize(self) -> EmulatorStdin<Vec<u8>> {
+    pub fn finalize(self) -> EmulatorStdin<Program, Vec<u8>> {
         EmulatorStdin {
-            buffer: self.buffer.into(),
-            cursor: 0,
+            programs: vec![],
+            inputs: self.buffer.into(),
+            pointer: 0,
         }
     }
 }
 
-// for riscv recursion stdin, compress
-impl<'a, C>
+// for convert stdin, converting riscv proofs to recursion proofs
+impl<'a>
     EmulatorStdin<
-        crate::instances::compiler_v2::riscv_circuit::stdin::RiscvRecursionStdin<'a, RiscvSC, C>,
+        RecursionProgram<Val<RecursionSC>>,
+        RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
     >
-where
-    C: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
 {
     /// Construct the recursion stdin for riscv_compress.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// batch_size should be greater than 1
-    pub fn setup_for_riscv_compress(
-        stdin: crate::instances::compiler_v2::riscv_circuit::stdin::RiscvRecursionStdin<
-            'a,
-            RiscvSC,
-            C,
-        >,
+
+    pub fn setup_for_convert(
+        riscv_vk: &'a BaseVerifyingKey<RiscvSC>,
+        vk_root: [Val<RiscvSC>; DIGEST_SIZE],
+        machine: &'a BaseMachine<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+        proofs: &[BaseProof<RiscvSC>],
     ) -> Self {
-        let buffer = vec![stdin];
+        // initialize for base_ and reconstruct_challenger
+        let [mut base_challenger, mut reconstruct_challenger] =
+            array::from_fn(|_| machine.config().challenger());
+
+        riscv_vk.observed_by(&mut base_challenger);
+        riscv_vk.observed_by(&mut reconstruct_challenger);
+
+        // make base_challenger ready for use in phase 2
+        let num_public_values = machine.num_public_values();
+        for each_proof in proofs.iter() {
+            base_challenger.observe(each_proof.clone().commitments.global_main_commit);
+            base_challenger.observe_slice(&each_proof.public_values[0..num_public_values]);
+        }
+
+        // construct programs and inputs
+        let total = proofs.len();
+
+        let mut inputs = Vec::new();
+        let mut programs = Vec::new();
+
+        // todo: parallel
+        for (i, proof) in proofs.iter().enumerate() {
+            let flag_complete = i == total - 1;
+            let flag_first_chunk = i == 0;
+
+            let input = RiscvRecursionStdin {
+                machine,
+                riscv_vk,
+                proofs: vec![proof.clone()],
+                base_challenger: base_challenger.clone(),
+                reconstruct_challenger: reconstruct_challenger.clone(),
+                flag_complete,
+                flag_first_chunk,
+                vk_root,
+            };
+            let program =
+                RiscvCompressVerifierCircuit::<RecursionFC, RiscvSC>::build(machine, &input);
+
+            programs.push(program);
+            inputs.push(input);
+        }
 
         Self {
-            buffer: buffer.into(),
-            cursor: 0,
+            programs,
+            inputs,
+            pointer: 0,
         }
     }
 }
 
-// for riscv recursion stdin, combine
-impl<'a, C> EmulatorStdin<RiscvRecursionStdin<'a, RiscvSC, C>>
-where
-    C: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
-{
-    /// Construct the recursion stdin for riscv_combine.
-    /// base_challenger is assumed to be a fresh new one (has not observed anything)
-    /// combine_size should be greater than 1
-    pub fn setup_for_riscv_combine(
-        _vk: &'a BaseVerifyingKey<RiscvSC>,
-        _machine: &'a BaseMachine<RiscvSC, C>,
-        _proofs: &[BaseProof<RiscvSC>],
-        _base_challenger: &'a mut <RiscvSC as StarkGenericConfig>::Challenger,
-        _combine_size: usize,
-    ) -> Self {
-        panic!("We will not support RiscV combine later");
-    }
-}
-
 // for recursion stdin
-impl<'a, C> EmulatorStdin<RecursionStdin<'a, RecursionSC, C>>
+impl<'a, C> EmulatorStdin<RecursionProgram<Val<RecursionSC>>, RecursionStdin<'a, RecursionSC, C>>
 where
     C: ChipBehavior<
             Val<RecursionSC>,
             Program = RecursionProgram<Val<RecursionSC>>,
             Record = RecursionRecord<Val<RecursionSC>>,
         > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, RecursionFC>>,
 {
     /// Construct the recursion stdin for one layer of combine.
-    pub fn setup_for_combine(stdin: RecursionStdin<'a, RecursionSC, C>) -> Self {
-        let buffer = vec![stdin];
+    pub fn setup_for_combine(
+        vk_root: [Val<RecursionSC>; DIGEST_SIZE],
+        vks: &[BaseVerifyingKey<RecursionSC>],
+        proofs: &[BaseProof<RecursionSC>],
+        machine: &'a BaseMachine<RecursionSC, C>,
+        combine_size: usize,
+        flag_complete: bool,
+    ) -> Self {
+        let mut inputs = Vec::new();
+        let mut programs = Vec::new();
+
+        assert_eq!(vks.len(), proofs.len());
+
+        proofs
+            .chunks(combine_size)
+            .zip(vks.chunks(combine_size))
+            .for_each(|(batch_proofs, batch_vks)| {
+                // todo: optimization
+                let batch_proofs = batch_proofs.to_vec();
+                let batch_vks = batch_vks.to_vec();
+
+                let input = RecursionStdin {
+                    machine,
+                    vks: batch_vks,
+                    proofs: batch_proofs,
+                    flag_complete,
+                    vk_root,
+                };
+                let program = RecursionCombineVerifierCircuit::<RecursionFC, RecursionSC, C>::build(
+                    machine, &input,
+                );
+
+                programs.push(program);
+                inputs.push(input);
+            });
 
         Self {
-            buffer: buffer.into(),
-            cursor: 0,
+            programs,
+            inputs,
+            pointer: 0,
         }
     }
 }

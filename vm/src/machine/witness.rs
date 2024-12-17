@@ -4,7 +4,6 @@ use crate::{
     },
     configs::config::{StarkGenericConfig, Val},
     emulator::{
-        context::EmulatorContext,
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, stdin::EmulatorStdin},
     },
@@ -17,31 +16,33 @@ use crate::{
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
+        keys::{BaseProvingKey, BaseVerifyingKey},
     },
+    primitives::consts::DIGEST_SIZE,
     recursion_v2::runtime::RecursionRecord,
 };
 use alloc::sync::Arc;
 use p3_air::Air;
 
-// Here SC, C refers to types in recursion (native), while I refers to type in original
 #[derive(Default)]
 pub struct ProvingWitness<SC, C, I>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
 {
-    pub program: Arc<C::Program>,
+    pub program: Option<Arc<C::Program>>,
 
-    pub stdin: Option<EmulatorStdin<I>>,
+    pub pk: Option<BaseProvingKey<SC>>,
 
-    pub opts: Option<EmulatorOpts>,
+    pub vk: Option<BaseVerifyingKey<SC>>,
 
-    pub context: Option<EmulatorContext>,
+    pub vk_root: Option<[Val<SC>; DIGEST_SIZE]>,
+
+    pub stdin: Option<EmulatorStdin<C::Program, I>>,
 
     pub config: Option<Arc<SC>>,
 
-    pub vk: Option<BaseVerifyingKey<SC>>, // for the machine to construct recursive stdin internally
+    pub opts: Option<EmulatorOpts>,
 
     pub records: Vec<C::Record>,
 }
@@ -53,22 +54,44 @@ where
 {
     pub fn setup_with_records(records: Vec<C::Record>) -> Self {
         Self {
-            program: Default::default(),
+            program: None,
+            pk: None,
+            vk: None,
+            vk_root: None,
             stdin: None,
             opts: None,
-            context: None,
             config: None,
-            vk: None,
             records,
         }
     }
 
-    pub fn records(&self) -> &[C::Record] {
-        &self.records
+    pub fn setup_with_keys_and_records(
+        pk: BaseProvingKey<SC>,
+        vk: BaseVerifyingKey<SC>,
+        records: Vec<C::Record>,
+    ) -> Self {
+        Self {
+            program: None,
+            pk: Some(pk),
+            vk: Some(vk),
+            vk_root: None,
+            stdin: None,
+            opts: None,
+            config: None,
+            records,
+        }
     }
 
-    pub fn program(&self) -> Arc<C::Program> {
-        self.program.clone()
+    pub fn pk(&self) -> &BaseProvingKey<SC> {
+        self.pk.as_ref().unwrap()
+    }
+
+    pub fn vk(&self) -> &BaseVerifyingKey<SC> {
+        self.vk.as_ref().unwrap()
+    }
+
+    pub fn records(&self) -> &[C::Record] {
+        &self.records
     }
 }
 
@@ -80,26 +103,28 @@ where
 {
     pub fn setup_for_riscv(
         program: Arc<C::Program>,
-        stdin: &EmulatorStdin<Vec<u8>>,
+        stdin: EmulatorStdin<C::Program, Vec<u8>>,
         opts: EmulatorOpts,
-        context: EmulatorContext,
+        pk: BaseProvingKey<SC>,
+        vk: BaseVerifyingKey<SC>,
     ) -> Self {
         Self {
-            program,
-            stdin: Some(stdin.clone()),
+            program: Some(program),
+            pk: Some(pk),
+            vk: Some(vk),
+            vk_root: None,
+            stdin: Some(stdin),
             opts: Some(opts),
-            context: Some(context),
             config: None,
-            vk: None,
             records: vec![],
         }
     }
 }
 
 // implement Witness for riscv-recursion machine
-impl<'a, C, RiscvC> ProvingWitness<RecursionSC, C, RiscvRecursionStdin<'a, RiscvSC, RiscvC>>
+impl<'a, C, PrevC> ProvingWitness<RecursionSC, C, RiscvRecursionStdin<'a, RiscvSC, PrevC>>
 where
-    RiscvC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
+    PrevC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
     C: ChipBehavior<
@@ -110,33 +135,33 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
 {
     pub fn setup_for_riscv_recursion(
-        program: Arc<C::Program>,
-        stdin: &'a EmulatorStdin<RiscvRecursionStdin<RiscvSC, RiscvC>>,
+        stdin: EmulatorStdin<C::Program, RiscvRecursionStdin<'a, RiscvSC, PrevC>>,
         config: Arc<RecursionSC>,
         opts: EmulatorOpts,
     ) -> Self {
         Self {
-            program,
-            stdin: Some(stdin.clone()),
-            opts: Some(opts),
-            context: None,
-            config: Some(config),
+            program: None,
+            pk: None,
             vk: None,
+            vk_root: None,
+            stdin: Some(stdin),
+            opts: Some(opts),
+            config: Some(config),
             records: vec![],
         }
     }
 }
 
 // implement Witness for recursion-recursion machine
-impl<'a, C, RecursionC> ProvingWitness<RecursionSC, C, RecursionStdin<'a, RecursionSC, RecursionC>>
+impl<'a, C, PrevC> ProvingWitness<RecursionSC, C, RecursionStdin<'a, RecursionSC, PrevC>>
 where
-    C: ChipBehavior<
+    PrevC: ChipBehavior<
             Val<RecursionSC>,
             Program = RecursionProgram<Val<RecursionSC>>,
             Record = RecursionRecord<Val<RecursionSC>>,
         > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
-    RecursionC: ChipBehavior<
+    C: ChipBehavior<
             Val<RecursionSC>,
             Program = RecursionProgram<Val<RecursionSC>>,
             Record = RecursionRecord<Val<RecursionSC>>,
@@ -144,19 +169,19 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
 {
     pub fn setup_for_recursion(
-        program: Arc<C::Program>,
-        stdin: &'a EmulatorStdin<RecursionStdin<RecursionSC, RecursionC>>,
+        vk_root: [Val<RecursionSC>; DIGEST_SIZE],
+        stdin: EmulatorStdin<C::Program, RecursionStdin<'a, RecursionSC, PrevC>>,
         config: Arc<RecursionSC>,
-        vk: &BaseVerifyingKey<RecursionSC>,
         opts: EmulatorOpts,
     ) -> Self {
         Self {
-            program,
-            stdin: Some(stdin.clone()),
+            program: None,
+            pk: None,
+            vk: None,
+            vk_root: Some(vk_root),
+            stdin: Some(stdin),
             opts: Some(opts),
-            context: None,
             config: Some(config),
-            vk: Some(vk.clone()),
             records: vec![],
         }
     }

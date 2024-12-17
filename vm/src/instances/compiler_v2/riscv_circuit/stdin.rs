@@ -46,9 +46,10 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub machine: &'a BaseMachine<SC, C>,
-    pub vk: &'a BaseVerifyingKey<SC>,
+    pub riscv_vk: &'a BaseVerifyingKey<SC>,
     pub proofs: Vec<BaseProof<SC>>,
-    pub challengers: RiscvRecursionChallengers<SC>,
+    pub base_challenger: SC::Challenger,
+    pub reconstruct_challenger: SC::Challenger,
     pub flag_complete: bool,
     pub flag_first_chunk: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
@@ -58,7 +59,7 @@ pub struct RiscvRecursionStdinVariable<
     CC: CircuitConfig<F = BabyBear>,
     SC: BabyBearFriConfigVariable<CC>,
 > {
-    pub vk: BaseVerifyingKeyVariable<CC, SC>,
+    pub riscv_vk: BaseVerifyingKeyVariable<CC, SC>,
     pub proofs: Vec<BaseProofVariable<CC, SC>>,
     pub base_challenger: SC::FriChallengerVariable,
     pub reconstruct_challenger: DuplexChallengerVariable<CC>,
@@ -76,20 +77,20 @@ where
 {
     pub fn new(
         machine: &'a BaseMachine<SC, C>,
-        vk: &'a BaseVerifyingKey<SC>,
-        proof: BaseProof<SC>,
-        challengers: RiscvRecursionChallengers<SC>,
+        riscv_vk: &'a BaseVerifyingKey<SC>,
+        proofs: Vec<BaseProof<SC>>,
+        base_challenger: SC::Challenger,
+        reconstruct_challenger: SC::Challenger,
         flag_complete: bool,
         flag_first_chunk: bool,
         vk_root: [SC::Val; DIGEST_SIZE],
     ) -> Self {
-        let proofs = vec![proof];
-
         Self {
             machine,
-            vk,
+            riscv_vk,
             proofs,
-            challengers,
+            base_challenger,
+            reconstruct_challenger,
             flag_complete,
             flag_first_chunk,
             vk_root,
@@ -107,16 +108,16 @@ where
     type WitnessVariable = RiscvRecursionStdinVariable<CC, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
-        let vk = self.vk.read(builder);
+        let riscv_vk = self.riscv_vk.read(builder);
         let proofs = self.proofs.read(builder);
-        let base_challenger = self.challengers.base_challenger.read(builder);
-        let reconstruct_challenger = self.challengers.reconstruct_challenger.read(builder);
+        let base_challenger = self.base_challenger.read(builder);
+        let reconstruct_challenger = self.reconstruct_challenger.read(builder);
         let flag_complete = SC_Val::from_bool(self.flag_complete).read(builder);
         let flag_first_chunk = SC_Val::from_bool(self.flag_first_chunk).read(builder);
         let vk_root = self.vk_root.read(builder);
 
         RiscvRecursionStdinVariable {
-            vk,
+            riscv_vk,
             proofs,
             base_challenger,
             reconstruct_challenger,
@@ -127,10 +128,10 @@ where
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
-        self.vk.write(witness);
+        self.riscv_vk.write(witness);
         self.proofs.write(witness);
-        self.challengers.base_challenger.write(witness);
-        self.challengers.reconstruct_challenger.write(witness);
+        self.base_challenger.write(witness);
+        self.reconstruct_challenger.write(witness);
         self.flag_complete.write(witness);
         self.flag_first_chunk.write(witness);
         self.vk_root.write(witness);

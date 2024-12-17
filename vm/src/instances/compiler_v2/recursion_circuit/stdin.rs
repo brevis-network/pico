@@ -44,7 +44,8 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub machine: &'a BaseMachine<SC, C>,
-    pub vks_and_proofs: Vec<(BaseVerifyingKey<SC>, BaseProof<SC>)>,
+    pub vks: Vec<BaseVerifyingKey<SC>>,
+    pub proofs: Vec<BaseProof<SC>>,
     pub flag_complete: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
 }
@@ -53,7 +54,8 @@ pub struct RecursionStdinVariable<
     CC: CircuitConfig<F = BabyBear>,
     SC: BabyBearFriConfigVariable<CC>,
 > {
-    pub vks_and_proofs: Vec<(BaseVerifyingKeyVariable<CC, SC>, BaseProofVariable<CC, SC>)>,
+    pub vks: Vec<BaseVerifyingKeyVariable<CC, SC>>,
+    pub proofs: Vec<BaseProofVariable<CC, SC>>,
     pub flag_complete: Felt<CC::F>,
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
 }
@@ -67,13 +69,15 @@ where
 {
     pub fn new(
         machine: &'a BaseMachine<SC, C>,
-        vks_and_proofs: Vec<(BaseVerifyingKey<SC>, BaseProof<SC>)>,
+        vks: Vec<BaseVerifyingKey<SC>>,
+        proofs: Vec<BaseProof<SC>>,
         flag_complete: bool,
         vk_root: [SC::Val; DIGEST_SIZE],
     ) -> Self {
         Self {
             machine,
-            vks_and_proofs,
+            vks,
+            proofs,
             flag_complete,
             vk_root,
         }
@@ -90,19 +94,22 @@ where
     type WitnessVariable = RecursionStdinVariable<CC, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
-        let vks_and_proofs = self.vks_and_proofs.read(builder);
+        let vks = self.vks.read(builder);
+        let proofs = self.proofs.read(builder);
         let flag_complete = SC_Val::from_bool(self.flag_complete).read(builder);
         let vk_root = self.vk_root.read(builder);
 
         RecursionStdinVariable {
-            vks_and_proofs,
+            vks,
+            proofs,
             flag_complete,
             vk_root,
         }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
-        self.vks_and_proofs.write(witness);
+        self.vks.write(witness);
+        self.proofs.write(witness);
         self.flag_complete.write(witness);
         self.vk_root.write(witness);
     }

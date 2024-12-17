@@ -1,8 +1,11 @@
 use p3_field::PrimeField32;
 use pico_vm::{
-    compiler::riscv::compiler::{Compiler, SourceType},
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
+    },
     configs::config::{Com, PcsProverData, StarkGenericConfig},
-    emulator::{context::EmulatorContext, opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
         configs::{
@@ -22,7 +25,7 @@ use tracing::info;
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
-fn run<SC>(config: SC, elf: &'static [u8], riscv_stdin: EmulatorStdin<Vec<u8>>)
+fn run<SC>(config: SC, elf: &'static [u8], riscv_stdin: EmulatorStdin<Program, Vec<u8>>)
 where
     SC: StarkGenericConfig + Serialize + Send,
     Com<SC>: Send + Sync,
@@ -48,21 +51,22 @@ where
     info!("Construct RiscV proving witness..");
     let riscv_witness = ProvingWitness::setup_for_riscv(
         riscv_program,
-        &riscv_stdin,
+        riscv_stdin,
         EmulatorOpts::default(),
-        EmulatorContext::default(),
+        riscv_pk,
+        riscv_vk,
     );
 
     // Generate the proof.
     info!("Generating RiscV proof (at {:?})..", start.elapsed());
     let timer = Instant::now();
-    let riscv_proof = riscv_machine.prove(&riscv_pk, &riscv_witness);
+    let riscv_proof = riscv_machine.prove(&riscv_witness);
     println!("Proof-generation-time: {:?}", timer.elapsed());
 
     // Verify the proof.
     info!("Verifying RiscV proof (at {:?})..", start.elapsed());
     let timer = Instant::now();
-    let riscv_result = riscv_machine.verify(&riscv_vk, &riscv_proof);
+    let riscv_result = riscv_machine.verify(&riscv_proof);
     println!("Proof-verification-time: {:?}", timer.elapsed());
     info!(
         "The proof is verified: {} (at {:?})..",

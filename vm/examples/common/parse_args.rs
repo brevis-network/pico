@@ -1,5 +1,5 @@
 use clap::Parser;
-use pico_vm::emulator::riscv::stdin::EmulatorStdin;
+use pico_vm::{compiler::riscv::program::Program, emulator::riscv::stdin::EmulatorStdin};
 use tracing::info;
 
 fn load_elf(elf: &str) -> &'static [u8] {
@@ -31,9 +31,14 @@ struct Args {
     field: String,
 }
 
-pub fn parse_args() -> (&'static [u8], EmulatorStdin<Vec<u8>>, String, String) {
+pub fn parse_args() -> (
+    &'static [u8],
+    EmulatorStdin<Program, Vec<u8>>,
+    String,
+    String,
+) {
     let args = Args::parse();
-    let mut stdin = EmulatorStdin::new_builder();
+    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder();
 
     let elf: &[u8];
     if args.elf == "fibonacci" || args.elf == "fib" || args.elf == "f" {

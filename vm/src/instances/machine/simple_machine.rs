@@ -45,18 +45,16 @@ where
     }
 
     /// Get the prover of the machine.
-    fn prove(
-        &self,
-        pk: &BaseProvingKey<SC>,
-        witness: &ProvingWitness<SC, C, Vec<u8>>,
-    ) -> MetaProof<SC>
+    fn prove(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> MetaProof<SC>
     where
         C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
     {
         info!("PERF-machine=simple");
         let begin = Instant::now();
 
-        let proofs = self.base_machine.prove_ensemble(pk, witness.records());
+        let proofs = self
+            .base_machine
+            .prove_ensemble(witness.pk(), witness.records());
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
@@ -64,21 +62,32 @@ where
         {
             use crate::machine::debug::constraints::debug_all_constraints;
             let mut debug_challenger = self.config().challenger();
-            debug_all_constraints(self.chips(), pk, witness.records(), &mut debug_challenger);
+            debug_all_constraints(
+                self.chips(),
+                witness.pk(),
+                witness.records(),
+                &mut debug_challenger,
+            );
         }
 
-        MetaProof::new(proofs)
+        // Construct the metaproof with proofs and vks where vks is a repetition of the same witness.vk
+        let vks = vec![witness.vk.clone().unwrap()].into();
+        MetaProof::new(proofs.into(), vks)
     }
 
     /// Verify the proof.
-    fn verify(&self, vk: &BaseVerifyingKey<SC>, proof: &MetaProof<SC>) -> Result<()> {
+    fn verify(&self, proof: &MetaProof<SC>) -> Result<()> {
         // panic if proofs is empty
         info!("PERF-machine=simple");
         let begin = Instant::now();
         if proof.proofs().is_empty() {
             panic!("proofs is empty");
         }
-        self.base_machine.verify_ensemble(vk, proof.proofs())?;
+
+        assert_eq!(proof.vks().len(), 1);
+
+        self.base_machine
+            .verify_ensemble(&(proof.vks()[0]), proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 

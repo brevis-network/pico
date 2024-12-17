@@ -95,14 +95,18 @@ where
     ) {
         // Read input.
         let RecursionStdinVariable {
-            mut vks_and_proofs,
+            mut vks,
+            mut proofs,
             flag_complete,
             ..
         } = input;
 
         // Must only have one proof.
-        assert_eq!(vks_and_proofs.len(), 1);
-        let (vk, chunk_proof) = vks_and_proofs.pop().unwrap();
+        assert_eq!(proofs.len(), 1);
+        assert_eq!(vks.len(), 1);
+
+        let vk = vks.pop().unwrap();
+        let chunk_proof = proofs.pop().unwrap();
 
         let one: Felt<_> = builder.eval(CC::F::ONE);
         let zero: Felt<_> = builder.eval(CC::F::ZERO);

@@ -348,9 +348,12 @@ impl RiscvEmulator {
     }
 
     // todo: refactor
-    pub fn run_with_stdin(&mut self, stdin: EmulatorStdin<Vec<u8>>) -> Result<(), EmulationError> {
+    pub fn run_with_stdin(
+        &mut self,
+        stdin: EmulatorStdin<Program, Vec<u8>>,
+    ) -> Result<(), EmulationError> {
         self.emulator_mode = EmulatorMode::Trace;
-        for input in &*stdin.buffer {
+        for input in &*stdin.inputs {
             self.state.input_stream.push(input.clone());
         }
         self.run()

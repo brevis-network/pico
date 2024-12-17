@@ -135,14 +135,14 @@ fn main() {
     simple_machine.complement_record(&mut records);
 
     info!("\n Construct proving witness..");
-    let witness = ProvingWitness::setup_with_records(records);
+    let witness = ProvingWitness::setup_with_keys_and_records(pk, vk, records);
 
     // Generate the proof.
     info!("\n Generating proof..");
-    let proof = simple_machine.prove(&pk, &witness);
+    let proof = simple_machine.prove(&witness);
 
     // Verify the proof.
-    let result = simple_machine.verify(&vk, &proof);
+    let result = simple_machine.verify(&proof);
     info!("\n The proof is verified: {}", result.is_ok());
     assert!(result.is_ok());
 }

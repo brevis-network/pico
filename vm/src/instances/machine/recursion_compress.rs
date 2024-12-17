@@ -70,7 +70,6 @@ where
     #[instrument(name = "compress_prove", level = "debug", skip_all)]
     fn prove(
         &self,
-        pk: &BaseProvingKey<RecursionSC>,
         witness: &ProvingWitness<RecursionSC, C, RecursionStdin<RecursionSC, C>>,
     ) -> MetaProof<RecursionSC>
     where
@@ -82,6 +81,9 @@ where
             >,
         >,
     {
+        // todo: keys
+        let pk = witness.pk();
+
         info!("PERF-machine=compress");
         let begin = Instant::now();
 
@@ -111,8 +113,13 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
         // construct meta proof
-        let proof = MetaProof::new(proofs);
-        let proof_size = bincode::serialize(&proof).unwrap().len();
+        // todo: keys
+        let vks = vec![witness.vk.clone().unwrap()].into();
+        let proof = MetaProof::new(proofs.into(), vks);
+        let proof_size = bincode::serialize(proof.proofs()).unwrap().len();
+        //
+        // let proof = MetaProof::new(proofs);
+        // let proof_size = bincode::serialize(&proof).unwrap().len();
         info!("PERF-step=proof_size-{}", proof_size);
 
         /*
@@ -126,11 +133,10 @@ where
     }
 
     /// Verify the proof.
-    fn verify(
-        &self,
-        vk: &BaseVerifyingKey<RecursionSC>, // note that this is the vk of riscv machine
-        proof: &MetaProof<RecursionSC>,
-    ) -> anyhow::Result<()> {
+    fn verify(&self, proof: &MetaProof<RecursionSC>) -> anyhow::Result<()> {
+        // todo: keys
+        let vk = proof.vks().first().unwrap();
+
         info!("PERF-machine=compress");
         let begin = Instant::now();
 

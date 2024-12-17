@@ -1,5 +1,6 @@
 use itertools::Itertools;
 use p3_baby_bear::BabyBear;
+use p3_challenger::DuplexChallenger;
 use p3_field::FieldAlgebra;
 use p3_matrix::dense::DenseStorage;
 use pico_vm::{
@@ -8,7 +9,7 @@ use pico_vm::{
         riscv::compiler::{Compiler, SourceType},
     },
     configs::config::{Challenge, Val},
-    emulator::{context::EmulatorContext, opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
@@ -25,7 +26,7 @@ use pico_vm::{
         configs::{
             embed_config::StarkConfig as EmbedSC,
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
-            riscv_config::StarkConfig as RiscvBbSC,
+            riscv_config::StarkConfig as RiscvBBSC,
         },
         machine::{
             recursion_combine::RecursionCombineMachine,
@@ -56,21 +57,23 @@ fn main() {
 
     // -------- Riscv Machine --------
 
-    info!("\n Begin RiscV..");
+    info!("\n Begin RISCV..");
 
-    let (elf, riscv_stdin, step, _field) = parse_args::parse_args();
+    let (elf, riscv_stdin, step, _) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("Creating RiscV Program..");
     let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
     let riscv_program = riscv_compiler.compile();
-    let riscv_config = RiscvBbSC::new();
-    let riscv_chips = RiscvChipType::<BabyBear>::all_chips();
 
     // Setup config and chips.
     info!("Creating RiscVMachine (at {:?})..", start.elapsed());
 
-    let riscv_machine = RiscvMachine::new(riscv_config, riscv_chips, RISCV_NUM_PVS);
+    let riscv_machine = RiscvMachine::new(
+        RiscvBBSC::new(),
+        RiscvChipType::<BabyBear>::all_chips(),
+        RISCV_NUM_PVS,
+    );
 
     // Setup machine prover, verifier, pk and vk.
     info!("Setup RiscV machine (at {:?})..", start.elapsed());
@@ -78,19 +81,20 @@ fn main() {
 
     info!("Construct RiscV proving witness..");
     let riscv_witness = ProvingWitness::setup_for_riscv(
-        riscv_program,
-        &riscv_stdin,
+        riscv_program.clone(),
+        riscv_stdin,
         EmulatorOpts::default(),
-        EmulatorContext::default(),
+        riscv_pk,
+        riscv_vk,
     );
 
     // Generate the proof.
     info!("Generating RiscV proof (at {:?})..", start.elapsed());
-    let riscv_proof = riscv_machine.prove(&riscv_pk, &riscv_witness);
+    let riscv_proof = riscv_machine.prove(&riscv_witness);
 
     // Verify the proof.
     info!("Verifying RiscV proof (at {:?})..", start.elapsed());
-    let riscv_result = riscv_machine.verify(&riscv_vk, &riscv_proof);
+    let riscv_result = riscv_machine.verify(&riscv_proof);
     info!(
         "The proof is verified: {} (at {:?})..",
         riscv_result.is_ok(),
@@ -103,291 +107,236 @@ fn main() {
 
     // -------- Riscv Compression Recursion Machine --------
 
-    let (riscv_compress_machine, riscv_compress_pks_vks_proofs) = {
-        info!("\n Begin Riscv Compression Recursion");
+    info!("\n Begin CONVERT..");
 
-        // TODO: Initialize the VK root.
-        let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
+    // TODO: Initialize the VK root.
+    let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
+    let riscv_vk = riscv_witness.vk();
 
-        info!("\n Initializing RiscV compression machine");
-        let machine = RiscvRecursionMachine::new(
-            RecursionSC::new(),
-            RecursionChipType::<BabyBear, RISCV_COMPRESS_DEGREE>::all_chips(),
-            RECURSION_NUM_PVS_V2,
-        );
+    info!("Initializing RiscV compression machine");
+    let riscv_compress_machine = RiscvRecursionMachine::new(
+        RecursionSC::new(),
+        RecursionChipType::<BabyBear, RISCV_COMPRESS_DEGREE>::all_chips(),
+        RECURSION_NUM_PVS_V2,
+    );
 
-        info!("\n Generating RiscV compression base and reconstruct challenger");
-        let challengers = RiscvRecursionChallengers::new(
-            riscv_machine.base_machine(),
-            &riscv_vk,
-            riscv_proof.proofs(),
-        );
+    // Setup stdin and witness
+    info!("Construct recursion stdin and witnesses..");
+    let riscv_compress_stdin = EmulatorStdin::setup_for_convert(
+        &riscv_vk,
+        vk_root,
+        riscv_machine.base_machine(),
+        riscv_proof.proofs(),
+    );
 
-        let total = riscv_proof.proofs.len();
-        info!("\n Generating RiscV compression PKs, VKs and proofs: total = {total}");
-        // TODO: Consider to run in parallel.
-        let pks_vks_proofs = riscv_proof.proofs.into_iter().enumerate().map(|(i, p)| {
-            let flag_complete = i == total - 1;
-            let flag_first_chunk = i == 0;
-            info!(
-                "\n Start generating RiscV compression proof-{i}: flag_complete = {flag_complete}, flag_first_chunk = {flag_first_chunk}",
-            );
-            let stdin = RiscvRecursionStdin::new(
-                riscv_machine.base_machine(),
-                &riscv_vk,
-                p.clone(),
-                challengers.clone(),
-                flag_complete,
-                flag_first_chunk,
-                vk_root,
-            );
+    let riscv_compress_witness = ProvingWitness::setup_for_riscv_recursion(
+        riscv_compress_stdin,
+        riscv_compress_machine.config(),
+        EmulatorOpts::default(),
+    );
 
-            info!("\n Building RiscV compression program for proof-{i}");
-            let program = RiscvCompressVerifierCircuit::<RecursionFC, RiscvBbSC>::build(
-                riscv_machine.base_machine(),
-                &stdin,
-            );
+    // Generate the proof.
+    info!("Generating CONVERT proof (at {:?})..", start.elapsed());
+    let riscv_compress_proof = riscv_compress_machine.prove(&riscv_compress_witness);
 
-            info!("\n Generating RiscV compression PK and VK for proof-{i}");
-            let (pk, vk) = machine.setup_keys(&program);
+    // Verify the proof.
+    info!("Verifying CONVERT proof (at {:?})..", start.elapsed());
+    let riscv_compress_result = riscv_compress_machine.verify(&riscv_compress_proof);
+    info!(
+        "The CONVERT proof is verified: {} (at {:?})",
+        riscv_compress_result.is_ok(),
+        start.elapsed()
+    );
+    assert!(riscv_compress_result.is_ok());
 
-            info!("\n Generating RiscV compression witness for proof-{i}");
-            let stdin = EmulatorStdin::setup_for_riscv_compress(stdin);
-            let witness = ProvingWitness::setup_for_riscv_recursion(
-                program.into(),
-                &stdin,
-                machine.config(),
-                EmulatorOpts::default(),
-            );
-
-            info!("\n Proving RiscV compression proof-{i}");
-            let proof = machine.prove(&pk, &witness);
-
-            info!("\n Verifying RiscV compression proof-{i}");
-            machine.verify(&vk, &proof).expect("Failed to verify RiscV compression proof");
-
-            info!("\n Finish generating RiscV compression proof-{i}");
-            (pk, vk, proof)
-        }).collect::<Vec<_>>();
-
-        (machine, pks_vks_proofs)
-    };
+    if step == "riscv_compress" {
+        return;
+    }
 
     // -------- Combine Recursion Machine --------
 
-    let (recursion_combine_machine, recursion_combine_vks_and_proofs) = {
-        info!("\n Begin Recursion Combine");
+    info!("\n Begin COMBINE");
 
-        // TODO: Initialize the VK root.
-        let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
+    // TODO: Initialize the VK root.
+    let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
 
-        info!("\n Initializing recursion combine machine");
-        let machine = RecursionCombineMachine::new(
-            RecursionSC::new(),
-            RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
-            RECURSION_NUM_PVS_V2,
-        );
+    info!("Initializing COMBINE machine");
+    let combine_machine = RecursionCombineMachine::new(
+        RecursionSC::new(),
+        RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
+        RECURSION_NUM_PVS_V2,
+    );
 
-        let mut flag_complete = false;
-        let mut layer_index = 1;
-        let mut all_vks_and_proofs = riscv_compress_pks_vks_proofs
-            .into_iter()
-            .map(|(_pk, vk, mut proof)| {
-                assert_eq!(
-                    proof.proofs.len(),
-                    1,
-                    "RiscV compress proof must have one base proof"
-                );
-                let proof = proof.proofs.to_vec().pop().unwrap();
-                (vk, proof)
-            })
-            .collect_vec();
-        loop {
-            all_vks_and_proofs = all_vks_and_proofs
-                .chunks(COMBINE_SIZE)
-                .enumerate()
-                .map(|(i, vks_and_proofs)| {
-                    let chunk_index = i + 1;
-                    info!("\n Generating recursion combine VKs and proofs: layer-{layer_index} chunk-{chunk_index}");
-                    let stdin = RecursionStdin::new(
-                        machine.base_machine(),
-                        vks_and_proofs.to_vec(),
-                        flag_complete,
-                        vk_root,
-                    );
+    // Setup stdin and witnesses
+    info!("Construct COMBINE stdin and witnesses..");
+    let combine_stdin = EmulatorStdin::setup_for_combine(
+        vk_root,
+        riscv_compress_proof.vks(),
+        riscv_compress_proof.proofs(),
+        riscv_compress_machine.base_machine(),
+        COMBINE_SIZE,
+        false,
+    );
 
-                    info!("\n Building recursion combine program: layer-{layer_index} chunk-{chunk_index}");
-                    let program =
-                        RecursionCombineVerifierCircuit::<RecursionFC, RecursionSC>::build(
-                            machine.base_machine(),
-                            &stdin,
-                        );
+    let combine_witness = ProvingWitness::setup_for_recursion(
+        vk_root,
+        combine_stdin,
+        combine_machine.config(),
+        EmulatorOpts::default(),
+    );
 
-                    info!("\n Generating recursion combine PK and VK: layer-{layer_index} chunk-{chunk_index}");
-                    let (pk, vk) = machine.setup_keys(&program);
+    // Generate the proof.
+    info!("Generating COMBINE proof (at {:?})..", start.elapsed());
+    let combine_proof = combine_machine.prove(&combine_witness);
 
-                    info!("\n Generating recursion combine witness: layer-{layer_index} chunk-{chunk_index}");
-                    let stdin = EmulatorStdin::setup_for_combine(stdin);
-                    let witness = ProvingWitness::setup_for_recursion(
-                        program.into(),
-                        &stdin,
-                        machine.config(),
-                        &vk,
-                        EmulatorOpts::default(),
-                    );
+    // Verify the proof.
+    info!("Verifying COMBINE proof (at {:?})..", start.elapsed());
+    let combine_result = combine_machine.verify(&combine_proof);
+    info!(
+        "The COMBINE proof is verified: {} (at {:?})",
+        combine_result.is_ok(),
+        start.elapsed()
+    );
+    assert!(combine_result.is_ok());
 
-                    info!("\n Proving recursion combine proof: layer-{layer_index} chunk-{chunk_index}");
-                    let mut proof = machine.prove(&pk, &witness);
-                    assert_eq!(proof.proofs.len(), 1, "Must have one proof for each combine chunk");
-
-                    (vk, proof.proofs.to_vec().pop().unwrap())
-                })
-                .collect_vec();
-
-            if flag_complete {
-                break;
-            }
-            flag_complete = all_vks_and_proofs.len() <= COMBINE_SIZE;
-            layer_index += 1;
-        }
-
-        info!("\n Verifying recusion combine proofs");
-        assert_eq!(all_vks_and_proofs.len(), 1, "Must have one proof combine");
-        all_vks_and_proofs.iter().for_each(|(vk, proof)| {
-            machine
-                .verify(&vk, &MetaProof::new(Arc::from(vec![proof.clone()])))
-                .expect("Failed to verify recursion combine proof");
-        });
-
-        (machine, all_vks_and_proofs)
-    };
+    if step == "recur_combine" {
+        return;
+    }
 
     // -------- Compress Recursion Machine --------
 
-    let (recursion_compress_machine, recursion_compress_vk_and_proof) = {
-        info!("\n Begin Recursion Compress");
+    info!("\n Begin COMPRESS..");
 
-        // TODO: Initialize the VK root.
-        let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
+    // TODO: Initialize the VK root.
+    let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
 
-        info!("\n Initializing recursion compress machine");
-        let machine = RecursionCompressMachine::new(
-            RecursionSC::compress(),
-            RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
-            RECURSION_NUM_PVS_V2,
+    info!("Initializing COMPRESS machine");
+    let compress_machine = RecursionCompressMachine::new(
+        RecursionSC::compress(),
+        RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
+        RECURSION_NUM_PVS_V2,
+    );
+
+    info!("Generating COMPRESS vks and proofs");
+    let compress_stdin = RecursionStdin::new(
+        compress_machine.base_machine(),
+        combine_proof.vks().to_vec(),
+        combine_proof.proofs().to_vec(),
+        true,
+        vk_root,
+    );
+
+    info!("Building COMPRESS program");
+    let compress_program = RecursionCompressVerifierCircuit::<RecursionFC, RecursionSC>::build(
+        combine_machine.base_machine(),
+        &compress_stdin,
+    );
+
+    info!("Generating COMPRESS keys");
+    let (compress_pk, compress_vk) = compress_machine.setup_keys(&compress_program);
+
+    let record = {
+        let mut witness_stream = Vec::new();
+        Witnessable::<RecursionFC>::write(&compress_stdin, &mut witness_stream);
+        let mut runtime = Runtime::<
+            Val<RecursionSC>,
+            Challenge<RecursionSC>,
+            _,
+            _,
+            PERMUTATION_WIDTH,
+            BABYBEAR_S_BOX_DEGREE,
+        >::new(
+            Arc::new(compress_program),
+            combine_machine.config().perm.clone(),
         );
-
-        info!("\n Generating recursion compress VKs and proofs");
-        let stdin = RecursionStdin::new(
-            machine.base_machine(),
-            recursion_combine_vks_and_proofs.to_vec(),
-            true,
-            vk_root,
-        );
-
-        info!("\n Building recursion compress program");
-        let program = RecursionCompressVerifierCircuit::<RecursionFC, RecursionSC>::build(
-            recursion_combine_machine.base_machine(),
-            &stdin,
-        );
-
-        info!("\n Generating recursion compress PK and VK");
-        let (pk, vk) = machine.setup_keys(&program);
-
-        let record = {
-            let mut witness_stream = Vec::new();
-            Witnessable::<RecursionFC>::write(&stdin, &mut witness_stream);
-            let mut runtime = Runtime::<
-                Val<RecursionSC>,
-                Challenge<RecursionSC>,
-                _,
-                _,
-                PERMUTATION_WIDTH,
-                BABYBEAR_S_BOX_DEGREE,
-            >::new(Arc::new(program), machine.config().perm.clone());
-            runtime.witness_stream = witness_stream.into();
-            runtime.run().unwrap();
-            runtime.record
-        };
-        let witness = ProvingWitness::setup_with_records(vec![record]);
-
-        info!("\n Proving recursion compress proof");
-        let mut proof = machine.prove(&pk, &witness);
-
-        info!("\n Verifying recursion compress proof");
-        machine
-            .verify(&vk, &proof)
-            .expect("Failed to verify recursion compress proof");
-
-        assert_eq!(proof.proofs().len(), 1);
-        let proof = proof.proofs.to_vec().pop().unwrap();
-
-        (machine, (vk, proof))
+        runtime.witness_stream = witness_stream.into();
+        runtime.run().unwrap();
+        runtime.record
     };
+    let compress_witness =
+        ProvingWitness::setup_with_keys_and_records(compress_pk, compress_vk, vec![record]);
+
+    info!("Proving COMPRESS");
+    let mut compress_proof = compress_machine.prove(&compress_witness);
+
+    info!("Verifying COMPRESS proof");
+    let compress_result = compress_machine.verify(&compress_proof);
+
+    info!(
+        "The COMPRESS proof is verified: {} (at {:?})",
+        compress_result.is_ok(),
+        start.elapsed()
+    );
+    assert!(compress_result.is_ok());
+
+    if step == "recur_compress" {
+        return;
+    }
 
     // -------- Embed Recursion Machine --------
 
-    let (recursion_embed_machine, recursion_embed_vk_and_proof) = {
-        info!("\n Begin Recursion Embed");
+    info!("\n Begin Embed..");
 
-        // TODO: Initialize the VK root.
-        let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
+    // TODO: Initialize the VK root.
+    let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
 
-        info!("\n Initializing recursion embed machine");
-        let machine = RecursionEmbedMachine::<_, _, Vec<u8>>::new(
-            EmbedSC::new(),
-            RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
-            RECURSION_NUM_PVS_V2,
+    info!("Initializing EMBED machine");
+    let embed_machine = RecursionEmbedMachine::<_, _, Vec<u8>>::new(
+        EmbedSC::new(),
+        RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
+        RECURSION_NUM_PVS_V2,
+    );
+
+    info!("Generating EMBED vks and proofs");
+    let embed_stdin = RecursionStdin::new(
+        compress_machine.base_machine(),
+        compress_proof.vks().to_vec(),
+        compress_proof.proofs().to_vec(),
+        true,
+        vk_root,
+    );
+
+    info!("Building EMBED program");
+    let embed_program = RecursionEmbedVerifierCircuit::<RecursionFC, RecursionSC>::build(
+        compress_machine.base_machine(),
+        &embed_stdin,
+    );
+
+    info!("Generating EMBED keys");
+    let (embed_pk, embed_vk) = embed_machine.setup_keys(&embed_program);
+
+    let record = {
+        let mut witness_stream = Vec::new();
+        Witnessable::<RecursionFC>::write(&embed_stdin, &mut witness_stream);
+        let mut runtime = Runtime::<
+            Val<RecursionSC>,
+            Challenge<RecursionSC>,
+            _,
+            _,
+            PERMUTATION_WIDTH,
+            BABYBEAR_S_BOX_DEGREE,
+        >::new(
+            Arc::new(embed_program),
+            compress_machine.config().perm.clone(),
         );
-
-        info!("\n Generating recursion embed VKs and proofs");
-        let stdin = RecursionStdin::new(
-            recursion_compress_machine.base_machine(),
-            vec![recursion_compress_vk_and_proof],
-            true,
-            vk_root,
-        );
-
-        info!("\n Building recursion embed program");
-        let program = RecursionEmbedVerifierCircuit::<RecursionFC, RecursionSC>::build(
-            recursion_compress_machine.base_machine(),
-            &stdin,
-        );
-
-        info!("\n Generating recursion embed PK and VK");
-        let (pk, vk) = machine.setup_keys(&program);
-
-        let record = {
-            let mut witness_stream = Vec::new();
-            Witnessable::<RecursionFC>::write(&stdin, &mut witness_stream);
-            let mut runtime = Runtime::<
-                Val<RecursionSC>,
-                Challenge<RecursionSC>,
-                _,
-                _,
-                PERMUTATION_WIDTH,
-                BABYBEAR_S_BOX_DEGREE,
-            >::new(
-                Arc::new(program),
-                recursion_compress_machine.config().perm.clone(),
-            );
-            runtime.witness_stream = witness_stream.into();
-            runtime.run().unwrap();
-            runtime.record
-        };
-        let witness = ProvingWitness::setup_with_records(vec![record]);
-
-        info!("\n Proving recursion embed proof");
-        let mut proof = machine.prove(&pk, &witness);
-
-        info!("\n Verifying recursion embed proof");
-        machine
-            .verify(&vk, &proof)
-            .expect("Failed to verify recursion embed proof");
-
-        assert_eq!(proof.proofs().len(), 1);
-        let proof = proof.proofs.to_vec().pop().unwrap();
-
-        (machine, (vk, proof))
+        runtime.witness_stream = witness_stream.into();
+        runtime.run().unwrap();
+        runtime.record
     };
+
+    let embed_witness =
+        ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
+
+    info!("Proving EMBED");
+    let mut embed_proof = embed_machine.prove(&embed_witness);
+
+    info!("\n Verifying EMBED proof");
+    let embed_result = embed_machine.verify(&embed_proof);
+
+    info!(
+        "The EMBED proof is verified: {} (at {:?})",
+        compress_result.is_ok(),
+        start.elapsed()
+    );
+    assert!(embed_result.is_ok());
 }
