@@ -7,7 +7,7 @@ use crate::{
         program::RecursionProgram,
     },
     configs::config::FieldGenericConfig,
-    primitives::{consts::EXTENSION_DEGREE, consts_v2::RECURSION_NUM_PVS_V2},
+    primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS_V2},
     recursion_v2::{
         air::{Block, RecursionPublicValues},
         runtime::*,

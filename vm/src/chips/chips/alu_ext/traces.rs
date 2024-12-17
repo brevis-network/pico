@@ -8,10 +8,10 @@ use crate::{
     },
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
     machine::chip::ChipBehavior,
-    primitives::consts_v2::EXTENSION_DEGREE,
-    recursion::stark::utils::next_power_of_two,
+    primitives::consts::EXTENSION_DEGREE,
     recursion_v2::{
         runtime::{ExtAluOpcode, RecursionRecord},
+        stark::utils::next_power_of_two,
         types::ExtAluInstr,
     },
 };

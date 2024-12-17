@@ -6,7 +6,7 @@ use crate::{
         ExtAluChip,
     },
     machine::builder::{ChipBuilder, ExtensionBuilder, RecursionBuilder},
-    primitives::consts_v2::EXTENSION_DEGREE,
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::{Air, BaseAir};
 use p3_field::{extension::BinomiallyExtendable, Field};

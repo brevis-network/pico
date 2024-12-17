@@ -1,14 +1,7 @@
 pub mod alu;
 pub mod byte;
-pub mod exp_reverse_bits;
-pub mod fri_fold;
 pub mod memory_program;
-pub mod multi;
-pub mod poseidon2_wide;
 pub mod rangecheck;
-pub mod recursion_cpu;
-pub mod recursion_memory;
-pub mod recursion_program;
 pub mod riscv_cpu;
 pub mod riscv_memory;
 pub mod riscv_program;

@@ -37,7 +37,7 @@ use crate::{
     compiler::recursion_v2::instruction::{
         FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction, PrintInstr,
     },
-    primitives::{consts::PERMUTATION_WIDTH, consts_v2::RECURSION_NUM_PVS_V2},
+    primitives::consts::{PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2},
 };
 use memory::*;
 pub use opcode::*;

@@ -20,7 +20,7 @@ use crate::{
         configs::{recur_config::FieldConfig as RiscvFC, riscv_config::StarkConfig as RiscvSC},
     },
     machine::machine::BaseMachine,
-    primitives::{consts::DIGEST_SIZE, consts_v2::RECURSION_NUM_PVS_V2},
+    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS_V2},
     recursion_v2::air::RecursionPublicValues,
 };
 use p3_baby_bear::BabyBear;

@@ -6,10 +6,12 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 
 use crate::{
-    chips::chips::{
-        poseidon2_wide::{external_linear_layer, internal_linear_layer},
-        poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
-        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
+    chips::{
+        chips::{
+            poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
+            rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
+        },
+        poseidon2::{external_linear_layer, internal_linear_layer},
     },
     compiler::riscv::program::Program,
     emulator::riscv::{
@@ -17,7 +19,7 @@ use crate::{
     },
     machine::chip::ChipBehavior,
     primitives::RC_16_30_U32,
-    recursion::stark::utils::pad_rows_fixed,
+    recursion_v2::stark::utils::pad_rows_fixed,
 };
 
 use super::{

@@ -12,7 +12,7 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder},
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
-    primitives::consts_v2::MAX_NUM_PVS_V2,
+    primitives::consts::MAX_NUM_PVS_V2,
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};

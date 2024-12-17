@@ -23,7 +23,7 @@ use crate::{
         folder::{ProverConstraintFolder, SymbolicConstraintFolder},
         keys::HashableKey,
     },
-    recursion::air::RecursionPublicValues,
+    recursion_v2::air::RecursionPublicValues,
 };
 
 use super::{keys::BaseVerifyingKey, proof::MetaProof};

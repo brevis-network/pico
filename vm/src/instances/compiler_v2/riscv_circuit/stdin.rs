@@ -27,7 +27,7 @@ use crate::{
         proof::BaseProof,
     },
     primitives::consts::DIGEST_SIZE,
-    recursion::air::Block,
+    recursion_v2::air::Block,
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;

@@ -15,8 +15,7 @@ use crate::{
     compiler::recursion_v2::{instruction::Instruction::Poseidon2, program::RecursionProgram},
     machine::chip::ChipBehavior,
     primitives::RC_16_30_U32,
-    recursion::stark::utils::next_power_of_two,
-    recursion_v2::runtime::RecursionRecord,
+    recursion_v2::{runtime::RecursionRecord, stark::utils::next_power_of_two},
 };
 use p3_air::BaseAir;
 use p3_field::PrimeField32;

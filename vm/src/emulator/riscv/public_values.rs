@@ -1,9 +1,6 @@
 use crate::{
     compiler::word::Word,
-    primitives::{
-        consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
-        consts_v2::MAX_NUM_PVS_V2,
-    },
+    primitives::consts::{MAX_NUM_PVS_V2, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
 };
 use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};

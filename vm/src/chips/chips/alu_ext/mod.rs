@@ -18,7 +18,7 @@ mod tests {
             program::RecursionProgram,
         },
         machine::chip::ChipBehavior,
-        primitives::consts_v2::EXTENSION_DEGREE,
+        primitives::consts::EXTENSION_DEGREE,
         recursion_v2::{
             runtime::{ExtAluOpcode, RecursionRecord},
             tests::run_recursion_test_machine,

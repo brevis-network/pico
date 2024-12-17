@@ -2,7 +2,7 @@ use super::columns::{PublicValuesCols, PublicValuesPreprocessedCols, NUM_PUBLIC_
 use crate::{
     chips::chips::public_values_v2::PublicValuesChip,
     machine::builder::{ChipBuilder, RecursionBuilder},
-    primitives::consts_v2::RECURSION_NUM_PVS_V2,
+    primitives::consts::RECURSION_NUM_PVS_V2,
     recursion_v2::air::RecursionPublicValues,
 };
 use p3_air::{Air, AirBuilder, BaseAir};

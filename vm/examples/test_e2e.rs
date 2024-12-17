@@ -37,12 +37,10 @@ use pico_vm::{
     machine::{
         logger::setup_logger, machine::MachineBehavior, proof::MetaProof, witness::ProvingWitness,
     },
-    primitives::{
-        consts::{
-            BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, DIGEST_SIZE,
-            EMBED_DEGREE, PERMUTATION_WIDTH, RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
-        },
-        consts_v2::RECURSION_NUM_PVS_V2,
+    primitives::consts::{
+        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, DIGEST_SIZE,
+        EMBED_DEGREE, PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2, RISCV_COMPRESS_DEGREE,
+        RISCV_NUM_PVS,
     },
     recursion_v2::runtime::Runtime,
 };

@@ -6,12 +6,9 @@ use crate::{
     },
     configs::config::FieldGenericConfig,
     instances::configs::recur_config::StarkConfig as RecursionSC,
-    primitives::{
-        consts::{
-            DIGEST_SIZE, PERMUTATION_RATE, PERMUTATION_WIDTH, POSEIDON_NUM_WORDS,
-            PV_DIGEST_NUM_WORDS,
-        },
-        consts_v2::{MAX_NUM_PVS_V2, RECURSION_NUM_PVS_V2},
+    primitives::consts::{
+        DIGEST_SIZE, MAX_NUM_PVS_V2, PERMUTATION_RATE, PERMUTATION_WIDTH, POSEIDON_NUM_WORDS,
+        PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
     },
     recursion_v2::air::public_values::circuit::{
         config::CircuitConfig, hash::Posedion2BabyBearHasherVariable,

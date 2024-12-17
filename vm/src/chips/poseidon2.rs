@@ -1,4 +1,4 @@
-use crate::primitives::consts::{POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY};
+use crate::primitives::consts::POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_poseidon2::matmul_internal;
 

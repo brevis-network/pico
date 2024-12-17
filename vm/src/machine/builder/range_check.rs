@@ -73,34 +73,4 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
             do_check.clone(),
         );
     }
-
-    /// Looking a range check operation to be processed.
-    fn recursion_looking_range_check(
-        &mut self,
-        range_check_opcode: impl Into<Self::Expr>,
-        val: impl Into<Self::Expr>,
-        is_real: impl Into<Self::Expr>,
-    ) {
-        self.looking(SymbolicLookup::new(
-            vec![range_check_opcode.into(), val.into()],
-            is_real.into(),
-            LookupType::Range,
-            LookupScope::Global,
-        ));
-    }
-
-    /// Looked a range check operation to be processed.
-    fn recursion_looked_range_check(
-        &mut self,
-        range_check_opcode: impl Into<Self::Expr>,
-        val: impl Into<Self::Expr>,
-        is_real: impl Into<Self::Expr>,
-    ) {
-        self.looked(SymbolicLookup::new(
-            vec![range_check_opcode.into(), val.into()],
-            is_real.into(),
-            LookupType::Range,
-            LookupScope::Global,
-        ));
-    }
 }

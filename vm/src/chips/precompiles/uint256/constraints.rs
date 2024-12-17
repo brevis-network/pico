@@ -18,7 +18,7 @@ use crate::{
     },
     emulator::riscv::syscalls::SyscallCode,
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
-    recursion::air::IsZeroOperation,
+    recursion_v2::air::IsZeroOperation,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, FieldAlgebra};

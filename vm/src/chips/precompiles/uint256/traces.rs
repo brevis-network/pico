@@ -11,7 +11,7 @@ use crate::{
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
-    recursion::{air::IsZeroOperation, stark::utils::pad_rows_fixed},
+    recursion_v2::{air::IsZeroOperation, stark::utils::pad_rows_fixed},
 };
 use hashbrown::HashMap;
 use num::{BigUint, One, Zero};

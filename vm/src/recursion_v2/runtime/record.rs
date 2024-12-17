@@ -5,7 +5,7 @@ use crate::{
     compiler::recursion_v2::program::RecursionProgram,
     emulator::record::RecordBehavior,
     machine::chip::ChipBehavior,
-    primitives::consts_v2::MAX_NUM_PVS_V2,
+    primitives::consts::MAX_NUM_PVS_V2,
     recursion_v2::{
         air::RecursionPublicValues,
         types::{

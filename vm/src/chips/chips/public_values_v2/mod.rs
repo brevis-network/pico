@@ -18,7 +18,7 @@ mod tests {
         chips::chips::public_values_v2::PublicValuesChip,
         compiler::recursion_v2::{instruction, program::RecursionProgram},
         machine::{chip::ChipBehavior, logger::setup_logger},
-        primitives::{consts::DIGEST_SIZE, consts_v2::RECURSION_NUM_PVS_V2},
+        primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS_V2},
         recursion_v2::{
             air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
             runtime::RecursionRecord,

@@ -51,7 +51,7 @@ pub(crate) mod tests {
             program::RecursionProgram,
         },
         machine::{chip::ChipBehavior, logger::setup_logger},
-        primitives::poseidon2bb_init,
+        primitives::pico_poseidon2bb_init,
         recursion_v2::{
             runtime::RecursionRecord,
             tests::run_recursion_test_machine,
@@ -70,7 +70,7 @@ pub(crate) mod tests {
     fn generate_trace_deg_3() {
         type F = BabyBear;
         let input_0 = [F::ONE; WIDTH];
-        let permuter = poseidon2bb_init();
+        let permuter = pico_poseidon2bb_init();
         let output_0 = permuter.permute(input_0);
         // let mut rng = rand::thread_rng();
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
@@ -103,7 +103,7 @@ pub(crate) mod tests {
     fn generate_trace_deg_9() {
         type F = BabyBear;
         let input_0 = [F::ONE; WIDTH];
-        let permuter = poseidon2bb_init();
+        let permuter = pico_poseidon2bb_init();
         let output_0 = permuter.permute(input_0);
         // let mut rng = rand::thread_rng();
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
@@ -137,13 +137,13 @@ pub(crate) mod tests {
         setup_logger();
 
         let input = [1; WIDTH];
-        let output = poseidon2bb_init()
+        let output = pico_poseidon2bb_init()
             .permute(input.map(BabyBear::from_canonical_u32))
             .map(|x| BabyBear::as_canonical_u32(&x));
 
         let rng = &mut rand::thread_rng();
         let input_1: [BabyBear; WIDTH] = std::array::from_fn(|_| BabyBear::rand(rng));
-        let output_1 = poseidon2bb_init()
+        let output_1 = pico_poseidon2bb_init()
             .permute(input_1)
             .map(|x| BabyBear::as_canonical_u32(&x));
         let input_1 = input_1.map(|x| BabyBear::as_canonical_u32(&x));

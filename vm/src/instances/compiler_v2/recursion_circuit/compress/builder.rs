@@ -35,13 +35,10 @@ use crate::{
         },
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
-    primitives::{
-        consts::{
-            ADDR_NUM_BITS, COMBINE_DEGREE, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE,
-            MAX_LOG_NUMBER_OF_CHUNKS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS,
-            RISCV_COMPRESS_DEGREE,
-        },
-        consts_v2::RECURSION_NUM_PVS_V2,
+    primitives::consts::{
+        ADDR_NUM_BITS, COMBINE_DEGREE, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE,
+        MAX_LOG_NUMBER_OF_CHUNKS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
+        RISCV_COMPRESS_DEGREE,
     },
     recursion_v2::air::{
         assert_recursion_public_values_valid, embed_public_values_digest,

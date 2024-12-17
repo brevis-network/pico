@@ -1,5 +1,6 @@
 pub mod air;
 pub mod runtime;
+pub mod stark;
 pub mod types;
 
 // Degree for recursion compress machine
@@ -27,7 +28,7 @@ pub mod tests {
             machine::simple_machine::SimpleMachine,
         },
         machine::{chip::MetaChip, machine::MachineBehavior, witness::ProvingWitness},
-        primitives::consts_v2::MAX_NUM_PVS_V2,
+        primitives::consts::{BABYBEAR_S_BOX_DEGREE, MAX_NUM_PVS_V2, PERMUTATION_WIDTH},
     };
     use std::sync::Arc;
 
@@ -68,8 +69,10 @@ pub mod tests {
         let program = Arc::new(program);
         let record = {
             // We should always use the BabyBearPoseidon2 for permutation.
-            let mut runtime =
-                Runtime::<F, EF, _>::new(program.clone(), BabyBearPoseidon2::new().perm);
+            let mut runtime = Runtime::<F, EF, _, _, PERMUTATION_WIDTH, BABYBEAR_S_BOX_DEGREE>::new(
+                program.clone(),
+                BabyBearPoseidon2::new().perm,
+            );
             runtime.run().unwrap();
             runtime.record
         };

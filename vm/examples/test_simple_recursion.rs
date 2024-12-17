@@ -23,12 +23,9 @@ use pico_vm::{
         machine::simple_machine::SimpleMachine,
     },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
-    primitives::{
-        consts::{
-            BABYBEAR_S_BOX_DEGREE, MAX_NUM_PVS, PERMUTATION_WIDTH, RISCV_NUM_PVS,
-            RISCV_SIMPLE_DEGREE,
-        },
-        consts_v2::MAX_NUM_PVS_V2,
+    primitives::consts::{
+        BABYBEAR_S_BOX_DEGREE, MAX_NUM_PVS, MAX_NUM_PVS_V2, PERMUTATION_WIDTH, RISCV_NUM_PVS,
+        RISCV_SIMPLE_DEGREE,
     },
     recursion_v2::runtime::Runtime as RecursionRuntime,
 };

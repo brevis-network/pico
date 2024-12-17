@@ -38,7 +38,7 @@ use crate::chips::{
 };
 
 use super::{limbs_from_prev_access, words_to_bytes_le_slice};
-use crate::recursion::stark::utils::pad_rows;
+use crate::recursion_v2::stark::utils::pad_rows;
 
 pub const fn num_fp_cols<P>() -> usize
 where

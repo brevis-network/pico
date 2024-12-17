@@ -2,10 +2,14 @@
 /*
 For word and bytes
  */
-use crate::{compiler::word::Word, emulator::riscv::public_values::PublicValues};
+use crate::{
+    compiler::word::Word, emulator::riscv::public_values::PublicValues,
+    recursion_v2::air::RecursionPublicValues,
+};
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use std::mem::size_of;
+
 // todo: further cleanup since these might be repetitive
 /*
 For word and bytes
@@ -28,7 +32,9 @@ pub const MAX_NUM_PVS: usize = 370;
 
 pub const RISCV_NUM_PVS: usize = size_of::<PublicValues<Word<u8>, u8>>();
 
-pub const RECURSION_NUM_PVS: usize = size_of::<crate::recursion::air::RecursionPublicValues<u8>>();
+pub const RECURSION_NUM_PVS_V2: usize = size_of::<RecursionPublicValues<u8>>();
+
+pub const MAX_NUM_PVS_V2: usize = RECURSION_NUM_PVS_V2;
 
 /*
 For Extensions
@@ -138,33 +144,6 @@ pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = Bab
     (BabyBear::ORDER_U32 - 1) >> 4,
     15,
 ]);
-
-// const INTERNAL_DIAG_MONTY_24: [BabyBear; 24] = BabyBear::new_array([
-//     BabyBear::ORDER_U32 - 2,
-//     1,
-//     2,
-//     (BabyBear::ORDER_U32 + 1) >> 1,
-//     3,
-//     4,
-//     (BabyBear::ORDER_U32 - 1) >> 1,
-//     BabyBear::ORDER_U32 - 3,
-//     BabyBear::ORDER_U32 - 4,
-//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 8),
-//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 2),
-//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 3),
-//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 4),
-//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 7),
-//     BabyBear::ORDER_U32 - ((BabyBear::ORDER_U32 - 1) >> 9),
-//     BabyBear::ORDER_U32 - 15,
-//     (BabyBear::ORDER_U32 - 1) >> 8,
-//     (BabyBear::ORDER_U32 - 1) >> 2,
-//     (BabyBear::ORDER_U32 - 1) >> 3,
-//     (BabyBear::ORDER_U32 - 1) >> 4,
-//     (BabyBear::ORDER_U32 - 1) >> 5,
-//     (BabyBear::ORDER_U32 - 1) >> 6,
-//     (BabyBear::ORDER_U32 - 1) >> 7,
-//     15,
-// ]);
 
 /*
 Poseidon2

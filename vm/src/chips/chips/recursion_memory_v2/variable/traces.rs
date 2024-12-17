@@ -11,8 +11,7 @@ use crate::{
         program::RecursionProgram,
     },
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
-    recursion::stark::utils::next_power_of_two,
-    recursion_v2::runtime::RecursionRecord,
+    recursion_v2::{runtime::RecursionRecord, stark::utils::next_power_of_two},
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

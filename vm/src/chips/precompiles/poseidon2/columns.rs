@@ -3,8 +3,7 @@ use std::mem::size_of;
 use pico_derive::AlignedBorrow;
 
 use crate::chips::chips::{
-    poseidon2_wide::{NUM_INTERNAL_ROUNDS, WIDTH},
-    poseidon2_wide_v2::NUM_EXTERNAL_ROUNDS,
+    poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
     riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
 };
 

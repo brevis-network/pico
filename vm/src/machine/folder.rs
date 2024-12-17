@@ -1,5 +1,5 @@
 use crate::{
-    compiler::recursion::ir::{
+    compiler::recursion_v2::ir::{
         Ext as RecursionExt, Felt as RecursionFelt, SymbolicExt as RecursionSymbolicExt,
     },
     configs::config::{FieldGenericConfig, PackedChallenge, PackedVal, StarkGenericConfig},
@@ -9,7 +9,7 @@ use crate::{
         },
         lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
     },
-    primitives::consts_v2::MAX_NUM_PVS_V2,
+    primitives::consts::MAX_NUM_PVS_V2,
 };
 use p3_air::{AirBuilder, ExtensionBuilder, PairBuilder};
 use p3_field::{ExtensionField, Field, FieldAlgebra};

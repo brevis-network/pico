@@ -5,10 +5,12 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 
 use crate::{
-    chips::chips::{
-        poseidon2_wide::{external_linear_layer, internal_linear_layer},
-        poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
-        riscv_memory::read_write::columns::MemoryCols,
+    chips::{
+        chips::{
+            poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
+            riscv_memory::read_write::columns::MemoryCols,
+        },
+        poseidon2::{external_linear_layer, internal_linear_layer},
     },
     emulator::riscv::syscalls::SyscallCode,
     machine::builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},

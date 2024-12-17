@@ -7,7 +7,7 @@ use crate::{
         },
         precompiles::uint256::Uint256NumWords,
     },
-    recursion::air::IsZeroOperation,
+    recursion_v2::air::IsZeroOperation,
 };
 use hybrid_array::Array;
 use pico_derive::AlignedBorrow;

@@ -2,9 +2,9 @@ use crate::{
     chips::chips::alu_base::{columns::*, BaseAluChip},
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
     machine::chip::ChipBehavior,
-    recursion::stark::utils::next_power_of_two,
     recursion_v2::{
         runtime::{BaseAluOpcode, RecursionRecord},
+        stark::utils::next_power_of_two,
         types::BaseAluInstr,
     },
 };

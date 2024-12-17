@@ -3,9 +3,9 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use std::marker::PhantomData;
 
 use crate::{
-    chips::chips::{
-        poseidon2_wide::{external_linear_layer, internal_linear_layer},
-        poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
+    chips::{
+        chips::poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
+        poseidon2::{external_linear_layer, internal_linear_layer},
     },
     emulator::riscv::syscalls::{syscall_context::SyscallContext, Syscall, SyscallCode},
     primitives::RC_16_30_U32,

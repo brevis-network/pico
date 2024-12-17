@@ -32,12 +32,9 @@ use crate::{
         },
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
-    primitives::{
-        consts::{
-            ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS,
-            POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS,
-        },
-        consts_v2::RECURSION_NUM_PVS_V2,
+    primitives::consts::{
+        ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS,
+        POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
     },
     recursion_v2::air::{recursion_public_values_digest, RecursionPublicValues},
 };

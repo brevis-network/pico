@@ -11,8 +11,9 @@ use crate::{
     },
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
     machine::chip::ChipBehavior,
-    recursion::stark::utils::pad_rows_fixed,
-    recursion_v2::{runtime::RecursionRecord, types::ExpReverseBitsInstr},
+    recursion_v2::{
+        runtime::RecursionRecord, stark::utils::pad_rows_fixed, types::ExpReverseBitsInstr,
+    },
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

@@ -13,7 +13,6 @@ use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::CryptographicHasher;
 
 pub mod consts;
-pub mod consts_v2;
 use p3_symmetric::PaddingFreeSponge;
 
 use zkhash::{
