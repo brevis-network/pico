@@ -77,9 +77,6 @@ where
             >,
         >,
     {
-        info!("PERF-machine=riscv");
-        let begin = Instant::now();
-
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
 
@@ -87,10 +84,9 @@ where
         let pk = witness.pk();
         pk.observed_by(&mut challenger);
 
-        // TODO: checkpoint batch records and apply pipeline parallelism
-
-        // First phase
-        // Generate batch records and commit to challenger
+        /*
+        First phase
+         */
 
         let mut emulator = MetaEmulator::setup_riscv(witness);
         loop {
@@ -108,7 +104,6 @@ where
             let commitments = batch_records
                 .into_par_iter()
                 .map(|record| {
-                    info!("PERF-phase=1-chunk={}", record.chunk_index());
                     self.base_machine
                         .commit(record, LookupScope::Global)
                         .unwrap()
@@ -125,35 +120,18 @@ where
             }
         }
 
-        // Second phase
-        // Generate batch records and generate proofs
+        /*
+        Second phase
+        */
 
         let mut emulator = MetaEmulator::setup_riscv(witness);
 
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
         let mut all_proofs = vec![];
 
-        // used for collect all records for debugging
-        #[cfg(feature = "debug")]
-        let mut all_records = vec![];
-        /*
-                let mut debug_challenger = self.config().challenger();
-                #[cfg(feature = "debug")]
-                let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
-                #[cfg(feature = "debug-lookups")]
-                let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
-        */
-
         loop {
             let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
-
-            /*
-                        #[cfg(feature = "debug")]
-                        constraint_debugger.debug_incremental(&self.chips(), &batch_records);
-                        #[cfg(feature = "debug-lookups")]
-                        lookup_debugger.debug_incremental(&self.chips(), &batch_records);
-            */
 
             // todo: parallel
             let batch_proofs = batch_records
@@ -182,29 +160,16 @@ where
                 break;
             }
         }
-        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()];
-        let proof_size = bincode::serialize(all_proofs.as_slice()).unwrap().len();
         let proof = MetaProof::new(all_proofs.into(), vks.into());
-        info!("PERF-step=proof_size-{}", proof_size);
-
-        /*
-                #[cfg(feature = "debug")]
-                constraint_debugger.print_results();
-                #[cfg(feature = "debug-lookups")]
-                lookup_debugger.print_results();
-        */
 
         proof
     }
 
     /// Verify the proof.
     fn verify(&self, proof: &MetaProof<SC>) -> Result<()> {
-        info!("PERF-machine=riscv");
-        let begin = Instant::now();
-
         // Assert single vk
         assert_eq!(proof.vks().len(), 1);
 
@@ -322,8 +287,6 @@ where
         // Verify the proofs.
         self.base_machine.verify_ensemble(vk, proof.proofs())?;
 
-        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
-
         Ok(())
     }
 }
@@ -381,7 +344,6 @@ where
     PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {
-        info!("PERF-machine=riscv");
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }

@@ -81,27 +81,8 @@ where
             >,
         >,
     {
-        // todo: keys
-        let pk = witness.pk();
-
-        info!("PERF-machine=compress");
-        let begin = Instant::now();
-
-        // used for collect all records for debugging
-        #[cfg(feature = "debug")]
-        let mut debug_challenger = self.config().challenger();
-        #[cfg(feature = "debug")]
-        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
-        #[cfg(feature = "debug-lookups")]
-        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
-
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
-
-        #[cfg(feature = "debug")]
-        constraint_debugger.debug_incremental(self.chips(), &records);
-        #[cfg(feature = "debug-lookups")]
-        lookup_debugger.debug_incremental(self.chips(), &records);
 
         debug!("recursion compress record stats");
         let stats = records[0].stats();
@@ -109,32 +90,17 @@ where
             debug!("   |- {:<28}: {}", key, value);
         }
 
-        let proofs = self.base_machine.prove_ensemble(pk, &records);
-        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
+        let proofs = self.base_machine.prove_ensemble(witness.pk(), &records);
 
         // construct meta proof
-        // todo: keys
         let vks = vec![witness.vk.clone().unwrap()].into();
         let proof = MetaProof::new(proofs.into(), vks);
-        let proof_size = bincode::serialize(proof.proofs()).unwrap().len();
-        //
-        // let proof = MetaProof::new(proofs);
-        // let proof_size = bincode::serialize(&proof).unwrap().len();
-        info!("PERF-step=proof_size-{}", proof_size);
-
-        /*
-                #[cfg(feature = "debug")]
-                constraint_debugger.print_results();
-                #[cfg(feature = "debug-lookups")]
-                lookup_debugger.print_results();
-        */
 
         proof
     }
 
     /// Verify the proof.
     fn verify(&self, proof: &MetaProof<RecursionSC>) -> anyhow::Result<()> {
-        // todo: keys
         let vk = proof.vks().first().unwrap();
 
         info!("PERF-machine=compress");
@@ -173,7 +139,6 @@ where
     PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
-        info!("PERF-machine=compress");
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }

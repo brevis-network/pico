@@ -73,14 +73,7 @@ where
 
     /// setup prover, verifier and keys.
     fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
-        let begin = Instant::now();
-
         let (pk, vk) = self.base_machine().setup_keys(program);
-
-        info!(
-            "PERF-step=setup_keys-user_time={}",
-            begin.elapsed().as_millis(),
-        );
 
         (pk, vk)
     }
@@ -283,7 +276,6 @@ where
             .zip_eq(records.iter())
             .enumerate()
             .map(|(i, (global_data, record))| {
-                info!("PERF-chunk={}", i + 1);
                 let regional_data = self.commit(record, LookupScope::Regional).unwrap();
                 self.prover.prove(
                     &self.config(),

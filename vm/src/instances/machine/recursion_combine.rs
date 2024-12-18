@@ -82,9 +82,6 @@ where
             >,
         >,
     {
-        info!("PERF-machine=combine");
-        let begin = Instant::now();
-
         let mut recursion_emulator =
             MetaEmulator::setup_combine(proving_witness, self.base_machine());
         let mut recursion_witness;
@@ -176,13 +173,8 @@ where
             all_vks.clear();
         }
 
-        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis(),);
-
         // construct meta proof
         let proof = MetaProof::new(all_proofs.into(), all_vks.into());
-        let proof_size = bincode::serialize(proof.proofs()).unwrap().len();
-
-        info!("PERF-step=proof_size-{}", proof_size);
 
         proof
     }
@@ -226,7 +218,6 @@ where
     PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
-        info!("PERF-machine=combine");
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }

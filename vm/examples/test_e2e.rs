@@ -58,7 +58,10 @@ fn main() {
     info!("\n Begin RISCV..");
 
     let (elf, riscv_stdin, step, _) = parse_args::parse_args();
+
+    info!("PERF-machine=riscv");
     let start = Instant::now();
+    let riscv_start = Instant::now();
 
     info!("Creating RiscV Program..");
     let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
@@ -89,6 +92,13 @@ fn main() {
     // Generate the proof.
     info!("Generating RiscV proof (at {:?})..", start.elapsed());
     let riscv_proof = riscv_machine.prove(&riscv_witness);
+    info!(
+        "PERF-step=prove-user_time={}",
+        riscv_start.elapsed().as_millis()
+    );
+
+    let riscv_proof_size = bincode::serialize(riscv_proof.proofs()).unwrap().len();
+    info!("PERF-step=proof_size-{}", riscv_proof_size);
 
     // Verify the proof.
     info!("Verifying RiscV proof (at {:?})..", start.elapsed());
@@ -106,6 +116,9 @@ fn main() {
     // -------- Riscv Compression Recursion Machine --------
 
     info!("\n Begin CONVERT..");
+
+    info!("PERF-machine=recursion");
+    let convert_start = Instant::now();
 
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
@@ -136,6 +149,15 @@ fn main() {
     // Generate the proof.
     info!("Generating CONVERT proof (at {:?})..", start.elapsed());
     let riscv_compress_proof = riscv_compress_machine.prove(&riscv_compress_witness);
+    info!(
+        "PERF-step=prove-user_time={}",
+        convert_start.elapsed().as_millis()
+    );
+
+    let convert_proof_size = bincode::serialize(riscv_compress_proof.proofs())
+        .unwrap()
+        .len();
+    info!("PERF-step=proof_size-{}", convert_proof_size);
 
     // Verify the proof.
     info!("Verifying CONVERT proof (at {:?})..", start.elapsed());
@@ -154,6 +176,9 @@ fn main() {
     // -------- Combine Recursion Machine --------
 
     info!("\n Begin COMBINE");
+
+    info!("PERF-machine=combine");
+    let combine_start = Instant::now();
 
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
@@ -186,6 +211,13 @@ fn main() {
     // Generate the proof.
     info!("Generating COMBINE proof (at {:?})..", start.elapsed());
     let combine_proof = combine_machine.prove(&combine_witness);
+    info!(
+        "PERF-step=prove-user_time={}",
+        combine_start.elapsed().as_millis(),
+    );
+
+    let combine_proof_size = bincode::serialize(combine_proof.proofs()).unwrap().len();
+    info!("PERF-step=proof_size-{}", combine_proof_size);
 
     // Verify the proof.
     info!("Verifying COMBINE proof (at {:?})..", start.elapsed());
@@ -204,6 +236,9 @@ fn main() {
     // -------- Compress Recursion Machine --------
 
     info!("\n Begin COMPRESS..");
+
+    info!("PERF-machine=compress");
+    let compress_start = Instant::now();
 
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
@@ -256,6 +291,13 @@ fn main() {
 
     info!("Proving COMPRESS");
     let mut compress_proof = compress_machine.prove(&compress_witness);
+    info!(
+        "PERF-step=prove-user_time={}",
+        compress_start.elapsed().as_millis()
+    );
+
+    let compress_proof_size = bincode::serialize(compress_proof.proofs()).unwrap().len();
+    info!("PERF-step=proof_size-{}", compress_proof_size);
 
     info!("Verifying COMPRESS proof");
     let compress_result = compress_machine.verify(&compress_proof);
@@ -273,7 +315,9 @@ fn main() {
 
     // -------- Embed Recursion Machine --------
 
-    info!("\n Begin Embed..");
+    info!("\n Begin EMBED..");
+    info!("PERF-machine=embed");
+    let embed_start = Instant::now();
 
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
@@ -327,8 +371,15 @@ fn main() {
 
     info!("Proving EMBED");
     let mut embed_proof = embed_machine.prove(&embed_witness);
+    info!(
+        "PERF-step=prove-user_time={}",
+        embed_start.elapsed().as_millis()
+    );
 
-    info!("\n Verifying EMBED proof");
+    let embed_proof_size = bincode::serialize(embed_proof.proofs()).unwrap().len();
+    info!("PERF-step=proof_size-{}", embed_proof_size);
+
+    info!("Verifying EMBED proof");
     let embed_result = embed_machine.verify(&embed_proof);
 
     info!(

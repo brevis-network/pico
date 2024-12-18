@@ -84,37 +84,16 @@ where
             >,
         >,
     {
-        info!("PERF-machine=recursion");
-        let begin = Instant::now();
-
         // setup
         let mut emulator = MetaEmulator::setup_convert(proving_witness, self.base_machine());
         let mut all_proofs = vec![];
         let mut all_vks = vec![];
 
-        // used for collect all records for debugging
-        // #[cfg(feature = "debug")]
-        /*
-                let mut debug_challenger = self.config().challenger();
-                #[cfg(feature = "debug")]
-                let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
-                #[cfg(feature = "debug-lookups")]
-                let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
-        */
-
         let mut chunk_index = 1;
         loop {
-            // println!("riscv recursion record stats: chunk {}", chunk_index);
             let (mut batch_records, batch_pks, batch_vks, done) = emulator.next_record_keys_batch();
 
             self.complement_record(batch_records.as_mut_slice());
-
-            /*
-            #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
-            #[cfg(feature = "debug-lookups")]
-            lookup_debugger.debug_incremental(&self.chips(), &batch_records);
-            */
 
             // set index for each record
             for record in batch_records.as_mut_slice() {
@@ -148,20 +127,8 @@ where
             }
         }
 
-        /*
-                #[cfg(feature = "debug")]
-                constraint_debugger.print_results();
-                #[cfg(feature = "debug-lookups")]
-                lookup_debugger.print_results();
-        */
-
-        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
-
         // construct meta proof
         let proof = MetaProof::new(all_proofs.into(), all_vks.into());
-        let proof_size = bincode::serialize(proof.proofs()).unwrap().len();
-
-        info!("PERF-step=proof_size-{}", proof_size);
 
         proof
     }
@@ -199,7 +166,6 @@ where
     PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
-        info!("PERF-machine=recursion");
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }
