@@ -76,7 +76,7 @@ impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
             .program
             .instructions
             .clone()
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(i, _)| {
                 let pc = input.program.pc_base + (i as u32 * 4);

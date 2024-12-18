@@ -1,7 +1,7 @@
-#[cfg(feature = "debug")]
-use crate::machine::debug::constraints::IncrementalConstraintDebugger;
-#[cfg(feature = "debug-lookups")]
-use crate::machine::debug::lookups::IncrementalLookupDebugger;
+// #[cfg(feature = "debug")]
+// use crate::machine::debug::constraints::IncrementalConstraintDebugger;
+// #[cfg(feature = "debug-lookups")]
+// use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::recursion_v2::{
         circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
@@ -45,7 +45,7 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<'_, RecursionSC, C>>
+impl<C> MachineBehavior<RecursionSC, C, RecursionStdin<'_, RecursionSC, C>>
     for CombineMachine<RecursionSC, C>
 where
     C: Send
@@ -176,9 +176,7 @@ where
         }
 
         // construct meta proof
-        let proof = MetaProof::new(all_proofs.into(), all_vks.into());
-
-        proof
+        MetaProof::new(all_proofs.into(), all_vks.into())
     }
 
     /// Verify the proof.

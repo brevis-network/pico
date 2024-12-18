@@ -58,17 +58,17 @@ where
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
-        #[cfg(feature = "debug")]
-        {
-            use crate::machine::debug::constraints::debug_all_constraints;
-            let mut debug_challenger = self.config().challenger();
-            debug_all_constraints(
-                self.chips(),
-                witness.pk(),
-                witness.records(),
-                &mut debug_challenger,
-            );
-        }
+        // #[cfg(feature = "debug")]
+        // {
+        //     use crate::machine::debug::constraints::debug_all_constraints;
+        //     let mut debug_challenger = self.config().challenger();
+        //     debug_all_constraints(
+        //         self.chips(),
+        //         witness.pk(),
+        //         witness.records(),
+        //         &mut debug_challenger,
+        //     );
+        // }
 
         // Construct the metaproof with proofs and vks where vks is a repetition of the same witness.vk
         let vks = vec![witness.vk.clone().unwrap()].into();

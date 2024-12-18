@@ -189,6 +189,7 @@ pub struct MemoryReadWriteCols<T> {
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
+#[allow(clippy::empty_line_after_doc_comments)]
 pub struct MemoryAccessCols<T> {
     /// The value of the memory access.
     pub value: Word<T>,

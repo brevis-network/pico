@@ -29,9 +29,9 @@ impl<AB: EmptyLookupBuilder, M> LookupBuilder<M> for AB {
     fn looked(&mut self, _message: M) {}
 }
 
-impl<'a, SC: StarkGenericConfig> EmptyLookupBuilder for ProverConstraintFolder<'a, SC> {}
-impl<'a, SC: StarkGenericConfig> EmptyLookupBuilder for VerifierConstraintFolder<'a, SC> {}
-impl<'a, F: Field, AB: AirBuilder<F = F>> EmptyLookupBuilder for FilteredAirBuilder<'a, AB> {}
+impl<SC: StarkGenericConfig> EmptyLookupBuilder for ProverConstraintFolder<'_, SC> {}
+impl<SC: StarkGenericConfig> EmptyLookupBuilder for VerifierConstraintFolder<'_, SC> {}
+impl<F: Field, AB: AirBuilder<F = F>> EmptyLookupBuilder for FilteredAirBuilder<'_, AB> {}
 
 pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
     /// Looking for an instruction to be processed.

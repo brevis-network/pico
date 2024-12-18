@@ -66,14 +66,21 @@ where
         // create a new emulator based on the emulator type
         let opts = proving_witness.opts.unwrap();
         let mut emulator =
-            RiscvEmulator::new::<BabyBear>(proving_witness.program.clone().unwrap().into(), opts);
+            RiscvEmulator::new::<BabyBear>(proving_witness.program.clone().unwrap(), opts);
         emulator.emulator_mode = EmulatorMode::Trace;
-        for each in proving_witness.stdin.as_ref().unwrap().inputs.to_vec() {
+        for each in proving_witness
+            .stdin
+            .as_ref()
+            .unwrap()
+            .inputs
+            .iter()
+            .cloned()
+        {
             emulator.state.input_stream.push(each);
         }
 
         Self {
-            stdin: &proving_witness.stdin.as_ref().unwrap(),
+            stdin: proving_witness.stdin.as_ref().unwrap(),
             emulator: Some(emulator),
             batch_size: opts.chunk_batch_size,
             pointer: 0,
@@ -140,7 +147,7 @@ where
         bool,
     ) {
         let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-        let (pk, vk) = self.machine.unwrap().setup_keys(&program);
+        let (pk, vk) = self.machine.unwrap().setup_keys(program);
         let mut emulator = RecursionEmulator::<RecursionSC> {
             recursion_program: program.clone().into(),
             config: self.machine.unwrap().config(),
@@ -150,6 +157,7 @@ where
         (record, pk, vk, done)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn next_record_keys_batch(
         &mut self,
     ) -> (
@@ -228,7 +236,7 @@ where
         bool,
     ) {
         let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-        let (pk, vk) = self.machine.unwrap().setup_keys(&program);
+        let (pk, vk) = self.machine.unwrap().setup_keys(program);
         let mut emulator = RecursionEmulator::<RecursionSC> {
             recursion_program: program.clone().into(),
             config: self.machine.unwrap().config(),
@@ -238,6 +246,7 @@ where
         (record, pk, vk, done)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn next_record_keys_batch(
         &mut self,
     ) -> (

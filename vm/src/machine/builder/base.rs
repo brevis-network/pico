@@ -56,7 +56,7 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
         result
     }
 
-    /// Extension field-related
+    // Extension field-related
 
     /// Asserts that the two field extensions are equal.
     fn assert_ext_eq<I: Into<Self::Expr>>(

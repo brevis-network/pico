@@ -98,7 +98,7 @@ where
     }
 }
 
-impl<'a, CC, C> Witnessable<CC> for SimpleRecursionStdin<'a, BabyBearPoseidon2, C>
+impl<CC, C> Witnessable<CC> for SimpleRecursionStdin<'_, BabyBearPoseidon2, C>
 where
     CC: CircuitConfig<F = SC_Val, EF = SC_Challenge, Bit = Felt<BabyBear>>,
     C: ChipBehavior<BabyBear>

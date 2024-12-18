@@ -71,6 +71,7 @@ where
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         machine: &'a BaseMachine<SC, C>,
         riscv_vk: &'a BaseVerifyingKey<SC>,
@@ -94,7 +95,7 @@ where
     }
 }
 
-impl<'a, CC, C> Witnessable<CC> for ConvertStdin<'a, BabyBearPoseidon2, C>
+impl<CC, C> Witnessable<CC> for ConvertStdin<'_, BabyBearPoseidon2, C>
 where
     CC: CircuitConfig<F = SC_Val, EF = SC_Challenge, Bit = Felt<BabyBear>>,
     C: ChipBehavior<BabyBear>

@@ -1,15 +1,12 @@
 use hashbrown::HashMap;
 use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
+use p3_challenger::DuplexChallenger;
 use pico_vm::{
     compiler::{
         recursion_v2::circuit::witness::Witnessable,
         riscv::compiler::{Compiler, SourceType},
     },
-    configs::{
-        config::{Challenge, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
-    },
+    configs::{config::StarkGenericConfig, stark_config::bb_poseidon2::BabyBearPoseidon2},
     emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator},
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
@@ -24,7 +21,7 @@ use pico_vm::{
     },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{
-        BABYBEAR_S_BOX_DEGREE, MAX_NUM_PVS, MAX_NUM_PVS_V2, PERMUTATION_WIDTH, RISCV_NUM_PVS,
+        BABYBEAR_S_BOX_DEGREE, MAX_NUM_PVS_V2, PERMUTATION_WIDTH, RISCV_NUM_PVS,
         RISCV_SIMPLE_DEGREE,
     },
     recursion_v2::runtime::Runtime as RecursionRuntime,
@@ -41,7 +38,7 @@ mod parse_args;
 fn main() {
     setup_logger();
 
-    let (elf, stdin, step, field) = parse_args::parse_args();
+    let (elf, stdin, step, _marker_ef) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("\n Creating Program..");

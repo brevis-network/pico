@@ -1553,8 +1553,12 @@ impl Default for EmulatorMode {
 
 mod tests {
     use super::{Program, RiscvEmulator};
-    use crate::compiler::riscv::compiler::{Compiler, SourceType};
+    use crate::{
+        compiler::riscv::compiler::{Compiler, SourceType},
+        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    };
     use alloc::sync::Arc;
+    use p3_baby_bear::BabyBear;
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =
@@ -1596,10 +1600,10 @@ mod tests {
     fn test_simple_fib() {
         // just run a simple elf file in the compiler folder(test_data)
         let program = simple_fibo_program();
-        let mut stdin = EmulatorStdin::default();
+        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder();
         stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);
         let mut emulator = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
-        emulator.run_with_stdin(stdin).unwrap();
+        emulator.run_with_stdin(stdin.finalize()).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
 
@@ -1608,10 +1612,10 @@ mod tests {
     fn test_simple_keccak() {
         let program = simple_keccak_program();
         let n = "a"; // do keccak(b"abcdefg")
-        let mut stdin = EmulatorStdin::default();
+        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder();
         stdin.write(&n);
         let mut emulator = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
-        emulator.run_with_stdin(stdin).unwrap();
+        emulator.run_with_stdin(stdin.finalize()).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
 }

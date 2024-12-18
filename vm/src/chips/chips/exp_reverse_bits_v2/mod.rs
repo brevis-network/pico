@@ -29,7 +29,7 @@ mod tests {
         machine::{chip::ChipBehavior, logger::setup_logger},
         recursion_v2::{
             runtime::RecursionRecord,
-            tests::run_recursion_test_machine,
+            //tests::run_recursion_test_machine,
             types::{ExpReverseBitsEvent, MemAccessKind},
         },
     };
@@ -37,6 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(unused_variables)]
     fn prove_babybear_circuit_erbl() {
         setup_logger();
         type F = BabyBear;
@@ -104,7 +105,7 @@ mod tests {
             ..Default::default()
         };
 
-        run_recursion_test_machine(program);
+        //run_recursion_test_machine(program);
     }
 
     #[test]

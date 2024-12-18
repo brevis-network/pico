@@ -25,10 +25,7 @@ where
 {
     /// Create a new MetaProof
     pub fn new(proofs: Arc<[BaseProof<SC>]>, vks: Arc<[BaseVerifyingKey<SC>]>) -> Self {
-        Self {
-            proofs: proofs.into(),
-            vks: vks.into(),
-        }
+        Self { proofs, vks }
     }
 
     /// Get the number of the proof and config

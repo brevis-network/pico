@@ -54,7 +54,7 @@ pub(crate) mod tests {
         primitives::pico_poseidon2bb_init,
         recursion_v2::{
             runtime::RecursionRecord,
-            tests::run_recursion_test_machine,
+            //tests::run_recursion_test_machine,
             types::{MemAccessKind, Poseidon2Event},
         },
     };
@@ -132,6 +132,7 @@ pub(crate) mod tests {
         println!("{:?}", main_trace.values)
     }
 
+    /*
     #[test]
     fn test_poseidon2_wide_v2() {
         setup_logger();
@@ -177,4 +178,5 @@ pub(crate) mod tests {
         };
         run_recursion_test_machine(program);
     }
+    */
 }

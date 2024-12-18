@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types)]
+#![allow(clippy::empty_line_after_doc_comments)]
 
 pub mod embed_bb_bn254_poseidon2;
 pub mod recur_bb_poseidon2;

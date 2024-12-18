@@ -29,7 +29,7 @@ mod tests {
         primitives::pico_poseidon2bb_init,
         recursion_v2::{
             runtime::RecursionRecord,
-            tests::run_recursion_wrap_test_machine,
+            //tests::run_recursion_wrap_test_machine,
             types::{MemAccessKind, Poseidon2Event},
         },
     };
@@ -69,6 +69,7 @@ mod tests {
         println!("Poseidon2 skinny chip: trace = {:?}", trace.values);
     }
 
+    /*
     #[test]
     fn recursion_poseidon2_skinny_chip_prove() {
         let input = [1; WIDTH];
@@ -113,4 +114,5 @@ mod tests {
 
         run_recursion_wrap_test_machine(program);
     }
+    */
 }

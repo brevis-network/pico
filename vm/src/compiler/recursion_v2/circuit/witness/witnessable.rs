@@ -50,7 +50,7 @@ impl<CC: CircuitConfig> Witnessable<CC> for bool {
     }
 }
 
-impl<'a, CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for &'a T {
+impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for &T {
     type WitnessVariable = T::WitnessVariable;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
@@ -209,12 +209,8 @@ impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
             .map(|opened_value| (**opened_value).clone())
             .collect_vec();
         let chips_opened_values = chips_opened_values.read(builder);
-        let chips_opened_values = Arc::from(
-            chips_opened_values
-                .into_iter()
-                .map(|opened_value| Arc::new(opened_value))
-                .collect_vec(),
-        );
+        let chips_opened_values =
+            Arc::from(chips_opened_values.into_iter().map(Arc::new).collect_vec());
         Self::WitnessVariable {
             chips_opened_values,
         }

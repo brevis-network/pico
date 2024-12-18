@@ -197,7 +197,7 @@ impl<F: PrimeField32> Poseidon2PermuteChip<F> {
         round_constants: &[F; WIDTH],
     ) {
         for (i, (s, r)) in state.iter_mut().zip(round_constants.iter()).enumerate() {
-            *s = *s + *r;
+            *s += *r;
             Self::populate_sbox(&mut full_round.sbox_x3[i], &mut full_round.sbox_x7[i], s);
         }
         external_linear_layer(state);
@@ -209,7 +209,7 @@ impl<F: PrimeField32> Poseidon2PermuteChip<F> {
         partial_round: &mut PartialRound<F>,
         round_constant: &F,
     ) {
-        state[0] = state[0] + *round_constant;
+        state[0] += *round_constant;
         Self::populate_sbox(
             &mut partial_round.sbox_x3,
             &mut partial_round.sbox_x7,

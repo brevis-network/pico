@@ -1,7 +1,7 @@
-#[cfg(feature = "debug")]
-use crate::machine::debug::constraints::IncrementalConstraintDebugger;
-#[cfg(feature = "debug-lookups")]
-use crate::machine::debug::lookups::IncrementalLookupDebugger;
+// #[cfg(feature = "debug")]
+// use crate::machine::debug::constraints::IncrementalConstraintDebugger;
+// #[cfg(feature = "debug-lookups")]
+// use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
@@ -127,9 +127,7 @@ where
         }
 
         // construct meta proof
-        let proof = MetaProof::new(all_proofs.into(), all_vks.into());
-
-        proof
+        MetaProof::new(all_proofs.into(), all_vks.into())
     }
 
     /// Verify the proof.

@@ -1,7 +1,7 @@
-#[cfg(feature = "debug")]
-use crate::machine::debug::constraints::IncrementalConstraintDebugger;
-#[cfg(feature = "debug-lookups")]
-use crate::machine::debug::lookups::IncrementalLookupDebugger;
+// #[cfg(feature = "debug")]
+// use crate::machine::debug::constraints::IncrementalConstraintDebugger;
+// #[cfg(feature = "debug-lookups")]
+// use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::{riscv::program::Program, word::Word},
     configs::{
@@ -137,7 +137,7 @@ where
 
             // todo: parallel
             let batch_proofs = batch_records
-                .into_iter()
+                .iter_mut()
                 .map(|record| {
                     let regional_commitment = self
                         .base_machine
@@ -165,9 +165,7 @@ where
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()];
-        let proof = MetaProof::new(all_proofs.into(), vks.into());
-
-        proof
+        MetaProof::new(all_proofs.into(), vks.into())
     }
 
     /// Verify the proof.

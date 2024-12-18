@@ -152,8 +152,8 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
     EmptyWitnessStream,
 }
 
-impl<'a, F, EF, ExternalPerm, InternalPerm, const D: u64>
-    Runtime<'a, F, EF, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>
+impl<F, EF, ExternalPerm, InternalPerm, const D: u64>
+    Runtime<'_, F, EF, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>
 where
     F: PrimeField32 + Field,
     EF: ExtensionField<F>,

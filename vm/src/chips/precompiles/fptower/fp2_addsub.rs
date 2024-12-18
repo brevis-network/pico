@@ -89,6 +89,7 @@ where
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
         blu_events: &mut impl RangeRecordBehavior,
         chunk: u32,

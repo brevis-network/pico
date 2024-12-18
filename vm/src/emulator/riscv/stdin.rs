@@ -106,7 +106,7 @@ impl EmulatorStdinBuilder<Vec<u8>> {
     pub fn finalize(self) -> EmulatorStdin<Program, Vec<u8>> {
         EmulatorStdin {
             programs: vec![],
-            inputs: self.buffer.into(),
+            inputs: self.buffer,
             pointer: 0,
         }
     }
@@ -122,7 +122,6 @@ impl<'a>
     /// Construct the recursion stdin for riscv_compress.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// batch_size should be greater than 1
-
     pub fn setup_for_convert(
         riscv_vk: &'a BaseVerifyingKey<RiscvSC>,
         vk_root: [Val<RiscvSC>; DIGEST_SIZE],

@@ -4,15 +4,15 @@ use super::ChipBuilder;
 use p3_air::{AirBuilder, FilteredAirBuilder};
 use p3_field::Field;
 
-impl<'a, F: Field, AB: AirBuilder<F = F> + PublicValuesBuilder> ChipBuilder<F>
-    for FilteredAirBuilder<'a, AB>
+impl<F: Field, AB: AirBuilder<F = F> + PublicValuesBuilder> ChipBuilder<F>
+    for FilteredAirBuilder<'_, AB>
 {
     fn preprocessed(&self) -> Self::M {
         panic!("Should not be called!")
     }
 }
 
-impl<'a, AB: PublicValuesBuilder> PublicValuesBuilder for FilteredAirBuilder<'a, AB> {
+impl<AB: PublicValuesBuilder> PublicValuesBuilder for FilteredAirBuilder<'_, AB> {
     type PublicVar = AB::PublicVar;
 
     fn public_values(&self) -> &[Self::PublicVar] {

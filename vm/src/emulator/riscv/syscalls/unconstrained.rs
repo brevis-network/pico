@@ -7,7 +7,7 @@ pub(crate) struct EnterUnconstrainedSyscall;
 
 impl Syscall for EnterUnconstrainedSyscall {
     fn emulate(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
-        if let Some(_) = ctx.rt.unconstrained {
+        if ctx.rt.unconstrained.is_some() {
             panic!("Unconstrained block is already active.");
         } else {
             let program = ctx.rt.record.program.clone();
@@ -53,7 +53,7 @@ impl Syscall for ExitUnconstrainedSyscall {
             ctx.rt.record = core::mem::take(&mut state.record);
             ctx.rt.memory_accesses = core::mem::take(&mut state.op_record);
             ctx.rt.emulator_mode = state.emulator_mode;
-            assert!(ctx.rt.record.unconstrained == false);
+            assert!(!ctx.rt.record.unconstrained);
         }
         Some(0)
     }

@@ -561,7 +561,7 @@ enum IfCondition<N> {
     NeI(Var<N>, N),
 }
 
-impl<'a, FC: FieldGenericConfig> IfBuilder<'a, FC> {
+impl<FC: FieldGenericConfig> IfBuilder<'_, FC> {
     pub fn then(mut self, mut f: impl FnMut(&mut Builder<FC>)) {
         // Get the condition reduced from the expressions for lhs and rhs.
         let condition = self.condition();
@@ -756,7 +756,7 @@ pub struct RangeBuilder<'a, FC: FieldGenericConfig> {
     builder: &'a mut Builder<FC>,
 }
 
-impl<'a, FC: FieldGenericConfig> RangeBuilder<'a, FC> {
+impl<FC: FieldGenericConfig> RangeBuilder<'_, FC> {
     pub const fn step_by(mut self, step_size: usize) -> Self {
         self.step_size = step_size;
         self

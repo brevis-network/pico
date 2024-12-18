@@ -1,8 +1,5 @@
-use itertools::Itertools;
 use p3_baby_bear::BabyBear;
-use p3_challenger::DuplexChallenger;
 use p3_field::FieldAlgebra;
-use p3_matrix::dense::DenseStorage;
 use pico_vm::{
     compiler::{
         recursion_v2::circuit::witness::Witnessable,
@@ -12,13 +9,9 @@ use pico_vm::{
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler_v2::{
-            recursion_circuit::{
-                combine::builder::CombineVerifierCircuit,
-                compress::builder::CompressVerifierCircuit, embed::builder::EmbedVerifierCircuit,
-                stdin::RecursionStdin,
-            },
-            riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
+        compiler_v2::recursion_circuit::{
+            compress::builder::CompressVerifierCircuit, embed::builder::EmbedVerifierCircuit,
+            stdin::RecursionStdin,
         },
         configs::{
             embed_config::StarkConfig as EmbedSC,
@@ -30,9 +23,7 @@ use pico_vm::{
             embed::EmbedMachine, riscv::RiscvMachine,
         },
     },
-    machine::{
-        logger::setup_logger, machine::MachineBehavior, proof::MetaProof, witness::ProvingWitness,
-    },
+    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{
         BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
         DIGEST_SIZE, EMBED_DEGREE, PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
@@ -123,7 +114,7 @@ fn main() {
 
     // Setup stdin and witness
     let convert_stdin = EmulatorStdin::setup_for_convert(
-        &riscv_vk,
+        riscv_vk,
         vk_root,
         riscv_machine.base_machine(),
         riscv_proof.proofs(),
@@ -273,7 +264,7 @@ fn main() {
         ProvingWitness::setup_with_keys_and_records(compress_pk, compress_vk, vec![record]);
 
     info!("Generating COMPRESS proof (at {:?})..", start.elapsed());
-    let mut compress_proof = compress_machine.prove(&compress_witness);
+    let compress_proof = compress_machine.prove(&compress_witness);
     info!(
         "PERF-step=prove-user_time={}",
         compress_start.elapsed().as_millis()
@@ -350,7 +341,7 @@ fn main() {
         ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
 
     info!("Generating EMBED proof (at {:?})..", start.elapsed());
-    let mut embed_proof = embed_machine.prove(&embed_witness);
+    let embed_proof = embed_machine.prove(&embed_witness);
     info!(
         "PERF-step=prove-user_time={}",
         embed_start.elapsed().as_millis()

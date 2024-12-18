@@ -185,7 +185,7 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub accumulator: PackedChallenge<SC>,
 }
 
-impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'_, SC> {
     type F = SC::Val;
     type Expr = PackedVal<SC>;
     type Var = PackedVal<SC>;
@@ -218,7 +218,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
     }
 }
 
-impl<'a, SC: StarkGenericConfig> PublicValuesBuilder for ProverConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> PublicValuesBuilder for ProverConstraintFolder<'_, SC> {
     type PublicVar = Self::F;
 
     fn public_values(&self) -> &[Self::F] {
@@ -245,7 +245,7 @@ impl<'a, SC: StarkGenericConfig> PermutationBuilder for ProverConstraintFolder<'
     }
 }
 
-impl<'a, SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<'_, SC> {
     type EF = SC::Challenge;
     type ExprEF = PackedChallenge<SC>;
     type VarEF = PackedChallenge<SC>;
@@ -260,13 +260,13 @@ impl<'a, SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<'a,
     }
 }
 
-impl<'a, SC: StarkGenericConfig> ChipBuilder<SC::Val> for ProverConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> ChipBuilder<SC::Val> for ProverConstraintFolder<'_, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }
 }
 
-impl<'a, SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<'_, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }
@@ -323,7 +323,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC>
     }
 }
 
-impl<'a, SC: StarkGenericConfig> ExtensionBuilder for VerifierConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> ExtensionBuilder for VerifierConstraintFolder<'_, SC> {
     type EF = SC::Challenge;
     type ExprEF = SC::Challenge;
     type VarEF = SC::Challenge;
@@ -357,7 +357,7 @@ impl<'a, SC: StarkGenericConfig> PermutationBuilder for VerifierConstraintFolder
     }
 }
 
-impl<'a, SC: StarkGenericConfig> PublicValuesBuilder for VerifierConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> PublicValuesBuilder for VerifierConstraintFolder<'_, SC> {
     type PublicVar = Self::F;
 
     fn public_values(&self) -> &[Self::F] {
@@ -365,13 +365,13 @@ impl<'a, SC: StarkGenericConfig> PublicValuesBuilder for VerifierConstraintFolde
     }
 }
 
-impl<'a, SC: StarkGenericConfig> ChipBuilder<SC::Val> for VerifierConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> ChipBuilder<SC::Val> for VerifierConstraintFolder<'_, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed
     }
 }
 
-impl<'a, SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> PairBuilder for VerifierConstraintFolder<'_, SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed
     }
@@ -475,8 +475,8 @@ where
     }
 }
 
-impl<'a, F, EF, PubVar, Var, Expr> ExtensionBuilder
-    for GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr>
+impl<F, EF, PubVar, Var, Expr> ExtensionBuilder
+    for GenericVerifierConstraintFolder<'_, F, EF, PubVar, Var, Expr>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -562,8 +562,8 @@ where
     }
 }
 
-impl<'a, F, EF, PubVar, Var, Expr> PairBuilder
-    for GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr>
+impl<F, EF, PubVar, Var, Expr> PairBuilder
+    for GenericVerifierConstraintFolder<'_, F, EF, PubVar, Var, Expr>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -596,8 +596,8 @@ where
     }
 }
 
-impl<'a, F, EF, PubVar, Var, Expr> EmptyLookupBuilder
-    for GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr>
+impl<F, EF, PubVar, Var, Expr> EmptyLookupBuilder
+    for GenericVerifierConstraintFolder<'_, F, EF, PubVar, Var, Expr>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -627,8 +627,8 @@ where
 {
 }
 
-impl<'a, F, EF, PubVar, Var, Expr> PublicValuesBuilder
-    for GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr>
+impl<F, EF, PubVar, Var, Expr> PublicValuesBuilder
+    for GenericVerifierConstraintFolder<'_, F, EF, PubVar, Var, Expr>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -663,8 +663,8 @@ where
     }
 }
 
-impl<'a, F, EF, PubVar, Var, Expr> ChipBuilder<F>
-    for GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr>
+impl<F, EF, PubVar, Var, Expr> ChipBuilder<F>
+    for GenericVerifierConstraintFolder<'_, F, EF, PubVar, Var, Expr>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -718,7 +718,7 @@ pub struct DebugConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) failures: Vec<DebugConstraintFailure<F, EF>>,
 }
 
-impl<'a, F, EF> DebugConstraintFolder<'a, F, EF>
+impl<F, EF> DebugConstraintFolder<'_, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -791,7 +791,7 @@ where
     }
 }
 
-impl<'a, F, EF> ExtensionBuilder for DebugConstraintFolder<'a, F, EF>
+impl<F, EF> ExtensionBuilder for DebugConstraintFolder<'_, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -840,7 +840,7 @@ where
     }
 }
 
-impl<'a, F, EF> PairBuilder for DebugConstraintFolder<'a, F, EF>
+impl<F, EF> PairBuilder for DebugConstraintFolder<'_, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -850,7 +850,7 @@ where
     }
 }
 
-impl<'a, F, EF> ChipBuilder<F> for DebugConstraintFolder<'a, F, EF>
+impl<F, EF> ChipBuilder<F> for DebugConstraintFolder<'_, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
@@ -860,7 +860,7 @@ where
     }
 }
 
-impl<'a, F: Field, EF: ExtensionField<F>> PublicValuesBuilder for DebugConstraintFolder<'a, F, EF> {
+impl<F: Field, EF: ExtensionField<F>> PublicValuesBuilder for DebugConstraintFolder<'_, F, EF> {
     type PublicVar = F;
 
     fn public_values(&self) -> &[Self::PublicVar] {
@@ -868,4 +868,4 @@ impl<'a, F: Field, EF: ExtensionField<F>> PublicValuesBuilder for DebugConstrain
     }
 }
 
-impl<'a, F: Field, EF: ExtensionField<F>> EmptyLookupBuilder for DebugConstraintFolder<'a, F, EF> {}
+impl<F: Field, EF: ExtensionField<F>> EmptyLookupBuilder for DebugConstraintFolder<'_, F, EF> {}

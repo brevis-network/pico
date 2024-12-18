@@ -12,6 +12,7 @@ pub struct Fp2MulSyscall<P> {
 }
 
 impl<P> Fp2MulSyscall<P> {
+    #[allow(clippy::new_without_default)]
     pub const fn new() -> Self {
         Self {
             _marker: PhantomData,

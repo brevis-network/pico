@@ -194,10 +194,10 @@ where
 
                     StarkVerifier::verify_chunk(
                         builder,
-                        &vk,
+                        vk,
                         machine,
                         &mut challenger,
-                        &chunk_proof,
+                        chunk_proof,
                         &[zero_ext, zero_ext],
                     );
                 }
@@ -246,9 +246,8 @@ where
                         current_public_values.start_reconstruct_challenger;
 
                     // Digests
-                    for i in 0..DIGEST_SIZE {
-                        riscv_vk_digest[i] = current_public_values.riscv_vk_digest[i];
-                    }
+                    riscv_vk_digest[..DIGEST_SIZE]
+                        .copy_from_slice(&current_public_values.riscv_vk_digest[..DIGEST_SIZE]);
 
                     for (word, current_word) in committed_value_digest
                         .iter_mut()
@@ -419,12 +418,12 @@ where
                 );
 
                 // Address bits.
-                for i in 0..ADDR_NUM_BITS {
-                    current_initialize_addr_bits[i] =
-                        current_public_values.last_initialize_addr_bits[i];
-                    current_finalize_addr_bits[i] =
-                        current_public_values.last_finalize_addr_bits[i];
-                }
+                current_initialize_addr_bits[..ADDR_NUM_BITS].copy_from_slice(
+                    &current_public_values.last_initialize_addr_bits[..ADDR_NUM_BITS],
+                );
+                current_finalize_addr_bits[..ADDR_NUM_BITS].copy_from_slice(
+                    &current_public_values.last_finalize_addr_bits[..ADDR_NUM_BITS],
+                );
 
                 // Cumsum
                 for (sum_element, current_sum_element) in global_cumulative_sum

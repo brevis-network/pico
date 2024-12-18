@@ -81,7 +81,7 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfig
     let alpha = challenger.sample_ext(builder);
 
     let fri_challenges =
-        verify_shape_and_sample_challenges::<CC, SC>(builder, config, &proof, challenger);
+        verify_shape_and_sample_challenges::<CC, SC>(builder, config, proof, challenger);
 
     let log_global_max_height = proof.commit_phase_commits.len() + config.log_blowup;
 
