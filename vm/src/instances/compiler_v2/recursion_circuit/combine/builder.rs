@@ -41,8 +41,8 @@ use crate::{
         machine::BaseMachine,
     },
     primitives::consts::{
-        ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS,
-        POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2, RISCV_COMPRESS_DEGREE,
+        ADDR_NUM_BITS, CONVERT_DEGREE, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE,
+        MAX_LOG_NUMBER_OF_CHUNKS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
     },
     recursion_v2::{
         air::{
@@ -66,11 +66,11 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy)]
-pub struct RecursionCombineVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig, C>(
+pub struct CombineVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig, C>(
     PhantomData<(FC, SC, C)>,
 );
 
-impl<C> RecursionCombineVerifierCircuit<RecursionFC, RecursionSC, C>
+impl<C> CombineVerifierCircuit<RecursionFC, RecursionSC, C>
 where
     C: ChipBehavior<
             Val<RecursionSC>,
@@ -97,7 +97,7 @@ where
     }
 }
 
-impl<CC, SC, C> RecursionCombineVerifierCircuit<CC, SC, C>
+impl<CC, SC, C> CombineVerifierCircuit<CC, SC, C>
 where
     SC: BabyBearFriConfigVariable<CC>,
     CC: CircuitConfig<F = SC::Val, EF = SC::Challenge>,

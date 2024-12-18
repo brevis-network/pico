@@ -35,10 +35,8 @@ use p3_challenger::{CanObserve, DuplexChallenger};
 use p3_field::FieldAlgebra;
 use pico_derive::DslVariable;
 
-use super::challenger::RiscvRecursionChallengers;
-
 #[derive(Clone)]
-pub struct RiscvRecursionStdin<'a, SC, C>
+pub struct ConvertStdin<'a, SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>
@@ -55,10 +53,8 @@ where
     pub vk_root: [SC::Val; DIGEST_SIZE],
 }
 
-pub struct RiscvRecursionStdinVariable<
-    CC: CircuitConfig<F = BabyBear>,
-    SC: BabyBearFriConfigVariable<CC>,
-> {
+pub struct ConvertStdinVariable<CC: CircuitConfig<F = BabyBear>, SC: BabyBearFriConfigVariable<CC>>
+{
     pub riscv_vk: BaseVerifyingKeyVariable<CC, SC>,
     pub proofs: Vec<BaseProofVariable<CC, SC>>,
     pub base_challenger: SC::FriChallengerVariable,
@@ -68,7 +64,7 @@ pub struct RiscvRecursionStdinVariable<
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
 }
 
-impl<'a, SC, C> RiscvRecursionStdin<'a, SC, C>
+impl<'a, SC, C> ConvertStdin<'a, SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>
@@ -98,14 +94,14 @@ where
     }
 }
 
-impl<'a, CC, C> Witnessable<CC> for RiscvRecursionStdin<'a, BabyBearPoseidon2, C>
+impl<'a, CC, C> Witnessable<CC> for ConvertStdin<'a, BabyBearPoseidon2, C>
 where
     CC: CircuitConfig<F = SC_Val, EF = SC_Challenge, Bit = Felt<BabyBear>>,
     C: ChipBehavior<BabyBear>
         + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
         + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
 {
-    type WitnessVariable = RiscvRecursionStdinVariable<CC, BabyBearPoseidon2>;
+    type WitnessVariable = ConvertStdinVariable<CC, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let riscv_vk = self.riscv_vk.read(builder);
@@ -116,7 +112,7 @@ where
         let flag_first_chunk = SC_Val::from_bool(self.flag_first_chunk).read(builder);
         let vk_root = self.vk_root.read(builder);
 
-        RiscvRecursionStdinVariable {
+        ConvertStdinVariable {
             riscv_vk,
             proofs,
             base_challenger,

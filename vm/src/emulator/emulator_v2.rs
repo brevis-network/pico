@@ -13,9 +13,7 @@ use crate::{
         chiptype::riscv_chiptype::RiscvChipType,
         compiler_v2::{
             recursion_circuit::stdin::RecursionStdin,
-            riscv_circuit::{
-                compress::builder::RiscvCompressVerifierCircuit, stdin::RiscvRecursionStdin,
-            },
+            riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
         },
         configs::{
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
@@ -100,7 +98,7 @@ impl<'a, C>
         RecursionSC,
         C,
         RecursionProgram<Val<RecursionSC>>,
-        RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+        ConvertStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
         RecursionEmulator<RecursionSC>,
     >
 where
@@ -115,7 +113,7 @@ where
         proving_witness: &'a ProvingWitness<
             RecursionSC,
             C,
-            RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+            ConvertStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
         >,
         machine: &'a BaseMachine<RecursionSC, C>,
     ) -> Self {
@@ -279,7 +277,7 @@ where
 impl RecursionEmulator<RecursionSC> {
     pub fn run_riscv<RiscvC>(
         &mut self,
-        stdin: &RiscvRecursionStdin<RiscvSC, RiscvC>,
+        stdin: &ConvertStdin<RiscvSC, RiscvC>,
     ) -> RecursionRecord<Val<RecursionSC>>
     where
         RiscvC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>

@@ -12,9 +12,7 @@ use pico_vm::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
     },
-    instances::{
-        configs::riscv_config::StarkConfig as RiscvSC, machine::simple_machine::SimpleMachine,
-    },
+    instances::{configs::riscv_config::StarkConfig as RiscvSC, machine::simple::SimpleMachine},
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},

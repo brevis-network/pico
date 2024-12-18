@@ -10,7 +10,7 @@ use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 
-/// Gadget columns for verifying that an compress is within the range `[0, modulus)`.
+/// Gadget columns for verifying that a compress is within the range `[0, modulus)`.
 #[derive(Debug, Clone, Copy, AlignedBorrow)]
 #[repr(C)]
 pub struct AssertLtColsBytes<T, const N: usize> {

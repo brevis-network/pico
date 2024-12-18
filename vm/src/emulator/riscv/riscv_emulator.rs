@@ -76,7 +76,7 @@ pub struct RiscvEmulator {
     /// The current trace of the emulation that is being collected.
     pub record: EmulationRecord,
 
-    /// The collected batch_chunk_size records last executed
+    /// The collected chunk_batch_size records last executed
     pub batch_records: Vec<EmulationRecord>,
 
     /// Current batch number

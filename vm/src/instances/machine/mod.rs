@@ -1,6 +1,6 @@
-pub mod recursion_combine;
-pub mod recursion_compress;
-pub mod recursion_embed;
-pub mod riscv_machine;
-pub mod riscv_recursion;
-pub mod simple_machine;
+pub mod combine;
+pub mod compress;
+pub mod convert;
+pub mod embed;
+pub mod riscv;
+pub mod simple;

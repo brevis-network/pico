@@ -4,11 +4,14 @@ use crate::machine::debug::constraints::IncrementalConstraintDebugger;
 use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::recursion_v2::program::RecursionProgram,
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    configs::config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{emulator_v2::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
     instances::{
         compiler_v2::recursion_circuit::stdin::RecursionStdin,
-        configs::recur_config::StarkConfig as RecursionSC,
+        configs::{
+            embed_bb_bn254_poseidon2::StarkConfig as EmbedSC,
+            recur_config::StarkConfig as RecursionSC,
+        },
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -30,7 +33,7 @@ use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument, trace};
 
-pub struct RecursionCompressMachine<SC, C>
+pub struct EmbedMachine<SC, C, I>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
@@ -41,50 +44,40 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     base_machine: BaseMachine<SC, C>,
+
+    phantom: std::marker::PhantomData<I>,
 }
 
-impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<'_, RecursionSC, C>>
-    for RecursionCompressMachine<RecursionSC, C>
+impl<C, I> MachineBehavior<EmbedSC, C, I> for EmbedMachine<EmbedSC, C, I>
 where
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<EmbedSC>,
+            Program = RecursionProgram<Val<EmbedSC>>,
+            Record = RecursionRecord<Val<EmbedSC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, EmbedSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, EmbedSC>>,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!(
-            "Compress Recursion Machine <{}>",
-            type_name::<RecursionSC>()
-        )
+        format!("Embed Recursion Machine <{}>", type_name::<EmbedSC>())
     }
 
     /// Get the base machine
-    fn base_machine(&self) -> &BaseMachine<RecursionSC, C> {
+    fn base_machine(&self) -> &BaseMachine<EmbedSC, C> {
         &self.base_machine
     }
 
+    // todo: I is actually not used here
     /// Get the prover of the machine.
-    #[instrument(name = "compress_prove", level = "debug", skip_all)]
-    fn prove(
-        &self,
-        witness: &ProvingWitness<RecursionSC, C, RecursionStdin<RecursionSC, C>>,
-    ) -> MetaProof<RecursionSC>
+    #[instrument(name = "embed_prove", level = "debug", skip_all)]
+    fn prove(&self, witness: &ProvingWitness<EmbedSC, C, I>) -> MetaProof<EmbedSC>
     where
-        C: for<'c> Air<
-            DebugConstraintFolder<
-                'c,
-                <RecursionSC as StarkGenericConfig>::Val,
-                <RecursionSC as StarkGenericConfig>::Challenge,
-            >,
-        >,
+        C: for<'c> Air<DebugConstraintFolder<'c, Val<EmbedSC>, Challenge<EmbedSC>>>,
     {
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
 
-        debug!("recursion compress record stats");
+        debug!("recursion embed record stats");
         let stats = records[0].stats();
         for (key, value) in &stats {
             debug!("   |- {:<28}: {}", key, value);
@@ -100,10 +93,10 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<RecursionSC>) -> anyhow::Result<()> {
+    fn verify(&self, proof: &MetaProof<EmbedSC>) -> anyhow::Result<()> {
         let vk = proof.vks().first().unwrap();
 
-        info!("PERF-machine=compress");
+        info!("PERF-machine=embed");
         let begin = Instant::now();
 
         assert_eq!(proof.num_proofs(), 1);
@@ -113,7 +106,7 @@ where
         trace!("public values: {:?}", public_values);
 
         // assert completion
-        if public_values.flag_complete != <Val<RecursionSC>>::ONE {
+        if public_values.flag_complete != <Val<EmbedSC>>::ONE {
             panic!("flag_complete is not 1");
         }
 
@@ -126,7 +119,7 @@ where
     }
 }
 
-impl<SC, C> RecursionCompressMachine<SC, C>
+impl<SC, C, I> EmbedMachine<SC, C, I>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
@@ -141,6 +134,7 @@ where
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
+            phantom: std::marker::PhantomData,
         }
     }
 }

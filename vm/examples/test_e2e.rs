@@ -14,14 +14,11 @@ use pico_vm::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
             recursion_circuit::{
-                combine::builder::RecursionCombineVerifierCircuit,
-                compress::builder::RecursionCompressVerifierCircuit,
-                embed::builder::RecursionEmbedVerifierCircuit, stdin::RecursionStdin,
+                combine::builder::CombineVerifierCircuit,
+                compress::builder::CompressVerifierCircuit, embed::builder::EmbedVerifierCircuit,
+                stdin::RecursionStdin,
             },
-            riscv_circuit::{
-                challenger::RiscvRecursionChallengers,
-                compress::builder::RiscvCompressVerifierCircuit, stdin::RiscvRecursionStdin,
-            },
+            riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
         },
         configs::{
             embed_config::StarkConfig as EmbedSC,
@@ -29,18 +26,16 @@ use pico_vm::{
             riscv_config::StarkConfig as RiscvBBSC,
         },
         machine::{
-            recursion_combine::RecursionCombineMachine,
-            recursion_compress::RecursionCompressMachine, recursion_embed::RecursionEmbedMachine,
-            riscv_machine::RiscvMachine, riscv_recursion::RiscvRecursionMachine,
+            combine::CombineMachine, compress::CompressMachine, convert::ConvertMachine,
+            embed::EmbedMachine, riscv::RiscvMachine,
         },
     },
     machine::{
         logger::setup_logger, machine::MachineBehavior, proof::MetaProof, witness::ProvingWitness,
     },
     primitives::consts::{
-        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, DIGEST_SIZE,
-        EMBED_DEGREE, PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2, RISCV_COMPRESS_DEGREE,
-        RISCV_NUM_PVS,
+        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
+        DIGEST_SIZE, EMBED_DEGREE, PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
     },
     recursion_v2::runtime::Runtime,
 };
@@ -63,12 +58,9 @@ fn main() {
     let start = Instant::now();
     let riscv_start = Instant::now();
 
-    info!("Creating RiscV Program..");
+    info!("Setting up RISCV..");
     let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
     let riscv_program = riscv_compiler.compile();
-
-    // Setup config and chips.
-    info!("Creating RiscVMachine (at {:?})..", start.elapsed());
 
     let riscv_machine = RiscvMachine::new(
         RiscvBBSC::new(),
@@ -77,10 +69,8 @@ fn main() {
     );
 
     // Setup machine prover, verifier, pk and vk.
-    info!("Setup RiscV machine (at {:?})..", start.elapsed());
     let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
 
-    info!("Construct RiscV proving witness..");
     let riscv_witness = ProvingWitness::setup_for_riscv(
         riscv_program.clone(),
         riscv_stdin,
@@ -90,7 +80,7 @@ fn main() {
     );
 
     // Generate the proof.
-    info!("Generating RiscV proof (at {:?})..", start.elapsed());
+    info!("Generating RISCV proof (at {:?})..", start.elapsed());
     let riscv_proof = riscv_machine.prove(&riscv_witness);
     info!(
         "PERF-step=prove-user_time={}",
@@ -101,7 +91,7 @@ fn main() {
     info!("PERF-step=proof_size-{}", riscv_proof_size);
 
     // Verify the proof.
-    info!("Verifying RiscV proof (at {:?})..", start.elapsed());
+    info!("Verifying RISCV proof (at {:?})..", start.elapsed());
     let riscv_result = riscv_machine.verify(&riscv_proof);
     info!(
         "The proof is verified: {} (at {:?})..",
@@ -117,65 +107,62 @@ fn main() {
 
     info!("\n Begin CONVERT..");
 
-    info!("PERF-machine=recursion");
+    info!("PERF-machine=convert");
     let convert_start = Instant::now();
 
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
     let riscv_vk = riscv_witness.vk();
 
-    info!("Initializing RiscV compression machine");
-    let riscv_compress_machine = RiscvRecursionMachine::new(
+    info!("Setting up CONVERT..");
+    let convert_machine = ConvertMachine::new(
         RecursionSC::new(),
-        RecursionChipType::<BabyBear, RISCV_COMPRESS_DEGREE>::all_chips(),
+        RecursionChipType::<BabyBear, CONVERT_DEGREE>::all_chips(),
         RECURSION_NUM_PVS_V2,
     );
 
     // Setup stdin and witness
-    info!("Construct recursion stdin and witnesses..");
-    let riscv_compress_stdin = EmulatorStdin::setup_for_convert(
+    let convert_stdin = EmulatorStdin::setup_for_convert(
         &riscv_vk,
         vk_root,
         riscv_machine.base_machine(),
         riscv_proof.proofs(),
     );
 
-    let riscv_compress_witness = ProvingWitness::setup_for_riscv_recursion(
-        riscv_compress_stdin,
-        riscv_compress_machine.config(),
+    let convert_witness = ProvingWitness::setup_for_convert(
+        convert_stdin,
+        convert_machine.config(),
         EmulatorOpts::default(),
     );
 
     // Generate the proof.
     info!("Generating CONVERT proof (at {:?})..", start.elapsed());
-    let riscv_compress_proof = riscv_compress_machine.prove(&riscv_compress_witness);
+    let convert_proof = convert_machine.prove(&convert_witness);
     info!(
         "PERF-step=prove-user_time={}",
         convert_start.elapsed().as_millis()
     );
 
-    let convert_proof_size = bincode::serialize(riscv_compress_proof.proofs())
-        .unwrap()
-        .len();
+    let convert_proof_size = bincode::serialize(convert_proof.proofs()).unwrap().len();
     info!("PERF-step=proof_size-{}", convert_proof_size);
 
     // Verify the proof.
     info!("Verifying CONVERT proof (at {:?})..", start.elapsed());
-    let riscv_compress_result = riscv_compress_machine.verify(&riscv_compress_proof);
+    let convert_result = convert_machine.verify(&convert_proof);
     info!(
         "The CONVERT proof is verified: {} (at {:?})",
-        riscv_compress_result.is_ok(),
+        convert_result.is_ok(),
         start.elapsed()
     );
-    assert!(riscv_compress_result.is_ok());
+    assert!(convert_result.is_ok());
 
-    if step == "riscv_compress" {
+    if step == "convert" {
         return;
     }
 
     // -------- Combine Recursion Machine --------
 
-    info!("\n Begin COMBINE");
+    info!("\n Begin COMBINE..");
 
     info!("PERF-machine=combine");
     let combine_start = Instant::now();
@@ -183,20 +170,19 @@ fn main() {
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
 
-    info!("Initializing COMBINE machine");
-    let combine_machine = RecursionCombineMachine::new(
+    info!("Setting up COMBINE");
+    let combine_machine = CombineMachine::new(
         RecursionSC::new(),
         RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
         RECURSION_NUM_PVS_V2,
     );
 
     // Setup stdin and witnesses
-    info!("Construct COMBINE stdin and witnesses..");
     let combine_stdin = EmulatorStdin::setup_for_combine(
         vk_root,
-        riscv_compress_proof.vks(),
-        riscv_compress_proof.proofs(),
-        riscv_compress_machine.base_machine(),
+        convert_proof.vks(),
+        convert_proof.proofs(),
+        convert_machine.base_machine(),
         COMBINE_SIZE,
         false,
     );
@@ -229,7 +215,7 @@ fn main() {
     );
     assert!(combine_result.is_ok());
 
-    if step == "recur_combine" {
+    if step == "combine" {
         return;
     }
 
@@ -243,14 +229,13 @@ fn main() {
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
 
-    info!("Initializing COMPRESS machine");
-    let compress_machine = RecursionCompressMachine::new(
+    info!("Setting up COMPRESS");
+    let compress_machine = CompressMachine::new(
         RecursionSC::compress(),
         RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
         RECURSION_NUM_PVS_V2,
     );
 
-    info!("Generating COMPRESS vks and proofs");
     let compress_stdin = RecursionStdin::new(
         compress_machine.base_machine(),
         combine_proof.vks().to_vec(),
@@ -259,13 +244,11 @@ fn main() {
         vk_root,
     );
 
-    info!("Building COMPRESS program");
-    let compress_program = RecursionCompressVerifierCircuit::<RecursionFC, RecursionSC>::build(
+    let compress_program = CompressVerifierCircuit::<RecursionFC, RecursionSC>::build(
         combine_machine.base_machine(),
         &compress_stdin,
     );
 
-    info!("Generating COMPRESS keys");
     let (compress_pk, compress_vk) = compress_machine.setup_keys(&compress_program);
 
     let record = {
@@ -289,7 +272,7 @@ fn main() {
     let compress_witness =
         ProvingWitness::setup_with_keys_and_records(compress_pk, compress_vk, vec![record]);
 
-    info!("Proving COMPRESS");
+    info!("Generating COMPRESS proof (at {:?})..", start.elapsed());
     let mut compress_proof = compress_machine.prove(&compress_witness);
     info!(
         "PERF-step=prove-user_time={}",
@@ -299,7 +282,7 @@ fn main() {
     let compress_proof_size = bincode::serialize(compress_proof.proofs()).unwrap().len();
     info!("PERF-step=proof_size-{}", compress_proof_size);
 
-    info!("Verifying COMPRESS proof");
+    info!("Verifying COMPRESS proof (at {:?})..", start.elapsed());
     let compress_result = compress_machine.verify(&compress_proof);
 
     info!(
@@ -309,11 +292,11 @@ fn main() {
     );
     assert!(compress_result.is_ok());
 
-    if step == "recur_compress" {
+    if step == "compress" {
         return;
     }
 
-    // -------- Embed Recursion Machine --------
+    // -------- Embed Machine --------
 
     info!("\n Begin EMBED..");
     info!("PERF-machine=embed");
@@ -322,14 +305,13 @@ fn main() {
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
 
-    info!("Initializing EMBED machine");
-    let embed_machine = RecursionEmbedMachine::<_, _, Vec<u8>>::new(
+    info!("Setting up EMBED");
+    let embed_machine = EmbedMachine::<_, _, Vec<u8>>::new(
         EmbedSC::new(),
         RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
         RECURSION_NUM_PVS_V2,
     );
 
-    info!("Generating EMBED vks and proofs");
     let embed_stdin = RecursionStdin::new(
         compress_machine.base_machine(),
         compress_proof.vks().to_vec(),
@@ -338,13 +320,11 @@ fn main() {
         vk_root,
     );
 
-    info!("Building EMBED program");
-    let embed_program = RecursionEmbedVerifierCircuit::<RecursionFC, RecursionSC>::build(
+    let embed_program = EmbedVerifierCircuit::<RecursionFC, RecursionSC>::build(
         compress_machine.base_machine(),
         &embed_stdin,
     );
 
-    info!("Generating EMBED keys");
     let (embed_pk, embed_vk) = embed_machine.setup_keys(&embed_program);
 
     let record = {
@@ -369,7 +349,7 @@ fn main() {
     let embed_witness =
         ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
 
-    info!("Proving EMBED");
+    info!("Generating EMBED proof (at {:?})..", start.elapsed());
     let mut embed_proof = embed_machine.prove(&embed_witness);
     info!(
         "PERF-step=prove-user_time={}",
@@ -379,7 +359,7 @@ fn main() {
     let embed_proof_size = bincode::serialize(embed_proof.proofs()).unwrap().len();
     info!("PERF-step=proof_size-{}", embed_proof_size);
 
-    info!("Verifying EMBED proof");
+    info!("Verifying EMBED proof (at {:?})..", start.elapsed());
     let embed_result = embed_machine.verify(&embed_proof);
 
     info!(

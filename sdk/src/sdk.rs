@@ -95,7 +95,7 @@
 //         let riscv_compiler = Compiler::new(SourceType::RiscV, elf.as_slice());
 //         let _riscv_program = riscv_compiler.compile();
 //
-//         // TODO: Enable after updating the Recursion combine and compress machines.
+//         // TODO: Enable after updating the Recursion combine and convert machines.
 //         todo!()
 //
 //         /*
@@ -124,7 +124,7 @@
 //                             combine_machine.base_machine(),
 //                         );
 //                         let compress_machine = RecursionCompressMachine::new(
-//                             RecursionSC::compress(),
+//                             RecursionSC::convert(),
 //                             RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
 //                             RECURSION_NUM_PVS,
 //                         );
@@ -154,7 +154,7 @@
 //                 )
 //                 .into();
 //                 let compress_machine = RecursionCompressMachine::new(
-//                     RecursionSC::compress(),
+//                     RecursionSC::convert(),
 //                     RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
 //                     RECURSION_NUM_PVS,
 //                 );
@@ -260,7 +260,7 @@
 //                 assert_vk_digest::<BabyBearPoseidon2>(&combine_proof, &riscv_keys.vk);
 //
 //                 // -------- Compress Recursion Machine --------
-//                 let (compress_proof, compress_keys) = self.compress(combine_keys.vk, combine_proof);
+//                 let (compress_proof, compress_keys) = self.convert(combine_keys.vk, combine_proof);
 //                 let compress_result = self
 //                     .compress_machine
 //                     .verify(&compress_keys.vk, &compress_proof);
@@ -342,7 +342,7 @@
 //                     vk_root,
 //                 );
 //                 let program =
-//                     pico_vm::instances::compiler_v2::riscv_circuit::compress::builder::RiscvCompressVerifierCircuit::<
+//                     pico_vm::instances::compiler_v2::riscv_circuit::convert::builder::RiscvCompressVerifierCircuit::<
 //                         RecursionFC,
 //                         RiscvSC,
 //                     >::build(self.riscv_machine.base_machine(), &stdin);
@@ -369,7 +369,7 @@
 //     }
 //
 //     /*
-//     fn compress(
+//     fn convert(
 //         &self,
 //         combine_vk: BaseVerifyingKey<StarkConfig>,
 //         combine_proof: MetaProof<StarkConfig>,

@@ -9,7 +9,7 @@ use crate::{
     },
     instances::{
         compiler_v2::{
-            recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::RiscvRecursionStdin,
+            recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,
         },
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
     },
@@ -122,7 +122,7 @@ where
 }
 
 // implement Witness for riscv-recursion machine
-impl<'a, C, PrevC> ProvingWitness<RecursionSC, C, RiscvRecursionStdin<'a, RiscvSC, PrevC>>
+impl<'a, C, PrevC> ProvingWitness<RecursionSC, C, ConvertStdin<'a, RiscvSC, PrevC>>
 where
     PrevC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
@@ -134,8 +134,8 @@ where
         > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
 {
-    pub fn setup_for_riscv_recursion(
-        stdin: EmulatorStdin<C::Program, RiscvRecursionStdin<'a, RiscvSC, PrevC>>,
+    pub fn setup_for_convert(
+        stdin: EmulatorStdin<C::Program, ConvertStdin<'a, RiscvSC, PrevC>>,
         config: Arc<RecursionSC>,
         opts: EmulatorOpts,
     ) -> Self {

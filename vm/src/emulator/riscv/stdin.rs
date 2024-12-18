@@ -13,13 +13,8 @@ use crate::{
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
-            recursion_circuit::{
-                combine::builder::RecursionCombineVerifierCircuit, stdin::RecursionStdin,
-            },
-            riscv_circuit::{
-                challenger::RiscvRecursionChallengers,
-                compress::builder::RiscvCompressVerifierCircuit, stdin::RiscvRecursionStdin,
-            },
+            recursion_circuit::{combine::builder::CombineVerifierCircuit, stdin::RecursionStdin},
+            riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
         },
         configs::{
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
@@ -121,7 +116,7 @@ impl EmulatorStdinBuilder<Vec<u8>> {
 impl<'a>
     EmulatorStdin<
         RecursionProgram<Val<RecursionSC>>,
-        RiscvRecursionStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+        ConvertStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
     >
 {
     /// Construct the recursion stdin for riscv_compress.
@@ -159,7 +154,7 @@ impl<'a>
             let flag_complete = i == total - 1;
             let flag_first_chunk = i == 0;
 
-            let input = RiscvRecursionStdin {
+            let input = ConvertStdin {
                 machine,
                 riscv_vk,
                 proofs: vec![proof.clone()],
@@ -169,8 +164,7 @@ impl<'a>
                 flag_first_chunk,
                 vk_root,
             };
-            let program =
-                RiscvCompressVerifierCircuit::<RecursionFC, RiscvSC>::build(machine, &input);
+            let program = ConvertVerifierCircuit::<RecursionFC, RiscvSC>::build(machine, &input);
 
             programs.push(program);
             inputs.push(input);
@@ -224,9 +218,8 @@ where
                     flag_complete,
                     vk_root,
                 };
-                let program = RecursionCombineVerifierCircuit::<RecursionFC, RecursionSC, C>::build(
-                    machine, &input,
-                );
+                let program =
+                    CombineVerifierCircuit::<RecursionFC, RecursionSC, C>::build(machine, &input);
 
                 programs.push(program);
                 inputs.push(input);

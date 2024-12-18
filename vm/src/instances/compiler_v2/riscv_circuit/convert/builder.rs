@@ -1,4 +1,4 @@
-use super::super::stdin::{RiscvRecursionStdin, RiscvRecursionStdinVariable};
+use super::super::stdin::{ConvertStdin, ConvertStdinVariable};
 use crate::{
     chips::chips::riscv_cpu::MAX_CPU_LOG_DEGREE,
     compiler::{
@@ -52,14 +52,14 @@ use std::{
 
 /// Circuit that verifies a single riscv proof and checks constraints
 #[derive(Debug, Clone, Copy)]
-pub struct RiscvCompressVerifierCircuit<CC: CircuitConfig, SC: BabyBearFriConfig> {
+pub struct ConvertVerifierCircuit<CC: CircuitConfig, SC: BabyBearFriConfig> {
     _phantom: PhantomData<(CC, SC)>,
 }
 
-impl RiscvCompressVerifierCircuit<RecursionFC, BabyBearPoseidon2> {
+impl ConvertVerifierCircuit<RecursionFC, BabyBearPoseidon2> {
     pub fn build(
         machine: &BaseMachine<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
-        input: &RiscvRecursionStdin<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
+        input: &ConvertStdin<BabyBearPoseidon2, RiscvChipType<BabyBear>>,
     ) -> RecursionProgram<Val<RiscvSC>> {
         // Construct the builder.
         let mut builder = Builder::<RecursionFC>::new();
@@ -74,7 +74,7 @@ impl RiscvCompressVerifierCircuit<RecursionFC, BabyBearPoseidon2> {
     }
 }
 
-impl<CC, SC> RiscvCompressVerifierCircuit<CC, SC>
+impl<CC, SC> ConvertVerifierCircuit<CC, SC>
 where
     SC: BabyBearFriConfigVariable<
         CC,
@@ -86,10 +86,10 @@ where
     pub fn build_verifier(
         builder: &mut Builder<CC>,
         machine: &BaseMachine<SC, RiscvChipType<SC::Val>>,
-        input: RiscvRecursionStdinVariable<CC, SC>,
+        input: ConvertStdinVariable<CC, SC>,
     ) {
         // Read input.
-        let RiscvRecursionStdinVariable {
+        let ConvertStdinVariable {
             riscv_vk,
             proofs,
             base_challenger,

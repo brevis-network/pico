@@ -36,9 +36,8 @@ use crate::{
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
     primitives::consts::{
-        ADDR_NUM_BITS, COMPRESS_DEGREE, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE,
+        ADDR_NUM_BITS, COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE,
         MAX_LOG_NUMBER_OF_CHUNKS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
-        RISCV_COMPRESS_DEGREE,
     },
     recursion_v2::air::{
         assert_recursion_public_values_valid, embed_public_values_digest,
@@ -58,11 +57,11 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy)]
-pub struct RecursionEmbedVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(
+pub struct EmbedVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(
     PhantomData<(FC, SC)>,
 );
 
-impl RecursionEmbedVerifierCircuit<RecursionFC, RecursionSC> {
+impl EmbedVerifierCircuit<RecursionFC, RecursionSC> {
     pub fn build(
         machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>,
         input: &RecursionStdin<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>,
@@ -80,7 +79,7 @@ impl RecursionEmbedVerifierCircuit<RecursionFC, RecursionSC> {
     }
 }
 
-impl<CC, SC> RecursionEmbedVerifierCircuit<CC, SC>
+impl<CC, SC> EmbedVerifierCircuit<CC, SC>
 where
     SC: BabyBearFriConfigVariable<CC>,
     CC: CircuitConfig<F = SC::Val, EF = SC::Challenge>,

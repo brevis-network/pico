@@ -20,7 +20,7 @@ use pico_vm::{
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
             riscv_config::StarkConfig as RiscvSC,
         },
-        machine::simple_machine::SimpleMachine,
+        machine::simple::SimpleMachine,
     },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{

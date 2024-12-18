@@ -5,9 +5,7 @@ use pico_vm::{
     chips::chips::toys::lookup_toy::{AddLookedChip, AddLookingChip},
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
-    instances::{
-        configs::riscv_config::StarkConfig as RiscvSC, machine::simple_machine::SimpleMachine,
-    },
+    instances::{configs::riscv_config::StarkConfig as RiscvSC, machine::simple::SimpleMachine},
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},

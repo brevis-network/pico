@@ -32,7 +32,7 @@ use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument, trace};
 
-pub struct RecursionCombineMachine<SC, C>
+pub struct CombineMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
@@ -46,7 +46,7 @@ where
 }
 
 impl<'a, C> MachineBehavior<RecursionSC, C, RecursionStdin<'_, RecursionSC, C>>
-    for RecursionCombineMachine<RecursionSC, C>
+    for CombineMachine<RecursionSC, C>
 where
     C: Send
         + ChipBehavior<
@@ -205,7 +205,7 @@ where
     }
 }
 
-impl<SC, C> RecursionCombineMachine<SC, C>
+impl<SC, C> CombineMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<

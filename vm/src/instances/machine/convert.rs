@@ -8,7 +8,7 @@ use crate::{
     emulator::{emulator_v2::MetaEmulator, record::RecordBehavior},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
-        compiler_v2::riscv_circuit::stdin::RiscvRecursionStdin,
+        compiler_v2::riscv_circuit::stdin::ConvertStdin,
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
     },
     machine::{
@@ -30,7 +30,7 @@ use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument, trace};
 
-pub struct RiscvRecursionMachine<SC, C>
+pub struct ConvertMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
@@ -43,9 +43,8 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<C>
-    MachineBehavior<RecursionSC, C, RiscvRecursionStdin<'_, RiscvSC, RiscvChipType<Val<RiscvSC>>>>
-    for RiscvRecursionMachine<RecursionSC, C>
+impl<C> MachineBehavior<RecursionSC, C, ConvertStdin<'_, RiscvSC, RiscvChipType<Val<RiscvSC>>>>
+    for ConvertMachine<RecursionSC, C>
 where
     C: Send
         + ChipBehavior<
@@ -72,7 +71,7 @@ where
         proving_witness: &ProvingWitness<
             RecursionSC,
             C,
-            RiscvRecursionStdin<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+            ConvertStdin<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
         >,
     ) -> MetaProof<RecursionSC>
     where
@@ -153,7 +152,7 @@ where
     }
 }
 
-impl<SC, C> RiscvRecursionMachine<SC, C>
+impl<SC, C> ConvertMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
