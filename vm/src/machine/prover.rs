@@ -236,7 +236,7 @@ where
         let begin = Instant::now();
 
         let pcs = config.pcs();
-        // todo: optimize in the future
+        // todo optimize: parallel
         let domains_and_traces = chips_and_main
             .clone()
             .into_iter()

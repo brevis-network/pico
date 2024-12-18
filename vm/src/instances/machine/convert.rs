@@ -108,7 +108,7 @@ where
                 }
             }
 
-            // prove records in parallel
+            // todo optimize: check parallelism is proper
             let batch_proofs = batch_records
                 .par_iter()
                 .zip(batch_pks.par_iter())

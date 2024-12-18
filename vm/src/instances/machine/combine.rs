@@ -123,6 +123,7 @@ where
                 }
 
                 // prove records in parallel
+                // todo optimize: check parallelism is proper
                 let batch_proofs = batch_records
                     .par_iter()
                     .zip(batch_pks.par_iter())
@@ -169,6 +170,7 @@ where
 
             recursion_emulator =
                 MetaEmulator::setup_combine(&recursion_witness, self.base_machine());
+
             all_proofs.clear();
             all_vks.clear();
         }

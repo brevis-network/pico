@@ -149,7 +149,7 @@ impl<'a>
         let mut inputs = Vec::new();
         let mut programs = Vec::new();
 
-        // todo: parallel
+        // todo optimize: parallel
         for (i, proof) in proofs.iter().enumerate() {
             let flag_complete = i == total - 1;
             let flag_first_chunk = i == 0;
@@ -203,11 +203,12 @@ where
 
         assert_eq!(vks.len(), proofs.len());
 
+        // todo optimize: parallel
         proofs
             .chunks(combine_size)
             .zip(vks.chunks(combine_size))
             .for_each(|(batch_proofs, batch_vks)| {
-                // todo: optimization
+                // todo: optimization to non-copy
                 let batch_proofs = batch_proofs.to_vec();
                 let batch_vks = batch_vks.to_vec();
 

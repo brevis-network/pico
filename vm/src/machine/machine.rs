@@ -59,6 +59,7 @@ where
         let chips_arc = self.chips();
         let chips = chips_arc.as_ref();
         records.par_iter_mut().for_each(|record| {
+            // todo optimize: parallel
             chips.iter().for_each(|chip| {
                 if chip.is_active(record) {
                     let mut extra = C::Record::default();

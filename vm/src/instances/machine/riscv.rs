@@ -93,6 +93,7 @@ where
             let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
 
+            // todo optimize: do this only in debugging mode
             for record in &mut *batch_records {
                 debug!("riscv record stats: chunk {}", record.chunk_index());
                 let stats = record.stats();
@@ -110,6 +111,7 @@ where
                 })
                 .collect::<Vec<_>>();
 
+            // todo optimize: parallel
             for commitment in commitments {
                 challenger.observe(commitment.commitment);
                 challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
