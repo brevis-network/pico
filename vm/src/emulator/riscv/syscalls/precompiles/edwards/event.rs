@@ -21,7 +21,7 @@ use crate::{
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveAddEvent {
     pub(crate) lookup_id: u128,
-    /// The shard number.
+    /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
     pub clk: u32,
@@ -46,7 +46,7 @@ pub struct EllipticCurveAddEvent {
 pub struct EdDecompressEvent {
     /// The lookup identifier.
     pub lookup_id: u128,
-    /// The shard number.
+    /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
     pub clk: u32,

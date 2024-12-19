@@ -36,7 +36,7 @@ mod tests {
 
     #[test]
     pub fn recursion_mem_chip_generate_main() {
-        let shard = RecursionRecord::<BabyBear> {
+        let chunk = RecursionRecord::<BabyBear> {
             mem_var_events: vec![
                 MemEvent {
                     inner: BabyBear::ONE.into(),
@@ -49,13 +49,13 @@ mod tests {
         };
         let const_chip = MemoryConstChip::default();
         let const_trace: RowMajorMatrix<BabyBear> =
-            const_chip.generate_main(&shard, &mut RecursionRecord::default());
+            const_chip.generate_main(&chunk, &mut RecursionRecord::default());
 
         println!("Memory constant chip: trace = {:?}", const_trace.values);
 
         let var_chip = MemoryVarChip::default();
         let var_trace: RowMajorMatrix<BabyBear> =
-            var_chip.generate_main(&shard, &mut RecursionRecord::default());
+            var_chip.generate_main(&chunk, &mut RecursionRecord::default());
         println!("Memory variable chip: trace = {:?}", var_trace.values);
     }
 

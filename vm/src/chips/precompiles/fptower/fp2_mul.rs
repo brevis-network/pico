@@ -48,6 +48,7 @@ where
 }
 
 #[derive(Default)]
+#[allow(clippy::type_complexity)]
 pub struct Fp2MulChip<F, P> {
     _marker: PhantomData<fn(F, P) -> (F, P)>,
 }

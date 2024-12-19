@@ -171,7 +171,7 @@ mod tests {
     fn test_recursion_fri_fold_chip_trace_generation() {
         let rng = &mut thread_rng();
 
-        let shard = RecursionRecord {
+        let chunk = RecursionRecord {
             fri_fold_events: (0..17)
                 .map(|_| FriFoldEvent {
                     base_single: FriFoldBaseIo {
@@ -194,7 +194,7 @@ mod tests {
             ..Default::default()
         };
         let chip = FriFoldChip::<3, F>::default();
-        let trace: RowMajorMatrix<F> = chip.generate_main(&shard, &mut RecursionRecord::default());
+        let trace: RowMajorMatrix<F> = chip.generate_main(&chunk, &mut RecursionRecord::default());
         println!("{:?}", trace.values);
     }
 

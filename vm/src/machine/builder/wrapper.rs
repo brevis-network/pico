@@ -83,7 +83,5 @@ fn build_outer_circuit(template_input: &EmbedWitnessValues) -> Vec<Constraint> {
     // TODO, add embed proof variable verifier here
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
-    let operations = backend.emit(builder.into_operations());
-
-    operations
+    backend.emit(builder.into_operations())
 }

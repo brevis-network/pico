@@ -47,7 +47,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
             .keccak_permute_events
             .par_chunks(chunk_size)
             .map(|ops: &[KeccakPermuteEvent]| {
-                // The blu map stores shard -> map(byte lookup event -> multiplicity).
+                // The blu map stores chunk -> map(byte lookup event -> multiplicity).
                 let mut blu: Vec<RangeLookupEvent> = Vec::new();
                 let mut rounds = zeroed_f_vec::<F>(NUM_KECCAK_MEM_COLS * NUM_ROUNDS);
                 ops.iter().for_each(|event: &KeccakPermuteEvent| {

@@ -141,7 +141,7 @@ pub struct RecursionPublicValues<T> {
     pub flag_complete: T,
 
     /// Whether the proof represents a collection of chunks which contain at least one execution
-    /// shard, i.e. a shard that contains the `cpu` chip.
+    /// chunk, i.e. a chunk that contains the `cpu` chip.
     pub contains_execution_chunk: T,
 
     /// The digest of all the previous public values elements.

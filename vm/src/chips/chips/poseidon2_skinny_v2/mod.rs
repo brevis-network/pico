@@ -50,7 +50,7 @@ mod tests {
 
         let input_1 = [F::rand(&mut rng); WIDTH];
         let output_1 = permuter.permute(input_1);
-        let shard = RecursionRecord::<BabyBear> {
+        let chunk = RecursionRecord::<BabyBear> {
             poseidon2_events: vec![
                 Poseidon2Event {
                     input: input_0,
@@ -65,7 +65,7 @@ mod tests {
         };
         let chip_9 = Poseidon2SkinnyChip::<9, _>::default();
         let trace: RowMajorMatrix<F> =
-            chip_9.generate_main(&shard, &mut RecursionRecord::default());
+            chip_9.generate_main(&chunk, &mut RecursionRecord::default());
         println!("Poseidon2 skinny chip: trace = {:?}", trace.values);
     }
 

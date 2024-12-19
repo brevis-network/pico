@@ -41,7 +41,7 @@ pub struct EmbedWitnessValues {
     pub is_complete: bool,
 }
 pub struct EmbedWitnessVariable {
-    /// The shard proofs to verify.
+    /// The chunk proofs to verify.
     pub vks_and_proofs: Vec<(
         BaseVerifyingKeyVariable<OuterConfig, BbBn254Poseidon2>,
         BaseProofVariable<OuterConfig, BbBn254Poseidon2>,

@@ -154,6 +154,7 @@ where
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub struct IncrementalLookupDebugger<'a, SC: StarkGenericConfig> {
     messages: Vec<(DebuggerMessageLevel, String)>,
     types: Option<&'a [LookupType]>,
@@ -229,8 +230,8 @@ impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
         SC::Val: PrimeField64,
     {
         // this stores (total balance, chip => local balance) per lookup key
-        let chips = chips.into_iter();
-        let records = records.into_iter();
+        let chips = chips.iter();
+        let records = records.iter();
 
         for chip in chips {
             let mut chip_events = 0;

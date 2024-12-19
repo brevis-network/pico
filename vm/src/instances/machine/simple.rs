@@ -67,7 +67,7 @@ where
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
         #[cfg(feature = "debug")]
-        constraint_debugger.debug_incremental(&self.chips(), &witness.records());
+        constraint_debugger.debug_incremental(&self.chips(), witness.records());
 
         #[cfg(feature = "debug")]
         constraint_debugger.print_results();

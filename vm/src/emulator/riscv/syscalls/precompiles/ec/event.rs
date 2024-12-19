@@ -24,8 +24,8 @@ use typenum::Unsigned;
 pub struct EllipticCurveDoubleEvent {
     /// The lookup identifer.
     pub lookup_id: u128,
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The clock cycle.
     pub clk: u32,
     /// The pointer to the point.
@@ -43,8 +43,8 @@ pub struct EllipticCurveDoubleEvent {
 pub struct EllipticCurveDecompressEvent {
     /// The lookup identifer.
     pub lookup_id: u128,
-    /// The shard number.
-    pub shard: u32,
+    /// The chunk number.
+    pub chunk: u32,
     /// The clock cycle.
     pub clk: u32,
     /// The pointer to the point.
@@ -90,7 +90,7 @@ pub fn create_ec_double_event<E: EllipticCurve>(
 
     EllipticCurveDoubleEvent {
         lookup_id: rt.syscall_lookup_id,
-        shard: rt.current_chunk(),
+        chunk: rt.current_chunk(),
         clk: start_clk,
         p_ptr,
         p,
@@ -137,7 +137,7 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
 
     EllipticCurveDecompressEvent {
         lookup_id: rt.syscall_lookup_id,
-        shard: rt.current_chunk(),
+        chunk: rt.current_chunk(),
         clk: start_clk,
         ptr: slice_ptr,
         sign_bit: sign_bit != 0,

@@ -19,7 +19,7 @@ use p3_field::{Field, FieldAlgebra, PrimeField32};
 #[derive(Clone, Default, Debug)]
 pub struct RecursionRecord<F> {
     pub program: Arc<RecursionProgram<F>>,
-    /// The index of the shard.
+    /// The index of the chunk.
     pub index: u32,
 
     pub base_alu_events: Vec<BaseAluEvent<F>>,

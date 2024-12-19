@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct ShaExtendEvent {
     /// The lookup identifier.
     pub lookup_id: u128,
-    /// The shard number.
+    /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
     pub clk: u32,
@@ -33,7 +33,7 @@ pub struct ShaExtendEvent {
 pub struct ShaCompressEvent {
     /// The lookup identifier.
     pub lookup_id: u128,
-    /// The shard number.
+    /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
     pub clk: u32,

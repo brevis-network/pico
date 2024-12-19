@@ -93,7 +93,7 @@ impl WeierstrassParameters for Bn254Parameters {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chips::gadgets::curves::utils::biguint_from_limbs;
+    use crate::chips::gadgets::utils::conversions::biguint_from_limbs;
 
     #[test]
     fn test_weierstrass_biguint_scalar_mul() {

@@ -224,7 +224,7 @@ pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Sy
 /// Syscall Event.
 ///
 /// This object encapsulated the information needed to prove a syscall invocation from the CPU table.
-/// This includes its shard, clk, syscall id, arguments, other relevant information.
+/// This includes its chunk, clk, syscall id, arguments, other relevant information.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SyscallEvent {
     /// The chunk number.

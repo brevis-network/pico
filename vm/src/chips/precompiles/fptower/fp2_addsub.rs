@@ -48,6 +48,7 @@ where
 }
 
 #[derive(Default)]
+#[allow(clippy::type_complexity)]
 pub struct Fp2AddSubChip<F, P> {
     _marker: PhantomData<fn(F, P) -> (F, P)>,
 }

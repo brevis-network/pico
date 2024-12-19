@@ -69,7 +69,7 @@ pub struct EmulationRecord {
     pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the memory finalize events.
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
-    /// A trace of all the shard's local memory events.
+    /// A trace of all the chunk's local memory events.
     pub cpu_local_memory_access: Vec<MemoryLocalEvent>,
     /// A trace of the keccak256 permute events.
     pub keccak_permute_events: Vec<KeccakPermuteEvent>,

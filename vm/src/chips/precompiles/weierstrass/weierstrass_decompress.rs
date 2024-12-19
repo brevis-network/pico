@@ -59,7 +59,7 @@ pub const fn num_weierstrass_decompress_cols<P: FieldParameters + NumWords>() ->
 #[repr(C)]
 pub struct WeierstrassDecompressCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
-    pub shard: T,
+    pub chunk: T,
     pub clk: T,
     pub nonce: T,
     pub ptr: T,
@@ -101,6 +101,7 @@ pub enum SignChoiceRule {
     Lexicographic,
 }
 
+#[allow(clippy::type_complexity)]
 pub struct WeierstrassDecompressChip<F, E> {
     sign_rule: SignChoiceRule,
     _marker: PhantomData<fn(F, E) -> (F, E)>,
@@ -145,27 +146,27 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecom
     fn populate_field_ops(
         blu_events: &mut impl ByteRecordBehavior,
         rlu_events: &mut impl RangeRecordBehavior,
-        shard: u32,
+        chunk: u32,
         cols: &mut WeierstrassDecompressCols<F, E::BaseField>,
         x: BigUint,
     ) {
         // Y = sqrt(x^3 + b)
         cols.range_x
-            .populate(blu_events, shard, &x, &E::BaseField::modulus());
+            .populate(blu_events, chunk, &x, &E::BaseField::modulus());
         let x_2 = cols.x_2.populate(
             rlu_events,
-            shard,
+            chunk,
             &x.clone(),
             &x.clone(),
             FieldOperation::Mul,
         );
         let x_3 = cols
             .x_3
-            .populate(rlu_events, shard, &x_2, &x, FieldOperation::Mul);
+            .populate(rlu_events, chunk, &x_2, &x, FieldOperation::Mul);
         let b = E::b_int();
         let x_3_plus_b = cols
             .x_3_plus_b
-            .populate(rlu_events, shard, &x_3, &b, FieldOperation::Add);
+            .populate(rlu_events, chunk, &x_3, &b, FieldOperation::Add);
 
         let sqrt_fn = match E::CURVE_TYPE {
             CurveType::Bls12381 => bls12381_sqrt,
@@ -174,11 +175,11 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecom
         };
         let y = cols
             .y
-            .populate(blu_events, rlu_events, shard, &x_3_plus_b, sqrt_fn);
+            .populate(blu_events, rlu_events, chunk, &x_3_plus_b, sqrt_fn);
 
         let zero = BigUint::zero();
         cols.neg_y
-            .populate(rlu_events, shard, &zero, &y, FieldOperation::Sub);
+            .populate(rlu_events, chunk, &zero, &y, FieldOperation::Sub);
     }
 }
 
@@ -227,7 +228,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 row[0..weierstrass_width].borrow_mut();
 
             cols.is_real = F::from_bool(true);
-            cols.shard = F::from_canonical_u32(event.shard);
+            cols.chunk = F::from_canonical_u32(event.chunk);
             cols.clk = F::from_canonical_u32(event.clk);
             cols.ptr = F::from_canonical_u32(event.ptr);
             cols.sign_bit = F::from_bool(event.sign_bit);
@@ -236,7 +237,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
             Self::populate_field_ops(
                 &mut new_byte_lookup_events,
                 &mut new_range_lookup_events,
-                event.shard,
+                event.chunk,
                 cols,
                 x,
             );
@@ -264,14 +265,14 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 if is_y_eq_sqrt_y_result {
                     choice_cols.neg_y_range_check.populate(
                         &mut new_byte_lookup_events,
-                        event.shard,
+                        event.chunk,
                         &neg_y,
                         &modulus,
                     );
                 } else {
                     choice_cols.neg_y_range_check.populate(
                         &mut new_byte_lookup_events,
-                        event.shard,
+                        event.chunk,
                         &decompressed_y,
                         &modulus,
                     );
@@ -282,7 +283,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                     choice_cols.when_neg_y_res_is_lt = F::from_bool(is_y_eq_sqrt_y_result);
                     choice_cols.comparison_lt_cols.populate(
                         &mut new_byte_lookup_events,
-                        event.shard,
+                        event.chunk,
                         &neg_y,
                         &decompressed_y,
                     );
@@ -292,7 +293,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                     choice_cols.when_neg_y_res_is_lt = F::from_bool(!is_y_eq_sqrt_y_result);
                     choice_cols.comparison_lt_cols.populate(
                         &mut new_byte_lookup_events,
-                        event.shard,
+                        event.chunk,
                         &decompressed_y,
                         &neg_y,
                     );
@@ -333,10 +334,10 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
         trace
     }
 
-    fn is_active(&self, shard: &Self::Record) -> bool {
+    fn is_active(&self, chunk: &Self::Record) -> bool {
         match E::CURVE_TYPE {
-            CurveType::Bls12381 => !shard.bls12381_decompress_events.is_empty(),
-            CurveType::Secp256k1 => !shard.k256_decompress_events.is_empty(),
+            CurveType::Bls12381 => !chunk.bls12381_decompress_events.is_empty(),
+            CurveType::Secp256k1 => !chunk.k256_decompress_events.is_empty(),
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
         }
     }
@@ -397,7 +398,7 @@ where
             &x,
             &x,
             FieldOperation::Mul,
-            local.shard,
+            local.chunk,
             local.is_real,
         );
         local.x_3.eval(
@@ -405,7 +406,7 @@ where
             &local.x_2.result,
             &x,
             FieldOperation::Mul,
-            local.shard,
+            local.chunk,
             local.is_real,
         );
         let b = E::b_int();
@@ -415,7 +416,7 @@ where
             &local.x_3.result,
             &b_const,
             FieldOperation::Add,
-            local.shard,
+            local.chunk,
             local.is_real,
         );
 
@@ -424,7 +425,7 @@ where
             &[CB::Expr::ZERO].iter(),
             &local.y.multiplication.result,
             FieldOperation::Sub,
-            local.shard,
+            local.chunk,
             local.is_real,
         );
 
@@ -432,7 +433,7 @@ where
             builder,
             &local.x_3_plus_b.result,
             local.y.lsb,
-            local.shard,
+            local.chunk,
             local.is_real,
         );
 
@@ -555,7 +556,7 @@ where
 
         for i in 0..num_words_field_element {
             builder.eval_memory_access(
-                local.shard,
+                local.chunk,
                 local.clk,
                 local.ptr.into() + CB::F::from_canonical_u32((i as u32) * 4 + num_limbs as u32),
                 &local.x_access[i],
@@ -564,7 +565,7 @@ where
         }
         for i in 0..num_words_field_element {
             builder.eval_memory_access(
-                local.shard,
+                local.chunk,
                 local.clk,
                 local.ptr.into() + CB::F::from_canonical_u32((i as u32) * 4),
                 &local.y_access[i],
@@ -583,7 +584,7 @@ where
         };
 
         builder.looked_syscall(
-            local.shard,
+            local.chunk,
             local.clk,
             local.nonce,
             syscall_id,

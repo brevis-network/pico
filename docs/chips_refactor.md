@@ -2,9 +2,9 @@
 
 ## Update
 
-- Delete `channel` and `shard` in all lookups.
+- Delete `channel` and `chunk` in all lookups.
 
-- Add `InteractionScope` to replace `shard` in lookup, it has `Local` and `Global` types.
+- Add `InteractionScope` to replace `chunk` in lookup, it has `Local` and `Global` types.
 
 - Add `Shape`, it's used to collect chip information (padded to fixed).
 

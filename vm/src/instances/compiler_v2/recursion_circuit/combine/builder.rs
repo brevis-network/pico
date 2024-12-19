@@ -447,7 +447,7 @@ where
         // Assert that `next_pc` is equal to zero (so program execution has completed)
         builder.assert_felt_eq(flag_complete * current_pc, zero);
 
-        // Assert that start shard is equal to 1.
+        // Assert that start chunk is equal to 1.
         builder.assert_felt_eq(
             flag_complete * (compress_public_values.start_chunk - one),
             zero,

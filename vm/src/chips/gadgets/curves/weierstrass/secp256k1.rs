@@ -115,7 +115,7 @@ pub fn secp256k1_sqrt(n: &BigUint) -> BigUint {
 mod tests {
 
     use super::*;
-    use crate::chips::gadgets::curves::utils::biguint_from_limbs;
+    use crate::chips::gadgets::utils::conversions::biguint_from_limbs;
     use num::bigint::RandBigInt;
     use rand::thread_rng;
 

@@ -402,7 +402,7 @@ where
         } = local_data;
 
         // Merge the chip ordering and traces from the global and local data.
-        let (all_chips_ordering, all_chip_scopes, all_shard_data) = self.merge_shard_traces(
+        let (all_chips_ordering, all_chip_scopes, all_chunk_data) = self.merge_chunk_traces(
             &global_traces,
             &global_chip_ordering,
             &local_traces,
@@ -412,11 +412,11 @@ where
         // Get the ordered chip, will be used in all following operations on chips
         // No chips should be used from now on!
         let ordered_chips = order_chips::<SC, C>(chips, &all_chips_ordering).collect::<Vec<_>>();
-        assert_eq!(ordered_chips.len(), all_shard_data.len());
+        assert_eq!(ordered_chips.len(), all_chunk_data.len());
 
-        let main_degrees = all_shard_data
+        let main_degrees = all_chunk_data
             .iter()
-            .map(|shard_data| shard_data.trace.height())
+            .map(|chunk_data| chunk_data.trace.height())
             .collect::<Vec<_>>();
 
         let log_main_degrees = main_degrees
@@ -451,7 +451,7 @@ where
             .collect::<Vec<_>>();
 
         // Generate the permutation traces.
-        let all_traces = all_shard_data.iter().map(|data| data.trace).collect_vec();
+        let all_traces = all_chunk_data.iter().map(|data| data.trace).collect_vec();
         let (permutation_traces, cumulative_sums) = self.generate_permutation(
             &ordered_chips,
             pk,
@@ -551,7 +551,7 @@ where
                             let main_on_quotient_domain = pcs
                                 .get_evaluations_on_domain(
                                     main_data,
-                                    all_shard_data[i].main_data_idx,
+                                    all_chunk_data[i].main_data_idx,
                                     *quotient_domain,
                                 )
                                 .to_row_major_matrix();
@@ -821,7 +821,7 @@ where
 
     /// Merge the global and local chips' sorted traces.
     #[allow(clippy::type_complexity)]
-    fn merge_shard_traces<'a, 'b>(
+    fn merge_chunk_traces<'a, 'b>(
         &'a self,
         global_traces: &'b [RowMajorMatrix<SC::Val>],
         global_chip_ordering: &'b HashMap<String, usize>,

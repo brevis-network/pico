@@ -144,9 +144,9 @@ where
             self.complement_record(batch_records);
 
             #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
+            constraint_debugger.debug_incremental(&self.chips(), batch_records);
             #[cfg(feature = "debug-lookups")]
-            lookup_debugger.debug_incremental(&self.chips(), &batch_records);
+            lookup_debugger.debug_incremental(&self.chips(), batch_records);
 
             // todo: parallel
             let batch_proofs = batch_records
@@ -321,10 +321,10 @@ where
 //   `commited_value_digest_prev`.
 // - If `deferred_proofs_digest_prev` is not zero, then `deferred_proofs_digest` should equal
 //   `deferred_proofs_digest_prev`.
-// - If it's not a shard with "CPU", then `commited_value_digest` should not change from the
-//   previous shard.
-// - If it's not a shard with "CPU", then `deferred_proofs_digest` should not change from the
-//   previous shard.
+// - If it's not a chunk with "CPU", then `commited_value_digest` should not change from the
+//   previous chunk.
+// - If it's not a chunk with "CPU", then `deferred_proofs_digest` should not change from the
+//   previous chunk.
 //
 // This is replaced with the following impl.
 // 1. prev is initialized as 0
