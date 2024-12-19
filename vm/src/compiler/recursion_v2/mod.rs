@@ -1,4 +1,5 @@
 pub mod circuit;
+pub mod constraints;
 pub mod instruction;
 pub mod ir;
 pub mod program;
