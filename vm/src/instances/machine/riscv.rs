@@ -1,7 +1,3 @@
-#[cfg(feature = "debug")]
-use crate::machine::debug::constraints::IncrementalConstraintDebugger;
-#[cfg(feature = "debug-lookups")]
-use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::{riscv::program::Program, word::Word},
     configs::{
@@ -28,7 +24,7 @@ use anyhow::Result;
 use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::CanObserve;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32, PrimeField64};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, array, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument};
@@ -54,6 +50,7 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
+    SC::Val: PrimeField64,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -131,22 +128,15 @@ where
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
         let mut all_proofs = vec![];
 
-        // used for collect all records for debugging
-        #[cfg(feature = "debug")]
-        let mut debug_challenger = self.config().challenger();
-        #[cfg(feature = "debug")]
-        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
-        #[cfg(feature = "debug-lookups")]
-        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
+        #[cfg(any(feature = "debug", feature = "debug-lookups"))]
+        let mut all_records = vec![];
 
         loop {
             let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
 
-            #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(&self.chips(), batch_records);
-            #[cfg(feature = "debug-lookups")]
-            lookup_debugger.debug_incremental(&self.chips(), batch_records);
+            #[cfg(any(feature = "debug", feature = "debug-lookups"))]
+            all_records.extend(batch_records.to_vec());
 
             // todo: parallel
             let batch_proofs = batch_records
@@ -158,13 +148,15 @@ where
                         .unwrap();
                     let global_commitment = self.base_machine.commit(record, LookupScope::Global);
 
-                    self.base_machine.prove_plain(
+                    let proof = self.base_machine.prove_plain(
                         witness.pk(),
                         &mut challenger.clone(),
                         record.chunk_index(),
                         regional_commitment,
                         global_commitment,
-                    )
+                    );
+
+                    proof
                 })
                 .collect::<Vec<_>>();
 
@@ -180,9 +172,14 @@ where
         let vks = vec![witness.vk.clone().unwrap()];
 
         #[cfg(feature = "debug")]
-        constraint_debugger.print_results();
+        crate::machine::debug::debug_all_constraints(
+            pk,
+            &mut self.config().challenger(),
+            &self.chips(),
+            &all_records,
+        );
         #[cfg(feature = "debug-lookups")]
-        lookup_debugger.print_results();
+        crate::machine::debug::debug_all_lookups(pk, &self.chips(), &all_records, None);
 
         MetaProof::new(all_proofs.into(), vks.into())
     }

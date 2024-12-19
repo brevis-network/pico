@@ -1,4 +1,7 @@
-use super::{folder::DebugConstraintFolder, lookup::LookupScope};
+use super::{
+    folder::DebugConstraintFolder,
+    lookup::{LookupScope, LookupType},
+};
 use crate::{
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
@@ -17,7 +20,7 @@ use anyhow::Result;
 use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, FieldAlgebra, PrimeField64};
 use p3_maybe_rayon::prelude::*;
 use std::{array, time::Instant};
 use tracing::{debug, info};
@@ -227,6 +230,7 @@ where
     ) -> Vec<BaseProof<SC>>
     where
         C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
+        SC::Val: PrimeField64,
     {
         let mut challenger = self.config().challenger();
 
@@ -272,7 +276,7 @@ where
             }
         });
 
-        global_data
+        let proofs = global_data
             .into_iter()
             .zip_eq(records.iter())
             .enumerate()
@@ -289,7 +293,19 @@ where
                     records[i].chunk_index(),
                 )
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+
+        #[cfg(feature = "debug")]
+        crate::machine::debug::debug_all_constraints(
+            pk,
+            &mut self.config().challenger(),
+            &self.chips(),
+            records,
+        );
+        #[cfg(feature = "debug-lookups")]
+        crate::machine::debug::debug_all_lookups(pk, &self.chips(), records, None);
+
+        proofs
     }
 
     /// Prove assuming that challenger has already observed pk & main commitments and pv's

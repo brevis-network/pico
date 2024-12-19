@@ -5,24 +5,24 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseProvingKey,
-        lookup::LookupType,
+        lookup::{LookupScope, LookupType, VirtualPairLookup},
     },
 };
-use alloc::collections::BTreeMap;
-use core::{fmt::Display, iter::repeat};
+use itertools::multizip;
+use log::{debug, error, info};
 use p3_air::Air;
-use p3_field::{Field, PrimeField64};
+use p3_field::{Field, FieldAlgebra, PrimeField64};
 use p3_matrix::Matrix;
-use tracing::error;
+use std::{collections::BTreeMap, fmt::Display, iter::repeat};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LookupData {
+pub struct LookupData<F> {
     pub chip_name: String,
     pub kind: LookupType,
     pub row: usize,
     pub number: usize,
     pub is_looking: bool,
-    pub mult: isize,
+    pub mult: F,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -49,7 +49,7 @@ impl<F: Display> Display for DebugLookupKey<F> {
 #[derive(Clone, Debug, Default)]
 pub struct DebugLookup<F> {
     // key => (data, sum(data.mult))
-    pub lookup_data: BTreeMap<DebugLookupKey<F>, (Vec<LookupData>, isize)>,
+    pub lookup_data: BTreeMap<DebugLookupKey<F>, (Vec<LookupData<F>>, F)>,
 }
 
 impl<F> DebugLookup<F>
@@ -57,30 +57,39 @@ where
     F: Field + PrimeField64,
 {
     pub fn debug_lookups<SC, C>(
+        pk: &BaseProvingKey<SC>,
         chip: &MetaChip<F, C>,
-        pkey: &BaseProvingKey<SC>,
-        record: &C::Record,
+        chunk: &C::Record,
+        scope: LookupScope,
         types: Option<&[LookupType]>,
     ) -> Self
     where
         SC: StarkGenericConfig<Val = F>,
         C: ChipBehavior<F>,
     {
-        let trace = chip.generate_main(record, &mut C::Record::default());
+        let trace = chip.generate_main(chunk, &mut C::Record::default());
         let height = trace.height();
-        let preprocessed_trace = pkey
+        let preprocessed_trace = pk
             .preprocessed_chip_ordering
             .get(&chip.name())
-            .map(|&n| &pkey.preprocessed_trace[n]);
-        let looking = chip.looking.iter().zip(repeat(true));
-        let looked = chip.looked.iter().zip(repeat(false));
-        let filter = |x| types.map_or(true, |v| v.contains(x));
+            .map(|&n| &pk.preprocessed_trace[n]);
 
+        let lookup_filter = |l: &VirtualPairLookup<F>| {
+            l.scope == scope && types.map_or(true, |types| types.contains(&l.kind))
+        };
+        let looking = chip
+            .looking
+            .iter()
+            .filter(|l| lookup_filter(l))
+            .zip(repeat(true));
+        let looked = chip
+            .looked
+            .iter()
+            .filter(|l| lookup_filter(l))
+            .zip(repeat(false));
         // this iterator has elements of kind (num, (lookup, is_looking))
-        let lookups = looking
-            .chain(looked)
-            .enumerate()
-            .filter(|x| filter(&x.1 .0.kind));
+        let lookups = looking.chain(looked).enumerate();
+
         let mut result = Self::default();
         let empty = [];
 
@@ -97,13 +106,6 @@ where
 
             for (num, (lookup, is_looking)) in lookups.clone() {
                 let mult: F = lookup.mult.apply(preprocessed_row, &main_row);
-
-                // convert the upper half of F's range to negative values
-                let mult = mult.as_canonical_u64() as isize;
-
-                if mult == 0 {
-                    continue;
-                }
 
                 // If we use Vec<F>, this allocates an [F; len]
                 // Conversion to Rc<[F]> reallocates [strong | weak | [F; len]] and copies the data
@@ -131,13 +133,6 @@ where
                     mult,
                 };
 
-                if mult > (F::ORDER_U64 as isize) >> 1 {
-                    error!(
-                        "{} encountered large multiplicity for {}: {}",
-                        &value.chip_name, &key, mult
-                    );
-                }
-
                 let entry = result.lookup_data.entry(key).or_default();
 
                 entry.0.push(value);
@@ -156,88 +151,104 @@ where
 
 #[allow(clippy::type_complexity)]
 pub struct IncrementalLookupDebugger<'a, SC: StarkGenericConfig> {
-    messages: Vec<(DebuggerMessageLevel, String)>,
-    types: Option<&'a [LookupType]>,
     pk: &'a BaseProvingKey<SC>,
-    lookup_map: BTreeMap<DebugLookupKey<SC::Val>, (isize, BTreeMap<String, isize>)>,
-    total: isize,
+    scope: LookupScope,
+    types: Option<&'a [LookupType]>,
+    lookups: BTreeMap<DebugLookupKey<SC::Val>, (SC::Val, BTreeMap<String, SC::Val>)>,
+    messages: Vec<(DebuggerMessageLevel, String)>,
+    total: SC::Val,
 }
 
 impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
-    pub fn new(pk: &'a BaseProvingKey<SC>, types: Option<&'a [LookupType]>) -> Self {
-        let messages = vec![(DebuggerMessageLevel::Info, "debugging all lookups".into())];
+    pub fn new(
+        pk: &'a BaseProvingKey<SC>,
+        scope: LookupScope,
+        types: Option<&'a [LookupType]>,
+    ) -> Self {
+        let lookups = BTreeMap::new();
+        let messages = vec![];
+        let total = SC::Val::ZERO;
+
         Self {
-            messages,
-            types,
             pk,
-            lookup_map: BTreeMap::new(),
-            total: 0,
+            scope,
+            types,
+            lookups,
+            messages,
+            total,
         }
     }
 
-    pub fn print_results(self) -> bool {
-        let mut result = false;
+    pub fn print_results(self) -> bool
+    where
+        SC::Val: PrimeField64,
+    {
+        let mut success = true;
+
+        info!("\n******** {} Lookups Debugging START ********", self.scope);
+
         for message in self.messages {
             match message {
                 (DebuggerMessageLevel::Info, msg) => log::info!("{}", msg),
                 (DebuggerMessageLevel::Debug, msg) => log::debug!("{}", msg),
                 (DebuggerMessageLevel::Error, msg) => {
                     eprintln!("{}", msg);
-                    result = true;
+                    success = false;
                 }
             }
         }
 
-        tracing::info_span!("debug lookups").in_scope(|| {
-            let mut balanced = true;
-            tracing::info!("Checking for imbalance");
-            // checks the imbalance per lookup key
-            for (k, (v, cv)) in self.lookup_map {
-                if v != 0 {
-                    tracing::info!("lookup imbalance of {} for {}", v, k);
-                    balanced = false;
+        info!("Checking for imbalance");
+        // checks the imbalance per lookup key
+        for (k, (v, cv)) in self.lookups {
+            if !v.is_zero() {
+                info!("lookup imbalance of {} for {}", field_to_int(v), k);
+                success = false;
 
-                    // print the detailed per-chip balancing data
-                    for (c, cv) in cv {
-                        tracing::info!("  {} balance: {}", c, cv);
-                    }
+                // print the detailed per-chip balancing data
+                for (c, cv) in cv {
+                    info!("  {} balance: {}", c, field_to_int(cv));
                 }
             }
+        }
 
-            // log overall results
-            if balanced {
-                tracing::info!("lookups are balanced");
-            } else {
-                tracing::info!("positive values mean more looking than looked");
-                tracing::info!("negative values mean more looked than looking");
-                tracing::info!("total imbalance: {}", self.total);
-                if self.total == 0 {
-                    tracing::info!(
-                        "total sends/receives match, but some lookups may have the wrong key"
-                    );
-                }
+        if success {
+            info!("Lookups are balanced");
+        } else {
+            info!("Positive values mean more looking than looked");
+            info!("Negative values mean more looked than looking");
+            error!("Total imbalance: {}", field_to_int(self.total));
+            if self.total.is_zero() {
+                error!("Total lookings/lookeds match, but some lookups may have the wrong key");
             }
+        }
 
-            result
-        })
+        info!("\n******** {} Lookups Debugging END ********", self.scope);
+
+        success
     }
 
-    pub fn debug_incremental<C>(&mut self, chips: &[MetaChip<SC::Val, C>], records: &[C::Record])
+    pub fn debug_incremental<C>(&mut self, chips: &[MetaChip<SC::Val, C>], chunks: &[C::Record])
     where
         C: ChipBehavior<SC::Val>
             + for<'b> Air<ProverConstraintFolder<'b, SC>>
             + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
         SC::Val: PrimeField64,
     {
-        // this stores (total balance, chip => local balance) per lookup key
-        let chips = chips.iter();
-        let records = records.iter();
+        if self.scope == LookupScope::Regional {
+            assert_eq!(
+                chunks.len(),
+                1,
+                "Regional lookups could only be debugged in one chunk",
+            );
+        }
 
+        // this stores (total balance, chip => local balance) per lookup key
         for chip in chips {
             let mut chip_events = 0;
-            for record in records.clone() {
-                let data =
-                    DebugLookup::debug_lookups(chip, self.pk, record, self.types).lookup_data;
+            for chunk in chunks {
+                let data = DebugLookup::debug_lookups(self.pk, chip, chunk, self.scope, self.types)
+                    .lookup_data;
                 chip_events += data.len();
 
                 // this loop consumes counts and thus the lookup key which allows us to use Box
@@ -245,7 +256,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
                 for (k, (_, v)) in data {
                     self.total += v;
 
-                    let entry = self.lookup_map.entry(k).or_default();
+                    let entry = self.lookups.entry(k).or_default();
 
                     // total balance
                     entry.0 += v;
@@ -259,5 +270,19 @@ impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
                 format!("chip {} experienced {} events", chip.name(), chip_events),
             ));
         }
+    }
+}
+
+/// Display field elements as signed integers on the range `[-modulus/2, modulus/2]`.
+///
+/// This presentation is useful when debugging lookups as it makes it clear which lookups
+/// are `send` and which are `receive`.
+fn field_to_int<F: PrimeField64>(x: F) -> i32 {
+    let modulus = F::ORDER_U64;
+    let val = x.as_canonical_u64();
+    if val > modulus / 2 {
+        val as i32 - modulus as i32
+    } else {
+        val as i32
     }
 }

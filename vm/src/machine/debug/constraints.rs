@@ -9,6 +9,7 @@ use crate::{
         utils::chunk_active_chips,
     },
 };
+use log::{debug, error, info};
 use p3_air::Air;
 use p3_challenger::FieldChallenger;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
@@ -18,60 +19,70 @@ use p3_matrix::{
     Matrix,
 };
 use p3_maybe_rayon::prelude::*;
+use std::array;
 
 pub struct IncrementalConstraintDebugger<'a, SC: StarkGenericConfig> {
-    challenges: [SC::Challenge; 2],
-    messages: Vec<(DebuggerMessageLevel, String)>,
-    sum: SC::Challenge,
     pk: &'a BaseProvingKey<SC>,
+    global_sum: SC::Challenge,
+    // 2 global and 2 regional challenges
+    challenges: [SC::Challenge; 4],
+    messages: Vec<(DebuggerMessageLevel, String)>,
 }
 
 impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
     pub fn new(pk: &'a BaseProvingKey<SC>, challenger: &mut SC::Challenger) -> Self {
+        let global_sum = SC::Challenge::ZERO;
+
+        // Obtain the 2 global and 2 regional challenges.
+        let challenges = array::from_fn(|_| challenger.sample_ext_element());
+
+        let messages = vec![];
+
         Self {
-            challenges: [
-                challenger.sample_ext_element(),
-                challenger.sample_ext_element(),
-            ],
-            messages: Vec::new(),
-            sum: SC::Challenge::ZERO,
             pk,
+            global_sum,
+            challenges,
+            messages,
         }
     }
 
     pub fn print_results(self) -> bool {
-        let mut result = false;
+        let mut success = true;
+
+        info!("\n******** Constraints Debugging START ********");
+
         for message in self.messages {
             match message {
                 (DebuggerMessageLevel::Info, msg) => log::info!("{}", msg),
                 (DebuggerMessageLevel::Debug, msg) => log::debug!("{}", msg),
                 (DebuggerMessageLevel::Error, msg) => {
                     eprintln!("{}", msg);
-                    result = true;
+                    success = false;
                 }
             }
         }
 
-        tracing::info_span!("debug constraints").in_scope(|| {
-            tracing::info!("Debug constraints verified successfully");
-            tracing::info!("Cumulative sum in debug constraints : {}", self.sum);
-            // If the cumulative sum is not zero, debug the lookups.
-            if !self.sum.is_zero() {
-                tracing::info!(
-                    "Cumulative sum is not zero.\
-                    Please set feature flag `debug-lookups` to debug the lookups."
-                );
-                result = true;
-            }
-        });
-        result
+        if !self.global_sum.is_zero() {
+            error!("Cumulative global sum is not zero: {}", self.global_sum);
+            success = false;
+        }
+
+        if success {
+            info!("Constraints success!");
+        } else {
+            error!("Constraints failed!");
+        }
+
+        info!("\n******** Constraints Debugging END ********");
+
+        success
     }
 
-    pub fn debug_incremental<C>(&mut self, chips: &[MetaChip<SC::Val, C>], records: &[C::Record])
+    pub fn debug_incremental<C>(&mut self, chips: &[MetaChip<SC::Val, C>], chunks: &[C::Record])
     where
         C: ChipBehavior<SC::Val> + for<'b> Air<DebugConstraintFolder<'b, SC::Val, SC::Challenge>>,
     {
-        for chunk in records.iter() {
+        for chunk in chunks.iter() {
             // Filter the chips based on what is used.
             let chips = chunk_active_chips::<SC, C>(chips, chunk).collect::<Vec<_>>();
 
@@ -94,25 +105,36 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
             // Generate the permutation traces.
             let mut permutation_traces = Vec::with_capacity(chips.len());
             let mut cumulative_sums = Vec::with_capacity(chips.len());
-            tracing::debug_span!("generate permutation traces").in_scope(|| {
-                chips
-                    .par_iter()
-                    .zip(traces.par_iter_mut())
-                    .map(|(chip, (main_trace, preprocessed_trace))| {
-                        let permutation_trace = chip
-                            .generate_permutation(*preprocessed_trace, main_trace, &self.challenges)
-                            .0;
-                        let cumulative_sum = permutation_trace
-                            .row_slice(main_trace.height() - 1)
-                            .last()
-                            .copied()
-                            .unwrap();
-                        (permutation_trace, cumulative_sum)
-                    })
-                    .unzip_into_vecs(&mut permutation_traces, &mut cumulative_sums);
-            });
+            chips
+                .par_iter()
+                .zip(traces.par_iter_mut())
+                .map(|(chip, (main_trace, preprocessed_trace))| {
+                    let (trace, global_sum, regional_sum) = chip.generate_permutation(
+                        *preprocessed_trace,
+                        main_trace,
+                        &self.challenges,
+                    );
+                    (trace, [global_sum, regional_sum])
+                })
+                .unzip_into_vecs(&mut permutation_traces, &mut cumulative_sums);
 
-            self.sum += cumulative_sums.iter().copied().sum::<SC::Challenge>();
+            self.global_sum += cumulative_sums
+                .iter()
+                .map(|sum| sum[0])
+                .sum::<SC::Challenge>();
+
+            let regional_sum = cumulative_sums
+                .iter()
+                .map(|sum| sum[1])
+                .sum::<SC::Challenge>();
+
+            if !regional_sum.is_zero() {
+                info!(
+                    "Regional cumulative sum is not zero: chunk_index = {}.\n\t
+                    Please enable `debug-lookups` feature to debug the lookups.",
+                    chunk.chunk_index(),
+                );
+            }
 
             // Compute some statistics.
             for i in 0..chips.len() {
@@ -121,7 +143,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 let permutation_width = permutation_traces[i].width()
                     * <SC::Challenge as FieldExtensionAlgebra<SC::Val>>::D;
                 let total_width = main_width + preprocessed_width + permutation_width;
-                self.messages.push((DebuggerMessageLevel::Debug, format!(
+                debug!(
                     "{:<11} | Main Cols = {:<5} | Preprocessed Cols = {:<5} | Permutation Cols = {:<5} | Rows = {:<10} | Cells = {:<10}",
                     chips[i].name(),
                     main_width,
@@ -129,30 +151,33 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                     permutation_width,
                     traces[i].0.height(),
                     total_width * traces[i].0.height(),
-                )));
+                );
             }
 
-            tracing::info_span!(
-                "debug constraints",
-                chunk = chunk.chunk_index(),
-                unconstrained = chunk.unconstrained()
-            )
-            .in_scope(|| {
-                for i in 0..chips.len() {
-                    let preprocessed_trace = self
-                        .pk
-                        .preprocessed_chip_ordering
-                        .get(&chips[i].name())
-                        .map(|index| &self.pk.preprocessed_trace[*index]);
-                    self.debug_constraints_incremental(
-                        chips[i],
-                        preprocessed_trace,
-                        &traces[i].0,
-                        &permutation_traces[i],
-                        chunk.public_values(),
-                    );
-                }
-            });
+            for i in 0..chips.len() {
+                let preprocessed_trace = self
+                    .pk
+                    .preprocessed_chip_ordering
+                    .get(&chips[i].name())
+                    .map(|index| &self.pk.preprocessed_trace[*index]);
+                self.debug_constraints_incremental(
+                    chips[i],
+                    preprocessed_trace,
+                    &traces[i].0,
+                    &permutation_traces[i],
+                    chunk.public_values(),
+                    &cumulative_sums[i],
+                );
+            }
+        }
+
+        info!("Constraints verified successfully");
+
+        if !self.global_sum.is_zero() {
+            info!(
+                "Global cumulative sum is not zero.\n\t
+                Please enable `debug-lookups` feature to debug the lookups.",
+            );
         }
     }
 
@@ -163,6 +188,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         main_trace: &RowMajorMatrix<SC::Val>,
         permutation_trace: &RowMajorMatrix<SC::Challenge>,
         public_values: Vec<SC::Val>,
+        cumulative_sums: &[SC::Challenge],
     ) where
         C: ChipBehavior<SC::Val> + for<'b> Air<DebugConstraintFolder<'b, SC::Val, SC::Challenge>>,
     {
@@ -215,7 +241,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                     RowMajorMatrixView::new_row(permutation_next),
                 ),
                 permutation_challenges: &self.challenges,
-                cumulative_sums: &[],
+                cumulative_sums,
                 is_first_row: SC::Val::ZERO,
                 is_last_row: SC::Val::ZERO,
                 is_transition: SC::Val::ONE,
