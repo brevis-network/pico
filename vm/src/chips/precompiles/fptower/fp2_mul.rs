@@ -43,15 +43,13 @@ use crate::recursion_v2::stark::utils::pad_rows;
 pub const fn num_fp2_mul_cols<P>() -> usize
 where
     P: FpOpField,
-    <P as NumLimbs>::Limbs: Debug,
-    <P as NumLimbs>::Witness: Debug,
 {
     size_of::<Fp2MulCols<u8, P>>()
 }
 
 #[derive(Default)]
 pub struct Fp2MulChip<F, P> {
-    _marker: PhantomData<(F, P)>,
+    _marker: PhantomData<fn(F, P) -> (F, P)>,
 }
 
 /// A set of columns for the FpAdd operation.
@@ -60,8 +58,6 @@ pub struct Fp2MulChip<F, P> {
 pub struct Fp2MulCols<F, P>
 where
     P: FpOpField,
-    <P as NumLimbs>::Limbs: Debug,
-    <P as NumLimbs>::Witness: Debug,
 {
     pub is_real: F,
     pub chunk: F,
@@ -83,8 +79,6 @@ impl<F, P> Fp2MulChip<F, P>
 where
     F: PrimeField32,
     P: FpOpField,
-    <P as NumLimbs>::Limbs: Debug,
-    <P as NumLimbs>::Witness: Debug,
 {
     pub const fn new() -> Self {
         Self {
@@ -158,8 +152,6 @@ impl<F, P> ChipBehavior<F> for Fp2MulChip<F, P>
 where
     F: PrimeField32,
     P: FpOpField,
-    <P as NumLimbs>::Limbs: Debug,
-    <P as NumLimbs>::Witness: Debug,
 {
     type Record = EmulationRecord;
 
@@ -270,10 +262,7 @@ where
 
 impl<F, P> BaseAir<F> for Fp2MulChip<F, P>
 where
-    F: Sync,
     P: FpOpField,
-    <P as NumLimbs>::Limbs: Debug,
-    <P as NumLimbs>::Witness: Debug,
 {
     fn width(&self) -> usize {
         num_fp2_mul_cols::<P>()
@@ -285,8 +274,6 @@ where
     F: Field,
     CB: ChipBuilder<F>,
     P: FpOpField,
-    <P as NumLimbs>::Limbs: Debug,
-    <P as NumLimbs>::Witness: Debug,
     Limbs<CB::Var, <P as NumLimbs>::Limbs>: Copy,
 {
     fn eval(&self, builder: &mut CB) {

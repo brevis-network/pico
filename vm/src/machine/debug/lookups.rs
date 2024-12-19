@@ -1,4 +1,3 @@
-/*
 use super::DebuggerMessageLevel;
 use crate::{
     configs::config::StarkGenericConfig,
@@ -189,12 +188,13 @@ impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
         }
 
         tracing::info_span!("debug lookups").in_scope(|| {
+            let mut balanced = true;
             tracing::info!("Checking for imbalance");
             // checks the imbalance per lookup key
             for (k, (v, cv)) in self.lookup_map {
                 if v != 0 {
                     tracing::info!("lookup imbalance of {} for {}", v, k);
-                    result = false;
+                    balanced = false;
 
                     // print the detailed per-chip balancing data
                     for (c, cv) in cv {
@@ -204,7 +204,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
             }
 
             // log overall results
-            if result {
+            if balanced {
                 tracing::info!("lookups are balanced");
             } else {
                 tracing::info!("positive values mean more looking than looked");
@@ -260,4 +260,3 @@ impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
         }
     }
 }
-*/

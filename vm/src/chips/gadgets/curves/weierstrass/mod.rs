@@ -14,6 +14,10 @@ use crate::chips::gadgets::{
 #[cfg(feature = "bigint-rug")]
 use crate::chips::gadgets::utils::conversions::{biguint_to_rug, rug_to_biguint};
 
+pub mod bls381;
+pub mod bn254;
+pub mod secp256k1;
+
 /// Parameters that specify a short Weierstrass curve : y^2 = x^3 + ax + b.
 pub trait WeierstrassParameters: EllipticCurveParameters {
     const A: Array<u8, <Self::BaseField as NumLimbs>::Limbs>;
@@ -44,7 +48,7 @@ pub trait WeierstrassParameters: EllipticCurveParameters {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SwCurve<E>(pub E);
 
 impl<E: WeierstrassParameters> WeierstrassParameters for SwCurve<E> {

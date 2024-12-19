@@ -12,7 +12,10 @@ mod write;
 
 use crate::{
     chips::gadgets::{
-        curves::edwards::ed25519::{Ed25519, Ed25519Parameters},
+        curves::{
+            edwards::ed25519::{Ed25519, Ed25519Parameters},
+            weierstrass::{bls381::Bls12381, bn254::Bn254, secp256k1::Secp256k1},
+        },
         field::field_op::FieldOperation,
     },
     emulator::riscv::syscalls::{
@@ -31,6 +34,10 @@ use precompiles::{
     poseidon2::permute::Poseidon2PermuteSyscall,
     sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
     uint256::syscall::Uint256MulSyscall,
+    weierstrass::{
+        add::WeierstrassAddAssignSyscall, decompress::WeierstrassDecompressSyscall,
+        double::WeierstrassDoubleAssignSyscall,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::{marker::PhantomData, sync::Arc};
@@ -170,6 +177,41 @@ pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Sy
     );
 
     syscall_map.insert(SyscallCode::UINT256_MUL, Arc::new(Uint256MulSyscall));
+
+    syscall_map.insert(
+        SyscallCode::SECP256K1_ADD,
+        Arc::new(WeierstrassAddAssignSyscall::<Secp256k1>::new()),
+    );
+    syscall_map.insert(
+        SyscallCode::BN254_ADD,
+        Arc::new(WeierstrassAddAssignSyscall::<Bn254>::new()),
+    );
+    syscall_map.insert(
+        SyscallCode::BLS12381_ADD,
+        Arc::new(WeierstrassAddAssignSyscall::<Bls12381>::new()),
+    );
+
+    syscall_map.insert(
+        SyscallCode::SECP256K1_DOUBLE,
+        Arc::new(WeierstrassDoubleAssignSyscall::<Secp256k1>::new()),
+    );
+    syscall_map.insert(
+        SyscallCode::BN254_DOUBLE,
+        Arc::new(WeierstrassDoubleAssignSyscall::<Bn254>::new()),
+    );
+    syscall_map.insert(
+        SyscallCode::BLS12381_DOUBLE,
+        Arc::new(WeierstrassDoubleAssignSyscall::<Bls12381>::new()),
+    );
+
+    syscall_map.insert(
+        SyscallCode::BLS12381_DECOMPRESS,
+        Arc::new(WeierstrassDecompressSyscall::<Bls12381>::new()),
+    );
+    syscall_map.insert(
+        SyscallCode::SECP256K1_DECOMPRESS,
+        Arc::new(WeierstrassDecompressSyscall::<Secp256k1>::new()),
+    );
 
     syscall_map.insert(
         SyscallCode::POSEIDON2_PERMUTE,

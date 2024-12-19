@@ -13,8 +13,14 @@ pub const BITS_PER_LIMB: usize = 8;
 /// Array allows us to constrain the correct array lengths so we can have # of limbs and # of
 /// witness limbs associated in NumLimbs / FieldParameters.
 /// See: https://github.com/RustCrypto/traits/issues/1481
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Limbs<T, N: ArraySize>(pub Array<T, N>);
+
+impl<T: Debug, N: ArraySize> Debug for Limbs<T, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Limbs({:?})", self.0.as_slice())
+    }
+}
 
 impl<T: Copy, N: ArraySize> Copy for Limbs<T, N> where N::ArrayType<T>: Copy {}
 

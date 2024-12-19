@@ -13,7 +13,7 @@ use p3_field::{extension::BinomiallyExtendable, Field};
 use p3_matrix::Matrix;
 use std::{borrow::Borrow, iter::zip};
 
-impl<F: Field> BaseAir<F> for ExtAluChip<F> {
+impl<F> BaseAir<F> for ExtAluChip<F> {
     fn width(&self) -> usize {
         NUM_EXT_ALU_COLS
     }

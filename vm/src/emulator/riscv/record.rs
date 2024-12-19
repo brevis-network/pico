@@ -1,4 +1,5 @@
 use super::syscalls::precompiles::{
+    edwards::event::{EdDecompressEvent, EllipticCurveAddEvent},
     fptower::event::{Fp2AddSubEvent, Fp2MulEvent, FpEvent},
     keccak256::event::KeccakPermuteEvent,
     poseidon2::event::Poseidon2PermuteEvent,
@@ -19,6 +20,7 @@ use crate::{
         riscv::{
             public_values::PublicValues,
             syscalls::precompiles::{
+                ec::event::{EllipticCurveDecompressEvent, EllipticCurveDoubleEvent},
                 sha256::event::{ShaCompressEvent, ShaExtendEvent},
                 uint256::event::Uint256MulEvent,
             },
@@ -29,8 +31,6 @@ use hashbrown::HashMap;
 use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{iter, sync::Arc};
-
-use super::syscalls::precompiles::edwards::event::{EdDecompressEvent, EllipticCurveAddEvent};
 
 /// A record of the emulation of a program.
 ///
@@ -95,6 +95,25 @@ pub struct EmulationRecord {
     pub uint256_mul_events: Vec<Uint256MulEvent>,
     /// Public values
     pub public_values: PublicValues<u32, u32>,
+
+    /// A trace of the bls12381 add events.
+    pub bls12381_add_events: Vec<EllipticCurveAddEvent>,
+    /// A trace of the bn254 add events.
+    pub bn254_add_events: Vec<EllipticCurveAddEvent>,
+    /// A trace of the secp256k1 add events.
+    pub secp256k1_add_events: Vec<EllipticCurveAddEvent>,
+
+    /// A trace of the bls12381 decompress events.
+    pub bls12381_decompress_events: Vec<EllipticCurveDecompressEvent>,
+    /// A trace of the k256 decompress events.
+    pub k256_decompress_events: Vec<EllipticCurveDecompressEvent>,
+
+    /// A trace of the bn254 double events.
+    pub bn254_double_events: Vec<EllipticCurveDoubleEvent>,
+    /// A trace of the bls12381 double events.
+    pub bls12381_double_events: Vec<EllipticCurveDoubleEvent>,
+    /// A trace of the secp256k1 double events.
+    pub secp256k1_double_events: Vec<EllipticCurveDoubleEvent>,
 }
 
 impl EmulationRecord {

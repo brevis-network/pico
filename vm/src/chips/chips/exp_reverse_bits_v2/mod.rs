@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 
 #[derive(Clone, Debug, Copy, Default)]
 pub struct ExpReverseBitsLenChip<const DEGREE: usize, F> {
-    pub _phantom: PhantomData<F>,
+    pub _phantom: PhantomData<fn(F) -> F>,
 }
 
 #[cfg(test)]
@@ -121,7 +121,7 @@ mod tests {
             ..Default::default()
         };
         let chip = ExpReverseBitsLenChip::<3, F> {
-            _phantom: PhantomData::<F>,
+            _phantom: PhantomData,
         };
         let main_trace: RowMajorMatrix<F> =
             chip.generate_main(&chunk, &mut RecursionRecord::default());

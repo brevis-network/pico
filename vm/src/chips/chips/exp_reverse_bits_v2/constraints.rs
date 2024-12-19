@@ -9,7 +9,7 @@ use super::{
     NUM_EXP_REVERSE_BITS_LEN_COLS,
 };
 
-impl<F: Field, const DEGREE: usize> BaseAir<F> for ExpReverseBitsLenChip<DEGREE, F> {
+impl<F, const DEGREE: usize> BaseAir<F> for ExpReverseBitsLenChip<DEGREE, F> {
     fn width(&self) -> usize {
         NUM_EXP_REVERSE_BITS_LEN_COLS
     }

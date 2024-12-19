@@ -94,7 +94,7 @@ mod tests {
             ..Default::default()
         };
         let chip = PublicValuesChip {
-            _phantom: PhantomData::<F>,
+            _phantom: PhantomData,
         };
         let trace: RowMajorMatrix<F> = chip.generate_main(&chunk, &mut RecursionRecord::default());
         println!("{:?}", trace.values)

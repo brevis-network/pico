@@ -86,6 +86,9 @@ pub fn parse_args() -> (
     } else if args.elf == "uint256_precompile" {
         elf = load_elf("uint256-precompiled");
         info!("Test Uint256 Mul Precompile");
+    } else if args.elf == "bn254_precompile" {
+        elf = load_elf("bn254-add");
+        info!("Test bn254 Precompile");
     } else if args.elf == "poseidon2_precompile" {
         elf = load_elf("poseidon2-permute");
         info!("Test Poseidon2 Permute Precompile");

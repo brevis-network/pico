@@ -1,7 +1,7 @@
-// #[cfg(feature = "debug")]
-// use crate::machine::debug::constraints::IncrementalConstraintDebugger;
-// #[cfg(feature = "debug-lookups")]
-// use crate::machine::debug::lookups::IncrementalLookupDebugger;
+#[cfg(feature = "debug")]
+use crate::machine::debug::constraints::IncrementalConstraintDebugger;
+#[cfg(feature = "debug-lookups")]
+use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::{riscv::program::Program, word::Word},
     configs::{
@@ -131,9 +131,22 @@ where
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
         let mut all_proofs = vec![];
 
+        // used for collect all records for debugging
+        #[cfg(feature = "debug")]
+        let mut debug_challenger = self.config().challenger();
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = IncrementalConstraintDebugger::new(pk, &mut debug_challenger);
+        #[cfg(feature = "debug-lookups")]
+        let mut lookup_debugger = IncrementalLookupDebugger::new(pk, None);
+
         loop {
             let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
+
+            #[cfg(feature = "debug")]
+            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
+            #[cfg(feature = "debug-lookups")]
+            lookup_debugger.debug_incremental(&self.chips(), &batch_records);
 
             // todo: parallel
             let batch_proofs = batch_records
@@ -165,6 +178,12 @@ where
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()];
+
+        #[cfg(feature = "debug")]
+        constraint_debugger.print_results();
+        #[cfg(feature = "debug-lookups")]
+        lookup_debugger.print_results();
+
         MetaProof::new(all_proofs.into(), vks.into())
     }
 

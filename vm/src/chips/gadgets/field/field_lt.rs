@@ -1,3 +1,4 @@
+use core::fmt::Debug;
 use itertools::izip;
 use num::BigUint;
 use p3_air::AirBuilder;
@@ -14,7 +15,7 @@ use crate::{
 };
 
 /// Operation columns for verifying that `lhs < rhs`.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct FieldLtCols<T, P: FieldParameters> {
     /// Boolean flags to indicate the first byte in which the element is smaller than the modulus.
@@ -23,6 +24,12 @@ pub struct FieldLtCols<T, P: FieldParameters> {
     pub(crate) lhs_comparison_byte: T,
 
     pub(crate) rhs_comparison_byte: T,
+}
+
+impl<T: Debug, P: FieldParameters> Debug for FieldLtCols<T, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FieldLtCols {{ byte_flags: {:?}, lhs_comparison_byte: {:?}, rhs_comparison_byte: {:?} }}", self.byte_flags, self.lhs_comparison_byte, self.rhs_comparison_byte)
+    }
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldLtCols<F, P> {

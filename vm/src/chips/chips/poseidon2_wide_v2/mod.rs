@@ -20,7 +20,7 @@ pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;
 /// A chip that implements addition for the opcode Poseidon2Wide.
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Poseidon2WideChip<const DEGREE: usize, F> {
-    pub _phantom: PhantomData<F>,
+    pub _phantom: PhantomData<fn(F) -> F>,
 }
 
 impl<'a, const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
@@ -92,7 +92,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let chip_3 = Poseidon2WideChip::<3, F> {
-            _phantom: PhantomData::<F>,
+            _phantom: PhantomData,
         };
         let main_trace: RowMajorMatrix<F> =
             chip_3.generate_main(&chunk, &mut RecursionRecord::default());
@@ -125,7 +125,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let chip_9 = Poseidon2WideChip::<9, F> {
-            _phantom: PhantomData::<F>,
+            _phantom: PhantomData,
         };
         let main_trace: RowMajorMatrix<F> =
             chip_9.generate_main(&chunk, &mut RecursionRecord::default());

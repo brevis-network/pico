@@ -1,7 +1,3 @@
-// #[cfg(feature = "debug")]
-// use crate::machine::debug::constraints::IncrementalConstraintDebugger;
-// #[cfg(feature = "debug-lookups")]
-// use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
@@ -84,7 +80,7 @@ where
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
 
-        debug!("recursion convert record stats");
+        debug!("recursion compress record stats");
         let stats = records[0].stats();
         for (key, value) in &stats {
             debug!("   |- {:<28}: {}", key, value);

@@ -1,4 +1,3 @@
-/*
 use super::DebuggerMessageLevel;
 use crate::{
     configs::config::StarkGenericConfig,
@@ -100,11 +99,9 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                     .par_iter()
                     .zip(traces.par_iter_mut())
                     .map(|(chip, (main_trace, preprocessed_trace))| {
-                        let permutation_trace = chip.generate_permutation(
-                            *preprocessed_trace,
-                            main_trace,
-                            &self.challenges,
-                        );
+                        let permutation_trace = chip
+                            .generate_permutation(*preprocessed_trace, main_trace, &self.challenges)
+                            .0;
                         let cumulative_sum = permutation_trace
                             .row_slice(main_trace.height() - 1)
                             .last()
@@ -175,7 +172,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
             return;
         }
 
-        let cumulative_sum = permutation_trace
+        let _cumulative_sum = permutation_trace
             .row_slice(permutation_trace.height() - 1)
             .last()
             .copied()
@@ -218,7 +215,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                     RowMajorMatrixView::new_row(permutation_next),
                 ),
                 permutation_challenges: &self.challenges,
-                cumulative_sum,
+                cumulative_sums: &[],
                 is_first_row: SC::Val::ZERO,
                 is_last_row: SC::Val::ZERO,
                 is_transition: SC::Val::ONE,
@@ -250,4 +247,3 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         });
     }
 }
-*/

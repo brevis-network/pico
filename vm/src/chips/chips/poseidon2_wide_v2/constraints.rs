@@ -15,7 +15,7 @@ use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::{array, borrow::Borrow};
 
-impl<F: Field, const DEGREE: usize> BaseAir<F> for Poseidon2WideChip<DEGREE, F> {
+impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2WideChip<DEGREE, F> {
     fn width(&self) -> usize {
         if DEGREE == 3 {
             NUM_POSEIDON2_DEGREE3_COLS

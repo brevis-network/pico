@@ -8,9 +8,7 @@ use num::BigUint;
 use p3_field::Field;
 use serde::{de::DeserializeOwned, Serialize};
 
-pub trait FieldParameters:
-    Send + Sync + Copy + 'static + Serialize + DeserializeOwned + NumLimbs
-{
+pub trait FieldParameters: Copy + 'static + Serialize + DeserializeOwned + NumLimbs {
     const NUM_BITS_PER_LIMB: usize = BITS_PER_LIMB;
     const NUM_LIMBS: usize = Self::Limbs::USIZE;
     const NUM_WITNESS_LIMBS: usize = Self::Witness::USIZE;

@@ -34,8 +34,6 @@ use super::{field_lt::FieldLtCols, field_op::FieldOpCols};
 pub struct FieldSqrtCols<T, P: FieldParameters>
 where
     P: FieldParameters,
-    P::Witness: Debug,
-    P::Limbs: Debug,
 {
     /// The multiplication operation to verify that the sqrt and the input match.
     ///
@@ -53,8 +51,6 @@ impl<F, P> FieldSqrtCols<F, P>
 where
     F: PrimeField32,
     P: FieldParameters,
-    P::Witness: Debug,
-    P::Limbs: Debug,
 {
     /// Populates the trace.
     ///
@@ -119,8 +115,6 @@ impl<V: Copy, P: FieldParameters> FieldSqrtCols<V, P>
 where
     V: Copy,
     Limbs<V, P::Limbs>: Copy,
-    P::Witness: Debug,
-    P::Limbs: Debug,
 {
     /// Calculates the square root of `a`.
     pub fn eval<F: Field, CB: ChipBuilder<F, Var = V>>(

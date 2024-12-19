@@ -84,6 +84,9 @@ cfg-if.workspace = true
 halo2curves.workspace = true
 
 rug = { version = "1.26.1", optional = true }
+amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = [
+    "bls381",
+] }
 p3-koala-bear.workspace = true
 
 [dev-dependencies]
@@ -93,7 +96,7 @@ num = { version = "0.4.3", features = ["rand"] }
 
 [features]
 debug = []
-debug-lookups = ["debug"]
+debug-lookups = []
 single-threaded = []
 
 # curves

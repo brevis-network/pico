@@ -14,11 +14,12 @@ use p3_field::Field;
 use p3_matrix::Matrix;
 use std::{borrow::Borrow, iter::zip};
 
-impl<F: Field> BaseAir<F> for BaseAluChip<F> {
+impl<F> BaseAir<F> for BaseAluChip<F> {
     fn width(&self) -> usize {
         NUM_BASE_ALU_COLS
     }
 }
+
 impl<F: Field, CB> Air<CB> for BaseAluChip<F>
 where
     CB: ChipBuilder<F>,

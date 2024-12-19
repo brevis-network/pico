@@ -8,7 +8,7 @@ use crate::emulator::riscv::syscalls::{
 };
 
 pub struct Fp2MulSyscall<P> {
-    _marker: PhantomData<P>,
+    _marker: PhantomData<fn(P) -> P>,
 }
 
 impl<P> Fp2MulSyscall<P> {

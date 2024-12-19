@@ -12,7 +12,7 @@ use crate::{
 
 pub struct Fp2AddSubSyscall<P> {
     op: FieldOperation,
-    _marker: PhantomData<P>,
+    _marker: PhantomData<fn(P) -> P>,
 }
 
 impl<P> Fp2AddSubSyscall<P> {

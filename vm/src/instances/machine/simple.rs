@@ -1,3 +1,5 @@
+#[cfg(feature = "debug")]
+use crate::machine::debug::constraints::IncrementalConstraintDebugger;
 use crate::{
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     machine::{
@@ -52,23 +54,23 @@ where
         info!("PERF-machine=simple");
         let begin = Instant::now();
 
+        #[cfg(feature = "debug")]
+        let mut debug_challenger = self.config().challenger();
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger =
+            IncrementalConstraintDebugger::new(witness.pk(), &mut debug_challenger);
+
         let proofs = self
             .base_machine
             .prove_ensemble(witness.pk(), witness.records());
 
         info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
-        // #[cfg(feature = "debug")]
-        // {
-        //     use crate::machine::debug::constraints::debug_all_constraints;
-        //     let mut debug_challenger = self.config().challenger();
-        //     debug_all_constraints(
-        //         self.chips(),
-        //         witness.pk(),
-        //         witness.records(),
-        //         &mut debug_challenger,
-        //     );
-        // }
+        #[cfg(feature = "debug")]
+        constraint_debugger.debug_incremental(&self.chips(), &witness.records());
+
+        #[cfg(feature = "debug")]
+        constraint_debugger.print_results();
 
         // Construct the metaproof with proofs and vks where vks is a repetition of the same witness.vk
         let vks = vec![witness.vk.clone().unwrap()].into();

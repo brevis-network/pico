@@ -6,7 +6,7 @@ mod traces;
 
 #[derive(Default)]
 pub struct ExtAluChip<F> {
-    pub _phantom: PhantomData<F>,
+    pub _phantom: PhantomData<fn(F) -> F>,
 }
 
 #[cfg(test)]
@@ -43,7 +43,7 @@ mod tests {
             ..Default::default()
         };
         let chip = ExtAluChip {
-            _phantom: PhantomData::<F>,
+            _phantom: PhantomData,
         };
         let trace: RowMajorMatrix<F> = chip.generate_main(&chunk, &mut RecursionRecord::default());
         println!("{:?}", trace.values)

@@ -1,7 +1,3 @@
-// #[cfg(feature = "debug")]
-// use crate::machine::debug::constraints::IncrementalConstraintDebugger;
-// #[cfg(feature = "debug-lookups")]
-// use crate::machine::debug::lookups::IncrementalLookupDebugger;
 use crate::{
     compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},

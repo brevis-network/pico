@@ -171,6 +171,7 @@ fn main() {
 
     let base_proof = proof.proofs()[0].clone();
 
+    // Get field_config input
     // Get recursion input
     let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
     let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());

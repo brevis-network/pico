@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use num::{BigUint, Zero};
 use p3_air::AirBuilder;
@@ -45,7 +45,7 @@ pub enum FieldOperation {
 ///
 /// **Warning**: The constraints do not check for division by zero. The caller is responsible for
 /// ensuring that the division operation is valid.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct FieldOpCols<T, P: FieldParameters> {
     /// The result of `a op b`, where a, b are field elements
@@ -53,6 +53,16 @@ pub struct FieldOpCols<T, P: FieldParameters> {
     pub(crate) carry: Limbs<T, P::Limbs>,
     pub(crate) witness_low: Limbs<T, P::Witness>,
     pub(crate) witness_high: Limbs<T, P::Witness>,
+}
+
+impl<T: Debug, P: FieldParameters> Debug for FieldOpCols<T, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "FieldOpCols {{ result: {:?}, carry: {:?}, witness_low: {:?}, witness_high: {:?}}}",
+            self.result, self.carry, self.witness_low, self.witness_high
+        )
+    }
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
