@@ -199,6 +199,30 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
         ]
     }
 
+    pub fn convert_chips() -> Vec<MetaChip<F, Self>> {
+        vec![
+            MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
+            MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
+            MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
+            MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
+            MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
+        ]
+    }
+
+    pub fn combine_chips() -> Vec<MetaChip<F, Self>> {
+        vec![
+            MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
+            MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
+            MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
+            MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
+            MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
+        ]
+    }
+
     // TODO: temporarily set to be the same as all_chips since adding Multi will break lookups
     pub fn compress_chips() -> Vec<MetaChip<F, Self>> {
         vec![
@@ -208,7 +232,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
-            MetaChip::new(Self::FriFold(FriFoldChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
     }
@@ -222,21 +245,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
-            MetaChip::new(Self::FriFold(FriFoldChip::default())),
-            MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
-        ]
-    }
-
-    // TODO: temporarily set to be the same as all_chips since adding Multi will break lookups
-    // For wrap bn254
-    pub fn wrap_chips() -> Vec<MetaChip<F, Self>> {
-        vec![
-            MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
-            MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
-            MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
-            MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
-            MetaChip::new(Self::Poseidon2Skinny(Poseidon2SkinnyChip::default())),
-            MetaChip::new(Self::FriFold(FriFoldChip::default())),
+            // MetaChip::new(Self::FriFold(FriFoldChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
     }

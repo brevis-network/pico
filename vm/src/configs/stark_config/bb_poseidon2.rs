@@ -86,12 +86,12 @@ impl BabyBearPoseidon2 {
         let dft = SC_Dft::default();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 33,
+            Err(_) => 50,
         };
         info!("NUM_QUERIES: {}", num_queries);
 
         let fri_config = FriConfig {
-            log_blowup: 3,
+            log_blowup: 2,
             num_queries,
             proof_of_work_bits: 16,
             mmcs: challenge_mmcs,
@@ -99,7 +99,7 @@ impl BabyBearPoseidon2 {
         let pcs = SC_Pcs::new(dft, val_mmcs, fri_config);
 
         let simple_fri_config = SimpleFriConfig {
-            log_blowup: 3,
+            log_blowup: 2,
             num_queries,
             proof_of_work_bits: 16,
         };
