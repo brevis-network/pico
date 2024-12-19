@@ -147,16 +147,19 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
         let events = &input.ed_add_events;
         info!("ed add precompile events: {:?}", events.len());
 
-        let mut rows = events
+        let (_rows, nonces): (Vec<[F; NUM_ED_ADD_COLS]>, Vec<_>) = events
             .par_iter()
             .map(|event| {
                 let mut row = [F::ZERO; NUM_ED_ADD_COLS];
                 let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
                 let mut rlu = Vec::new();
                 Self::event_to_row(event, cols, &mut rlu);
-                row
+                let nonce = *input.nonce_lookup.get(&event.lookup_id).unwrap();
+                (row, nonce)
             })
-            .collect::<Vec<_>>();
+            .unzip();
+
+        let mut rows = _rows.clone();
 
         pad_rows(&mut rows, || {
             let mut row = [F::ZERO; NUM_ED_ADD_COLS];
@@ -184,7 +187,8 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
         for i in 0..trace.height() {
             let cols: &mut EdAddAssignCols<F> =
                 trace.values[i * NUM_ED_ADD_COLS..(i + 1) * NUM_ED_ADD_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
+            let nonce = nonces.get(i).unwrap_or(&0);
+            cols.nonce = F::from_canonical_u32(*nonce);
         }
 
         trace
@@ -269,10 +273,11 @@ where
         let next: &EdAddAssignCols<CB::Var> = (*next).borrow();
 
         // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
+        // builder.when_first_row().assert_zero(local.nonce);
+
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
+            .assert_eq(next.is_real * (local.nonce + CB::Expr::ONE), next.nonce);
 
         let x1: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
             limbs_from_prev_access(&local.p_access[0..8]);

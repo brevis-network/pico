@@ -292,6 +292,7 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
         let mut rows = Vec::new();
+        let mut nonces = Vec::new();
         let events = &input.ed_decompress_events;
         debug!("ed decompress precompile events: {:?}", events.len());
 
@@ -301,6 +302,9 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
             cols.populate::<E::BaseField, E>(event.clone(), output);
 
             rows.push(row);
+
+            let nonce = *input.nonce_lookup.get(&event.lookup_id).unwrap();
+            nonces.push(nonce);
         }
 
         pad_rows(&mut rows, || {
@@ -321,7 +325,8 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
             let cols: &mut EdDecompressCols<F> = trace.values
                 [i * NUM_ED_DECOMPRESS_COLS..(i + 1) * NUM_ED_DECOMPRESS_COLS]
                 .borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
+            let nonce = nonces.get(i).unwrap_or(&0);
+            cols.nonce = F::from_canonical_u32(*nonce);
         }
 
         trace
@@ -352,10 +357,10 @@ where
         let next: &EdDecompressCols<CB::Var> = (*next).borrow();
 
         // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
+        // builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
+            .assert_eq(next.is_real * (local.nonce + CB::Expr::ONE), next.nonce);
 
         local.eval::<F, CB, E::BaseField, E>(builder);
     }
