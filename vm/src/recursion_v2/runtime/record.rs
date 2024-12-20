@@ -40,7 +40,7 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
     //type Config = EmulatorOpts;
 
     fn name(&self) -> String {
-        todo!()
+        "RecursionRecord".to_string()
     }
 
     fn stats(&self) -> hashbrown::HashMap<String, usize> {
@@ -99,7 +99,7 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
     }
 
     fn chunk_index(&self) -> usize {
-        0
+        self.index as usize
     }
 }
 

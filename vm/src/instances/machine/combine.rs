@@ -108,10 +108,7 @@ where
                 for record in batch_records.as_mut_slice() {
                     record.index = chunk_index;
                     chunk_index += 1;
-                    debug!(
-                        "riscv recursion record stats: chunk {}",
-                        record.chunk_index()
-                    );
+                    debug!("combine record stats: chunk {}", record.chunk_index());
                     let stats = record.stats();
                     for (key, value) in &stats {
                         debug!("   |- {:<28}: {}", key, value);
@@ -119,7 +116,6 @@ where
                 }
 
                 // prove records in parallel
-                // todo optimize: check parallelism is proper
                 let batch_proofs = batch_records
                     .par_iter()
                     .zip(batch_pks.par_iter())

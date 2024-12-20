@@ -36,6 +36,7 @@ use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
 use p3_field::FieldAlgebra;
+use p3_maybe_rayon::prelude::*;
 use serde::Serialize;
 use std::array;
 
@@ -145,29 +146,28 @@ impl<'a>
         // construct programs and inputs
         let total = proofs.len();
 
-        let mut inputs = Vec::new();
-        let mut programs = Vec::new();
+        let (programs, inputs): (Vec<_>, Vec<_>) = proofs
+            .iter()
+            .enumerate()
+            .map(|(i, proof)| {
+                let flag_complete = i == total - 1;
+                let flag_first_chunk = i == 0;
 
-        // todo optimize: parallel
-        for (i, proof) in proofs.iter().enumerate() {
-            let flag_complete = i == total - 1;
-            let flag_first_chunk = i == 0;
-
-            let input = ConvertStdin {
-                machine,
-                riscv_vk,
-                proofs: vec![proof.clone()],
-                base_challenger: base_challenger.clone(),
-                reconstruct_challenger: reconstruct_challenger.clone(),
-                flag_complete,
-                flag_first_chunk,
-                vk_root,
-            };
-            let program = ConvertVerifierCircuit::<RecursionFC, RiscvSC>::build(machine, &input);
-
-            programs.push(program);
-            inputs.push(input);
-        }
+                let input = ConvertStdin {
+                    machine,
+                    riscv_vk,
+                    proofs: vec![proof.clone()],
+                    base_challenger: base_challenger.clone(),
+                    reconstruct_challenger: reconstruct_challenger.clone(),
+                    flag_complete,
+                    flag_first_chunk,
+                    vk_root,
+                };
+                let program =
+                    ConvertVerifierCircuit::<RecursionFC, RiscvSC>::build(machine, &input);
+                (program, input)
+            })
+            .unzip();
 
         Self {
             programs,
@@ -186,7 +186,8 @@ where
             Record = RecursionRecord<Val<RecursionSC>>,
         > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
         + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, RecursionFC>>,
+        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, RecursionFC>>
+        + Send,
 {
     /// Construct the recursion stdin for one layer of combine.
     pub fn setup_for_combine(
@@ -197,33 +198,25 @@ where
         combine_size: usize,
         flag_complete: bool,
     ) -> Self {
-        let mut inputs = Vec::new();
-        let mut programs = Vec::new();
-
         assert_eq!(vks.len(), proofs.len());
 
-        // todo optimize: parallel
-        proofs
+        let (programs, inputs): (Vec<_>, Vec<_>) = proofs
             .chunks(combine_size)
             .zip(vks.chunks(combine_size))
-            .for_each(|(batch_proofs, batch_vks)| {
-                // todo: optimization to non-copy
-                let batch_proofs = batch_proofs.to_vec();
-                let batch_vks = batch_vks.to_vec();
-
+            .map(|(batch_proofs, batch_vks)| {
                 let input = RecursionStdin {
                     machine,
-                    vks: batch_vks,
-                    proofs: batch_proofs,
+                    vks: batch_vks.to_vec(), // todo: optimization to non-copy
+                    proofs: batch_proofs.to_vec(),
                     flag_complete,
                     vk_root,
                 };
                 let program =
                     CombineVerifierCircuit::<RecursionFC, RecursionSC, C>::build(machine, &input);
 
-                programs.push(program);
-                inputs.push(input);
-            });
+                (program, input)
+            })
+            .unzip();
 
         Self {
             programs,

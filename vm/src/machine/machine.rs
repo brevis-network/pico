@@ -214,12 +214,11 @@ where
         record: &C::Record,
         lookup_scope: LookupScope,
     ) -> Option<MainTraceCommitments<SC>> {
-        self.prover.commit_main(
-            &self.config(),
-            record,
-            self.prover
-                .generate_main(&self.chips(), record, lookup_scope),
-        )
+        let chips_and_main_traces = self
+            .prover
+            .generate_main(&self.chips(), record, lookup_scope);
+        self.prover
+            .commit_main(&self.config(), record, chips_and_main_traces)
     }
 
     /// prove a batch of records with a single pk

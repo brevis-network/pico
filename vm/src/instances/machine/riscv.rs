@@ -50,6 +50,7 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
+    SC::Domain: Send + Sync,
     SC::Val: PrimeField64,
 {
     /// Get the name of the machine.
@@ -90,7 +91,7 @@ where
             let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
 
-            // todo optimize: do this only in debugging mode
+            //#[cfg(feature = "debug")]
             for record in &mut *batch_records {
                 debug!("riscv record stats: chunk {}", record.chunk_index());
                 let stats = record.stats();
@@ -154,9 +155,8 @@ where
                 global_lookup_debugger.debug_incremental(&self.chips(), batch_records);
             }
 
-            // todo: parallel
             let batch_proofs = batch_records
-                .iter_mut()
+                .into_par_iter()
                 .map(|record| {
                     let regional_commitment = self
                         .base_machine

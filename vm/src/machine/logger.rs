@@ -19,6 +19,9 @@ pub fn setup_logger() {
             .add_directive("p3_keccak_air=off".parse().unwrap())
             .add_directive("p3_fri=off".parse().unwrap())
             .add_directive("p3_dft=off".parse().unwrap())
+            .add_directive("p3_matrix=off".parse().unwrap())
+            .add_directive("p3_merkle_tree=off".parse().unwrap())
+            .add_directive("p3_field=off".parse().unwrap())
             .add_directive("p3_challenger=off".parse().unwrap());
 
         // if the RUST_LOGGER environment variable is set, use it to determine which logger to

@@ -143,7 +143,7 @@ where
         chips_and_preprocessed.sort_by_key(|(_, trace)| Reverse(trace.height()));
         for cp in &chips_and_preprocessed {
             debug!(
-                "chip {:<14} | width {:<2} rows {:<6} cells {:<7} | in {:?}",
+                "chip {:<17} | width {:<2} rows {:<6} cells {:<7} | in {:?}",
                 cp.0,
                 cp.1.width(),
                 cp.1.height(),
@@ -195,11 +195,18 @@ where
             chips_and_main
         };
         // Execute with or without thread pool based on the feature
-        let chips_and_main = if cfg!(feature = "single-threaded") {
-            let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        // TODO: figure out why deadlock if not using separate threadpool.
+        let chips_and_main = {
+            let num_threads = if cfg!(feature = "single-threaded") {
+                1
+            } else {
+                num_cpus::get().max(1) // Get the number of logical cores
+            };
+            let pool = ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .unwrap();
             pool.install(generate_main_closure)
-        } else {
-            generate_main_closure()
         };
         for cp in &chips_and_main {
             debug!(

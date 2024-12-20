@@ -32,6 +32,7 @@ where
     PcsProverData<SC>: Send + Sync,
     SC::Val: PrimeField32,
     BaseProof<SC>: Send + Sync,
+    SC::Domain: Send + Sync,
 {
     info!("\n Begin RiscV..");
     let start = Instant::now();

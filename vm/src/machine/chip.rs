@@ -78,7 +78,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         );
 
         debug!(
-            "new chip {:<17} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
+            "new chip {:<21} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
             chip.name(),
             chip.preprocessed_width(),
             log_quotient_degree,
