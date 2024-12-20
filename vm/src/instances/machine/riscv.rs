@@ -192,6 +192,9 @@ where
         #[cfg(feature = "debug-lookups")]
         global_lookup_debugger.print_results();
 
+        // TODO: print some summary numbers
+        info!("RiscV proofs generated with {} chunks.", all_proofs.len());
+
         MetaProof::new(all_proofs.into(), vks.into())
     }
 
