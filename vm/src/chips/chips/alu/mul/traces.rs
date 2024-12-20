@@ -184,7 +184,7 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
         trace
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         self.generate_main(input, extra);
     }
 

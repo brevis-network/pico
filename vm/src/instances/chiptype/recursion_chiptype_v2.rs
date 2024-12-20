@@ -98,7 +98,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
         }
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         match self {
             Self::MemoryConst(chip) => chip.extra_record(input, extra),
             Self::MemoryVar(chip) => chip.extra_record(input, extra),

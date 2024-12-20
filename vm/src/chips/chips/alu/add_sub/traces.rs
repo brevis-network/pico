@@ -95,7 +95,7 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
         trace
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(
             (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
             1,

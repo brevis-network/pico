@@ -100,7 +100,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Poseidon2PermuteChip<F> {
         None
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let events = input.poseidon2_permute_events.clone();
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
         let blu_batches = events

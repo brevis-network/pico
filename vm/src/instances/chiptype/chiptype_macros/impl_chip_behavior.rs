@@ -38,7 +38,7 @@ macro_rules! impl_chip_behavior {
                 }
             }
 
-            fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+            fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
                 match self {
                     $(
                         Self::$variant(chip) => chip.extra_record(input, extra),

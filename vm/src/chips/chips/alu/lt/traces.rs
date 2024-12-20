@@ -69,7 +69,7 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
         trace
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(input.lt_events.len() / num_cpus::get(), 1);
 
         let blu_batches = input

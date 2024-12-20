@@ -194,7 +194,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
         trace
     }
 
-    fn extra_record(&self, input: &mut Self::Record, output: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, output: &mut Self::Record) {
         let events = &input.ed_add_events;
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 

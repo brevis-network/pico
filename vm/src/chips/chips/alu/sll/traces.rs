@@ -70,7 +70,7 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
         trace
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(input.shift_left_events.len() / num_cpus::get(), 1);
 
         let range_batches = input

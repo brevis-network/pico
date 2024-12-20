@@ -40,7 +40,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
         None
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = 8;
 
         let blu_events: Vec<Vec<RangeLookupEvent>> = input

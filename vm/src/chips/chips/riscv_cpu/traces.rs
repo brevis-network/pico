@@ -77,7 +77,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         trace
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         // Generate the trace rows for each event.
         let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
         let (alu_events, range_events): (Vec<_>, Vec<_>) = input

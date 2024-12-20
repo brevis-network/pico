@@ -81,7 +81,7 @@ impl<F: Field> ChipBehavior<F> for MemoryReadWriteChip<F> {
         trace
     }
 
-    fn extra_record(&self, input: &mut Self::Record, extra: &mut Self::Record) {
+    fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         // We only care about the CPU events of memory instructions.
         let mem_events = input
             .cpu_events
