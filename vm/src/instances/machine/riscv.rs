@@ -128,15 +128,31 @@ where
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
         let mut all_proofs = vec![];
 
-        #[cfg(any(feature = "debug", feature = "debug-lookups"))]
-        let mut all_records = vec![];
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
+            pk,
+            &mut self.config().challenger(),
+        );
+        #[cfg(feature = "debug-lookups")]
+        let mut global_lookup_debugger =
+            crate::machine::debug::IncrementalLookupDebugger::new(pk, LookupScope::Global, None);
 
         loop {
             let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
 
-            #[cfg(any(feature = "debug", feature = "debug-lookups"))]
-            all_records.extend(batch_records.to_vec());
+            #[cfg(feature = "debug")]
+            constraint_debugger.debug_incremental(&self.chips(), batch_records);
+            #[cfg(feature = "debug-lookups")]
+            {
+                crate::machine::debug::debug_regional_lookups(
+                    pk,
+                    &self.chips(),
+                    batch_records,
+                    None,
+                );
+                global_lookup_debugger.debug_incremental(&self.chips(), batch_records);
+            }
 
             // todo: parallel
             let batch_proofs = batch_records
@@ -172,14 +188,9 @@ where
         let vks = vec![witness.vk.clone().unwrap()];
 
         #[cfg(feature = "debug")]
-        crate::machine::debug::debug_all_constraints(
-            pk,
-            &mut self.config().challenger(),
-            &self.chips(),
-            &all_records,
-        );
+        constraint_debugger.print_results();
         #[cfg(feature = "debug-lookups")]
-        crate::machine::debug::debug_all_lookups(pk, &self.chips(), &all_records, None);
+        global_lookup_debugger.print_results();
 
         MetaProof::new(all_proofs.into(), vks.into())
     }
