@@ -66,6 +66,6 @@ jobs:
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_simple_recursion -- --elf keccak --n 15
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e_no_recursion -- --field kb
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf multiple-precompile --step riscv
           # TODO: Will fix the other integration tests.
           # RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_combine -- --elf keccak
-          # RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf multiple-precompile --step riscv

@@ -21,8 +21,6 @@ pub struct SyscallContext<'a: 'a> {
     pub rt: &'a mut RiscvEmulator,
     /// The syscall lookup id.
     pub syscall_lookup_id: u128,
-    /// The local memory access events for the syscall.
-    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
 }
 
 impl<'a> SyscallContext<'a> {
@@ -37,7 +35,6 @@ impl<'a> SyscallContext<'a> {
             exit_code: 0,
             rt: runtime,
             syscall_lookup_id: 0,
-            local_memory_access: HashMap::new(),
         }
     }
 
@@ -54,12 +51,7 @@ impl<'a> SyscallContext<'a> {
 
     /// Read a word from memory.
     pub fn mr(&mut self, addr: u32) -> (MemoryReadRecord, u32) {
-        let record = self.rt.mr(
-            addr,
-            self.current_chunk,
-            self.clk,
-            Some(&mut self.local_memory_access),
-        );
+        let record = self.rt.mr(addr, self.current_chunk, self.clk, None);
         (record, record.value)
     }
 
@@ -77,13 +69,7 @@ impl<'a> SyscallContext<'a> {
 
     /// Write a word to memory.
     pub fn mw(&mut self, addr: u32, value: u32) -> MemoryWriteRecord {
-        self.rt.mw(
-            addr,
-            value,
-            self.current_chunk,
-            self.clk,
-            Some(&mut self.local_memory_access),
-        )
+        self.rt.mw(addr, value, self.current_chunk, self.clk, None)
     }
 
     /// Write a slice of words to memory.
