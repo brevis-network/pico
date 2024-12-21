@@ -42,6 +42,7 @@ impl<'a, const DEGREE: usize, F: Field> Poseidon2WideChip<DEGREE, F> {
 }
 
 #[cfg(test)]
+#[allow(unused_imports)]
 pub(crate) mod tests {
 
     use super::{Poseidon2WideChip, WIDTH};

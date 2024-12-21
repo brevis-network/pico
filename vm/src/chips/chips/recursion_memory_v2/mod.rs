@@ -23,6 +23,7 @@ pub struct MemoryAccessCols<F: Copy> {
 pub type MemEvent<F> = MemIo<Block<F>>;
 
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
     use super::{constant::MemoryConstChip, variable::MemoryVarChip, MemEvent};
     use crate::{

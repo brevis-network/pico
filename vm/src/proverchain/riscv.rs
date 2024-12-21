@@ -47,13 +47,12 @@ where
         let program = Compiler::new(SourceType::RiscV, elf).compile();
         let machine = RiscvMachine::new(config, RiscvChipType::all_chips(), RISCV_NUM_PVS);
         let (pk, vk) = machine.setup_keys(&program);
-        let prover = Self {
+        Self {
             program,
             machine,
             pk,
             vk,
-        };
-        prover
+        }
     }
 }
 

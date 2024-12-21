@@ -18,6 +18,7 @@ impl<const DEGREE: usize, F> Default for Poseidon2SkinnyChip<DEGREE, F> {
 }
 
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
     use super::{utils::WIDTH, Poseidon2SkinnyChip};
     use crate::{

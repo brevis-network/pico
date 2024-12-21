@@ -1555,10 +1555,15 @@ impl Default for EmulatorMode {
     }
 }
 
+#[allow(unused_imports)]
 mod tests {
     use super::{Program, RiscvEmulator};
-    use crate::compiler::riscv::compiler::{Compiler, SourceType};
+    use crate::{
+        compiler::riscv::compiler::{Compiler, SourceType},
+        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    };
     use alloc::sync::Arc;
+    use p3_baby_bear::BabyBear;
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =
