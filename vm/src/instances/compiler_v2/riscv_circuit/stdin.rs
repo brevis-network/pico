@@ -1,24 +1,18 @@
 use crate::{
-    compiler::{
-        recursion_v2::{
-            circuit::{
-                challenger::DuplexChallengerVariable,
-                config::{BabyBearFriConfigVariable, CircuitConfig},
-                hash::FieldHasherVariable,
-                stark::BaseProofVariable,
-                types,
-                types::BaseVerifyingKeyVariable,
-                witness::{witnessable::Witnessable, WitnessWriter},
-            },
-            prelude::*,
+    compiler::recursion_v2::{
+        circuit::{
+            challenger::DuplexChallengerVariable,
+            config::{BabyBearFriConfigVariable, CircuitConfig},
+            stark::BaseProofVariable,
+            types::BaseVerifyingKeyVariable,
+            witness::{witnessable::Witnessable, WitnessWriter},
         },
-        riscv::program::Program,
+        prelude::*,
     },
     configs::{
-        config::{Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
+        config::{StarkGenericConfig, Val},
         stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val},
     },
-    instances::compiler_v2::witness,
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -27,13 +21,10 @@ use crate::{
         proof::BaseProof,
     },
     primitives::consts::DIGEST_SIZE,
-    recursion_v2::air::Block,
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
 use p3_field::FieldAlgebra;
-use pico_derive::DslVariable;
 
 #[derive(Clone)]
 pub struct ConvertStdin<'a, SC, C>

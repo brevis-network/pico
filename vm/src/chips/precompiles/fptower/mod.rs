@@ -5,17 +5,12 @@ pub mod fp2_mul;
 use crate::chips::{
     chips::riscv_memory::read_write::columns::MemoryCols, gadgets::utils::limbs::Limbs,
 };
-use hybrid_array::ArraySize;
+use hybrid_array::{Array, ArraySize};
 
 pub fn limbs_from_prev_access<T: Copy, N: ArraySize, M: MemoryCols<T>>(cols: &[M]) -> Limbs<T, N> {
-    let vec = cols
-        .iter()
-        .flat_map(|access| access.prev_value().0)
-        .collect::<Box<[T]>>();
+    let vec = cols.iter().flat_map(|access| access.prev_value().0);
 
-    let sized = (&*vec)
-        .try_into()
-        .unwrap_or_else(|_| panic!("failed to convert to limbs"));
+    let sized = Array::try_from_iter(vec).unwrap_or_else(|_| panic!("failed to convert to limbs"));
     Limbs(sized)
 }
 

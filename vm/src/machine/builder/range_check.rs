@@ -1,10 +1,7 @@
 //! Range check associating builder functions
 
 use super::{ChipBuilder, ChipLookupBuilder};
-use crate::{
-    compiler::riscv::opcode::RangeCheckOpcode,
-    machine::lookup::{LookupScope, LookupType, SymbolicLookup},
-};
+use crate::compiler::riscv::opcode::RangeCheckOpcode;
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
 

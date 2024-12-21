@@ -10,21 +10,17 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey},
-        lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
+    recursion_v2::runtime::RecursionRecord,
 };
 use anyhow::Result;
 use p3_air::Air;
-use p3_challenger::CanObserve;
-use p3_field::Field;
 use p3_maybe_rayon::prelude::*;
-use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument, trace};
+use std::{any::type_name, time::Instant};
+use tracing::{debug, info, instrument};
 
 pub struct ConvertMachine<SC, C>
 where

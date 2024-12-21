@@ -1,7 +1,7 @@
 use crate::{
     compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
-    emulator::{emulator_v2::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
+    emulator::record::RecordBehavior,
     instances::{
         compiler_v2::recursion_circuit::stdin::RecursionStdin,
         configs::recur_config::StarkConfig as RecursionSC,
@@ -9,20 +9,14 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
-        lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::COMBINE_SIZE,
     recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
-use anyhow::Result;
 use p3_air::Air;
-use p3_challenger::CanObserve;
 use p3_field::FieldAlgebra;
-use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument, trace};
 
@@ -112,7 +106,7 @@ where
         }
 
         // verify
-        self.base_machine.verify_ensemble(vk, proof.proofs())?;
+        self.base_machine.verify_ensemble(vk, &proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 

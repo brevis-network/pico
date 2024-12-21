@@ -3,7 +3,7 @@ use crate::{
         recursion_v2::{circuit::witness::witnessable::Witnessable, program::RecursionProgram},
         riscv::program::Program,
     },
-    configs::config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},
+    configs::config::{Challenge, StarkGenericConfig, Val},
     emulator::riscv::{
         record::EmulationRecord,
         riscv_emulator::{EmulatorMode, RiscvEmulator},
@@ -12,8 +12,7 @@ use crate::{
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
         compiler_v2::{
-            recursion_circuit::stdin::RecursionStdin,
-            riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
+            recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,
         },
         configs::{
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},

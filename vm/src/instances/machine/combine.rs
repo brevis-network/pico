@@ -11,8 +11,6 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
-        lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -22,11 +20,10 @@ use crate::{
 };
 use anyhow::Result;
 use p3_air::Air;
-use p3_challenger::CanObserve;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, info, instrument};
 
 pub struct CombineMachine<SC, C>
 where
@@ -189,7 +186,7 @@ where
 
         // verify
         self.base_machine
-            .verify_ensemble(proof.vks().first().unwrap(), proof.proofs())?;
+            .verify_ensemble(proof.vks().first().unwrap(), &proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 

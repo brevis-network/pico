@@ -5,10 +5,7 @@ use crate::{
         builder::{ChipBuilder, PermutationBuilder},
         folder::SymbolicConstraintFolder,
         lookup::{LookupScope, VirtualPairLookup},
-        permutation::{
-            eval_permutation_constraints, generate_permutation_trace, get_grouped_maps,
-            permutation_trace_width,
-        },
+        permutation::{eval_permutation_constraints, generate_permutation_trace, get_grouped_maps},
         utils::get_log_quotient_degree,
     },
 };

@@ -8,8 +8,7 @@ use crate::{
         lookup::{LookupScope, LookupType, VirtualPairLookup},
     },
 };
-use itertools::multizip;
-use log::{debug, error, info};
+use log::{error, info};
 use p3_air::Air;
 use p3_field::{Field, FieldAlgebra, PrimeField64};
 use p3_matrix::Matrix;

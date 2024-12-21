@@ -16,7 +16,7 @@ use crate::{
 };
 use p3_baby_bear::BabyBear;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
-use p3_fri::{CommitPhaseProofStep, QueryProof};
+use p3_fri::CommitPhaseProofStep;
 use p3_symmetric::Hash;
 use std::borrow::Borrow;
 

@@ -1,7 +1,5 @@
 #![deny(warnings)]
-#![allow(clippy::needless_range_loop)]
-#![allow(clippy::module_inception)]
-#![allow(unused_imports)]
+#![feature(generic_arg_infer)]
 
 extern crate alloc;
 extern crate core;
@@ -13,4 +11,5 @@ pub mod emulator;
 pub mod instances;
 pub mod machine;
 pub mod primitives;
+pub mod proverchain;
 pub mod recursion_v2;

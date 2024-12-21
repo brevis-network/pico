@@ -21,10 +21,7 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
-use p3_matrix::{
-    dense::{DenseMatrix, RowMajorMatrix},
-    Matrix,
-};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use rayon::ThreadPoolBuilder;
@@ -93,7 +90,7 @@ where
         let preprocessed_trace = chips_and_preprocessed
             .into_iter()
             .map(|t| t.1)
-            .collect::<Vec<_>>();
+            .collect::<Arc<[_]>>();
 
         let pc_start = program.pc_start();
 

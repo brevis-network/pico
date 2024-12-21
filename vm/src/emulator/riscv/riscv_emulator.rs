@@ -1013,7 +1013,7 @@ impl RiscvEmulator {
         record.chunk = chunk;
         record.timestamp = timestamp;
 
-        {
+        if self.unconstrained.is_none() && self.emulator_mode == EmulatorMode::Trace {
             let local_memory_access = if let Some(local_memory_access) = local_memory_access {
                 local_memory_access
             } else {
@@ -1092,7 +1092,7 @@ impl RiscvEmulator {
         record.chunk = chunk;
         record.timestamp = timestamp;
 
-        {
+        if self.unconstrained.is_none() && self.emulator_mode == EmulatorMode::Trace {
             let local_memory_access = if let Some(local_memory_access) = local_memory_access {
                 local_memory_access
             } else {
@@ -1450,8 +1450,10 @@ impl RiscvEmulator {
     /// Bump the record.
     pub fn bump_record(&mut self) {
         // Copy all of the existing local memory accesses to the record's local_memory_access vec.
-        for (_, event) in self.local_memory_access.drain() {
-            self.record.cpu_local_memory_access.push(event);
+        if self.emulator_mode == EmulatorMode::Trace {
+            for (_, event) in self.local_memory_access.drain() {
+                self.record.cpu_local_memory_access.push(event);
+            }
         }
 
         let removed_record =
@@ -1465,8 +1467,10 @@ impl RiscvEmulator {
     /// Bump the records to self.batch_records.
     pub fn bump_record_to_batch(&mut self) {
         // Copy all of the existing local memory accesses to the record's local_memory_access vec.
-        for (_, event) in self.local_memory_access.drain() {
-            self.record.cpu_local_memory_access.push(event);
+        if self.emulator_mode == EmulatorMode::Trace {
+            for (_, event) in self.local_memory_access.drain() {
+                self.record.cpu_local_memory_access.push(event);
+            }
         }
 
         let removed_record =
@@ -1553,12 +1557,8 @@ impl Default for EmulatorMode {
 
 mod tests {
     use super::{Program, RiscvEmulator};
-    use crate::{
-        compiler::riscv::compiler::{Compiler, SourceType},
-        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
-    };
+    use crate::compiler::riscv::compiler::{Compiler, SourceType};
     use alloc::sync::Arc;
-    use p3_baby_bear::BabyBear;
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =

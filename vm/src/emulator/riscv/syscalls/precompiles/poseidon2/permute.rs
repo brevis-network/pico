@@ -1,5 +1,4 @@
-use p3_baby_bear::BabyBear;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::PrimeField32;
 use std::marker::PhantomData;
 
 use crate::{

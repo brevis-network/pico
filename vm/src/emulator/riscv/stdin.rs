@@ -1,17 +1,10 @@
 use crate::{
-    compiler::{
-        recursion_v2::{
-            circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
-        },
-        riscv::program::Program,
+    compiler::recursion_v2::{
+        circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
     },
-    configs::{
-        config::{Challenger, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
-    },
-    emulator::riscv::record::EmulationRecord,
+    configs::config::{StarkGenericConfig, Val},
     instances::{
-        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
+        chiptype::riscv_chiptype::RiscvChipType,
         compiler_v2::{
             recursion_circuit::{combine::builder::CombineVerifierCircuit, stdin::RecursionStdin},
             riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
@@ -28,14 +21,12 @@ use crate::{
         machine::BaseMachine,
         proof::BaseProof,
     },
-    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
+    primitives::consts::DIGEST_SIZE,
     recursion_v2::runtime::RecursionRecord,
 };
 use alloc::sync::Arc;
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
-use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use serde::Serialize;
 use std::array;
@@ -47,8 +38,8 @@ pub struct EmulatorStdinBuilder<I> {
 
 #[derive(Default, Serialize)]
 pub struct EmulatorStdin<P, I> {
-    pub programs: Vec<P>,
-    pub inputs: Vec<I>,
+    pub programs: Arc<[P]>,
+    pub inputs: Arc<[I]>,
     pub pointer: usize,
 }
 
@@ -104,10 +95,10 @@ impl EmulatorStdinBuilder<Vec<u8>> {
         self.buffer.push(tmp);
     }
 
-    pub fn finalize(self) -> EmulatorStdin<Program, Vec<u8>> {
+    pub fn finalize<P>(self) -> EmulatorStdin<P, Vec<u8>> {
         EmulatorStdin {
-            programs: vec![],
-            inputs: self.buffer,
+            programs: Arc::new([]),
+            inputs: self.buffer.into(),
             pointer: 0,
         }
     }
@@ -170,8 +161,8 @@ impl<'a>
             .unzip();
 
         Self {
-            programs,
-            inputs,
+            programs: programs.into(),
+            inputs: inputs.into(),
             pointer: 0,
         }
     }
@@ -201,13 +192,13 @@ where
         assert_eq!(vks.len(), proofs.len());
 
         let (programs, inputs): (Vec<_>, Vec<_>) = proofs
-            .chunks(combine_size)
-            .zip(vks.chunks(combine_size))
+            .par_chunks(combine_size)
+            .zip_eq(vks.par_chunks(combine_size))
             .map(|(batch_proofs, batch_vks)| {
                 let input = RecursionStdin {
                     machine,
-                    vks: batch_vks.to_vec(), // todo: optimization to non-copy
-                    proofs: batch_proofs.to_vec(),
+                    vks: batch_vks.into(), // todo: optimization to non-copy
+                    proofs: batch_proofs.into(),
                     flag_complete,
                     vk_root,
                 };
@@ -219,8 +210,8 @@ where
             .unzip();
 
         Self {
-            programs,
-            inputs,
+            programs: programs.into(),
+            inputs: inputs.into(),
             pointer: 0,
         }
     }

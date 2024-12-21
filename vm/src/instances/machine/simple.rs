@@ -3,7 +3,6 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -77,7 +76,7 @@ where
         assert_eq!(proof.vks().len(), 1);
 
         self.base_machine
-            .verify_ensemble(&(proof.vks()[0]), proof.proofs())?;
+            .verify_ensemble(&(proof.vks()[0]), &proof.proofs())?;
 
         info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 

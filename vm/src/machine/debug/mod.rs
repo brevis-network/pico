@@ -11,7 +11,6 @@ use super::{
     lookup::{LookupScope, LookupType},
 };
 use crate::{configs::config::StarkGenericConfig, emulator::record::RecordBehavior};
-use k256::pkcs8::DecodePublicKey;
 use log::info;
 use p3_air::Air;
 use p3_field::PrimeField64;

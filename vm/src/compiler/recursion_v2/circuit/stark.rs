@@ -18,13 +18,12 @@ use crate::{
     configs::config::{Challenger, FieldGenericConfig, StarkGenericConfig, Val},
     instances::configs::riscv_config::StarkConfig as RiscvSC,
     machine::{
-        chip::{ChipBehavior, MetaChip},
+        chip::ChipBehavior,
         folder::{
             // todo: use v2
             ProverConstraintFolder,
             VerifierConstraintFolder,
         },
-        keys::BaseVerifyingKey,
         lookup::LookupScope,
         machine::BaseMachine,
         proof::{BaseCommitments, BaseOpenedValues},
@@ -36,8 +35,8 @@ use itertools::{izip, Itertools};
 use p3_air::{Air, BaseAir};
 use p3_baby_bear::BabyBear;
 use p3_commit::{Mmcs, Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
-use p3_matrix::{dense::RowMajorMatrix, Dimensions};
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
+use p3_matrix::dense::RowMajorMatrix;
 
 /// Reference: [pico_machine::stark::BaseProof]
 #[derive(Clone)]

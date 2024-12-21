@@ -9,7 +9,7 @@ use super::{
     hash::{FieldHasherVariable, Posedion2BabyBearHasherVariable},
     utils::{felt_bytes_to_bn254_var, felts_to_bn254_var, words_to_bytes},
 };
-use crate::configs::{config::SimpleFriConfig, stark_config::bb_poseidon2::SC_Val};
+use crate::configs::config::SimpleFriConfig;
 use crate::{
     compiler::recursion_v2::ir::{Builder, Ext, Felt, SymbolicFelt, Var, Variable},
     configs::{

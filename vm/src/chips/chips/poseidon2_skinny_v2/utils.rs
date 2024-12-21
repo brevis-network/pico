@@ -1,9 +1,7 @@
 use crate::primitives::consts::{
-    MONTY_INVERSE, PERMUTATION_RATE, PERMUTATION_WIDTH,
-    POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY,
+    PERMUTATION_RATE, PERMUTATION_WIDTH, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY,
 };
 use p3_field::{FieldAlgebra, PrimeField32};
-use p3_poseidon2::matmul_internal;
 
 /// The width of the permutation.
 pub const WIDTH: usize = PERMUTATION_WIDTH;

@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{Com, Dom, PcsProverData, StarkGenericConfig},
+    configs::config::{Com, PcsProverData, StarkGenericConfig},
     primitives::{consts::DIGEST_SIZE, poseidon2_hash},
 };
 use alloc::sync::Arc;
@@ -16,11 +16,26 @@ pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// start pc of program
     pub pc_start: SC::Val,
     /// named preprocessed traces.
-    pub preprocessed_trace: Vec<RowMajorMatrix<SC::Val>>,
+    pub preprocessed_trace: Arc<[RowMajorMatrix<SC::Val>]>,
     /// The pcs data for the preprocessed traces.
     pub preprocessed_prover_data: PcsProverData<SC>,
     /// the index of for chips, chip name for key
     pub preprocessed_chip_ordering: Arc<HashMap<String, usize>>,
+}
+
+impl<SC: StarkGenericConfig> Clone for BaseProvingKey<SC>
+where
+    PcsProverData<SC>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            commit: self.commit.clone(),
+            pc_start: self.pc_start,
+            preprocessed_trace: self.preprocessed_trace.clone(),
+            preprocessed_prover_data: self.preprocessed_prover_data.clone(),
+            preprocessed_chip_ordering: self.preprocessed_chip_ordering.clone(),
+        }
+    }
 }
 
 impl<SC: StarkGenericConfig> BaseProvingKey<SC> {

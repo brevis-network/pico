@@ -3,21 +3,15 @@ use crate::{
         circuit::{
             challenger::DuplexChallengerVariable,
             config::{BabyBearFriConfigVariable, CircuitConfig},
-            hash::FieldHasherVariable,
             stark::BaseProofVariable,
-            types,
             types::BaseVerifyingKeyVariable,
             witness::{witnessable::Witnessable, WitnessWriter},
         },
         prelude::*,
     },
     configs::{
-        config::{Com, FieldGenericConfig, PcsProof, StarkGenericConfig},
+        config::StarkGenericConfig,
         stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val},
-    },
-    instances::{
-        compiler_v2::witness,
-        configs::{recur_config as rcf, riscv_config::StarkConfig as RiscvSC},
     },
     machine::{
         chip::ChipBehavior,
@@ -26,11 +20,10 @@ use crate::{
         machine::BaseMachine,
         proof::BaseProof,
     },
-    recursion_v2::air::Block,
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
+use p3_challenger::CanObserve;
 use p3_field::FieldAlgebra;
 
 pub struct SimpleRecursionStdin<'a, SC, C>

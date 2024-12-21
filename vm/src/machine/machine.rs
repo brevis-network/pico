@@ -1,7 +1,4 @@
-use super::{
-    folder::DebugConstraintFolder,
-    lookup::{LookupScope, LookupType},
-};
+use super::{folder::DebugConstraintFolder, lookup::LookupScope};
 use crate::{
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
@@ -23,7 +20,7 @@ use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{Field, FieldAlgebra, PrimeField64};
 use p3_maybe_rayon::prelude::*;
 use std::{array, time::Instant};
-use tracing::{debug, info};
+use tracing::debug;
 
 /// Functions that each machine instance should implement.
 pub trait MachineBehavior<SC, C, I>

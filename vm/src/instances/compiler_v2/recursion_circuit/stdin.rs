@@ -1,24 +1,17 @@
 use crate::{
-    compiler::{
-        recursion_v2::{
-            circuit::{
-                challenger::DuplexChallengerVariable,
-                config::{BabyBearFriConfigVariable, CircuitConfig},
-                hash::FieldHasherVariable,
-                stark::BaseProofVariable,
-                types,
-                types::BaseVerifyingKeyVariable,
-                witness::{witnessable::Witnessable, WitnessWriter},
-            },
-            prelude::*,
+    compiler::recursion_v2::{
+        circuit::{
+            config::{BabyBearFriConfigVariable, CircuitConfig},
+            stark::BaseProofVariable,
+            types::BaseVerifyingKeyVariable,
+            witness::{witnessable::Witnessable, WitnessWriter},
         },
-        riscv::program::Program,
+        prelude::*,
     },
     configs::{
-        config::{Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
+        config::{StarkGenericConfig, Val},
         stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val},
     },
-    instances::compiler_v2::witness,
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -27,13 +20,11 @@ use crate::{
         proof::BaseProof,
     },
     primitives::consts::DIGEST_SIZE,
-    recursion_v2::air::Block,
 };
+use alloc::sync::Arc;
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
-use p3_challenger::{CanObserve, DuplexChallenger};
 use p3_field::FieldAlgebra;
-use pico_derive::DslVariable;
 
 #[derive(Clone)]
 pub struct RecursionStdin<'a, SC, C>
@@ -44,8 +35,8 @@ where
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub machine: &'a BaseMachine<SC, C>,
-    pub vks: Vec<BaseVerifyingKey<SC>>,
-    pub proofs: Vec<BaseProof<SC>>,
+    pub vks: Arc<[BaseVerifyingKey<SC>]>,
+    pub proofs: Arc<[BaseProof<SC>]>,
     pub flag_complete: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
 }
@@ -69,8 +60,8 @@ where
 {
     pub fn new(
         machine: &'a BaseMachine<SC, C>,
-        vks: Vec<BaseVerifyingKey<SC>>,
-        proofs: Vec<BaseProof<SC>>,
+        vks: Arc<[BaseVerifyingKey<SC>]>,
+        proofs: Arc<[BaseProof<SC>]>,
         flag_complete: bool,
         vk_root: [SC::Val; DIGEST_SIZE],
     ) -> Self {
@@ -94,8 +85,8 @@ where
     type WitnessVariable = RecursionStdinVariable<CC, BabyBearPoseidon2>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
-        let vks = self.vks.read(builder);
-        let proofs = self.proofs.read(builder);
+        let vks = self.vks.as_ref().read(builder);
+        let proofs = self.proofs.as_ref().read(builder);
         let flag_complete = SC_Val::from_bool(self.flag_complete).read(builder);
         let vk_root = self.vk_root.read(builder);
 
@@ -108,8 +99,8 @@ where
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
-        self.vks.write(witness);
-        self.proofs.write(witness);
+        self.vks.as_ref().write(witness);
+        self.proofs.as_ref().write(witness);
         self.flag_complete.write(witness);
         self.vk_root.write(witness);
     }

@@ -78,7 +78,7 @@ fn main() {
         riscv_start.elapsed().as_millis()
     );
 
-    let riscv_proof_size = bincode::serialize(riscv_proof.proofs()).unwrap().len();
+    let riscv_proof_size = bincode::serialize(&riscv_proof.proofs()).unwrap().len();
     info!("PERF-step=proof_size-{}", riscv_proof_size);
 
     // Verify the proof.
@@ -94,7 +94,7 @@ fn main() {
         return;
     }
 
-    // -------- Riscv Compression Recursion Machine --------
+    // -------- Riscv Convert Recursion Machine --------
 
     info!("\n Begin CONVERT..");
 
@@ -117,7 +117,7 @@ fn main() {
         riscv_vk,
         vk_root,
         riscv_machine.base_machine(),
-        riscv_proof.proofs(),
+        &riscv_proof.proofs(),
     );
 
     let convert_witness = ProvingWitness::setup_for_convert(
@@ -134,7 +134,7 @@ fn main() {
         convert_start.elapsed().as_millis()
     );
 
-    let convert_proof_size = bincode::serialize(convert_proof.proofs()).unwrap().len();
+    let convert_proof_size = bincode::serialize(&convert_proof.proofs()).unwrap().len();
     info!("PERF-step=proof_size-{}", convert_proof_size);
 
     // Verify the proof.
@@ -172,7 +172,7 @@ fn main() {
     let combine_stdin = EmulatorStdin::setup_for_combine(
         vk_root,
         convert_proof.vks(),
-        convert_proof.proofs(),
+        &convert_proof.proofs(),
         convert_machine.base_machine(),
         COMBINE_SIZE,
         false,
@@ -193,7 +193,7 @@ fn main() {
         combine_start.elapsed().as_millis(),
     );
 
-    let combine_proof_size = bincode::serialize(combine_proof.proofs()).unwrap().len();
+    let combine_proof_size = bincode::serialize(&combine_proof.proofs()).unwrap().len();
     info!("PERF-step=proof_size-{}", combine_proof_size);
 
     // Verify the proof.
@@ -229,8 +229,8 @@ fn main() {
 
     let compress_stdin = RecursionStdin::new(
         compress_machine.base_machine(),
-        combine_proof.vks().to_vec(),
-        combine_proof.proofs().to_vec(),
+        combine_proof.vks.clone(),
+        combine_proof.proofs.clone(),
         true,
         vk_root,
     );
@@ -270,7 +270,7 @@ fn main() {
         compress_start.elapsed().as_millis()
     );
 
-    let compress_proof_size = bincode::serialize(compress_proof.proofs()).unwrap().len();
+    let compress_proof_size = bincode::serialize(&compress_proof.proofs()).unwrap().len();
     info!("PERF-step=proof_size-{}", compress_proof_size);
 
     info!("Verifying COMPRESS proof (at {:?})..", start.elapsed());
@@ -305,8 +305,8 @@ fn main() {
 
     let embed_stdin = RecursionStdin::new(
         compress_machine.base_machine(),
-        compress_proof.vks().to_vec(),
-        compress_proof.proofs().to_vec(),
+        compress_proof.vks,
+        compress_proof.proofs,
         true,
         vk_root,
     );
@@ -347,7 +347,7 @@ fn main() {
         embed_start.elapsed().as_millis()
     );
 
-    let embed_proof_size = bincode::serialize(embed_proof.proofs()).unwrap().len();
+    let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
     info!("PERF-step=proof_size-{}", embed_proof_size);
 
     info!("Verifying EMBED proof (at {:?})..", start.elapsed());

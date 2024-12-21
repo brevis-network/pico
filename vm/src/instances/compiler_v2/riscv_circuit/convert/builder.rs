@@ -12,17 +12,13 @@ use crate::{
                 witness::Witnessable,
                 CircuitV2Builder,
             },
-            instruction::commit_public_values,
-            ir::{compiler, compiler::DslIrCompiler},
+            ir::compiler::DslIrCompiler,
             prelude::*,
             program::RecursionProgram,
         },
         word::Word,
     },
-    configs::{
-        config::{Com, FieldGenericConfig, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val, SC_ValMmcs},
-    },
+    configs::{config::Val, stark_config::bb_poseidon2::BabyBearPoseidon2},
     emulator::riscv::public_values::PublicValues,
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -31,23 +27,18 @@ use crate::{
             riscv_config::StarkConfig as RiscvSC,
         },
     },
-    machine::{chip::ChipBehavior, machine::BaseMachine},
+    machine::machine::BaseMachine,
     primitives::consts::{
-        ADDR_NUM_BITS, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS,
-        POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
+        ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS_V2,
     },
     recursion_v2::air::{recursion_public_values_digest, RecursionPublicValues},
 };
 use itertools::Itertools;
 use p3_baby_bear::BabyBear;
-use p3_commit::{Mmcs, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_field::FieldAlgebra;
 use std::{
-    array,
     borrow::{Borrow, BorrowMut},
     marker::PhantomData,
-    mem::MaybeUninit,
 };
 
 /// Circuit that verifies a single riscv proof and checks constraints

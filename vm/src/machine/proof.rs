@@ -34,8 +34,8 @@ where
     }
 
     /// Get the proofs
-    pub fn proofs(&self) -> &[BaseProof<SC>] {
-        self.proofs.as_ref()
+    pub fn proofs(&self) -> Arc<[BaseProof<SC>]> {
+        self.proofs.clone()
     }
 
     /// Get the vks

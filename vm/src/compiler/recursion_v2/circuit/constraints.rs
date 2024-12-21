@@ -7,16 +7,15 @@ use crate::{
     compiler::recursion_v2::ir::{
         Builder, Ext, ExtConst, ExtensionOperand, Felt, SymbolicExt, SymbolicFelt,
     },
-    configs::config::{FieldGenericConfig, StarkGenericConfig},
+    configs::config::FieldGenericConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::GenericVerifierConstraintFolder,
         proof::ChipOpenedValues,
     },
 };
-use anyhow::{bail, Result};
 use core::iter::Iterator;
-use p3_air::{Air, BaseAir};
+use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::{LagrangeSelectors, Mmcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};

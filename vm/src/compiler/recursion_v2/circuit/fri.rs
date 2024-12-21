@@ -1,6 +1,6 @@
 use super::{
     challenger::{CanObserveVariable, CanSampleBitsVariable, FieldChallengerVariable},
-    config::{BabyBearFriConfigVariable, CircuitConfig, FriMmcs},
+    config::{BabyBearFriConfigVariable, CircuitConfig},
     types::{FriChallengesVariable, FriProofVariable, QueryProofVariable, TwoAdicPcsRoundVariable},
 };
 use crate::{
@@ -13,7 +13,7 @@ use itertools::{izip, Itertools};
 use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
 use p3_field::{FieldAlgebra, TwoAdicField};
-use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof};
+use p3_fri::{BatchOpening, CommitPhaseProofStep, FriProof, QueryProof};
 use p3_symmetric::Hash;
 use p3_util::log2_strict_usize;
 use std::{

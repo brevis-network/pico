@@ -1,60 +1,31 @@
 use super::super::stdin::{RecursionStdin, RecursionStdinVariable};
 use crate::{
-    chips::chips::riscv_cpu::MAX_CPU_LOG_DEGREE,
-    compiler::{
-        recursion_v2::{
-            circuit::{
-                challenger::{
-                    CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable,
-                },
-                config::{BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig},
-                stark::StarkVerifier,
-                utils::uninit_challenger_pv,
-                witness::Witnessable,
-                CircuitV2Builder,
-            },
-            instruction::commit_public_values,
-            ir::{compiler, compiler::DslIrCompiler},
-            prelude::*,
-            program::RecursionProgram,
+    compiler::recursion_v2::{
+        circuit::{
+            challenger::CanObserveVariable,
+            config::{BabyBearFriConfigVariable, CircuitConfig},
+            stark::StarkVerifier,
+            witness::Witnessable,
         },
-        word::Word,
+        ir::compiler::DslIrCompiler,
+        prelude::*,
+        program::RecursionProgram,
     },
-    configs::{
-        config::{Com, FieldGenericConfig, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val, SC_ValMmcs},
-    },
-    emulator::riscv::public_values::PublicValues,
+    configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
     instances::{
-        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        configs::{
-            recur_config::{
-                FieldConfig as RiscvFC, FieldConfig as RecursionFC, StarkConfig as RecursionSC,
-            },
-            riscv_config::StarkConfig as RiscvSC,
+        chiptype::recursion_chiptype_v2::RecursionChipType,
+        configs::recur_config::{
+            FieldConfig as RiscvFC, FieldConfig as RecursionFC, StarkConfig as RecursionSC,
         },
     },
-    machine::{chip::ChipBehavior, machine::BaseMachine},
-    primitives::consts::{
-        ADDR_NUM_BITS, COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE,
-        MAX_LOG_NUMBER_OF_CHUNKS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
-    },
+    machine::machine::BaseMachine,
+    primitives::consts::COMPRESS_DEGREE,
     recursion_v2::air::{
-        assert_recursion_public_values_valid, embed_public_values_digest,
-        recursion_public_values_digest, ChallengerPublicValues, RecursionPublicValues,
+        assert_recursion_public_values_valid, embed_public_values_digest, RecursionPublicValues,
     },
 };
-use itertools::{izip, Itertools};
-use p3_baby_bear::BabyBear;
-use p3_commit::{Mmcs, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
-use p3_matrix::dense::RowMajorMatrix;
-use std::{
-    array,
-    borrow::{Borrow, BorrowMut},
-    marker::PhantomData,
-    mem::MaybeUninit,
-};
+use p3_field::FieldAlgebra;
+use std::{borrow::BorrowMut, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
 pub struct EmbedVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(

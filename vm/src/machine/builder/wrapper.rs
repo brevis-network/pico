@@ -1,6 +1,5 @@
 use crate::{
     compiler::recursion_v2::{
-        circuit::config::EmbedConfig,
         constraints::{Constraint, ConstraintCompiler},
         ir::{Builder, Var, Witness},
     },
@@ -8,10 +7,7 @@ use crate::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         configs::embed_config::StarkConfig as EmbedSC,
     },
-    machine::{
-        keys::BaseVerifyingKey,
-        proof::{BaseProof, MetaProof},
-    },
+    machine::{keys::BaseVerifyingKey, proof::BaseProof},
 };
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::Bn254Fr;

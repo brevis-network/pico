@@ -1,16 +1,9 @@
 use crate::{
     compiler::recursion_v2::{
-        circuit::{
-            config::{BabyBearFriConfigVariable, CircuitConfig},
-            hash::FieldHasherVariable,
-            stark::BaseProofVariable,
-        },
+        circuit::{config::CircuitConfig, stark::BaseProofVariable},
         ir::{Builder, Ext, Felt},
     },
-    configs::{
-        config::{Com, PcsProof},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
-    },
+    configs::stark_config::bb_poseidon2::BabyBearPoseidon2,
     instances::configs::recur_config as rcf,
     machine::proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
 };
@@ -126,7 +119,7 @@ impl<CC: CircuitConfig, T: Witnessable<CC>, const N: usize> Witnessable<CC> for 
     }
 }
 
-impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for Vec<T> {
+impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for &[T] {
     type WitnessVariable = Vec<T::WitnessVariable>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
@@ -137,6 +130,18 @@ impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for Vec<T> {
         for x in self.iter() {
             x.write(witness);
         }
+    }
+}
+
+impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for Vec<T> {
+    type WitnessVariable = Vec<T::WitnessVariable>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        self.as_slice().read(builder)
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        self.as_slice().write(witness)
     }
 }
 

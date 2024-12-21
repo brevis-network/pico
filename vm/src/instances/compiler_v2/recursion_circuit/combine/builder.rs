@@ -1,68 +1,46 @@
 use super::super::stdin::{RecursionStdin, RecursionStdinVariable};
 use crate::{
-    chips::chips::riscv_cpu::MAX_CPU_LOG_DEGREE,
     compiler::{
         recursion_v2::{
             circuit::{
-                challenger::{
-                    CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable,
-                },
-                config::{BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig},
+                challenger::CanObserveVariable,
+                config::{BabyBearFriConfigVariable, CircuitConfig},
                 constraints::RecursiveVerifierConstraintFolder,
                 stark::StarkVerifier,
                 utils::uninit_challenger_pv,
                 witness::Witnessable,
-                CircuitV2Builder,
             },
-            instruction::commit_public_values,
-            ir::{compiler, compiler::DslIrCompiler},
+            ir::compiler::DslIrCompiler,
             prelude::*,
             program::RecursionProgram,
         },
         word::Word,
     },
-    configs::{
-        config::{Com, FieldGenericConfig, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val, SC_ValMmcs},
-    },
-    emulator::riscv::public_values::PublicValues,
-    instances::{
-        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        configs::{
-            recur_config::{
-                FieldConfig as RiscvFC, FieldConfig as RecursionFC, StarkConfig as RecursionSC,
-            },
-            riscv_config::StarkConfig as RiscvSC,
-        },
+    configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
+    instances::configs::recur_config::{
+        FieldConfig as RiscvFC, FieldConfig as RecursionFC, StarkConfig as RecursionSC,
     },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         machine::BaseMachine,
     },
-    primitives::consts::{
-        ADDR_NUM_BITS, CONVERT_DEGREE, DIGEST_SIZE, EMPTY, MAX_LOG_CHUNK_SIZE,
-        MAX_LOG_NUMBER_OF_CHUNKS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
-    },
+    primitives::consts::{ADDR_NUM_BITS, DIGEST_SIZE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2},
     recursion_v2::{
         air::{
-            assert_recursion_public_values_valid, embed_public_values_digest,
-            recursion_public_values_digest, ChallengerPublicValues, RecursionPublicValues,
+            assert_recursion_public_values_valid, recursion_public_values_digest,
+            ChallengerPublicValues, RecursionPublicValues,
         },
         runtime::RecursionRecord,
     },
 };
-use itertools::{izip, Itertools};
+use itertools::Itertools;
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
-use p3_commit::{Mmcs, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_field::FieldAlgebra;
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
     marker::PhantomData,
-    mem::MaybeUninit,
 };
 
 #[derive(Debug, Clone, Copy)]

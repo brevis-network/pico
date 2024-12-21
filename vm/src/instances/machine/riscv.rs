@@ -1,9 +1,6 @@
 use crate::{
     compiler::{riscv::program::Program, word::Word},
-    configs::{
-        config::{Com, PcsProverData, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::SC_Challenge,
-    },
+    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{
         emulator_v2::MetaEmulator,
         record::RecordBehavior,
@@ -12,7 +9,6 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey},
         lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
@@ -21,12 +17,11 @@ use crate::{
     primitives::consts::MAX_LOG_CHUNK_SIZE,
 };
 use anyhow::Result;
-use itertools::Itertools;
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField32, PrimeField64};
 use p3_maybe_rayon::prelude::*;
-use std::{any::type_name, array, borrow::Borrow, time::Instant};
+use std::{any::type_name, borrow::Borrow};
 use tracing::{debug, info, instrument};
 
 pub struct RiscvMachine<SC, C>
@@ -315,7 +310,7 @@ where
         }
 
         // Verify the proofs.
-        self.base_machine.verify_ensemble(vk, proof.proofs())?;
+        self.base_machine.verify_ensemble(vk, &proof.proofs())?;
 
         Ok(())
     }

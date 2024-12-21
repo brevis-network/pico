@@ -4,11 +4,9 @@ use crate::{
         recursion_v2::{circuit, prelude::*},
         word::Word,
     },
-    configs::config::FieldGenericConfig,
-    instances::configs::recur_config::StarkConfig as RecursionSC,
     primitives::consts::{
-        DIGEST_SIZE, MAX_NUM_PVS_V2, PERMUTATION_RATE, PERMUTATION_WIDTH, POSEIDON_NUM_WORDS,
-        PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
+        DIGEST_SIZE, MAX_NUM_PVS_V2, PERMUTATION_RATE, PERMUTATION_WIDTH, PV_DIGEST_NUM_WORDS,
+        RECURSION_NUM_PVS_V2,
     },
     recursion_v2::air::public_values::circuit::{
         config::CircuitConfig, hash::Posedion2BabyBearHasherVariable,
@@ -16,9 +14,8 @@ use crate::{
 };
 use core::fmt::Debug;
 use itertools::Itertools;
-use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::PrimeField32;
 use p3_symmetric::CryptographicPermutation;
 use pico_derive::AlignedBorrow;
 use serde::{Deserialize, Serialize};

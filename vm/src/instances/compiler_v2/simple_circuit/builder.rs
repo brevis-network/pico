@@ -8,26 +8,20 @@ use crate::{
             witness::Witnessable,
             CircuitV2Builder,
         },
-        ir::{compiler, compiler::DslIrCompiler, Builder, Ext, ExtConst, Felt},
+        ir::{compiler::DslIrCompiler, Builder, Ext, ExtConst, Felt},
         program::RecursionProgram,
     },
-    configs::{
-        config::{Com, FieldGenericConfig, StarkGenericConfig},
-        stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val, SC_ValMmcs},
-    },
+    configs::stark_config::bb_poseidon2::BabyBearPoseidon2,
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType,
-        configs::{recur_config::FieldConfig as RiscvFC, riscv_config::StarkConfig as RiscvSC},
+        chiptype::riscv_chiptype::RiscvChipType, configs::recur_config::FieldConfig as RiscvFC,
     },
     machine::machine::BaseMachine,
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS_V2},
     recursion_v2::air::RecursionPublicValues,
 };
 use p3_baby_bear::BabyBear;
-use p3_commit::{Mmcs, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
-use p3_matrix::dense::RowMajorMatrix;
-use std::{array, borrow::BorrowMut, marker::PhantomData};
+use p3_field::FieldAlgebra;
+use std::{borrow::BorrowMut, marker::PhantomData};
 
 /// A program for recursively verifying a batch of Pico proofs.
 #[derive(Debug, Clone, Copy)]

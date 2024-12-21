@@ -6,10 +6,7 @@ use super::{
 use crate::{
     compiler::recursion_v2::ir::{Builder, DslIr, Felt, Var},
     configs::{config::FieldGenericConfig, stark_config::bb_poseidon2::BabyBearPoseidon2},
-    instances::configs::{
-        embed_config::{StarkConfig as EmbedSC, MULTI_FIELD_CHALLENGER_WIDTH},
-        recur_config::StarkConfig as RecursionSC,
-    },
+    instances::configs::embed_config::{StarkConfig as EmbedSC, MULTI_FIELD_CHALLENGER_WIDTH},
     primitives::{
         consts::{DIGEST_SIZE, PERMUTATION_RATE, PERMUTATION_WIDTH},
         pico_poseidon2bb_init, pico_poseidon2bn254_init,

@@ -1,7 +1,5 @@
 use crate::{
-    compiler::{
-        program::ProgramBehavior, recursion_v2::program::RecursionProgram, riscv::program::Program,
-    },
+    compiler::{recursion_v2::program::RecursionProgram, riscv::program::Program},
     configs::config::{StarkGenericConfig, Val},
     emulator::{
         opts::EmulatorOpts,

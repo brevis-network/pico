@@ -2,21 +2,16 @@ use crate::{
     compiler::recursion_v2::{
         circuit::{
             challenger::DuplexChallengerVariable,
-            config::{BabyBearFriConfigVariable, CircuitConfig},
-            hash::FieldHasherVariable,
+            config::CircuitConfig,
             types::BaseVerifyingKeyVariable,
             witness::{WitnessWriter, Witnessable},
         },
         ir::{Builder, Felt, Var},
     },
-    configs::{
-        config::{Com, PcsProof},
-        stark_config::{
-            bb_bn254_poseidon2::BbBn254Poseidon2,
-            bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Perm, SC_Val},
-        },
+    configs::stark_config::{
+        bb_bn254_poseidon2::BbBn254Poseidon2,
+        bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Perm, SC_Val},
     },
-    instances::configs::recur_config as rcf,
     machine::keys::BaseVerifyingKey,
 };
 use p3_baby_bear::BabyBear;
