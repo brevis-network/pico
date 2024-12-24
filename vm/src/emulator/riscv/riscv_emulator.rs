@@ -17,6 +17,7 @@ use crate::{
         context::EmulatorContext,
         opts::EmulatorOpts,
         riscv::{
+            hook::{default_hook_map, Hook},
             public_values::PublicValues,
             record::{EmulationRecord, MemoryAccessRecord},
             state::RiscvEmulationState,
@@ -99,6 +100,9 @@ pub struct RiscvEmulator {
 
     /// The mapping between syscall codes and their implementations.
     pub syscall_map: HashMap<SyscallCode, Arc<dyn Syscall>>,
+
+    /// The mapping between hook fds and their implementation
+    pub hook_map: HashMap<u32, Hook>,
 
     /// The memory accesses for the current cycle.
     pub memory_accesses: MemoryAccessRecord,
@@ -217,8 +221,11 @@ impl RiscvEmulator {
             .unwrap_or(0);
         let log_syscalls = std::env::var_os("LOG_SYSCALLS").is_some();
 
+        let hook_map = default_hook_map();
+
         Self {
             syscall_map,
+            hook_map,
             memory_accesses: MemoryAccessRecord::default(),
             unconstrained: None,
             chunk_size: opts.chunk_size as u32,

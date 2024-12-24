@@ -48,6 +48,10 @@ impl Syscall for WriteSyscall {
             rt.state.public_values_stream.extend_from_slice(slice);
         } else if fd == 4 {
             rt.state.input_stream.push(slice.to_vec());
+        } else if let Some(hook) = rt.hook_map.get(&fd) {
+            let result = hook(&rt, slice);
+            let ptr = rt.state.input_stream_ptr;
+            rt.state.input_stream.splice(ptr..ptr, result);
         } else {
             tracing::warn!("tried to write to unknown file descriptor {fd}");
         }

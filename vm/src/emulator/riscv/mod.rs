@@ -1,3 +1,4 @@
+pub mod hook;
 pub mod public_values;
 pub mod record;
 pub mod riscv_emulator;
