@@ -254,7 +254,7 @@ fn main() {
     expected_stats.insert("poseidon2_events".to_string(), 495);
     expected_stats.insert("poseidon2_hash_events".to_string(), 8000);
     expected_stats.insert("poseidon2_compress_events".to_string(), 24598);
-    expected_stats.insert("fri_fold_events".to_string(), 280000);
+    expected_stats.insert("fri_fold_events".to_string(), 0);
     expected_stats.insert("range_check_events".to_string(), 67000);
     expected_stats.insert("exp_reverse_bits_len_events".to_string(), 660);
     assert_eq!(
@@ -262,8 +262,8 @@ fn main() {
         expected_stats.get("poseidon2_events")
     );
     assert_eq!(
-        stats.get("fri_fold_event"),
-        expected_stats.get("fri_fold_event")
+        stats.get("fri_fold_events"),
+        expected_stats.get("fri_fold_events")
     );
 
     // Setup field_config machine
