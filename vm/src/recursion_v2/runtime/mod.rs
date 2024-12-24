@@ -14,7 +14,7 @@ use std::{
 };
 
 use crate::{
-    chips::chips::{fri_fold_v2::event::FriFoldEvent, recursion_memory_v2::MemEvent},
+    chips::chips::recursion_memory_v2::MemEvent,
     compiler::recursion_v2::program::RecursionProgram,
     recursion_v2::{air::Block, runtime::memory::MemVecMap},
 };
@@ -28,8 +28,8 @@ use p3_util::reverse_bits_len;
 
 use crate::recursion_v2::types::{
     BaseAluEvent, BaseAluInstr, CommitPublicValuesEvent, ExpReverseBitsEvent, ExpReverseBitsInstr,
-    ExpReverseBitsIo, ExtAluEvent, ExtAluInstr, FriFoldBaseIo, FriFoldExtSingleIo, FriFoldExtVecIo,
-    FriFoldInstr, MemAccessKind, MemInstr, MemIo, Poseidon2Event, Poseidon2Instr, Poseidon2Io,
+    ExpReverseBitsIo, ExtAluEvent, ExtAluInstr, MemAccessKind, MemInstr, MemIo, Poseidon2Event,
+    Poseidon2Instr, Poseidon2Io,
 };
 use thiserror::Error;
 
@@ -87,8 +87,6 @@ where
     pub nb_branch_ops: usize,
 
     pub nb_exp_reverse_bits: usize,
-
-    pub nb_fri_fold: usize,
 
     pub nb_print_f: usize,
 
@@ -179,7 +177,6 @@ where
             nb_base_ops: 0,
             nb_memory_ops: 0,
             nb_branch_ops: 0,
-            nb_fri_fold: 0,
             nb_print_f: 0,
             nb_print_e: 0,
             clk: F::ZERO,
@@ -200,7 +197,6 @@ where
         tracing::debug!("Poseidon Skinny Operations: {}", self.nb_poseidons);
         tracing::debug!("Poseidon Wide Operations: {}", self.nb_wide_poseidons);
         tracing::debug!("Exp Reverse Bits Operations: {}", self.nb_exp_reverse_bits);
-        tracing::debug!("FriFold Operations: {}", self.nb_fri_fold);
         tracing::debug!("Field Operations: {}", self.nb_base_ops);
         tracing::debug!("Extension Operations: {}", self.nb_ext_ops);
         tracing::debug!("Memory Operations: {}", self.nb_memory_ops);
@@ -397,81 +393,6 @@ where
                     for (bit, (addr, mult)) in bits.into_iter().zip(output_addrs_mults) {
                         self.memory.mw(addr, bit, mult);
                         self.record.mem_var_events.push(MemEvent { inner: bit });
-                    }
-                }
-
-                Instruction::FriFold(instr) => {
-                    let FriFoldInstr {
-                        base_single_addrs,
-                        ext_single_addrs,
-                        ext_vec_addrs,
-                        alpha_pow_mults,
-                        ro_mults,
-                    } = *instr;
-                    self.nb_fri_fold += 1;
-                    let x = self.memory.mr(base_single_addrs.x).val[0];
-                    let z = self.memory.mr(ext_single_addrs.z).val;
-                    let z: EF = z.ext();
-                    let alpha = self.memory.mr(ext_single_addrs.alpha).val;
-                    let alpha: EF = alpha.ext();
-                    let mat_opening = ext_vec_addrs
-                        .mat_opening
-                        .iter()
-                        .map(|addr| self.memory.mr(*addr).val)
-                        .collect_vec();
-                    let ps_at_z = ext_vec_addrs
-                        .ps_at_z
-                        .iter()
-                        .map(|addr| self.memory.mr(*addr).val)
-                        .collect_vec();
-
-                    for m in 0..ps_at_z.len() {
-                        // let m = F::from_canonical_u32(m);
-                        // Get the opening values.
-                        let p_at_x = mat_opening[m];
-                        let p_at_x: EF = p_at_x.ext();
-                        let p_at_z = ps_at_z[m];
-                        let p_at_z: EF = p_at_z.ext();
-
-                        // Calculate the quotient and update the values
-                        let quotient = (-p_at_z + p_at_x) / (-z + x);
-
-                        // First we peek to get the current value.
-                        let alpha_pow: EF =
-                            self.memory.mr(ext_vec_addrs.alpha_pow_input[m]).val.ext();
-
-                        let ro: EF = self.memory.mr(ext_vec_addrs.ro_input[m]).val.ext();
-
-                        let new_ro = ro + alpha_pow * quotient;
-                        let new_alpha_pow = alpha_pow * alpha;
-
-                        let _ = self.memory.mw(
-                            ext_vec_addrs.ro_output[m],
-                            Block::from(new_ro.as_base_slice()),
-                            ro_mults[m],
-                        );
-
-                        let _ = self.memory.mw(
-                            ext_vec_addrs.alpha_pow_output[m],
-                            Block::from(new_alpha_pow.as_base_slice()),
-                            alpha_pow_mults[m],
-                        );
-
-                        self.record.fri_fold_events.push(FriFoldEvent {
-                            base_single: FriFoldBaseIo { x },
-                            ext_single: FriFoldExtSingleIo {
-                                z: Block::from(z.as_base_slice()),
-                                alpha: Block::from(alpha.as_base_slice()),
-                            },
-                            ext_vec: FriFoldExtVecIo {
-                                mat_opening: Block::from(p_at_x.as_base_slice()),
-                                ps_at_z: Block::from(p_at_z.as_base_slice()),
-                                alpha_pow_input: Block::from(alpha_pow.as_base_slice()),
-                                ro_input: Block::from(ro.as_base_slice()),
-                                alpha_pow_output: Block::from(new_alpha_pow.as_base_slice()),
-                                ro_output: Block::from(new_ro.as_base_slice()),
-                            },
-                        });
                     }
                 }
 

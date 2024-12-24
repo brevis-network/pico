@@ -1,7 +1,4 @@
-use super::{
-    Array, CircuitV2FriFoldInput, CircuitV2FriFoldOutput, Ext, Felt, FriFoldInput, MemIndex, Ptr,
-    TracedVec, Usize, Var,
-};
+use super::{Array, Ext, Felt, MemIndex, Ptr, TracedVec, Usize, Var};
 use crate::{configs::config::FieldGenericConfig, recursion_v2::air::RecursionPublicValues};
 
 /// An intermeddiate instruction set for implementing programs.
@@ -311,14 +308,6 @@ pub enum DslIr<FC: FieldGenericConfig> {
     /// Should only be used when target is a gnark circuit.
     CircuitCommitCommittedValuesDigest(Var<FC::N>),
 
-    // FRI specific instructions.
-    /// Executes a FRI fold operation. 1st field is the size of the fri fold input array.  2nd
-    /// field is the fri fold input array.  See [`FriFoldInput`] for more details.
-    FriFold(Var<FC::N>, Array<FC, FriFoldInput<FC>>),
-    // FRI specific instructions.
-    /// Executes a FRI fold operation. Input is the fri fold input array.  See [`FriFoldInput`] for
-    /// more details.
-    CircuitV2FriFold(Box<(CircuitV2FriFoldOutput<FC>, CircuitV2FriFoldInput<FC>)>),
     /// Select's a variable based on a condition. (select(cond, true_val, false_val) => output).
     /// Should only be used when target is a gnark circuit.
     CircuitSelectV(Var<FC::N>, Var<FC::N>, Var<FC::N>, Var<FC::N>),

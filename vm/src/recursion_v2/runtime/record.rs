@@ -1,7 +1,7 @@
 use std::{array, sync::Arc};
 
 use crate::{
-    chips::chips::{fri_fold_v2::event::FriFoldEvent, recursion_memory_v2::MemEvent},
+    chips::chips::recursion_memory_v2::MemEvent,
     compiler::recursion_v2::program::RecursionProgram,
     emulator::record::RecordBehavior,
     machine::chip::ChipBehavior,
@@ -31,7 +31,6 @@ pub struct RecursionRecord<F> {
 
     pub poseidon2_events: Vec<Poseidon2Event<F>>,
     pub exp_reverse_bits_len_events: Vec<ExpReverseBitsEvent<F>>,
-    pub fri_fold_events: Vec<FriFoldEvent<F>>,
     pub commit_pv_hash_events: Vec<CommitPublicValuesEvent<F>>,
 }
 
@@ -54,7 +53,6 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
             "exp_reverse_bits_events".to_string(),
             self.exp_reverse_bits_len_events.len(),
         );
-        stats.insert("fri_fold_events".to_string(), self.fri_fold_events.len());
 
         stats
     }
@@ -71,7 +69,6 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
             public_values: _,
             poseidon2_events,
             exp_reverse_bits_len_events,
-            fri_fold_events,
             commit_pv_hash_events,
         } = self;
         base_alu_events.append(&mut other.base_alu_events);
@@ -80,7 +77,6 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
         mem_var_events.append(&mut other.mem_var_events);
         poseidon2_events.append(&mut other.poseidon2_events);
         exp_reverse_bits_len_events.append(&mut other.exp_reverse_bits_len_events);
-        fri_fold_events.append(&mut other.fri_fold_events);
         commit_pv_hash_events.append(&mut other.commit_pv_hash_events);
     }
 

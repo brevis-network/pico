@@ -27,7 +27,6 @@ pub trait CircuitV2Builder<FC: FieldGenericConfig> {
         &mut self,
         input: impl IntoIterator<Item = Felt<FC::F>>,
     ) -> [Felt<FC::F>; DIGEST_SIZE];
-    fn fri_fold_v2(&mut self, input: CircuitV2FriFoldInput<FC>) -> CircuitV2FriFoldOutput<FC>;
     fn ext2felt_v2(&mut self, ext: Ext<FC::F, FC::EF>) -> [Felt<FC::F>; EXTENSION_DEGREE];
     fn commit_public_values_v2(&mut self, public_values: RecursionPublicValues<Felt<FC::F>>);
     fn cycle_tracker_v2_enter(&mut self, name: String);
@@ -148,21 +147,6 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CircuitV2Builder<FC> for Builder<FC> 
         let post = self.poseidon2_permute_v2(pre);
         let post: [Felt<FC::F>; DIGEST_SIZE] = post[..DIGEST_SIZE].try_into().unwrap();
         post
-    }
-
-    /// Runs FRI fold.
-    fn fri_fold_v2(&mut self, input: CircuitV2FriFoldInput<FC>) -> CircuitV2FriFoldOutput<FC> {
-        let mut uninit_vec = |len| {
-            std::iter::from_fn(|| Some(self.uninit()))
-                .take(len)
-                .collect()
-        };
-        let output = CircuitV2FriFoldOutput {
-            alpha_pow_output: uninit_vec(input.alpha_pow_input.len()),
-            ro_output: uninit_vec(input.ro_input.len()),
-        };
-        self.push_op(DslIr::CircuitV2FriFold(Box::new((output.clone(), input))));
-        output
     }
 
     /// Decomposes an ext into its felt coordinates.

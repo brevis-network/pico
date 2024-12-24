@@ -131,48 +131,6 @@ pub struct ExpReverseBitsEvent<F> {
     pub result: F,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FriFoldIo<V> {
-    pub ext_single: FriFoldExtSingleIo<Block<V>>,
-    pub ext_vec: FriFoldExtVecIo<Vec<Block<V>>>,
-    pub base_single: FriFoldBaseIo<V>,
-}
-
-/// The extension-field-valued single inputs to the FRI fold operation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FriFoldExtSingleIo<V> {
-    pub z: V,
-    pub alpha: V,
-}
-
-/// The extension-field-valued vector inputs to the FRI fold operation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FriFoldExtVecIo<V> {
-    pub mat_opening: V,
-    pub ps_at_z: V,
-    pub alpha_pow_input: V,
-    pub ro_input: V,
-    pub alpha_pow_output: V,
-    pub ro_output: V,
-}
-
-/// The base-field-valued inputs to the FRI fold operation.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FriFoldBaseIo<V> {
-    pub x: V,
-}
-
-/// An instruction invoking the FRI fold operation. Addresses for extension field elements are of
-/// the same type as for base field elements.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FriFoldInstr<F> {
-    pub base_single_addrs: FriFoldBaseIo<Address<F>>,
-    pub ext_single_addrs: FriFoldExtSingleIo<Address<F>>,
-    pub ext_vec_addrs: FriFoldExtVecIo<Vec<Address<F>>>,
-    pub alpha_pow_mults: Vec<F>,
-    pub ro_mults: Vec<F>,
-}
-
 /// An instruction that will save the public values to the execution record and will commit to
 /// it's digest.
 #[derive(Clone, Debug, Serialize, Deserialize)]
