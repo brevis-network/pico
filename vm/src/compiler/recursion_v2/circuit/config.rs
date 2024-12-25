@@ -11,7 +11,7 @@ use super::{
 };
 use crate::configs::config::SimpleFriConfig;
 use crate::{
-    compiler::recursion_v2::ir::{Builder, Ext, Felt, SymbolicFelt, Var, Variable},
+    compiler::recursion_v2::ir::{Builder, Ext, Felt, Var, Variable},
     configs::{
         config::{FieldGenericConfig, StarkGenericConfig},
         stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_ValMmcs}, // TODO: use instance config
@@ -269,136 +269,6 @@ impl CircuitConfig for FieldConfig {
         power_bits: Vec<Felt<<Self as FieldGenericConfig>::F>>,
     ) -> Felt<<Self as FieldGenericConfig>::F> {
         builder.exp_reverse_bits_v2(input, power_bits)
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EmbedConfig;
-
-impl FieldGenericConfig for EmbedConfig {
-    type F = <FieldConfig as FieldGenericConfig>::F;
-    type EF = <FieldConfig as FieldGenericConfig>::EF;
-    type N = <FieldConfig as FieldGenericConfig>::N;
-}
-
-// TODO: dedup same function implementations
-impl CircuitConfig for EmbedConfig {
-    type Bit = <FieldConfig as CircuitConfig>::Bit;
-
-    fn assert_bit_zero(builder: &mut Builder<Self>, bit: Self::Bit) {
-        builder.assert_felt_eq(bit, Self::F::ZERO);
-    }
-
-    fn assert_bit_one(builder: &mut Builder<Self>, bit: Self::Bit) {
-        builder.assert_felt_eq(bit, Self::F::ONE);
-    }
-
-    fn read_bit(builder: &mut Builder<Self>) -> Self::Bit {
-        builder.hint_felt_v2()
-    }
-
-    fn read_felt(builder: &mut Builder<Self>) -> Felt<Self::F> {
-        builder.hint_felt_v2()
-    }
-
-    fn read_ext(builder: &mut Builder<Self>) -> Ext<Self::F, Self::EF> {
-        builder.hint_ext_v2()
-    }
-
-    fn ext2felt(
-        builder: &mut Builder<Self>,
-        ext: Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>,
-    ) -> [Felt<<Self as FieldGenericConfig>::F>; EXTENSION_DEGREE] {
-        builder.ext2felt_v2(ext)
-    }
-
-    fn num2bits(
-        builder: &mut Builder<Self>,
-        num: Felt<<Self as FieldGenericConfig>::F>,
-        num_bits: usize,
-    ) -> Vec<Felt<<Self as FieldGenericConfig>::F>> {
-        builder.num2bits_v2_f(num, num_bits)
-    }
-
-    fn bits2num(
-        builder: &mut Builder<Self>,
-        bits: impl IntoIterator<Item = Felt<<Self as FieldGenericConfig>::F>>,
-    ) -> Felt<<Self as FieldGenericConfig>::F> {
-        builder.bits2num_v2_f(bits)
-    }
-
-    fn select_chain_f(
-        builder: &mut Builder<Self>,
-        should_swap: Self::Bit,
-        first: impl IntoIterator<Item = Felt<<Self as FieldGenericConfig>::F>> + Clone,
-        second: impl IntoIterator<Item = Felt<<Self as FieldGenericConfig>::F>> + Clone,
-    ) -> Vec<Felt<<Self as FieldGenericConfig>::F>> {
-        let one: Felt<_> = builder.constant(Self::F::ONE);
-        let should_not_swap: Felt<_> = builder.eval(one - should_swap);
-
-        let id_branch = first.clone().into_iter().chain(second.clone());
-        let swap_branch = second.into_iter().chain(first);
-        zip(
-            zip(id_branch, swap_branch),
-            zip(repeat(should_not_swap), repeat(should_swap)),
-        )
-        .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
-        .collect()
-    }
-
-    fn select_chain_ef(
-        builder: &mut Builder<Self>,
-        should_swap: Self::Bit,
-        first: impl IntoIterator<
-                Item = Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>,
-            > + Clone,
-        second: impl IntoIterator<
-                Item = Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>,
-            > + Clone,
-    ) -> Vec<Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>> {
-        let one: Felt<_> = builder.constant(Self::F::ONE);
-        let should_not_swap: Felt<_> = builder.eval(one - should_swap);
-
-        let id_branch = first.clone().into_iter().chain(second.clone());
-        let swap_branch = second.into_iter().chain(first);
-        zip(
-            zip(id_branch, swap_branch),
-            zip(repeat(should_not_swap), repeat(should_swap)),
-        )
-        .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_v * id_c + sw_v * sw_c))
-        .collect()
-    }
-
-    fn exp_f_bits_precomputed(
-        builder: &mut Builder<Self>,
-        power_bits: &[Self::Bit],
-        two_adic_powers_of_x: &[Felt<Self::F>],
-    ) -> Felt<Self::F> {
-        Self::exp_reverse_bits(
-            builder,
-            two_adic_powers_of_x[0],
-            power_bits.iter().rev().copied().collect(),
-        )
-    }
-
-    fn exp_reverse_bits(
-        builder: &mut Builder<Self>,
-        input: Felt<<Self as FieldGenericConfig>::F>,
-        power_bits: Vec<Felt<<Self as FieldGenericConfig>::F>>,
-    ) -> Felt<<Self as FieldGenericConfig>::F> {
-        // builder.exp_reverse_bits_v2(input, power_bits)
-        let mut result = builder.constant(Self::F::ONE);
-        let mut power_f = input;
-        let bit_len = power_bits.len();
-
-        for i in 1..=bit_len {
-            let index = bit_len - i;
-            let bit = power_bits[index];
-            let prod: Felt<_> = builder.eval(result * power_f);
-            result = builder.eval(bit * prod + (SymbolicFelt::ONE - bit) * result);
-            power_f = builder.eval(power_f * power_f);
-        }
-        result
     }
 }
 
