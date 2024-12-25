@@ -12,7 +12,7 @@ mod parse_args;
 
 fn main() {
     setup_logger();
-    let (elf, riscv_stdin, _, _) = parse_args::parse_args();
+    let (elf, riscv_stdin, _) = parse_args::parse_args();
 
     let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), elf));
     let convert = ConvertProver::new_with_prev(&riscv);

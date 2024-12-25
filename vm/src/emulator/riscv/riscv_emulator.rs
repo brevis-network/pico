@@ -34,7 +34,7 @@ use p3_field::PrimeField32;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Instant};
 use thiserror::Error;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, trace};
 
 /// A struct that records states that must be restored after we exit unconstrained mode
 #[derive(Clone, Debug, Default)]
@@ -776,7 +776,7 @@ impl RiscvEmulator {
                 c = self.rr(Register::X11, MemoryAccessPosition::C);
                 b = self.rr(Register::X10, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
-                debug!("emulate syscall code: {:?}", syscall);
+                trace!("emulate syscall code: {:?}", syscall);
 
                 // `hint_slice` is allowed in unconstrained mode since it is used to write the hint.
                 // Other syscalls are not allowed because they can lead to non-deterministic

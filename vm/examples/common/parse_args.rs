@@ -1,5 +1,8 @@
 use clap::Parser;
-use pico_vm::{compiler::riscv::program::Program, emulator::riscv::stdin::EmulatorStdin};
+use pico_vm::{
+    compiler::riscv::program::Program,
+    emulator::riscv::stdin::{EmulatorStdin, EmulatorStdinBuilder},
+};
 use tracing::info;
 
 fn load_elf(elf: &str) -> &'static [u8] {
@@ -10,33 +13,32 @@ fn load_elf(elf: &str) -> &'static [u8] {
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
-struct Args {
+pub struct Args {
     // ELF to run.
     // [ fibonacci | fib | f ], [ keccak | k ], [keccak_precompile], [ed_precompile]
     #[clap(long, default_value = "fibonacci")]
-    elf: String,
+    pub elf: String,
 
     // fibonacci seq num or keccak input str len
     #[clap(long, default_value = "10")]
-    n: u32,
+    pub n: u32,
 
     // Step to exit the test.
     // all | riscv | riscv_compress | riscv_combine | recur_combine | recur_compress | recur_embed
     #[clap(long, default_value = "all")]
-    step: String,
+    pub step: String,
 
     // Field to work on.
     // bb | m31 | kb
     #[clap(long, default_value = "bb")]
-    field: String,
+    pub field: String,
+
+    // use benchmark config
+    #[clap(long)]
+    pub bench: bool,
 }
 
-pub fn parse_args() -> (
-    &'static [u8],
-    EmulatorStdin<Program, Vec<u8>>,
-    String,
-    String,
-) {
+pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
     let args = Args::parse();
     let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder();
 
@@ -95,10 +97,37 @@ pub fn parse_args() -> (
     } else if args.elf == "multiple-precompile" {
         elf = load_elf("multiple-precompile");
         info!("Test multiple precompiles in a single elf");
+    } else if args.elf == "tendermint" {
+        (elf, stdin) = load_program(TENDERMINT_PROGRAM);
     } else {
-        eprintln!("Invalid test elf. Accept: [ fibonacci | fib | f ], [ keccak | k ], [keccak_precompile], [ed_precompile]\n");
+        eprintln!("Invalid test elf.\n");
         std::process::exit(1);
     }
 
-    (elf, stdin.finalize(), args.step, args.field)
+    (elf, stdin.finalize(), args)
+}
+
+// reorg this later
+// used for tendermint test case
+
+pub struct TesterProgram {
+    pub elf: &'static [u8],
+    pub input: &'static [u8],
+}
+
+impl TesterProgram {
+    const fn new(elf: &'static [u8], input: &'static [u8]) -> Self {
+        Self { elf, input }
+    }
+}
+
+pub const TENDERMINT_PROGRAM: TesterProgram = TesterProgram::new(
+    include_bytes!("../../../vm/src/compiler/test_data/tendermint/riscv32im-tendermint-elf"),
+    include_bytes!("../../../vm/src/compiler/test_data/tendermint/input.bin"),
+);
+
+pub fn load_program(program: TesterProgram) -> (&'static [u8], EmulatorStdinBuilder<Vec<u8>>) {
+    let stdin: EmulatorStdinBuilder<Vec<u8>> =
+        bincode::deserialize(program.input).expect("failed to deserialize input");
+    (program.elf, stdin)
 }

@@ -187,8 +187,13 @@ where
         #[cfg(feature = "debug-lookups")]
         global_lookup_debugger.print_results();
 
-        // TODO: print some summary numbers
-        info!("RiscV proofs generated with {} chunks.", all_proofs.len());
+        // TODO: print more summary numbers
+        let riscv_emulator = emulator.emulator.unwrap();
+        info!("RiscV execution report:");
+        info!("|- cycles:           {}", riscv_emulator.state.global_clk);
+        info!("|- chunk_num:        {}", all_proofs.len());
+        info!("|- chunk_size:       {}", riscv_emulator.chunk_size);
+        info!("|- chunk_batch_size: {}", riscv_emulator.chunk_batch_size);
 
         MetaProof::new(all_proofs.into(), vks.into())
     }

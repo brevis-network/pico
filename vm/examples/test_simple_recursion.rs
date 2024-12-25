@@ -38,7 +38,7 @@ mod parse_args;
 fn main() {
     setup_logger();
 
-    let (elf, stdin, step, _marker_ef) = parse_args::parse_args();
+    let (elf, stdin, args) = parse_args::parse_args();
     let start = Instant::now();
 
     info!("\n Creating Program..");
@@ -163,7 +163,7 @@ fn main() {
     );
     assert!(result.is_ok());
 
-    if step == "riscv" {
+    if args.step == "riscv" {
         return;
     }
 

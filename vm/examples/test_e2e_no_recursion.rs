@@ -79,15 +79,15 @@ where
 
 fn main() {
     setup_logger();
-    let (elf, riscv_stdin, _step, field) = parse_args::parse_args();
+    let (elf, riscv_stdin, args) = parse_args::parse_args();
 
     // -------- Riscv Machine --------
 
-    if field == "bb" {
+    if args.field == "bb" {
         run(RiscvBBSC::new(), elf, riscv_stdin);
-    } else if field == "kb" {
+    } else if args.field == "kb" {
         run(RiscvKBSC::new(), elf, riscv_stdin);
     } else {
-        panic!("unsupported field: {}", field);
+        panic!("unsupported field: {}", args.field);
     };
 }

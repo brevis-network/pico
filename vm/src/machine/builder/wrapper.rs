@@ -155,7 +155,7 @@ fn build_outer_circuit(template_input: &EmbedWitnessValues<BbBn254Poseidon2>) ->
     builder.assert_felt_eq(vk.pc_start, template_vk.pc_start);
 
     let base_machine = embed_machine.base_machine();
-    verify_embed(&mut builder, &base_machine, &input);
+    verify_embed(&mut builder, base_machine, &input);
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
     backend.emit(builder.into_operations())

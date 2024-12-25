@@ -71,6 +71,15 @@ pub const TEST_CHUNK_BATCH_SIZE: usize = 2;
 
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 
+// for benchmark
+pub const BENCH_MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 18;
+
+pub const BENCH_MAX_CHUNK_SIZE: usize = 1 << 21;
+
+pub const BENCH_MAX_CHUNK_BATCH_SIZE: usize = 8;
+
+pub const BENCH_RECURSION_MAX_CHUNK_SIZE: usize = 1 << 22;
+
 /*
 For RiscV
  */

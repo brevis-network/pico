@@ -1,11 +1,13 @@
-use std::env;
-
-use serde::{Deserialize, Serialize};
-
 use crate::primitives::consts::{
-    DEFAULT_CHUNK_BATCH_SIZE, DEFAULT_CHUNK_SIZE, DEFERRED_SPLIT_THRESHOLD, TEST_CHUNK_BATCH_SIZE,
-    TEST_CHUNK_SIZE, TEST_DEFERRED_SPLIT_THRESHOLD,
+    BENCH_MAX_CHUNK_BATCH_SIZE, BENCH_MAX_CHUNK_SIZE, BENCH_MAX_DEFERRED_SPLIT_THRESHOLD,
+    BENCH_RECURSION_MAX_CHUNK_SIZE, DEFAULT_CHUNK_BATCH_SIZE, DEFAULT_CHUNK_SIZE,
+    DEFERRED_SPLIT_THRESHOLD, TEST_CHUNK_BATCH_SIZE, TEST_CHUNK_SIZE,
+    TEST_DEFERRED_SPLIT_THRESHOLD,
 };
+use log::info;
+use serde::{Deserialize, Serialize};
+use std::env;
+use sysinfo::System;
 
 /// Options for the core prover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +53,55 @@ impl EmulatorOpts {
             split_opts: SplitOpts::new(TEST_DEFERRED_SPLIT_THRESHOLD),
         }
     }
+
+    fn bench_default_opts() -> (usize, usize, usize) {
+        let split_threshold = env::var("SPLIT_THRESHOLD")
+            .map(|s| {
+                s.parse::<usize>()
+                    .unwrap_or(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD)
+            })
+            .unwrap_or(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD)
+            .max(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD);
+
+        let sys = System::new_all();
+        let total_available_mem = sys.total_memory() / (1024 * 1024 * 1024);
+        info!("total_available_mem: {:?}", total_available_mem);
+        let default_chunk_size = chunk_size(total_available_mem);
+        let default_chunk_batch_size = chunk_batch_size(total_available_mem);
+        (
+            split_threshold,
+            default_chunk_size,
+            default_chunk_batch_size,
+        )
+    }
+
+    pub fn bench_riscv_ops() -> Self {
+        let (split_threshold, default_chunk_size, default_chunk_batch_size) =
+            Self::bench_default_opts();
+        Self {
+            chunk_size: env::var("CHUNK_SIZE").map_or_else(
+                |_| default_chunk_size,
+                |s| s.parse::<usize>().unwrap_or(default_chunk_size),
+            ),
+            chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
+                |_| default_chunk_batch_size,
+                |s| s.parse::<usize>().unwrap_or(default_chunk_batch_size),
+            ),
+            split_opts: SplitOpts::new(split_threshold),
+        }
+    }
+
+    pub fn bench_recursion_opts() -> Self {
+        let (split_threshold, _, default_chunk_batch_size) = Self::bench_default_opts();
+        Self {
+            chunk_size: BENCH_RECURSION_MAX_CHUNK_SIZE,
+            chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
+                |_| default_chunk_batch_size,
+                |s| s.parse::<usize>().unwrap_or(default_chunk_batch_size),
+            ),
+            split_opts: SplitOpts::new(split_threshold),
+        }
+    }
 }
 
 /// Options for splitting deferred events.
@@ -79,5 +130,23 @@ impl SplitOpts {
             sha_compress: deferred_shift_threshold / 80,
             memory: deferred_shift_threshold * 4,
         }
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn chunk_size(total_available_mem: u64) -> usize {
+    let log_shard_size = match total_available_mem {
+        0..=14 => 17,
+        m => (((m as f64).log2() * 0.619) + 16.2).floor() as usize,
+    };
+    std::cmp::min(1 << log_shard_size, BENCH_MAX_CHUNK_SIZE)
+}
+
+fn chunk_batch_size(total_available_mem: u64) -> usize {
+    match total_available_mem {
+        0..=16 => 1,
+        17..=48 => 2,
+        256.. => BENCH_MAX_CHUNK_BATCH_SIZE,
+        _ => 4,
     }
 }

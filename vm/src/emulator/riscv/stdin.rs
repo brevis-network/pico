@@ -28,15 +28,15 @@ use alloc::sync::Arc;
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_maybe_rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::array;
 
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct EmulatorStdinBuilder<I> {
     pub buffer: Vec<I>,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct EmulatorStdin<P, I> {
     pub programs: Arc<[P]>,
     pub inputs: Arc<[I]>,

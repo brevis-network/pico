@@ -30,7 +30,10 @@ use pico_vm::{
     },
     recursion_v2::runtime::Runtime,
 };
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::info;
 
 #[path = "common/parse_args.rs"]
@@ -43,7 +46,7 @@ fn main() {
 
     info!("\n Begin RISCV..");
 
-    let (elf, riscv_stdin, step, _) = parse_args::parse_args();
+    let (elf, riscv_stdin, args) = parse_args::parse_args();
 
     info!("PERF-machine=riscv");
     let start = Instant::now();
@@ -62,17 +65,25 @@ fn main() {
     // Setup machine prover, verifier, pk and vk.
     let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
 
+    info!("Construct RiscV proving witness..");
+    let core_opts = if args.bench {
+        info!("use benchmark options");
+        EmulatorOpts::bench_riscv_ops()
+    } else {
+        EmulatorOpts::default()
+    };
+    info!("core_opts: {:?}", core_opts);
     let riscv_witness = ProvingWitness::setup_for_riscv(
         riscv_program.clone(),
         riscv_stdin,
-        EmulatorOpts::default(),
+        core_opts,
         riscv_pk,
         riscv_vk,
     );
 
     // Generate the proof.
     info!("Generating RISCV proof (at {:?})..", start.elapsed());
-    let riscv_proof = riscv_machine.prove(&riscv_witness);
+    let (riscv_proof, riscv_duration) = timed_run(|| riscv_machine.prove(&riscv_witness));
     info!(
         "PERF-step=prove-user_time={}",
         riscv_start.elapsed().as_millis()
@@ -90,13 +101,25 @@ fn main() {
         start.elapsed()
     );
     assert!(riscv_result.is_ok());
-    if step == "riscv" {
+    if args.step == "riscv" {
+        info!("Proof duration:");
+        info!("|- riscv {:?}", riscv_duration);
+
+        info!("Proof size:");
+        info!("|- riscv {:?}K", (riscv_proof_size as f64) / 1000.0);
         return;
     }
 
     // -------- Riscv Convert Recursion Machine --------
 
     info!("\n Begin CONVERT..");
+
+    let recursion_opts = if args.bench {
+        EmulatorOpts::bench_recursion_opts()
+    } else {
+        EmulatorOpts::default()
+    };
+    info!("recursion_opts: {:?}", recursion_opts);
 
     info!("PERF-machine=convert");
     let convert_start = Instant::now();
@@ -120,15 +143,12 @@ fn main() {
         &riscv_proof.proofs(),
     );
 
-    let convert_witness = ProvingWitness::setup_for_convert(
-        convert_stdin,
-        convert_machine.config(),
-        EmulatorOpts::default(),
-    );
+    let convert_witness =
+        ProvingWitness::setup_for_convert(convert_stdin, convert_machine.config(), recursion_opts);
 
     // Generate the proof.
     info!("Generating CONVERT proof (at {:?})..", start.elapsed());
-    let convert_proof = convert_machine.prove(&convert_witness);
+    let (convert_proof, convert_duration) = timed_run(|| convert_machine.prove(&convert_witness));
     info!(
         "PERF-step=prove-user_time={}",
         convert_start.elapsed().as_millis()
@@ -147,7 +167,15 @@ fn main() {
     );
     assert!(convert_result.is_ok());
 
-    if step == "convert" {
+    if args.step == "convert" {
+        info!("Proof duration:");
+        info!("|- riscv   {:?}", riscv_duration);
+        info!("|- convert {:?}", convert_duration);
+        info!("|- total   {:?}", riscv_duration + convert_duration);
+
+        info!("Proof size:");
+        info!("|- riscv   {:?}K", (riscv_proof_size as f64) / 1000.0);
+        info!("|- convert {:?}K", (convert_proof_size as f64) / 1000.0);
         return;
     }
 
@@ -182,12 +210,12 @@ fn main() {
         vk_root,
         combine_stdin,
         combine_machine.config(),
-        EmulatorOpts::default(),
+        recursion_opts,
     );
 
     // Generate the proof.
     info!("Generating COMBINE proof (at {:?})..", start.elapsed());
-    let combine_proof = combine_machine.prove(&combine_witness);
+    let (combine_proof, combine_duration) = timed_run(|| combine_machine.prove(&combine_witness));
     info!(
         "PERF-step=prove-user_time={}",
         combine_start.elapsed().as_millis(),
@@ -206,7 +234,19 @@ fn main() {
     );
     assert!(combine_result.is_ok());
 
-    if step == "combine" {
+    if args.step == "combine" {
+        let recursion_duration = convert_duration + combine_duration;
+        info!("Proof duration:");
+        info!("|- riscv      {:?}", riscv_duration);
+        info!("|- recursion  {:?}", recursion_duration);
+        info!("   |- convert   {:?}", convert_duration);
+        info!("   |- combine   {:?}", combine_duration);
+        info!("|- total      {:?}", riscv_duration + recursion_duration);
+
+        info!("Proof size:");
+        info!("|- riscv   {:?}K", (riscv_proof_size as f64) / 1000.0);
+        info!("|- convert {:?}K", (convert_proof_size as f64) / 1000.0);
+        info!("|- combine {:?}K", (combine_proof_size as f64) / 1000.0);
         return;
     }
 
@@ -264,7 +304,8 @@ fn main() {
         ProvingWitness::setup_with_keys_and_records(compress_pk, compress_vk, vec![record]);
 
     info!("Generating COMPRESS proof (at {:?})..", start.elapsed());
-    let compress_proof = compress_machine.prove(&compress_witness);
+    let (compress_proof, compress_duration) =
+        timed_run(|| compress_machine.prove(&compress_witness));
     info!(
         "PERF-step=prove-user_time={}",
         compress_start.elapsed().as_millis()
@@ -283,7 +324,21 @@ fn main() {
     );
     assert!(compress_result.is_ok());
 
-    if step == "compress" {
+    if args.step == "compress" {
+        let recursion_duration = convert_duration + combine_duration + compress_duration;
+        info!("Proof duration at step compress:");
+        info!("|- riscv       {:?}", riscv_duration);
+        info!("|- recursion   {:?}", recursion_duration);
+        info!("   |- convert    {:?}", convert_duration);
+        info!("   |- combine    {:?}", combine_duration);
+        info!("   |- compress   {:?}", compress_duration);
+        info!("|- total         {:?}", riscv_duration + recursion_duration);
+
+        info!("Proof size:");
+        info!("|- riscv    {:?}K", (riscv_proof_size as f64) / 1000.0);
+        info!("|- convert  {:?}K", (convert_proof_size as f64) / 1000.0);
+        info!("|- combine  {:?}K", (combine_proof_size as f64) / 1000.0);
+        info!("|- compress {:?}K", (compress_proof_size as f64) / 1000.0);
         return;
     }
 
@@ -341,7 +396,7 @@ fn main() {
         ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
 
     info!("Generating EMBED proof (at {:?})..", start.elapsed());
-    let embed_proof = embed_machine.prove(&embed_witness);
+    let (embed_proof, embed_duration) = timed_run(|| embed_machine.prove(&embed_witness));
     info!(
         "PERF-step=prove-user_time={}",
         embed_start.elapsed().as_millis()
@@ -359,4 +414,29 @@ fn main() {
         start.elapsed()
     );
     assert!(embed_result.is_ok());
+
+    info!("Proof duration:");
+    let recursion_duration =
+        convert_duration + combine_duration + compress_duration + embed_duration;
+    info!("|- riscv       {:?}", riscv_duration);
+    info!("|- recursion   {:?}", recursion_duration);
+    info!("   |- convert    {:?}", convert_duration);
+    info!("   |- combine    {:?}", combine_duration);
+    info!("   |- compress   {:?}", compress_duration);
+    info!("   |- embed      {:?}", embed_duration);
+    info!("|- total       {:?}", riscv_duration + recursion_duration);
+
+    info!("Proof size:");
+    info!("|- riscv    {:?}K", (riscv_proof_size as f64) / 1000.0);
+    info!("|- convert  {:?}K", (convert_proof_size as f64) / 1000.0);
+    info!("|- combine  {:?}K", (combine_proof_size as f64) / 1000.0);
+    info!("|- compress {:?}K", (compress_proof_size as f64) / 1000.0);
+    info!("|- embed    {:?}K", (embed_proof_size as f64) / 1000.0);
+}
+
+pub fn timed_run<T, F: FnOnce() -> T>(operation: F) -> (T, Duration) {
+    let start = Instant::now();
+    let result = operation();
+    let duration = start.elapsed();
+    (result, duration)
 }
