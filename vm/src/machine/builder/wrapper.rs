@@ -1,29 +1,107 @@
 use crate::{
     compiler::recursion_v2::{
+        circuit::{
+            challenger::CanObserveVariable,
+            config::BabyBearFriConfigVariable,
+            hash::FieldHasherVariable,
+            stark::StarkVerifier,
+            utils::{babybear_bytes_to_bn254, babybears_to_bn254, words_to_bytes},
+            witness::{
+                embed::{EmbedWitnessValues, EmbedWitnessVariable},
+                Witnessable,
+            },
+        },
         constraints::{Constraint, ConstraintCompiler},
-        ir::{Builder, Var, Witness},
+        ir::{Builder, Ext, Felt, Var, Witness},
+    },
+    configs::{
+        config::{FieldGenericConfig, OuterConfig},
+        stark_config::bb_bn254_poseidon2::BbBn254Poseidon2,
     },
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
-        configs::embed_config::StarkConfig as EmbedSC,
+        configs::embed_config::StarkConfig as EmbedSC, machine::embed::EmbedMachine,
     },
-    machine::{keys::BaseVerifyingKey, proof::BaseProof},
+    machine::{
+        keys::BaseVerifyingKey,
+        machine::{BaseMachine, MachineBehavior},
+        proof::BaseProof,
+    },
+    primitives::consts::{EMBED_DEGREE, RECURSION_NUM_PVS_V2},
+    recursion_v2::air::{
+        assert_recursion_public_values_valid, recursion_public_values_digest, RecursionPublicValues,
+    },
 };
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::Bn254Fr;
-use std::borrow::Borrow;
-
-use crate::{
-    compiler::recursion_v2::circuit::{
-        hash::FieldHasherVariable,
-        utils::{babybear_bytes_to_bn254, babybears_to_bn254, words_to_bytes},
-        witness::{embed::EmbedWitnessValues, Witnessable},
-    },
-    configs::{config::OuterConfig, stark_config::bb_bn254_poseidon2::BbBn254Poseidon2},
-    instances::machine::embed::EmbedMachine,
-    primitives::consts::{EMBED_DEGREE, RECURSION_NUM_PVS_V2},
-    recursion_v2::air::RecursionPublicValues,
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra, PrimeField};
+use serde::{Deserialize, Serialize};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    fs::File,
+    io::Write,
+    path::PathBuf,
 };
+
+/// A witness that can be used to initialize values for witness generation inside Gnark.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GnarkWitness {
+    pub vars: Vec<String>,
+    pub felts: Vec<String>,
+    pub exts: Vec<Vec<String>>,
+    pub vkey_hash: String,
+    pub committed_values_digest: String,
+}
+
+impl GnarkWitness {
+    /// Creates a new witness from a given [Witness].
+    pub fn new(mut witness: Witness<OuterConfig>) -> Self {
+        witness
+            .vars
+            .push(<OuterConfig as FieldGenericConfig>::N::from_canonical_usize(999));
+        witness
+            .felts
+            .push(<OuterConfig as FieldGenericConfig>::F::from_canonical_usize(999));
+        witness
+            .exts
+            .push(<OuterConfig as FieldGenericConfig>::EF::from_canonical_usize(999));
+        GnarkWitness {
+            vars: witness
+                .vars
+                .into_iter()
+                .map(|w| w.as_canonical_biguint().to_string())
+                .collect(),
+            felts: witness
+                .felts
+                .into_iter()
+                .map(|w| w.as_canonical_biguint().to_string())
+                .collect(),
+            exts: witness
+                .exts
+                .into_iter()
+                .map(|w| {
+                    w.as_base_slice()
+                        .iter()
+                        .map(|x: &BabyBear| x.as_canonical_biguint().to_string())
+                        .collect()
+                })
+                .collect(),
+            vkey_hash: witness.vkey_hash.as_canonical_biguint().to_string(),
+            committed_values_digest: witness
+                .committed_values_digest
+                .as_canonical_biguint()
+                .to_string(),
+        }
+    }
+
+    /// Saves the witness to a given path.
+    #[allow(unused)]
+    pub fn save(&self, path: &str) {
+        let serialized = serde_json::to_string(self).unwrap();
+        let mut file = File::create(path).unwrap();
+        file.write_all(serialized.as_bytes()).unwrap();
+    }
+}
 
 #[allow(unused)]
 pub fn build_constraints_and_witness(
@@ -57,7 +135,7 @@ pub fn build_constraints_and_witness(
 }
 
 #[allow(unused)]
-fn build_outer_circuit(template_input: &EmbedWitnessValues) -> Vec<Constraint> {
+fn build_outer_circuit(template_input: &EmbedWitnessValues<BbBn254Poseidon2>) -> Vec<Constraint> {
     let embed_machine = EmbedMachine::<_, _, Vec<u8>>::new(
         EmbedSC::new(),
         RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
@@ -76,8 +154,94 @@ fn build_outer_circuit(template_input: &EmbedWitnessValues) -> Vec<Constraint> {
 
     builder.assert_felt_eq(vk.pc_start, template_vk.pc_start);
 
-    // TODO, add embed proof variable verifier here
+    let base_machine = embed_machine.base_machine();
+    verify_embed(&mut builder, &base_machine, &input);
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
     backend.emit(builder.into_operations())
+}
+
+pub fn verify_embed(
+    builder: &mut Builder<OuterConfig>,
+    machine: &BaseMachine<BbBn254Poseidon2, RecursionChipType<BabyBear, EMBED_DEGREE>>,
+    input: &EmbedWitnessVariable<OuterConfig, BbBn254Poseidon2>,
+) {
+    // Assert that there is only one proof, and get the verification key and proof.
+    let vk = input.vks_and_proofs.first().unwrap().clone().0;
+    let proof = input.vks_and_proofs.first().unwrap().clone().1;
+
+    // Verify the stark proof.
+
+    // Prepare a challenger.
+    let mut challenger = machine.config().challenger_variable(builder);
+
+    vk.observed_by(builder, &mut challenger);
+
+    // Observe the vk and start pc.
+    challenger.observe_commitment(builder, vk.commit);
+    challenger.observe(builder, vk.pc_start);
+    let zero: Felt<_> = builder.eval(<OuterConfig as FieldGenericConfig>::F::ZERO);
+    for _ in 0..7 {
+        challenger.observe(builder, zero);
+    }
+
+    // Observe the main commitment and public values.
+    challenger.observe_slice(
+        builder,
+        proof.public_values[0..machine.num_public_values()]
+            .iter()
+            .copied(),
+    );
+
+    let zero_ext: Ext<
+        <OuterConfig as FieldGenericConfig>::F,
+        <OuterConfig as FieldGenericConfig>::EF,
+    > = builder.eval(<OuterConfig as FieldGenericConfig>::F::ZERO);
+    StarkVerifier::verify_chunk(
+        builder,
+        &vk,
+        machine,
+        &mut challenger,
+        &proof,
+        &[zero_ext, zero_ext],
+    );
+
+    // Get the public values, and assert that they are valid.
+    let mut compress_public_values_stream = proof.public_values;
+    let compress_public_values: &mut RecursionPublicValues<_> =
+        compress_public_values_stream.as_mut_slice().borrow_mut();
+
+    assert_recursion_public_values_valid::<OuterConfig, BbBn254Poseidon2>(
+        builder,
+        compress_public_values,
+    );
+
+    compress_public_values.digest = recursion_public_values_digest::<OuterConfig, BbBn254Poseidon2>(
+        builder,
+        compress_public_values,
+    );
+
+    // Reflect the public values to the next level.
+    BbBn254Poseidon2::commit_recursion_public_values(builder, *compress_public_values);
+}
+
+#[allow(unused)]
+pub fn build_gnark_config(
+    constraints: Vec<Constraint>,
+    witness: Witness<OuterConfig>,
+    build_dir: PathBuf,
+) {
+    let serialized = serde_json::to_string(&constraints).unwrap();
+
+    // Write constraints.
+    let constraints_path = build_dir.join("constraints.json");
+    let mut file = File::create(constraints_path).unwrap();
+    file.write_all(serialized.as_bytes()).unwrap();
+
+    // Write witness.
+    let witness_path = build_dir.join("groth16_witness.json");
+    let gnark_witness = GnarkWitness::new(witness);
+    let mut file = File::create(witness_path).unwrap();
+    let serialized = serde_json::to_string(&gnark_witness).unwrap();
+    file.write_all(serialized.as_bytes()).unwrap();
 }

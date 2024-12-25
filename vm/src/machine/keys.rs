@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{Com, PcsProverData, StarkGenericConfig},
+    configs::config::{Com, Dom, PcsProverData, StarkGenericConfig},
     primitives::{consts::DIGEST_SIZE, poseidon2_hash},
 };
 use alloc::sync::Arc;
@@ -53,7 +53,7 @@ pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     /// start pc of program
     pub pc_start: SC::Val,
     /// The preprocessed information.
-    pub preprocessed_info: Arc<[(String, SC::Domain, Dimensions)]>,
+    pub preprocessed_info: Arc<[(String, Dom<SC>, Dimensions)]>,
     /// the index of for chips, chip name for key
     pub preprocessed_chip_ordering: Arc<HashMap<String, usize>>,
 }

@@ -1,7 +1,8 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            config::CircuitConfig,
+            config::{BabyBearFriConfigVariable, CircuitConfig},
+            hash::FieldHasherVariable,
             stark::BaseProofVariable,
             types::{
                 BaseVerifyingKeyVariable, BatchOpeningVariable, FriCommitPhaseProofStepVariable,
@@ -12,7 +13,7 @@ use crate::{
         ir::{Builder, Felt, Var, Witness},
     },
     configs::{
-        config::{FieldGenericConfig, OuterConfig},
+        config::{Com, OuterConfig, PcsProof, StarkGenericConfig},
         stark_config::{bb_bn254_poseidon2 as ecf, bb_bn254_poseidon2::BbBn254Poseidon2},
     },
     machine::{keys::BaseVerifyingKey, proof::BaseProof},
@@ -20,7 +21,7 @@ use crate::{
 use core::borrow::Borrow;
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::Bn254Fr;
-use p3_field::FieldAlgebra;
+use p3_field::{extension::BinomialExtensionField, FieldAlgebra};
 use p3_fri::CommitPhaseProofStep;
 
 impl<C: CircuitConfig<N = Bn254Fr>> Witnessable<C> for Bn254Fr {
@@ -33,20 +34,14 @@ impl<C: CircuitConfig<N = Bn254Fr>> Witnessable<C> for Bn254Fr {
     }
 }
 
-pub struct EmbedWitnessValues {
-    pub vks_and_proofs: Vec<(
-        BaseVerifyingKey<BbBn254Poseidon2>,
-        BaseProof<BbBn254Poseidon2>,
-    )>,
+pub struct EmbedWitnessValues<SC: StarkGenericConfig> {
+    pub vks_and_proofs: Vec<(BaseVerifyingKey<SC>, BaseProof<SC>)>,
     pub is_complete: bool,
 }
-pub struct EmbedWitnessVariable {
+pub struct EmbedWitnessVariable<C: CircuitConfig<F = BabyBear>, SC: BabyBearFriConfigVariable<C>> {
     /// The chunk proofs to verify.
-    pub vks_and_proofs: Vec<(
-        BaseVerifyingKeyVariable<OuterConfig, BbBn254Poseidon2>,
-        BaseProofVariable<OuterConfig, BbBn254Poseidon2>,
-    )>,
-    pub is_complete: Felt<<OuterConfig as FieldGenericConfig>::F>,
+    pub vks_and_proofs: Vec<(BaseVerifyingKeyVariable<C, SC>, BaseProofVariable<C, SC>)>,
+    pub is_complete: Felt<C::F>,
 }
 impl WitnessWriter<OuterConfig> for Witness<OuterConfig> {
     fn write_bit(&mut self, value: bool) {
@@ -62,9 +57,16 @@ impl WitnessWriter<OuterConfig> for Witness<OuterConfig> {
         self.exts.push(value);
     }
 }
-impl Witnessable<OuterConfig> for EmbedWitnessValues {
-    type WitnessVariable = EmbedWitnessVariable;
-    fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
+impl<
+        C: CircuitConfig<F = BabyBear, EF = BinomialExtensionField<BabyBear, 4>>,
+        SC: BabyBearFriConfigVariable<C>,
+    > Witnessable<C> for EmbedWitnessValues<SC>
+where
+    Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
+    PcsProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
+{
+    type WitnessVariable = EmbedWitnessVariable<C, SC>;
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let vks_and_proofs = self.vks_and_proofs.read(builder);
         let is_complete = BabyBear::from_bool(self.is_complete).read(builder);
         EmbedWitnessVariable {
@@ -72,42 +74,12 @@ impl Witnessable<OuterConfig> for EmbedWitnessValues {
             is_complete,
         }
     }
-    fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
+    fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.vks_and_proofs.write(witness);
         BabyBear::from_bool(self.is_complete).write(witness);
     }
 }
 
-impl<
-        CC: CircuitConfig<F = ecf::SC_Val, N = Bn254Fr, EF = ecf::SC_Challenge, Bit = Var<Bn254Fr>>,
-    > Witnessable<CC> for BaseProof<BbBn254Poseidon2>
-{
-    type WitnessVariable = BaseProofVariable<CC, BbBn254Poseidon2>;
-    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
-        let commitments = self.commitments.read(builder);
-        let opened_values = self.opened_values.read(builder);
-        let fri_proof = self.opening_proof.read(builder);
-        let log_main_degrees = self.log_main_degrees.to_vec();
-        let log_quotient_degrees = self.log_main_degrees.to_vec();
-        let main_chip_ordering = (*self.main_chip_ordering).clone();
-        let public_values = self.public_values.to_vec().read(builder);
-        BaseProofVariable {
-            commitments,
-            opened_values,
-            opening_proof: fri_proof,
-            log_main_degrees,
-            log_quotient_degrees,
-            main_chip_ordering,
-            public_values,
-        }
-    }
-    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
-        self.commitments.write(witness);
-        self.opened_values.write(witness);
-        self.opening_proof.write(witness);
-        self.public_values.to_vec().write(witness);
-    }
-}
 impl<
         CC: CircuitConfig<F = ecf::SC_Val, N = Bn254Fr, EF = ecf::SC_Challenge, Bit = Var<Bn254Fr>>,
     > Witnessable<CC> for ecf::SC_PcsProof

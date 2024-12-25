@@ -1,14 +1,23 @@
 use crate::{
     compiler::recursion_v2::{
-        circuit::{config::CircuitConfig, stark::BaseProofVariable},
+        circuit::{
+            config::{BabyBearFriConfigVariable, CircuitConfig},
+            hash::FieldHasherVariable,
+            stark::BaseProofVariable,
+            types::FriProofVariable,
+        },
         ir::{Builder, Ext, Felt},
     },
-    configs::stark_config::bb_poseidon2::BabyBearPoseidon2,
+    configs::{
+        config::{Com, PcsProof},
+        stark_config::bb_poseidon2::SC_Val,
+    },
     instances::configs::recur_config as rcf,
     machine::proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
 };
 use itertools::Itertools;
 use p3_baby_bear::BabyBear;
+use p3_field::extension::BinomialExtensionField;
 use p3_matrix::dense::DenseStorage;
 use std::sync::Arc;
 
@@ -145,10 +154,15 @@ impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for Vec<T> {
     }
 }
 
-impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge, Bit = Felt<BabyBear>>>
-    Witnessable<CC> for BaseProof<BabyBearPoseidon2>
+impl<
+        CC: CircuitConfig<F = BabyBear, EF = BinomialExtensionField<SC_Val, 4>>,
+        SC: BabyBearFriConfigVariable<CC>,
+    > Witnessable<CC> for BaseProof<SC>
+where
+    Com<SC>: Witnessable<CC, WitnessVariable = <SC as FieldHasherVariable<CC>>::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
 {
-    type WitnessVariable = BaseProofVariable<CC, BabyBearPoseidon2>;
+    type WitnessVariable = BaseProofVariable<CC, SC>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let commitments = self.commitments.read(builder);
