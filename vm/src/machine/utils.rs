@@ -1,4 +1,8 @@
-use std::{any::type_name, borrow::Borrow};
+use std::{
+    any::{type_name, TypeId},
+    borrow::Borrow,
+    cmp::max,
+};
 
 use core::iter;
 use hashbrown::HashMap;
@@ -10,6 +14,7 @@ use p3_commit::PolynomialSpace;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
+use p3_mersenne_31::Mersenne31;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use rayon::ThreadPoolBuilder;
@@ -341,7 +346,7 @@ where
 {
     get_symbolic_constraints(air, preprocessed_width)
         .iter()
-        .map(|c| c.degree_multiple())
+        .map(|c| compute_degree(c))
         .max()
         .unwrap_or(0)
 }
@@ -370,4 +375,25 @@ pub fn assert_vk_digest<SC: StarkGenericConfig>(
 {
     let public_values: &RecursionPublicValues<_> = proof.proofs[0].public_values.as_ref().borrow();
     assert_eq!(public_values.riscv_vk_digest, riscv_vk.hash_babybear());
+}
+
+fn compute_degree<F: Field>(expr: &SymbolicExpression<F>) -> usize {
+    if TypeId::of::<F>() != TypeId::of::<Mersenne31>() {
+        expr.degree_multiple()
+    } else {
+        match expr {
+            SymbolicExpression::Variable(var) => var.degree_multiple(),
+            SymbolicExpression::IsFirstRow => 1,
+            SymbolicExpression::IsLastRow => 1,
+            SymbolicExpression::IsTransition => 1,
+            SymbolicExpression::Constant(_) => 0,
+            SymbolicExpression::Add { x, y, .. } | SymbolicExpression::Sub { x, y, .. } => {
+                max(compute_degree(x.as_ref()), compute_degree(y.as_ref()))
+            }
+            SymbolicExpression::Neg { x, .. } => compute_degree(x.as_ref()),
+            SymbolicExpression::Mul { x, y, .. } => {
+                compute_degree(x.as_ref()) + compute_degree(y.as_ref())
+            }
+        }
+    }
 }

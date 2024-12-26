@@ -10,6 +10,7 @@ use pico_vm::{
         chiptype::riscv_chiptype::RiscvChipType,
         configs::{
             riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
+            riscv_m31_config::StarkConfig as RiscvM31SC,
         },
         machine::riscv::RiscvMachine,
     },
@@ -87,6 +88,8 @@ fn main() {
         run(RiscvBBSC::new(), elf, riscv_stdin);
     } else if args.field == "kb" {
         run(RiscvKBSC::new(), elf, riscv_stdin);
+    } else if args.field == "m31" {
+        run(RiscvM31SC::new(), elf, riscv_stdin);
     } else {
         panic!("unsupported field: {}", args.field);
     };

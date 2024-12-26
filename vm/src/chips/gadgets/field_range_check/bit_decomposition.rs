@@ -2,6 +2,7 @@ use p3_air::AirBuilder;
 use p3_baby_bear::BabyBear;
 use p3_field::{Field, FieldAlgebra};
 use p3_koala_bear::KoalaBear;
+use p3_mersenne_31::Mersenne31;
 use pico_derive::AlignedBorrow;
 use std::{any::TypeId, array};
 
@@ -24,6 +25,8 @@ impl<F: Field> FieldBitDecomposition<F> {
             3u32
         } else if TypeId::of::<F>() == TypeId::of::<KoalaBear>() {
             0
+        } else if TypeId::of::<F>() == TypeId::of::<Mersenne31>() {
+            return;
         } else {
             unimplemented!("Unsupported field type");
         };
@@ -98,6 +101,10 @@ impl<F: Field> FieldBitDecomposition<F> {
                 .when(is_real)
                 .when(cols.upper_all_one.result)
                 .assert_zero(lower_bits_sum);
+        } else if TypeId::of::<F>() == TypeId::of::<Mersenne31>() {
+            // Mersenne31 Modulus in big endian format
+            // 01111111 11111111 11111111 11111111
+            // 2^31 - 1
         } else {
             unimplemented!("Unsupported field type");
         }
