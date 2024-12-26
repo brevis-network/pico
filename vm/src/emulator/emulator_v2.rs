@@ -30,7 +30,7 @@ use crate::{
     recursion_v2::runtime::{RecursionRecord, Runtime},
 };
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
+use p3_field::PrimeField32;
 use std::sync::Arc;
 
 // todo: refactor
@@ -57,6 +57,7 @@ where
 impl<'a, SC, C> MetaEmulator<'a, SC, C, Program, Vec<u8>, RiscvEmulator>
 where
     SC: StarkGenericConfig,
+    SC::Val: PrimeField32,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
@@ -65,7 +66,7 @@ where
         // create a new emulator based on the emulator type
         let opts = proving_witness.opts.unwrap();
         let mut emulator =
-            RiscvEmulator::new::<BabyBear>(proving_witness.program.clone().unwrap(), opts);
+            RiscvEmulator::new::<SC::Val>(proving_witness.program.clone().unwrap(), opts);
         emulator.emulator_mode = EmulatorMode::Trace;
         for each in proving_witness
             .stdin
