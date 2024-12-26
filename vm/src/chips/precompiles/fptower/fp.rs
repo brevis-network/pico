@@ -1,15 +1,12 @@
-use core::{
-    borrow::{Borrow, BorrowMut},
-    fmt::Debug,
-    marker::PhantomData,
-    mem::size_of,
-};
-
+use super::{limbs_from_prev_access, words_to_bytes_le_slice};
 use crate::{
     chips::{
-        chips::rangecheck::event::RangeRecordBehavior,
+        chips::{
+            rangecheck::event::RangeRecordBehavior,
+            riscv_memory::read_write::columns::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
+        },
         gadgets::{
-            field::field_op::FieldOperation,
+            field::field_op::{FieldOpCols, FieldOperation},
             utils::{
                 field_params::{FieldType, FpOpField, NumLimbs},
                 limbs::Limbs,
@@ -18,11 +15,21 @@ use crate::{
         },
     },
     compiler::riscv::program::Program,
-    emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
+    emulator::{
+        record::RecordBehavior,
+        riscv::{record::EmulationRecord, syscalls::SyscallCode},
+    },
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
     },
+    recursion_v2::stark::utils::pad_rows,
+};
+use core::{
+    borrow::{Borrow, BorrowMut},
+    fmt::Debug,
+    marker::PhantomData,
+    mem::size_of,
 };
 use hybrid_array::Array;
 use itertools::Itertools;
@@ -31,14 +38,7 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
-
-use crate::chips::{
-    chips::riscv_memory::read_write::columns::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
-    gadgets::field::field_op::FieldOpCols,
-};
-
-use super::{limbs_from_prev_access, words_to_bytes_le_slice};
-use crate::recursion_v2::stark::utils::pad_rows;
+use tracing::debug;
 
 pub const fn num_fp_cols<P>() -> usize
 where
@@ -122,6 +122,12 @@ where
             FieldType::Bn254 => input.fp_bn254_events.iter(),
             FieldType::Bls381 => input.fp_bls381_events.iter(),
         };
+
+        debug!(
+            "record {} fp precompile events {:?}",
+            input.chunk_index(),
+            events.len()
+        );
 
         let mut rows = Vec::new();
         let mut new_byte_lookup_events = Vec::new();

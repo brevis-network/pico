@@ -1,3 +1,4 @@
+use cpu_time::ProcessTime;
 use p3_baby_bear::BabyBear;
 use p3_field::FieldAlgebra;
 use pico_vm::{
@@ -83,7 +84,7 @@ fn main() {
 
     // Generate the proof.
     info!("Generating RISCV proof (at {:?})..", start.elapsed());
-    let (riscv_proof, riscv_duration) = timed_run(|| riscv_machine.prove(&riscv_witness));
+    let (riscv_proof, riscv_time) = timed_run(|| riscv_machine.prove(&riscv_witness));
     info!(
         "PERF-step=prove-user_time={}",
         riscv_start.elapsed().as_millis()
@@ -102,11 +103,18 @@ fn main() {
     );
     assert!(riscv_result.is_ok());
     if args.step == "riscv" {
-        info!("Proof duration:");
-        info!("|- riscv {:?}", riscv_duration);
-
-        info!("Proof size:");
-        info!("|- riscv {:?}K", (riscv_proof_size as f64) / 1000.0);
+        print_stats(
+            riscv_time,
+            TIME_ZERO,
+            TIME_ZERO,
+            TIME_ZERO,
+            TIME_ZERO,
+            riscv_proof_size,
+            0,
+            0,
+            0,
+            0,
+        );
         return;
     }
 
@@ -148,7 +156,7 @@ fn main() {
 
     // Generate the proof.
     info!("Generating CONVERT proof (at {:?})..", start.elapsed());
-    let (convert_proof, convert_duration) = timed_run(|| convert_machine.prove(&convert_witness));
+    let (convert_proof, convert_time) = timed_run(|| convert_machine.prove(&convert_witness));
     info!(
         "PERF-step=prove-user_time={}",
         convert_start.elapsed().as_millis()
@@ -168,14 +176,18 @@ fn main() {
     assert!(convert_result.is_ok());
 
     if args.step == "convert" {
-        info!("Proof duration:");
-        info!("|- riscv   {:?}", riscv_duration);
-        info!("|- convert {:?}", convert_duration);
-        info!("|- total   {:?}", riscv_duration + convert_duration);
-
-        info!("Proof size:");
-        info!("|- riscv   {:?}K", (riscv_proof_size as f64) / 1000.0);
-        info!("|- convert {:?}K", (convert_proof_size as f64) / 1000.0);
+        print_stats(
+            riscv_time,
+            convert_time,
+            TIME_ZERO,
+            TIME_ZERO,
+            TIME_ZERO,
+            riscv_proof_size,
+            convert_proof_size,
+            0,
+            0,
+            0,
+        );
         return;
     }
 
@@ -215,7 +227,7 @@ fn main() {
 
     // Generate the proof.
     info!("Generating COMBINE proof (at {:?})..", start.elapsed());
-    let (combine_proof, combine_duration) = timed_run(|| combine_machine.prove(&combine_witness));
+    let (combine_proof, combine_time) = timed_run(|| combine_machine.prove(&combine_witness));
     info!(
         "PERF-step=prove-user_time={}",
         combine_start.elapsed().as_millis(),
@@ -235,18 +247,18 @@ fn main() {
     assert!(combine_result.is_ok());
 
     if args.step == "combine" {
-        let recursion_duration = convert_duration + combine_duration;
-        info!("Proof duration:");
-        info!("|- riscv      {:?}", riscv_duration);
-        info!("|- recursion  {:?}", recursion_duration);
-        info!("   |- convert   {:?}", convert_duration);
-        info!("   |- combine   {:?}", combine_duration);
-        info!("|- total      {:?}", riscv_duration + recursion_duration);
-
-        info!("Proof size:");
-        info!("|- riscv   {:?}K", (riscv_proof_size as f64) / 1000.0);
-        info!("|- convert {:?}K", (convert_proof_size as f64) / 1000.0);
-        info!("|- combine {:?}K", (combine_proof_size as f64) / 1000.0);
+        print_stats(
+            riscv_time,
+            convert_time,
+            combine_time,
+            TIME_ZERO,
+            TIME_ZERO,
+            riscv_proof_size,
+            convert_proof_size,
+            combine_proof_size,
+            0,
+            0,
+        );
         return;
     }
 
@@ -304,8 +316,7 @@ fn main() {
         ProvingWitness::setup_with_keys_and_records(compress_pk, compress_vk, vec![record]);
 
     info!("Generating COMPRESS proof (at {:?})..", start.elapsed());
-    let (compress_proof, compress_duration) =
-        timed_run(|| compress_machine.prove(&compress_witness));
+    let (compress_proof, compress_time) = timed_run(|| compress_machine.prove(&compress_witness));
     info!(
         "PERF-step=prove-user_time={}",
         compress_start.elapsed().as_millis()
@@ -325,20 +336,18 @@ fn main() {
     assert!(compress_result.is_ok());
 
     if args.step == "compress" {
-        let recursion_duration = convert_duration + combine_duration + compress_duration;
-        info!("Proof duration at step compress:");
-        info!("|- riscv       {:?}", riscv_duration);
-        info!("|- recursion   {:?}", recursion_duration);
-        info!("   |- convert    {:?}", convert_duration);
-        info!("   |- combine    {:?}", combine_duration);
-        info!("   |- compress   {:?}", compress_duration);
-        info!("|- total         {:?}", riscv_duration + recursion_duration);
-
-        info!("Proof size:");
-        info!("|- riscv    {:?}K", (riscv_proof_size as f64) / 1000.0);
-        info!("|- convert  {:?}K", (convert_proof_size as f64) / 1000.0);
-        info!("|- combine  {:?}K", (combine_proof_size as f64) / 1000.0);
-        info!("|- compress {:?}K", (compress_proof_size as f64) / 1000.0);
+        print_stats(
+            riscv_time,
+            convert_time,
+            combine_time,
+            compress_time,
+            TIME_ZERO,
+            riscv_proof_size,
+            convert_proof_size,
+            combine_proof_size,
+            compress_proof_size,
+            0,
+        );
         return;
     }
 
@@ -396,7 +405,7 @@ fn main() {
         ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
 
     info!("Generating EMBED proof (at {:?})..", start.elapsed());
-    let (embed_proof, embed_duration) = timed_run(|| embed_machine.prove(&embed_witness));
+    let (embed_proof, embed_time) = timed_run(|| embed_machine.prove(&embed_witness));
     info!(
         "PERF-step=prove-user_time={}",
         embed_start.elapsed().as_millis()
@@ -415,17 +424,110 @@ fn main() {
     );
     assert!(embed_result.is_ok());
 
-    info!("Proof duration:");
-    let recursion_duration =
-        convert_duration + combine_duration + compress_duration + embed_duration;
-    info!("|- riscv       {:?}", riscv_duration);
-    info!("|- recursion   {:?}", recursion_duration);
-    info!("   |- convert    {:?}", convert_duration);
-    info!("   |- combine    {:?}", combine_duration);
-    info!("   |- compress   {:?}", compress_duration);
-    info!("   |- embed      {:?}", embed_duration);
-    info!("|- total       {:?}", riscv_duration + recursion_duration);
+    print_stats(
+        riscv_time,
+        convert_time,
+        combine_time,
+        compress_time,
+        embed_time,
+        riscv_proof_size,
+        convert_proof_size,
+        combine_proof_size,
+        compress_proof_size,
+        embed_proof_size,
+    );
+}
 
+struct TimeStats {
+    pub wall_time: Duration,
+    pub cpu_time: Duration,
+    pub parallelism: f64,
+}
+
+const TIME_ZERO: TimeStats = TimeStats {
+    wall_time: Duration::from_secs(0),
+    cpu_time: Duration::from_secs(0),
+    parallelism: 0.0,
+};
+
+fn timed_run<T, F: FnOnce() -> T>(operation: F) -> (T, TimeStats) {
+    let start = Instant::now();
+    let start_cpu = ProcessTime::now();
+    let result = operation();
+    let wall_time = start.elapsed();
+    let cpu_time = start_cpu.elapsed();
+    let parallelism = cpu_time.as_secs_f64() / wall_time.as_secs_f64();
+    (
+        result,
+        TimeStats {
+            wall_time,
+            cpu_time,
+            parallelism,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn print_stats(
+    riscv_time: TimeStats,
+    convert_time: TimeStats,
+    combine_time: TimeStats,
+    compress_time: TimeStats,
+    embed_time: TimeStats,
+    riscv_proof_size: usize,
+    convert_proof_size: usize,
+    combine_proof_size: usize,
+    compress_proof_size: usize,
+    embed_proof_size: usize,
+) {
+    let recursion_time = convert_time.wall_time
+        + combine_time.wall_time
+        + compress_time.wall_time
+        + embed_time.wall_time;
+    let recursion_cpu_time = convert_time.cpu_time
+        + combine_time.cpu_time
+        + compress_time.cpu_time
+        + embed_time.cpu_time;
+    let recursion_parallelism = recursion_cpu_time.as_secs_f64() / recursion_time.as_secs_f64();
+    let total_time = riscv_time.wall_time + recursion_time;
+
+    info!("Proof time: (duration, parallelism)");
+    info!(
+        "|- riscv      {:<10}  {:.2}",
+        format_duration(riscv_time.wall_time.as_secs_f64()),
+        riscv_time.parallelism
+    );
+    info!(
+        "|- recursion  {:<10}  {:.2}",
+        format_duration(recursion_time.as_secs_f64()),
+        recursion_parallelism
+    );
+    info!(
+        "   |- convert   {:<8}  {:.2}",
+        format_duration(convert_time.wall_time.as_secs_f64()),
+        convert_time.parallelism
+    );
+    info!(
+        "   |- combine   {:<8}  {:.2}",
+        format_duration(combine_time.wall_time.as_secs_f64()),
+        combine_time.parallelism
+    );
+    info!(
+        "   |- compress  {:<8}  {:.2}",
+        format_duration(compress_time.wall_time.as_secs_f64()),
+        compress_time.parallelism
+    );
+    info!(
+        "   |- embed     {:<8}  {:.2}",
+        format_duration(embed_time.wall_time.as_secs_f64()),
+        embed_time.parallelism
+    );
+    info!(
+        "|- total      {:<10}",
+        format_duration(total_time.as_secs_f64())
+    );
+
+    info!("");
     info!("Proof size:");
     info!("|- riscv    {:?}K", (riscv_proof_size as f64) / 1000.0);
     info!("|- convert  {:?}K", (convert_proof_size as f64) / 1000.0);
@@ -434,9 +536,20 @@ fn main() {
     info!("|- embed    {:?}K", (embed_proof_size as f64) / 1000.0);
 }
 
-pub fn timed_run<T, F: FnOnce() -> T>(operation: F) -> (T, Duration) {
-    let start = Instant::now();
-    let result = operation();
-    let duration = start.elapsed();
-    (result, duration)
+fn format_duration(duration: f64) -> String {
+    let secs = duration.round() as u64;
+    let minutes = secs / 60;
+    let seconds = secs % 60;
+
+    if minutes > 0 {
+        format!("{}m:{}s", minutes, seconds)
+    } else if seconds > 0 {
+        format!(
+            "{}s:{}ms",
+            seconds,
+            ((duration - seconds as f64) * 1000.0).round() as u64
+        )
+    } else {
+        format!("{}ms", (duration * 1000.0).round() as u64)
+    }
 }

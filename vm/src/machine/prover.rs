@@ -129,7 +129,7 @@ where
                     .map(|trace| (chip.name(), trace));
                 let elapsed_time = begin.elapsed();
                 durations.insert(chip.name(), elapsed_time);
-                info!(
+                debug!(
                     "PERF-step=generate_preprocessed-chip={}-cpu_time={}",
                     chip.name(),
                     elapsed_time.as_millis()
@@ -178,7 +178,7 @@ where
                     let trace = chip.generate_main(record, &mut C::Record::default());
                     let elapsed_time = begin.elapsed();
                     durations.insert(chip.name(), elapsed_time);
-                    info!(
+                    debug!(
                         "PERF-step=generate_main-chunk={}-chip={}-cpu_time={}",
                         record.chunk_index(),
                         chip.name(),
@@ -312,7 +312,7 @@ where
                     let elapsed_time = begin.elapsed();
                     durations.insert(chip.name(), elapsed_time);
 
-                    info!(
+                    debug!(
                         "PERF-step=generate_permutation-chunk={}-chip={}-cpu_time={}",
                         chunk_index,
                         chip.name(),
@@ -578,7 +578,7 @@ where
                                 alpha,
                             );
 
-                            info!(
+                            debug!(
                                 "PERF-step=compute_quotient_values-chunk={}-chip={}-cpu_time={}",
                                 chunk_index,
                                 ordered_chips[i].name(),

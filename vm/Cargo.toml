@@ -33,6 +33,7 @@ p3-maybe-rayon = { workspace = true, features = ["parallel"] }
 p3-bn254-fr.workspace = true
 p3-mersenne-31.workspace = true
 p3-circle.workspace = true
+p3-koala-bear.workspace = true
 
 # misc
 anyhow.workspace = true
@@ -73,8 +74,6 @@ tracing.workspace = true
 typenum.workspace = true
 vec_map.workspace = true
 zkhash.workspace = true
-hybrid-array = "0.2.1"
-num-bigint = "0.4.6"
 curve25519-dalek.workspace = true
 k256.workspace = true
 p256.workspace = true
@@ -88,8 +87,10 @@ rug = { version = "1.26.1", optional = true }
 amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = [
     "bls381",
 ] }
-p3-koala-bear.workspace = true
 sysinfo = "0.30.13"
+hybrid-array = "0.2.1"
+num-bigint = "0.4.6"
+cpu-time = "1.0.0"
 
 
 [dev-dependencies]

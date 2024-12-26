@@ -1,18 +1,3 @@
-use core::{
-    borrow::{Borrow, BorrowMut},
-    mem::size_of,
-};
-use std::{fmt::Debug, marker::PhantomData};
-
-use hashbrown::HashMap;
-use num::{BigUint, Zero};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
-use pico_derive::AlignedBorrow;
-use tracing::info;
-
 use crate::{
     chips::{
         chips::{
@@ -39,9 +24,12 @@ use crate::{
         utils::pad_rows,
     },
     compiler::riscv::program::Program,
-    emulator::riscv::{
-        record::EmulationRecord,
-        syscalls::{precompiles::edwards::event::EllipticCurveAddEvent, SyscallCode},
+    emulator::{
+        record::RecordBehavior,
+        riscv::{
+            record::EmulationRecord,
+            syscalls::{precompiles::edwards::event::EllipticCurveAddEvent, SyscallCode},
+        },
     },
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
@@ -49,6 +37,19 @@ use crate::{
         utils::limbs_from_prev_access,
     },
 };
+use core::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+};
+use hashbrown::HashMap;
+use num::{BigUint, Zero};
+use p3_air::{Air, AirBuilder, BaseAir};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
+use pico_derive::AlignedBorrow;
+use std::{fmt::Debug, marker::PhantomData};
+use tracing::debug;
 
 pub const NUM_ED_ADD_COLS: usize = size_of::<EdAddAssignCols<u8>>();
 
@@ -145,8 +146,11 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
         let events = &input.ed_add_events;
-        info!("ed add precompile events: {:?}", events.len());
-
+        debug!(
+            "record {} ed add precompile events {:?}",
+            input.chunk_index(),
+            events.len()
+        );
         let (_rows, nonces): (Vec<[F; NUM_ED_ADD_COLS]>, Vec<_>) = events
             .par_iter()
             .map(|event| {

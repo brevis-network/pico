@@ -80,11 +80,21 @@ where
         let mut all_proofs = vec![];
         let mut all_vks = vec![];
 
+        let mut batch_num = 1;
         let mut chunk_index = 1;
         loop {
+            let start = Instant::now();
             let (mut batch_records, batch_pks, batch_vks, done) = emulator.next_record_keys_batch();
 
             self.complement_record(batch_records.as_mut_slice());
+
+            info!(
+                "--- Generate convert records for batch {}, chunk {}-{} in {:?}",
+                batch_num,
+                chunk_index,
+                chunk_index + batch_records.len() as u32 - 1,
+                start.elapsed()
+            );
 
             // set index for each record
             for record in batch_records.as_mut_slice() {
@@ -101,13 +111,29 @@ where
                 .par_iter()
                 .zip(batch_pks.par_iter())
                 .flat_map(|(record, pk)| {
-                    self.base_machine
-                        .prove_ensemble(pk, std::slice::from_ref(record))
+                    let start_chunk = Instant::now();
+                    let proof = self
+                        .base_machine
+                        .prove_ensemble(pk, std::slice::from_ref(record));
+                    info!(
+                        "--- Prove convert chunk {} in {:?}",
+                        record.chunk_index(),
+                        start_chunk.elapsed()
+                    );
+                    proof
                 })
                 .collect::<Vec<_>>();
 
             all_proofs.extend(batch_proofs);
             all_vks.extend(batch_vks);
+
+            info!(
+                "--- Finish convert batch {} in {:?}",
+                batch_num,
+                start.elapsed()
+            );
+
+            batch_num += 1;
 
             if done {
                 break;

@@ -21,7 +21,7 @@ use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField32, PrimeField64};
 use p3_maybe_rayon::prelude::*;
-use std::{any::type_name, borrow::Borrow};
+use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument};
 
 pub struct RiscvMachine<SC, C>
@@ -70,6 +70,7 @@ where
             >,
         >,
     {
+        let start_p1 = Instant::now();
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
 
@@ -91,7 +92,7 @@ where
                 debug!("riscv record stats: chunk {}", record.chunk_index());
                 let stats = record.stats();
                 for (key, value) in &stats {
-                    debug!("   |- {:<25}: {}", key, value);
+                    debug!("   |- {:<26}: {}", key, value);
                 }
             }
 
@@ -114,6 +115,7 @@ where
                 break;
             }
         }
+        info!("--- Finish riscv phase 1 in {:?}", start_p1.elapsed());
 
         /*
         Second phase
@@ -133,9 +135,21 @@ where
         let mut global_lookup_debugger =
             crate::machine::debug::IncrementalLookupDebugger::new(pk, LookupScope::Global, None);
 
+        let start_p2 = Instant::now();
+        let mut batch_num = 1;
+        let mut chunk_num = 0;
         loop {
+            let start_local = Instant::now();
             let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);
+            info!(
+                "--- Generate riscv records for batch {}, chunk {}-{} in {:?}",
+                batch_num,
+                chunk_num + 1,
+                chunk_num + batch_records.len() as u32,
+                start_local.elapsed()
+            );
+            chunk_num += batch_records.len() as u32;
 
             #[cfg(feature = "debug")]
             constraint_debugger.debug_incremental(&self.chips(), batch_records);
@@ -153,6 +167,8 @@ where
             let batch_proofs = batch_records
                 .into_par_iter()
                 .map(|record| {
+                    let start_chunk = Instant::now();
+
                     let regional_commitment = self
                         .base_machine
                         .commit(record, LookupScope::Regional)
@@ -167,6 +183,12 @@ where
                         global_commitment,
                     );
 
+                    info!(
+                        "--- Prove riscv batch {} chunk {} in {:?}",
+                        batch_num,
+                        record.chunk_index(),
+                        start_chunk.elapsed()
+                    );
                     proof
                 })
                 .collect::<Vec<_>>();
@@ -174,10 +196,19 @@ where
             // extend all_proofs to include batch_proofs
             all_proofs.extend(batch_proofs);
 
+            info!(
+                "--- Finish riscv batch {} in {:?}",
+                batch_num,
+                start_local.elapsed()
+            );
+
+            batch_num += 1;
+
             if done {
                 break;
             }
         }
+        info!("--- Finish riscv phase 2 in {:?}", start_p2.elapsed());
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()];

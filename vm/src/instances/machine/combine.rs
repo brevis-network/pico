@@ -88,17 +88,22 @@ where
         let mut flag_complete = false;
 
         loop {
+            let mut batch_num = 1;
+            let start_layer = Instant::now();
             loop {
+                let start_batch = Instant::now();
                 let (mut batch_records, batch_pks, batch_vks, done) =
                     recursion_emulator.next_record_keys_batch();
 
                 self.complement_record(batch_records.as_mut_slice());
 
                 info!(
-                    "recursion combine layer {}, chunk {}-{}",
+                    "--- Generate combine records for layer {}, batch {}, chunk {}-{} in {:?}",
                     layer_index,
+                    batch_num,
                     chunk_index,
-                    chunk_index + batch_records.len() as u32 - 1
+                    chunk_index + batch_records.len() as u32 - 1,
+                    start_batch.elapsed()
                 );
 
                 // set index for each record
@@ -117,18 +122,41 @@ where
                     .par_iter()
                     .zip(batch_pks.par_iter())
                     .flat_map(|(record, pk)| {
-                        self.base_machine
-                            .prove_ensemble(pk, std::slice::from_ref(record))
+                        let start_chunk = Instant::now();
+                        let proof = self
+                            .base_machine
+                            .prove_ensemble(pk, std::slice::from_ref(record));
+                        info!(
+                            "--- Prove combine layer {} chunk {} in {:?}",
+                            layer_index,
+                            record.chunk_index(),
+                            start_chunk.elapsed()
+                        );
+                        proof
                     })
                     .collect::<Vec<_>>();
 
                 all_proofs.extend(batch_proofs);
                 all_vks.extend(batch_vks);
 
+                info!(
+                    "--- Finish combine batch {} of layer {} in {:?}",
+                    batch_num,
+                    layer_index,
+                    start_batch.elapsed()
+                );
+
+                batch_num += 1;
                 if done {
                     break;
                 }
             }
+
+            info!(
+                "--- Finish combine layer {} in {:?}",
+                layer_index,
+                start_layer.elapsed()
+            );
 
             if flag_complete {
                 info!("recursion combine finished");

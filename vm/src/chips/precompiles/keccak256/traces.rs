@@ -1,10 +1,11 @@
+use crate::emulator::record::RecordBehavior;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_keccak_air::{generate_trace_rows, NUM_KECCAK_COLS, NUM_ROUNDS};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use std::borrow::BorrowMut;
-use tracing::info;
+use tracing::debug;
 
 use super::{
     columns::{KeccakMemCols, NUM_KECCAK_MEM_COLS},
@@ -66,7 +67,11 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
 
     fn generate_main(&self, input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
         let events = input.keccak_permute_events.clone();
-        info!("keccak precompile events: {:?}", events.len());
+        debug!(
+            "record {} keccak precompile events {:?}",
+            input.chunk_index(),
+            events.len()
+        );
         let num_events = events.len();
         let num_rows = (num_events * NUM_ROUNDS).next_power_of_two();
         let chunk_size = 8;

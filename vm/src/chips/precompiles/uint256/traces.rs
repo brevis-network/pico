@@ -9,7 +9,7 @@ use crate::{
         precompiles::uint256::{Uint256MulChip, UINT256_NUM_WORDS},
     },
     compiler::riscv::program::Program,
-    emulator::riscv::record::EmulationRecord,
+    emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     machine::chip::ChipBehavior,
     recursion_v2::{air::IsZeroOperation, stark::utils::pad_rows_fixed},
 };
@@ -18,6 +18,7 @@ use num::{BigUint, One, Zero};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::borrow::BorrowMut;
+use tracing::debug;
 
 impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
     type Record = EmulationRecord;
@@ -32,6 +33,12 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
         input: &EmulationRecord,
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
+        debug!(
+            "record {} uint256 precompile events {:?}",
+            input.chunk_index(),
+            input.uint256_mul_events.len()
+        );
+
         // The record update is used by extra_record
         let mut chunked_byte_lookup_events = Vec::new();
         let mut rangecheck_lookup_events = Vec::new();

@@ -1,10 +1,7 @@
-use std::borrow::BorrowMut;
-
-use p3_air::BaseAir;
-use p3_field::{Field, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use rayon::{iter::ParallelIterator, slice::ParallelSlice};
-
+use super::{
+    columns::{FullRound, PartialRound, Poseidon2Cols, NUM_POSEIDON2_COLS},
+    Poseidon2PermuteChip,
+};
 use crate::{
     chips::{
         chips::{
@@ -14,18 +11,22 @@ use crate::{
         poseidon2::{external_linear_layer, internal_linear_layer},
     },
     compiler::riscv::program::Program,
-    emulator::riscv::{
-        record::EmulationRecord, syscalls::precompiles::poseidon2::event::Poseidon2PermuteEvent,
+    emulator::{
+        record::RecordBehavior,
+        riscv::{
+            record::EmulationRecord, syscalls::precompiles::poseidon2::event::Poseidon2PermuteEvent,
+        },
     },
     machine::chip::ChipBehavior,
     primitives::RC_16_30_U32,
     recursion_v2::stark::utils::pad_rows_fixed,
 };
-
-use super::{
-    columns::{FullRound, PartialRound, Poseidon2Cols, NUM_POSEIDON2_COLS},
-    Poseidon2PermuteChip,
-};
+use p3_air::BaseAir;
+use p3_field::{Field, PrimeField32};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use rayon::{iter::ParallelIterator, slice::ParallelSlice};
+use std::borrow::BorrowMut;
+use tracing::debug;
 
 impl<F: Field> BaseAir<F> for Poseidon2PermuteChip<F> {
     fn width(&self) -> usize {
@@ -46,6 +47,12 @@ impl<F: PrimeField32> ChipBehavior<F> for Poseidon2PermuteChip<F> {
         input: &Self::Record,
         _output: &mut Self::Record,
     ) -> p3_matrix::dense::RowMajorMatrix<F> {
+        debug!(
+            "record {} poseidon2 precompile events {:?}",
+            input.chunk_index(),
+            input.poseidon2_permute_events.len()
+        );
+
         // Generate the trace rows & corresponding records for each chunk of events concurrently.
         let mut new_byte_lookup_events = Vec::new();
 

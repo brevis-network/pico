@@ -1,18 +1,3 @@
-use std::marker::PhantomData;
-
-use core::{
-    borrow::{Borrow, BorrowMut},
-    mem::size_of,
-};
-use hybrid_array::Array;
-use num::{BigUint, One, Zero};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use pico_derive::AlignedBorrow;
-use tracing::debug;
-use typenum::U32;
-
 use crate::{
     chips::{
         chips::{
@@ -38,9 +23,12 @@ use crate::{
         utils::pad_rows,
     },
     compiler::riscv::program::Program,
-    emulator::riscv::{
-        record::EmulationRecord,
-        syscalls::{precompiles::edwards::event::EdDecompressEvent, SyscallCode},
+    emulator::{
+        record::RecordBehavior,
+        riscv::{
+            record::EmulationRecord,
+            syscalls::{precompiles::edwards::event::EdDecompressEvent, SyscallCode},
+        },
     },
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
@@ -48,6 +36,19 @@ use crate::{
         utils::{limbs_from_access, limbs_from_prev_access},
     },
 };
+use core::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+};
+use hybrid_array::Array;
+use num::{BigUint, One, Zero};
+use p3_air::{Air, AirBuilder, BaseAir};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use pico_derive::AlignedBorrow;
+use std::marker::PhantomData;
+use tracing::debug;
+use typenum::U32;
 
 pub const NUM_ED_DECOMPRESS_COLS: usize = size_of::<EdDecompressCols<u8>>();
 
@@ -294,7 +295,11 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
         let mut rows = Vec::new();
         let mut nonces = Vec::new();
         let events = &input.ed_decompress_events;
-        debug!("ed decompress precompile events: {:?}", events.len());
+        debug!(
+            "record {} ed decompress precompile events {:?}",
+            input.chunk_index(),
+            events.len()
+        );
 
         for event in events {
             let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
