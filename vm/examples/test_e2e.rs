@@ -491,39 +491,45 @@ fn print_stats(
     let recursion_parallelism = recursion_cpu_time.as_secs_f64() / recursion_time.as_secs_f64();
     let total_time = riscv_time.wall_time + recursion_time;
 
-    info!("Proof time: (duration, parallelism)");
+    info!("Proof time: (wall_time, total_cpu_time, parallelism)");
     info!(
-        "|- riscv      {:<10}  {:.2}",
+        "|- riscv      {:<12}  {:<10}  {:.2}",
         format_duration(riscv_time.wall_time.as_secs_f64()),
+        format_duration(riscv_time.cpu_time.as_secs_f64()),
         riscv_time.parallelism
     );
     info!(
-        "|- recursion  {:<10}  {:.2}",
+        "|- recursion  {:<12}  {:<10}  {:.2}",
         format_duration(recursion_time.as_secs_f64()),
+        format_duration(recursion_cpu_time.as_secs_f64()),
         recursion_parallelism
     );
     info!(
-        "   |- convert   {:<8}  {:.2}",
+        "   |- convert   {:10}  {:<10}  {:.2}",
         format_duration(convert_time.wall_time.as_secs_f64()),
+        format_duration(convert_time.cpu_time.as_secs_f64()),
         convert_time.parallelism
     );
     info!(
-        "   |- combine   {:<8}  {:.2}",
+        "   |- combine   {:<10}  {:<10}  {:.2}",
         format_duration(combine_time.wall_time.as_secs_f64()),
+        format_duration(combine_time.cpu_time.as_secs_f64()),
         combine_time.parallelism
     );
     info!(
-        "   |- compress  {:<8}  {:.2}",
+        "   |- compress  {:<10}  {:<10}  {:.2}",
         format_duration(compress_time.wall_time.as_secs_f64()),
+        format_duration(compress_time.cpu_time.as_secs_f64()),
         compress_time.parallelism
     );
     info!(
-        "   |- embed     {:<8}  {:.2}",
+        "   |- embed     {:<10}  {:<10}  {:.2}",
         format_duration(embed_time.wall_time.as_secs_f64()),
+        format_duration(embed_time.cpu_time.as_secs_f64()),
         embed_time.parallelism
     );
     info!(
-        "|- total      {:<10}",
+        "|- total      {:<12}",
         format_duration(total_time.as_secs_f64())
     );
 
