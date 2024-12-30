@@ -157,11 +157,15 @@ pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = Bab
 Poseidon2
  */
 
-pub const POSEIDON2_PERM_SEED: usize = 42;
-
 pub const PERMUTATION_WIDTH: usize = 16;
 
 pub const PERMUTATION_RATE: usize = 8;
+
+pub const MULTI_FIELD_CHALLENGER_WIDTH: usize = 3;
+
+pub const MULTI_FIELD_CHALLENGER_RATE: usize = 2;
+
+pub const MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 
 pub const BABYBEAR_S_BOX_DEGREE: u64 = 7;
 

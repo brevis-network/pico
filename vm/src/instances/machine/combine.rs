@@ -212,6 +212,8 @@ where
             panic!("flag_complete is not 1");
         }
 
+        // todo: assert public values digest
+
         // verify
         self.base_machine
             .verify_ensemble(proof.vks().first().unwrap(), &proof.proofs())?;

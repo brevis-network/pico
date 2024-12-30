@@ -1,4 +1,4 @@
-#![deny(warnings)]
+// #![deny(warnings)]
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::module_inception)]
 #![feature(generic_arg_infer)]

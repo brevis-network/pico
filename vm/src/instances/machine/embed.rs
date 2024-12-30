@@ -1,6 +1,11 @@
 use crate::{
-    compiler::recursion_v2::program::RecursionProgram,
-    configs::config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},
+    compiler::recursion_v2::{
+        circuit::utils::assert_embed_public_values_valid, program::RecursionProgram,
+    },
+    configs::{
+        config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},
+        stark_config::bb_poseidon2::BabyBearPoseidon2,
+    },
     emulator::record::RecordBehavior,
     instances::configs::embed_bb_bn254_poseidon2::StarkConfig as EmbedSC,
     machine::{
@@ -91,6 +96,9 @@ where
         if public_values.flag_complete != <Val<EmbedSC>>::ONE {
             panic!("flag_complete is not 1");
         }
+
+        // assert public value digest
+        assert_embed_public_values_valid(&BabyBearPoseidon2::new(), public_values);
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;

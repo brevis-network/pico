@@ -212,6 +212,20 @@ where
     H::poseidon2_hash(builder, &input)
 }
 
+/// Verifies the digest of a recursive public values struct.
+pub(crate) fn assert_embed_public_values_valid<C, H>(
+    builder: &mut Builder<C>,
+    public_values: &RecursionPublicValues<Felt<C::F>>,
+) where
+    C: CircuitConfig,
+    H: Posedion2BabyBearHasherVariable<C>,
+{
+    let expected_digest = embed_public_values_digest::<C, H>(builder, public_values);
+    for (value, expected) in public_values.digest.iter().copied().zip_eq(expected_digest) {
+        builder.assert_felt_eq(value, expected);
+    }
+}
+
 /// Compute the digest of a recursive public values Struct.
 pub(crate) fn recursion_public_values_digest<C, H>(
     builder: &mut Builder<C>,

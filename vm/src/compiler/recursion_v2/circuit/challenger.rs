@@ -2,17 +2,14 @@ use super::builder::CircuitV2Builder;
 use crate::{
     compiler::recursion_v2::ir::{Builder, DslIr, Ext, Felt, Var},
     configs::config::FieldGenericConfig,
-    instances::configs::embed_config::{
+    primitives::consts::{
         MULTI_FIELD_CHALLENGER_DIGEST_SIZE, MULTI_FIELD_CHALLENGER_RATE,
+        MULTI_FIELD_CHALLENGER_WIDTH, PERMUTATION_RATE, PERMUTATION_WIDTH,
     },
-    primitives::consts::{PERMUTATION_RATE, PERMUTATION_WIDTH},
     recursion_v2::{air::ChallengerPublicValues, runtime::NUM_BITS},
 };
 use p3_baby_bear::BabyBear;
 use p3_field::{Field, FieldAlgebra};
-
-// Constants for the Multifield challenger.
-pub const POSEIDON_2_BB_RATE: usize = 16;
 
 pub trait CanCopyChallenger<FC: FieldGenericConfig> {
     fn copy(&self, builder: &mut Builder<FC>) -> Self;
@@ -244,7 +241,7 @@ impl<FC: FieldGenericConfig<F = BabyBear>> FieldChallengerVariable<FC, Felt<FC::
 
 #[derive(Clone)]
 pub struct MultiField32ChallengerVariable<FC: FieldGenericConfig> {
-    sponge_state: [Var<FC::N>; 3],
+    sponge_state: [Var<FC::N>; MULTI_FIELD_CHALLENGER_WIDTH],
     input_buffer: Vec<Felt<FC::F>>,
     output_buffer: Vec<Felt<FC::F>>,
     num_f_elms: usize,
@@ -253,18 +250,13 @@ pub struct MultiField32ChallengerVariable<FC: FieldGenericConfig> {
 impl<FC: FieldGenericConfig> MultiField32ChallengerVariable<FC> {
     pub fn new(builder: &mut Builder<FC>) -> Self {
         MultiField32ChallengerVariable::<FC> {
-            sponge_state: [
-                builder.eval(FC::N::ZERO),
-                builder.eval(FC::N::ZERO),
-                builder.eval(FC::N::ZERO),
-            ],
+            sponge_state: core::array::from_fn(|_| builder.eval(FC::N::ZERO)),
             input_buffer: vec![],
             output_buffer: vec![],
             num_f_elms: FC::N::bits() / 64,
         }
     }
 
-    // todo: p3 update
     pub fn duplexing(&mut self, builder: &mut Builder<FC>) {
         assert!(self.input_buffer.len() <= self.num_f_elms * MULTI_FIELD_CHALLENGER_RATE);
 
@@ -273,7 +265,6 @@ impl<FC: FieldGenericConfig> MultiField32ChallengerVariable<FC> {
         }
         self.input_buffer.clear();
 
-        // TODO make this a method for the builder.
         builder.push_op(DslIr::CircuitPoseidon2Permute(self.sponge_state));
 
         self.output_buffer.clear();

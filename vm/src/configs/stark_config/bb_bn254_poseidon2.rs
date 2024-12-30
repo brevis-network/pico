@@ -14,22 +14,33 @@ use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
 use tracing::info;
 
-pub const DIGEST_SIZE: usize = 1;
-
-pub const MULTI_FIELD_CHALLENGER_WIDTH: usize = 3;
-pub const MULTI_FIELD_CHALLENGER_RATE: usize = 2; // TODO: use it with upgraged p3
-pub const MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
+use crate::primitives::consts::{
+    MULTI_FIELD_CHALLENGER_DIGEST_SIZE, MULTI_FIELD_CHALLENGER_RATE, MULTI_FIELD_CHALLENGER_WIDTH,
+};
 
 pub type SC_Val = BabyBear;
-pub type SC_Perm = Poseidon2Bn254<3>;
-pub type SC_Hash = MultiField32PaddingFreeSponge<SC_Val, Bn254Fr, SC_Perm, 3, 16, 1>;
-pub type SC_DigestHash = Hash<SC_Val, Bn254Fr, 1>;
-pub type SC_Digest = [Bn254Fr; 1];
+pub type SC_Perm = Poseidon2Bn254<MULTI_FIELD_CHALLENGER_WIDTH>;
+pub type SC_Hash = MultiField32PaddingFreeSponge<
+    SC_Val,
+    Bn254Fr,
+    SC_Perm,
+    3,
+    16,
+    MULTI_FIELD_CHALLENGER_DIGEST_SIZE,
+>;
+pub type SC_DigestHash = Hash<SC_Val, Bn254Fr, MULTI_FIELD_CHALLENGER_DIGEST_SIZE>;
+pub type SC_Digest = [Bn254Fr; MULTI_FIELD_CHALLENGER_DIGEST_SIZE];
 pub type SC_Compress = TruncatedPermutation<SC_Perm, 2, 1, 3>;
 pub type SC_ValMmcs = MerkleTreeMmcs<BabyBear, Bn254Fr, SC_Hash, SC_Compress, 1>;
 pub type SC_Challenge = BinomialExtensionField<SC_Val, 4>;
 pub type SC_ChallengeMmcs = ExtensionMmcs<SC_Val, SC_Challenge, SC_ValMmcs>;
-pub type SC_Challenger = MultiField32Challenger<SC_Val, Bn254Fr, SC_Perm, 3, 3>; // todo: currently setting RATE == WIDTH
+pub type SC_Challenger = MultiField32Challenger<
+    SC_Val,
+    Bn254Fr,
+    SC_Perm,
+    MULTI_FIELD_CHALLENGER_WIDTH,
+    MULTI_FIELD_CHALLENGER_RATE,
+>;
 pub type SC_Dft = Radix2DitParallel<SC_Val>;
 pub type SC_Pcs = TwoAdicFriPcs<SC_Val, SC_Dft, SC_ValMmcs, SC_ChallengeMmcs>;
 
@@ -39,28 +50,28 @@ pub type SC_QueryProof = QueryProof<SC_Challenge, SC_ChallengeMmcs, SC_InputProo
 pub type SC_CommitPhaseStep = CommitPhaseProofStep<SC_Challenge, SC_ChallengeMmcs>;
 pub type SC_PcsProof = FriProof<SC_Challenge, SC_ChallengeMmcs, SC_Val, SC_InputProof>;
 
-pub struct BbBn254Poseidon2 {
+pub struct BabyBearBn254Poseidon2 {
     pub perm: SC_Perm,
     pcs: SC_Pcs,
     simple_fri_config: SimpleFriConfig,
 }
 
-impl Serialize for BbBn254Poseidon2 {
+impl Serialize for BabyBearBn254Poseidon2 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        std::marker::PhantomData::<BbBn254Poseidon2>.serialize(serializer)
+        std::marker::PhantomData::<BabyBearBn254Poseidon2>.serialize(serializer)
     }
 }
 
-impl Clone for BbBn254Poseidon2 {
+impl Clone for BabyBearBn254Poseidon2 {
     fn clone(&self) -> Self {
         Self::new()
     }
 }
 
-impl BbBn254Poseidon2 {
+impl BabyBearBn254Poseidon2 {
     pub fn new() -> Self {
         let perm = pico_poseidon2bn254_init();
         let hash = SC_Hash::new(perm.clone()).unwrap();
@@ -88,7 +99,7 @@ impl BbBn254Poseidon2 {
             proof_of_work_bits: 16,
         };
 
-        BbBn254Poseidon2 {
+        BabyBearBn254Poseidon2 {
             perm,
             pcs,
             simple_fri_config,
@@ -100,13 +111,13 @@ impl BbBn254Poseidon2 {
     }
 }
 
-impl Default for BbBn254Poseidon2 {
+impl Default for BabyBearBn254Poseidon2 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StarkGenericConfig for BbBn254Poseidon2 {
+impl StarkGenericConfig for BabyBearBn254Poseidon2 {
     type Val = SC_Val;
     type Domain = <SC_Pcs as p3_commit::Pcs<SC_Challenge, SC_Challenger>>::Domain;
     type Challenge = SC_Challenge;
@@ -126,8 +137,8 @@ impl StarkGenericConfig for BbBn254Poseidon2 {
     }
 }
 
-impl ZeroCommitment<BbBn254Poseidon2> for SC_Pcs {
-    fn zero_commitment(&self) -> Com<BbBn254Poseidon2> {
+impl ZeroCommitment<BabyBearBn254Poseidon2> for SC_Pcs {
+    fn zero_commitment(&self) -> Com<BabyBearBn254Poseidon2> {
         SC_DigestHash::from([Bn254Fr::ZERO; 1])
     }
 }

@@ -1,14 +1,14 @@
 use super::{
     builder::CircuitV2Builder,
-    challenger::{reduce_32, POSEIDON_2_BB_RATE},
+    challenger::reduce_32,
     config::{select_chain, CircuitConfig},
 };
 use crate::{
     compiler::recursion_v2::ir::{Builder, DslIr, Felt, Var},
     configs::{config::FieldGenericConfig, stark_config::bb_poseidon2::BabyBearPoseidon2},
-    instances::configs::embed_config::{StarkConfig as EmbedSC, MULTI_FIELD_CHALLENGER_WIDTH},
+    instances::configs::embed_config::StarkConfig as EmbedSC,
     primitives::{
-        consts::{DIGEST_SIZE, PERMUTATION_RATE, PERMUTATION_WIDTH},
+        consts::{DIGEST_SIZE, MULTI_FIELD_CHALLENGER_WIDTH, PERMUTATION_RATE, PERMUTATION_WIDTH},
         pico_poseidon2bb_init, pico_poseidon2bn254_init,
     },
 };
@@ -187,7 +187,7 @@ impl<CC: CircuitConfig<F = BabyBear, N = Bn254Fr, Bit = Var<Bn254Fr>>> FieldHash
             builder.eval(CC::N::ZERO),
             builder.eval(CC::N::ZERO),
         ];
-        for block_chunk in &input.iter().chunks(POSEIDON_2_BB_RATE) {
+        for block_chunk in &input.iter().chunks(PERMUTATION_WIDTH) {
             for (chunk_id, chunk) in (&block_chunk.chunks(num_f_elms)).into_iter().enumerate() {
                 let chunk = chunk.copied().collect::<Vec<_>>();
                 state[chunk_id] = reduce_32(builder, chunk.as_slice());

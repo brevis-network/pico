@@ -9,7 +9,7 @@ use p3_symmetric::Hash;
 
 // Each field_config config mod should have public types with the same names as below.
 
-pub type FieldConfig = kb_simple::BabyBearSimple;
+pub type FieldConfig = kb_simple::KoalaBearSimple;
 
 pub type SC_Val = kb_poseidon2::SC_Val;
 pub type SC_Perm = kb_poseidon2::SC_Perm;

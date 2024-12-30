@@ -1,5 +1,5 @@
 [workspace]
-members = ["derive", "vm", "sdk"]
+members = ["derive", "vm", "sdk", "babybear-ffi"]
 resolver = "2"
 
 [workspace.package]

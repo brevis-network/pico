@@ -13,9 +13,10 @@ use crate::{
         ir::{Builder, Felt, Var, Witness},
     },
     configs::{
-        config::{Com, OuterConfig, PcsProof, StarkGenericConfig},
-        stark_config::{bb_bn254_poseidon2 as ecf, bb_bn254_poseidon2::BbBn254Poseidon2},
+        config::{Com, PcsProof, StarkGenericConfig},
+        stark_config::{bb_bn254_poseidon2 as ecf, bb_bn254_poseidon2::BabyBearBn254Poseidon2},
     },
+    instances::configs::embed_config::{FieldConfig as EmbedFC, StarkConfig as EmbedSC},
     machine::{keys::BaseVerifyingKey, proof::BaseProof},
 };
 use core::borrow::Borrow;
@@ -43,7 +44,7 @@ pub struct EmbedWitnessVariable<C: CircuitConfig<F = BabyBear>, SC: BabyBearFriC
     pub vks_and_proofs: Vec<(BaseVerifyingKeyVariable<C, SC>, BaseProofVariable<C, SC>)>,
     pub is_complete: Felt<C::F>,
 }
-impl WitnessWriter<OuterConfig> for Witness<OuterConfig> {
+impl WitnessWriter<EmbedFC> for Witness<EmbedFC> {
     fn write_bit(&mut self, value: bool) {
         self.vars.push(Bn254Fr::from_bool(value));
     }
@@ -84,7 +85,7 @@ impl<
         CC: CircuitConfig<F = ecf::SC_Val, N = Bn254Fr, EF = ecf::SC_Challenge, Bit = Var<Bn254Fr>>,
     > Witnessable<CC> for ecf::SC_PcsProof
 {
-    type WitnessVariable = FriProofVariable<CC, BbBn254Poseidon2>;
+    type WitnessVariable = FriProofVariable<CC, BabyBearBn254Poseidon2>;
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let commit_phase_commits = self
             .commit_phase_commits
@@ -119,7 +120,7 @@ impl<
         CC: CircuitConfig<F = ecf::SC_Val, N = Bn254Fr, EF = ecf::SC_Challenge, Bit = Var<Bn254Fr>>,
     > Witnessable<CC> for ecf::SC_QueryProof
 {
-    type WitnessVariable = QueryProofVariable<CC, ecf::BbBn254Poseidon2>;
+    type WitnessVariable = QueryProofVariable<CC, ecf::BabyBearBn254Poseidon2>;
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let input_proof = self.input_proof.read(builder);
         let commit_phase_openings = self.commit_phase_openings.read(builder);
@@ -137,7 +138,7 @@ impl<
         CC: CircuitConfig<F = ecf::SC_Val, N = Bn254Fr, EF = ecf::SC_Challenge, Bit = Var<Bn254Fr>>,
     > Witnessable<CC> for CommitPhaseProofStep<ecf::SC_Challenge, ecf::SC_ChallengeMmcs>
 {
-    type WitnessVariable = FriCommitPhaseProofStepVariable<CC, BbBn254Poseidon2>;
+    type WitnessVariable = FriCommitPhaseProofStepVariable<CC, BabyBearBn254Poseidon2>;
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let sibling_value = self.sibling_value.read(builder);
         let opening_proof = self.opening_proof.read(builder);
@@ -155,7 +156,7 @@ impl<CC> Witnessable<CC> for ecf::SC_BatchOpening
 where
     CC: CircuitConfig<F = ecf::SC_Val, N = Bn254Fr, EF = ecf::SC_Challenge, Bit = Var<Bn254Fr>>,
 {
-    type WitnessVariable = BatchOpeningVariable<CC, BbBn254Poseidon2>;
+    type WitnessVariable = BatchOpeningVariable<CC, BabyBearBn254Poseidon2>;
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let opened_values = self
             .opened_values

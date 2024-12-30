@@ -232,7 +232,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
-            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::Poseidon2Skinny(
+                Poseidon2SkinnyChip::<DEGREE, _>::default(),
+            )),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
     }

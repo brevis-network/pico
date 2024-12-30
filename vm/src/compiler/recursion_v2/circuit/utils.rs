@@ -3,14 +3,44 @@ use crate::{
         recursion_v2::ir::{Builder, Felt, Var},
         word::Word,
     },
-    configs::config::FieldGenericConfig,
+    configs::{config::FieldGenericConfig, stark_config::bb_poseidon2::BabyBearPoseidon2},
     primitives::consts::DIGEST_SIZE,
-    recursion_v2::air::ChallengerPublicValues,
+    recursion_v2::air::{ChallengerPublicValues, RecursionPublicValues},
 };
+use itertools::Itertools;
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
+use p3_symmetric::CryptographicHasher;
 use std::mem::MaybeUninit;
+
+// todo: make generic
+pub fn embed_public_values_digest(
+    config: &BabyBearPoseidon2,
+    public_values: &RecursionPublicValues<BabyBear>,
+) -> [BabyBear; 8] {
+    let hash = crate::configs::stark_config::bb_poseidon2::SC_Hash::new(config.perm.clone());
+    let input = (public_values.riscv_vk_digest)
+        .into_iter()
+        .chain(
+            (public_values.committed_value_digest)
+                .into_iter()
+                .flat_map(|word| word.0.into_iter()),
+        )
+        .collect::<Vec<_>>();
+    hash.hash_slice(&input)
+}
+
+// todo: make generic
+pub fn assert_embed_public_values_valid(
+    config: &BabyBearPoseidon2,
+    public_values: &RecursionPublicValues<BabyBear>,
+) {
+    let expected_digest = embed_public_values_digest(config, public_values);
+    for (value, expected) in public_values.digest.iter().copied().zip_eq(expected_digest) {
+        assert_eq!(value, expected);
+    }
+}
 
 #[allow(dead_code)]
 pub(crate) unsafe fn uninit_challenger_pv<FC: FieldGenericConfig>(
