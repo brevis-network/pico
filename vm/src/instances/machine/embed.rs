@@ -20,7 +20,7 @@ use crate::{
 use p3_air::Air;
 use p3_field::FieldAlgebra;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument, trace};
+use tracing::{info, instrument, trace};
 
 pub struct EmbedMachine<SC, C, I>
 where
@@ -66,10 +66,10 @@ where
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
 
-        debug!("recursion embed record stats");
+        info!("EMBED record stats");
         let stats = records[0].stats();
         for (key, value) in &stats {
-            debug!("   |- {:<28}: {}", key, value);
+            info!("   |- {:<28}: {}", key, value);
         }
 
         let proofs = self.base_machine.prove_ensemble(witness.pk(), &records);

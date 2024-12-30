@@ -23,7 +23,7 @@ use p3_air::Air;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 pub struct CombineMachine<SC, C>
 where
@@ -110,10 +110,10 @@ where
                 for record in batch_records.as_mut_slice() {
                     record.index = chunk_index;
                     chunk_index += 1;
-                    debug!("combine record stats: chunk {}", record.chunk_index());
                     let stats = record.stats();
+                    info!("COMBINE record stats: chunk {}", record.chunk_index());
                     for (key, value) in &stats {
-                        debug!("   |- {:<28}: {}", key, value);
+                        info!("   |- {:<28}: {}", key, value);
                     }
                 }
 

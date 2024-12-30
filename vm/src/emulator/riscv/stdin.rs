@@ -156,6 +156,9 @@ impl<'a>
                 };
                 let program =
                     ConvertVerifierCircuit::<RecursionFC, RiscvSC>::build(machine, &input);
+
+                program.print_stats();
+
                 (program, input)
             })
             .unzip();
@@ -204,6 +207,8 @@ where
                 };
                 let program =
                     CombineVerifierCircuit::<RecursionFC, RecursionSC, C>::build(machine, &input);
+
+                program.print_stats();
 
                 (program, input)
             })

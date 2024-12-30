@@ -7,7 +7,7 @@ use pico_vm::{
         riscv::compiler::{Compiler, SourceType},
     },
     configs::config::{Challenge, Val},
-    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::recursion_circuit::{
@@ -72,7 +72,6 @@ fn main() {
     // Setup machine prover, verifier, pk and vk.
     let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
 
-    info!("Construct RiscV proving witness..");
     let core_opts = if args.bench {
         info!("use benchmark options");
         EmulatorOpts::bench_riscv_ops()
@@ -80,17 +79,20 @@ fn main() {
         EmulatorOpts::default()
     };
     info!("core_opts: {:?}", core_opts);
-    let riscv_witness = ProvingWitness::setup_for_riscv(
-        riscv_program.clone(),
-        riscv_stdin,
-        core_opts,
-        riscv_pk,
-        riscv_vk,
-    );
 
     // Generate the proof.
     info!("Generating RISCV proof (at {:?})..", start.elapsed());
-    let (riscv_proof, riscv_time) = timed_run(|| riscv_machine.prove(&riscv_witness));
+    let (riscv_proof, riscv_time) = timed_run(|| {
+        let riscv_witness = ProvingWitness::setup_for_riscv(
+            riscv_program.clone(),
+            riscv_stdin,
+            core_opts,
+            riscv_pk,
+            riscv_vk.clone(),
+        );
+
+        riscv_machine.prove(&riscv_witness)
+    });
     info!(
         "PERF-step=prove-user_time={}",
         riscv_start.elapsed().as_millis()
@@ -140,7 +142,6 @@ fn main() {
 
     // TODO: Initialize the VK root.
     let vk_root = [BabyBear::ZERO; DIGEST_SIZE];
-    let riscv_vk = riscv_witness.vk();
 
     info!("Setting up CONVERT..");
     let convert_machine = ConvertMachine::new(
@@ -149,20 +150,23 @@ fn main() {
         RECURSION_NUM_PVS_V2,
     );
 
-    // Setup stdin and witness
-    let convert_stdin = EmulatorStdin::setup_for_convert(
-        riscv_vk,
-        vk_root,
-        riscv_machine.base_machine(),
-        &riscv_proof.proofs(),
-    );
-
-    let convert_witness =
-        ProvingWitness::setup_for_convert(convert_stdin, convert_machine.config(), recursion_opts);
-
-    // Generate the proof.
     info!("Generating CONVERT proof (at {:?})..", start.elapsed());
-    let (convert_proof, convert_time) = timed_run(|| convert_machine.prove(&convert_witness));
+    let (convert_proof, convert_time) = timed_run(|| {
+        let convert_stdin = EmulatorStdin::setup_for_convert(
+            &riscv_vk,
+            vk_root,
+            riscv_machine.base_machine(),
+            &riscv_proof.proofs(),
+        );
+
+        let convert_witness = ProvingWitness::setup_for_convert(
+            convert_stdin,
+            convert_machine.config(),
+            recursion_opts,
+        );
+
+        convert_machine.prove(&convert_witness)
+    });
     info!(
         "PERF-step=prove-user_time={}",
         convert_start.elapsed().as_millis()
@@ -214,26 +218,26 @@ fn main() {
         RECURSION_NUM_PVS_V2,
     );
 
-    // Setup stdin and witnesses
-    let combine_stdin = EmulatorStdin::setup_for_combine(
-        vk_root,
-        convert_proof.vks(),
-        &convert_proof.proofs(),
-        convert_machine.base_machine(),
-        COMBINE_SIZE,
-        false,
-    );
-
-    let combine_witness = ProvingWitness::setup_for_recursion(
-        vk_root,
-        combine_stdin,
-        combine_machine.config(),
-        recursion_opts,
-    );
-
-    // Generate the proof.
     info!("Generating COMBINE proof (at {:?})..", start.elapsed());
-    let (combine_proof, combine_time) = timed_run(|| combine_machine.prove(&combine_witness));
+    let (combine_proof, combine_time) = timed_run(|| {
+        let combine_stdin = EmulatorStdin::setup_for_combine(
+            vk_root,
+            convert_proof.vks(),
+            &convert_proof.proofs(),
+            convert_machine.base_machine(),
+            COMBINE_SIZE,
+            false,
+        );
+
+        let combine_witness = ProvingWitness::setup_for_recursion(
+            vk_root,
+            combine_stdin,
+            combine_machine.config(),
+            recursion_opts,
+        );
+
+        combine_machine.prove(&combine_witness)
+    });
     info!(
         "PERF-step=prove-user_time={}",
         combine_start.elapsed().as_millis(),
@@ -285,44 +289,48 @@ fn main() {
         RECURSION_NUM_PVS_V2,
     );
 
-    let compress_stdin = RecursionStdin::new(
-        compress_machine.base_machine(),
-        combine_proof.vks.clone(),
-        combine_proof.proofs.clone(),
-        true,
-        vk_root,
-    );
-
-    let compress_program = CompressVerifierCircuit::<RecursionFC, RecursionSC>::build(
-        combine_machine.base_machine(),
-        &compress_stdin,
-    );
-
-    let (compress_pk, compress_vk) = compress_machine.setup_keys(&compress_program);
-
-    let record = {
-        let mut witness_stream = Vec::new();
-        Witnessable::<RecursionFC>::write(&compress_stdin, &mut witness_stream);
-        let mut runtime = Runtime::<
-            Val<RecursionSC>,
-            Challenge<RecursionSC>,
-            _,
-            _,
-            PERMUTATION_WIDTH,
-            BABYBEAR_S_BOX_DEGREE,
-        >::new(
-            Arc::new(compress_program),
-            combine_machine.config().perm.clone(),
-        );
-        runtime.witness_stream = witness_stream.into();
-        runtime.run().unwrap();
-        runtime.record
-    };
-    let compress_witness =
-        ProvingWitness::setup_with_keys_and_records(compress_pk, compress_vk, vec![record]);
-
     info!("Generating COMPRESS proof (at {:?})..", start.elapsed());
-    let (compress_proof, compress_time) = timed_run(|| compress_machine.prove(&compress_witness));
+    let (compress_proof, compress_time) = timed_run(|| {
+        let compress_stdin = RecursionStdin::new(
+            compress_machine.base_machine(),
+            combine_proof.vks.clone(),
+            combine_proof.proofs.clone(),
+            true,
+            vk_root,
+        );
+
+        let compress_program = CompressVerifierCircuit::<RecursionFC, RecursionSC>::build(
+            combine_machine.base_machine(),
+            &compress_stdin,
+        );
+
+        compress_program.print_stats();
+
+        let (compress_pk, compress_vk) = compress_machine.setup_keys(&compress_program);
+
+        let record = {
+            let mut witness_stream = Vec::new();
+            Witnessable::<RecursionFC>::write(&compress_stdin, &mut witness_stream);
+            let mut runtime = Runtime::<
+                Val<RecursionSC>,
+                Challenge<RecursionSC>,
+                _,
+                _,
+                PERMUTATION_WIDTH,
+                BABYBEAR_S_BOX_DEGREE,
+            >::new(
+                Arc::new(compress_program),
+                combine_machine.config().perm.clone(),
+            );
+            runtime.witness_stream = witness_stream.into();
+            runtime.run().unwrap();
+            runtime.record
+        };
+        let compress_witness =
+            ProvingWitness::setup_with_keys_and_records(compress_pk, compress_vk, vec![record]);
+
+        compress_machine.prove(&compress_witness)
+    });
     info!(
         "PERF-step=prove-user_time={}",
         compress_start.elapsed().as_millis()
@@ -373,45 +381,49 @@ fn main() {
         RECURSION_NUM_PVS_V2,
     );
 
-    let embed_stdin = RecursionStdin::new(
-        compress_machine.base_machine(),
-        compress_proof.vks,
-        compress_proof.proofs,
-        true,
-        vk_root,
-    );
-
-    let embed_program = EmbedVerifierCircuit::<RecursionFC, RecursionSC>::build(
-        compress_machine.base_machine(),
-        &embed_stdin,
-    );
-
-    let (embed_pk, embed_vk) = embed_machine.setup_keys(&embed_program);
-
-    let record = {
-        let mut witness_stream = Vec::new();
-        Witnessable::<RecursionFC>::write(&embed_stdin, &mut witness_stream);
-        let mut runtime = Runtime::<
-            Val<RecursionSC>,
-            Challenge<RecursionSC>,
-            _,
-            _,
-            PERMUTATION_WIDTH,
-            BABYBEAR_S_BOX_DEGREE,
-        >::new(
-            Arc::new(embed_program),
-            compress_machine.config().perm.clone(),
-        );
-        runtime.witness_stream = witness_stream.into();
-        runtime.run().unwrap();
-        runtime.record
-    };
-
-    let embed_witness =
-        ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
-
     info!("Generating EMBED proof (at {:?})..", start.elapsed());
-    let (embed_proof, embed_time) = timed_run(|| embed_machine.prove(&embed_witness));
+    let (embed_proof, embed_time) = timed_run(|| {
+        let embed_stdin = RecursionStdin::new(
+            compress_machine.base_machine(),
+            compress_proof.vks,
+            compress_proof.proofs,
+            true,
+            vk_root,
+        );
+
+        let embed_program = EmbedVerifierCircuit::<RecursionFC, RecursionSC>::build(
+            compress_machine.base_machine(),
+            &embed_stdin,
+        );
+
+        embed_program.print_stats();
+
+        let (embed_pk, embed_vk) = embed_machine.setup_keys(&embed_program);
+
+        let record = {
+            let mut witness_stream = Vec::new();
+            Witnessable::<RecursionFC>::write(&embed_stdin, &mut witness_stream);
+            let mut runtime = Runtime::<
+                Val<RecursionSC>,
+                Challenge<RecursionSC>,
+                _,
+                _,
+                PERMUTATION_WIDTH,
+                BABYBEAR_S_BOX_DEGREE,
+            >::new(
+                Arc::new(embed_program),
+                compress_machine.config().perm.clone(),
+            );
+            runtime.witness_stream = witness_stream.into();
+            runtime.run().unwrap();
+            runtime.record
+        };
+
+        let embed_witness =
+            ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
+
+        embed_machine.prove(&embed_witness)
+    });
     info!(
         "PERF-step=prove-user_time={}",
         embed_start.elapsed().as_millis()
@@ -505,6 +517,8 @@ fn print_stats(
         + embed_time.cpu_time;
     let recursion_parallelism = recursion_cpu_time.as_secs_f64() / recursion_time.as_secs_f64();
     let total_time = riscv_time.wall_time + recursion_time;
+    let total_cpu_time = riscv_time.cpu_time + recursion_cpu_time;
+    let total_parallelism = total_cpu_time.as_secs_f64() / total_time.as_secs_f64();
 
     info!("Proof time: (wall_time, total_cpu_time, parallelism)");
     info!(
@@ -544,8 +558,10 @@ fn print_stats(
         embed_time.parallelism
     );
     info!(
-        "|- total      {:<12}",
-        format_duration(total_time.as_secs_f64())
+        "|- total      {:<12}  {:<12}  {:.2}",
+        format_duration(total_time.as_secs_f64()),
+        format_duration(total_cpu_time.as_secs_f64()),
+        total_parallelism
     );
 
     info!("");

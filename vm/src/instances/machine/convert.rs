@@ -20,7 +20,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, time::Instant};
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 pub struct ConvertMachine<SC, C>
 where
@@ -100,10 +100,10 @@ where
             for record in batch_records.as_mut_slice() {
                 record.index = chunk_index;
                 chunk_index += 1;
-                debug!("convert record stats: chunk {}", record.chunk_index());
+                info!("CONVERT record stats: chunk {}", record.chunk_index());
                 let stats = record.stats();
                 for (key, value) in &stats {
-                    debug!("   |- {:<28}: {}", key, value);
+                    info!("   |- {:<28}: {}", key, value);
                 }
             }
 

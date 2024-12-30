@@ -53,6 +53,10 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
             "exp_reverse_bits_events".to_string(),
             self.exp_reverse_bits_len_events.len(),
         );
+        stats.insert(
+            "commit_pv_hash_events".to_string(),
+            self.commit_pv_hash_events.len(),
+        );
 
         stats
     }

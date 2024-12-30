@@ -22,7 +22,7 @@ use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField32, PrimeField64};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 pub struct RiscvMachine<SC, C>
 where
@@ -89,10 +89,10 @@ where
 
             //#[cfg(feature = "debug")]
             for record in &mut *batch_records {
-                debug!("riscv record stats: chunk {}", record.chunk_index());
                 let stats = record.stats();
+                info!("RISCV record stats: chunk {}", record.chunk_index());
                 for (key, value) in &stats {
-                    debug!("   |- {:<26}: {}", key, value);
+                    info!("   |- {:<26}: {}", key, value);
                 }
             }
 

@@ -187,13 +187,17 @@ where
             .iter()
             .map(|(name, domain, _)| {
                 let i = main_chip_ordering[name];
-                let values = opened_values.chips_opened_values[i].clone();
+                // let values = opened_values.chips_opened_values[i].clone();
                 TwoAdicPcsMatsVariable::<CC> {
                     domain: *domain,
                     points: vec![zeta, domain.next_point_variable(builder, zeta)],
                     values: vec![
-                        values.preprocessed_local.clone(),
-                        values.preprocessed_next.clone(),
+                        opened_values.chips_opened_values[i]
+                            .preprocessed_local
+                            .clone(),
+                        opened_values.chips_opened_values[i]
+                            .preprocessed_next
+                            .clone(),
                     ],
                 }
             })
@@ -270,7 +274,7 @@ where
 
         // Create the pcs rounds.
         let prep_commit = vk.commit;
-        let prep_round = TwoAdicPcsRoundVariable {
+        let prep_round: TwoAdicPcsRoundVariable<CC, SC> = TwoAdicPcsRoundVariable {
             batch_commit: prep_commit,
             domains_points_and_opens: preprocessed_domains_points_and_opens,
         };
