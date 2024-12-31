@@ -1,17 +1,7 @@
-use crate::compiler::recursion_v2::{
-    circuit::config::CircuitConfig,
-    ir::{Builder, DslIr, Ext, Felt, Var},
-};
-use p3_baby_bear::BabyBear;
-use p3_bn254_fr::Bn254Fr;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
-use p3_field::{
-    extension::BinomialExtensionField, ExtensionField, Field, FieldAlgebra, PrimeField,
-    TwoAdicField,
-};
+use p3_field::{ExtensionField, Field, PrimeField, TwoAdicField};
 use serde::Serialize;
-use std::{iter::zip, marker::PhantomData};
 // Resembling Plonky3: https://github.com/Plonky3/Plonky3/blob/main/uni-stark/src/config.rs
 
 pub type PackedVal<SC> = <Val<SC> as Field>::Packing;

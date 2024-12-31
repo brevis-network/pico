@@ -14,7 +14,6 @@ mod recursion_v2;
 mod riscv_memory;
 mod sub_builder;
 mod word;
-pub mod wrapper;
 
 pub use base::ChipBaseBuilder;
 pub use extension::ExtensionBuilder;

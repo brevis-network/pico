@@ -7,12 +7,18 @@ use pico_vm::{
         riscv::compiler::{Compiler, SourceType},
     },
     configs::config::{Challenge, Val},
-    emulator::{opts::EmulatorOpts, record::RecordBehavior, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler_v2::recursion_circuit::{
-            compress::builder::CompressVerifierCircuit, embed::builder::EmbedVerifierCircuit,
-            stdin::RecursionStdin,
+        compiler_v2::{
+            onchain_circuit::{
+                gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin,
+                utils::build_gnark_config,
+            },
+            recursion_circuit::{
+                compress::builder::CompressVerifierCircuit, embed::builder::EmbedVerifierCircuit,
+                stdin::RecursionStdin,
+            },
         },
         configs::{
             embed_config::StarkConfig as EmbedSC,
@@ -24,12 +30,7 @@ use pico_vm::{
             embed::EmbedMachine, riscv::RiscvMachine,
         },
     },
-    machine::{
-        builder::wrapper::{build_constraints_and_witness, build_gnark_config},
-        logger::setup_logger,
-        machine::MachineBehavior,
-        witness::ProvingWitness,
-    },
+    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{
         BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
         DIGEST_SIZE, EMBED_DEGREE, PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
@@ -455,14 +456,18 @@ fn main() {
         embed_proof_size,
     );
 
-    info!("start export gnark data");
-    let (constraints, witness) = build_constraints_and_witness(
-        embed_proof.vks().first().unwrap(),
-        embed_proof.proofs().first().unwrap(),
-    );
+    info!("\n Begin Onchain..");
+    let onchain_stdin = OnchainStdin {
+        machine: embed_machine.base_machine(),
+        vk: embed_proof.vks().first().unwrap().clone(),
+        proof: embed_proof.proofs().first().unwrap().clone(),
+        flag_complete: true,
+    };
+
+    let (constraints, witness) = OnchainVerifierCircuit::build(&onchain_stdin);
 
     build_gnark_config(constraints, witness, PathBuf::from("./"));
-    info!("end export gnark data");
+    info!("Finished exporting gnark data");
 }
 
 struct TimeStats {

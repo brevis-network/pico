@@ -1,28 +1,24 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            config::{BabyBearFriConfigVariable, CircuitConfig},
-            hash::FieldHasherVariable,
-            stark::BaseProofVariable,
+            config::CircuitConfig,
             types::{
-                BaseVerifyingKeyVariable, BatchOpeningVariable, FriCommitPhaseProofStepVariable,
-                FriProofVariable, QueryProofVariable,
+                BatchOpeningVariable, FriCommitPhaseProofStepVariable, FriProofVariable,
+                QueryProofVariable,
             },
             witness::{WitnessWriter, Witnessable},
         },
-        ir::{Builder, Felt, Var, Witness},
+        ir::{Builder, Var, Witness},
     },
-    configs::{
-        config::{Com, PcsProof, StarkGenericConfig},
-        stark_config::{bb_bn254_poseidon2 as ecf, bb_bn254_poseidon2::BabyBearBn254Poseidon2},
+    configs::stark_config::{
+        bb_bn254_poseidon2 as ecf, bb_bn254_poseidon2::BabyBearBn254Poseidon2,
     },
-    instances::configs::embed_config::{FieldConfig as EmbedFC, StarkConfig as EmbedSC},
-    machine::{keys::BaseVerifyingKey, proof::BaseProof},
+    instances::configs::embed_config::FieldConfig as EmbedFC,
 };
 use core::borrow::Borrow;
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::Bn254Fr;
-use p3_field::{extension::BinomialExtensionField, FieldAlgebra};
+use p3_field::FieldAlgebra;
 use p3_fri::CommitPhaseProofStep;
 
 impl<C: CircuitConfig<N = Bn254Fr>> Witnessable<C> for Bn254Fr {
@@ -35,15 +31,6 @@ impl<C: CircuitConfig<N = Bn254Fr>> Witnessable<C> for Bn254Fr {
     }
 }
 
-pub struct EmbedWitnessValues<SC: StarkGenericConfig> {
-    pub vks_and_proofs: Vec<(BaseVerifyingKey<SC>, BaseProof<SC>)>,
-    pub is_complete: bool,
-}
-pub struct EmbedWitnessVariable<C: CircuitConfig<F = BabyBear>, SC: BabyBearFriConfigVariable<C>> {
-    /// The chunk proofs to verify.
-    pub vks_and_proofs: Vec<(BaseVerifyingKeyVariable<C, SC>, BaseProofVariable<C, SC>)>,
-    pub is_complete: Felt<C::F>,
-}
 impl WitnessWriter<EmbedFC> for Witness<EmbedFC> {
     fn write_bit(&mut self, value: bool) {
         self.vars.push(Bn254Fr::from_bool(value));
@@ -56,28 +43,6 @@ impl WitnessWriter<EmbedFC> for Witness<EmbedFC> {
     }
     fn write_ext(&mut self, value: ecf::SC_Challenge) {
         self.exts.push(value);
-    }
-}
-impl<
-        C: CircuitConfig<F = BabyBear, EF = BinomialExtensionField<BabyBear, 4>>,
-        SC: BabyBearFriConfigVariable<C>,
-    > Witnessable<C> for EmbedWitnessValues<SC>
-where
-    Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    PcsProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
-{
-    type WitnessVariable = EmbedWitnessVariable<C, SC>;
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let vks_and_proofs = self.vks_and_proofs.read(builder);
-        let is_complete = BabyBear::from_bool(self.is_complete).read(builder);
-        EmbedWitnessVariable {
-            vks_and_proofs,
-            is_complete,
-        }
-    }
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vks_and_proofs.write(witness);
-        BabyBear::from_bool(self.is_complete).write(witness);
     }
 }
 
