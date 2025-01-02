@@ -155,10 +155,15 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfig
                     for (z, ps_at_z) in izip!(mat_points, mat_values) {
                         // Unroll the loop calculation to avoid symbolic expression overhead
 
-                        // let mut acc: Ext<CC::F, CC::EF> = builder.constant(CC::EF::ZERO);
-                        let mut acc: Ext<_, _> = builder.uninit();
+                        let len = ps_at_z.len();
+                        let mut alphas = Vec::with_capacity(len);
+                        let mut p_at_zs = Vec::with_capacity(len);
+                        let mut p_at_xs = Vec::with_capacity(len);
 
-                        builder.push_op(DslIr::ImmE(acc, CC::EF::ZERO));
+                        // let mut acc: Ext<CC::F, CC::EF> = builder.constant(CC::EF::ZERO);
+                        // let mut acc: Ext<_, _> = builder.uninit();
+
+                        // builder.push_op(DslIr::ImmE(acc, CC::EF::ZERO));
                         for (p_at_x, p_at_z) in izip!(mat_opening.clone(), ps_at_z) {
                             let pow = log_height_pow[log_height];
                             // Fill in any missing powers of alpha.
@@ -178,22 +183,28 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfig
                             //
                             // acc = builder.eval(acc + (alpha_pows[pow] * (p_at_z - p_at_x[0])));
 
-                            // let temp_1 = p_at_z - p_at_x[0];
-                            let temp_1: Ext<_, _> = builder.uninit();
-                            builder.push_op(DslIr::SubEF(temp_1, p_at_z, p_at_x[0]));
-                            // let temp_2 = alpha_pows[pow] * temp_1;
-                            let temp_2: Ext<_, _> = builder.uninit();
-                            builder.push_op(DslIr::MulE(temp_2, alpha_pows[pow], temp_1));
-                            // let temp_3 = acc + temp_2;
-                            let temp_3: Ext<_, _> = builder.uninit();
-                            builder.push_op(DslIr::AddE(temp_3, acc, temp_2));
+                            // // let temp_1 = p_at_z - p_at_x[0];
+                            // let temp_1: Ext<_, _> = builder.uninit();
+                            // builder.push_op(DslIr::SubEF(temp_1, p_at_z, p_at_x[0]));
+                            // // let temp_2 = alpha_pows[pow] * temp_1;
+                            // let temp_2: Ext<_, _> = builder.uninit();
+                            // builder.push_op(DslIr::MulE(temp_2, alpha_pows[pow], temp_1));
+                            // // let temp_3 = acc + temp_2;
+                            // let temp_3: Ext<_, _> = builder.uninit();
+                            // builder.push_op(DslIr::AddE(temp_3, acc, temp_2));
+                            // // acc = temp_3;
                             // acc = temp_3;
-                            acc = temp_3;
+
+                            alphas.push(alpha_pows[pow]);
+                            p_at_zs.push(p_at_z);
+                            p_at_xs.push(p_at_x[0]);
 
                             log_height_pow[log_height] += 1;
                         }
                         // Unroll this calculation to avoid symbolic expression overhead
                         // ro[log_height] = builder.eval(ro[log_height] + acc / (z - x));
+
+                        let acc = CC::batch_fri(builder, alphas, p_at_zs, p_at_xs);
 
                         // let temp_1 = z - x;
                         let temp_1: Ext<_, _> = builder.uninit();

@@ -21,6 +21,12 @@ pub trait CircuitV2Builder<FC: FieldGenericConfig> {
         input: Felt<FC::F>,
         power_bits: Vec<Felt<FC::F>>,
     ) -> Felt<FC::F>;
+    fn batch_fri(
+        &mut self,
+        alphas: Vec<Ext<FC::F, FC::EF>>,
+        p_at_zs: Vec<Ext<FC::F, FC::EF>>,
+        p_at_xs: Vec<Felt<FC::F>>,
+    ) -> Ext<FC::F, FC::EF>;
     fn poseidon2_permute_v2(&mut self, state: [Felt<FC::F>; WIDTH]) -> [Felt<FC::F>; WIDTH];
     fn poseidon2_hash_v2(&mut self, array: &[Felt<FC::F>]) -> [Felt<FC::F>; DIGEST_SIZE];
     fn poseidon2_compress_v2(
@@ -108,6 +114,20 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CircuitV2Builder<FC> for Builder<FC> 
     ) -> Felt<FC::F> {
         let output: Felt<_> = self.uninit();
         self.push_op(DslIr::CircuitV2ExpReverseBits(output, input, power_bits));
+        output
+    }
+
+    /// batch_fri precompile chip
+    fn batch_fri(
+        &mut self,
+        alphas: Vec<Ext<FC::F, FC::EF>>,
+        p_at_zs: Vec<Ext<FC::F, FC::EF>>,
+        p_at_xs: Vec<Felt<FC::F>>,
+    ) -> Ext<FC::F, FC::EF> {
+        let output: Ext<_, _> = self.uninit();
+        self.push_op(DslIr::CircuitBatchFRI(Box::new((
+            output, alphas, p_at_zs, p_at_xs,
+        ))));
         output
     }
 

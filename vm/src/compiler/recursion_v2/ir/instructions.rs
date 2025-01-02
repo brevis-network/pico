@@ -308,6 +308,25 @@ pub enum DslIr<FC: FieldGenericConfig> {
     /// Should only be used when target is a gnark circuit.
     CircuitCommitCommittedValuesDigest(Var<FC::N>),
 
+    /// BatchFRI loop
+    CircuitBatchFRI(
+        Box<(
+            Ext<FC::F, FC::EF>,
+            Vec<Ext<FC::F, FC::EF>>,
+            Vec<Ext<FC::F, FC::EF>>,
+            Vec<Felt<FC::F>>,
+        )>,
+    ),
+
+    /// Select based on input bit
+    Select(
+        Felt<FC::F>,
+        Felt<FC::F>,
+        Felt<FC::F>,
+        Felt<FC::F>,
+        Felt<FC::F>,
+    ),
+
     /// Select's a variable based on a condition. (select(cond, true_val, false_val) => output).
     /// Should only be used when target is a gnark circuit.
     CircuitSelectV(Var<FC::N>, Var<FC::N>, Var<FC::N>, Var<FC::N>),

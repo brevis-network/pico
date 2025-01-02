@@ -98,6 +98,19 @@ where
                         } = instr.as_mut();
                         mults.iter_mut().zip(addrs).for_each(&mut backfill);
                     }
+                    Instruction::Select(SelectInstr {
+                        addrs:
+                            SelectIo {
+                                out1: ref addr1,
+                                out2: ref addr2,
+                                ..
+                            },
+                        mult1,
+                        mult2,
+                    }) => {
+                        backfill((mult1, addr1));
+                        backfill((mult2, addr2));
+                    }
                     Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
                         addrs:
                             ExpReverseBitsIo {
@@ -115,6 +128,15 @@ where
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
                     }
+                    Instruction::BatchFRI(instr) => {
+                        let BatchFRIInstr {
+                            ext_single_addrs: BatchFRIExtSingleIo { ref acc },
+                            acc_mult,
+                            ..
+                        } = instr.as_mut();
+                        backfill((acc_mult, acc));
+                    }
+
                     Instruction::HintExt2Felts(HintExt2FeltsInstr {
                         output_addrs_mults, ..
                     }) => {
@@ -259,6 +281,9 @@ where
             DslIr::CircuitV2CommitPublicValues(public_values) => {
                 f(self.commit_public_values(&public_values))
             }
+            DslIr::CircuitBatchFRI(data) => f(self.batch_fri(data.0, data.1, data.2, data.3)),
+
+            DslIr::Select(bit, dst1, dst2, lhs, rhs) => f(self.select(bit, dst1, dst2, lhs, rhs)),
 
             DslIr::PrintV(dst) => f(self.print_f(dst)),
             DslIr::PrintF(dst) => f(self.print_f(dst)),
@@ -511,6 +536,7 @@ where
         f(self.ext_alu(DivE, out, Imm::EF(FC::EF::ONE), diff));
     }
 
+    #[inline(always)]
     fn poseidon2_permute(
         &mut self,
         dst: [impl Reg<FC>; WIDTH],
@@ -523,6 +549,28 @@ where
             },
             mults: [FC::F::ZERO; WIDTH],
         }))
+    }
+
+    #[inline(always)]
+    fn select(
+        &mut self,
+        bit: impl Reg<FC>,
+        dst1: impl Reg<FC>,
+        dst2: impl Reg<FC>,
+        lhs: impl Reg<FC>,
+        rhs: impl Reg<FC>,
+    ) -> Instruction<FC::F> {
+        Instruction::Select(SelectInstr {
+            addrs: SelectIo {
+                bit: bit.read(self),
+                out1: dst1.write(self),
+                out2: dst2.write(self),
+                in1: lhs.read(self),
+                in2: rhs.read(self),
+            },
+            mult1: FC::F::ZERO,
+            mult2: FC::F::ZERO,
+        })
     }
 
     fn exp_reverse_bits(
@@ -553,6 +601,28 @@ where
                 .collect(),
             input_addr: value.read_ghost(self),
         })
+    }
+
+    fn batch_fri(
+        &mut self,
+        acc: Ext<FC::F, FC::EF>,
+        alpha_pows: Vec<Ext<FC::F, FC::EF>>,
+        p_at_zs: Vec<Ext<FC::F, FC::EF>>,
+        p_at_xs: Vec<Felt<FC::F>>,
+    ) -> Instruction<FC::F> {
+        Instruction::BatchFRI(Box::new(BatchFRIInstr {
+            base_vec_addrs: BatchFRIBaseVecIo {
+                p_at_x: p_at_xs.into_iter().map(|e| e.read(self)).collect(),
+            },
+            ext_single_addrs: BatchFRIExtSingleIo {
+                acc: acc.write(self),
+            },
+            ext_vec_addrs: BatchFRIExtVecIo {
+                p_at_z: p_at_zs.into_iter().map(|e| e.read(self)).collect(),
+                alpha_pow: alpha_pows.into_iter().map(|e| e.read(self)).collect(),
+            },
+            acc_mult: FC::F::ZERO,
+        }))
     }
 
     fn commit_public_values(
@@ -618,7 +688,9 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::ExtAlu(_) => "ExtAlu",
         Instruction::Mem(_) => "Mem",
         Instruction::Poseidon2(_) => "Poseidon2",
+        Instruction::Select(_) => "Select",
         Instruction::ExpReverseBitsLen(_) => "ExpReverseBitsLen",
+        Instruction::BatchFRI(_) => "BatchFRI",
         Instruction::HintBits(_) => "HintBits",
         Instruction::Print(_) => "Print",
         Instruction::HintExt2Felts(_) => "HintExt2Felts",

@@ -25,6 +25,7 @@ use crate::{
     primitives::consts::EXTENSION_DEGREE,
     recursion_v2::air::RecursionPublicValues,
 };
+use itertools::izip;
 use p3_baby_bear::BabyBear;
 use p3_bn254_fr::Bn254Fr;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger, GrindingChallenger};
@@ -33,10 +34,7 @@ use p3_dft::Radix2DitParallel;
 use p3_field::FieldAlgebra;
 use p3_fri::{FriConfig, TwoAdicFriPcs};
 use p3_matrix::dense::RowMajorMatrix;
-use std::{
-    iter::{repeat, zip},
-    ops::{Add, Mul},
-};
+use std::iter::{repeat, zip};
 
 type EF = <BabyBearPoseidon2 as StarkGenericConfig>::Challenge;
 
@@ -126,6 +124,13 @@ pub trait CircuitConfig: FieldGenericConfig {
         power_bits: &[Self::Bit],
         two_adic_powers_of_x: &[Felt<Self::F>],
     ) -> Felt<Self::F>;
+
+    fn batch_fri(
+        builder: &mut Builder<Self>,
+        alpha_pows: Vec<Ext<Self::F, Self::EF>>,
+        p_at_zs: Vec<Ext<Self::F, Self::EF>>,
+        p_at_xs: Vec<Felt<Self::F>>,
+    ) -> Ext<Self::F, Self::EF>;
 
     fn num2bits(
         builder: &mut Builder<Self>,
@@ -271,6 +276,15 @@ impl CircuitConfig for RecurFC {
         power_bits: Vec<Felt<<Self as FieldGenericConfig>::F>>,
     ) -> Felt<<Self as FieldGenericConfig>::F> {
         builder.exp_reverse_bits_v2(input, power_bits)
+    }
+
+    fn batch_fri(
+        builder: &mut Builder<Self>,
+        alpha_pows: Vec<Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>>,
+        p_at_zs: Vec<Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>>,
+        p_at_xs: Vec<Felt<<Self as FieldGenericConfig>::F>>,
+    ) -> Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF> {
+        builder.batch_fri(alpha_pows, p_at_zs, p_at_xs)
     }
 }
 
@@ -462,38 +476,24 @@ impl CircuitConfig for EmbedFC {
         }
         result
     }
-}
 
-pub fn select_chain<'a, FC, R, S>(
-    builder: &'a mut Builder<FC>,
-    should_swap: R,
-    first: impl IntoIterator<Item = S> + Clone + 'a,
-    second: impl IntoIterator<Item = S> + Clone + 'a,
-) -> impl Iterator<Item = S> + 'a
-where
-    FC: FieldGenericConfig,
-    R: Variable<FC> + 'a,
-    S: Variable<FC> + 'a,
-    <R as Variable<FC>>::Expression: FieldAlgebra
-        + Mul<<S as Variable<FC>>::Expression, Output = <S as Variable<FC>>::Expression>,
-    <S as Variable<FC>>::Expression: Add<Output = <S as Variable<FC>>::Expression>,
-{
-    let should_swap: <R as Variable<FC>>::Expression = should_swap.into();
-    let one = <R as Variable<FC>>::Expression::ONE;
-    let should_not_swap = one - should_swap.clone();
-
-    let id_branch = first
-        .clone()
-        .into_iter()
-        .chain(second.clone())
-        .map(<S as Variable<FC>>::Expression::from);
-    let swap_branch = second
-        .into_iter()
-        .chain(first)
-        .map(<S as Variable<FC>>::Expression::from);
-    zip(
-        zip(id_branch, swap_branch),
-        zip(repeat(should_not_swap), repeat(should_swap)),
-    )
-    .map(|((id_v, sw_v), (id_c, sw_c))| builder.eval(id_c * id_v + sw_c * sw_v))
+    fn batch_fri(
+        builder: &mut Builder<Self>,
+        alpha_pows: Vec<Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>>,
+        p_at_zs: Vec<Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>>,
+        p_at_xs: Vec<Felt<<Self as FieldGenericConfig>::F>>,
+    ) -> Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF> {
+        let mut acc: Ext<_, _> = builder.uninit();
+        builder.push_op(DslIr::ImmE(acc, <Self as FieldGenericConfig>::EF::ZERO));
+        for (alpha_pow, p_at_z, p_at_x) in izip!(alpha_pows, p_at_zs, p_at_xs) {
+            let temp_1: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::SubEF(temp_1, p_at_z, p_at_x));
+            let temp_2: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::MulE(temp_2, alpha_pow, temp_1));
+            let temp_3: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::AddE(temp_3, acc, temp_2));
+            acc = temp_3;
+        }
+        acc
+    }
 }
