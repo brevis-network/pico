@@ -16,6 +16,7 @@ use crate::{
     emulator::{
         context::EmulatorContext,
         opts::EmulatorOpts,
+        record::RecordBehavior,
         riscv::{
             hook::{default_hook_map, Hook},
             public_values::PublicValues,
@@ -24,6 +25,7 @@ use crate::{
             stdin::EmulatorStdin,
             syscalls::{
                 default_syscall_map, syscall_context::SyscallContext, Syscall, SyscallCode,
+                SyscallEvent,
             },
         },
     },
@@ -119,6 +121,38 @@ pub struct RiscvEmulator {
 
     /// whether or not to log syscalls
     log_syscalls: bool,
+}
+
+impl RiscvEmulator {
+    pub fn is_unconstrained(&self) -> bool {
+        self.unconstrained.is_some()
+    }
+
+    #[inline]
+    pub(crate) fn syscall_event(
+        &self,
+        clk: u32,
+        syscall_id: u32,
+        arg1: u32,
+        arg2: u32,
+        lookup_id: u128,
+    ) -> SyscallEvent {
+        SyscallEvent {
+            chunk: self.chunk(),
+            clk,
+            syscall_id,
+            arg1,
+            arg2,
+            lookup_id,
+            nonce: self.record.nonce_lookup[&lookup_id],
+        }
+    }
+
+    fn emit_syscall(&mut self, clk: u32, syscall_id: u32, arg1: u32, arg2: u32, lookup_id: u128) {
+        let syscall_event = self.syscall_event(clk, syscall_id, arg1, arg2, lookup_id);
+
+        self.record.syscall_events.push(syscall_event);
+    }
 }
 
 /// The different modes the emulator can run in.
@@ -489,6 +523,27 @@ impl RiscvEmulator {
             self.bump_record_to_batch();
         }
 
+        info!(
+            "batch record len before defer and split: {:?}",
+            self.batch_records.len()
+        );
+
+        let mut deferred = EmulationRecord::new(self.program.clone());
+
+        for record in self.batch_records.iter_mut() {
+            deferred.append(&mut record.defer());
+        }
+
+        let opts = self.opts.split_opts.clone();
+        let deferred = deferred.split(true, opts);
+        info!("split-chunks len: {:?}", deferred.len());
+
+        self.batch_records.extend(deferred);
+        info!(
+            "batch record len after defer and split: {:?}",
+            self.batch_records.len()
+        );
+
         if done {
             self.postprocess();
             // Push the remaining emulation record with memory initialize & finalize events.
@@ -496,6 +551,11 @@ impl RiscvEmulator {
         } else {
             self.current_batch += 1;
         }
+
+        info!(
+            "batch record len after postprocess: {:?}",
+            self.batch_records.len()
+        );
 
         // Set the global public values for all chunks.
         // println!("# batch records to be processed: {}", self.batch_records.len());
@@ -813,6 +873,9 @@ impl RiscvEmulator {
                 *syscall_count += 1;
 
                 let syscall_impl = self.get_syscall(syscall).cloned();
+                if syscall.should_send() != 0 {
+                    self.emit_syscall(clk, syscall.syscall_id(), b, c, syscall_lookup_id);
+                }
                 let mut precompile_rt = SyscallContext::new(self);
                 precompile_rt.syscall_lookup_id = syscall_lookup_id;
                 let (precompile_next_pc, precompile_cycles, returned_exit_code) =
@@ -1493,7 +1556,7 @@ impl RiscvEmulator {
         // if self.state.proof_stream_ptr != self.state.proof_stream.len() {
         //     panic!(
         //         "Not all proofs were read. Proving will fail during recursion. Did you pass too
-        // many proofs in or forget to call verify_sp1_proof?"     );
+        // many proofs in or forget to call verify_pico_proof?"     );
         // }
         if self.state.input_stream_ptr != self.state.input_stream.len() {
             tracing::warn!("Not all input bytes were read.");

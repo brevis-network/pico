@@ -6,6 +6,7 @@ use crate::{
         record::RecordBehavior,
         riscv::{public_values::PublicValues, record::EmulationRecord},
     },
+    instances::compiler_v2::shapes::riscv_shape::RiscvShapeConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -22,7 +23,7 @@ use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField32, PrimeField64};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 pub struct RiscvMachine<SC, C>
 where
@@ -32,6 +33,179 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
     base_machine: BaseMachine<SC, C>,
+}
+
+// TODO: remove duplicated code
+impl<SC, C> RiscvMachine<SC, C>
+where
+    SC: Send + StarkGenericConfig,
+    Val<SC>: PrimeField32,
+    C: Send
+        + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+    BaseProof<SC>: Send + Sync,
+    SC::Domain: Send + Sync,
+    SC::Val: PrimeField64,
+{
+    /// Prove with shape config
+    #[instrument(name = "riscv_prove_with_shape", level = "debug", skip_all)]
+    pub fn prove_with_shape(
+        &self,
+        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+    ) -> MetaProof<SC>
+    where
+        C: for<'a> Air<
+            DebugConstraintFolder<
+                'a,
+                <SC as StarkGenericConfig>::Val,
+                <SC as StarkGenericConfig>::Challenge,
+            >,
+        >,
+    {
+        // Initialize the challenger.
+        let mut challenger = self.config().challenger();
+
+        // Get pk from witness and observe with challenger
+        let pk = witness.pk();
+        pk.observed_by(&mut challenger);
+
+        /*
+        First phase
+         */
+
+        let mut emulator = MetaEmulator::setup_riscv(witness);
+
+        loop {
+            let (batch_records, done) = emulator.next_record_batch();
+
+            self.complement_record(batch_records);
+
+            if let Some(shape_config) = shape_config {
+                for record in batch_records.iter_mut() {
+                    shape_config
+                        .padding_shape(record)
+                        .expect("padding_shape failed");
+                }
+            }
+
+            //#[cfg(feature = "debug")]
+            for record in &mut *batch_records {
+                debug!("riscv record stats: chunk {}", record.chunk_index());
+                let stats = record.stats();
+                for (key, value) in &stats {
+                    debug!("   |- {:<25}: {}", key, value);
+                }
+            }
+
+            let commitments = batch_records
+                .into_par_iter()
+                .map(|record| {
+                    self.base_machine
+                        .commit(record, LookupScope::Global)
+                        .unwrap()
+                })
+                .collect::<Vec<_>>();
+
+            // todo optimize: parallel
+            for commitment in commitments {
+                challenger.observe(commitment.commitment);
+                challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
+            }
+
+            if done {
+                break;
+            }
+        }
+
+        /*
+        Second phase
+        */
+
+        let mut emulator = MetaEmulator::setup_riscv(witness);
+
+        // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
+        let mut all_proofs = vec![];
+
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
+            pk,
+            &mut self.config().challenger(),
+        );
+        #[cfg(feature = "debug-lookups")]
+        let mut global_lookup_debugger =
+            crate::machine::debug::IncrementalLookupDebugger::new(pk, LookupScope::Global, None);
+
+        loop {
+            let (batch_records, done) = emulator.next_record_batch();
+            self.complement_record(batch_records);
+
+            if let Some(shape_config) = shape_config {
+                for record in batch_records.iter_mut() {
+                    shape_config
+                        .padding_shape(record)
+                        .expect("padding_shape failed");
+                }
+            }
+
+            #[cfg(feature = "debug")]
+            constraint_debugger.debug_incremental(&self.chips(), batch_records);
+            #[cfg(feature = "debug-lookups")]
+            {
+                crate::machine::debug::debug_regional_lookups(
+                    pk,
+                    &self.chips(),
+                    batch_records,
+                    None,
+                );
+                global_lookup_debugger.debug_incremental(&self.chips(), batch_records);
+            }
+
+            let batch_proofs = batch_records
+                .into_par_iter()
+                .map(|record| {
+                    let regional_commitment = self
+                        .base_machine
+                        .commit(record, LookupScope::Regional)
+                        .unwrap();
+                    let global_commitment = self.base_machine.commit(record, LookupScope::Global);
+
+                    let proof = self.base_machine.prove_plain(
+                        witness.pk(),
+                        &mut challenger.clone(),
+                        record.chunk_index(),
+                        regional_commitment,
+                        global_commitment,
+                    );
+
+                    proof
+                })
+                .collect::<Vec<_>>();
+
+            // extend all_proofs to include batch_proofs
+            all_proofs.extend(batch_proofs);
+
+            if done {
+                break;
+            }
+        }
+
+        // construct meta proof
+        let vks = vec![witness.vk.clone().unwrap()];
+
+        #[cfg(feature = "debug")]
+        constraint_debugger.print_results();
+        #[cfg(feature = "debug-lookups")]
+        global_lookup_debugger.print_results();
+
+        // TODO: print some summary numbers
+        info!("RiscV proofs generated with {} chunks.", all_proofs.len());
+
+        MetaProof::new(all_proofs.into(), vks.into())
+    }
 }
 
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
@@ -83,6 +257,7 @@ where
          */
 
         let mut emulator = MetaEmulator::setup_riscv(witness);
+        // TODO: it seems emulator.next_record_batch() always return "done = true", no need for loop
         loop {
             let (batch_records, done) = emulator.next_record_batch();
             self.complement_record(batch_records);

@@ -1,10 +1,12 @@
-use crate::chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord};
+use crate::chips::chips::riscv_memory::event::{
+    MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord,
+};
 use serde::{Deserialize, Serialize};
 
 /// SHA-256 Extend Event.
 ///
 /// This event is emitted when a SHA-256 extend operation is performed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ShaExtendEvent {
     /// The lookup identifier.
     pub lookup_id: u128,
@@ -24,12 +26,14 @@ pub struct ShaExtendEvent {
     pub w_i_minus_7_reads: Vec<MemoryReadRecord>,
     /// The memory writes of w[i].
     pub w_i_writes: Vec<MemoryWriteRecord>,
+    /// The local memory accesses.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }
 
 /// SHA-256 Compress Event.
 ///
 /// This event is emitted when a SHA-256 compress operation is performed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ShaCompressEvent {
     /// The lookup identifier.
     pub lookup_id: u128,
@@ -51,4 +55,6 @@ pub struct ShaCompressEvent {
     pub w_i_read_records: Vec<MemoryReadRecord>,
     /// The memory records for the word.
     pub h_write_records: [MemoryWriteRecord; 8],
+    /// The local memory accesses.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }

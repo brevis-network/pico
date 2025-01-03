@@ -75,7 +75,8 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for BatchFRIChip<DEGR
         );
 
         // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_BATCH_FRI_PREPROCESSED_COLS, F>(&mut trace.values);
+        let log_size = program.fixed_log2_rows(&self.name());
+        pad_to_power_of_two::<NUM_BATCH_FRI_PREPROCESSED_COLS, F>(&mut trace.values, log_size);
 
         Some(trace)
     }
@@ -101,7 +102,8 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for BatchFRIChip<DEGR
             NUM_BATCH_FRI_COLS,
         );
 
-        pad_to_power_of_two::<NUM_BATCH_FRI_COLS, F>(&mut trace.values);
+        let log_rows = input.fixed_log2_rows(&self.name());
+        pad_to_power_of_two::<NUM_BATCH_FRI_COLS, F>(&mut trace.values, log_rows);
 
         trace
     }

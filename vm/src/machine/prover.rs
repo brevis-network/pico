@@ -21,7 +21,7 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use rayon::ThreadPoolBuilder;
@@ -76,10 +76,14 @@ where
             let domain = pcs.natural_domain_for_degree(trace.height());
             (name, trace, domain)
         });
-        let preprocessed_info: Arc<[_]> = preprocessed_iter
+        let preprocessed_info_vec: Vec<(String, SC::Domain, Dimensions)> = preprocessed_iter
             .clone()
             .map(|(name, trace, domain)| (name.to_owned(), domain, trace.dimensions()))
             .collect();
+
+        let preprocessed_info: Arc<Vec<(String, SC::Domain, Dimensions)>> =
+            Arc::new(preprocessed_info_vec);
+
         let domains_and_preprocessed: Vec<_> = preprocessed_iter
             .map(|(_, trace, domain)| (domain, trace.to_owned()))
             .collect();
@@ -137,7 +141,7 @@ where
                 trace
             })
             .collect::<Vec<_>>();
-        chips_and_preprocessed.sort_by_key(|(_, trace)| Reverse(trace.height()));
+        chips_and_preprocessed.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
         for cp in &chips_and_preprocessed {
             debug!(
                 "chip {:<17} | width {:<2} rows {:<6} cells {:<7} | in {:?}",
@@ -188,7 +192,8 @@ where
                     Some((chip.name(), trace))
                 })
                 .collect::<Vec<_>>();
-            chips_and_main.sort_by_key(|(_, trace)| Reverse(trace.height()));
+            chips_and_main.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
+
             chips_and_main
         };
         // Execute with or without thread pool based on the feature
@@ -506,6 +511,20 @@ where
             .iter()
             .map(|log_degree| 1 << log_degree)
             .collect::<Vec<_>>();
+
+        info!("Chip log degrees:");
+        ordered_chips
+            .iter()
+            .zip_eq(log_main_degrees.iter())
+            .zip_eq(log_quotient_degrees.iter())
+            .for_each(|((chip, log_main_degree), log_quotient_degree)| {
+                info!(
+                    "   |- {:<20} main: {:<8} quotient: {:<8}",
+                    chip.name(),
+                    log_main_degree,
+                    log_quotient_degree
+                );
+            });
 
         // Compute quotient values
         let quotient_domains = main_domains

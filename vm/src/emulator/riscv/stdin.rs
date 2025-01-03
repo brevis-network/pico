@@ -4,10 +4,14 @@ use crate::{
     },
     configs::config::{StarkGenericConfig, Val},
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType,
+        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
             recursion_circuit::{combine::builder::CombineVerifierCircuit, stdin::RecursionStdin},
             riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
+            shapes::compress_shape::RecursionShapeConfig,
+            vk_merkle::{
+                builder::CombineVkVerifierCircuit, stdin::RecursionVkStdin, VkMerkleManager,
+            },
         },
         configs::{
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
@@ -21,11 +25,12 @@ use crate::{
         machine::BaseMachine,
         proof::BaseProof,
     },
-    primitives::consts::DIGEST_SIZE,
+    primitives::consts::{COMBINE_DEGREE, CONVERT_DEGREE, DIGEST_SIZE},
     recursion_v2::runtime::RecursionRecord,
 };
 use alloc::sync::Arc;
 use p3_air::Air;
+use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
 use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -119,6 +124,9 @@ impl<'a>
         vk_root: [Val<RiscvSC>; DIGEST_SIZE],
         machine: &'a BaseMachine<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
         proofs: &[BaseProof<RiscvSC>],
+        recursion_config: Option<
+            RecursionShapeConfig<BabyBear, RecursionChipType<BabyBear, CONVERT_DEGREE>>,
+        >,
     ) -> Self {
         // initialize for base_ and reconstruct_challenger
         let [mut base_challenger, mut reconstruct_challenger] =
@@ -154,8 +162,12 @@ impl<'a>
                     flag_first_chunk,
                     vk_root,
                 };
-                let program =
+                let mut program =
                     ConvertVerifierCircuit::<RecursionFC, RiscvSC>::build(machine, &input);
+
+                if let Some(config) = &recursion_config {
+                    config.padding_shape(&mut program);
+                }
 
                 program.print_stats();
 
@@ -211,6 +223,66 @@ where
                 program.print_stats();
 
                 (program, input)
+            })
+            .unzip();
+
+        Self {
+            programs: programs.into(),
+            inputs: inputs.into(),
+            pointer: 0,
+        }
+    }
+}
+
+// for recursion_vk stdin
+impl<'a, C> EmulatorStdin<RecursionProgram<Val<RecursionSC>>, RecursionVkStdin<'a, RecursionSC, C>>
+where
+    C: ChipBehavior<
+            Val<RecursionSC>,
+            Program = RecursionProgram<Val<RecursionSC>>,
+            Record = RecursionRecord<Val<RecursionSC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, RecursionFC>>
+        + Send,
+{
+    /// Construct the recursion stdin for one layer of combine.
+    pub fn setup_for_combine_vk(
+        vk_root: [Val<RecursionSC>; DIGEST_SIZE],
+        vks: &[BaseVerifyingKey<RecursionSC>],
+        proofs: &[BaseProof<RecursionSC>],
+        machine: &'a BaseMachine<RecursionSC, C>,
+        combine_size: usize,
+        flag_complete: bool,
+    ) -> Self {
+        assert_eq!(vks.len(), proofs.len());
+        // TODO: static vk_manager or use a parameter
+        let vk_manager = VkMerkleManager::new_from_file("vk_map.bin").unwrap();
+        let recursion_config =
+            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default(
+            );
+
+        let (programs, inputs): (Vec<_>, Vec<_>) = proofs
+            .par_chunks(combine_size)
+            .zip_eq(vks.par_chunks(combine_size))
+            .map(|(batch_proofs, batch_vks)| {
+                let recursion_input = RecursionStdin {
+                    machine,
+                    vks: batch_vks.into(), // todo: optimization to non-copy
+                    proofs: batch_proofs.into(),
+                    flag_complete,
+                    vk_root,
+                };
+
+                let recursion_vk_input = vk_manager.add_vk_merkle_proof(recursion_input);
+                let mut program = CombineVkVerifierCircuit::<RecursionFC, RecursionSC, C>::build(
+                    machine,
+                    &recursion_vk_input,
+                );
+
+                recursion_config.padding_shape(&mut program);
+
+                (program, recursion_vk_input)
             })
             .unzip();
 

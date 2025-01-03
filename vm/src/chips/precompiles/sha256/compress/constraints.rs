@@ -11,8 +11,11 @@ use crate::{
     },
     compiler::word::Word,
     emulator::riscv::syscalls::SyscallCode,
-    machine::builder::{
-        ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+    machine::{
+        builder::{
+            ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+        },
+        lookup::LookupScope,
     },
 };
 use p3_air::{Air, AirBuilder};
@@ -55,6 +58,7 @@ where
             local.w_ptr,
             local.h_ptr,
             local.start,
+            LookupScope::Regional,
         );
     }
 }

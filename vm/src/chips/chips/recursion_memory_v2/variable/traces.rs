@@ -52,7 +52,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
             .collect::<Vec<_>>();
 
         let nb_rows = accesses.len().div_ceil(NUM_VAR_MEM_ENTRIES_PER_ROW);
-        let padded_nb_rows = match program.fixed_log2_rows(self) {
+        let padded_nb_rows = match program.fixed_log2_rows(&self.name()) {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
         };
@@ -65,10 +65,11 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
             .zip_eq(accesses)
             .for_each(|(row, &(addr, mult))| *row.borrow_mut() = MemoryAccessCols { addr, mult });
 
-        let mut trace = RowMajorMatrix::new(values, NUM_MEM_PREPROCESSED_INIT_COLS);
+        let trace = RowMajorMatrix::new(values, NUM_MEM_PREPROCESSED_INIT_COLS);
 
-        // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_MEM_PREPROCESSED_INIT_COLS, F>(&mut trace.values);
+        // // Pad the trace to a power of two based on shape, if available.
+        // let log_size = program.fixed_log2_rows(&self.name());
+        // pad_to_power_of_two::<NUM_MEM_PREPROCESSED_INIT_COLS, F>(&mut trace.values, log_size);
 
         Some(trace)
     }
@@ -94,8 +95,9 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
             NUM_MEM_INIT_COLS,
         );
 
-        // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_MEM_INIT_COLS, F>(&mut trace.values);
+        // Pad the trace to a power of two based on shape, if available.
+        let log_size = input.fixed_log2_rows(&self.name());
+        pad_to_power_of_two::<NUM_MEM_INIT_COLS, F>(&mut trace.values, log_size);
 
         trace
     }

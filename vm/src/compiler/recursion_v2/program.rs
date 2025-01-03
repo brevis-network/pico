@@ -1,5 +1,8 @@
 use super::instruction::Instruction;
-use crate::{compiler::program::ProgramBehavior, machine::chip::ChipBehavior};
+use crate::{
+    compiler::program::ProgramBehavior,
+    instances::compiler_v2::shapes::compress_shape::RecursionPadShape,
+};
 use backtrace::Backtrace;
 use hashbrown::HashMap;
 use p3_field::Field;
@@ -12,6 +15,7 @@ pub struct RecursionProgram<F> {
     pub total_memory: usize,
     #[serde(skip)]
     pub traces: Vec<Option<Backtrace>>,
+    pub shape: Option<RecursionPadShape>,
 }
 
 impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
@@ -24,15 +28,24 @@ impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
             instructions: self.instructions.clone(),
             total_memory: 0,
             traces: self.traces.clone(),
+            shape: self.shape.clone(),
         }
     }
 }
 
+// TODO: rename
 impl<F: Field> RecursionProgram<F> {
     #[inline]
-    pub fn fixed_log2_rows<A: ChipBehavior<F>>(&self, _air: &A) -> Option<usize> {
-        // TODO, support shape
-        None
+    pub fn fixed_log2_rows(&self, chip_name: &String) -> Option<usize> {
+        self.shape
+            .as_ref()
+            .map(|shape| {
+                shape
+                    .inner
+                    .get(chip_name)
+                    .unwrap_or_else(|| panic!("Chip {} not found in specified shape", chip_name))
+            })
+            .copied()
     }
 
     // compute number of each type of instructions in the program

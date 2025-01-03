@@ -11,7 +11,11 @@ use crate::{
     },
     compiler::riscv::program::Program,
     emulator::riscv::{
-        record::EmulationRecord, syscalls::precompiles::sha256::event::ShaExtendEvent,
+        record::EmulationRecord,
+        syscalls::{
+            precompiles::{sha256::event::ShaExtendEvent, PrecompileEvent},
+            SyscallCode,
+        },
     },
     machine::chip::ChipBehavior,
 };
@@ -58,9 +62,15 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
         }*/
         let mut new_byte_lookup_events = Vec::new();
         let mut wrapped_rows = Some(rows);
-        for i in 0..input.sha_extend_events.len() {
+        for (_, event) in input.get_precompile_events(SyscallCode::SHA_EXTEND).iter() {
+            let event = if let PrecompileEvent::ShaExtend(event) = event {
+                event
+            } else {
+                unreachable!()
+            };
+
             self.event_to_rows(
-                &input.sha_extend_events[i],
+                &event,
                 &mut wrapped_rows,
                 &mut new_byte_lookup_events,
                 &mut Vec::new(),
@@ -70,8 +80,15 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
         let mut rows = wrapped_rows.unwrap();
         let nb_rows = rows.len();
         let mut padded_nb_rows = nb_rows.next_power_of_two();
-        if padded_nb_rows == 2 || padded_nb_rows == 1 {
-            padded_nb_rows = 4;
+        // ensure 16 rows to align with pre-generated shape
+        if padded_nb_rows < 16 {
+            padded_nb_rows = 16;
+        }
+        let log_rows = input.shape_chip_size(&self.name());
+
+        if let Some(log_rows) = log_rows {
+            padded_nb_rows = 1 << log_rows;
+            println!("padded_nb_rows in sha extend {}", padded_nb_rows);
         }
 
         for i in nb_rows..padded_nb_rows {
@@ -98,9 +115,19 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
     }
 
     fn extra_record(&self, input: &Self::Record, output: &mut Self::Record) {
-        let chunk_size = std::cmp::max(input.sha_extend_events.len() / num_cpus::get(), 1);
-        let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = input
-            .sha_extend_events
+        let extend_events: Vec<_> = input
+            .get_precompile_events(SyscallCode::SHA_EXTEND)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::ShaExtend(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
+        let chunk_size = std::cmp::max(extend_events.len() / num_cpus::get(), 1);
+        let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = extend_events
             .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
@@ -117,7 +144,13 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        !record.sha_extend_events.is_empty()
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record
+                .get_precompile_events(SyscallCode::SHA_EXTEND)
+                .is_empty()
+        }
     }
 }
 

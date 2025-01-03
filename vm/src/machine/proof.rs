@@ -1,9 +1,11 @@
 use crate::{
     configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig},
+    instances::compiler_v2::shapes::ProofShape,
     machine::keys::BaseVerifyingKey,
 };
 use alloc::{sync::Arc, vec::Vec};
 use hashbrown::HashMap;
+use itertools::Itertools;
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 
@@ -134,4 +136,18 @@ pub struct ChipOpenedValues<Challenge> {
 pub struct QuotientData {
     pub log_quotient_degree: usize,
     pub quotient_size: usize,
+}
+
+impl<SC: StarkGenericConfig> BaseProof<SC> {
+    pub fn shape(&self) -> ProofShape {
+        ProofShape {
+            chip_information: self
+                .main_chip_ordering
+                .iter()
+                .sorted_by_key(|(_, idx)| *idx)
+                .zip(self.opened_values.chips_opened_values.iter())
+                .map(|((name, _), values)| (name.to_owned(), values.log_main_degree))
+                .collect(),
+        }
+    }
 }

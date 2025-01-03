@@ -1,11 +1,11 @@
 use crate::chips::{
-    chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
+    chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
     gadgets::field::field_op::FieldOperation,
 };
 use serde::{Deserialize, Serialize};
 
 /// Base field events
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FpEvent {
     /// The lookup id.
     pub lookup_id: u128,
@@ -27,12 +27,14 @@ pub struct FpEvent {
     pub x_memory_records: Box<[MemoryWriteRecord]>,
     /// The memory records for the y operand.
     pub y_memory_records: Box<[MemoryReadRecord]>,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }
 
 /// Fp2 addition and subtraction events
 ///
 /// TODO: maybe unify this with FpEvent?
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Fp2AddSubEvent {
     /// The lookup id.
     pub lookup_id: u128,
@@ -54,12 +56,14 @@ pub struct Fp2AddSubEvent {
     pub x_memory_records: Box<[MemoryWriteRecord]>,
     /// The memory records for the y operand.
     pub y_memory_records: Box<[MemoryReadRecord]>,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }
 
 /// Fp2 multiplication events
 ///
 /// TODO: maybe unify this with FpEvent?
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Fp2MulEvent {
     /// The lookup id.
     pub lookup_id: u128,
@@ -79,4 +83,6 @@ pub struct Fp2MulEvent {
     pub x_memory_records: Box<[MemoryWriteRecord]>,
     /// The memory records for the y operand.
     pub y_memory_records: Box<[MemoryReadRecord]>,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }

@@ -57,7 +57,9 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
                 self.event_to_row(&event, cols, &mut new_byte_lookup_events);
             });
 
-        pad_to_power_of_two::<NUM_LT_COLS, F>(&mut trace.values);
+        // Pad the trace based on shape
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_to_power_of_two::<NUM_LT_COLS, F>(&mut trace.values, log_rows);
 
         // assign nonce to the trace.
         for i in 0..trace.height() {

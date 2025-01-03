@@ -20,21 +20,25 @@ use crate::{
                 limbs::Limbs,
             },
         },
-        utils::pad_rows,
     },
     compiler::riscv::program::Program,
     emulator::{
         record::RecordBehavior,
         riscv::{
             record::EmulationRecord,
-            syscalls::{precompiles::edwards::event::EdDecompressEvent, SyscallCode},
+            syscalls::{
+                precompiles::{edwards::event::EdDecompressEvent, PrecompileEvent},
+                SyscallCode,
+            },
         },
     },
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
+        lookup::LookupScope,
         utils::{limbs_from_access, limbs_from_prev_access},
     },
+    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -257,6 +261,7 @@ impl<V: Copy> EdDecompressCols<V> {
             self.ptr,
             self.sign,
             self.is_real,
+            LookupScope::Regional,
         );
     }
 }
@@ -294,7 +299,18 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
     ) -> RowMajorMatrix<F> {
         let mut rows = Vec::new();
         let mut nonces = Vec::new();
-        let events = &input.ed_decompress_events;
+        let events: Vec<_> = input
+            .get_precompile_events(SyscallCode::ED_DECOMPRESS)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::EdDecompress(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
+
         debug!(
             "record {} ed decompress precompile events {:?}",
             input.chunk_index(),
@@ -312,13 +328,18 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
             nonces.push(nonce);
         }
 
-        pad_rows(&mut rows, || {
-            let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
-            let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
-            let zero = BigUint::zero();
-            cols.populate_field_ops::<E>(&mut vec![], &mut vec![], 0, &zero);
-            row
-        });
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_rows_fixed(
+            &mut rows,
+            || {
+                let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
+                let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
+                let zero = BigUint::zero();
+                cols.populate_field_ops::<E>(&mut vec![], &mut vec![], 0, &zero);
+                row
+            },
+            log_rows,
+        );
 
         let mut trace = RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
@@ -338,7 +359,13 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        !record.ed_decompress_events.is_empty()
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record
+                .get_precompile_events(SyscallCode::ED_DECOMPRESS)
+                .is_empty()
+        }
     }
 }
 

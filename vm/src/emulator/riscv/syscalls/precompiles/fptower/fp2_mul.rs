@@ -4,7 +4,8 @@ use num::BigUint;
 use std::marker::PhantomData;
 
 use crate::emulator::riscv::syscalls::{
-    precompiles::fptower::event::Fp2MulEvent, Syscall, SyscallCode, SyscallContext,
+    precompiles::{fptower::event::Fp2MulEvent, PrecompileEvent},
+    Syscall, SyscallCode, SyscallContext,
 };
 
 pub struct Fp2MulSyscall<P> {
@@ -24,7 +25,7 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
     fn emulate(
         &self,
         rt: &mut SyscallContext,
-        _syscall_code: SyscallCode,
+        syscall_code: SyscallCode,
         x_ptr: u32,
         y_ptr: u32,
     ) -> Option<u32> {
@@ -69,11 +70,8 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
         let y = y.into_boxed_slice();
         let x_memory_records = x_memory_records.into_boxed_slice();
         let y_memory_records = y_memory_records.into_boxed_slice();
-        match P::FIELD_TYPE {
-            FieldType::Bn254 => &mut rt.record_mut().fp2_bn254_mul_events,
-            FieldType::Bls381 => &mut rt.record_mut().fp2_bls381_mul_events,
-        }
-        .push(Fp2MulEvent {
+
+        let event = Fp2MulEvent {
             lookup_id,
             chunk,
             clk,
@@ -83,7 +81,30 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
             y,
             x_memory_records,
             y_memory_records,
-        });
+            local_mem_access: rt.postprocess(),
+        };
+
+        let syscall_event = rt.rt.syscall_event(
+            clk,
+            syscall_code.syscall_id(),
+            x_ptr,
+            y_ptr,
+            event.lookup_id,
+        );
+
+        match P::FIELD_TYPE {
+            FieldType::Bn254 => rt.record_mut().add_precompile_event(
+                syscall_code,
+                syscall_event,
+                PrecompileEvent::Bn254Fp2Mul(event),
+            ),
+            FieldType::Bls381 => rt.record_mut().add_precompile_event(
+                syscall_code,
+                syscall_event,
+                PrecompileEvent::Bls12381Fp2Mul(event),
+            ),
+        };
+
         None
     }
 

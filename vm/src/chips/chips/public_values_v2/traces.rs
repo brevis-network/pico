@@ -61,8 +61,7 @@ impl<F: PrimeField32> ChipBehavior<F> for PublicValuesChip<F> {
             }
         }
 
-        // Pad the preprocessed rows to 8 rows.
-        // gpu code breaks for small traces
+        // Pad the preprocessed rows to log size 4.
         pad_rows_fixed(
             &mut rows,
             || [F::ZERO; NUM_PUBLIC_VALUES_PREPROCESSED_COLS],
@@ -99,7 +98,7 @@ impl<F: PrimeField32> ChipBehavior<F> for PublicValuesChip<F> {
             }
         }
 
-        // Pad the trace to 8 rows.
+        // Pad the trace to log size 4
         pad_rows_fixed(
             &mut rows,
             || [F::ZERO; NUM_PUBLIC_VALUES_COLS],

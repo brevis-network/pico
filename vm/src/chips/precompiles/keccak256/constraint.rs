@@ -5,16 +5,18 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
 use p3_matrix::Matrix;
 
+use super::{columns::KeccakMemCols, KeccakPermuteChip, STATE_NUM_WORDS, STATE_SIZE};
 use crate::{
     chips::chips::riscv_memory::read_write::columns::MemoryCols,
     emulator::riscv::syscalls::SyscallCode,
-    machine::builder::{
-        ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
-        SubAirBuilder,
+    machine::{
+        builder::{
+            ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+            SubAirBuilder,
+        },
+        lookup::LookupScope,
     },
 };
-
-use super::{columns::KeccakMemCols, KeccakPermuteChip, STATE_NUM_WORDS, STATE_SIZE};
 
 impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F>
 where
@@ -73,6 +75,7 @@ where
             local.state_addr,
             CB::Expr::ZERO,
             local.receive_ecall,
+            LookupScope::Regional,
         );
 
         // Constrain that the inputs stay the same throughout the 24 rows of each cycle

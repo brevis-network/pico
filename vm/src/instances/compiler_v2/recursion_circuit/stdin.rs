@@ -12,6 +12,12 @@ use crate::{
         config::{StarkGenericConfig, Val},
         stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val},
     },
+    instances::{
+        chiptype::recursion_chiptype_v2::RecursionChipType,
+        compiler_v2::{
+            riscv_circuit::stdin::dummy_vk_and_chunk_proof, shapes::compress_shape::RecursionShape,
+        },
+    },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -19,7 +25,7 @@ use crate::{
         machine::BaseMachine,
         proof::BaseProof,
     },
-    primitives::consts::DIGEST_SIZE,
+    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
 };
 use alloc::sync::Arc;
 use p3_air::Air;
@@ -49,6 +55,35 @@ pub struct RecursionStdinVariable<
     pub proofs: Vec<BaseProofVariable<CC, SC>>,
     pub flag_complete: Felt<CC::F>,
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
+}
+
+impl<'a> RecursionStdin<'a, BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>> {
+    pub fn dummy(
+        machine: &'a BaseMachine<BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>>,
+        shape: &RecursionShape,
+    ) -> Self {
+        let vks_and_proofs: Vec<_> = shape
+            .proof_shapes
+            .iter()
+            .map(|proof_shape| {
+                let (vk, proof) = dummy_vk_and_chunk_proof(machine, proof_shape);
+                (vk, proof)
+            })
+            .collect();
+
+        let (vks, proofs): (Vec<_>, Vec<_>) = vks_and_proofs.into_iter().unzip();
+
+        let vks = Arc::from(vks.into_boxed_slice());
+        let proofs = Arc::from(proofs.into_boxed_slice());
+
+        Self {
+            machine,
+            vks,
+            proofs,
+            flag_complete: false,
+            vk_root: [BabyBear::ZERO; DIGEST_SIZE],
+        }
+    }
 }
 
 impl<'a, SC, C> RecursionStdin<'a, SC, C>

@@ -65,7 +65,7 @@ where
             mut vks,
             mut proofs,
             flag_complete,
-            ..
+            vk_root,
         } = input;
 
         // Must only have one proof.
@@ -117,6 +117,11 @@ where
 
         // validate digest
         assert_recursion_public_values_valid::<CC, SC>(builder, compress_public_values);
+
+        // validate vk_root
+        for (expected, actual) in vk_root.iter().zip(compress_public_values.vk_root.iter()) {
+            builder.assert_felt_eq(*expected, *actual);
+        }
 
         compress_public_values.digest =
             recursion_public_values_digest::<CC, SC>(builder, compress_public_values);

@@ -1,7 +1,8 @@
 use crate::{
     chips::gadgets::curves::{CurveType, EllipticCurve},
     emulator::riscv::syscalls::{
-        precompiles::ec::event::create_ec_decompress_event, syscall_context::SyscallContext,
+        precompiles::{ec::event::create_ec_decompress_event, PrecompileEvent},
+        syscall_context::SyscallContext,
         Syscall, SyscallCode,
     },
 };
@@ -24,15 +25,31 @@ impl<E: EllipticCurve> Syscall for WeierstrassDecompressSyscall<E> {
     fn emulate(
         &self,
         rt: &mut SyscallContext,
-        _syscall_code: SyscallCode,
+        syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
     ) -> Option<u32> {
         let event = create_ec_decompress_event::<E>(rt, arg1, arg2);
+
+        let syscall_event = rt.rt.syscall_event(
+            event.clk,
+            syscall_code.syscall_id(),
+            arg1,
+            arg2,
+            event.lookup_id,
+        );
         match E::CURVE_TYPE {
-            CurveType::Secp256k1 => rt.record_mut().k256_decompress_events.push(event),
-            CurveType::Bls12381 => rt.record_mut().bls12381_decompress_events.push(event),
-            _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
+            CurveType::Secp256k1 => rt.record_mut().add_precompile_event(
+                syscall_code,
+                syscall_event,
+                PrecompileEvent::Secp256k1Decompress(event),
+            ),
+            CurveType::Bls12381 => rt.record_mut().add_precompile_event(
+                syscall_code,
+                syscall_event,
+                PrecompileEvent::Bls12381Decompress(event),
+            ),
+            _ => panic!("Unsupported curve"),
         }
         None
     }

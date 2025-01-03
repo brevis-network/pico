@@ -61,8 +61,9 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
                 self.event_to_row(&event, cols, &mut (), &mut ());
             });
 
-        // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_SLR_COLS, F>(&mut trace.values);
+        // Pad the trace based on shape
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_to_power_of_two::<NUM_SLR_COLS, F>(&mut trace.values, log_rows);
 
         // Create the template for the padded rows. These are fake rows that don't fail on some
         // sanity checks.

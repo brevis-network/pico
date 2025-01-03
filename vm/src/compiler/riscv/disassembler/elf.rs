@@ -162,6 +162,7 @@ impl Elf {
             pc_start: self.pc_start,
             pc_base: self.pc_base,
             memory_image: self.memory_image.clone(),
+            preprocessed_shape: None,
         }
         .into()
     }

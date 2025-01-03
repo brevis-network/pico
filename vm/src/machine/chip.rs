@@ -127,6 +127,15 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         self.log_quotient_degree
     }
 
+    /// The looking of the chip.
+    pub fn get_looking(&self) -> &[VirtualPairLookup<F>] {
+        &self.looking
+    }
+
+    pub fn get_looked(&self) -> &[VirtualPairLookup<F>] {
+        &self.looked
+    }
+
     pub fn lookup_scope(&self) -> LookupScope {
         self.chip.lookup_scope()
     }

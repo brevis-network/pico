@@ -5,18 +5,20 @@ use super::{
     ShaCompressChip, SHA_COMPRESS_K,
 };
 use crate::{
-    chips::{
-        chips::{
-            byte::event::{ByteLookupEvent, ByteRecordBehavior},
-            rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
-        },
-        utils::pad_rows,
+    chips::chips::{
+        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
     },
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::{
-        record::EmulationRecord, syscalls::precompiles::sha256::event::ShaCompressEvent,
+        record::EmulationRecord,
+        syscalls::{
+            precompiles::{sha256::event::ShaCompressEvent, PrecompileEvent},
+            SyscallCode,
+        },
     },
     machine::chip::ChipBehavior,
+    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -44,14 +46,20 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
         let rows = Vec::new();
 
         let mut wrapped_rows = Some(rows);
-        for i in 0..input.sha_compress_events.len() {
-            let event = input.sha_compress_events[i].clone();
+        for (_, event) in input.get_precompile_events(SyscallCode::SHA_COMPRESS) {
+            let event = if let PrecompileEvent::ShaCompress(event) = event {
+                event
+            } else {
+                unreachable!()
+            };
             self.event_to_rows(&event, &mut wrapped_rows, &mut Vec::new(), &mut Vec::new());
         }
         let mut rows = wrapped_rows.unwrap();
         let num_real_rows = rows.len();
 
-        pad_rows(&mut rows, || [F::ZERO; NUM_SHA_COMPRESS_COLS]);
+        let log_rows = input.shape_chip_size(&self.name());
+        println!("log_rows in sha compress: {:?}", log_rows);
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_SHA_COMPRESS_COLS], log_rows);
 
         // Set the octet_num and octect columns for the padded rows.
         let mut octet_num = 0;
@@ -94,26 +102,44 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
     }
 
     fn extra_record(&self, input: &Self::Record, output: &mut Self::Record) {
-        let chunk_size = std::cmp::max(input.sha_compress_events.len() / num_cpus::get(), 1);
-        let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = input
-            .sha_compress_events
-            .par_chunks(chunk_size)
-            .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
-                let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
-                events.iter().for_each(|event| {
-                    self.event_to_rows(event, &mut None, &mut blu, &mut range);
-                });
-                (blu, range)
+        let compress_events: Vec<_> = input
+            .get_precompile_events(SyscallCode::SHA_COMPRESS)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::ShaCompress(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
             })
-            .unzip();
+            .collect();
+
+        let chunk_size = std::cmp::max(compress_events.len() / num_cpus::get(), 1);
+        let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) =
+            compress_events
+                .par_chunks(chunk_size)
+                .map(|events| {
+                    let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                    let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
+                    events.iter().for_each(|event| {
+                        self.event_to_rows(event, &mut None, &mut blu, &mut range);
+                    });
+                    (blu, range)
+                })
+                .unzip();
 
         output.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
         output.add_rangecheck_lookup_events(range_batches);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        !record.sha_compress_events.is_empty()
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record
+                .get_precompile_events(SyscallCode::SHA_COMPRESS)
+                .is_empty()
+        }
     }
 }
 

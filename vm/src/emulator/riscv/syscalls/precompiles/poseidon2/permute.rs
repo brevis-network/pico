@@ -1,16 +1,17 @@
 use p3_field::PrimeField32;
 use std::marker::PhantomData;
 
+use super::event::Poseidon2PermuteEvent;
 use crate::{
     chips::{
         chips::poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
         poseidon2::{external_linear_layer, internal_linear_layer},
     },
-    emulator::riscv::syscalls::{syscall_context::SyscallContext, Syscall, SyscallCode},
+    emulator::riscv::syscalls::{
+        precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
+    },
     primitives::RC_16_30_U32,
 };
-
-use super::event::Poseidon2PermuteEvent;
 
 pub(crate) struct Poseidon2PermuteSyscall<F: PrimeField32>(pub(crate) PhantomData<F>);
 
@@ -43,7 +44,7 @@ impl<F: PrimeField32> Syscall for Poseidon2PermuteSyscall<F> {
     fn emulate(
         &self,
         ctx: &mut SyscallContext,
-        _syscall_code: SyscallCode,
+        syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
     ) -> Option<u32> {
@@ -112,8 +113,17 @@ impl<F: PrimeField32> Syscall for Poseidon2PermuteSyscall<F> {
             output_memory_ptr,
             state_read_records,
             state_write_records,
+            local_mem_access: ctx.postprocess(),
         };
-        ctx.record_mut().add_poseidon2_permute_lookup_event(event);
+
+        let syscall_event =
+            ctx.rt
+                .syscall_event(clk_init, syscall_code.syscall_id(), arg1, arg2, lookup_id);
+        ctx.record_mut().add_precompile_event(
+            syscall_code,
+            syscall_event,
+            PrecompileEvent::Poseidon2Permute(event),
+        );
 
         None
     }

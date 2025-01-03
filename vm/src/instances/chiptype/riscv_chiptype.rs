@@ -1,3 +1,5 @@
+use hashbrown::HashSet;
+use itertools::Itertools;
 use p3_air::{Air, BaseAir};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -14,11 +16,16 @@ use crate::{
             rangecheck::RangeCheckChip,
             riscv_cpu::CpuChip,
             riscv_memory::{
-                initialize_finalize::{MemoryChipType, MemoryInitializeFinalizeChip},
-                local::MemoryLocalChip,
+                initialize_finalize::{
+                    MemoryChipType,
+                    MemoryChipType::{Finalize, Initialize},
+                    MemoryInitializeFinalizeChip,
+                },
+                local::{columns::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW, MemoryLocalChip},
                 read_write::MemoryReadWriteChip,
             },
             riscv_program::ProgramChip,
+            syscall::SyscallChip,
         },
         gadgets::curves::{
             edwards::ed25519::{Ed25519, Ed25519Parameters},
@@ -44,11 +51,14 @@ use crate::{
     },
     compiler::riscv::program::Program,
     define_chip_type,
-    emulator::riscv::record::EmulationRecord,
+    emulator::riscv::{record::EmulationRecord, syscalls::precompiles::PrecompileLocalMemory},
+    instances::compiler_v2::shapes::riscv_shape::{
+        precompile_rows_per_event, precompile_syscall_code,
+    },
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
-        lookup::LookupScope,
+        lookup::{LookupScope, LookupType},
     },
 };
 
@@ -111,6 +121,191 @@ define_chip_type!(
         (Fp2AddSubBls381, Fp2AddSubBls381),
         (Fp2MulBls381, Fp2MulBls381),
         (U256Mul, Uint256MulChip),
-        (Poseidon2P, Poseidon2PermuteChip)
+        (Poseidon2P, Poseidon2PermuteChip),
+        (SyscallRiscv, SyscallChip),
+        (SyscallPrecompile, SyscallChip)
     ]
 );
+
+impl<F: PrimeField32> RiscvChipType<F> {
+    /// Get the heights of the preprocessed chips for a given program.
+    pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(String, usize)> {
+        vec![
+            (
+                RiscvChipType::<F>::Program(ProgramChip::default()).name(),
+                program.instructions.len(),
+            ),
+            (
+                RiscvChipType::<F>::MemoryProgram(MemoryProgramChip::default()).name(),
+                program.memory_image.len(),
+            ),
+            (
+                RiscvChipType::<F>::Byte(ByteChip::default()).name(),
+                1 << 16,
+            ),
+            (
+                RiscvChipType::<F>::Range(RangeCheckChip::default()).name(),
+                1 << 16,
+            ),
+        ]
+    }
+
+    /// Get the heights of the chips for a given execution record.
+    pub(crate) fn riscv_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
+        vec![
+            (
+                RiscvChipType::<F>::Cpu(CpuChip::default()).name(),
+                record.cpu_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::DivRem(DivRemChip::default()).name(),
+                record.divrem_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::AddSub(AddSubChip::default()).name(),
+                record.add_events.len() + record.sub_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::Bitwise(BitwiseChip::default()).name(),
+                record.bitwise_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::Mul(MulChip::default()).name(),
+                record.mul_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::SR(ShiftRightChip::default()).name(),
+                record.shift_right_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::SLL(SLLChip::default()).name(),
+                record.shift_left_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::Lt(LtChip::default()).name(),
+                record.lt_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::MemoryLocal(MemoryLocalChip::default()).name(),
+                record
+                    .get_local_mem_events()
+                    .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
+                    .into_iter()
+                    .count(),
+            ),
+            (
+                RiscvChipType::<F>::MemoryReadWrite(MemoryReadWriteChip::default()).name(),
+                record
+                    .cpu_events
+                    .iter()
+                    .filter(|e| e.instruction.is_memory_instruction())
+                    .count(),
+            ),
+            (
+                RiscvChipType::<F>::SyscallRiscv(SyscallChip::riscv()).name(),
+                record.syscall_events.len(),
+            ),
+        ]
+    }
+
+    pub(crate) fn get_memory_init_final_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
+        vec![
+            (
+                RiscvChipType::<F>::MemoryInitialize(MemoryInitializeFinalizeChip::new(Initialize))
+                    .name(),
+                record.memory_initialize_events.len(),
+            ),
+            (
+                RiscvChipType::<F>::MemoryFinalize(MemoryInitializeFinalizeChip::new(Finalize))
+                    .name(),
+                record.memory_finalize_events.len(),
+            ),
+        ]
+    }
+
+    /// Get the height of the corresponding precompile chip.
+    ///
+    /// If the precompile is not included in the record, returns `None`. Otherwise, returns
+    /// `Some(num_rows, num_local_mem_events)`, where `num_rows` is the number of rows of the
+    /// corresponding chip and `num_local_mem_events` is the number of local memory events.
+    pub(crate) fn get_precompile_heights(
+        chip_name: &str,
+        record: &EmulationRecord,
+    ) -> Option<(usize, usize)> {
+        record
+            .precompile_events
+            .get_events(precompile_syscall_code(chip_name))
+            .filter(|events| !events.is_empty())
+            .map(|events| {
+                (
+                    events.len() * precompile_rows_per_event(chip_name),
+                    events.get_local_mem_events().into_iter().count(),
+                )
+            })
+    }
+
+    pub(crate) fn get_all_riscv_chips() -> Vec<MetaChip<F, Self>> {
+        vec![
+            MetaChip::new(Self::Cpu(CpuChip::default())),
+            MetaChip::new(Self::AddSub(AddSubChip::default())),
+            MetaChip::new(Self::Bitwise(BitwiseChip::default())),
+            MetaChip::new(Self::Mul(MulChip::default())),
+            MetaChip::new(Self::DivRem(DivRemChip::default())),
+            MetaChip::new(Self::SLL(SLLChip::default())),
+            MetaChip::new(Self::SR(ShiftRightChip::default())),
+            MetaChip::new(Self::Lt(LtChip::default())),
+            MetaChip::new(Self::MemoryLocal(MemoryLocalChip::default())),
+            MetaChip::new(Self::MemoryReadWrite(MemoryReadWriteChip::default())),
+            MetaChip::new(Self::SyscallRiscv(SyscallChip::riscv())),
+        ]
+    }
+
+    pub(crate) fn memory_init_final_chips() -> Vec<MetaChip<F, Self>> {
+        vec![
+            MetaChip::new(Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
+                MemoryChipType::Initialize,
+            ))),
+            MetaChip::new(Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
+                MemoryChipType::Finalize,
+            ))),
+        ]
+    }
+
+    /// return (precompile_chip_name, memory_local_per_event)
+    pub(crate) fn get_all_precompile_chips() -> Vec<(String, usize)> {
+        let all_chips = Self::all_chips();
+
+        let mut excluded_chip_names: HashSet<String> = HashSet::new();
+
+        for riscv_air in Self::get_all_riscv_chips() {
+            excluded_chip_names.insert(riscv_air.name());
+        }
+        for memory_chip in Self::memory_init_final_chips() {
+            excluded_chip_names.insert(memory_chip.name());
+        }
+
+        excluded_chip_names.insert(Self::SyscallPrecompile(SyscallChip::precompile()).name());
+        // Remove the preprocessed chips.
+        excluded_chip_names.insert(Self::Program(ProgramChip::default()).name());
+        excluded_chip_names.insert(Self::MemoryProgram(MemoryProgramChip::default()).name());
+        excluded_chip_names.insert(Self::Byte(ByteChip::default()).name());
+        excluded_chip_names.insert(Self::Range(RangeCheckChip::default()).name());
+
+        all_chips
+            .into_iter()
+            .filter(|chip| !excluded_chip_names.contains(&chip.name()))
+            .map(|chip| {
+                let local_mem_events: usize = chip
+                    .get_looking()
+                    .iter()
+                    .chain(chip.get_looked())
+                    .filter(|lookup| {
+                        lookup.kind == LookupType::Memory && lookup.scope == LookupScope::Regional
+                    })
+                    .count();
+
+                (chip.name(), local_mem_events)
+            })
+            .collect()
+    }
+}

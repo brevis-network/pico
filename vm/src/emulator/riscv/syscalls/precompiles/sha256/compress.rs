@@ -1,6 +1,7 @@
 use crate::emulator::riscv::syscalls::{
-    precompiles::sha256::event::ShaCompressEvent, syscall_context::SyscallContext, Syscall,
-    SyscallCode,
+    precompiles::{sha256::event::ShaCompressEvent, PrecompileEvent},
+    syscall_context::SyscallContext,
+    Syscall, SyscallCode,
 };
 
 pub const SHA_COMPRESS_K: [u32; 64] = [
@@ -26,7 +27,7 @@ impl Syscall for Sha256CompressSyscall {
     fn emulate(
         &self,
         ctx: &mut SyscallContext,
-        _syscall_code: SyscallCode,
+        syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
     ) -> Option<u32> {
@@ -95,19 +96,25 @@ impl Syscall for Sha256CompressSyscall {
         // Push the SHA extend event.
         let chunk = ctx.current_chunk();
         let lookup_id = ctx.syscall_lookup_id;
+
+        let event = PrecompileEvent::ShaCompress(ShaCompressEvent {
+            lookup_id,
+            chunk,
+            clk: start_clk,
+            w_ptr,
+            h_ptr,
+            w: original_w,
+            h: hx,
+            h_read_records: h_read_records.try_into().unwrap(),
+            w_i_read_records,
+            h_write_records: h_write_records.try_into().unwrap(),
+            local_mem_access: ctx.postprocess(),
+        });
+        let syscall_event =
+            ctx.rt
+                .syscall_event(start_clk, syscall_code.syscall_id(), arg1, arg2, lookup_id);
         ctx.record_mut()
-            .add_sha256_compress_lookup_event(ShaCompressEvent {
-                lookup_id,
-                chunk,
-                clk: start_clk,
-                w_ptr,
-                h_ptr,
-                w: original_w,
-                h: hx,
-                h_read_records: h_read_records.try_into().unwrap(),
-                w_i_read_records,
-                h_write_records: h_write_records.try_into().unwrap(),
-            });
+            .add_precompile_event(syscall_code, syscall_event, event);
 
         None
     }

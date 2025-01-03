@@ -4,7 +4,6 @@ use crate::{
     chips::chips::recursion_memory_v2::MemEvent,
     compiler::recursion_v2::program::RecursionProgram,
     emulator::record::RecordBehavior,
-    machine::chip::ChipBehavior,
     primitives::consts::MAX_NUM_PVS_V2,
     recursion_v2::{
         air::RecursionPublicValues,
@@ -114,7 +113,7 @@ impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
 
 impl<F: Field> RecursionRecord<F> {
     #[inline]
-    pub fn fixed_log2_rows<A: ChipBehavior<F>>(&self, air: &A) -> Option<usize> {
-        self.program.fixed_log2_rows(air)
+    pub fn fixed_log2_rows(&self, chip_name: &String) -> Option<usize> {
+        self.program.fixed_log2_rows(chip_name)
     }
 }

@@ -8,7 +8,6 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
 };
-use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
@@ -39,18 +38,14 @@ impl<F: Field> ChipBehavior<F> for ByteChip<F> {
             NUM_BYTE_MULT_COLS,
         );
 
-        let chunk = input.public_values.chunk;
-        for (lookup, mult) in input
-            .byte_lookups
-            .get(&chunk)
-            .unwrap_or(&HashMap::new())
-            .iter()
-        {
-            let row = (((lookup.b as u16) << 8) + lookup.c as u16) as usize;
-            let index = lookup.opcode as usize;
+        for (_chunk, lookups) in input.byte_lookups.iter() {
+            for (lookup, mult) in lookups.iter() {
+                let row = (((lookup.b as u16) << 8) + lookup.c as u16) as usize;
+                let index = lookup.opcode as usize;
 
-            let cols: &mut ByteMultCols<F> = trace.row_mut(row).borrow_mut();
-            cols.multiplicities[index] += F::from_canonical_usize(*mult);
+                let cols: &mut ByteMultCols<F> = trace.row_mut(row).borrow_mut();
+                cols.multiplicities[index] += F::from_canonical_usize(*mult);
+            }
         }
 
         trace

@@ -74,7 +74,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         pad_rows_fixed(
             &mut rows,
             || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS],
-            program.fixed_log2_rows(self),
+            program.fixed_log2_rows(&self.name()),
         );
 
         let trace = RowMajorMatrix::new(
@@ -131,7 +131,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLen
         pad_rows_fixed(
             &mut overall_rows,
             || [F::ZERO; NUM_EXP_REVERSE_BITS_LEN_COLS].to_vec(),
-            input.fixed_log2_rows(self),
+            input.fixed_log2_rows(&self.name()),
         );
 
         // Convert the trace to a row major matrix.

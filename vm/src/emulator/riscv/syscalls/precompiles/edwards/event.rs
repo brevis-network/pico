@@ -3,7 +3,7 @@ use typenum::Unsigned;
 
 use crate::{
     chips::{
-        chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
+        chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
         gadgets::{
             curves::{
                 edwards::WORDS_FIELD_ELEMENT, AffinePoint, EllipticCurve, COMPRESSED_POINT_BYTES,
@@ -37,6 +37,8 @@ pub struct EllipticCurveAddEvent {
     pub p_memory_records: Vec<MemoryWriteRecord>,
     /// The memory records for the second point.
     pub q_memory_records: Vec<MemoryReadRecord>,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }
 
 /// Edwards Decompress Event.
@@ -62,6 +64,8 @@ pub struct EdDecompressEvent {
     pub x_memory_records: [MemoryWriteRecord; WORDS_FIELD_ELEMENT],
     /// The memory records for the y coordinate.
     pub y_memory_records: [MemoryReadRecord; WORDS_FIELD_ELEMENT],
+    /// The local memory access events.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }
 
 /// Create an elliptic curve add event. It takes two pointers to memory locations, reads the points
@@ -111,5 +115,6 @@ pub fn create_ec_add_event<E: EllipticCurve>(
         q,
         p_memory_records,
         q_memory_records,
+        local_mem_access: ctx.postprocess(),
     }
 }

@@ -178,19 +178,20 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         ));
     }
 
+    // TODO: remove all the chunk constraints in range check in a clean way
     /// Sends a new range lookup
     fn looking_rangecheck(
         &mut self,
         opcode: RangeCheckOpcode,
         value: impl Into<Self::Expr>,
-        chunk: impl Into<Self::Expr>,
+        _chunk: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.looking(SymbolicLookup::new(
             vec![
                 Self::Expr::from_canonical_u8(opcode as u8),
                 value.into(),
-                chunk.into(),
+                // chunk.into(),
             ],
             multiplicity.into(),
             LookupType::RangeUnified,
@@ -203,14 +204,14 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         &mut self,
         opcode: RangeCheckOpcode,
         value: impl Into<Self::Expr>,
-        chunk: impl Into<Self::Expr>,
+        // chunk: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         self.looked(SymbolicLookup::new(
             vec![
                 Self::Expr::from_canonical_u8(opcode as u8),
                 value.into(),
-                chunk.into(),
+                // chunk.into(),
             ],
             multiplicity.into(),
             LookupType::RangeUnified,
@@ -260,6 +261,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         arg1: impl Into<Self::Expr> + Clone,
         arg2: impl Into<Self::Expr> + Clone,
         multiplicity: impl Into<Self::Expr>,
+        scope: LookupScope,
     ) {
         self.looking(SymbolicLookup::new(
             vec![
@@ -272,8 +274,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             ],
             multiplicity.into(),
             LookupType::Syscall,
-            // We only have the local syscall for now.
-            LookupScope::Regional,
+            scope,
         ))
     }
 
@@ -287,6 +288,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         arg1: impl Into<Self::Expr> + Clone,
         arg2: impl Into<Self::Expr> + Clone,
         multiplicity: impl Into<Self::Expr>,
+        scope: LookupScope,
     ) {
         self.looked(SymbolicLookup::new(
             vec![
@@ -299,8 +301,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             ],
             multiplicity.into(),
             LookupType::Syscall,
-            // We only have the local syscall for now.
-            LookupScope::Regional,
+            scope,
         ))
     }
 }

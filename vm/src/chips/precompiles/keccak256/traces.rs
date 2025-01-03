@@ -18,7 +18,11 @@ use crate::{
     },
     compiler::riscv::program::Program,
     emulator::riscv::{
-        record::EmulationRecord, syscalls::precompiles::keccak256::event::KeccakPermuteEvent,
+        record::EmulationRecord,
+        syscalls::{
+            precompiles::{keccak256::event::KeccakPermuteEvent, PrecompileEvent},
+            SyscallCode,
+        },
     },
     machine::chip::ChipBehavior,
 };
@@ -44,14 +48,25 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = 8;
 
-        let blu_events: Vec<Vec<RangeLookupEvent>> = input
-            .keccak_permute_events
+        let events: Vec<_> = input
+            .get_precompile_events(SyscallCode::KECCAK_PERMUTE)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::KeccakPermute(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
+
+        let blu_events: Vec<Vec<RangeLookupEvent>> = events
             .par_chunks(chunk_size)
-            .map(|ops: &[KeccakPermuteEvent]| {
+            .map(|ops: &[&KeccakPermuteEvent]| {
                 // The blu map stores chunk -> map(byte lookup event -> multiplicity).
                 let mut blu: Vec<RangeLookupEvent> = Vec::new();
                 let mut rounds = zeroed_f_vec::<F>(NUM_KECCAK_MEM_COLS * NUM_ROUNDS);
-                ops.iter().for_each(|event: &KeccakPermuteEvent| {
+                ops.iter().for_each(|event| {
                     Self::populate_chunk(event, &mut rounds, &mut blu);
                 });
                 blu
@@ -66,7 +81,17 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
-        let events = input.keccak_permute_events.clone();
+        let events: Vec<_> = input
+            .get_precompile_events(SyscallCode::KECCAK_PERMUTE)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::KeccakPermute(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
         debug!(
             "record {} keccak precompile events {:?}",
             input.chunk_index(),
@@ -119,7 +144,13 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        !record.keccak_permute_events.is_empty()
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record
+                .get_precompile_events(SyscallCode::KECCAK_PERMUTE)
+                .is_empty()
+        }
     }
 }
 

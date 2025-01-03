@@ -12,8 +12,11 @@ use crate::{
         precompiles::sha256::extend::{columns::ShaExtendCols, ShaExtendChip},
     },
     emulator::riscv::syscalls::SyscallCode,
-    machine::builder::{
-        ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+    machine::{
+        builder::{
+            ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+        },
+        lookup::LookupScope,
     },
 };
 use core::borrow::Borrow;
@@ -207,6 +210,7 @@ where
             local.w_ptr,
             CB::Expr::ZERO,
             local.cycle_48_start,
+            LookupScope::Regional,
         );
 
         // Assert that is_real is a bool.

@@ -17,7 +17,10 @@ use crate::{
         },
     },
     emulator::riscv::syscalls::SyscallCode,
-    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+    machine::{
+        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+        lookup::LookupScope,
+    },
     recursion_v2::air::IsZeroOperation,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
@@ -44,10 +47,11 @@ where
         let next: &Uint256MulCols<CB::Var> = (*next).borrow();
 
         // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
+        // builder.when_first_row().assert_zero(local.nonce);
         builder
             .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
+            .assert_eq(next.is_real * (local.nonce + CB::Expr::ONE), next.nonce);
+        // .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // We are computing (x * y) % modulus. The value of x is stored in the "prev_value" of
         // the x_memory, since we write to it later.
@@ -145,6 +149,7 @@ where
             local.x_ptr,
             local.y_ptr,
             local.is_real,
+            LookupScope::Regional,
         );
 
         // Assert that is_real is a boolean.

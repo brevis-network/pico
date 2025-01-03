@@ -14,7 +14,11 @@ use crate::{
     emulator::{
         record::RecordBehavior,
         riscv::{
-            record::EmulationRecord, syscalls::precompiles::poseidon2::event::Poseidon2PermuteEvent,
+            record::EmulationRecord,
+            syscalls::{
+                precompiles::{poseidon2::event::Poseidon2PermuteEvent, PrecompileEvent},
+                SyscallCode,
+            },
         },
     },
     machine::chip::ChipBehavior,
@@ -42,22 +46,29 @@ impl<F: PrimeField32> ChipBehavior<F> for Poseidon2PermuteChip<F> {
         "Poseidon2Permute".to_string()
     }
 
-    fn generate_main(
-        &self,
-        input: &Self::Record,
-        _output: &mut Self::Record,
-    ) -> p3_matrix::dense::RowMajorMatrix<F> {
+    fn generate_main(&self, input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
+        let events: Vec<_> = input
+            .get_precompile_events(SyscallCode::POSEIDON2_PERMUTE)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::Poseidon2Permute(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
+
         debug!(
             "record {} poseidon2 precompile events {:?}",
             input.chunk_index(),
-            input.poseidon2_permute_events.len()
+            events.len()
         );
 
         // Generate the trace rows & corresponding records for each chunk of events concurrently.
         let mut new_byte_lookup_events = Vec::new();
 
-        let (_rows, nonces): (Vec<[F; NUM_POSEIDON2_COLS]>, Vec<_>) = input
-            .poseidon2_permute_events
+        let (_rows, nonces): (Vec<[F; NUM_POSEIDON2_COLS]>, Vec<_>) = events
             .iter()
             .map(|event| {
                 let mut row: [F; NUM_POSEIDON2_COLS] = [F::ZERO; NUM_POSEIDON2_COLS];
@@ -77,7 +88,8 @@ impl<F: PrimeField32> ChipBehavior<F> for Poseidon2PermuteChip<F> {
 
         let mut rows = _rows.clone();
 
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_POSEIDON2_COLS], None);
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_POSEIDON2_COLS], log_rows);
 
         // Convert the trace to a row major matrix.
         let mut trace = RowMajorMatrix::new(
@@ -97,7 +109,13 @@ impl<F: PrimeField32> ChipBehavior<F> for Poseidon2PermuteChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        !record.poseidon2_permute_events.is_empty()
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record
+                .get_precompile_events(SyscallCode::POSEIDON2_PERMUTE)
+                .is_empty()
+        }
     }
 
     fn generate_preprocessed(
@@ -108,7 +126,18 @@ impl<F: PrimeField32> ChipBehavior<F> for Poseidon2PermuteChip<F> {
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
-        let events = input.poseidon2_permute_events.clone();
+        let events: Vec<_> = input
+            .get_precompile_events(SyscallCode::POSEIDON2_PERMUTE)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::Poseidon2Permute(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
+
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
         let blu_batches = events
             .par_chunks(chunk_size)

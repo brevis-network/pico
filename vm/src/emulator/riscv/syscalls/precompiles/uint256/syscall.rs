@@ -6,8 +6,9 @@ use crate::{
         precompiles::uint256::UINT256_NUM_WORDS,
     },
     emulator::riscv::syscalls::{
-        precompiles::uint256::event::Uint256MulEvent, syscall_context::SyscallContext, Syscall,
-        SyscallCode,
+        precompiles::{uint256::event::Uint256MulEvent, PrecompileEvent},
+        syscall_context::SyscallContext,
+        Syscall, SyscallCode,
     },
     primitives::consts::WORD_SIZE,
 };
@@ -18,7 +19,7 @@ impl Syscall for Uint256MulSyscall {
     fn emulate(
         &self,
         ctx: &mut SyscallContext,
-        _syscall_code: SyscallCode,
+        syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
     ) -> Option<u32> {
@@ -71,8 +72,7 @@ impl Syscall for Uint256MulSyscall {
         let lookup_id = ctx.syscall_lookup_id;
         let chunk = ctx.current_chunk();
 
-        // Todo: Add local_mem_access after scope update
-        let event = Uint256MulEvent {
+        let event = PrecompileEvent::Uint256Mul(Uint256MulEvent {
             lookup_id,
             chunk,
             clk,
@@ -84,9 +84,16 @@ impl Syscall for Uint256MulSyscall {
             x_memory_records,
             y_memory_records,
             modulus_memory_records,
-        };
+            local_mem_access: ctx.postprocess(),
+        });
 
-        ctx.record_mut().add_uint256_mul_event(event);
+        // ctx.record_mut().add_uint256_mul_event(event);
+
+        let syscall_event =
+            ctx.rt
+                .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2, lookup_id);
+        ctx.record_mut()
+            .add_precompile_event(syscall_code, syscall_event, event);
 
         None
     }

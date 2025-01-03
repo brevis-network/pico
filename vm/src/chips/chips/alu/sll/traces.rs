@@ -44,7 +44,10 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
                 let cols: &mut ShiftLeftCols<F> = row.borrow_mut();
                 self.event_to_row(&event, cols, &mut ());
             });
-        pad_to_power_of_two::<NUM_SLL_COLS, F>(&mut trace.values);
+
+        // Pad the trace based on shape
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_to_power_of_two::<NUM_SLL_COLS, F>(&mut trace.values, log_rows);
 
         // Create the template for the padded rows. These are fake rows that don't fail on some
         // sanity checks.

@@ -63,6 +63,7 @@ impl MachineProver<RecursionSC> for ConvertProver<RiscvSC, RecursionSC> {
             [Val::<RiscvSC>::ZERO; DIGEST_SIZE],
             &self.prev_machine,
             &proofs.proofs(),
+            None,
         );
         let witness =
             ProvingWitness::setup_for_convert(stdin, self.machine.config(), Default::default());

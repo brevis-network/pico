@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord};
+use crate::chips::chips::riscv_memory::event::{
+    MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord,
+};
 
 /// Poseidon2 Permutation Event.
 ///
@@ -23,4 +25,6 @@ pub struct Poseidon2PermuteEvent {
     pub state_read_records: Vec<MemoryReadRecord>,
     /// The memory records for the post-state.
     pub state_write_records: Vec<MemoryWriteRecord>,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }

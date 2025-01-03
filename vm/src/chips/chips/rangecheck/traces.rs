@@ -44,6 +44,10 @@ where
         );
 
         let mut chunk = input.chunk_index() as u32;
+        // TODO: temp work around
+        // if chunk == 2 {
+        //     chunk = 1;
+        // }
         if input.name() == "RecursionRecord" {
             chunk = 0;
         }
@@ -55,7 +59,7 @@ where
 
                 let cols: &mut RangeCheckMultCols<F> = trace.row_mut(row).borrow_mut();
                 cols.multiplicities[index] += F::from_canonical_usize(multi);
-                cols.chunk = F::from_canonical_u32(chunk);
+                // cols.chunk = F::from_canonical_u32(chunk);
             });
 
         trace

@@ -182,6 +182,7 @@ where
             instructions,
             total_memory,
             traces,
+            shape: None,
         }
     }
 

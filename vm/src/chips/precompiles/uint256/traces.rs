@@ -9,7 +9,10 @@ use crate::{
         precompiles::uint256::{Uint256MulChip, UINT256_NUM_WORDS},
     },
     compiler::riscv::program::Program,
-    emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
+    emulator::riscv::{
+        record::EmulationRecord,
+        syscalls::{precompiles::PrecompileEvent, SyscallCode},
+    },
     machine::chip::ChipBehavior,
     recursion_v2::{air::IsZeroOperation, stark::utils::pad_rows_fixed},
 };
@@ -18,7 +21,6 @@ use num::{BigUint, One, Zero};
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::borrow::BorrowMut;
-use tracing::debug;
 
 impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
     type Record = EmulationRecord;
@@ -33,18 +35,24 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
         input: &EmulationRecord,
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        debug!(
-            "record {} uint256 precompile events {:?}",
-            input.chunk_index(),
-            input.uint256_mul_events.len()
-        );
-
         // The record update is used by extra_record
         let mut chunked_byte_lookup_events = Vec::new();
         let mut rangecheck_lookup_events = Vec::new();
+
+        let events: Vec<_> = input
+            .get_precompile_events(SyscallCode::UINT256_MUL)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::Uint256Mul(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
+
         // Generate the trace rows & corresponding records for each event.
-        let mut rows = input
-            .uint256_mul_events
+        let (_rows, nonces): (Vec<[F; NUM_UINT256_MUL_COLS]>, Vec<_>) = events
             .iter()
             .map(|event| {
                 let mut new_range_check_events = HashMap::new();
@@ -109,9 +117,18 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
 
                 chunked_byte_lookup_events.push(new_byte_lookup_events);
                 rangecheck_lookup_events.push(new_range_check_events);
-                row
+
+                let nonce = *input.nonce_lookup.get(&event.lookup_id).unwrap();
+
+                (row, nonce)
             })
-            .collect::<Vec<_>>();
+            .unzip();
+        // .collect::<Vec<_>>();
+
+        let mut rows = _rows.clone();
+
+        let log_rows = input.shape_chip_size(&self.name());
+        println!("Log rows in uint256mul: {:?}", log_rows);
 
         pad_rows_fixed(
             &mut rows,
@@ -126,7 +143,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
 
                 row
             },
-            None,
+            log_rows,
         );
 
         output.add_chunked_byte_lookup_events(chunked_byte_lookup_events.iter().collect());
@@ -142,7 +159,9 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
         for i in 0..trace.height() {
             let cols: &mut Uint256MulCols<F> =
                 trace.values[i * NUM_UINT256_MUL_COLS..(i + 1) * NUM_UINT256_MUL_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
+            // cols.nonce = F::from_canonical_usize(i);
+            let nonce = nonces.get(i).unwrap_or(&0);
+            cols.nonce = F::from_canonical_u32(*nonce);
         }
 
         trace
@@ -153,6 +172,13 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
     }
 
     fn is_active(&self, chunk: &Self::Record) -> bool {
-        !chunk.uint256_mul_events.is_empty()
+        // !chunk.uint256_mul_events.is_empty()
+        if let Some(shape) = chunk.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !chunk
+                .get_precompile_events(SyscallCode::UINT256_MUL)
+                .is_empty()
+        }
     }
 }

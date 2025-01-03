@@ -31,14 +31,18 @@ use crate::{
                 limbs::Limbs,
             },
         },
-        utils::pad_rows,
     },
     compiler::riscv::program::Program,
-    emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
+    emulator::riscv::{
+        record::EmulationRecord,
+        syscalls::{precompiles::PrecompileEvent, SyscallCode},
+    },
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
+        lookup::LookupScope,
     },
+    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use hybrid_array::Array;
 use num::{BigUint, Zero};
@@ -207,9 +211,9 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
         let events = match E::CURVE_TYPE {
-            CurveType::Secp256k1 => &input.k256_decompress_events,
-            CurveType::Bls12381 => &input.bls12381_decompress_events,
-            _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
+            CurveType::Secp256k1 => input.get_precompile_events(SyscallCode::SECP256K1_DECOMPRESS),
+            CurveType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_DECOMPRESS),
+            _ => panic!("Unsupported curve"),
         };
 
         let mut rows = Vec::new();
@@ -222,7 +226,14 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
         let modulus = E::BaseField::modulus();
 
         for i in 0..events.len() {
-            let event = events[i].clone();
+            let (_syscall_event, precompile_event) = &events[i];
+
+            let event = match precompile_event {
+                PrecompileEvent::Secp256k1Decompress(event)
+                | PrecompileEvent::Bls12381Decompress(event) => event,
+                _ => unreachable!(),
+            };
+
             let mut row = vec![F::ZERO; width];
             let cols: &mut WeierstrassDecompressCols<F, E::BaseField> =
                 row[0..weierstrass_width].borrow_mut();
@@ -305,22 +316,27 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
         output.add_byte_lookup_events(new_byte_lookup_events);
         output.add_range_lookup_events(new_range_lookup_events);
 
-        pad_rows(&mut rows, || {
-            let mut row = vec![F::ZERO; width];
-            let cols: &mut WeierstrassDecompressCols<F, E::BaseField> =
-                row.as_mut_slice()[0..weierstrass_width].borrow_mut();
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_rows_fixed(
+            &mut rows,
+            || {
+                let mut row = vec![F::ZERO; width];
+                let cols: &mut WeierstrassDecompressCols<F, E::BaseField> =
+                    row.as_mut_slice()[0..weierstrass_width].borrow_mut();
 
-            // take X of the generator as a dummy value to make sure Y^2 = X^3 + b holds
-            let dummy_value = E::generator().0;
-            let dummy_bytes = dummy_value.to_bytes_le();
-            let words = bytes_to_words_le_vec(&dummy_bytes);
-            for i in 0..cols.x_access.len() {
-                cols.x_access[i].access.value = words[i].into();
-            }
+                // take X of the generator as a dummy value to make sure Y^2 = X^3 + b holds
+                let dummy_value = E::generator().0;
+                let dummy_bytes = dummy_value.to_bytes_le();
+                let words = bytes_to_words_le_vec(&dummy_bytes);
+                for i in 0..cols.x_access.len() {
+                    cols.x_access[i].access.value = words[i].into();
+                }
 
-            Self::populate_field_ops(&mut vec![], &mut vec![], 0, cols, dummy_value);
-            row
-        });
+                Self::populate_field_ops(&mut vec![], &mut vec![], 0, cols, dummy_value);
+                row
+            },
+            log_rows,
+        );
 
         let mut trace = RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), width);
 
@@ -335,10 +351,18 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
     }
 
     fn is_active(&self, chunk: &Self::Record) -> bool {
-        match E::CURVE_TYPE {
-            CurveType::Bls12381 => !chunk.bls12381_decompress_events.is_empty(),
-            CurveType::Secp256k1 => !chunk.k256_decompress_events.is_empty(),
-            _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
+        if let Some(shape) = chunk.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            match E::CURVE_TYPE {
+                CurveType::Secp256k1 => !chunk
+                    .get_precompile_events(SyscallCode::SECP256K1_DECOMPRESS)
+                    .is_empty(),
+                CurveType::Bls12381 => !chunk
+                    .get_precompile_events(SyscallCode::BLS12381_DECOMPRESS)
+                    .is_empty(),
+                _ => panic!("Unsupported curve"),
+            }
         }
     }
 }
@@ -591,6 +615,7 @@ where
             local.ptr,
             local.sign_bit,
             local.is_real,
+            LookupScope::Regional,
         );
     }
 }

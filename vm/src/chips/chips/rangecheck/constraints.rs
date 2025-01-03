@@ -36,7 +36,7 @@ where
 
         for (i, opcode) in RangeCheckOpcode::all().into_iter().enumerate() {
             let mult = local_mult.multiplicities[i];
-            let chunk = local_mult.chunk;
+            // let chunk = local_mult.chunk;
 
             // check that no lookups happened out of the range
             match opcode {
@@ -53,7 +53,8 @@ where
             }
 
             // record the receive
-            builder.looked_rangecheck(opcode, local.value, chunk, mult);
+            builder.looked_rangecheck(opcode, local.value, mult);
+            // builder.looked_rangecheck(opcode, local.value, chunk, mult);
         }
     }
 }

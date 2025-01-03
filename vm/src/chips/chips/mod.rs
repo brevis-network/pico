@@ -17,3 +17,4 @@ pub mod poseidon2_wide_v2;
 pub mod public_values_v2;
 pub mod recursion_memory_v2;
 pub mod select;
+pub mod syscall;

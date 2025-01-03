@@ -105,7 +105,7 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
         let mut trace = RowMajorMatrix::new(rows, NUM_TOY_COLS);
 
         // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_TOY_COLS, F>(&mut trace.values);
+        pad_to_power_of_two::<NUM_TOY_COLS, F>(&mut trace.values, None);
 
         trace
     }
@@ -171,7 +171,7 @@ mod tests {
         let cols = ToyCols::new(&a, &b, &result, &is_add);
 
         let mut expected_row = vec![a, b, result, is_add];
-        pad_to_power_of_two::<NUM_TOY_COLS, F>(&mut expected_row);
+        pad_to_power_of_two::<NUM_TOY_COLS, F>(&mut expected_row, None);
         assert_eq!(cols.to_row(), [a, b, result, is_add]);
     }
 }

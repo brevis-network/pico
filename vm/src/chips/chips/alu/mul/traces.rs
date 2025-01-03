@@ -171,8 +171,9 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
         let mut trace =
             RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_MUL_COLS);
 
-        // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_MUL_COLS, F>(&mut trace.values);
+        // Pad the trace based on shape
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_to_power_of_two::<NUM_MUL_COLS, F>(&mut trace.values, log_rows);
 
         // Write the nonces to the trace.
         for i in 0..trace.height() {

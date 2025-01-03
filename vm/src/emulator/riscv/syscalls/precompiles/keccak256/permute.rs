@@ -1,6 +1,7 @@
 use crate::emulator::riscv::syscalls::{
-    precompiles::keccak256::event::KeccakPermuteEvent, syscall_context::SyscallContext, Syscall,
-    SyscallCode,
+    precompiles::{keccak256::event::KeccakPermuteEvent, PrecompileEvent},
+    syscall_context::SyscallContext,
+    Syscall, SyscallCode,
 };
 use tiny_keccak::keccakf;
 
@@ -15,7 +16,7 @@ impl Syscall for Keccak256PermuteSyscall {
     fn emulate(
         &self,
         ctx: &mut SyscallContext,
-        _syscall_code: SyscallCode,
+        syscall_code: SyscallCode,
         arg1: u32,
         arg2: u32,
     ) -> Option<u32> {
@@ -60,17 +61,22 @@ impl Syscall for Keccak256PermuteSyscall {
         // Push the Keccak permute event.
         let chunk = ctx.current_chunk();
         let lookup_id = ctx.syscall_lookup_id;
+        let event = PrecompileEvent::KeccakPermute(KeccakPermuteEvent {
+            lookup_id,
+            chunk,
+            clk: start_clk,
+            pre_state: saved_state.as_slice().try_into().unwrap(),
+            post_state: state.as_slice().try_into().unwrap(),
+            state_read_records,
+            state_write_records,
+            state_addr: state_ptr,
+            local_mem_access: ctx.postprocess(),
+        });
+        let syscall_event =
+            ctx.rt
+                .syscall_event(start_clk, syscall_code.syscall_id(), arg1, arg2, lookup_id);
         ctx.record_mut()
-            .add_keccak_permute_lookup_event(KeccakPermuteEvent {
-                lookup_id,
-                chunk,
-                clk: start_clk,
-                pre_state: saved_state.as_slice().try_into().unwrap(),
-                post_state: state.as_slice().try_into().unwrap(),
-                state_read_records,
-                state_write_records,
-                state_addr: state_ptr,
-            });
+            .add_precompile_event(syscall_code, syscall_event, event);
         None
     }
 

@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{Com, Dom, PcsProverData, StarkGenericConfig},
+    configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
     primitives::{consts::DIGEST_SIZE, poseidon2_hash},
 };
 use alloc::sync::Arc;
@@ -9,6 +9,7 @@ use p3_challenger::CanObserve;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, TwoAdicField};
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// The commitment to the named traces.
@@ -43,17 +44,22 @@ impl<SC: StarkGenericConfig> BaseProvingKey<SC> {
     pub fn observed_by(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
+        for _ in 0..7 {
+            challenger.observe(Val::<SC>::ZERO);
+        }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(serialize = "Dom<SC>: Serialize"))]
+#[serde(bound(deserialize = "Dom<SC>: DeserializeOwned"))]
 pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     /// The commitment to the preprocessed traces.
     pub commit: Com<SC>,
     /// start pc of program
     pub pc_start: SC::Val,
     /// The preprocessed information.
-    pub preprocessed_info: Arc<[(String, Dom<SC>, Dimensions)]>,
+    pub preprocessed_info: Arc<Vec<(String, Dom<SC>, Dimensions)>>,
     /// the index of for chips, chip name for key
     pub preprocessed_chip_ordering: Arc<HashMap<String, usize>>,
 }
@@ -63,6 +69,9 @@ impl<SC: StarkGenericConfig> BaseVerifyingKey<SC> {
     pub fn observed_by(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
+        for _ in 0..7 {
+            challenger.observe(Val::<SC>::ZERO);
+        }
     }
 }
 

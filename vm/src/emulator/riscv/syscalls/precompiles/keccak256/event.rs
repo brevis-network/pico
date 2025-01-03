@@ -1,4 +1,6 @@
-use crate::chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord};
+use crate::chips::chips::riscv_memory::event::{
+    MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord,
+};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const STATE_SIZE: usize = 25;
@@ -24,4 +26,6 @@ pub struct KeccakPermuteEvent {
     pub state_write_records: Vec<MemoryWriteRecord>,
     /// The address of the state.
     pub state_addr: u32,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }

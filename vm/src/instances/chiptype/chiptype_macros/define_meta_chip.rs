@@ -12,6 +12,13 @@ macro_rules! define_meta_chip {
         )))
     };
 
+    (SyscallRiscv, $chip_type:ident, $F:ident) => {
+        MetaChip::new(Self::SyscallRiscv(SyscallChip::riscv()))
+    };
+    (SyscallPrecompile, $chip_type:ident, $F:ident) => {
+        MetaChip::new(Self::SyscallPrecompile(SyscallChip::precompile()))
+    };
+
     ($variant:ident, $chip_type:ident, $F:ident) => {
         MetaChip::new(Self::$variant($chip_type::default()))
     };

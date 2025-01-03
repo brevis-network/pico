@@ -54,7 +54,7 @@ pub struct BaseProofVariable<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConf
 pub fn dummy_challenger(config: &RiscvSC) -> Challenger<RiscvSC> {
     let mut challenger = config.challenger();
     challenger.input_buffer = vec![];
-    challenger.output_buffer = vec![BabyBear::ZERO; challenger.sponge_state.len()];
+    challenger.output_buffer = vec![BabyBear::ZERO; 8];
     challenger
 }
 
@@ -106,6 +106,7 @@ where
     {
         let chips = machine.chips();
         let chips = order_chips::<SC, A>(&chips, &proof.main_chip_ordering).collect_vec();
+
         let chip_scopes = chips.iter().map(|chip| chip.lookup_scope()).collect_vec();
 
         let has_global_main_commit = chip_scopes.contains(&LookupScope::Global);

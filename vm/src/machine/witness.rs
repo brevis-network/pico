@@ -8,6 +8,7 @@ use crate::{
     instances::{
         compiler_v2::{
             recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,
+            vk_merkle::stdin::RecursionVkStdin,
         },
         configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
     },
@@ -169,6 +170,41 @@ where
     pub fn setup_for_recursion(
         vk_root: [Val<RecursionSC>; DIGEST_SIZE],
         stdin: EmulatorStdin<C::Program, RecursionStdin<'a, RecursionSC, PrevC>>,
+        config: Arc<RecursionSC>,
+        opts: EmulatorOpts,
+    ) -> Self {
+        Self {
+            program: None,
+            pk: None,
+            vk: None,
+            vk_root: Some(vk_root),
+            stdin: Some(stdin),
+            opts: Some(opts),
+            config: Some(config),
+            records: vec![],
+        }
+    }
+}
+
+// implement Witness for recursion-recursion machine
+impl<'a, C, PrevC> ProvingWitness<RecursionSC, C, RecursionVkStdin<'a, RecursionSC, PrevC>>
+where
+    PrevC: ChipBehavior<
+            Val<RecursionSC>,
+            Program = RecursionProgram<Val<RecursionSC>>,
+            Record = RecursionRecord<Val<RecursionSC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+    C: ChipBehavior<
+            Val<RecursionSC>,
+            Program = RecursionProgram<Val<RecursionSC>>,
+            Record = RecursionRecord<Val<RecursionSC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+{
+    pub fn setup_for_recursion_vk(
+        vk_root: [Val<RecursionSC>; DIGEST_SIZE],
+        stdin: EmulatorStdin<C::Program, RecursionVkStdin<'a, RecursionSC, PrevC>>,
         config: Arc<RecursionSC>,
         opts: EmulatorOpts,
     ) -> Self {

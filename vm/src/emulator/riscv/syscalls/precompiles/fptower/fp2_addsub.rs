@@ -6,7 +6,8 @@ use std::marker::PhantomData;
 use crate::{
     chips::gadgets::field::field_op::FieldOperation,
     emulator::riscv::syscalls::{
-        precompiles::fptower::event::Fp2AddSubEvent, Syscall, SyscallCode, SyscallContext,
+        precompiles::{fptower::event::Fp2AddSubEvent, PrecompileEvent},
+        Syscall, SyscallCode, SyscallContext,
     },
 };
 
@@ -28,7 +29,7 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
     fn emulate(
         &self,
         rt: &mut SyscallContext,
-        _syscall_code: SyscallCode,
+        syscall_code: SyscallCode,
         x_ptr: u32,
         y_ptr: u32,
     ) -> Option<u32> {
@@ -76,11 +77,8 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
         let x_memory_records = x_memory_records.into_boxed_slice();
         let y_memory_records = y_memory_records.into_boxed_slice();
         let op = self.op;
-        match P::FIELD_TYPE {
-            FieldType::Bn254 => &mut rt.record_mut().fp2_bn254_addsub_events,
-            FieldType::Bls381 => &mut rt.record_mut().fp2_bls381_addsub_events,
-        }
-        .push(Fp2AddSubEvent {
+
+        let event = Fp2AddSubEvent {
             lookup_id,
             chunk,
             clk,
@@ -91,7 +89,57 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
             op,
             x_memory_records,
             y_memory_records,
-        });
+            local_mem_access: rt.postprocess(),
+        };
+
+        match P::FIELD_TYPE {
+            // All the fp2 add and sub events for a given curve are coalesced to the curve's fp2 add operation.  Only check for
+            // that operation.
+            // TODO:  Fix this.
+            FieldType::Bn254 => {
+                let syscall_code_key = match syscall_code {
+                    SyscallCode::BN254_FP2_ADD | SyscallCode::BN254_FP2_SUB => {
+                        SyscallCode::BN254_FP2_ADD
+                    }
+                    _ => unreachable!(),
+                };
+
+                let syscall_event = rt.rt.syscall_event(
+                    clk,
+                    syscall_code.syscall_id(),
+                    x_ptr,
+                    y_ptr,
+                    event.lookup_id,
+                );
+                rt.record_mut().add_precompile_event(
+                    syscall_code_key,
+                    syscall_event,
+                    PrecompileEvent::Bn254Fp2AddSub(event),
+                );
+            }
+            FieldType::Bls381 => {
+                let syscall_code_key = match syscall_code {
+                    SyscallCode::BLS12381_FP2_ADD | SyscallCode::BLS12381_FP2_SUB => {
+                        SyscallCode::BLS12381_FP2_ADD
+                    }
+                    _ => unreachable!(),
+                };
+
+                let syscall_event = rt.rt.syscall_event(
+                    clk,
+                    syscall_code.syscall_id(),
+                    x_ptr,
+                    y_ptr,
+                    event.lookup_id,
+                );
+                rt.record_mut().add_precompile_event(
+                    syscall_code_key,
+                    syscall_event,
+                    PrecompileEvent::Bls12381Fp2AddSub(event),
+                );
+            }
+        }
+
         None
     }
 

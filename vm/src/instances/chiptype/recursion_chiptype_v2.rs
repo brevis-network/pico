@@ -1,26 +1,35 @@
 use crate::{
     chips::chips::{
-        alu_base::BaseAluChip,
-        alu_ext::ExtAluChip,
+        alu_base::{columns::NUM_BASE_ALU_ENTRIES_PER_ROW, BaseAluChip},
+        alu_ext::{columns::NUM_EXT_ALU_ENTRIES_PER_ROW, ExtAluChip},
         batch_fri::BatchFRIChip,
         exp_reverse_bits_v2::ExpReverseBitsLenChip,
         poseidon2_skinny_v2::Poseidon2SkinnyChip,
         poseidon2_wide_v2::Poseidon2WideChip,
-        public_values_v2::PublicValuesChip,
-        recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
+        public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
+        recursion_memory_v2::{
+            constant::{columns::NUM_CONST_MEM_ENTRIES_PER_ROW, MemoryConstChip},
+            variable::{columns::NUM_VAR_MEM_ENTRIES_PER_ROW, MemoryVarChip},
+        },
         select::SelectChip,
     },
-    compiler::recursion_v2::program::RecursionProgram,
+    compiler::recursion_v2::{
+        instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction},
+        program::RecursionProgram,
+    },
+    instances::compiler_v2::shapes::compress_shape::RecursionPadShape,
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
     },
     primitives::consts::EXTENSION_DEGREE,
-    recursion_v2::runtime::RecursionRecord,
+    recursion_v2::{runtime::RecursionRecord, types::ExpReverseBitsInstr},
 };
+use hashbrown::HashMap;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+use std::ops::{Add, AddAssign};
 
 pub enum RecursionChipType<
     F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
@@ -265,5 +274,136 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
+    }
+
+    pub fn chip_heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {
+        let heights = program
+            .instructions
+            .iter()
+            .fold(RecursionEventCount::default(), |heights, instruction| {
+                heights + instruction
+            });
+
+        [
+            (
+                Self::MemoryConst(MemoryConstChip::default()),
+                heights
+                    .mem_const_events
+                    .div_ceil(NUM_CONST_MEM_ENTRIES_PER_ROW),
+            ),
+            (
+                Self::MemoryVar(MemoryVarChip::default()),
+                heights.mem_var_events.div_ceil(NUM_VAR_MEM_ENTRIES_PER_ROW),
+            ),
+            (
+                Self::BaseAlu(BaseAluChip::default()),
+                heights
+                    .base_alu_events
+                    .div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW),
+            ),
+            (
+                Self::ExtAlu(ExtAluChip::default()),
+                heights.ext_alu_events.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW),
+            ),
+            (
+                Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE, F>::default()),
+                heights.poseidon2_wide_events,
+            ),
+            (
+                Self::BatchFRI(BatchFRIChip::<DEGREE, F>::default()),
+                heights.batch_fri_events,
+            ),
+            (Self::Select(SelectChip::default()), heights.select_events),
+            (
+                Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE, F>::default()),
+                heights.exp_reverse_bits_len_events,
+            ),
+            (
+                Self::PublicValues(PublicValuesChip::default()),
+                PUB_VALUES_LOG_HEIGHT,
+            ),
+        ]
+        .map(|(chip, log_height)| (chip.name(), log_height))
+        .to_vec()
+    }
+
+    // all the compress proof should be padded to this shape
+    pub fn compress_shape() -> RecursionPadShape {
+        let shape = HashMap::from(
+            [
+                (Self::MemoryConst(MemoryConstChip::default()), 17),
+                (Self::MemoryVar(MemoryVarChip::default()), 18),
+                (Self::BaseAlu(BaseAluChip::default()), 15),
+                (Self::ExtAlu(ExtAluChip::default()), 15),
+                (
+                    Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE, F>::default()),
+                    16,
+                ),
+                (
+                    Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE, F>::default()),
+                    17,
+                ),
+                (
+                    Self::PublicValues(PublicValuesChip::default()),
+                    PUB_VALUES_LOG_HEIGHT,
+                ),
+                (Self::BatchFRI(BatchFRIChip::<DEGREE, F>::default()), 18),
+                (Self::Select(SelectChip::default()), 18),
+            ]
+            .map(|(chip, log_height)| (chip.name(), log_height)),
+        );
+        RecursionPadShape { inner: shape }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RecursionEventCount {
+    pub mem_const_events: usize,
+    pub mem_var_events: usize,
+    pub base_alu_events: usize,
+    pub ext_alu_events: usize,
+    pub poseidon2_wide_events: usize,
+    pub batch_fri_events: usize,
+    pub select_events: usize,
+    pub exp_reverse_bits_len_events: usize,
+}
+
+impl<F> AddAssign<&Instruction<F>> for RecursionEventCount {
+    #[inline]
+    fn add_assign(&mut self, rhs: &Instruction<F>) {
+        match rhs {
+            Instruction::BaseAlu(_) => self.base_alu_events += 1,
+            Instruction::ExtAlu(_) => self.ext_alu_events += 1,
+            Instruction::Mem(_) => self.mem_const_events += 1,
+            Instruction::Select(_) => self.select_events += 1,
+            Instruction::Poseidon2(_) => self.poseidon2_wide_events += 1,
+            Instruction::ExpReverseBitsLen(ExpReverseBitsInstr { addrs, .. }) => {
+                self.exp_reverse_bits_len_events += addrs.exp.len()
+            }
+            Instruction::Hint(HintInstr { output_addrs_mults })
+            | Instruction::HintBits(HintBitsInstr {
+                output_addrs_mults,
+                input_addr: _, // No receive interaction for the hint operation
+            }) => self.mem_var_events += output_addrs_mults.len(),
+            Instruction::HintExt2Felts(HintExt2FeltsInstr {
+                output_addrs_mults,
+                input_addr: _, // No receive interaction for the hint operation
+            }) => self.mem_var_events += output_addrs_mults.len(),
+            Instruction::CommitPublicValues(_) => {}
+            Instruction::Print(_) => {}
+            Instruction::BatchFRI(instr) => {
+                self.batch_fri_events += instr.base_vec_addrs.p_at_x.len()
+            }
+        }
+    }
+}
+
+impl<F> Add<&Instruction<F>> for RecursionEventCount {
+    type Output = Self;
+
+    #[inline]
+    fn add(mut self, rhs: &Instruction<F>) -> Self::Output {
+        self += rhs;
+        self
     }
 }

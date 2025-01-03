@@ -21,21 +21,25 @@ use crate::{
                 limbs::Limbs,
             },
         },
-        utils::pad_rows,
     },
     compiler::riscv::program::Program,
     emulator::{
         record::RecordBehavior,
         riscv::{
             record::EmulationRecord,
-            syscalls::{precompiles::edwards::event::EllipticCurveAddEvent, SyscallCode},
+            syscalls::{
+                precompiles::{edwards::event::EllipticCurveAddEvent, PrecompileEvent},
+                SyscallCode,
+            },
         },
     },
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
+        lookup::LookupScope,
         utils::limbs_from_prev_access,
     },
+    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -145,7 +149,17 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        let events = &input.ed_add_events;
+        let events: Vec<_> = input
+            .get_precompile_events(SyscallCode::ED_ADD)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::EdAdd(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
         debug!(
             "record {} ed add precompile events {:?}",
             input.chunk_index(),
@@ -165,21 +179,26 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
 
         let mut rows = _rows.clone();
 
-        pad_rows(&mut rows, || {
-            let mut row = [F::ZERO; NUM_ED_ADD_COLS];
-            let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
-            let zero = BigUint::zero();
-            Self::populate_field_ops(
-                &mut vec![],
-                0,
-                cols,
-                zero.clone(),
-                zero.clone(),
-                zero.clone(),
-                zero,
-            );
-            row
-        });
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_rows_fixed(
+            &mut rows,
+            || {
+                let mut row = [F::ZERO; NUM_ED_ADD_COLS];
+                let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
+                let zero = BigUint::zero();
+                Self::populate_field_ops(
+                    &mut vec![],
+                    0,
+                    cols,
+                    zero.clone(),
+                    zero.clone(),
+                    zero.clone(),
+                    zero,
+                );
+                row
+            },
+            log_rows,
+        );
 
         // Convert the trace to a row major matrix.
         let mut trace = RowMajorMatrix::new(
@@ -199,7 +218,18 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
     }
 
     fn extra_record(&self, input: &Self::Record, output: &mut Self::Record) {
-        let events = &input.ed_add_events;
+        let events: Vec<_> = input
+            .get_precompile_events(SyscallCode::ED_ADD)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::EdAdd(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect();
+
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
         let rlu_batches = events
@@ -219,7 +249,11 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
-        !record.ed_add_events.is_empty()
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !record.get_precompile_events(SyscallCode::ED_ADD).is_empty()
+        }
     }
 }
 
@@ -401,6 +435,7 @@ where
             local.p_ptr,
             local.q_ptr,
             local.is_real,
+            LookupScope::Regional,
         );
     }
 }

@@ -37,13 +37,30 @@ pub fn type_name_of<T>(_: &T) -> String {
     type_name::<T>().to_string()
 }
 
-pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<T>) {
+pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(
+    values: &mut Vec<T>,
+    log_size: Option<usize>,
+) {
     debug_assert!(values.len() % N == 0);
     let mut n_real_rows = values.len() / N;
     if n_real_rows < 16 {
         n_real_rows = 16;
     }
-    values.resize(n_real_rows.next_power_of_two() * N, T::default());
+
+    let target_rows = if let Some(log) = log_size {
+        let specified_size = 1 << log; // 2^log
+        if specified_size < n_real_rows {
+            panic!(
+                "log_size is smaller than real rows num: real rows num {} > 2^{}={}",
+                n_real_rows, log, specified_size
+            );
+        }
+        specified_size
+    } else {
+        n_real_rows.next_power_of_two()
+    };
+
+    values.resize(target_rows * N, T::default());
 }
 
 pub fn limbs_from_prev_access<T: Copy, N: ArraySize, M: MemoryCols<T>>(cols: &[M]) -> Limbs<T, N> {

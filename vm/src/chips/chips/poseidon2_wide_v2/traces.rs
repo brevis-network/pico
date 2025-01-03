@@ -41,7 +41,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for Poseidon2WideChip
             })
             .collect::<Vec<_>>();
 
-        let padded_nb_rows = match program.fixed_log2_rows(self) {
+        let padded_nb_rows = match program.fixed_log2_rows(&self.name()) {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(instructions.len(), None),
         };
@@ -73,7 +73,7 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for Poseidon2WideChip
         _output: &mut RecursionRecord<F>,
     ) -> RowMajorMatrix<F> {
         let events = &input.poseidon2_events;
-        let padded_nb_rows = match input.fixed_log2_rows(self) {
+        let padded_nb_rows = match input.fixed_log2_rows(&self.name()) {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(events.len(), None),
         };

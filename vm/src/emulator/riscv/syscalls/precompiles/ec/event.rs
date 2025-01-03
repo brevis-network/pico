@@ -1,6 +1,6 @@
 use crate::{
     chips::{
-        chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
+        chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
         gadgets::{
             curves::{
                 weierstrass::{bls381::bls12381_decompress, secp256k1::secp256k1_decompress},
@@ -20,7 +20,7 @@ use typenum::Unsigned;
 /// Elliptic Curve Double Event.
 ///
 /// This event is emitted when an elliptic curve doubling operation is performed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveDoubleEvent {
     /// The lookup identifer.
     pub lookup_id: u128,
@@ -34,12 +34,14 @@ pub struct EllipticCurveDoubleEvent {
     pub p: Vec<u32>,
     /// The memory records for the point.
     pub p_memory_records: Vec<MemoryWriteRecord>,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }
 
 /// Elliptic Curve Point Decompress Event.
 ///
 /// This event is emitted when an elliptic curve point decompression operation is performed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveDecompressEvent {
     /// The lookup identifer.
     pub lookup_id: u128,
@@ -59,6 +61,8 @@ pub struct EllipticCurveDecompressEvent {
     pub x_memory_records: Vec<MemoryReadRecord>,
     /// The memory records for the y coordinate.
     pub y_memory_records: Vec<MemoryWriteRecord>,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }
 
 /// Create an elliptic curve double event.
@@ -95,6 +99,7 @@ pub fn create_ec_double_event<E: EllipticCurve>(
         p_ptr,
         p,
         p_memory_records,
+        local_mem_access: rt.postprocess(),
     }
 }
 
@@ -145,5 +150,6 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
         decompressed_y_bytes,
         x_memory_records,
         y_memory_records,
+        local_mem_access: rt.postprocess(),
     }
 }

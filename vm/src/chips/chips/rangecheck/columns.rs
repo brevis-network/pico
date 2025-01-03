@@ -29,7 +29,7 @@ pub struct RangeCheckPreprocessedCols<T> {
 pub struct RangeCheckMultCols<T> {
     /// Chunk number
     /// TRICKY: It's set to 0 for recursion, RiscV chunk starts from 1, so should have no conflict.
-    pub chunk: T,
+    // pub chunk: T,
 
     /// The multiplicities of each range check operation.
     pub multiplicities: [T; NUM_RANGECHECK_OPS],

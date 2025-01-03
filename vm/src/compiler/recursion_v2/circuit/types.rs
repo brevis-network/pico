@@ -85,11 +85,10 @@ impl<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>>
         challenger.observe(builder, self.commit);
         // Observe the pc_start.
         challenger.observe(builder, self.pc_start);
-        // TODO: Observe the padding.
-        // let zero: Felt<_> = builder.eval(CC::F::ZERO);
-        // for _ in 0..7 {
-        //     challenger.observe(builder, zero);
-        // }
+        let zero: Felt<_> = builder.eval(CC::F::ZERO);
+        for _ in 0..7 {
+            challenger.observe(builder, zero);
+        }
     }
 
     /// Hash the verifying key + prep domains into a single digest.

@@ -1,10 +1,12 @@
-use crate::chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord};
+use crate::chips::chips::riscv_memory::event::{
+    MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord,
+};
 use serde::{Deserialize, Serialize};
 
 /// Uint256 Mul Event.
 ///
 /// This event is emitted when uint256 multiplication operation is performed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Uint256MulEvent {
     /// The lookup identifier
     pub lookup_id: u128,
@@ -28,4 +30,6 @@ pub struct Uint256MulEvent {
     pub y_memory_records: Vec<MemoryReadRecord>,
     /// The memory records for the modulus
     pub modulus_memory_records: Vec<MemoryReadRecord>,
+    /// The local memory access records.
+    pub local_mem_access: Vec<MemoryLocalEvent>,
 }

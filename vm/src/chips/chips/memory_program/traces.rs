@@ -48,8 +48,9 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
             NUM_MEMORY_PROGRAM_PREPROCESSED_COLS,
         );
 
+        let log_size = program.fixed_log2_rows(&self.name());
         // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_MEMORY_PROGRAM_PREPROCESSED_COLS, F>(&mut trace.values);
+        pad_to_power_of_two::<NUM_MEMORY_PROGRAM_PREPROCESSED_COLS, F>(&mut trace.values, log_size);
 
         Some(trace)
     }
@@ -86,8 +87,9 @@ impl<F: Field> ChipBehavior<F> for MemoryProgramChip<F> {
             NUM_MEMORY_PROGRAM_MULT_COLS,
         );
 
-        // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_MEMORY_PROGRAM_MULT_COLS, F>(&mut trace.values);
+        // Pad the trace based on shape
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_to_power_of_two::<NUM_MEMORY_PROGRAM_MULT_COLS, F>(&mut trace.values, log_rows);
 
         trace
     }

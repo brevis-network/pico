@@ -4,6 +4,10 @@ use p3_air::{Air, AirBuilder};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 
+use super::{
+    columns::{FullRound, PartialRound, Poseidon2Cols},
+    Poseidon2PermuteChip,
+};
 use crate::{
     chips::{
         chips::{
@@ -13,13 +17,11 @@ use crate::{
         poseidon2::{external_linear_layer, internal_linear_layer},
     },
     emulator::riscv::syscalls::SyscallCode,
-    machine::builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+    machine::{
+        builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+        lookup::LookupScope,
+    },
     primitives::RC_16_30_U32,
-};
-
-use super::{
-    columns::{FullRound, PartialRound, Poseidon2Cols},
-    Poseidon2PermuteChip,
 };
 
 impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for Poseidon2PermuteChip<F>
@@ -118,6 +120,7 @@ where
             local.input_memory_ptr,
             local.output_memory_ptr,
             local.is_real,
+            LookupScope::Regional,
         );
 
         // Assert that is_real is a boolean.

@@ -12,15 +12,19 @@ use crate::{
                 limbs::Limbs,
             },
         },
-        utils::pad_rows,
     },
     compiler::riscv::program::Program,
-    emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
+    emulator::riscv::{
+        record::EmulationRecord,
+        syscalls::{precompiles::PrecompileEvent, SyscallCode},
+    },
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
+        lookup::LookupScope,
         utils::limbs_from_prev_access,
     },
+    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -195,11 +199,12 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
         // collects the events based on the curve type.
+
         let events = match E::CURVE_TYPE {
-            CurveType::Secp256k1 => &input.secp256k1_double_events,
-            CurveType::Bn254 => &input.bn254_double_events,
-            CurveType::Bls12381 => &input.bls12381_double_events,
-            _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
+            CurveType::Secp256k1 => input.get_precompile_events(SyscallCode::SECP256K1_DOUBLE),
+            CurveType::Bn254 => input.get_precompile_events(SyscallCode::BN254_DOUBLE),
+            CurveType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_DOUBLE),
+            _ => panic!("Unsupported curve"),
         };
 
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
@@ -212,7 +217,15 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
 
                 let rows = events
                     .iter()
-                    .map(|event| {
+                    .map(|event_pair| {
+                        let (_syscall_event, precompile_event) = event_pair;
+                        let event = match precompile_event {
+                            PrecompileEvent::Secp256k1Double(event)
+                            | PrecompileEvent::Bn254Double(event)
+                            | PrecompileEvent::Bls12381Double(event) => event,
+                            _ => unreachable!(),
+                        };
+
                         let mut row = vec![F::ZERO; num_weierstrass_double_cols::<E::BaseField>()];
                         let cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField> =
                             row.as_mut_slice().borrow_mut();
@@ -259,14 +272,19 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
             output.add_range_lookup_events(row.1);
         }
 
-        pad_rows(&mut rows, || {
-            let mut row = vec![F::ZERO; num_weierstrass_double_cols::<E::BaseField>()];
-            let cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField> =
-                row.as_mut_slice().borrow_mut();
-            let zero = BigUint::zero();
-            Self::populate_field_ops(&mut vec![], 0, cols, zero.clone(), zero.clone());
-            row
-        });
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_rows_fixed(
+            &mut rows,
+            || {
+                let mut row = vec![F::ZERO; num_weierstrass_double_cols::<E::BaseField>()];
+                let cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField> =
+                    row.as_mut_slice().borrow_mut();
+                let zero = BigUint::zero();
+                Self::populate_field_ops(&mut vec![], 0, cols, zero.clone(), zero.clone());
+                row
+            },
+            log_rows,
+        );
 
         // Convert the trace to a row major matrix.
         let mut trace = RowMajorMatrix::new(
@@ -287,11 +305,21 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
     }
 
     fn is_active(&self, chunk: &Self::Record) -> bool {
-        match E::CURVE_TYPE {
-            CurveType::Secp256k1 => !chunk.secp256k1_double_events.is_empty(),
-            CurveType::Bn254 => !chunk.bn254_double_events.is_empty(),
-            CurveType::Bls12381 => !chunk.bls12381_double_events.is_empty(),
-            _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
+        if let Some(shape) = chunk.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            match E::CURVE_TYPE {
+                CurveType::Secp256k1 => !chunk
+                    .get_precompile_events(SyscallCode::SECP256K1_DOUBLE)
+                    .is_empty(),
+                CurveType::Bn254 => !chunk
+                    .get_precompile_events(SyscallCode::BN254_DOUBLE)
+                    .is_empty(),
+                CurveType::Bls12381 => !chunk
+                    .get_precompile_events(SyscallCode::BLS12381_DOUBLE)
+                    .is_empty(),
+                _ => panic!("Unsupported curve"),
+            }
         }
     }
 }
@@ -480,6 +508,7 @@ where
             local.p_ptr,
             CB::Expr::ZERO,
             local.is_real,
+            LookupScope::Regional,
         );
     }
 }

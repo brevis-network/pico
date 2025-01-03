@@ -138,7 +138,7 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
     }
 }
 
-pub fn verify<CC: CircuitConfig, HV: FieldHasherVariable<CC>>(
+pub fn merkle_verify<CC: CircuitConfig, HV: FieldHasherVariable<CC>>(
     builder: &mut Builder<CC>,
     proof: MerkleProofVariable<CC, HV>,
     value: HV::DigestVariable,

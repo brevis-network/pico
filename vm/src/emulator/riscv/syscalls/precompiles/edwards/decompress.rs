@@ -12,8 +12,9 @@ use crate::chips::gadgets::{
 use crate::{
     chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
     emulator::riscv::syscalls::{
-        precompiles::edwards::event::EdDecompressEvent, syscall_context::SyscallContext, Syscall,
-        SyscallCode,
+        precompiles::{edwards::event::EdDecompressEvent, PrecompileEvent},
+        syscall_context::SyscallContext,
+        Syscall, SyscallCode,
     },
 };
 
@@ -34,7 +35,7 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
     fn emulate(
         &self,
         ctx: &mut SyscallContext,
-        _syscall_code: SyscallCode,
+        syscall_code: SyscallCode,
         arg1: u32,
         sign: u32,
     ) -> Option<u32> {
@@ -75,18 +76,32 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
 
         let lookup_id = ctx.syscall_lookup_id;
         let chunk = ctx.current_chunk();
-        ctx.record_mut()
-            .add_ed_decompress_lookup_event(EdDecompressEvent {
-                lookup_id,
-                chunk,
-                clk: start_clk,
-                ptr: slice_ptr,
-                sign: sign_bool,
-                y_bytes,
-                decompressed_x_bytes: decompressed_x_bytes.try_into().unwrap(),
-                x_memory_records,
-                y_memory_records,
-            });
+        let event = EdDecompressEvent {
+            lookup_id,
+            chunk,
+            clk: start_clk,
+            ptr: slice_ptr,
+            sign: sign_bool,
+            y_bytes,
+            decompressed_x_bytes: decompressed_x_bytes.try_into().unwrap(),
+            x_memory_records,
+            y_memory_records,
+            local_mem_access: ctx.postprocess(),
+        };
+
+        let syscall_event = ctx.rt.syscall_event(
+            start_clk,
+            syscall_code.syscall_id(),
+            arg1,
+            sign,
+            event.lookup_id,
+        );
+        ctx.record_mut().add_precompile_event(
+            syscall_code,
+            syscall_event,
+            PrecompileEvent::EdDecompress(event),
+        );
+
         None
     }
 

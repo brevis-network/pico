@@ -17,13 +17,17 @@ use crate::{
     compiler::riscv::program::Program,
     emulator::{
         record::RecordBehavior,
-        riscv::{record::EmulationRecord, syscalls::SyscallCode},
+        riscv::{
+            record::EmulationRecord,
+            syscalls::{precompiles::PrecompileEvent, SyscallCode},
+        },
     },
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
+        lookup::LookupScope,
     },
-    recursion_v2::stark::utils::pad_rows,
+    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -118,9 +122,17 @@ where
     }
 
     fn generate_main(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
+        // All the fp events for a given curve are coalesce to the curve's Add operation.  Only retrieve
+        // precompile events for that operation.
+        // TODO:  Fix this.
+
         let events = match P::FIELD_TYPE {
-            FieldType::Bn254 => input.fp_bn254_events.iter(),
-            FieldType::Bls381 => input.fp_bls381_events.iter(),
+            FieldType::Bn254 => input
+                .get_precompile_events(SyscallCode::BN254_FP_ADD)
+                .iter(),
+            FieldType::Bls381 => input
+                .get_precompile_events(SyscallCode::BLS12381_FP_ADD)
+                .iter(),
         };
 
         debug!(
@@ -132,7 +144,13 @@ where
         let mut rows = Vec::new();
         let mut new_byte_lookup_events = Vec::new();
 
-        for event in events {
+        for (_, event) in events {
+            let event = match (P::FIELD_TYPE, event) {
+                (FieldType::Bn254, PrecompileEvent::Bn254Fp(event)) => event,
+                (FieldType::Bls381, PrecompileEvent::Bls12381Fp(event)) => event,
+                _ => unreachable!(),
+            };
+
             let mut row = vec![F::ZERO; num_fp_cols::<P>()];
             let cols: &mut FpOpCols<F, P> = row.as_mut_slice().borrow_mut();
 
@@ -172,21 +190,26 @@ where
             .iter()
             .for_each(|x| output.add_range_lookup_event(*x));
 
-        pad_rows(&mut rows, || {
-            let mut row = vec![F::ZERO; num_fp_cols::<P>()];
-            let cols: &mut FpOpCols<F, P> = row.as_mut_slice().borrow_mut();
-            let zero = BigUint::zero();
-            cols.is_add = F::from_canonical_u8(1);
-            Self::populate_field_ops(
-                &mut vec![],
-                0,
-                cols,
-                zero.clone(),
-                zero,
-                FieldOperation::Add,
-            );
-            row
-        });
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_rows_fixed(
+            &mut rows,
+            || {
+                let mut row = vec![F::ZERO; num_fp_cols::<P>()];
+                let cols: &mut FpOpCols<F, P> = row.as_mut_slice().borrow_mut();
+                let zero = BigUint::zero();
+                cols.is_add = F::from_canonical_u8(1);
+                Self::populate_field_ops(
+                    &mut vec![],
+                    0,
+                    cols,
+                    zero.clone(),
+                    zero,
+                    FieldOperation::Add,
+                );
+                row
+            },
+            log_rows,
+        );
 
         // Convert the trace to a row major matrix.
         let mut trace = RowMajorMatrix::new(
@@ -209,11 +232,36 @@ where
     }
 
     fn is_active(&self, input: &Self::Record) -> bool {
-        let events = match P::FIELD_TYPE {
-            FieldType::Bn254 => &input.fp_bn254_events,
-            FieldType::Bls381 => &input.fp_bls381_events,
-        };
-        !events.is_empty()
+        // All the fp events for a given curve are coalesce to the curve's Add operation. Only
+        // check for that operation.
+
+        assert!(
+            input
+                .get_precompile_events(SyscallCode::BN254_FP_SUB)
+                .is_empty()
+                && input
+                    .get_precompile_events(SyscallCode::BN254_FP_MUL)
+                    .is_empty()
+                && input
+                    .get_precompile_events(SyscallCode::BLS12381_FP_SUB)
+                    .is_empty()
+                && input
+                    .get_precompile_events(SyscallCode::BLS12381_FP_MUL)
+                    .is_empty()
+        );
+
+        if let Some(shape) = input.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            match P::FIELD_TYPE {
+                FieldType::Bn254 => !input
+                    .get_precompile_events(SyscallCode::BN254_FP_ADD)
+                    .is_empty(),
+                FieldType::Bls381 => !input
+                    .get_precompile_events(SyscallCode::BLS12381_FP_ADD)
+                    .is_empty(),
+            }
+        }
     }
 }
 
@@ -324,6 +372,7 @@ where
             local.x_ptr,
             local.y_ptr,
             local.is_real,
+            LookupScope::Regional,
         );
     }
 }

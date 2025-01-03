@@ -93,7 +93,9 @@ impl<F: Field> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
             NUM_MEMORY_INITIALIZE_FINALIZE_COLS,
         );
 
-        pad_to_power_of_two::<NUM_MEMORY_INITIALIZE_FINALIZE_COLS, F>(&mut trace.values);
+        // Pad the trace based on shape
+        let log_rows = input.shape_chip_size(&self.name());
+        pad_to_power_of_two::<NUM_MEMORY_INITIALIZE_FINALIZE_COLS, F>(&mut trace.values, log_rows);
 
         trace
     }
