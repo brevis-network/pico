@@ -52,7 +52,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
             } else {
                 unreachable!()
             };
-            self.event_to_rows(&event, &mut wrapped_rows, &mut Vec::new(), &mut Vec::new());
+            self.event_to_rows(event, &mut wrapped_rows, &mut Vec::new(), &mut Vec::new());
         }
         let mut rows = wrapped_rows.unwrap();
         let num_real_rows = rows.len();

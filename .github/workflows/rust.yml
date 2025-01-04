@@ -55,8 +55,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cargo build examples
-        run: cargo build --examples --release
       - name: Cargo run examples
         run: |
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example toy_base_machine

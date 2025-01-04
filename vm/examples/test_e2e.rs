@@ -564,7 +564,7 @@ fn print_stats(
         embed_time.parallelism
     );
     info!(
-        "|- total      {:<12}  {:<12}  {:.2}",
+        "|- total      {:<12}  {:<10}  {:.2}",
         format_duration(total_time.as_secs_f64()),
         format_duration(total_cpu_time.as_secs_f64()),
         total_parallelism

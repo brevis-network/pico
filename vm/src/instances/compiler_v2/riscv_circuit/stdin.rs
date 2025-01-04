@@ -165,7 +165,7 @@ where
         .collect::<HashMap<_, _>>();
     let chips = machine.chips();
     let chunk_chips =
-        order_chips::<BabyBearPoseidon2, CB>(&*chips, &chip_ordering).collect::<Vec<_>>();
+        order_chips::<BabyBearPoseidon2, CB>(&chips, &chip_ordering).collect::<Vec<_>>();
     let chip_scopes = chunk_chips
         .iter()
         .map(|chip| chip.lookup_scope())
@@ -178,7 +178,7 @@ where
             .map(|(chip, (_, log_main_degree))| {
                 dummy_opened_values::<_, _, _>(chip, *log_main_degree)
             })
-            .map(|item| Arc::new(item))
+            .map(Arc::new)
             .collect(),
     };
 

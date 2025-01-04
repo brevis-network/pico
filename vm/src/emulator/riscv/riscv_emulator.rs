@@ -534,8 +534,7 @@ impl RiscvEmulator {
             deferred.append(&mut record.defer());
         }
 
-        let opts = self.opts.split_opts.clone();
-        let deferred = deferred.split(true, opts);
+        let deferred = deferred.split(true, self.opts.split_opts);
         info!("split-chunks len: {:?}", deferred.len());
 
         self.batch_records.extend(deferred);

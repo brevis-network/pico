@@ -1,5 +1,4 @@
 use p3_baby_bear::BabyBear;
-use p3_field::FieldAlgebra;
 use pico_vm::{
     compiler::{
         recursion_v2::circuit::witness::Witnessable,
@@ -10,10 +9,7 @@ use pico_vm::{
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
-            recursion_circuit::{
-                compress::builder::CompressVerifierCircuit, embed::builder::EmbedVerifierCircuit,
-                stdin::RecursionStdin,
-            },
+            recursion_circuit::stdin::RecursionStdin,
             shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
             vk_merkle::{
                 builder::{CompressVkVerifierCircuit, EmbedVkVerifierCircuit},
@@ -27,9 +23,8 @@ use pico_vm::{
             riscv_config::StarkConfig as RiscvBBSC,
         },
         machine::{
-            combine::CombineMachine, combine_vk::CombineVkMachine, compress::CompressMachine,
-            compress_vk::CompressVkMachine, convert::ConvertMachine, embed::EmbedMachine,
-            riscv::RiscvMachine,
+            combine_vk::CombineVkMachine, compress_vk::CompressVkMachine, convert::ConvertMachine,
+            embed::EmbedMachine, riscv::RiscvMachine,
         },
     },
     machine::{
@@ -40,7 +35,7 @@ use pico_vm::{
     },
     primitives::consts::{
         BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
-        DIGEST_SIZE, EMBED_DEGREE, PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
+        EMBED_DEGREE, PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
     },
     recursion_v2::runtime::Runtime,
 };

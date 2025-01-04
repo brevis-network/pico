@@ -149,7 +149,7 @@ pub struct RecursionVkStdinVariable<
     pub merkle_proof_var: MerkleProofStdinVariable<CC, SC>,
 }
 
-impl<'a, CC, C> Witnessable<CC> for RecursionVkStdin<'a, BabyBearPoseidon2, C>
+impl<CC, C> Witnessable<CC> for RecursionVkStdin<'_, BabyBearPoseidon2, C>
 where
     CC: CircuitConfig<F = SC_Val, EF = SC_Challenge, Bit = Felt<BabyBear>>,
     C: ChipBehavior<BabyBear>

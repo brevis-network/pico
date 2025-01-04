@@ -70,7 +70,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
             };
 
             self.event_to_rows(
-                &event,
+                event,
                 &mut wrapped_rows,
                 &mut new_byte_lookup_events,
                 &mut Vec::new(),

@@ -123,7 +123,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
                         let idx = i * chunk_size + j;
                         if idx < num_events {
                             let mut new_byte_lookup_events = Vec::new();
-                            Self::populate_chunk(&events[idx], rounds, &mut new_byte_lookup_events);
+                            Self::populate_chunk(events[idx], rounds, &mut new_byte_lookup_events);
                         } else {
                             rounds.copy_from_slice(&dummy_chunk[..rounds.len()]);
                         }

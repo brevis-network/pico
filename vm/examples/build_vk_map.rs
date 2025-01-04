@@ -21,10 +21,7 @@ use pico_vm::{
             },
         },
         configs::{
-            recur_bb_poseidon2::FieldConfig,
-            recur_config::{
-                FieldConfig as RiscvFC, FieldConfig as RecursionFC, StarkConfig as RecursionSC,
-            },
+            recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
             riscv_config::StarkConfig as RiscvSC,
         },
         machine::{
@@ -34,8 +31,8 @@ use pico_vm::{
     },
     machine::{keys::HashableKey, machine::MachineBehavior},
     primitives::consts::{
-        COMBINE_DEGREE, COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, EMBED_DEGREE,
-        RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
+        COMBINE_DEGREE, COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, RECURSION_NUM_PVS_V2,
+        RISCV_NUM_PVS,
     },
 };
 use rayon::{iter::ParallelIterator, prelude::IntoParallelRefIterator};
@@ -59,12 +56,12 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
             let (mut vks, chunk_proofs): (Vec<_>, Vec<_>) = shape
                 .proof_shapes
                 .iter()
-                .map(|shape| dummy_vk_and_chunk_proof(&base_machine, shape))
+                .map(|shape| dummy_vk_and_chunk_proof(base_machine, shape))
                 .unzip();
 
             let vk = vks.pop().unwrap();
-            let base_challenger = dummy_challenger(&*base_machine.config());
-            let reconstruct_challenger = dummy_challenger(&*base_machine.config());
+            let base_challenger = dummy_challenger(&base_machine.config());
+            let reconstruct_challenger = dummy_challenger(&base_machine.config());
 
             let stdin = ConvertStdin {
                 machine: base_machine,
@@ -180,9 +177,7 @@ fn main() {
         .chain(compress_shape)
         .collect();
 
-    let all_shapes: Vec<_> = HashSet::<_>::from_iter(all_shapes.into_iter())
-        .into_iter()
-        .collect();
+    let all_shapes: Vec<_> = HashSet::<_>::from_iter(all_shapes).into_iter().collect();
 
     let total_num = all_shapes.len();
     println!(
@@ -229,9 +224,7 @@ fn main() {
         .chain(compress_shape)
         .collect();
 
-    let all_shapes: Vec<_> = HashSet::<_>::from_iter(all_shapes.into_iter())
-        .into_iter()
-        .collect();
+    let all_shapes: Vec<_> = HashSet::<_>::from_iter(all_shapes).into_iter().collect();
 
     let results: Vec<_> = all_shapes
         .par_iter()

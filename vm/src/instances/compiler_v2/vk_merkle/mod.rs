@@ -62,7 +62,7 @@ impl VkMerkleManager {
                 let index = self
                     .allowed_vk_map
                     .get(&vk_digest)
-                    .expect(&format!("vk not allowed: {:?}", vk_digest));
+                    .unwrap_or_else(|| panic!("vk not allowed: {:?}", vk_digest));
                 (*index, vk_digest)
             })
             .unzip();

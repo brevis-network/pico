@@ -96,10 +96,10 @@ impl OnchainVerifierCircuit<EmbedFC, EmbedSC> {
 
             StarkVerifier::verify_chunk(
                 builder,
-                &vk,
+                vk,
                 machine,
                 &mut challenger,
-                &proof,
+                proof,
                 &[zero_ext, zero_ext],
             );
         }
