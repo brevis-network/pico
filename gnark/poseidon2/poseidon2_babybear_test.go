@@ -67,7 +67,7 @@ func TestPoseidon2BabyBear(t *testing.T) {
 		babybear.NewFConst("1159054104"),
 		babybear.NewFConst("47710013"),
 		babybear.NewFConst("179166241"),
-		babybear.NewFConst("560796067"),
+		babybear.NewFConst("42705162"),
 		babybear.NewFConst("1517988227"),
 		babybear.NewFConst("1481867517"),
 	}

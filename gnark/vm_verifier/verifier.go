@@ -18,7 +18,7 @@ type Circuit struct {
 	Exts                  []babybear.ExtensionVariable
 }
 
-func NewCircuit(witnessInput WitnessInput) Circuit {
+func NewCircuit(witnessInput WitnessInput) *Circuit {
 	vars := make([]frontend.Variable, len(witnessInput.Vars))
 	felts := make([]babybear.Variable, len(witnessInput.Felts))
 	exts := make([]babybear.ExtensionVariable, len(witnessInput.Exts))
@@ -31,7 +31,7 @@ func NewCircuit(witnessInput WitnessInput) Circuit {
 	for i := 0; i < len(witnessInput.Exts); i++ {
 		exts[i] = babybear.NewE(witnessInput.Exts[i])
 	}
-	return Circuit{
+	return &Circuit{
 		VkeyHash:              witnessInput.VkeyHash,
 		CommittedValuesDigest: witnessInput.CommittedValuesDigest,
 		Vars:                  vars,
