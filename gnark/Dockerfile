@@ -17,7 +17,6 @@ RUN echo 'helper = store' >> /root/.gitconfig
 RUN --mount=type=secret,id=gitcre,target=/root/.git-credentials git clone https://github.com/brevis-network/brevis-vm.git
 
 WORKDIR /pico/brevis-vm
-RUN git checkout add-gnark-setup
 
 RUN --mount=type=secret,id=gitcre,target=/root/.git-credentials cargo build --release
 RUN cp target/release/libbabybear_ffi.so /usr/lib/

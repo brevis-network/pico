@@ -18,7 +18,18 @@ import (
 	"testing"
 )
 
-func TestVerifierCircuit(t *testing.T) {
+func TestSolveVerifierCircuit(t *testing.T) {
+	logger.Set(zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "15:04:05"}).With().Timestamp().Logger())
+	assert := test.NewAssert(t)
+
+	os.Setenv("WITNESS_JSON", "./groth16_witness.json")
+	os.Setenv("CONSTRAINTS_JSON", "./constraints.json")
+	os.Setenv("GROTH16", "1")
+
+	doSolve(assert)
+}
+
+func TestSetupVerifierCircuit(t *testing.T) {
 	logger.Set(zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "15:04:05"}).With().Timestamp().Logger())
 	assert := test.NewAssert(t)
 

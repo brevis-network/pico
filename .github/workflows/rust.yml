@@ -66,3 +66,18 @@ jobs:
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e_no_recursion -- --elf poseidon2_precompile --field kb
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf multiple-precompile --step riscv
+      - name: compile babybear so
+        run: |
+          cargo build --release --package babybear-ffi
+          sudo mv ./target/release/libbabybear_ffi.so /usr/lib/
+      - uses: actions/setup-go@v2
+        with:
+          go-version: '1.22'
+      - name: gnark_verifier
+        run: |
+          cp constraints.json gnark/vm_verifier/
+          cp groth16_witness.json gnark/vm_verifier/
+          cd gnark/vm_verifier/
+          go test -timeout 70s -run TestSolveVerifierCircuit
+          
+
