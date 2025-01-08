@@ -89,7 +89,7 @@ func main() {
 			fmt.Printf("fail to setup: %v\n", err)
 		}
 		err = sdk.ExportSolidify()
-		if err == nil {
+		if err != nil {
 			fmt.Printf("fail to export solidity: %v\n", err)
 		}
 		err = sdk.Prove()

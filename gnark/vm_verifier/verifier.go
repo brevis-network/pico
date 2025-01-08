@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/brevis-network/brevis-vm/gnark/babybear"
-	poseidon3 "github.com/brevis-network/brevis-vm/gnark/poseidon2"
+	"github.com/brevis-network/brevis-vm/gnark/poseidon2"
 	"github.com/consensys/gnark/frontend"
 	"os"
 	"strconv"
@@ -79,8 +79,8 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		return fmt.Errorf("error deserializing JSON: %v", err)
 	}
 
-	hashAPI := poseidon3.NewChip(api)
-	hashBabyBearAPI := poseidon3.NewBabyBearChip(api)
+	hashAPI := poseidon2.NewChip(api)
+	hashBabyBearAPI := poseidon2.NewBabyBearChip(api)
 	fieldAPI := babybear.NewChip(api)
 	vars := make(map[string]frontend.Variable)
 	felts := make(map[string]babybear.Variable)

@@ -8,11 +8,13 @@ import "C"
 
 import (
 	"fmt"
+	"math"
+	"math/big"
+	"os"
+
 	"github.com/consensys/gnark/constraint/solver"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/std/rangecheck"
-	"math"
-	"math/big"
 )
 
 var modulus = new(big.Int).SetUint64(2013265921)
@@ -75,13 +77,6 @@ func NewFConst(value string) Variable {
 func NewF(value string) Variable {
 	return Variable{
 		Value:      frontend.Variable(value),
-		UpperBound: new(big.Int).SetUint64(uint64(math.Pow(2, 32))),
-	}
-}
-
-func NewFByV(value frontend.Variable) Variable {
-	return Variable{
-		Value:      value,
 		UpperBound: new(big.Int).SetUint64(uint64(math.Pow(2, 32))),
 	}
 }
@@ -165,7 +160,11 @@ func (c *Chip) invF(in Variable) Variable {
 		Value:      result[0],
 		UpperBound: new(big.Int).SetUint64(2147483648),
 	}
-	c.api.ToBinary(result[0], 31)
+	if os.Getenv("GROTH16") != "1" {
+		c.RangeChecker.Check(result[0], 31)
+	} else {
+		c.api.ToBinary(result[0], 31)
+	}
 	product := c.MulF(in, xinv)
 	c.AssertIsEqualF(product, NewFConst("1"))
 
@@ -288,10 +287,17 @@ func (c *Chip) InvE(in ExtensionVariable) ExtensionVariable {
 	yinv := Variable{Value: result[1], UpperBound: new(big.Int).SetUint64(2147483648)}
 	zinv := Variable{Value: result[2], UpperBound: new(big.Int).SetUint64(2147483648)}
 	linv := Variable{Value: result[3], UpperBound: new(big.Int).SetUint64(2147483648)}
-	c.api.ToBinary(result[0], 31)
-	c.api.ToBinary(result[1], 31)
-	c.api.ToBinary(result[2], 31)
-	c.api.ToBinary(result[3], 31)
+	if os.Getenv("GROTH16") != "1" {
+		c.RangeChecker.Check(result[0], 31)
+		c.RangeChecker.Check(result[1], 31)
+		c.RangeChecker.Check(result[2], 31)
+		c.RangeChecker.Check(result[3], 31)
+	} else {
+		c.api.ToBinary(result[0], 31)
+		c.api.ToBinary(result[1], 31)
+		c.api.ToBinary(result[2], 31)
+		c.api.ToBinary(result[3], 31)
+	}
 	out := ExtensionVariable{Value: [4]Variable{xinv, yinv, zinv, linv}}
 
 	product := c.MulE(in, out)
@@ -327,10 +333,13 @@ func (c *Chip) ToBinary(in Variable) []frontend.Variable {
 }
 
 func (p *Chip) reduceFast(x Variable) Variable {
-	return Variable{
-		Value:      p.reduceWithMaxBits(x.Value, uint64(x.UpperBound.BitLen())),
-		UpperBound: modulus_sub_1,
+	if x.UpperBound.BitLen() >= 120 {
+		return Variable{
+			Value:      p.reduceWithMaxBits(x.Value, uint64(x.UpperBound.BitLen())),
+			UpperBound: modulus_sub_1,
+		}
 	}
+	return x
 }
 
 func (p *Chip) ReduceSlow(x Variable) Variable {
@@ -355,7 +364,11 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 	quotient := result[0]
 	remainder := result[1]
 
-	p.api.ToBinary(quotient, int(maxNbBits-30))
+	if os.Getenv("GROTH16") != "1" {
+		p.RangeChecker.Check(quotient, int(maxNbBits-30))
+	} else {
+		p.api.ToBinary(quotient, int(maxNbBits-30))
+	}
 
 	// Check that the remainder has size less than the BabyBear modulus, by decomposing it into a 27
 	// bit limb and a 4 bit limb.
@@ -375,8 +388,13 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 		),
 		remainder,
 	)
-	p.api.ToBinary(highLimb, 4)
-	p.api.ToBinary(lowLimb, 27)
+	if os.Getenv("GROTH16") != "1" {
+		p.RangeChecker.Check(highLimb, 4)
+		p.RangeChecker.Check(lowLimb, 27)
+	} else {
+		p.api.ToBinary(highLimb, 4)
+		p.api.ToBinary(lowLimb, 27)
+	}
 
 	// If the most significant bits are all 1, then we need to check that the least significant bits
 	// are all zero in order for element to be less than the BabyBear modulus. Otherwise, we don't
