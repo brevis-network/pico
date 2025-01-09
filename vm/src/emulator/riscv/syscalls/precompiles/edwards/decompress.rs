@@ -63,7 +63,8 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
 
         // Compute actual decompressed X
         let compressed_y = CompressedEdwardsY(compressed_edwards_y);
-        let decompressed = decompress(&compressed_y);
+        let decompressed =
+            decompress(&compressed_y).expect("Decompression failed, syscall invariant violated.");
 
         let mut decompressed_x_bytes = decompressed.x.to_bytes_le();
         decompressed_x_bytes.resize(32, 0u8);
@@ -88,7 +89,6 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
             y_memory_records,
             local_mem_access: ctx.postprocess(),
         };
-
         let syscall_event = ctx.rt.syscall_event(
             start_clk,
             syscall_code.syscall_id(),
@@ -101,7 +101,6 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
             syscall_event,
             PrecompileEvent::EdDecompress(event),
         );
-
         None
     }
 

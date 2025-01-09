@@ -146,7 +146,9 @@ impl<F: PrimeField32> EdDecompressCols<F> {
             .populate(rlu_events, chunk, &u, &v, FieldOperation::Div);
         let x = self
             .x
-            .populate(blu_events, rlu_events, chunk, &u_div_v, ed25519_sqrt);
+            .populate(blu_events, rlu_events, chunk, &u_div_v, |p| {
+                ed25519_sqrt(p).expect("ed25519_sqrt failed, syscall invariant violated")
+            });
         self.neg_x
             .populate(rlu_events, chunk, &BigUint::zero(), &x, FieldOperation::Sub);
     }
