@@ -1,12 +1,14 @@
 use p3_baby_bear::BabyBear;
 use p3_field::Field;
+use p3_koala_bear::KoalaBear;
 use p3_mersenne_31::Mersenne31;
 use std::any::TypeId;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum FieldType {
     TypeGeneralField,
     TypeBabyBear,
+    TypeKoalaBear,
     TypeMersenne31,
 }
 
@@ -20,6 +22,7 @@ impl<F: Field> FieldBehavior for F {
     fn field_type() -> FieldType {
         match TypeId::of::<F>() {
             type_id if type_id == TypeId::of::<BabyBear>() => FieldType::TypeBabyBear,
+            type_id if type_id == TypeId::of::<KoalaBear>() => FieldType::TypeKoalaBear,
             type_id if type_id == TypeId::of::<Mersenne31>() => FieldType::TypeMersenne31,
             _ => FieldType::TypeGeneralField,
         }
