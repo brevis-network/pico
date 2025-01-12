@@ -1,6 +1,5 @@
 pub mod alu;
 pub mod byte;
-pub mod memory_program;
 pub mod rangecheck;
 pub mod riscv_cpu;
 pub mod riscv_memory;

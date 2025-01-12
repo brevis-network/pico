@@ -5,7 +5,11 @@ use crate::{
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{emulator_v2::MetaEmulator, record::RecordBehavior, riscv::stdin::EmulatorStdin},
     instances::{
-        compiler_v2::vk_merkle::stdin::RecursionVkStdin,
+        chiptype::recursion_chiptype_v2::RecursionChipType,
+        compiler_v2::{
+            shapes::compress_shape::RecursionShapeConfig,
+            vk_merkle::{stdin::RecursionVkStdin, VkMerkleManager},
+        },
         configs::recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
     },
     machine::{
@@ -15,15 +19,16 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::COMBINE_SIZE,
+    primitives::consts::{COMBINE_DEGREE, COMBINE_SIZE},
     recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use anyhow::Result;
 use p3_air::Air;
+use p3_baby_bear::BabyBear;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 pub struct CombineVkMachine<SC, C>
 where
@@ -85,33 +90,48 @@ where
 
         let mut all_proofs = vec![];
         let mut all_vks = vec![];
+        let mut last_vk = proving_witness.vk.clone();
+        let mut last_proof = proving_witness.proof.clone();
 
         let mut chunk_index = 1;
         let mut layer_index = 1;
-        let mut flag_complete = false;
+        // TODO: vk_manager as a input parameters or static value
+        let vk_manager = VkMerkleManager::new_from_file("vk_map.bin").unwrap();
+        let recursion_shape_config =
+            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default(
+            );
 
         loop {
+            let mut batch_num = 1;
+            let start_layer = Instant::now();
             loop {
+                let start_batch = Instant::now();
+                if proving_witness.flag_empty_stdin {
+                    break;
+                }
+
                 let (mut batch_records, batch_pks, batch_vks, done) =
                     recursion_emulator.next_record_keys_batch();
 
                 self.complement_record(batch_records.as_mut_slice());
 
                 info!(
-                    "recursion combine layer {}, chunk {}-{}",
+                    "--- Generate combine records for layer {}, batch {}, chunk {}-{} in {:?}",
                     layer_index,
+                    batch_num,
                     chunk_index,
-                    chunk_index + batch_records.len() as u32 - 1
+                    chunk_index + batch_records.len() as u32 - 1,
+                    start_batch.elapsed()
                 );
 
                 // set index for each record
                 for record in batch_records.as_mut_slice() {
                     record.index = chunk_index;
                     chunk_index += 1;
-                    debug!("combine record stats: chunk {}", record.chunk_index());
                     let stats = record.stats();
+                    info!("COMBINE record stats: chunk {}", record.chunk_index());
                     for (key, value) in &stats {
-                        debug!("   |- {:<28}: {}", key, value);
+                        info!("   |- {:<28}: {}", key, value);
                     }
                 }
 
@@ -120,48 +140,81 @@ where
                     .par_iter()
                     .zip(batch_pks.par_iter())
                     .flat_map(|(record, pk)| {
-                        self.base_machine
-                            .prove_ensemble(pk, std::slice::from_ref(record))
+                        let start_chunk = Instant::now();
+                        let proof = self
+                            .base_machine
+                            .prove_ensemble(pk, std::slice::from_ref(record));
+                        info!(
+                            "--- Prove combine layer {} chunk {} in {:?}",
+                            layer_index,
+                            record.chunk_index(),
+                            start_chunk.elapsed()
+                        );
+                        proof
                     })
                     .collect::<Vec<_>>();
 
                 all_proofs.extend(batch_proofs);
                 all_vks.extend(batch_vks);
 
+                info!(
+                    "--- Finish combine batch {} of layer {} in {:?}",
+                    batch_num,
+                    layer_index,
+                    start_batch.elapsed()
+                );
+
+                batch_num += 1;
                 if done {
                     break;
                 }
             }
 
-            if flag_complete {
+            info!(
+                "--- Finish combine layer {} in {:?}",
+                layer_index,
+                start_layer.elapsed()
+            );
+
+            if last_proof.is_some() {
+                all_vks.push(last_vk.unwrap());
+                all_proofs.push(last_proof.unwrap());
+            }
+
+            if all_proofs.len() == 1 {
                 info!("recursion combine finished");
                 break;
             }
-
-            flag_complete = all_proofs.len() <= COMBINE_SIZE;
 
             layer_index += 1;
             chunk_index = 1;
 
             // more than one proofs, need to combine another round
-            recursion_stdin = EmulatorStdin::setup_for_combine_vk(
+            (recursion_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine_vk(
                 proving_witness.vk_root.unwrap(),
                 &all_vks,
                 &all_proofs,
                 self.base_machine(),
                 COMBINE_SIZE,
-                flag_complete,
+                all_proofs.len() <= COMBINE_SIZE,
+                &vk_manager,
+                &recursion_shape_config,
             );
 
             recursion_witness = ProvingWitness::setup_for_recursion_vk(
                 proving_witness.vk_root.unwrap(),
                 recursion_stdin,
+                last_vk,
+                last_proof,
                 self.config(),
                 proving_witness.opts.unwrap(),
             );
 
             recursion_emulator =
                 MetaEmulator::setup_combine_vk(&recursion_witness, self.base_machine());
+
+            last_proof = recursion_witness.proof.clone();
+            last_vk = recursion_witness.vk.clone();
 
             all_proofs.clear();
             all_vks.clear();

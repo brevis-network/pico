@@ -28,13 +28,13 @@ use crate::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::Field;
+use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use std::{array, borrow::BorrowMut};
 use tracing::debug;
 
-impl<F: Field> ChipBehavior<F> for MemoryReadWriteChip<F> {
+impl<F: PrimeField> ChipBehavior<F> for MemoryReadWriteChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

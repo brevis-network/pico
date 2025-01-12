@@ -263,6 +263,10 @@ where
             }
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F, P> BaseAir<F> for FpOpChip<F, P>
@@ -285,14 +289,9 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &FpOpCols<CB::Var, P> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &FpOpCols<CB::Var, P> = (*next).borrow();
 
         // Check that nonce is incremented.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Check that operations flags are boolean.
         builder.assert_bool(local.is_add);

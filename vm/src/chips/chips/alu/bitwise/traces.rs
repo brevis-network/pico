@@ -20,12 +20,12 @@ use crate::{
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_field::Field;
+use p3_field::{Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use tracing::debug;
 
-impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
+impl<F: PrimeField> ChipBehavior<F> for BitwiseChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -90,6 +90,10 @@ impl<F: Field> ChipBehavior<F> for BitwiseChip<F> {
     // flag reflecting whether chip is used in the record
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.bitwise_events.is_empty()
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 }
 

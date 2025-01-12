@@ -75,8 +75,6 @@ where
         let chunk_proof = proofs.pop().unwrap();
 
         let one: Felt<_> = builder.eval(CC::F::ONE);
-        let zero: Felt<_> = builder.eval(CC::F::ZERO);
-        let zero_ext: Ext<CC::F, CC::EF> = builder.eval(zero);
 
         // Flag must be complete.
         builder.assert_felt_eq(flag_complete, one);
@@ -98,14 +96,7 @@ where
                     .copied(),
             );
 
-            StarkVerifier::verify_chunk(
-                builder,
-                &vk,
-                machine,
-                &mut challenger,
-                &chunk_proof,
-                &[zero_ext, zero_ext],
-            );
+            StarkVerifier::verify_chunk(builder, &vk, machine, &mut challenger, &chunk_proof);
         }
 
         /*

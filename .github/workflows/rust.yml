@@ -62,10 +62,11 @@ jobs:
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example toy_lookup_machine
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_riscv_emulator
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_simple_recursion -- --elf keccak --n 15
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e_no_recursion -- --field kb
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e_no_recursion -- --elf poseidon2_precompile --field kb
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e_no_recursion -- --field m31
-          RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e_no_recursion -- --elf poseidon2_precompile --field m31
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release -p pico-vm --no-default-features --features koalabear --example test_e2e_no_recursion -- --field kb
+          RUST_LOG="info" FRI_QUERIES="1" cargo run --release -p pico-vm --no-default-features --features koalabear --example test_e2e_no_recursion -- --elf poseidon2_precompile --field kb
+          # TODO: We will enable m31 after `SepticCurve` update.
+          # RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e_no_recursion -- --field m31
+          # RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e_no_recursion -- --elf poseidon2_precompile --field m31
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e
           RUST_LOG="info" FRI_QUERIES="1" cargo run --release --example test_e2e -- --elf multiple-precompile --step riscv
       - name: compile babybear so

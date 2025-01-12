@@ -11,7 +11,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use p3_air::BaseAir;
-use p3_field::Field;
+use p3_field::{Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::{borrow::BorrowMut, marker::PhantomData};
@@ -26,7 +26,7 @@ impl<F: Field> BaseAir<F> for SLLChip<F> {
     }
 }
 
-impl<F: Field> ChipBehavior<F> for SLLChip<F> {
+impl<F: PrimeField> ChipBehavior<F> for SLLChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -96,6 +96,10 @@ impl<F: Field> ChipBehavior<F> for SLLChip<F> {
 
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.shift_left_events.is_empty()
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 }
 

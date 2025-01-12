@@ -52,7 +52,7 @@ where
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,
-        global_permutation_challenges: &[SC::Challenge],
+        num_public_values: usize,
     ) -> Result<()> {
         let BaseProof {
             commitments,
@@ -64,22 +64,19 @@ where
             public_values,
         } = proof;
 
-        let ordered_chips = order_chips::<SC, C>(chips, main_chip_ordering).collect::<Vec<_>>();
-        let chip_scopes = ordered_chips
-            .iter()
-            .map(|chip| chip.lookup_scope())
-            .collect::<Vec<_>>();
+        let chips = order_chips::<SC, C>(chips, main_chip_ordering).collect::<Vec<_>>();
 
         let pcs = config.pcs();
 
         let BaseCommitments {
-            global_main_commit,
-            regional_main_commit,
+            main_commit,
             permutation_commit,
             quotient_commit,
         } = commitments;
 
-        challenger.observe(regional_main_commit.clone());
+        // Observe the public values and the main commitment.
+        challenger.observe_slice(&public_values[0..num_public_values]);
+        challenger.observe(main_commit.clone());
 
         let regional_permutation_challenges = (0..2)
             .map(|_| challenger.sample_ext_element::<SC::Challenge>())
@@ -92,23 +89,18 @@ where
         for (opening, chip) in opened_values
             .chips_opened_values
             .iter()
-            .zip_eq(ordered_chips.iter())
+            .zip_eq(chips.iter())
         {
-            let global_sum = opening.global_cumulative_sum;
             let regional_sum = opening.regional_cumulative_sum;
-            challenger.observe_slice(global_sum.as_base_slice());
+            let global_sum = opening.global_cumulative_sum;
             challenger.observe_slice(regional_sum.as_base_slice());
+            challenger.observe_slice(&global_sum.0.x.0);
+            challenger.observe_slice(&global_sum.0.y.0);
 
-            let has_global_lookups = chip
-                .looking
-                .iter()
-                .chain(chip.looked.iter())
-                .any(|i| i.scope == LookupScope::Global);
-            if !has_global_lookups && !global_sum.is_zero() {
+            if chip.lookup_scope() == LookupScope::Regional && !global_sum.is_zero() {
                 bail!(
-                    "chip-{}: has_global_lookups = {}, global_sum_is_zero = {}, global cumulative sum is non-zero, but no global interactions",
+                    "chip-{}: global_sum_is_zero = {}, global cumulative sum is non-zero, but chip is Regional",
                     chip.name(),
-                    has_global_lookups,
                     global_sum.is_zero(),
                 );
             }
@@ -119,7 +111,7 @@ where
                 .any(|i| i.scope == LookupScope::Regional);
             if !has_regional_lookups && !regional_sum.is_zero() {
                 bail!(
-                    "chip-{}: has_regional_lookups = {}, regional_sum_is_zero = {}, regional cumulative sum is non-zero, but no local interactions",
+                    "chip-{}: has_regional_lookups = {}, regional_sum_is_zero = {}, regional cumulative sum is non-zero, but no regional lookups",
                     chip.name(),
                     has_regional_lookups,
                     regional_sum.is_zero(),
@@ -128,13 +120,11 @@ where
         }
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
-
         debug!("VERIFIER: alpha: {:?}", alpha);
 
         challenger.observe(quotient_commit.clone());
 
         let zeta: SC::Challenge = challenger.sample_ext_element();
-
         debug!("VERIFIER: zeta: {:?}", zeta);
 
         // main opening
@@ -149,30 +139,39 @@ where
             .map(|(name, domain, _)| {
                 let i = main_chip_ordering[name];
                 let values = opened_values.chips_opened_values[i].clone();
-                (
-                    *domain,
-                    vec![
-                        (zeta, values.preprocessed_local.clone()),
-                        (
-                            domain.next_point(zeta).unwrap(),
-                            values.preprocessed_next.clone(),
-                        ),
-                    ],
-                )
+                if !chips[i].local_only() {
+                    (
+                        *domain,
+                        vec![
+                            (zeta, values.preprocessed_local.clone()),
+                            (
+                                domain.next_point(zeta).unwrap(),
+                                values.preprocessed_next.clone(),
+                            ),
+                        ],
+                    )
+                } else {
+                    (*domain, vec![(zeta, values.preprocessed_local.clone())])
+                }
             })
             .collect::<Vec<_>>();
 
         let main_domains_and_opens = main_domains
             .iter()
             .zip_eq(opened_values.chips_opened_values.iter())
-            .map(|(domain, values)| {
-                (
-                    *domain,
-                    vec![
-                        (zeta, values.main_local.clone()),
-                        (domain.next_point(zeta).unwrap(), values.main_next.clone()),
-                    ],
-                )
+            .zip_eq(chips.iter())
+            .map(|((domain, values), chip)| {
+                if !chip.local_only() {
+                    (
+                        *domain,
+                        vec![
+                            (zeta, values.main_local.clone()),
+                            (domain.next_point(zeta).unwrap(), values.main_next.clone()),
+                        ],
+                    )
+                } else {
+                    (*domain, vec![(zeta, values.main_local.clone())])
+                }
             })
             .collect::<Vec<_>>();
 
@@ -216,53 +215,22 @@ where
             })
             .collect::<Vec<_>>();
 
-        // Split the main_domains_points_and_opens to the global and local chips.
-        let mut global_trace_points_and_openings = Vec::new();
-        let mut local_trace_points_and_openings = Vec::new();
-        for (i, points_and_openings) in main_domains_and_opens.clone().into_iter().enumerate() {
-            let scope = chip_scopes[i];
-            if scope == LookupScope::Global {
-                global_trace_points_and_openings.push(points_and_openings);
-            } else {
-                local_trace_points_and_openings.push(points_and_openings);
-            }
-        }
-
-        let rounds = if !global_trace_points_and_openings.is_empty() {
-            vec![
-                (vk.commit.clone(), preprocessed_domains_points_and_opens),
-                (global_main_commit.clone(), global_trace_points_and_openings),
-                (
-                    regional_main_commit.clone(),
-                    local_trace_points_and_openings,
-                ),
-                (
-                    permutation_commit.clone(),
-                    permutation_domains_points_and_opens,
-                ),
-                (quotient_commit.clone(), quotient_domains_and_opens),
-            ]
-        } else {
-            vec![
-                (vk.commit.clone(), preprocessed_domains_points_and_opens),
-                (
-                    regional_main_commit.clone(),
-                    local_trace_points_and_openings,
-                ),
-                (
-                    permutation_commit.clone(),
-                    permutation_domains_points_and_opens,
-                ),
-                (quotient_commit.clone(), quotient_domains_and_opens),
-            ]
-        };
+        let rounds = vec![
+            (vk.commit.clone(), preprocessed_domains_points_and_opens),
+            (main_commit.clone(), main_domains_and_opens),
+            (
+                permutation_commit.clone(),
+                permutation_domains_points_and_opens,
+            ),
+            (quotient_commit.clone(), quotient_domains_and_opens),
+        ];
 
         // verify openings
         pcs.verify(rounds, opening_proof, challenger)
             .map_err(|e| anyhow!("{e:?}"))?;
 
         for (chip, main_domain, quotient_chunk_domain, log_quotient_degree, values) in izip!(
-            ordered_chips.iter(),
+            chips.iter(),
             main_domains,
             quotient_chunk_domains,
             log_quotient_degrees.iter(),
@@ -345,20 +313,15 @@ where
                 RowMajorMatrixView::new_row(&perm_next_ext),
             );
 
-            let perm_challenges = &global_permutation_challenges
-                .iter()
-                .chain(regional_permutation_challenges.iter())
-                .copied()
-                .collect::<Vec<_>>();
+            let perm_challenges = &regional_permutation_challenges;
 
-            let cumulative_sums = [values.global_cumulative_sum, values.regional_cumulative_sum];
-            let cumulative_sums = cumulative_sums.as_slice();
             let mut folder = VerifierConstraintFolder {
                 preprocessed,
                 main,
                 perm,
                 perm_challenges,
-                cumulative_sums,
+                regional_cumulative_sum: &values.regional_cumulative_sum,
+                global_cumulative_sum: &values.global_cumulative_sum,
                 public_values,
                 is_first_row: sels.is_first_row,
                 is_last_row: sels.is_last_row,
@@ -374,6 +337,12 @@ where
             if folded_constraints * sels.inv_zeroifier != quotient {
                 panic!("Constraint verification failed");
             }
+        }
+
+        // Verify that the regional cumulative sum is zero.
+        let regional_cumulative_sum = proof.regional_cumulative_sum();
+        if regional_cumulative_sum != SC::Challenge::ZERO {
+            panic!("Regional cumulative sum is not zero");
         }
 
         Ok(())

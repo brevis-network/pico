@@ -44,7 +44,6 @@ fn main() {
     let mut execution_record_count = 0;
     let mut prev_next_pc = pc_start;
 
-    let mut flag_first_nonexecution = true;
     loop {
         if emulator.emulate_to_batch().unwrap() {
             done = true;
@@ -53,9 +52,6 @@ fn main() {
         for (i, record) in enumerate(emulator.batch_records.iter()) {
             if !record.cpu_events.is_empty() {
                 execution_record_count += 1;
-            } else if flag_first_nonexecution {
-                execution_record_count += 1;
-                flag_first_nonexecution = false;
             }
             record_count += 1;
 

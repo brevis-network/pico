@@ -61,7 +61,7 @@ impl MachineProver<RecursionSC> for CombineProver<RecursionSC, RecursionSC> {
 
     fn prove(&self, proofs: Self::Witness) -> MetaProof<RecursionSC> {
         let vk_root = [Val::<RecursionSC>::ZERO; DIGEST_SIZE];
-        let stdin = EmulatorStdin::setup_for_combine(
+        let (stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine(
             vk_root,
             proofs.vks(),
             &proofs.proofs(),
@@ -72,6 +72,8 @@ impl MachineProver<RecursionSC> for CombineProver<RecursionSC, RecursionSC> {
         let witness = ProvingWitness::setup_for_recursion(
             vk_root,
             stdin,
+            last_vk,
+            last_proof,
             self.machine.config(),
             Default::default(),
         );

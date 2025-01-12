@@ -42,7 +42,7 @@ use p3_matrix::dense::RowMajorMatrix;
 #[derive(Clone)]
 pub struct BaseProofVariable<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>> {
     pub commitments: BaseCommitments<SC::DigestVariable>,
-    pub opened_values: BaseOpenedValues<Ext<CC::F, CC::EF>>,
+    pub opened_values: BaseOpenedValues<Felt<CC::F>, Ext<CC::F, CC::EF>>,
     pub opening_proof: FriProofVariable<CC, SC>,
     pub log_main_degrees: Vec<usize>,
     pub log_quotient_degrees: Vec<usize>,
@@ -100,7 +100,6 @@ where
         machine: &BaseMachine<SC, A>,
         challenger: &mut SC::FriChallengerVariable,
         proof: &BaseProofVariable<CC, SC>,
-        global_permutation_challenges: &[Ext<CC::F, CC::EF>],
     ) where
         A: ChipBehavior<CC::F> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
     {
@@ -137,13 +136,12 @@ where
             .collect_vec();
 
         let BaseCommitments {
-            global_main_commit,
-            regional_main_commit,
+            main_commit,
             permutation_commit,
             quotient_commit,
         } = *commitments;
 
-        challenger.observe(builder, regional_main_commit);
+        challenger.observe(builder, main_commit);
 
         let regional_permutation_challenges =
             (0..2).map(|_| challenger.sample_ext(builder)).collect_vec();
@@ -154,19 +152,18 @@ where
             .iter()
             .zip_eq(chips.iter())
         {
-            let global_sum = CC::ext2felt(builder, opening.global_cumulative_sum);
             let regional_sum = CC::ext2felt(builder, opening.regional_cumulative_sum);
-            challenger.observe_slice(builder, global_sum);
+            let global_sum = opening.global_cumulative_sum;
             challenger.observe_slice(builder, regional_sum);
+            challenger.observe_slice(builder, global_sum.0.x.0);
+            challenger.observe_slice(builder, global_sum.0.y.0);
 
-            let has_global_interactions = chip
-                .looking
-                .iter()
-                .chain(chip.looked.iter())
-                .any(|i| i.scope == LookupScope::Global);
-            if !has_global_interactions {
-                builder.assert_ext_eq(opening.global_cumulative_sum, CC::EF::ZERO.cons());
+            if chip.lookup_scope() == LookupScope::Regional {
+                let is_real: Felt<CC::F> = builder.uninit();
+                builder.push_op(DslIr::ImmF(is_real, CC::F::ONE));
+                builder.assert_digest_zero_v2(is_real, global_sum);
             }
+
             let has_regional_interactions = chip
                 .looking
                 .iter()
@@ -188,18 +185,27 @@ where
             .iter()
             .map(|(name, domain, _)| {
                 let i = main_chip_ordering[name];
-                // let values = opened_values.chips_opened_values[i].clone();
-                TwoAdicPcsMatsVariable::<CC> {
-                    domain: *domain,
-                    points: vec![zeta, domain.next_point_variable(builder, zeta)],
-                    values: vec![
-                        opened_values.chips_opened_values[i]
+                if !chips[i].local_only() {
+                    TwoAdicPcsMatsVariable::<CC> {
+                        domain: *domain,
+                        points: vec![zeta, domain.next_point_variable(builder, zeta)],
+                        values: vec![
+                            opened_values.chips_opened_values[i]
+                                .preprocessed_local
+                                .clone(),
+                            opened_values.chips_opened_values[i]
+                                .preprocessed_next
+                                .clone(),
+                        ],
+                    }
+                } else {
+                    TwoAdicPcsMatsVariable::<CC> {
+                        domain: *domain,
+                        points: vec![zeta],
+                        values: vec![opened_values.chips_opened_values[i]
                             .preprocessed_local
-                            .clone(),
-                        opened_values.chips_opened_values[i]
-                            .preprocessed_next
-                            .clone(),
-                    ],
+                            .clone()],
+                    }
                 }
             })
             .collect_vec();
@@ -207,10 +213,21 @@ where
         let main_domains_points_and_opens = trace_domains
             .iter()
             .zip_eq(opened_values.chips_opened_values.iter())
-            .map(|(domain, values)| TwoAdicPcsMatsVariable::<CC> {
-                domain: *domain,
-                points: vec![zeta, domain.next_point_variable(builder, zeta)],
-                values: vec![values.main_local.clone(), values.main_next.clone()],
+            .zip_eq(chips.iter())
+            .map(|((domain, values), chip)| {
+                if !chip.local_only() {
+                    TwoAdicPcsMatsVariable::<CC> {
+                        domain: *domain,
+                        points: vec![zeta, domain.next_point_variable(builder, zeta)],
+                        values: vec![values.main_local.clone(), values.main_next.clone()],
+                    }
+                } else {
+                    TwoAdicPcsMatsVariable::<CC> {
+                        domain: *domain,
+                        points: vec![zeta],
+                        values: vec![values.main_local.clone()],
+                    }
+                }
             })
             .collect_vec();
 
@@ -257,35 +274,15 @@ where
             })
             .collect_vec();
 
-        // Split the main_domains_points_and_opens to the global and local chips.
-        let mut global_trace_points_and_openings = vec![];
-        let mut regional_trace_points_and_openings = vec![];
-        for (i, points_and_openings) in main_domains_points_and_opens
-            .clone()
-            .into_iter()
-            .enumerate()
-        {
-            let scope = chip_scopes[i];
-            if scope == LookupScope::Global {
-                global_trace_points_and_openings.push(points_and_openings);
-            } else {
-                regional_trace_points_and_openings.push(points_and_openings);
-            }
-        }
-
         // Create the pcs rounds.
         let prep_commit = vk.commit;
         let prep_round: TwoAdicPcsRoundVariable<CC, SC> = TwoAdicPcsRoundVariable {
             batch_commit: prep_commit,
             domains_points_and_opens: preprocessed_domains_points_and_opens,
         };
-        let global_main_round = TwoAdicPcsRoundVariable {
-            batch_commit: global_main_commit,
-            domains_points_and_opens: global_trace_points_and_openings,
-        };
-        let regional_main_round = TwoAdicPcsRoundVariable {
-            batch_commit: regional_main_commit,
-            domains_points_and_opens: regional_trace_points_and_openings,
+        let main_round = TwoAdicPcsRoundVariable {
+            batch_commit: main_commit,
+            domains_points_and_opens: main_domains_points_and_opens,
         };
         let perm_round = TwoAdicPcsRoundVariable {
             batch_commit: permutation_commit,
@@ -296,17 +293,7 @@ where
             domains_points_and_opens: quotient_domains_points_and_opens,
         };
 
-        let rounds = if has_global_main_commit {
-            vec![
-                prep_round,
-                global_main_round,
-                regional_main_round,
-                perm_round,
-                quotient_round,
-            ]
-        } else {
-            vec![prep_round, regional_main_round, perm_round, quotient_round]
-        };
+        let rounds = vec![prep_round, main_round, perm_round, quotient_round];
 
         // Verify the pcs proof
         builder.cycle_tracker_v2_enter("stage-d-verify-pcs".to_string());
@@ -317,11 +304,7 @@ where
 
         // Verify the constrtaint evaluations.
         builder.cycle_tracker_v2_enter("stage-e-verify-constraints".to_string());
-        let permutation_challenges = global_permutation_challenges
-            .iter()
-            .chain(regional_permutation_challenges.iter())
-            .copied()
-            .collect::<Vec<_>>();
+        let permutation_challenges = regional_permutation_challenges;
 
         for (chip, trace_domain, qc_domains, values) in izip!(
             chips.iter(),
@@ -363,7 +346,7 @@ where
             );
         }
 
-        // Verify that the chips' local_cumulative_sum sum to 0.
+        // Verify that the chips' regional_cumulative_sum sum to 0.
         let regional_cumulative_sum: Ext<CC::F, CC::EF> = opened_values
             .chips_opened_values
             .iter()

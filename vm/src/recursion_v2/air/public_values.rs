@@ -4,6 +4,7 @@ use crate::{
         recursion_v2::{circuit, prelude::*},
         word::Word,
     },
+    machine::septic::SepticDigest,
     primitives::consts::{
         DIGEST_SIZE, MAX_NUM_PVS_V2, PERMUTATION_RATE, PERMUTATION_WIDTH, PV_DIGEST_NUM_WORDS,
         RECURSION_NUM_PVS_V2,
@@ -78,6 +79,7 @@ impl<T: Clone> ChallengerPublicValues<T> {
         }
     }
 }
+
 // todo: refactor
 /// The PublicValues struct is used to store all of a reduce proof's public values.
 #[derive(AlignedBorrow, Serialize, Deserialize, Clone, Copy, Default, Debug)]
@@ -116,23 +118,15 @@ pub struct RecursionPublicValues<T> {
     /// Last MemoryFinalize address bits.
     pub last_finalize_addr_bits: [T; 32],
 
-    /// Start state of reconstruct_challenger.
-    pub start_reconstruct_challenger: ChallengerPublicValues<T>,
-
-    /// End state of reconstruct_challenger.
-    pub end_reconstruct_challenger: ChallengerPublicValues<T>,
-
     /// The commitment to the Pico program being proven.
     pub riscv_vk_digest: [T; DIGEST_SIZE],
 
     /// The root of the vk merkle tree.
     pub vk_root: [T; DIGEST_SIZE],
 
-    /// The leaf challenger containing the entropy from the main trace commitment.
-    pub base_challenger: ChallengerPublicValues<T>,
-
-    /// Current cumulative sum of lookup bus.
-    pub cumulative_sum: [T; 4],
+    /// Current cumulative sum of lookup bus. Note that for recursive proofs for core proofs, this
+    /// contains the global cumulative sum.
+    pub global_cumulative_sum: SepticDigest<T>,
 
     /// Whether the proof completely proves the program execution.
     pub flag_complete: T,

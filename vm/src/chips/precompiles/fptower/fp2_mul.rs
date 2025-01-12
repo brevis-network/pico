@@ -282,6 +282,10 @@ where
             }
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F, P> BaseAir<F> for Fp2MulChip<F, P>
@@ -304,13 +308,8 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &Fp2MulCols<CB::Var, P> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &Fp2MulCols<CB::Var, P> = (*next).borrow();
 
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
         let num_words_field_element = <P as NumLimbs>::Limbs::USIZE / 4;
 
         let p_x = limbs_from_prev_access(&local.x_access[0..num_words_field_element]);

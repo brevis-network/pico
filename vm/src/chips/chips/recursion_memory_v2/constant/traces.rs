@@ -108,4 +108,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }

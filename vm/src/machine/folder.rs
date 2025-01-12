@@ -8,6 +8,7 @@ use crate::{
             ChipBuilder, EmptyLookupBuilder, LookupBuilder, PermutationBuilder, PublicValuesBuilder,
         },
         lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
+        septic::SepticDigest,
     },
     primitives::consts::MAX_NUM_PVS_V2,
 };
@@ -177,7 +178,8 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub perm: RowMajorMatrix<PackedChallenge<SC>>,
     pub public_values: &'a [SC::Val],
     pub perm_challenges: &'a [PackedChallenge<SC>],
-    pub cumulative_sums: &'a [PackedChallenge<SC>],
+    pub regional_cumulative_sum: &'a PackedChallenge<SC>,
+    pub global_cumulative_sum: &'a SepticDigest<SC::Val>,
     pub is_first_row: PackedVal<SC>,
     pub is_last_row: PackedVal<SC>,
     pub is_transition: PackedVal<SC>,
@@ -238,10 +240,15 @@ impl<'a, SC: StarkGenericConfig> PermutationBuilder for ProverConstraintFolder<'
         self.perm_challenges
     }
 
-    type Sum = PackedChallenge<SC>;
+    type RegionalSum = PackedChallenge<SC>;
+    type GlobalSum = SC::Val;
 
-    fn cumulative_sums(&self) -> &'a [Self::Sum] {
-        self.cumulative_sums
+    fn regional_cumulative_sum(&self) -> &'a Self::RegionalSum {
+        self.regional_cumulative_sum
+    }
+
+    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+        self.global_cumulative_sum
     }
 }
 
@@ -281,7 +288,8 @@ pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
     pub main: ViewPair<'a, SC::Challenge>,
     pub perm: ViewPair<'a, SC::Challenge>,
     pub perm_challenges: &'a [SC::Challenge],
-    pub cumulative_sums: &'a [SC::Challenge],
+    pub regional_cumulative_sum: &'a SC::Challenge,
+    pub global_cumulative_sum: &'a SepticDigest<SC::Val>,
     pub public_values: &'a [SC::Val],
     pub is_first_row: SC::Challenge,
     pub is_last_row: SC::Challenge,
@@ -350,10 +358,15 @@ impl<'a, SC: StarkGenericConfig> PermutationBuilder for VerifierConstraintFolder
         self.perm_challenges
     }
 
-    type Sum = SC::Challenge;
+    type RegionalSum = SC::Challenge;
+    type GlobalSum = SC::Val;
 
-    fn cumulative_sums(&self) -> &[Self::Sum] {
-        self.cumulative_sums
+    fn regional_cumulative_sum(&self) -> &'a Self::RegionalSum {
+        self.regional_cumulative_sum
+    }
+
+    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+        self.global_cumulative_sum
     }
 }
 
@@ -396,8 +409,10 @@ pub struct GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr> {
     pub perm: VerticalPair<RowMajorMatrixView<'a, Var>, RowMajorMatrixView<'a, Var>>,
     /// The challenges for the permutation.
     pub perm_challenges: &'a [Var],
-    /// The cumulative sum of the permutation.
-    pub cumulative_sums: &'a [Var],
+    /// The local cumulative sum of the permutation.
+    pub regional_cumulative_sum: &'a Var,
+    /// The global cumulative sum of the permutation.
+    pub global_cumulative_sum: &'a SepticDigest<PubVar>,
     /// The selector for the first row.
     pub is_first_row: Var,
     /// The selector for the last row.
@@ -547,7 +562,6 @@ where
 {
     type MP = VerticalPair<RowMajorMatrixView<'a, Var>, RowMajorMatrixView<'a, Var>>;
     type RandomVar = Var;
-    type Sum = Var;
 
     fn permutation(&self) -> Self::MP {
         self.perm
@@ -557,8 +571,15 @@ where
         self.perm_challenges
     }
 
-    fn cumulative_sums(&self) -> &[Self::Sum] {
-        self.cumulative_sums
+    type RegionalSum = Var;
+    type GlobalSum = PubVar;
+
+    fn regional_cumulative_sum(&self) -> &'a Self::RegionalSum {
+        self.regional_cumulative_sum
+    }
+
+    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+        self.global_cumulative_sum
     }
 }
 
@@ -709,7 +730,8 @@ pub struct DebugConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
     pub(crate) preprocessed: ViewPair<'a, F>,
     pub(crate) main: ViewPair<'a, F>,
     pub(crate) permutation: ViewPair<'a, EF>,
-    pub(crate) cumulative_sums: &'a [EF],
+    pub(crate) regional_cumulative_sum: &'a EF,
+    pub(crate) global_cumulative_sum: &'a SepticDigest<F>,
     pub(crate) permutation_challenges: &'a [EF],
     pub(crate) is_first_row: F,
     pub(crate) is_last_row: F,
@@ -778,15 +800,8 @@ where
     /// Assert that `x` is a boolean, i.e. either 0 or 1.
     fn assert_bool<I: Into<Self::Expr>>(&mut self, x: I) {
         let x = x.into();
-        // <<<<<<< HEAD
-        //         if x != F::ZERO && x != F::ONE {
-        //             let backtrace = std::backtrace::Backtrace::force_capture();
-        //             eprintln!("constraint failed: {x:?} is not a bool\n{backtrace}");
-        //             panic!();
-        // =======
         if x != F::ZERO && x != F::ONE {
             self.failures.push(DebugConstraintFailure::NonBoolean(x));
-            // >>>>>>> main
         }
     }
 }
@@ -804,15 +819,11 @@ where
     where
         I: Into<Self::ExprEF>,
     {
-        // <<<<<<< HEAD
-        //         assert_eq!(x.into(), EF::ZERO, "constraints must evaluate to zero");
-        // =======
         let x = x.into();
         if x != EF::ZERO {
             self.failures
                 .push(DebugConstraintFailure::ExtensionNonzero(x));
         }
-        // >>>>>>> main
     }
 }
 
@@ -822,10 +833,9 @@ where
     EF: ExtensionField<F>,
 {
     type MP = ViewPair<'a, EF>;
-
     type RandomVar = EF;
-
-    type Sum = EF;
+    type RegionalSum = EF;
+    type GlobalSum = F;
 
     fn permutation(&self) -> Self::MP {
         self.permutation
@@ -835,8 +845,12 @@ where
         self.permutation_challenges
     }
 
-    fn cumulative_sums(&self) -> &[Self::Sum] {
-        self.cumulative_sums
+    fn regional_cumulative_sum(&self) -> &'a Self::RegionalSum {
+        self.regional_cumulative_sum
+    }
+
+    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
+        self.global_cumulative_sum
     }
 }
 

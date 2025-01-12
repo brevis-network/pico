@@ -3,9 +3,11 @@
 use crate::{
     compiler::recursion_v2::prelude::*,
     configs::config::FieldGenericConfig,
+    machine::septic::{SepticCurve, SepticDigest, SepticExtension},
     primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE},
     recursion_v2::{air::RecursionPublicValues, runtime::HASH_RATE, types::WIDTH},
 };
+use itertools::Itertools;
 use p3_baby_bear::BabyBear;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use std::iter::repeat;
@@ -34,6 +36,21 @@ pub trait CircuitV2Builder<FC: FieldGenericConfig> {
         input: impl IntoIterator<Item = Felt<FC::F>>,
     ) -> [Felt<FC::F>; DIGEST_SIZE];
     fn ext2felt_v2(&mut self, ext: Ext<FC::F, FC::EF>) -> [Felt<FC::F>; EXTENSION_DEGREE];
+    fn add_curve_v2(
+        &mut self,
+        point1: SepticCurve<Felt<FC::F>>,
+        point2: SepticCurve<Felt<FC::F>>,
+    ) -> SepticCurve<Felt<FC::F>>;
+    fn assert_digest_zero_v2(&mut self, is_real: Felt<FC::F>, digest: SepticDigest<Felt<FC::F>>);
+    fn sum_digest_v2(
+        &mut self,
+        digests: Vec<SepticDigest<Felt<FC::F>>>,
+    ) -> SepticDigest<Felt<FC::F>>;
+    fn select_global_cumulative_sum(
+        &mut self,
+        is_first_shard: Felt<FC::F>,
+        vk_digest: SepticDigest<Felt<FC::F>>,
+    ) -> SepticDigest<Felt<FC::F>>;
     fn commit_public_values_v2(&mut self, public_values: RecursionPublicValues<Felt<FC::F>>);
     fn cycle_tracker_v2_enter(&mut self, name: String);
     fn cycle_tracker_v2_exit(&mut self);
@@ -184,6 +201,107 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CircuitV2Builder<FC> for Builder<FC> 
         self.assert_ext_eq(reconstructed_ext, ext);
 
         felts
+    }
+
+    /// Adds two septic elliptic curve points.
+    fn add_curve_v2(
+        &mut self,
+        point1: SepticCurve<Felt<FC::F>>,
+        point2: SepticCurve<Felt<FC::F>>,
+    ) -> SepticCurve<Felt<FC::F>> {
+        let point_sum_x: [Felt<FC::F>; 7] = core::array::from_fn(|_| self.uninit());
+        let point_sum_y: [Felt<FC::F>; 7] = core::array::from_fn(|_| self.uninit());
+        let point = SepticCurve {
+            x: SepticExtension(point_sum_x),
+            y: SepticExtension(point_sum_y),
+        };
+        self.push_op(DslIr::CircuitV2HintAddCurve(Box::new((
+            point, point1, point2,
+        ))));
+
+        let point1_symbolic = SepticCurve::convert(point1, |x| x.into());
+        let point2_symbolic = SepticCurve::convert(point2, |x| x.into());
+        let point_symbolic = SepticCurve::convert(point, |x| x.into());
+
+        let sum_checker_x = SepticCurve::<SymbolicFelt<FC::F>>::sum_checker_x(
+            point1_symbolic,
+            point2_symbolic,
+            point_symbolic,
+        );
+
+        let sum_checker_y = SepticCurve::<SymbolicFelt<FC::F>>::sum_checker_y(
+            point1_symbolic,
+            point2_symbolic,
+            point_symbolic,
+        );
+
+        for limb in sum_checker_x.0 {
+            self.assert_felt_eq(limb, FC::F::ZERO);
+        }
+
+        for limb in sum_checker_y.0 {
+            self.assert_felt_eq(limb, FC::F::ZERO);
+        }
+
+        point
+    }
+
+    /// Asserts that the SepticDigest is zero.
+    fn assert_digest_zero_v2(&mut self, is_real: Felt<FC::F>, digest: SepticDigest<Felt<FC::F>>) {
+        let zero = SepticDigest::<SymbolicFelt<FC::F>>::zero();
+        for (digest_limb_x, zero_limb_x) in digest.0.x.0.into_iter().zip_eq(zero.0.x.0.into_iter())
+        {
+            self.assert_felt_eq(is_real * digest_limb_x, is_real * zero_limb_x);
+        }
+        for (digest_limb_y, zero_limb_y) in digest.0.y.0.into_iter().zip_eq(zero.0.y.0.into_iter())
+        {
+            self.assert_felt_eq(is_real * digest_limb_y, is_real * zero_limb_y);
+        }
+    }
+
+    // Sums the digests into one.
+    fn sum_digest_v2(
+        &mut self,
+        digests: Vec<SepticDigest<Felt<FC::F>>>,
+    ) -> SepticDigest<Felt<FC::F>> {
+        let mut convert_to_felt =
+            |point: SepticCurve<FC::F>| SepticCurve::convert(point, |value| self.eval(value));
+
+        let start = convert_to_felt(SepticDigest::starting_digest().0);
+        let zero_digest = convert_to_felt(SepticDigest::zero().0);
+
+        if digests.is_empty() {
+            return SepticDigest(zero_digest);
+        }
+
+        let neg_start = convert_to_felt(SepticDigest::starting_digest().0.neg());
+        let neg_zero_digest = convert_to_felt(SepticDigest::zero().0.neg());
+
+        let mut ret = start;
+        for (i, digest) in digests.clone().into_iter().enumerate() {
+            ret = self.add_curve_v2(ret, digest.0);
+            if i != digests.len() - 1 {
+                ret = self.add_curve_v2(ret, neg_zero_digest)
+            }
+        }
+        SepticDigest(self.add_curve_v2(ret, neg_start))
+    }
+
+    /// Returns the zero digest when `flag_first_chunk` is zero, and returns the `digest` when `flag_first_chunk` is one.
+    fn select_global_cumulative_sum(
+        &mut self,
+        is_first_shard: Felt<FC::F>,
+        vk_digest: SepticDigest<Felt<FC::F>>,
+    ) -> SepticDigest<Felt<FC::F>> {
+        let zero = SepticDigest::<SymbolicFelt<FC::F>>::zero();
+        let one: Felt<FC::F> = self.constant(FC::F::ONE);
+        let x = SepticExtension(core::array::from_fn(|i| {
+            self.eval(is_first_shard * vk_digest.0.x.0[i] + (one - is_first_shard) * zero.0.x.0[i])
+        }));
+        let y = SepticExtension(core::array::from_fn(|i| {
+            self.eval(is_first_shard * vk_digest.0.y.0[i] + (one - is_first_shard) * zero.0.y.0[i])
+        }));
+        SepticDigest(SepticCurve { x, y })
     }
 
     // Commits public values.

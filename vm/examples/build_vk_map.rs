@@ -141,6 +141,26 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
     }
 }
 
+fn load_vk_map(filename: &str) -> BTreeMap<[BabyBear; DIGEST_SIZE], usize> {
+    if let Ok(mut file) = File::open(filename) {
+        if let Ok(vk_map) =
+            bincode::deserialize_from::<_, BTreeMap<[BabyBear; DIGEST_SIZE], usize>>(&mut file)
+        {
+            return vk_map;
+        }
+    }
+    BTreeMap::new()
+}
+
+fn save_vk_map(
+    filename: &str,
+    vk_map: &BTreeMap<[BabyBear; DIGEST_SIZE], usize>,
+) -> std::io::Result<()> {
+    let mut file = File::create(filename)?;
+    bincode::serialize_into(&mut file, vk_map)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+}
+
 fn main() {
     // TODO: remove redundant count (merkle tree height set to 0 for dummy shape count)
     let start_time = std::time::Instant::now();
@@ -235,7 +255,11 @@ fn main() {
         })
         .collect();
 
-    let vk_set: BTreeSet<_> = results.into_iter().collect();
+    let mut vk_map = load_vk_map("vk_map.bin");
+    let mut vk_set: BTreeSet<[BabyBear; DIGEST_SIZE]> = vk_map.keys().copied().collect();
+
+    let new_vk_set: BTreeSet<_> = results.into_iter().collect();
+    vk_set.extend(new_vk_set);
 
     let vk_map = vk_set
         .into_iter()
@@ -243,10 +267,7 @@ fn main() {
         .map(|(i, vk)| (vk, i))
         .collect::<BTreeMap<_, _>>();
 
-    // println!("vk_map = {:?}", vk_map);
-
-    let mut file = File::create("vk_map.bin").expect("cannot create file vk_map.bin");
-    bincode::serialize_into(&mut file, &vk_map).expect("cannot serialize vk_map");
+    save_vk_map("vk_map.bin", &vk_map).expect("Failed to save updated vk_map.bin");
 
     println!("vk_map has been serialized and saved to vk_map.bin");
     let total_time = start_time.elapsed().as_secs_f32();

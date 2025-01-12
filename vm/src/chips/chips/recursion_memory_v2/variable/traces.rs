@@ -7,7 +7,9 @@ use super::{
 };
 use crate::{
     compiler::recursion_v2::{
-        instruction::{HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction},
+        instruction::{
+            HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
+        },
         program::RecursionProgram,
     },
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
@@ -47,6 +49,16 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
                     output_addrs_mults,
                     input_addr: _, // No receive interaction for the hint operation
                 }) => output_addrs_mults.iter().collect(),
+                Instruction::HintAddCurve(instr) => {
+                    let HintAddCurveInstr {
+                        output_x_addrs_mults,
+                        output_y_addrs_mults, .. // No receive interaction for the hint operation
+                    } = instr.as_ref();
+                    output_x_addrs_mults
+                        .iter()
+                        .chain(output_y_addrs_mults.iter())
+                        .collect()
+                }
                 _ => vec![],
             })
             .collect::<Vec<_>>();
@@ -103,6 +115,10 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
     }
 
     fn is_active(&self, _record: &Self::Record) -> bool {
+        true
+    }
+
+    fn local_only(&self) -> bool {
         true
     }
 }

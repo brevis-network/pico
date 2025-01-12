@@ -11,11 +11,11 @@ use crate::{
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use hashbrown::HashMap;
-use p3_field::Field;
+use p3_field::PrimeField;
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
-impl<F: Field> ChipBehavior<F> for ProgramChip<F> {
+impl<F: PrimeField> ChipBehavior<F> for ProgramChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

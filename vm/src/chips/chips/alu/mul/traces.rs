@@ -20,7 +20,7 @@ use crate::{
     primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };
 use p3_air::BaseAir;
-use p3_field::Field;
+use p3_field::{Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::borrow::BorrowMut;
@@ -31,7 +31,7 @@ impl<F: Field> BaseAir<F> for MulChip<F> {
     }
 }
 
-impl<F: Field> ChipBehavior<F> for MulChip<F> {
+impl<F: PrimeField> ChipBehavior<F> for MulChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -191,5 +191,9 @@ impl<F: Field> ChipBehavior<F> for MulChip<F> {
 
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.mul_events.is_empty()
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 }

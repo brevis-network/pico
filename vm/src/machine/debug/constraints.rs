@@ -6,6 +6,8 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::DebugConstraintFolder,
         keys::BaseProvingKey,
+        lookup::LookupScope,
+        septic::{SepticCurve, SepticDigest, SepticExtension},
         utils::chunk_active_chips,
     },
 };
@@ -23,24 +25,29 @@ use std::array;
 
 pub struct IncrementalConstraintDebugger<'a, SC: StarkGenericConfig> {
     pk: &'a BaseProvingKey<SC>,
-    global_sum: SC::Challenge,
-    // 2 global and 2 regional challenges
-    challenges: [SC::Challenge; 4],
+    global_sums: Vec<SepticDigest<SC::Val>>,
+    challenges: [SC::Challenge; 2],
     messages: Vec<(DebuggerMessageLevel, String)>,
 }
 
 impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
-    pub fn new(pk: &'a BaseProvingKey<SC>, challenger: &mut SC::Challenger) -> Self {
-        let global_sum = SC::Challenge::ZERO;
+    pub fn new(
+        pk: &'a BaseProvingKey<SC>,
+        challenger: &mut SC::Challenger,
+        has_global: bool,
+    ) -> Self {
+        let mut global_sums = vec![];
+        if has_global {
+            global_sums.push(pk.initial_global_cumulative_sum);
+        }
 
-        // Obtain the 2 global and 2 regional challenges.
         let challenges = array::from_fn(|_| challenger.sample_ext_element());
 
         let messages = vec![];
 
         Self {
             pk,
-            global_sum,
+            global_sums,
             challenges,
             messages,
         }
@@ -62,8 +69,9 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
             }
         }
 
-        if !self.global_sum.is_zero() {
-            error!("Cumulative global sum is not zero: {}", self.global_sum);
+        let global_sum: SepticDigest<SC::Val> = self.global_sums.iter().copied().sum();
+        if !global_sum.is_zero() {
+            error!("Cumulative global sum is not zero");
             success = false;
         }
 
@@ -109,23 +117,34 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 .par_iter()
                 .zip(traces.par_iter_mut())
                 .map(|(chip, (main_trace, preprocessed_trace))| {
-                    let (trace, global_sum, regional_sum) = chip.generate_permutation(
+                    let (trace, regional_sum) = chip.generate_permutation(
                         *preprocessed_trace,
                         main_trace,
                         &self.challenges,
                     );
-                    (trace, [global_sum, regional_sum])
+                    let global_sum = if chip.lookup_scope() == LookupScope::Regional {
+                        SepticDigest::<SC::Val>::zero()
+                    } else {
+                        let main_trace_size = main_trace.height() * main_trace.width();
+                        let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
+                        SepticDigest(SepticCurve {
+                            x: SepticExtension::<SC::Val>::from_base_fn(|i| last_row[i]),
+                            y: SepticExtension::<SC::Val>::from_base_fn(|i| last_row[i + 7]),
+                        })
+                    };
+                    (trace, (global_sum, regional_sum))
                 })
                 .unzip_into_vecs(&mut permutation_traces, &mut cumulative_sums);
 
-            self.global_sum += cumulative_sums
+            let global_sum = cumulative_sums
                 .iter()
-                .map(|sum| sum[0])
-                .sum::<SC::Challenge>();
+                .map(|sum| sum.0)
+                .sum::<SepticDigest<SC::Val>>();
+            self.global_sums.push(global_sum);
 
             let regional_sum = cumulative_sums
                 .iter()
-                .map(|sum| sum[1])
+                .map(|sum| sum.1)
                 .sum::<SC::Challenge>();
 
             if !regional_sum.is_zero() {
@@ -166,14 +185,16 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                     &traces[i].0,
                     &permutation_traces[i],
                     chunk.public_values(),
-                    &cumulative_sums[i],
+                    &cumulative_sums[i].1,
+                    &cumulative_sums[i].0,
                 );
             }
         }
 
         info!("Constraints verified successfully");
 
-        if !self.global_sum.is_zero() {
+        let global_sum: SepticDigest<SC::Val> = self.global_sums.iter().copied().sum();
+        if !global_sum.is_zero() {
             info!(
                 "Global cumulative sum is not zero.\n\t
                 Please enable `debug-lookups` feature to debug the lookups.",
@@ -188,7 +209,8 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         main_trace: &RowMajorMatrix<SC::Val>,
         permutation_trace: &RowMajorMatrix<SC::Challenge>,
         public_values: Vec<SC::Val>,
-        cumulative_sums: &[SC::Challenge],
+        regional_cumulative_sum: &SC::Challenge,
+        global_cumulative_sum: &SepticDigest<SC::Val>,
     ) where
         C: ChipBehavior<SC::Val> + for<'b> Air<DebugConstraintFolder<'b, SC::Val, SC::Challenge>>,
     {
@@ -241,7 +263,8 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                     RowMajorMatrixView::new_row(permutation_next),
                 ),
                 permutation_challenges: &self.challenges,
-                cumulative_sums,
+                regional_cumulative_sum,
+                global_cumulative_sum,
                 is_first_row: SC::Val::ZERO,
                 is_last_row: SC::Val::ZERO,
                 is_transition: SC::Val::ONE,

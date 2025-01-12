@@ -121,6 +121,8 @@ pub struct RiscvEmulator {
 
     /// whether or not to log syscalls
     log_syscalls: bool,
+
+    flag_active: bool,
 }
 
 impl RiscvEmulator {
@@ -280,6 +282,7 @@ impl RiscvEmulator {
             max_syscall_cycles,
             local_memory_access: HashMap::new(),
             log_syscalls,
+            flag_active: true,
         }
     }
 
@@ -559,11 +562,14 @@ impl RiscvEmulator {
         // Set the global public values for all chunks.
         // println!("# batch records to be processed: {}", self.batch_records.len());
         let mut current_execution_chunk = 0;
-        let mut flag_extra = true;
         for record in self.batch_records.iter_mut() {
             self.public_values_buffer.chunk += 1;
             if !record.cpu_events.is_empty() {
-                self.public_values_buffer.execution_chunk += 1;
+                if !self.flag_active {
+                    self.flag_active = true;
+                } else {
+                    self.public_values_buffer.execution_chunk += 1;
+                }
                 current_execution_chunk = self.public_values_buffer.execution_chunk;
                 self.public_values_buffer.start_pc = record.cpu_events[0].pc;
                 self.public_values_buffer.next_pc = record.cpu_events.last().unwrap().next_pc;
@@ -572,9 +578,9 @@ impl RiscvEmulator {
                     record.public_values.committed_value_digest;
             } else {
                 // hack to make execution chunk consistent
-                if flag_extra {
+                if (self.flag_active) & (!done) {
                     current_execution_chunk += 1;
-                    flag_extra = false;
+                    self.flag_active = false;
                 }
                 self.public_values_buffer.execution_chunk = current_execution_chunk;
 

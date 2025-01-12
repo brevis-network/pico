@@ -365,6 +365,10 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
             }
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F, E: EllipticCurve> BaseAir<F> for WeierstrassDecompressChip<F, E> {
@@ -393,15 +397,9 @@ where
         let local_slice = main.row_slice(0);
         let local: &WeierstrassDecompressCols<CB::Var, E::BaseField> =
             (*local_slice)[0..weierstrass_cols].borrow();
-        let next = main.row_slice(1);
-        let next: &WeierstrassDecompressCols<CB::Var, E::BaseField> =
-            (*next)[0..weierstrass_cols].borrow();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
         let num_words_field_element = num_limbs / 4;

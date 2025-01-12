@@ -95,6 +95,10 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.lt_events.is_empty()
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F: PrimeField32> LtChip<F> {

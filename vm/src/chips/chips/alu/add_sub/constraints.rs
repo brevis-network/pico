@@ -7,7 +7,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{Field, FieldAlgebra};
+use p3_field::Field;
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
@@ -19,14 +19,9 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &AddSubCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &AddSubCols<CB::Var> = (*next).borrow();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Evaluate the addition operation.
         AddGadget::<CB::F>::eval(

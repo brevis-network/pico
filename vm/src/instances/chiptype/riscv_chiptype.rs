@@ -12,7 +12,6 @@ use crate::{
                 mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip,
             },
             byte::ByteChip,
-            memory_program::MemoryProgramChip,
             rangecheck::RangeCheckChip,
             riscv_cpu::CpuChip,
             riscv_memory::{
@@ -86,7 +85,6 @@ define_chip_type!(
     RiscvChipType<F>,
     [
         (Program, ProgramChip),
-        (MemoryProgram, MemoryProgramChip),
         (Cpu, CpuChip),
         (ShaCompress, ShaCompressChip),
         (Ed25519Add, EdAddAssignChip),
@@ -134,10 +132,6 @@ impl<F: PrimeField32> RiscvChipType<F> {
             (
                 RiscvChipType::<F>::Program(ProgramChip::default()).name(),
                 program.instructions.len(),
-            ),
-            (
-                RiscvChipType::<F>::MemoryProgram(MemoryProgramChip::default()).name(),
-                program.memory_image.len(),
             ),
             (
                 RiscvChipType::<F>::Byte(ByteChip::default()).name(),
@@ -287,7 +281,6 @@ impl<F: PrimeField32> RiscvChipType<F> {
         excluded_chip_names.insert(Self::SyscallPrecompile(SyscallChip::precompile()).name());
         // Remove the preprocessed chips.
         excluded_chip_names.insert(Self::Program(ProgramChip::default()).name());
-        excluded_chip_names.insert(Self::MemoryProgram(MemoryProgramChip::default()).name());
         excluded_chip_names.insert(Self::Byte(ByteChip::default()).name());
         excluded_chip_names.insert(Self::Range(RangeCheckChip::default()).name());
 

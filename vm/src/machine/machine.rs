@@ -8,18 +8,19 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey},
         proof::{BaseProof, MainTraceCommitments, MetaProof},
         prover::BaseProver,
+        septic::SepticDigest,
         verifier::BaseVerifier,
         witness::ProvingWitness,
     },
 };
 use alloc::sync::Arc;
 use anyhow::Result;
+use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::Air;
-use p3_challenger::{CanObserve, FieldChallenger};
-use p3_field::{Field, FieldAlgebra, PrimeField64};
+use p3_field::{Field, PrimeField64};
 use p3_maybe_rayon::prelude::*;
-use std::{array, time::Instant};
+use std::time::Instant;
 use tracing::debug;
 
 /// Functions that each machine instance should implement.
@@ -161,6 +162,25 @@ where
     pub fn num_public_values(&self) -> usize {
         self.num_public_values
     }
+
+    /// Check if have global chips.
+    pub fn has_global(&self) -> bool {
+        self.has_global
+    }
+
+    /// Returns an iterator over the chips in the machine that are included in the given chunk.
+    pub fn chunk_ordered_chips<'a, 'b>(
+        &'a self,
+        chip_ordering: &'b HashMap<String, usize>,
+    ) -> impl Iterator<Item = &'b MetaChip<Val<SC>, C>>
+    where
+        'a: 'b,
+    {
+        self.chips
+            .iter()
+            .filter(|chip| chip_ordering.contains_key(&chip.name()))
+            .sorted_by_key(|chip| chip_ordering.get(&chip.name()))
+    }
 }
 
 impl<SC, C> BaseMachine<SC, C>
@@ -206,14 +226,8 @@ where
         (pk, vk)
     }
 
-    pub fn commit(
-        &self,
-        record: &C::Record,
-        lookup_scope: LookupScope,
-    ) -> Option<MainTraceCommitments<SC>> {
-        let chips_and_main_traces = self
-            .prover
-            .generate_main(&self.chips(), record, lookup_scope);
+    pub fn commit(&self, record: &C::Record) -> Option<MainTraceCommitments<SC>> {
+        let chips_and_main_traces = self.prover.generate_main(&self.chips(), record);
         self.prover
             .commit_main(&self.config(), record, chips_and_main_traces)
     }
@@ -229,64 +243,21 @@ where
         SC::Val: PrimeField64,
     {
         let mut challenger = self.config().challenger();
-
-        // observe preprocessed
         pk.observed_by(&mut challenger);
 
-        // Generate and commit the global traces for each chunk.
-        let global_data = records
+        let proofs = records
             .iter()
-            .map(|record| {
-                if self.has_global {
-                    self.commit(record, LookupScope::Global)
-                } else {
-                    None
-                }
-            })
-            .collect_vec();
-
-        // Observe the challenges for each segment.
-        global_data
-            .iter()
-            .zip_eq(records.iter())
-            .for_each(|(global_data, record)| {
-                if self.has_global {
-                    challenger.observe(
-                        global_data
-                            .as_ref()
-                            .expect("must have a global commitment")
-                            .commitment
-                            .clone(),
-                    );
-                }
-                challenger
-                    .observe_slice(&record.public_values::<SC::Val>()[0..self.num_public_values()]);
-            });
-
-        // Obtain the challenges used for the global permutation argument.
-        let global_permutation_challenges: [SC::Challenge; 2] = array::from_fn(|_| {
-            if self.has_global {
-                challenger.sample_ext_element()
-            } else {
-                SC::Challenge::ZERO
-            }
-        });
-
-        let proofs = global_data
-            .into_iter()
-            .zip_eq(records.iter())
             .enumerate()
-            .map(|(i, (global_data, record))| {
-                let regional_data = self.commit(record, LookupScope::Regional).unwrap();
+            .map(|(i, record)| {
+                let data = self.commit(record).unwrap();
                 self.prover.prove(
                     &self.config(),
                     &self.chips(),
                     pk,
-                    regional_data,
-                    global_data,
+                    data,
                     &mut challenger.clone(),
-                    &global_permutation_challenges,
                     records[i].chunk_index(),
+                    self.num_public_values,
                 )
             })
             .collect::<Vec<_>>();
@@ -297,6 +268,7 @@ where
             &mut self.config().challenger(),
             &self.chips(),
             records,
+            self.has_global,
         );
         #[cfg(feature = "debug-lookups")]
         crate::machine::debug::debug_all_lookups(pk, &self.chips(), records, None);
@@ -310,29 +282,57 @@ where
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         chunk_index: usize,
-        local_commitment: MainTraceCommitments<SC>,
-        global_commitment: Option<MainTraceCommitments<SC>>,
+        main_commitment: MainTraceCommitments<SC>,
     ) -> BaseProof<SC> {
-        // Sample for the global permutation challenges.
-        // Obtain the challenges used for the global permutation argument.
-        let global_permutation_challenges: [SC::Challenge; 2] = array::from_fn(|_| {
-            if self.has_global {
-                challenger.sample_ext_element()
-            } else {
-                SC::Challenge::ZERO
-            }
-        });
-
         self.prover.prove(
             &self.config(),
             &self.chips(),
             pk,
-            local_commitment,
-            global_commitment,
+            main_commitment,
             challenger,
-            &global_permutation_challenges,
             chunk_index,
+            self.num_public_values,
         )
+    }
+
+    pub fn verify_riscv(&self, vk: &BaseVerifyingKey<SC>, proofs: &[BaseProof<SC>]) -> Result<()> {
+        assert!(!proofs.is_empty());
+
+        let mut challenger = self.config().challenger();
+
+        // observe all preprocessed and main commits and pv's
+        vk.observed_by(&mut challenger);
+
+        // verify all proofs
+        for proof in proofs {
+            self.verifier.verify(
+                &self.config(),
+                &self.chips(),
+                vk,
+                &mut challenger.clone(),
+                proof,
+                self.num_public_values,
+            )?;
+
+            if !proof.regional_cumulative_sum().is_zero() {
+                panic!("verify_riscv: local lookup cumulative sum is not zero");
+            }
+        }
+
+        let mut sum = proofs
+            .iter()
+            .map(|proof| proof.global_cumulative_sum())
+            .sum();
+        if self.has_global {
+            sum = [sum, vk.initial_global_cumulative_sum]
+                .into_iter()
+                .sum::<SepticDigest<SC::Val>>();
+        };
+        if !sum.is_zero() {
+            panic!("verify_riscv: global lookup cumulative sum is not zero");
+        }
+
+        Ok(())
     }
 
     /// Verify a batch of BaseProofs with a single vk
@@ -348,22 +348,6 @@ where
         // observe all preprocessed and main commits and pv's
         vk.observed_by(&mut challenger);
 
-        proofs.iter().for_each(|proof| {
-            if self.has_global {
-                challenger.observe(proof.commitments.global_main_commit.clone());
-            }
-            challenger.observe_slice(&proof.public_values[..self.num_public_values]);
-        });
-
-        // Obtain the challenges used for the global permutation argument.
-        let global_permutation_challenges: [SC::Challenge; 2] = array::from_fn(|_| {
-            if self.has_global {
-                challenger.sample_ext_element()
-            } else {
-                SC::Challenge::ZERO
-            }
-        });
-
         // verify all proofs
         for proof in proofs {
             self.verifier.verify(
@@ -372,7 +356,7 @@ where
                 vk,
                 &mut challenger.clone(),
                 proof,
-                &global_permutation_challenges,
+                self.num_public_values,
             )?;
 
             if !proof.regional_cumulative_sum().is_zero() {
@@ -380,13 +364,17 @@ where
             }
         }
 
-        let sum = proofs
+        let mut sum = proofs
             .iter()
             .map(|proof| proof.global_cumulative_sum())
-            .sum::<SC::Challenge>();
-
+            .sum::<SepticDigest<SC::Val>>();
+        if self.has_global {
+            sum = [sum, vk.initial_global_cumulative_sum]
+                .into_iter()
+                .sum::<SepticDigest<SC::Val>>();
+        };
         if !sum.is_zero() {
-            panic!("verify_ensemble: global lookup cumulative sum is not zero");
+            panic!("verify_riscv: global lookup cumulative sum is not zero");
         }
 
         Ok(())
@@ -399,22 +387,13 @@ where
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,
     ) -> Result<()> {
-        // Obtain the challenges used for the global permutation argument.
-        let global_permutation_challenges: [SC::Challenge; 2] = array::from_fn(|_| {
-            if self.has_global {
-                challenger.sample_ext_element()
-            } else {
-                SC::Challenge::ZERO
-            }
-        });
-
         self.verifier.verify(
             &self.config(),
             &self.chips(),
             vk,
             challenger,
             proof,
-            &global_permutation_challenges,
+            self.num_public_values,
         )
     }
 }

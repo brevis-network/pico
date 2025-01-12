@@ -18,8 +18,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &ShiftLeftCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &ShiftLeftCols<CB::Var> = (*next).borrow();
 
         let zero: CB::Expr = CB::F::ZERO.into();
         let one: CB::Expr = CB::F::ONE.into();
@@ -27,9 +25,6 @@ where
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + one.clone(), next.nonce);
 
         // Check the sum of c_lsb[i] * 2^i equals c[0].
         let mut c_byte_sum = zero.clone();

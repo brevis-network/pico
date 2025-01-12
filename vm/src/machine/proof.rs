@@ -1,7 +1,7 @@
 use crate::{
     configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig},
     instances::compiler_v2::shapes::ProofShape,
-    machine::keys::BaseVerifyingKey,
+    machine::{keys::BaseVerifyingKey, septic::SepticDigest},
 };
 use alloc::{sync::Arc, vec::Vec};
 use hashbrown::HashMap;
@@ -57,7 +57,7 @@ where
 #[serde(bound = "")]
 pub struct BaseProof<SC: StarkGenericConfig> {
     pub commitments: BaseCommitments<Com<SC>>,
-    pub opened_values: BaseOpenedValues<SC::Challenge>,
+    pub opened_values: BaseOpenedValues<SC::Val, SC::Challenge>,
     pub opening_proof: PcsProof<SC>,
     pub log_main_degrees: Arc<[usize]>,
     pub log_quotient_degrees: Arc<[usize]>,
@@ -74,7 +74,7 @@ impl<SC: StarkGenericConfig> BaseProof<SC> {
             .sum()
     }
 
-    pub fn global_cumulative_sum(&self) -> SC::Challenge {
+    pub fn global_cumulative_sum(&self) -> SepticDigest<SC::Val> {
         self.opened_values
             .chips_opened_values
             .iter()
@@ -99,8 +99,7 @@ impl<SC: StarkGenericConfig> BaseProof<SC> {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct BaseCommitments<Com> {
-    pub global_main_commit: Com,
-    pub regional_main_commit: Com,
+    pub main_commit: Com,
     pub permutation_commit: Com,
     pub quotient_commit: Com,
 }
@@ -114,12 +113,12 @@ pub struct MainTraceCommitments<SC: StarkGenericConfig> {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct BaseOpenedValues<Challenge> {
-    pub chips_opened_values: Arc<[Arc<ChipOpenedValues<Challenge>>]>,
+pub struct BaseOpenedValues<Val, Challenge> {
+    pub chips_opened_values: Arc<[Arc<ChipOpenedValues<Val, Challenge>>]>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ChipOpenedValues<Challenge> {
+pub struct ChipOpenedValues<Val, Challenge> {
     pub preprocessed_local: Vec<Challenge>,
     pub preprocessed_next: Vec<Challenge>,
     pub main_local: Vec<Challenge>,
@@ -127,7 +126,7 @@ pub struct ChipOpenedValues<Challenge> {
     pub permutation_local: Vec<Challenge>,
     pub permutation_next: Vec<Challenge>,
     pub quotient: Vec<Vec<Challenge>>,
-    pub global_cumulative_sum: Challenge,
+    pub global_cumulative_sum: SepticDigest<Val>,
     pub regional_cumulative_sum: Challenge,
     pub log_main_degree: usize,
 }

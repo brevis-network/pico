@@ -112,4 +112,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }

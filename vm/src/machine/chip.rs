@@ -43,6 +43,11 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Regional
     }
+
+    /// Specifies whether the air only uses the local row, and not the next row.
+    fn local_only(&self) -> bool {
+        false
+    }
 }
 
 /// Chip wrapper, includes interactions
@@ -95,7 +100,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         preprocessed: Option<&RowMajorMatrix<F>>,
         main: &RowMajorMatrix<F>,
         perm_challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, EF, EF) {
+    ) -> (RowMajorMatrix<EF>, EF) {
         let batch_size = 1 << self.log_quotient_degree;
 
         generate_permutation_trace(
@@ -114,7 +119,10 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         let (_, _, grouped_widths) =
             get_grouped_maps(&self.looking, &self.looked, self.logup_batch_size());
 
-        grouped_widths.values().sum()
+        grouped_widths
+            .get(&LookupScope::Regional)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Returns the log2 of the batch size.
@@ -139,6 +147,10 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
     pub fn lookup_scope(&self) -> LookupScope {
         self.chip.lookup_scope()
     }
+
+    pub fn local_only(&self) -> bool {
+        self.chip.local_only()
+    }
 }
 
 /// BaseAir implementation for the chip
@@ -160,7 +172,7 @@ where
 impl<F, C, CB> Air<CB> for MetaChip<F, C>
 where
     F: Field,
-    C: Air<CB>,
+    C: Air<CB> + ChipBehavior<F>,
     CB: ChipBuilder<F> + PermutationBuilder,
 {
     fn eval(&self, builder: &mut CB) {
@@ -169,6 +181,7 @@ where
             &self.looking,
             &self.looked,
             1 << self.log_quotient_degree,
+            self.lookup_scope(),
             builder,
         )
     }

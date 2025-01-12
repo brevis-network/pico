@@ -52,11 +52,13 @@ where
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let commit = self.commit.read(builder);
         let pc_start = self.pc_start.read(builder);
+        let initial_global_cumulative_sum = self.initial_global_cumulative_sum.read(builder);
         let preprocessed_info = self.preprocessed_info.clone();
         let preprocessed_chip_ordering = self.preprocessed_chip_ordering.clone();
         BaseVerifyingKeyVariable {
             commit,
             pc_start,
+            initial_global_cumulative_sum,
             preprocessed_info: preprocessed_info.to_vec(),
             preprocessed_chip_ordering: (*preprocessed_chip_ordering).clone(),
         }
@@ -65,5 +67,6 @@ where
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
         self.commit.write(witness);
         self.pc_start.write(witness);
+        self.initial_global_cumulative_sum.write(witness);
     }
 }

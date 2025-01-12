@@ -31,8 +31,6 @@ use crate::{
 use alloc::sync::Arc;
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
-use p3_challenger::CanObserve;
-use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::array;
 
@@ -45,6 +43,7 @@ pub struct EmulatorStdinBuilder<I> {
 pub struct EmulatorStdin<P, I> {
     pub programs: Arc<[P]>,
     pub inputs: Arc<[I]>,
+    pub flag_empty: bool,
     pub pointer: usize,
 }
 
@@ -57,6 +56,7 @@ where
         Self {
             programs: self.programs.clone(),
             inputs: self.inputs.clone(),
+            flag_empty: self.flag_empty,
             pointer: self.pointer,
         }
     }
@@ -67,6 +67,7 @@ impl<P, I> EmulatorStdin<P, I> {
     // get both program and input for emulator
     pub fn get_program_and_input(&self, index: usize) -> (&P, &I, bool) {
         let flag_last = index == self.inputs.len() - 1;
+
         if index < self.programs.len() && index < self.inputs.len() {
             (&self.programs[index], &self.inputs[index], flag_last)
         } else {
@@ -104,6 +105,7 @@ impl EmulatorStdinBuilder<Vec<u8>> {
         EmulatorStdin {
             programs: Arc::new([]),
             inputs: self.buffer.into(),
+            flag_empty: false,
             pointer: 0,
         }
     }
@@ -134,13 +136,6 @@ impl<'a>
 
         riscv_vk.observed_by(&mut base_challenger);
         riscv_vk.observed_by(&mut reconstruct_challenger);
-
-        // make base_challenger ready for use in phase 2
-        let num_public_values = machine.num_public_values();
-        for each_proof in proofs.iter() {
-            base_challenger.observe(each_proof.clone().commitments.global_main_commit);
-            base_challenger.observe_slice(&each_proof.public_values[0..num_public_values]);
-        }
 
         // construct programs and inputs
         let total = proofs.len();
@@ -175,9 +170,12 @@ impl<'a>
             })
             .unzip();
 
+        let flag_empty = programs.len() == 0;
+
         Self {
             programs: programs.into(),
             inputs: inputs.into(),
+            flag_empty,
             pointer: 0,
         }
     }
@@ -203,34 +201,58 @@ where
         machine: &'a BaseMachine<RecursionSC, C>,
         combine_size: usize,
         flag_complete: bool,
-    ) -> Self {
+    ) -> (
+        Self,
+        Option<BaseVerifyingKey<RecursionSC>>,
+        Option<BaseProof<RecursionSC>>,
+    ) {
         assert_eq!(vks.len(), proofs.len());
 
-        let (programs, inputs): (Vec<_>, Vec<_>) = proofs
-            .par_chunks(combine_size)
-            .zip_eq(vks.par_chunks(combine_size))
-            .map(|(batch_proofs, batch_vks)| {
-                let input = RecursionStdin {
-                    machine,
-                    vks: batch_vks.into(), // todo: optimization to non-copy
-                    proofs: batch_proofs.into(),
-                    flag_complete,
-                    vk_root,
-                };
-                let program =
-                    CombineVerifierCircuit::<RecursionFC, RecursionSC, C>::build(machine, &input);
+        let mut last_vk = None;
+        let mut last_proof = None;
 
-                program.print_stats();
+        let mut programs = Vec::new();
+        let mut inputs = Vec::new();
 
-                (program, input)
-            })
-            .unzip();
+        // TODO: Fix to parallel.
+        proofs
+            .chunks(combine_size)
+            .zip(vks.chunks(combine_size))
+            .for_each(|(batch_proofs, batch_vks)| {
+                if batch_proofs.len() > 1 {
+                    let input = RecursionStdin {
+                        machine,
+                        vks: batch_vks.into(), // todo: optimization to non-copy
+                        proofs: batch_proofs.into(),
+                        flag_complete,
+                        vk_root,
+                    };
+                    let program = CombineVerifierCircuit::<RecursionFC, RecursionSC, C>::build(
+                        machine, &input,
+                    );
 
-        Self {
-            programs: programs.into(),
-            inputs: inputs.into(),
-            pointer: 0,
-        }
+                    program.print_stats();
+
+                    programs.push(program);
+                    inputs.push(input);
+                } else {
+                    last_vk = Some(batch_vks[0].clone());
+                    last_proof = Some(batch_proofs[0].clone());
+                }
+            });
+
+        let flag_empty = programs.len() == 0;
+
+        (
+            Self {
+                programs: programs.into(),
+                inputs: inputs.into(),
+                flag_empty,
+                pointer: 0,
+            },
+            last_vk,
+            last_proof,
+        )
     }
 }
 
@@ -254,42 +276,66 @@ where
         machine: &'a BaseMachine<RecursionSC, C>,
         combine_size: usize,
         flag_complete: bool,
-    ) -> Self {
+        vk_manager: &VkMerkleManager,
+        recursion_shape_config: &RecursionShapeConfig<
+            BabyBear,
+            RecursionChipType<BabyBear, COMBINE_DEGREE>,
+        >,
+    ) -> (
+        Self,
+        Option<BaseVerifyingKey<RecursionSC>>,
+        Option<BaseProof<RecursionSC>>,
+    ) {
         assert_eq!(vks.len(), proofs.len());
-        // TODO: static vk_manager or use a parameter
-        let vk_manager = VkMerkleManager::new_from_file("vk_map.bin").unwrap();
-        let recursion_config =
-            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default(
-            );
 
-        let (programs, inputs): (Vec<_>, Vec<_>) = proofs
-            .par_chunks(combine_size)
-            .zip_eq(vks.par_chunks(combine_size))
-            .map(|(batch_proofs, batch_vks)| {
-                let recursion_input = RecursionStdin {
-                    machine,
-                    vks: batch_vks.into(), // todo: optimization to non-copy
-                    proofs: batch_proofs.into(),
-                    flag_complete,
-                    vk_root,
-                };
+        let mut last_vk = None;
+        let mut last_proof = None;
 
-                let recursion_vk_input = vk_manager.add_vk_merkle_proof(recursion_input);
-                let mut program = CombineVkVerifierCircuit::<RecursionFC, RecursionSC, C>::build(
-                    machine,
-                    &recursion_vk_input,
-                );
+        let mut programs = Vec::new();
+        let mut inputs = Vec::new();
 
-                recursion_config.padding_shape(&mut program);
+        proofs
+            .chunks(combine_size)
+            .zip(vks.chunks(combine_size))
+            .for_each(|(batch_proofs, batch_vks)| {
+                if batch_proofs.len() > 1 {
+                    let input = RecursionStdin {
+                        machine,
+                        vks: batch_vks.into(), // todo: optimization to non-copy
+                        proofs: batch_proofs.into(),
+                        flag_complete,
+                        vk_root,
+                    };
 
-                (program, recursion_vk_input)
-            })
-            .unzip();
+                    let input = vk_manager.add_vk_merkle_proof(input);
+                    let mut program =
+                        CombineVkVerifierCircuit::<RecursionFC, RecursionSC, C>::build(
+                            machine, &input,
+                        );
 
-        Self {
-            programs: programs.into(),
-            inputs: inputs.into(),
-            pointer: 0,
-        }
+                    recursion_shape_config.padding_shape(&mut program);
+
+                    program.print_stats();
+
+                    programs.push(program);
+                    inputs.push(input);
+                } else {
+                    last_vk = Some(batch_vks[0].clone());
+                    last_proof = Some(batch_proofs[0].clone());
+                }
+            });
+
+        let flag_empty = programs.len() == 0;
+
+        (
+            Self {
+                programs: programs.into(),
+                inputs: inputs.into(),
+                flag_empty,
+                pointer: 0,
+            },
+            last_vk,
+            last_proof,
+        )
     }
 }

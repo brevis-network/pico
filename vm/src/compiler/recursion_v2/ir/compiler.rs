@@ -1,12 +1,14 @@
 use crate::{
     compiler::recursion_v2::{
         instruction::{
-            FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction, PrintInstr,
+            FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr,
+            Instruction, PrintInstr,
         },
         prelude::*,
         program::RecursionProgram,
     },
     configs::config::FieldGenericConfig,
+    machine::septic::SepticCurve,
     primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS_V2},
     recursion_v2::{
         air::{Block, RecursionPublicValues},
@@ -141,6 +143,19 @@ where
                         output_addrs_mults, ..
                     }) => {
                         output_addrs_mults
+                            .iter_mut()
+                            .for_each(|(addr, mult)| backfill((mult, addr)));
+                    }
+                    Instruction::HintAddCurve(instr) => {
+                        let HintAddCurveInstr {
+                            output_x_addrs_mults,
+                            output_y_addrs_mults,
+                            ..
+                        } = instr.as_mut();
+                        output_x_addrs_mults
+                            .iter_mut()
+                            .for_each(|(addr, mult)| backfill((mult, addr)));
+                        output_y_addrs_mults
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
                     }
@@ -285,6 +300,7 @@ where
             DslIr::CircuitBatchFRI(data) => f(self.batch_fri(data.0, data.1, data.2, data.3)),
 
             DslIr::Select(bit, dst1, dst2, lhs, rhs) => f(self.select(bit, dst1, dst2, lhs, rhs)),
+            DslIr::CircuitV2HintAddCurve(data) => f(self.add_curve(data.0, data.1, data.2)),
 
             DslIr::PrintV(dst) => f(self.print_f(dst)),
             DslIr::PrintF(dst) => f(self.print_f(dst)),
@@ -646,6 +662,52 @@ where
         }))
     }
 
+    fn add_curve(
+        &mut self,
+        output: SepticCurve<Felt<FC::F>>,
+        input1: SepticCurve<Felt<FC::F>>,
+        input2: SepticCurve<Felt<FC::F>>,
+    ) -> Instruction<FC::F> {
+        Instruction::HintAddCurve(Box::new(HintAddCurveInstr {
+            output_x_addrs_mults: output
+                .x
+                .0
+                .into_iter()
+                .map(|r| (r.write(self), FC::F::ZERO))
+                .collect(),
+            output_y_addrs_mults: output
+                .y
+                .0
+                .into_iter()
+                .map(|r| (r.write(self), FC::F::ZERO))
+                .collect(),
+            input1_x_addrs: input1
+                .x
+                .0
+                .into_iter()
+                .map(|value| value.read_ghost(self))
+                .collect(),
+            input1_y_addrs: input1
+                .y
+                .0
+                .into_iter()
+                .map(|value| value.read_ghost(self))
+                .collect(),
+            input2_x_addrs: input2
+                .x
+                .0
+                .into_iter()
+                .map(|value| value.read_ghost(self))
+                .collect(),
+            input2_y_addrs: input2
+                .y
+                .0
+                .into_iter()
+                .map(|value| value.read_ghost(self))
+                .collect(),
+        }))
+    }
+
     fn print_f(&mut self, addr: impl Reg<FC>) -> Instruction<FC::F> {
         Instruction::Print(PrintInstr {
             field_elt_type: FieldEltType::Base,
@@ -697,6 +759,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::HintExt2Felts(_) => "HintExt2Felts",
         Instruction::Hint(_) => "Hint",
         Instruction::CommitPublicValues(_) => "CommitPublicValues",
+        Instruction::HintAddCurve(_) => "HintAddCurve",
     }
 }
 

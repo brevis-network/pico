@@ -37,7 +37,7 @@ use crate::{
     primitives::consts::WORD_SIZE,
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::{Field, FieldAlgebra};
+use p3_field::Field;
 use p3_matrix::Matrix;
 
 impl<F: Field, CB> Air<CB> for MulChip<F>
@@ -48,8 +48,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &MulCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &MulCols<CB::Var> = (*next).borrow();
         let base = CB::F::from_canonical_u32(1 << 8);
 
         let zero: CB::Expr = CB::F::ZERO.into();
@@ -58,9 +56,6 @@ where
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Calculate the MSBs.
         let (b_msb, c_msb) = {

@@ -222,18 +222,20 @@ fn main() {
 
     info!("Generating COMBINE proof (at {:?})..", start.elapsed());
     let (combine_proof, combine_time) = timed_run(|| {
-        let combine_stdin = EmulatorStdin::setup_for_combine(
+        let (combine_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine(
             vk_root,
             convert_proof.vks(),
             &convert_proof.proofs(),
             convert_machine.base_machine(),
             COMBINE_SIZE,
-            false,
+            convert_proof.proofs().len() <= COMBINE_SIZE,
         );
 
         let combine_witness = ProvingWitness::setup_for_recursion(
             vk_root,
             combine_stdin,
+            last_vk,
+            last_proof,
             combine_machine.config(),
             recursion_opts,
         );
@@ -294,7 +296,7 @@ fn main() {
     info!("Generating COMPRESS proof (at {:?})..", start.elapsed());
     let (compress_proof, compress_time) = timed_run(|| {
         let compress_stdin = RecursionStdin::new(
-            compress_machine.base_machine(),
+            combine_machine.base_machine(),
             combine_proof.vks.clone(),
             combine_proof.proofs.clone(),
             true,

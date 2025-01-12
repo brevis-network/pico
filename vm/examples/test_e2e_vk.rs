@@ -50,7 +50,7 @@ fn main() {
 
     let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
     // COMBINE_DEGREE == COMPRESS_DEGREE == CONVERT_DEGREE == 3
-    let recursion_config =
+    let recursion_shape_config =
         RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
     let vk_manager = VkMerkleManager::new_from_file("vk_map.bin").unwrap();
 
@@ -85,10 +85,18 @@ fn main() {
     // Setup machine prover, verifier, pk and vk.
     let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
 
+    let core_opts = if args.bench {
+        info!("use benchmark options");
+        EmulatorOpts::bench_riscv_ops()
+    } else {
+        EmulatorOpts::default()
+    };
+    info!("core_opts: {:?}", core_opts);
+
     let riscv_witness = ProvingWitness::setup_for_riscv(
         riscv_program.clone(),
         riscv_stdin,
-        EmulatorOpts::default(),
+        core_opts,
         riscv_pk,
         riscv_vk,
     );
@@ -125,11 +133,16 @@ fn main() {
     // -------- Riscv Convert Recursion Machine --------
 
     info!("\n Begin CONVERT..");
+    let recursion_opts = if args.bench {
+        EmulatorOpts::bench_recursion_opts()
+    } else {
+        EmulatorOpts::default()
+    };
+    info!("recursion_opts: {:?}", recursion_opts);
 
     info!("PERF-machine=convert");
     let convert_start = Instant::now();
 
-    // TODO: Initialize the VK root.
     let vk_root = vk_manager.merkle_root;
     let riscv_vk = riscv_witness.vk();
 
@@ -146,14 +159,11 @@ fn main() {
         vk_root,
         riscv_machine.base_machine(),
         &riscv_proof.proofs(),
-        Some(recursion_config),
+        Some(recursion_shape_config),
     );
 
-    let convert_witness = ProvingWitness::setup_for_convert(
-        convert_stdin,
-        convert_machine.config(),
-        EmulatorOpts::default(),
-    );
+    let convert_witness =
+        ProvingWitness::setup_for_convert(convert_stdin, convert_machine.config(), recursion_opts);
 
     // Generate the proof.
     info!("Generating CONVERT proof (at {:?})..", start.elapsed());
@@ -184,6 +194,9 @@ fn main() {
 
     info!("\n Begin COMBINE..");
 
+    let recursion_shape_config =
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
+
     info!("PERF-machine=combine");
     let combine_start = Instant::now();
 
@@ -204,20 +217,24 @@ fn main() {
         );
     }
     // Setup stdin and witnesses
-    let combine_stdin = EmulatorStdin::setup_for_combine_vk(
+    let (combine_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine_vk(
         vk_root,
         convert_proof.vks(),
         &convert_proof.proofs(),
         convert_machine.base_machine(),
         COMBINE_SIZE,
-        false,
+        convert_proof.proofs().len() <= COMBINE_SIZE,
+        &vk_manager,
+        &recursion_shape_config,
     );
 
     let combine_witness = ProvingWitness::setup_for_recursion_vk(
         vk_root,
         combine_stdin,
+        last_vk,
+        last_proof,
         combine_machine.config(),
-        EmulatorOpts::default(),
+        recursion_opts,
     );
 
     // Generate the proof.
@@ -343,7 +360,7 @@ fn main() {
     );
 
     let embed_stdin = RecursionStdin::new(
-        compress_machine.base_machine(),
+        combine_machine.base_machine(),
         compress_proof.vks,
         compress_proof.proofs,
         true,
@@ -357,6 +374,8 @@ fn main() {
         &embed_vk_stdin,
         vk_manager,
     );
+
+    embed_vk_program.print_stats();
 
     let (embed_pk, embed_vk) = embed_machine.setup_keys(&embed_vk_program);
 

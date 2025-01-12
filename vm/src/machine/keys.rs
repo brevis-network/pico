@@ -1,3 +1,4 @@
+use super::septic::SepticDigest;
 use crate::{
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
     primitives::{consts::DIGEST_SIZE, poseidon2_hash},
@@ -22,6 +23,10 @@ pub struct BaseProvingKey<SC: StarkGenericConfig> {
     pub preprocessed_prover_data: PcsProverData<SC>,
     /// the index of for chips, chip name for key
     pub preprocessed_chip_ordering: Arc<HashMap<String, usize>>,
+    /// The starting global digest of the program, after incorporating the initial memory.
+    pub initial_global_cumulative_sum: SepticDigest<SC::Val>,
+    /// The preprocessed chip local only information.
+    pub local_only: Vec<bool>,
 }
 
 impl<SC: StarkGenericConfig> Clone for BaseProvingKey<SC>
@@ -35,6 +40,8 @@ where
             preprocessed_trace: self.preprocessed_trace.clone(),
             preprocessed_prover_data: self.preprocessed_prover_data.clone(),
             preprocessed_chip_ordering: self.preprocessed_chip_ordering.clone(),
+            initial_global_cumulative_sum: self.initial_global_cumulative_sum.clone(),
+            local_only: self.local_only.clone(),
         }
     }
 }
@@ -44,6 +51,8 @@ impl<SC: StarkGenericConfig> BaseProvingKey<SC> {
     pub fn observed_by(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
+        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
+        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
         for _ in 0..7 {
             challenger.observe(Val::<SC>::ZERO);
         }
@@ -62,6 +71,8 @@ pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     pub preprocessed_info: Arc<Vec<(String, Dom<SC>, Dimensions)>>,
     /// the index of for chips, chip name for key
     pub preprocessed_chip_ordering: Arc<HashMap<String, usize>>,
+    /// The starting global digest of the program, after incorporating the initial memory.
+    pub initial_global_cumulative_sum: SepticDigest<SC::Val>,
 }
 
 impl<SC: StarkGenericConfig> BaseVerifyingKey<SC> {
@@ -69,6 +80,8 @@ impl<SC: StarkGenericConfig> BaseVerifyingKey<SC> {
     pub fn observed_by(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
         challenger.observe(self.pc_start);
+        challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
+        challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
         for _ in 0..7 {
             challenger.observe(Val::<SC>::ZERO);
         }

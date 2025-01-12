@@ -43,24 +43,13 @@ where
             NUM_RANGECHECK_MULT_COLS,
         );
 
-        let mut chunk = input.chunk_index() as u32;
-        // TODO: temp work around
-        // if chunk == 2 {
-        //     chunk = 1;
-        // }
-        if input.name() == "RecursionRecord" {
-            chunk = 0;
-        }
-        input
-            .range_lookup_events(Some(chunk))
-            .for_each(|(event, multi)| {
-                let row = event.value as usize;
-                let index = event.opcode as usize;
+        input.all_range_lookup_events().for_each(|(event, multi)| {
+            let row = event.value as usize;
+            let index = event.opcode as usize;
 
-                let cols: &mut RangeCheckMultCols<F> = trace.row_mut(row).borrow_mut();
-                cols.multiplicities[index] += F::from_canonical_usize(multi);
-                // cols.chunk = F::from_canonical_u32(chunk);
-            });
+            let cols: &mut RangeCheckMultCols<F> = trace.row_mut(row).borrow_mut();
+            cols.multiplicities[index] += F::from_canonical_usize(multi);
+        });
 
         trace
     }

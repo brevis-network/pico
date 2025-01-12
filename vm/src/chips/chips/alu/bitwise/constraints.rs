@@ -8,7 +8,7 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra};
+use p3_field::Field;
 use p3_matrix::Matrix;
 
 impl<F: Field> BaseAir<F> for BitwiseChip<F> {
@@ -25,14 +25,9 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &BitwiseCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &BitwiseCols<CB::Var> = (*next).borrow();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Get the opcode for the operation.
         let opcode = local.is_xor * ByteOpcode::XOR.as_field::<CB::F>()

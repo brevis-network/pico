@@ -19,7 +19,7 @@ use crate::{
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use p3_air::BaseAir;
-use p3_field::Field;
+use p3_field::{Field, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use tracing::debug;
@@ -30,7 +30,7 @@ impl<F: Field> BaseAir<F> for AddSubChip<F> {
     }
 }
 
-impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
+impl<F: PrimeField> ChipBehavior<F> for AddSubChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -126,6 +126,10 @@ impl<F: Field> ChipBehavior<F> for AddSubChip<F> {
 
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.add_events.is_empty() || !record.sub_events.is_empty()
+    }
+
+    fn local_only(&self) -> bool {
+        true
     }
 }
 

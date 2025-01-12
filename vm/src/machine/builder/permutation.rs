@@ -1,5 +1,6 @@
 //! Permutation associating builder functions
 
+use crate::machine::septic::SepticDigest;
 use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_matrix::Matrix;
 
@@ -10,14 +11,19 @@ pub trait PermutationBuilder: AirBuilder + ExtensionBuilder {
 
     type RandomVar: Into<Self::ExprEF> + Copy;
 
+    /// The type of the local cumulative sum.
+    type RegionalSum: Into<Self::ExprEF> + Copy;
+
+    /// The type of the global cumulative sum;
+    type GlobalSum: Into<Self::Expr> + Copy;
+
     fn permutation(&self) -> Self::MP;
 
     fn permutation_randomness(&self) -> &[Self::RandomVar];
 
-    /// for cumulative sum
-    // The type of the cumulative sum.
-    type Sum: Into<Self::ExprEF> + Copy;
+    /// Returns the local cumulative sum of the permutation.
+    fn regional_cumulative_sum(&self) -> &Self::RegionalSum;
 
-    // Returns the cumulative sum of the permutation.
-    fn cumulative_sums(&self) -> &[Self::Sum];
+    /// Returns the global cumulative sum of the permutation.
+    fn global_cumulative_sum(&self) -> &SepticDigest<Self::GlobalSum>;
 }

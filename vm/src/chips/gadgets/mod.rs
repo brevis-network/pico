@@ -7,6 +7,8 @@ pub mod field;
 pub mod field_range_check;
 pub mod fixed_rotate_right;
 pub mod fixed_shift_right;
+pub mod global_accumulation;
+pub mod global_interaction;
 pub mod is_equal_word;
 pub mod is_zero;
 pub mod is_zero_word;

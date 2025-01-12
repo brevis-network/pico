@@ -1,5 +1,5 @@
 use p3_air::{Air, BaseAir};
-use p3_field::Field;
+use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     chips::chips::toys::lookup_toy::{AddLookedChip, AddLookingChip},
@@ -23,7 +23,7 @@ pub enum LookupToyChipType<F: Field> {
     LookedChip(AddLookedChip<F>),
 }
 
-impl<F: Field> LookupToyChipType<F> {
+impl<F: PrimeField> LookupToyChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![
             MetaChip::new(Self::LookingChip(AddLookingChip::default())),
@@ -32,7 +32,7 @@ impl<F: Field> LookupToyChipType<F> {
     }
 }
 
-impl<F: Field> ChipBehavior<F> for LookupToyChipType<F> {
+impl<F: PrimeField> ChipBehavior<F> for LookupToyChipType<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

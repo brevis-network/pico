@@ -171,37 +171,10 @@ fn main() {
 
     let base_proof = proof.proofs()[0].clone();
 
-    // Get field_config input
     // Get recursion input
-    let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
     let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
-    /*
-        // Get field_config program
-        // Note that simple_machine is used as input for recursive verifier to build the program
-        info!(
-            "\n Build simple recursion program (at {:?})..",
-            start.elapsed()
-        );
-        let recursion_program =
-            SimpleVerifierCircuit::<rcf::FieldConfig, _>::build(simple_machine.base_machine());
-
-        let serialized_program = bincode::serialize(&recursion_program).unwrap();
-        let mut hasher = DefaultHasher::new();
-        serialized_program.hash(&mut hasher);
-        let hash = hasher.finish();
-        info!("Simple recursion program hash: {}", hash);
-        // assert_eq!(hash, 5942896757507644055);
-
-        // Get field_config input
-        // let mut reconstruct_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
-        // let mut base_challenger = DuplexChallenger::new(simple_machine.config().perm.clone());
-        let mut reconstruct_challenger = simple_machine.config().challenger();
-        let mut base_challenger = simple_machine.config().challenger();
-    */
-
     let recursion_stdin = SimpleRecursionStdin::construct(
         simple_machine.base_machine(),
-        &mut reconstruct_challenger,
         &vk,
         &mut base_challenger,
         base_proof.clone(),
@@ -251,7 +224,7 @@ fn main() {
 
     // // TODO: The number of CPU and range_check events keeps changing
     let mut expected_stats = HashMap::<String, usize>::new();
-    expected_stats.insert("poseidon2_events".to_string(), 495);
+    expected_stats.insert("poseidon2_events".to_string(), 595);
     expected_stats.insert("poseidon2_hash_events".to_string(), 8000);
     expected_stats.insert("poseidon2_compress_events".to_string(), 24598);
     expected_stats.insert("range_check_events".to_string(), 67000);

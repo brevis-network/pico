@@ -8,7 +8,7 @@ use crate::{
             witness::Witnessable,
         },
         constraints::{Constraint, ConstraintCompiler},
-        ir::{Builder, Ext, Witness},
+        ir::{Builder, Witness},
     },
     configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
     instances::{
@@ -21,7 +21,6 @@ use crate::{
     recursion_v2::air::{assert_embed_public_values_valid, RecursionPublicValues},
 };
 use p3_baby_bear::BabyBear;
-use p3_field::FieldAlgebra;
 use std::{borrow::Borrow, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
@@ -74,9 +73,6 @@ impl OnchainVerifierCircuit<EmbedFC, EmbedSC> {
     ) {
         let OnchainStdinVariable { vk, proof, .. } = input;
 
-        let zero_ext: Ext<<EmbedFC as FieldGenericConfig>::F, <EmbedFC as FieldGenericConfig>::EF> =
-            builder.eval(<EmbedFC as FieldGenericConfig>::F::ZERO);
-
         /*
         Verify chunk proof
          */
@@ -94,14 +90,7 @@ impl OnchainVerifierCircuit<EmbedFC, EmbedSC> {
                     .copied(),
             );
 
-            StarkVerifier::verify_chunk(
-                builder,
-                vk,
-                machine,
-                &mut challenger,
-                proof,
-                &[zero_ext, zero_ext],
-            );
+            StarkVerifier::verify_chunk(builder, vk, machine, &mut challenger, proof);
         }
 
         // Get the public values, and assert that they are valid.

@@ -47,8 +47,8 @@ use core::{
 };
 use hashbrown::HashMap;
 use num::{BigUint, Zero};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_air::{Air, BaseAir};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use pico_derive::AlignedBorrow;
@@ -255,6 +255,10 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
             !record.get_precompile_events(SyscallCode::ED_ADD).is_empty()
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E> {
@@ -307,15 +311,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &EdAddAssignCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &EdAddAssignCols<CB::Var> = (*next).borrow();
-
-        // Constrain the incrementing nonce.
-        // builder.when_first_row().assert_zero(local.nonce);
-
-        builder
-            .when_transition()
-            .assert_eq(next.is_real * (local.nonce + CB::Expr::ONE), next.nonce);
 
         let x1: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
             limbs_from_prev_access(&local.p_access[0..8]);

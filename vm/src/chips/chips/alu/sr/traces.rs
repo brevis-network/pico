@@ -117,6 +117,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.shift_right_events.is_empty()
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F: PrimeField32> ShiftRightChip<F> {

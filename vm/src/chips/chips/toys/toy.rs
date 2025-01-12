@@ -3,13 +3,11 @@
 use crate::{
     compiler::riscv::{opcode::Opcode, program::Program},
     emulator::riscv::record::EmulationRecord,
-    machine::{
-        builder::ChipBuilder, chip::ChipBehavior, lookup::LookupScope, utils::pad_to_power_of_two,
-    },
+    machine::{builder::ChipBuilder, chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, FieldAlgebra, PrimeField};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{marker::PhantomData, mem::size_of};
 
@@ -47,7 +45,7 @@ impl<'a, T: Clone> ToyCols<&'a T> {
     }
 }
 
-impl<F: Field> ChipBehavior<F> for ToyChip<F> {
+impl<F: PrimeField> ChipBehavior<F> for ToyChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -116,10 +114,6 @@ impl<F: Field> ChipBehavior<F> for ToyChip<F> {
 
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
-    }
-
-    fn lookup_scope(&self) -> LookupScope {
-        LookupScope::Global
     }
 }
 

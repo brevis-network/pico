@@ -27,6 +27,7 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, SymbolicConstraintFolder},
         keys::HashableKey,
+        septic::SepticDigest,
     },
     recursion_v2::air::RecursionPublicValues,
 };
@@ -181,7 +182,8 @@ pub fn compute_quotient_values<SC, C, Mat>(
     main_trace_on_quotient_domain: Mat,
     permutation_trace_on_quotient_domain: Mat,
     perm_challenges: &[PackedChallenge<SC>],
-    cumulative_sums: &[SC::Challenge],
+    regional_cumulative_sum: &SC::Challenge,
+    global_cumulative_sum: &SepticDigest<SC::Val>,
     alpha: SC::Challenge,
 ) -> Vec<SC::Challenge>
 where
@@ -278,10 +280,8 @@ where
 
                 let accumulator = PackedChallenge::<SC>::ZERO;
 
-                let packed_cumulative_sums = cumulative_sums
-                    .iter()
-                    .map(|c| PackedChallenge::<SC>::from_f(*c))
-                    .collect::<Vec<_>>();
+                let packed_regional_cumulative_sum =
+                    PackedChallenge::<SC>::from_f(*regional_cumulative_sum);
 
                 let mut folder = ProverConstraintFolder {
                     preprocessed: preprocessed_trace_on_quotient_domain,
@@ -289,7 +289,8 @@ where
                     perm: permutation_on_quotient_domain,
                     public_values,
                     perm_challenges,
-                    cumulative_sums: &packed_cumulative_sums,
+                    regional_cumulative_sum: &packed_regional_cumulative_sum,
+                    global_cumulative_sum,
                     is_first_row,
                     is_last_row,
                     is_transition,

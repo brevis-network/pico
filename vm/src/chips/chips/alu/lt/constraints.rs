@@ -20,8 +20,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &LtCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &LtCols<CB::Var> = (*next).borrow();
 
         let is_real = local.is_slt + local.is_slt_u;
         let mut b_cmp: Word<CB::Expr> = local.b.map(|x| x.into());
@@ -29,9 +27,6 @@ where
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         b_cmp[3] = local.b[3] * local.is_slt_u + local.b_masked * local.is_slt;
         c_cmp[3] = local.c[3] * local.is_slt_u + local.c_masked * local.is_slt;

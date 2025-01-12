@@ -4,9 +4,7 @@ use crate::{
     compiler::{
         recursion_v2::{
             circuit::{
-                challenger::{
-                    CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable,
-                },
+                challenger::{CanObserveVariable, DuplexChallengerVariable},
                 config::{BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig},
                 stark::StarkVerifier,
                 witness::Witnessable,
@@ -27,13 +25,12 @@ use crate::{
             riscv_config::StarkConfig as RiscvSC,
         },
     },
-    machine::machine::BaseMachine,
+    machine::{lookup::LookupScope, machine::BaseMachine},
     primitives::consts::{
         ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS_V2,
     },
     recursion_v2::air::{recursion_public_values_digest, RecursionPublicValues},
 };
-use itertools::Itertools;
 use p3_baby_bear::BabyBear;
 use p3_field::FieldAlgebra;
 use std::{
@@ -83,8 +80,6 @@ where
         let ConvertStdinVariable {
             riscv_vk,
             proofs,
-            base_challenger,
-            reconstruct_challenger,
             flag_complete,
             flag_first_chunk,
             vk_root,
@@ -106,10 +101,6 @@ where
         let mut current_chunk = public_values.chunk;
         let mut current_execution_chunk = public_values.execution_chunk;
 
-        // for reconstruct challenger
-        let mut current_reconstruct_challenger: DuplexChallengerVariable<_> =
-            reconstruct_challenger.copy(builder);
-
         // flags
         let flag_cpu = proofs[0].contains_cpu();
         let flag_memory_initialize = proofs[0].contains_memory_initialize();
@@ -118,21 +109,23 @@ where
         /*
         Verify chunk proof
          */
-        {
-            let mut challenger = base_challenger.copy(builder);
 
-            let global_permutation_challenges =
-                (0..2).map(|_| challenger.sample_ext(builder)).collect_vec();
+        // Prepare a challenger.
+        let mut challenger = {
+            let mut challenger = machine.config().challenger_variable(builder);
+            riscv_vk.observed_by(builder, &mut challenger);
 
-            StarkVerifier::verify_chunk(
+            challenger.observe_slice(
                 builder,
-                &riscv_vk,
-                machine,
-                &mut challenger,
-                &proofs[0],
-                &global_permutation_challenges,
+                proofs[0].public_values[0..machine.num_public_values()]
+                    .iter()
+                    .copied(),
             );
-        }
+
+            challenger
+        };
+
+        StarkVerifier::verify_chunk(builder, &riscv_vk, machine, &mut challenger, &proofs[0]);
 
         /*
         Beginning constraints
@@ -153,19 +146,6 @@ where
                 (SymbolicFelt::ONE - flag_first_chunk) * public_values.chunk,
                 CC::F::ONE,
             );
-
-            // Starting challenger assertion
-            let mut starting_challenger = machine.config().challenger_variable(builder);
-            riscv_vk.observed_by(builder, &mut starting_challenger);
-            let starting_challenger_public_values = starting_challenger.public_values(builder);
-            let reconstruct_challenger_public_values =
-                reconstruct_challenger.public_values(builder);
-            for (c0, c1) in starting_challenger_public_values
-                .into_iter()
-                .zip(reconstruct_challenger_public_values)
-            {
-                builder.assert_felt_eq(flag_first_chunk * (c0 - c1), CC::F::ZERO);
-            }
 
             // `start_pc` equals `vk.pc_start`.
             builder.assert_felt_eq(
@@ -247,25 +227,24 @@ where
             builder.assert_felt_eq(public_values.exit_code, CC::F::ZERO);
         }
 
-        /*
-        Update bookkeeping
-         */
-        // update reconstruct challenger
-        current_reconstruct_challenger.observe(builder, proofs[0].commitments.global_main_commit);
-        for element in proofs[0]
-            .public_values
-            .iter()
-            .take(machine.num_public_values())
-        {
-            current_reconstruct_challenger.observe(builder, *element);
-        }
-
         // cumulative sum
-        let mut global_cumulative_sum: Ext<_, _> = builder.eval(CC::EF::ZERO.cons());
-        for values in proofs[0].opened_values.chips_opened_values.iter() {
-            global_cumulative_sum =
-                builder.eval(global_cumulative_sum + values.global_cumulative_sum);
+        let mut global_cumulative_sums = Vec::new();
+        global_cumulative_sums.push(builder.select_global_cumulative_sum(
+            flag_first_chunk,
+            riscv_vk.initial_global_cumulative_sum,
+        ));
+        let chips = machine
+            .chunk_ordered_chips(&proofs[0].main_chip_ordering)
+            .collect::<Vec<_>>();
+        for (chip, values) in chips
+            .iter()
+            .zip(proofs[0].opened_values.chips_opened_values.iter())
+        {
+            if chip.lookup_scope() == LookupScope::Global {
+                global_cumulative_sums.push(values.global_cumulative_sum);
+            }
         }
+        let global_cumulative_sum = builder.sum_digest_v2(global_cumulative_sums);
 
         /*
         Update public values and commit
@@ -273,15 +252,6 @@ where
         {
             // Compute the vk digest.
             let vk_digest = riscv_vk.hash_babybear(builder);
-
-            // challenger pvs
-            let base_challenger_public_values = base_challenger.public_values(builder);
-            let start_challenger_public_values = reconstruct_challenger.public_values(builder);
-            let end_challenger_public_values =
-                current_reconstruct_challenger.public_values(builder);
-
-            // Collect the cumulative sum.
-            let global_cumulative_sum_array = builder.ext2felt_v2(global_cumulative_sum);
 
             let zero: Felt<_> = builder.eval(CC::F::ZERO);
 
@@ -309,14 +279,10 @@ where
                 public_values.previous_finalize_addr_bits;
             recursion_public_values.last_finalize_addr_bits = public_values.last_finalize_addr_bits;
 
-            recursion_public_values.base_challenger = base_challenger_public_values;
-            recursion_public_values.start_reconstruct_challenger = start_challenger_public_values;
-            recursion_public_values.end_reconstruct_challenger = end_challenger_public_values;
-
             recursion_public_values.riscv_vk_digest = vk_digest;
             recursion_public_values.vk_root = vk_root;
 
-            recursion_public_values.cumulative_sum = global_cumulative_sum_array;
+            recursion_public_values.global_cumulative_sum = global_cumulative_sum;
             recursion_public_values.exit_code = public_values.exit_code;
             recursion_public_values.flag_complete = flag_complete;
 

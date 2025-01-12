@@ -3,7 +3,10 @@ use super::{
     config::{BabyBearFriConfigVariable, CircuitConfig},
     hash::FieldHasherVariable,
 };
-use crate::{compiler::recursion_v2::prelude::*, primitives::consts::DIGEST_SIZE};
+use crate::{
+    compiler::recursion_v2::prelude::*, machine::septic::SepticDigest,
+    primitives::consts::DIGEST_SIZE,
+};
 use hashbrown::HashMap;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
@@ -16,6 +19,7 @@ pub struct BaseVerifyingKeyVariable<
 > {
     pub commit: SC::DigestVariable,
     pub pc_start: Felt<CC::F>,
+    pub initial_global_cumulative_sum: SepticDigest<Felt<CC::F>>,
     pub preprocessed_info: Vec<(String, TwoAdicMultiplicativeCoset<CC::F>, Dimensions)>,
     pub preprocessed_chip_ordering: HashMap<String, usize>,
 }
@@ -85,6 +89,8 @@ impl<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>>
         challenger.observe(builder, self.commit);
         // Observe the pc_start.
         challenger.observe(builder, self.pc_start);
+        challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.x.0);
+        challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.y.0);
         let zero: Felt<_> = builder.eval(CC::F::ZERO);
         for _ in 0..7 {
             challenger.observe(builder, zero);

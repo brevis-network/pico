@@ -16,6 +16,7 @@ use crate::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
+        proof::BaseProof,
     },
     primitives::consts::DIGEST_SIZE,
     recursion_v2::runtime::RecursionRecord,
@@ -35,9 +36,13 @@ where
 
     pub vk: Option<BaseVerifyingKey<SC>>,
 
+    pub proof: Option<BaseProof<SC>>,
+
     pub vk_root: Option<[Val<SC>; DIGEST_SIZE]>,
 
     pub stdin: Option<EmulatorStdin<C::Program, I>>,
+
+    pub flag_empty_stdin: bool,
 
     pub config: Option<Arc<SC>>,
 
@@ -56,8 +61,10 @@ where
             program: None,
             pk: None,
             vk: None,
+            proof: None,
             vk_root: None,
             stdin: None,
+            flag_empty_stdin: false,
             opts: None,
             config: None,
             records,
@@ -73,8 +80,10 @@ where
             program: None,
             pk: Some(pk),
             vk: Some(vk),
+            proof: None,
             vk_root: None,
             stdin: None,
+            flag_empty_stdin: false,
             opts: None,
             config: None,
             records,
@@ -111,8 +120,10 @@ where
             program: Some(program),
             pk: Some(pk),
             vk: Some(vk),
+            proof: None,
             vk_root: None,
             stdin: Some(stdin),
+            flag_empty_stdin: false,
             opts: Some(opts),
             config: None,
             records: vec![],
@@ -142,8 +153,10 @@ where
             program: None,
             pk: None,
             vk: None,
+            proof: None,
             vk_root: None,
             stdin: Some(stdin),
+            flag_empty_stdin: false,
             opts: Some(opts),
             config: Some(config),
             records: vec![],
@@ -170,15 +183,20 @@ where
     pub fn setup_for_recursion(
         vk_root: [Val<RecursionSC>; DIGEST_SIZE],
         stdin: EmulatorStdin<C::Program, RecursionStdin<'a, RecursionSC, PrevC>>,
+        last_vk: Option<BaseVerifyingKey<RecursionSC>>,
+        last_proof: Option<BaseProof<RecursionSC>>,
         config: Arc<RecursionSC>,
         opts: EmulatorOpts,
     ) -> Self {
+        let flag_empty_stdin = stdin.flag_empty;
         Self {
             program: None,
             pk: None,
-            vk: None,
+            vk: last_vk,
+            proof: last_proof,
             vk_root: Some(vk_root),
             stdin: Some(stdin),
+            flag_empty_stdin,
             opts: Some(opts),
             config: Some(config),
             records: vec![],
@@ -205,15 +223,20 @@ where
     pub fn setup_for_recursion_vk(
         vk_root: [Val<RecursionSC>; DIGEST_SIZE],
         stdin: EmulatorStdin<C::Program, RecursionVkStdin<'a, RecursionSC, PrevC>>,
+        last_vk: Option<BaseVerifyingKey<RecursionSC>>,
+        last_proof: Option<BaseProof<RecursionSC>>,
         config: Arc<RecursionSC>,
         opts: EmulatorOpts,
     ) -> Self {
+        let flag_empty_stdin = stdin.flag_empty;
         Self {
             program: None,
             pk: None,
-            vk: None,
+            vk: last_vk,
+            proof: last_proof,
             vk_root: Some(vk_root),
             stdin: Some(stdin),
+            flag_empty_stdin,
             opts: Some(opts),
             config: Some(config),
             records: vec![],

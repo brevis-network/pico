@@ -61,7 +61,14 @@ macro_rules! impl_chip_behavior {
                     )+
                 }
             }
-        }
 
+            fn local_only(&self) -> bool {
+                match self {
+                    $(
+                        Self::$variant(chip) => chip.local_only(),
+                    )+
+                }
+            }
+        }
     };
 }

@@ -2,13 +2,13 @@ use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            challenger::{CanObserveVariable, DuplexChallengerVariable, FieldChallengerVariable},
+            challenger::{CanObserveVariable, DuplexChallengerVariable},
             config::{BabyBearFriConfig, BabyBearFriConfigVariable, CircuitConfig},
             stark::StarkVerifier,
             witness::Witnessable,
             CircuitV2Builder,
         },
-        ir::{compiler::DslIrCompiler, Builder, Ext, ExtConst, Felt},
+        ir::{compiler::DslIrCompiler, Builder, Felt},
         program::RecursionProgram,
     },
     configs::stark_config::bb_poseidon2::BabyBearPoseidon2,
@@ -67,19 +67,12 @@ where
         let SimpleRecursionStdinVariable {
             vk,
             base_proofs,
-            base_challenger,
-            initial_reconstruct_challenger,
             flag_complete: _,
             flag_first_chunk: _,
         } = input;
 
-        // Initialize the challenger variables.
-        let base_challenger_public_values = base_challenger.public_values(builder);
-        let mut reconstruct_challenger: DuplexChallengerVariable<_> =
-            initial_reconstruct_challenger.copy(builder);
-
         // Initialize the cumulative sum.
-        let mut global_cumulative_sum: Ext<_, _> = builder.eval(CC::EF::ZERO.cons());
+        let mut global_cumulative_sums = Vec::new();
 
         // Assert that the number of proofs is not zero.
         // builder.assert_usize_eq(base_proofs.len(), 1);
@@ -87,43 +80,42 @@ where
 
         // Verify proofs, validate transitions, and update accumulation variables.
         for base_proof in base_proofs.into_iter() {
-            // Verify each chunk
-            let mut challenger = base_challenger.copy(builder);
+            // Prepare a challenger.
+            let mut challenger = {
+                let mut challenger = machine.config().challenger_variable(builder);
+                vk.observed_by(builder, &mut challenger);
 
-            let global_permutation_challenges = (0..2)
-                .map(|_| challenger.sample_ext(builder))
-                .collect::<Vec<_>>();
+                challenger.observe_slice(
+                    builder,
+                    base_proof.public_values[0..machine.num_public_values()]
+                        .iter()
+                        .copied(),
+                );
 
+                challenger
+            };
+
+            /*
+            Verify chunk proof
+             */
             StarkVerifier::<CC, SC, RiscvChipType<SC::Val>>::verify_chunk(
                 builder,
                 &vk,
                 machine,
                 &mut challenger,
                 &base_proof,
-                &global_permutation_challenges,
             );
-
-            // Update the reconstruct challenger.
-            reconstruct_challenger.observe(builder, base_proof.commitments.global_main_commit);
-            for element in base_proof
-                .public_values
-                .iter()
-                .take(machine.num_public_values())
-            {
-                reconstruct_challenger.observe(builder, *element);
-            }
 
             // Cumulative sum is updated by sums of all chips.
             for values in base_proof.opened_values.chips_opened_values.iter() {
-                global_cumulative_sum =
-                    builder.eval(global_cumulative_sum + values.global_cumulative_sum);
+                global_cumulative_sums.push(values.global_cumulative_sum);
             }
         }
 
         // Write all values to the public values struct and commit to them.
         {
             // Collect the cumulative sum.
-            let global_cumulative_sum_array = builder.ext2felt_v2(global_cumulative_sum);
+            let global_cumulative_sum = builder.sum_digest_v2(global_cumulative_sums);
 
             // Initialize the public values we will commit to.
             let zero: Felt<_> = builder.eval(CC::F::ZERO);
@@ -132,8 +124,7 @@ where
             let recursion_public_values: &mut RecursionPublicValues<_> =
                 recursion_public_values_stream.as_mut_slice().borrow_mut();
 
-            recursion_public_values.base_challenger = base_challenger_public_values;
-            recursion_public_values.cumulative_sum = global_cumulative_sum_array;
+            recursion_public_values.global_cumulative_sum = global_cumulative_sum;
 
             SC::commit_recursion_public_values(builder, *recursion_public_values);
         }

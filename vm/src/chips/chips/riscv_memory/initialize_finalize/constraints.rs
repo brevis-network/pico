@@ -4,14 +4,13 @@ use super::{
 };
 use crate::{
     chips::gadgets::{
-        field_range_check::bit_decomposition::FieldBitDecomposition, is_zero::IsZeroGadget,
+        field_range_check::bit_decomposition::FieldBitDecomposition,
+        global_accumulation::GlobalAccumulationOperation,
+        global_interaction::GlobalInteractionOperation, is_zero::IsZeroGadget,
     },
     compiler::word::Word,
     emulator::riscv::public_values::PublicValues,
-    machine::{
-        builder::{ChipBaseBuilder, ChipBuilder},
-        lookup::{LookupScope, LookupType, SymbolicLookup},
-    },
+    machine::builder::{ChipBaseBuilder, ChipBuilder},
     primitives::consts::MAX_NUM_PVS_V2,
 };
 use core::borrow::Borrow;
@@ -56,27 +55,44 @@ where
 
         if self.kind == MemoryChipType::Initialize {
             let mut values = vec![CB::Expr::ZERO, CB::Expr::ZERO, local.addr.into()];
-            values.extend(value.map(Into::into));
-            builder.looked(SymbolicLookup::new(
-                values,
-                local.is_real.into(),
-                LookupType::Memory,
-                LookupScope::Global,
-            ));
+            values.extend(value.clone().map(Into::into));
+            GlobalInteractionOperation::<CB::F>::eval_single_digest_memory(
+                builder,
+                CB::Expr::ZERO,
+                CB::Expr::ZERO,
+                local.addr.into(),
+                value,
+                local.global_interaction_cols,
+                false,
+                local.is_real,
+            );
         } else {
             let mut values = vec![
                 local.chunk.into(),
                 local.timestamp.into(),
                 local.addr.into(),
             ];
-            values.extend(value);
-            builder.looking(SymbolicLookup::new(
-                values,
-                local.is_real.into(),
-                LookupType::Memory,
-                LookupScope::Global,
-            ));
+            values.extend(value.clone());
+            GlobalInteractionOperation::<CB::F>::eval_single_digest_memory(
+                builder,
+                local.chunk.into(),
+                local.timestamp.into(),
+                local.addr.into(),
+                value,
+                local.global_interaction_cols,
+                true,
+                local.is_real,
+            );
         }
+
+        GlobalAccumulationOperation::<CB::F, 1>::eval_accumulation(
+            builder,
+            [local.global_interaction_cols],
+            [local.is_real],
+            [next.is_real],
+            local.global_accumulation_cols,
+            next.global_accumulation_cols,
+        );
 
         // Canonically decompose the address into bits so we can do comparisons.
         FieldBitDecomposition::<CB::F>::range_check(

@@ -9,13 +9,13 @@ use crate::{
     machine::chip::ChipBehavior,
 };
 use itertools::Itertools;
-use p3_field::Field;
+use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
 pub const NUM_ROWS: usize = 1 << 16;
 
-impl<F: Field> ChipBehavior<F> for ByteChip<F> {
+impl<F: PrimeField> ChipBehavior<F> for ByteChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

@@ -82,16 +82,21 @@ where
 
         let mut all_proofs = vec![];
         let mut all_vks = vec![];
+        let mut last_vk = proving_witness.vk.clone();
+        let mut last_proof = proving_witness.proof.clone();
 
         let mut chunk_index = 1;
         let mut layer_index = 1;
-        let mut flag_complete = false;
 
         loop {
             let mut batch_num = 1;
             let start_layer = Instant::now();
             loop {
                 let start_batch = Instant::now();
+                if proving_witness.flag_empty_stdin {
+                    break;
+                }
+
                 let (mut batch_records, batch_pks, batch_vks, done) =
                     recursion_emulator.next_record_keys_batch();
 
@@ -158,35 +163,43 @@ where
                 start_layer.elapsed()
             );
 
-            if flag_complete {
+            if last_proof.is_some() {
+                all_vks.push(last_vk.unwrap());
+                all_proofs.push(last_proof.unwrap());
+            }
+
+            if all_proofs.len() == 1 {
                 info!("recursion combine finished");
                 break;
             }
-
-            flag_complete = all_proofs.len() <= COMBINE_SIZE;
 
             layer_index += 1;
             chunk_index = 1;
 
             // more than one proofs, need to combine another round
-            recursion_stdin = EmulatorStdin::setup_for_combine(
+            (recursion_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine(
                 proving_witness.vk_root.unwrap(),
                 &all_vks,
                 &all_proofs,
                 self.base_machine(),
                 COMBINE_SIZE,
-                flag_complete,
+                all_proofs.len() <= COMBINE_SIZE,
             );
 
             recursion_witness = ProvingWitness::setup_for_recursion(
                 proving_witness.vk_root.unwrap(),
                 recursion_stdin,
+                last_vk,
+                last_proof,
                 self.config(),
                 proving_witness.opts.unwrap(),
             );
 
             recursion_emulator =
                 MetaEmulator::setup_combine(&recursion_witness, self.base_machine());
+
+            last_proof = recursion_witness.proof.clone();
+            last_vk = recursion_witness.vk.clone();
 
             all_proofs.clear();
             all_vks.clear();

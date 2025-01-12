@@ -1,7 +1,6 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            challenger::DuplexChallengerVariable,
             config::{BabyBearFriConfigVariable, CircuitConfig},
             fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
             stark::BaseProofVariable,
@@ -19,9 +18,9 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
-        lookup::LookupScope,
         machine::BaseMachine,
         proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
+        septic::SepticDigest,
         utils::order_chips,
     },
     primitives::consts::{DIGEST_SIZE, MAX_NUM_PVS_V2},
@@ -57,8 +56,6 @@ pub struct ConvertStdinVariable<CC: CircuitConfig<F = BabyBear>, SC: BabyBearFri
 {
     pub riscv_vk: BaseVerifyingKeyVariable<CC, SC>,
     pub proofs: Vec<BaseProofVariable<CC, SC>>,
-    pub base_challenger: SC::FriChallengerVariable,
-    pub reconstruct_challenger: DuplexChallengerVariable<CC>,
     pub flag_complete: Felt<CC::F>,
     pub flag_first_chunk: Felt<CC::F>,
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
@@ -107,8 +104,6 @@ where
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let riscv_vk = self.riscv_vk.read(builder);
         let proofs = self.proofs.read(builder);
-        let base_challenger = self.base_challenger.read(builder);
-        let reconstruct_challenger = self.reconstruct_challenger.read(builder);
         let flag_complete = SC_Val::from_bool(self.flag_complete).read(builder);
         let flag_first_chunk = SC_Val::from_bool(self.flag_first_chunk).read(builder);
         let vk_root = self.vk_root.read(builder);
@@ -116,8 +111,6 @@ where
         ConvertStdinVariable {
             riscv_vk,
             proofs,
-            base_challenger,
-            reconstruct_challenger,
             flag_complete,
             flag_first_chunk,
             vk_root,
@@ -127,8 +120,6 @@ where
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
         self.riscv_vk.write(witness);
         self.proofs.write(witness);
-        self.base_challenger.write(witness);
-        self.reconstruct_challenger.write(witness);
         self.flag_complete.write(witness);
         self.flag_first_chunk.write(witness);
         self.vk_root.write(witness);
@@ -150,8 +141,7 @@ where
 {
     // Make a dummy commitment.
     let commitments = BaseCommitments {
-        global_main_commit: dummy_hash(),
-        regional_main_commit: dummy_hash(),
+        main_commit: dummy_hash(),
         permutation_commit: dummy_hash(),
         quotient_commit: dummy_hash(),
     };
@@ -165,12 +155,7 @@ where
         .collect::<HashMap<_, _>>();
     let chips = machine.chips();
     let chunk_chips =
-        order_chips::<BabyBearPoseidon2, CB>(&chips, &chip_ordering).collect::<Vec<_>>();
-    let chip_scopes = chunk_chips
-        .iter()
-        .map(|chip| chip.lookup_scope())
-        .collect::<Vec<_>>();
-    let has_global_main_commit = chip_scopes.contains(&LookupScope::Global);
+        order_chips::<BabyBearPoseidon2, CB>(&*chips, &chip_ordering).collect::<Vec<_>>();
     let opened_values = BaseOpenedValues {
         chips_opened_values: chunk_chips
             .iter()
@@ -184,17 +169,15 @@ where
 
     let mut preprocessed_names_and_dimensions = vec![];
     let mut preprocessed_batch_shape = vec![];
-    let mut global_main_batch_shape = vec![];
-    let mut regional_main_batch_shape = vec![];
+    let mut main_batch_shape = vec![];
     let mut permutation_batch_shape = vec![];
     let mut quotient_batch_shape = vec![];
     let mut log_main_degrees = vec![];
     let mut log_quotient_degrees = vec![];
 
-    for ((chip, chip_opening), scope) in chunk_chips
+    for (chip, chip_opening) in chunk_chips
         .iter()
         .zip_eq(opened_values.chips_opened_values.iter())
-        .zip_eq(chip_scopes.iter())
     {
         log_main_degrees.push(chip_opening.log_main_degree);
         // TODO: should we multiple by 4?
@@ -215,10 +198,8 @@ where
             width: chip_opening.main_local.len(),
             log_degree: chip_opening.log_main_degree,
         };
-        match scope {
-            LookupScope::Global => global_main_batch_shape.push(main_shape),
-            LookupScope::Regional => regional_main_batch_shape.push(main_shape),
-        }
+        main_batch_shape.push(main_shape);
+
         let permutation_shape = PolynomialShape {
             width: chip_opening.permutation_local.len(),
             log_degree: chip_opening.log_main_degree,
@@ -233,40 +214,20 @@ where
         }
     }
 
-    let batch_shapes = if has_global_main_commit {
-        vec![
-            PolynomialBatchShape {
-                shapes: preprocessed_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: global_main_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: regional_main_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: permutation_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: quotient_batch_shape,
-            },
-        ]
-    } else {
-        vec![
-            PolynomialBatchShape {
-                shapes: preprocessed_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: regional_main_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: permutation_batch_shape,
-            },
-            PolynomialBatchShape {
-                shapes: quotient_batch_shape,
-            },
-        ]
-    };
+    let batch_shapes = vec![
+        PolynomialBatchShape {
+            shapes: preprocessed_batch_shape,
+        },
+        PolynomialBatchShape {
+            shapes: main_batch_shape,
+        },
+        PolynomialBatchShape {
+            shapes: permutation_batch_shape,
+        },
+        PolynomialBatchShape {
+            shapes: quotient_batch_shape,
+        },
+    ];
 
     let fri_queries = machine.config().fri_config().num_queries;
     let log_blowup = machine.config().fri_config().log_blowup;
@@ -307,6 +268,7 @@ where
     let vk = BaseVerifyingKey {
         commit: dummy_hash(),
         pc_start: BabyBear::ZERO,
+        initial_global_cumulative_sum: SepticDigest::<BabyBear>::zero(),
         preprocessed_info: preprocessed_chip_information.into(),
         preprocessed_chip_ordering: preprocessed_chip_ordering.into(),
     };
@@ -327,7 +289,7 @@ where
 fn dummy_opened_values<F: Field, EF: ExtensionField<F>, CB: ChipBehavior<F>>(
     chip: &MetaChip<F, CB>,
     log_main_degree: usize,
-) -> ChipOpenedValues<EF> {
+) -> ChipOpenedValues<F, EF> {
     let preprocessed_width = chip.preprocessed_width();
     let preprocessed_local = vec![EF::ZERO; preprocessed_width];
     let preprocessed_next = vec![EF::ZERO; preprocessed_width];
@@ -353,7 +315,7 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, CB: ChipBehavior<F>>(
         permutation_local,
         permutation_next,
         quotient,
-        global_cumulative_sum: EF::ZERO,
+        global_cumulative_sum: SepticDigest::<F>::zero(),
         regional_cumulative_sum: EF::ZERO,
         log_main_degree,
     }

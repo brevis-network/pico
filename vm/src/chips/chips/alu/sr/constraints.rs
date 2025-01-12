@@ -17,16 +17,11 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &ShiftRightCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &ShiftRightCols<CB::Var> = (*next).borrow();
         let zero: CB::Expr = CB::F::ZERO.into();
         let one: CB::Expr = CB::F::ONE.into();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + one.clone(), next.nonce);
 
         // Check that the MSB of most_significant_byte matches local.b_msb using lookup.
         {

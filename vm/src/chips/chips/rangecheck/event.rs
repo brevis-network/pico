@@ -34,6 +34,8 @@ pub trait RangeRecordBehavior {
         }
     }
 
+    fn all_range_lookup_events(&self) -> Box<dyn Iterator<Item = (RangeLookupEvent, usize)> + '_>;
+
     fn range_lookup_events(
         &self,
         chunk: Option<u32>,
@@ -87,6 +89,9 @@ impl RangeLookupEvent {
 
 impl RangeRecordBehavior for () {
     fn add_range_lookup_event(&mut self, _event: RangeLookupEvent) {}
+    fn all_range_lookup_events(&self) -> Box<dyn Iterator<Item = (RangeLookupEvent, usize)> + '_> {
+        Box::new(iter::empty())
+    }
     fn range_lookup_events(
         &self,
         _chunk: Option<u32>,
@@ -99,6 +104,9 @@ impl RangeRecordBehavior for Vec<RangeLookupEvent> {
     fn add_range_lookup_event(&mut self, event: RangeLookupEvent) {
         self.push(event);
     }
+    fn all_range_lookup_events(&self) -> Box<dyn Iterator<Item = (RangeLookupEvent, usize)> + '_> {
+        Box::new(self.iter().copied().zip(std::iter::repeat(1)))
+    }
     fn range_lookup_events(
         &self,
         _chunk: Option<u32>,
@@ -110,6 +118,9 @@ impl RangeRecordBehavior for Vec<RangeLookupEvent> {
 impl RangeRecordBehavior for HashMap<RangeLookupEvent, usize> {
     fn add_range_lookup_event(&mut self, event: RangeLookupEvent) {
         *self.entry(event).or_insert(0) += 1;
+    }
+    fn all_range_lookup_events(&self) -> Box<dyn Iterator<Item = (RangeLookupEvent, usize)> + '_> {
+        Box::new(self.iter().map(move |(event, v)| (*event, *v)))
     }
     fn range_lookup_events(
         &self,

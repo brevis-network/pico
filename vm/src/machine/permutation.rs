@@ -5,7 +5,7 @@ use crate::machine::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::ExtensionBuilder;
+use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
@@ -74,126 +74,102 @@ pub fn generate_permutation_trace<F: Field, EF: ExtensionField<F>>(
     main: &RowMajorMatrix<F>,
     random_elements: &[EF],
     batch_size: usize,
-) -> (RowMajorMatrix<EF>, EF, EF) {
+) -> (RowMajorMatrix<EF>, EF) {
     let (grouped_sends, grouped_receives, grouped_widths) =
         get_grouped_maps(looking, looked, batch_size);
 
+    let empty_vec = vec![];
+    let local_sends = grouped_sends
+        .get(&LookupScope::Regional)
+        .unwrap_or(&empty_vec);
+    let local_receives = grouped_receives
+        .get(&LookupScope::Regional)
+        .unwrap_or(&empty_vec);
+
+    let local_permutation_width = grouped_widths
+        .get(&LookupScope::Regional)
+        .cloned()
+        .unwrap_or_default();
+
     let height = main.height();
-    let permutation_trace_width = grouped_widths.values().sum::<usize>();
+    let permutation_trace_width = local_permutation_width;
     let mut permutation_trace = RowMajorMatrix::new(
         vec![EF::ZERO; permutation_trace_width * height],
         permutation_trace_width,
     );
 
-    let mut global_cumulative_sum = EF::ZERO;
     let mut regional_cumulative_sum = EF::ZERO;
 
-    for scope in LookupScope::iter() {
-        let empty_vec = vec![];
-        let sends = grouped_sends.get(&scope).unwrap_or(&empty_vec);
-        let receives = grouped_receives.get(&scope).unwrap_or(&empty_vec);
+    let random_elements = &random_elements[0..2];
+    let local_row_range = 0..local_permutation_width;
 
-        if sends.is_empty() && receives.is_empty() {
-            continue;
-        }
-
-        let random_elements = match scope {
-            LookupScope::Global => &random_elements[0..2],
-            LookupScope::Regional => &random_elements[2..4],
-        };
-
-        let row_range = match scope {
-            LookupScope::Global => {
-                0..*grouped_widths
-                    .get(&LookupScope::Global)
-                    .expect("Expected global scope")
-            }
-            LookupScope::Regional => {
-                let global_perm_width = *grouped_widths
-                    .get(&LookupScope::Global)
-                    .expect("Expected global scope");
-                let local_perm_width = *grouped_widths
-                    .get(&LookupScope::Regional)
-                    .expect("Expected local scope");
-                global_perm_width..global_perm_width + local_perm_width
-            }
-        };
-
-        // Compute the permutation trace values in parallel.
-        match preprocessed {
-            Some(prep) => {
-                permutation_trace
-                    .par_rows_mut()
-                    .zip_eq(prep.par_row_slices())
-                    .zip_eq(main.par_row_slices())
-                    .for_each(|((row, prep_row), main_row)| {
-                        populate_permutation_row(
-                            &mut row[row_range.start..row_range.end],
-                            prep_row,
-                            main_row,
-                            sends,
-                            receives,
-                            random_elements,
-                            batch_size,
-                        );
-                    });
-            }
-            None => {
-                permutation_trace
-                    .par_rows_mut()
-                    .zip_eq(main.par_row_slices())
-                    .for_each(|(row, main_row)| {
-                        populate_permutation_row(
-                            &mut row[row_range.start..row_range.end],
-                            &[],
-                            main_row,
-                            sends,
-                            receives,
-                            random_elements,
-                            batch_size,
-                        );
-                    });
-            }
-        }
-
-        let zero = EF::ZERO;
-        let cumulative_sums = permutation_trace
-            .par_rows_mut()
-            .map(|row| {
-                row[row_range.start..row_range.end - 1]
-                    .iter()
-                    .copied()
-                    .sum::<EF>()
-            })
-            .collect::<Vec<_>>();
-
-        let cumulative_sums = cumulative_sums
-            .into_par_iter()
-            .scan(|a, b| *a + *b, zero)
-            .collect::<Vec<_>>();
-
-        match scope {
-            LookupScope::Global => {
-                global_cumulative_sum = *cumulative_sums.last().unwrap();
-            }
-            LookupScope::Regional => {
-                regional_cumulative_sum = *cumulative_sums.last().unwrap();
-            }
-        }
-
-        permutation_trace
-            .par_rows_mut()
-            .zip_eq(cumulative_sums.clone().into_par_iter())
-            .for_each(|(row, cumulative_sum)| {
-                row[row_range.end - 1] = cumulative_sum;
-            });
+    if local_sends.is_empty() && local_receives.is_empty() {
+        return (permutation_trace, regional_cumulative_sum);
     }
 
-    (
-        permutation_trace,
-        global_cumulative_sum,
-        regional_cumulative_sum,
-    )
+    // Compute the permutation trace values in parallel.
+    match preprocessed {
+        Some(prep) => {
+            permutation_trace
+                .par_rows_mut()
+                .zip_eq(prep.par_row_slices())
+                .zip_eq(main.par_row_slices())
+                .for_each(|((row, prep_row), main_row)| {
+                    populate_permutation_row(
+                        &mut row[0..local_permutation_width],
+                        prep_row,
+                        main_row,
+                        local_sends,
+                        local_receives,
+                        random_elements,
+                        batch_size,
+                    );
+                });
+        }
+        None => {
+            permutation_trace
+                .par_rows_mut()
+                .zip_eq(main.par_row_slices())
+                .for_each(|(row, main_row)| {
+                    populate_permutation_row(
+                        &mut row[0..local_permutation_width],
+                        &[],
+                        main_row,
+                        local_sends,
+                        local_receives,
+                        random_elements,
+                        batch_size,
+                    );
+                });
+        }
+    }
+
+    let zero = EF::ZERO;
+    let regional_cumulative_sums = permutation_trace
+        .par_rows_mut()
+        .map(|row| {
+            row[local_row_range.start..local_row_range.end - 1]
+                .iter()
+                .copied()
+                .sum::<EF>()
+        })
+        .collect::<Vec<_>>();
+
+    let regional_cumulative_sums = regional_cumulative_sums
+        .into_par_iter()
+        .scan(|a, b| *a + *b, zero)
+        .collect::<Vec<_>>();
+
+    regional_cumulative_sum = *regional_cumulative_sums.last().unwrap();
+
+    permutation_trace
+        .par_rows_mut()
+        .zip_eq(regional_cumulative_sums.into_par_iter())
+        .for_each(|(row, cumulative_sum)| {
+            row[local_row_range.end - 1] = cumulative_sum;
+        });
+
+    (permutation_trace, regional_cumulative_sum)
 }
 
 /// Evaluates the permutation constraints for the given chip.
@@ -206,6 +182,7 @@ pub fn eval_permutation_constraints<F, AB>(
     looking: &[VirtualPairLookup<F>],
     looked: &[VirtualPairLookup<F>],
     batch_size: usize,
+    lookup_scope: LookupScope,
     builder: &mut AB,
 ) where
     F: Field,
@@ -215,15 +192,19 @@ pub fn eval_permutation_constraints<F, AB>(
     let (grouped_sends, grouped_receives, grouped_widths) =
         get_grouped_maps(looking, looked, batch_size);
 
-    // Get the permutation challenges.
-    let permutation_challenges = builder.permutation_randomness();
-    let random_elements: Vec<AB::ExprEF> =
-        permutation_challenges.iter().map(|x| (*x).into()).collect();
-    let cumulative_sums: Vec<AB::ExprEF> = builder
-        .cumulative_sums()
-        .iter()
-        .map(|x| (*x).into())
-        .collect();
+    let empty_vec = vec![];
+    let local_sends = grouped_sends
+        .get(&LookupScope::Regional)
+        .unwrap_or(&empty_vec);
+    let local_receives = grouped_receives
+        .get(&LookupScope::Regional)
+        .unwrap_or(&empty_vec);
+
+    let local_permutation_width = grouped_widths
+        .get(&LookupScope::Regional)
+        .cloned()
+        .unwrap_or_default();
+
     let preprocessed = builder.preprocessed();
     let main = builder.main();
     let perm = builder.permutation().to_row_major_matrix();
@@ -239,52 +220,27 @@ pub fn eval_permutation_constraints<F, AB>(
     let perm_next: &[AB::VarEF] = (*perm_next).borrow();
 
     // Assert that the permutation trace width is correct.
-    let expected_perm_width = grouped_widths.values().sum::<usize>();
-    if perm_width != expected_perm_width {
+    if perm_width != local_permutation_width {
         panic!(
-            "permutation trace width is incorrect: expected {expected_perm_width}, got {perm_width}",
+            "permutation trace width is incorrect: expected {local_permutation_width}, got {perm_width}",
         );
     }
 
-    for scope in LookupScope::iter() {
-        let random_elements = match scope {
-            LookupScope::Global => &random_elements[0..2],
-            LookupScope::Regional => &random_elements[2..4],
-        };
+    // Get the permutation challenges.
+    let permutation_challenges = builder.permutation_randomness();
+    let random_elements: Vec<AB::ExprEF> =
+        permutation_challenges.iter().map(|x| (*x).into()).collect();
+    let regional_cumulative_sum = *builder.regional_cumulative_sum();
 
-        let (alpha, beta) = (&random_elements[0], &random_elements[1]);
+    let random_elements = &random_elements[0..2];
+    let (alpha, beta) = (&random_elements[0], &random_elements[1]);
 
-        let perm_local = match scope {
-            LookupScope::Global => &perm_local[0..*grouped_widths.get(&scope).unwrap()],
-            LookupScope::Regional => {
-                let global_perm_width = *grouped_widths.get(&LookupScope::Global).unwrap();
-                &perm_local
-                    [global_perm_width..global_perm_width + *grouped_widths.get(&scope).unwrap()]
-            }
-        };
-
-        let perm_next = match scope {
-            LookupScope::Global => &perm_next[0..*grouped_widths.get(&scope).unwrap()],
-            LookupScope::Regional => {
-                let global_perm_width = *grouped_widths.get(&LookupScope::Global).unwrap();
-                &perm_next
-                    [global_perm_width..global_perm_width + *grouped_widths.get(&scope).unwrap()]
-            }
-        };
-
-        let empty_vec = vec![];
-        let sends = grouped_sends.get(&scope).unwrap_or(&empty_vec);
-        let receives = grouped_receives.get(&scope).unwrap_or(&empty_vec);
-
-        if sends.is_empty() && receives.is_empty() {
-            continue;
-        }
-
+    if !local_sends.is_empty() || !local_receives.is_empty() {
         // Ensure that each batch sum m_i/f_i is computed correctly.
-        let interaction_chunks = &sends
+        let interaction_chunks = &local_sends
             .iter()
             .map(|int| (int, true))
-            .chain(receives.iter().map(|int| (int, false)))
+            .chain(local_receives.iter().map(|int| (int, false)))
             .chunks(batch_size);
 
         // Assert that the i-eth entry is equal to the sum_i m_i/rlc_i by constraints:
@@ -345,12 +301,11 @@ pub fn eval_permutation_constraints<F, AB>(
         }
 
         // Compute the running local and next permutation sums.
-        let perm_width = grouped_widths.get(&scope).unwrap();
-        let sum_local = perm_local[..perm_width - 1]
+        let sum_local = perm_local[..local_permutation_width - 1]
             .iter()
             .map(|x| (*x).into())
             .sum::<AB::ExprEF>();
-        let sum_next = perm_next[..perm_width - 1]
+        let sum_next = perm_next[..local_permutation_width - 1]
             .iter()
             .map(|x| (*x).into())
             .sum::<AB::ExprEF>();
@@ -367,16 +322,24 @@ pub fn eval_permutation_constraints<F, AB>(
         builder
             .when_transition()
             .assert_eq_ext(phi_next - phi_local.clone(), sum_next);
-
-        // Assert that the cumulative sum is constrained to `phi_local` on the last row.
-        let cumulative_sum = match scope {
-            LookupScope::Global => &cumulative_sums[0],
-            LookupScope::Regional => &cumulative_sums[1],
-        };
-
         builder
             .when_last_row()
-            .assert_eq_ext(*perm_local.last().unwrap(), cumulative_sum.clone());
+            .assert_eq_ext(*perm_local.last().unwrap(), regional_cumulative_sum);
+    }
+
+    // Handle global permutations.
+    let global_cumulative_sum = *builder.global_cumulative_sum();
+    if lookup_scope == LookupScope::Global {
+        for i in 0..7 {
+            builder.when_last_row().assert_eq(
+                main_local[main_local.len() - 14 + i],
+                global_cumulative_sum.0.x.0[i],
+            );
+            builder.when_last_row().assert_eq(
+                main_local[main_local.len() - 7 + i],
+                global_cumulative_sum.0.y.0[i],
+            );
+        }
     }
 }
 

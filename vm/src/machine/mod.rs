@@ -11,6 +11,7 @@ pub mod machine;
 pub mod permutation;
 pub mod proof;
 pub mod prover;
+pub mod septic;
 pub mod utils;
 pub mod verifier;
 pub mod witness;

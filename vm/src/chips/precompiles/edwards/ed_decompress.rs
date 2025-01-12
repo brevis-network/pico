@@ -369,6 +369,10 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
                 .is_empty()
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F: Sync, E: EdwardsParameters> BaseAir<F> for EdDecompressChip<F, E> {
@@ -387,14 +391,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &EdDecompressCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &EdDecompressCols<CB::Var> = (*next).borrow();
-
-        // Constrain the incrementing nonce.
-        // builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(next.is_real * (local.nonce + CB::Expr::ONE), next.nonce);
 
         local.eval::<F, CB, E::BaseField, E>(builder);
     }

@@ -13,7 +13,10 @@ use crate::{
         stark_config::bb_poseidon2::SC_Val,
     },
     instances::configs::recur_config as rcf,
-    machine::proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
+    machine::{
+        proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
+        septic::{SepticCurve, SepticDigest, SepticExtension},
+    },
 };
 use itertools::Itertools;
 use p3_baby_bear::BabyBear;
@@ -196,30 +199,27 @@ impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for BaseCommitments<
     type WitnessVariable = BaseCommitments<T::WitnessVariable>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
-        let global_main_commit = self.global_main_commit.read(builder);
-        let regional_main_commit = self.regional_main_commit.read(builder);
+        let main_commit = self.main_commit.read(builder);
         let permutation_commit = self.permutation_commit.read(builder);
         let quotient_commit = self.quotient_commit.read(builder);
         Self::WitnessVariable {
-            global_main_commit,
-            regional_main_commit,
+            main_commit,
             permutation_commit,
             quotient_commit,
         }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
-        self.global_main_commit.write(witness);
-        self.regional_main_commit.write(witness);
+        self.main_commit.write(witness);
         self.permutation_commit.write(witness);
         self.quotient_commit.write(witness);
     }
 }
 
 impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
-    for BaseOpenedValues<rcf::SC_Challenge>
+    for BaseOpenedValues<rcf::SC_Val, rcf::SC_Challenge>
 {
-    type WitnessVariable = BaseOpenedValues<Ext<CC::F, CC::EF>>;
+    type WitnessVariable = BaseOpenedValues<Felt<CC::F>, Ext<CC::F, CC::EF>>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let chips_opened_values = self
@@ -246,9 +246,9 @@ impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
 }
 
 impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
-    for ChipOpenedValues<rcf::SC_Challenge>
+    for ChipOpenedValues<rcf::SC_Val, rcf::SC_Challenge>
 {
-    type WitnessVariable = ChipOpenedValues<Ext<CC::F, CC::EF>>;
+    type WitnessVariable = ChipOpenedValues<Felt<CC::F>, Ext<CC::F, CC::EF>>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let preprocessed_local = self.preprocessed_local.read(builder);
@@ -285,5 +285,25 @@ impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
         self.quotient.write(witness);
         self.global_cumulative_sum.write(witness);
         self.regional_cumulative_sum.write(witness);
+    }
+}
+
+impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
+    for SepticDigest<rcf::SC_Val>
+{
+    type WitnessVariable = SepticDigest<Felt<CC::F>>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        let x = self.0.x.0.read(builder);
+        let y = self.0.y.0.read(builder);
+        SepticDigest(SepticCurve {
+            x: SepticExtension(x),
+            y: SepticExtension(y),
+        })
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        self.0.x.0.write(witness);
+        self.0.y.0.write(witness);
     }
 }

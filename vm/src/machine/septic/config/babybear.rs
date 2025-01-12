@@ -1,0 +1,92 @@
+//! A septic extension with an irreducible polynomial:
+//! `z^7 - 2z - 5`
+
+use super::super::SepticExtension;
+use p3_field::FieldAlgebra;
+
+impl<F: FieldAlgebra> SepticExtension<F> {
+    pub const EXT_GENERATOR: Self =
+        SepticExtension([F::TWO, F::ONE, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
+}
+
+pub const F_ORDER: u32 = 2013265921_u32;
+
+pub const TOP_BITS: usize = 4;
+
+// z^7 - 2^z - 5 = 0
+// z^7 = 2^z + 5
+pub const EXT_COEFFS: [u32; 7] = [5, 2, 0, 0, 0, 0, 0];
+
+pub const Z_POW_P: [[u32; 7]; 7] = [
+    [1, 1, 1, 1, 1, 1, 1],
+    [
+        954599710, 1359279693, 566669999, 1982781815, 1735718361, 1174868538, 1120871770,
+    ],
+    [
+        862825265, 597046311, 978840770, 1790138282, 1044777201, 835869808, 1342179023,
+    ],
+    [
+        596273169, 658837454, 1515468261, 367059247, 781278880, 1544222616, 155490465,
+    ],
+    [
+        557608863, 1173670028, 1749546888, 1086464137, 803900099, 1288818584, 1184677604,
+    ],
+    [
+        763416381, 1252567168, 628856225, 1771903394, 650712211, 19417363, 57990258,
+    ],
+    [
+        1734711039, 1749813853, 1227235221, 1707730636, 424560395, 1007029514, 498034669,
+    ],
+];
+
+pub const Z_POW_P2: [[u32; 7]; 7] = [
+    [1, 1, 1, 1, 1, 1, 1],
+    [
+        1013489358, 1619071628, 304593143, 1949397349, 1564307636, 327761151, 415430835,
+    ],
+    [
+        209824426, 1313900768, 38410482, 256593180, 1708830551, 1244995038, 1555324019,
+    ],
+    [
+        1475628651, 777565847, 704492386, 1218528120, 1245363405, 475884575, 649166061,
+    ],
+    [
+        550038364, 948935655, 68722023, 1251345762, 1692456177, 1177958698, 350232928,
+    ],
+    [
+        882720258, 821925756, 199955840, 812002876, 1484951277, 1063138035, 491712810,
+    ],
+    [
+        738287111, 1955364991, 552724293, 1175775744, 341623997, 1454022463, 408193320,
+    ],
+];
+
+/// The x-coordinate for a curve point used as a witness for padding interactions.
+pub const CURVE_WITNESS_DUMMY_POINT_X: [u32; 7] = [
+    0x2738281, 0x8284590, 0x4523536, 0x0287471, 0x3526624, 0x9775724, 0x7093699,
+];
+
+/// The y-coordinate for a curve point used as a witness for padding interactions.
+pub const CURVE_WITNESS_DUMMY_POINT_Y: [u32; 7] = [
+    48041908, 550064556, 415267377, 1726976249, 1253299140, 209439863, 1302309485,
+];
+
+/// The x-coordinate for a curve point used as a starting cumulative sum for global permutation trace generation.
+pub const CURVE_CUMULATIVE_SUM_START_X: [u32; 7] = [
+    0x1434213, 0x5623730, 0x9504880, 0x1688724, 0x2096980, 0x7856967, 0x1875376,
+];
+
+/// The y-coordinate for a curve point used as a starting cumulative sum for global permutation trace generation.
+pub const CURVE_CUMULATIVE_SUM_START_Y: [u32; 7] = [
+    885797405, 1130275556, 567836311, 52700240, 239639200, 442612155, 1839439733,
+];
+
+/// The x-coordinate for a curve point used as a starting random point for digest accumulation.
+pub const DIGEST_SUM_START_X: [u32; 7] = [
+    0x1742050, 0x8075688, 0x7729352, 0x7446341, 0x5058723, 0x6694280, 0x5253810,
+];
+
+/// The y-coordinate for a curve point used as a starting random point for digest accumulation.
+pub const DIGEST_SUM_START_Y: [u32; 7] = [
+    462194069, 1842131493, 281651264, 1684885851, 483907222, 1097389352, 1648978901,
+];

@@ -85,17 +85,12 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &DivRemCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &DivRemCols<CB::Var> = (*next).borrow();
         let base = CB::F::from_canonical_u32(1 << 8);
         let one: CB::Expr = CB::F::ONE.into();
         let zero: CB::Expr = CB::F::ZERO.into();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // Calculate whether b, remainder, and c are negative.
         {

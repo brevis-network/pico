@@ -1,7 +1,6 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            challenger::DuplexChallengerVariable,
             config::{BabyBearFriConfigVariable, CircuitConfig},
             stark::BaseProofVariable,
             types::BaseVerifyingKeyVariable,
@@ -36,8 +35,6 @@ where
     pub vk: &'a BaseVerifyingKey<SC>,
     pub machine: &'a BaseMachine<SC, C>,
     pub base_proofs: Vec<BaseProof<SC>>,
-    pub base_challenger: SC::Challenger,
-    pub initial_reconstruct_challenger: SC::Challenger,
     pub flag_complete: bool,
     pub flag_first_chunk: bool,
     // todo: vk_root
@@ -49,8 +46,6 @@ pub struct SimpleRecursionStdinVariable<
 > {
     pub vk: BaseVerifyingKeyVariable<CC, SC>,
     pub base_proofs: Vec<BaseProofVariable<CC, SC>>,
-    pub base_challenger: SC::FriChallengerVariable,
-    pub initial_reconstruct_challenger: DuplexChallengerVariable<CC>,
     pub flag_complete: Felt<CC::F>,
     pub flag_first_chunk: Felt<CC::F>,
 }
@@ -64,27 +59,21 @@ where
 {
     pub fn construct(
         machine: &'a BaseMachine<SC, C>,
-        reconstruct_challenger: &mut SC::Challenger,
         vk: &'a BaseVerifyingKey<SC>,
         base_challenger: &'a mut SC::Challenger,
         base_proof: BaseProof<SC>,
     ) -> Self {
         let num_public_values = machine.num_public_values();
 
-        vk.observed_by(reconstruct_challenger);
-        vk.observed_by(base_challenger);
-
         let base_proofs = vec![base_proof.clone()];
 
-        base_challenger.observe(base_proof.commitments.global_main_commit);
+        base_challenger.observe(base_proof.commitments.main_commit);
         base_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
 
         Self {
             vk,
             machine,
             base_proofs,
-            base_challenger: base_challenger.clone(),
-            initial_reconstruct_challenger: reconstruct_challenger.clone(),
             flag_complete: true,
             flag_first_chunk: true,
         }
@@ -103,16 +92,12 @@ where
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let vk = self.vk.read(builder);
         let base_proofs = self.base_proofs.read(builder);
-        let base_challenger = self.base_challenger.read(builder);
-        let initial_reconstruct_challenger = self.initial_reconstruct_challenger.read(builder);
         let flag_complete = SC_Val::from_bool(self.flag_complete).read(builder);
         let flag_first_chunk = SC_Val::from_bool(self.flag_first_chunk).read(builder);
 
         SimpleRecursionStdinVariable {
             vk,
             base_proofs,
-            base_challenger,
-            initial_reconstruct_challenger,
             flag_complete,
             flag_first_chunk,
         }
@@ -121,8 +106,6 @@ where
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
         self.vk.write(witness);
         self.base_proofs.write(witness);
-        self.base_challenger.write(witness);
-        self.initial_reconstruct_challenger.write(witness);
         self.flag_complete.write(witness);
         self.flag_first_chunk.write(witness);
     }

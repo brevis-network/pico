@@ -16,10 +16,21 @@ pub enum Instruction<F> {
     ExpReverseBitsLen(ExpReverseBitsInstr<F>),
     HintBits(HintBitsInstr<F>),
     BatchFRI(Box<BatchFRIInstr<F>>),
+    HintAddCurve(Box<HintAddCurveInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
     Hint(HintInstr<F>),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HintAddCurveInstr<F> {
+    pub output_x_addrs_mults: Vec<(Address<F>, F)>,
+    pub output_y_addrs_mults: Vec<(Address<F>, F)>,
+    pub input1_x_addrs: Vec<Address<F>>,
+    pub input1_y_addrs: Vec<Address<F>>,
+    pub input2_x_addrs: Vec<Address<F>>,
+    pub input2_y_addrs: Vec<Address<F>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

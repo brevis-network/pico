@@ -111,6 +111,10 @@ impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for Poseidon2WideChip
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F: PrimeField32, const DEGREE: usize> Poseidon2WideChip<DEGREE, F> {

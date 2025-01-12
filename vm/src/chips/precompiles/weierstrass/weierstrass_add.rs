@@ -33,7 +33,7 @@ use core::{
 use hybrid_array::Array;
 use num::{BigUint, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{fmt::Debug, marker::PhantomData};
@@ -301,6 +301,10 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
             }
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F, E: EllipticCurve> BaseAir<F> for WeierstrassAddAssignChip<F, E> {
@@ -319,14 +323,9 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &WeierstrassAddAssignCols<CB::Var, E::BaseField> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &WeierstrassAddAssignCols<CB::Var, E::BaseField> = (*next).borrow();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         let num_words_field_element = <E::BaseField as NumLimbs>::Limbs::USIZE / 4;
 

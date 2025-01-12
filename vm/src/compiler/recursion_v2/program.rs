@@ -2,6 +2,7 @@ use super::instruction::Instruction;
 use crate::{
     compiler::program::ProgramBehavior,
     instances::compiler_v2::shapes::compress_shape::RecursionPadShape,
+    machine::septic::SepticDigest,
 };
 use backtrace::Backtrace;
 use hashbrown::HashMap;
@@ -30,6 +31,10 @@ impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
             traces: self.traces.clone(),
             shape: self.shape.clone(),
         }
+    }
+
+    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
+        SepticDigest::<F>::zero()
     }
 }
 
@@ -64,6 +69,7 @@ impl<F: Field> RecursionProgram<F> {
                 Instruction::Print(_) => "Print",
                 Instruction::HintExt2Felts(_) => "HintExt2Felts",
                 Instruction::CommitPublicValues(_) => "CommitPublicValues",
+                Instruction::HintAddCurve(_) => "HintAddCurve",
                 Instruction::Hint(_) => "Hint",
             };
             *stats.entry(key.to_string()).or_insert(0) += 1;

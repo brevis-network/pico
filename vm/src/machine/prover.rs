@@ -1,6 +1,6 @@
 use crate::{
     compiler::program::ProgramBehavior,
-    configs::config::{Com, PackedChallenge, PcsProverData, StarkGenericConfig, ZeroCommitment},
+    configs::config::{Com, PackedChallenge, PcsProverData, StarkGenericConfig},
     emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -10,6 +10,7 @@ use crate::{
         proof::{
             BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues, MainTraceCommitments,
         },
+        septic::{SepticCurve, SepticDigest, SepticExtension},
         utils::{compute_quotient_values, order_chips},
     },
 };
@@ -25,7 +26,7 @@ use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use rayon::ThreadPoolBuilder;
-use std::{cmp::Reverse, time::Instant};
+use std::{array, cmp::Reverse, time::Instant};
 use tracing::{debug, debug_span, info, instrument, Span};
 
 pub struct BaseProver<SC, C> {
@@ -61,18 +62,23 @@ where
     ) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let chips_and_preprocessed = self.generate_preprocessed(chips, program);
 
+        let local_only = chips_and_preprocessed
+            .iter()
+            .map(|(_, local_only, _)| local_only.to_owned())
+            .collect::<Vec<_>>();
+
         // Get the chip ordering.
         let preprocessed_chip_ordering = chips_and_preprocessed
             .iter()
             .enumerate()
-            .map(|(i, (name, _))| (name.to_owned(), i))
+            .map(|(i, (name, _, _))| (name.to_owned(), i))
             .collect::<HashMap<_, _>>();
         let preprocessed_chip_ordering = Arc::new(preprocessed_chip_ordering);
 
         let pcs = config.pcs();
 
         //let (preprocessed_info, domains_and_preprocessed): (Arc<[_]>, Vec<_>) =
-        let preprocessed_iter = chips_and_preprocessed.iter().map(|(name, trace)| {
+        let preprocessed_iter = chips_and_preprocessed.iter().map(|(name, _, trace)| {
             let domain = pcs.natural_domain_for_degree(trace.height());
             (name, trace, domain)
         });
@@ -93,22 +99,26 @@ where
 
         let preprocessed_trace = chips_and_preprocessed
             .into_iter()
-            .map(|t| t.1)
+            .map(|t| t.2)
             .collect::<Arc<[_]>>();
 
         let pc_start = program.pc_start();
+        let initial_global_cumulative_sum = program.initial_global_cumulative_sum();
 
         (
             BaseProvingKey {
                 commit: commit.clone(),
                 pc_start,
+                initial_global_cumulative_sum,
                 preprocessed_trace,
                 preprocessed_prover_data,
                 preprocessed_chip_ordering: preprocessed_chip_ordering.clone(),
+                local_only,
             },
             BaseVerifyingKey {
                 commit,
                 pc_start,
+                initial_global_cumulative_sum,
                 preprocessed_info,
                 preprocessed_chip_ordering,
             },
@@ -121,7 +131,7 @@ where
         &self,
         chips: &[MetaChip<SC::Val, C>],
         program: &C::Program,
-    ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
+    ) -> Vec<(String, bool, RowMajorMatrix<SC::Val>)> {
         let begin = Instant::now();
         let mut durations = HashMap::new();
         let mut chips_and_preprocessed = chips
@@ -130,7 +140,7 @@ where
                 let begin = Instant::now();
                 let trace = chip
                     .generate_preprocessed(program)
-                    .map(|trace| (chip.name(), trace));
+                    .map(|trace| (chip.name(), chip.local_only(), trace));
                 let elapsed_time = begin.elapsed();
                 durations.insert(chip.name(), elapsed_time);
                 debug!(
@@ -141,14 +151,15 @@ where
                 trace
             })
             .collect::<Vec<_>>();
-        chips_and_preprocessed.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
+        chips_and_preprocessed
+            .sort_by_key(|(name, _, trace)| (Reverse(trace.height()), name.clone()));
         for cp in &chips_and_preprocessed {
             debug!(
                 "chip {:<17} | width {:<2} rows {:<6} cells {:<7} | in {:?}",
                 cp.0,
-                cp.1.width(),
-                cp.1.height(),
-                cp.1.values.len(),
+                cp.2.width(),
+                cp.2.height(),
+                cp.2.values.len(),
                 durations.get(&cp.0).unwrap()
             )
         }
@@ -165,7 +176,6 @@ where
         &self,
         chips: &[MetaChip<SC::Val, C>],
         record: &C::Record,
-        lookup_scope: LookupScope,
     ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
         let begin = Instant::now();
         let durations = DashMap::new();
@@ -174,7 +184,7 @@ where
             let mut chips_and_main = chips
                 .par_iter()
                 .filter_map(|chip| {
-                    if !(chip.is_active(record) && chip.lookup_scope() == lookup_scope) {
+                    if !(chip.is_active(record)) {
                         return None;
                     }
 
@@ -287,10 +297,14 @@ where
         &self,
         ordered_chips: &[&MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
-        traces: &[&RowMajorMatrix<SC::Val>],
-        perm_challenges: &[SC::Challenge],
+        traces: &[RowMajorMatrix<SC::Val>],
+        local_perm_challenges: &[SC::Challenge],
         chunk_index: usize,
-    ) -> (Vec<RowMajorMatrix<SC::Challenge>>, Vec<[SC::Challenge; 2]>) {
+    ) -> (
+        Vec<RowMajorMatrix<SC::Challenge>>,
+        Vec<SepticDigest<SC::Val>>,
+        Vec<SC::Challenge>,
+    ) {
         let begin = Instant::now();
         let durations = DashMap::new();
         let preprocessed_traces = ordered_chips
@@ -311,8 +325,22 @@ where
                 .zip(preprocessed_traces.into_par_iter())
                 .map(|((chip, main_trace), preprocessed_trace)| {
                     let begin = Instant::now();
-                    let (permutation_traces, global_sum, regional_sum) =
-                        chip.generate_permutation(preprocessed_trace, main_trace, perm_challenges);
+                    let (permutation_trace, regional_sum) = chip.generate_permutation(
+                        preprocessed_trace,
+                        main_trace,
+                        local_perm_challenges,
+                    );
+
+                    let global_sum = if chip.lookup_scope() == LookupScope::Regional {
+                        SepticDigest::<SC::Val>::zero()
+                    } else {
+                        let main_trace_size = main_trace.height() * main_trace.width();
+                        let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
+                        SepticDigest(SepticCurve {
+                            x: SepticExtension::<SC::Val>::from_base_fn(|i| last_row[i]),
+                            y: SepticExtension::<SC::Val>::from_base_fn(|i| last_row[i + 7]),
+                        })
+                    };
 
                     let elapsed_time = begin.elapsed();
                     durations.insert(chip.name(), elapsed_time);
@@ -324,12 +352,12 @@ where
                         elapsed_time.as_millis()
                     );
 
-                    (permutation_traces, [global_sum, regional_sum])
+                    (permutation_trace, (global_sum, regional_sum))
                 })
                 .unzip()
         };
         // Execute the closure with or without a thread pool based on the feature
-        let (permutation_traces, cumulative_sums): (Vec<_>, Vec<_>) =
+        let (permutation_traces, (global_sums, local_sums)): (Vec<_>, (Vec<_>, Vec<_>)) =
             if cfg!(feature = "single-threaded") {
                 let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
                 pool.install(generate_permutation_closure)
@@ -354,7 +382,7 @@ where
             begin.elapsed().as_millis(),
         );
 
-        (permutation_traces, cumulative_sums)
+        (permutation_traces, global_sums, local_sums)
     }
 
     /// core proving function in BaseProver
@@ -366,108 +394,51 @@ where
         config: &SC,
         chips: &[MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
-        local_data: MainTraceCommitments<SC>,
-        global_data: Option<MainTraceCommitments<SC>>,
+        data: MainTraceCommitments<SC>,
         challenger: &mut SC::Challenger,
-        global_permutation_challenges: &[SC::Challenge],
         chunk_index: usize,
+        num_public_values: usize,
     ) -> BaseProof<SC> {
         let begin = Instant::now();
 
-        // setup pcs
-        let pcs = config.pcs();
+        let chips = order_chips::<SC, C>(chips, &data.main_chip_ordering).collect_vec();
+        let traces = data.main_traces;
+        assert_eq!(chips.len(), traces.len());
 
-        let (global_traces, global_main_commit, global_main_data, global_chip_ordering) =
-            if let Some(global_data) = global_data {
-                let MainTraceCommitments {
-                    main_traces: global_traces,
-                    commitment: global_main_commit,
-                    data: global_main_data,
-                    main_chip_ordering: global_chip_ordering,
-                    public_values: _,
-                } = global_data;
-                (
-                    global_traces.to_vec(),
-                    global_main_commit,
-                    Some(global_main_data),
-                    global_chip_ordering,
-                )
-            } else {
-                (
-                    vec![],
-                    pcs.zero_commitment(),
-                    None,
-                    Arc::new(HashMap::new()),
-                )
-            };
-        let global_traces = Arc::from(global_traces);
-
-        let MainTraceCommitments {
-            main_traces: local_traces,
-            commitment: regional_main_commit,
-            data: local_main_data,
-            main_chip_ordering: local_chip_ordering,
-            public_values: local_public_values,
-        } = local_data;
-
-        // Merge the chip ordering and traces from the global and local data.
-        let (all_chips_ordering, all_chip_scopes, all_chunk_data) = self.merge_chunk_traces(
-            &global_traces,
-            &global_chip_ordering,
-            &local_traces,
-            &local_chip_ordering,
-        );
-
-        // Get the ordered chip, will be used in all following operations on chips
-        // No chips should be used from now on!
-        let ordered_chips = order_chips::<SC, C>(chips, &all_chips_ordering).collect::<Vec<_>>();
-        assert_eq!(ordered_chips.len(), all_chunk_data.len());
-
-        let main_degrees = all_chunk_data
-            .iter()
-            .map(|chunk_data| chunk_data.trace.height())
-            .collect::<Vec<_>>();
-
+        let main_degrees = traces.iter().map(|t| t.height()).collect_vec();
         let log_main_degrees = main_degrees
             .iter()
             .map(|degree| log2_strict_usize(*degree))
             .collect::<Arc<[_]>>();
 
+        let pcs = config.pcs();
         let main_domains = main_degrees
             .iter()
             .map(|degree| pcs.natural_domain_for_degree(*degree))
-            .collect::<Vec<_>>();
+            .collect_vec();
 
-        // Observe the regional main commitment.
-        challenger.observe(regional_main_commit.clone());
+        // Observe the public values and the main commitment.
+        challenger.observe_slice(&data.public_values[0..num_public_values]);
+        challenger.observe(data.commitment.clone());
 
-        // Obtain the challenges used for the local permutation argument.
-        let mut regional_permutation_challenges: Vec<SC::Challenge> = Vec::new();
-        for _ in 0..2 {
-            regional_permutation_challenges.push(challenger.sample_ext_element());
-        }
+        // Obtain the challenges used for the regional permutation argument.
+        let regional_permutation_challenges: [SC::Challenge; 2] =
+            array::from_fn(|_| challenger.sample_ext_element());
 
-        let permutation_challenges = global_permutation_challenges
+        let packed_perm_challenges = regional_permutation_challenges
             .iter()
-            .chain(regional_permutation_challenges.iter())
-            .copied()
-            .collect::<Vec<_>>();
-
-        let packed_perm_challenges = permutation_challenges
-            .iter()
-            .chain(regional_permutation_challenges.iter())
             .map(|c| PackedChallenge::<SC>::from_f(*c))
-            .collect::<Vec<_>>();
+            .collect_vec();
 
         // Generate the permutation traces.
-        let all_traces = all_chunk_data.iter().map(|data| data.trace).collect_vec();
-        let (permutation_traces, cumulative_sums) = self.generate_permutation(
-            &ordered_chips,
-            pk,
-            &all_traces,
-            &permutation_challenges,
-            chunk_index,
-        );
+        let (permutation_traces, global_cumulative_sums, regional_cumulative_sums) = self
+            .generate_permutation(
+                &chips,
+                pk,
+                &traces,
+                &regional_permutation_challenges,
+                chunk_index,
+            );
 
         // commit permutation traces on main domain
         let begin_commit_permutation = Instant::now();
@@ -492,18 +463,20 @@ where
 
         // Observe the permutation commitment and cumulative sums.
         challenger.observe(permutation_commit.clone());
-
-        for [global_sum, regional_sum] in cumulative_sums.iter() {
-            challenger.observe_slice(global_sum.as_base_slice());
+        for (regional_sum, global_sum) in regional_cumulative_sums
+            .iter()
+            .zip(global_cumulative_sums.iter())
+        {
             challenger.observe_slice(regional_sum.as_base_slice());
+            challenger.observe_slice(&global_sum.0.x.0);
+            challenger.observe_slice(&global_sum.0.y.0);
         }
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
-
         debug!("PROVER: alpha: {:?}", alpha);
 
         // Quotient
-        let log_quotient_degrees = ordered_chips
+        let log_quotient_degrees = chips
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
             .collect::<Arc<[_]>>();
@@ -513,7 +486,7 @@ where
             .collect::<Vec<_>>();
 
         info!("Chip log degrees:");
-        ordered_chips
+        chips
             .iter()
             .zip_eq(log_main_degrees.iter())
             .zip_eq(log_quotient_degrees.iter())
@@ -548,7 +521,7 @@ where
 
                             let pre_trace_on_quotient_domains = pk
                                 .preprocessed_chip_ordering
-                                .get(&ordered_chips[i].name())
+                                .get(&chips[i].name())
                                 .map(|index| {
                                     pcs.get_evaluations_on_domain(
                                         &pk.preprocessed_prover_data,
@@ -563,20 +536,8 @@ where
                                         quotient_domain.size()
                                     ])
                                 });
-                            let scope = all_chip_scopes[i];
-                            let main_data = if scope == LookupScope::Global {
-                                global_main_data
-                                    .as_ref()
-                                    .expect("Expected global_main_data to be Some")
-                            } else {
-                                &local_main_data
-                            };
-                            let main_on_quotient_domain = pcs
-                                .get_evaluations_on_domain(
-                                    main_data,
-                                    all_chunk_data[i].main_data_idx,
-                                    *quotient_domain,
-                                )
+                            let main_trace_on_quotient_domain = pcs
+                                .get_evaluations_on_domain(&data.data, i, *quotient_domain)
                                 .to_row_major_matrix();
 
                             let permutation_trace_on_quotient_domains = pcs
@@ -585,22 +546,23 @@ where
 
                             // todo: consider optimize quotient domain
                             let qv = compute_quotient_values(
-                                ordered_chips[i],
-                                &local_public_values,
+                                chips[i],
+                                &data.public_values,
                                 main_domains[i],
                                 *quotient_domain,
                                 pre_trace_on_quotient_domains,
-                                main_on_quotient_domain,
+                                main_trace_on_quotient_domain,
                                 permutation_trace_on_quotient_domains,
                                 packed_perm_challenges.as_slice(),
-                                &cumulative_sums.clone()[i],
+                                &regional_cumulative_sums[i],
+                                &global_cumulative_sums[i],
                                 alpha,
                             );
 
                             debug!(
                                 "PERF-step=compute_quotient_values-chunk={}-chip={}-cpu_time={}",
                                 chunk_index,
-                                ordered_chips[i].name(),
+                                chips[i].name(),
                                 begin_compute_quotient.elapsed().as_millis(),
                             );
 
@@ -646,130 +608,91 @@ where
         let begin_open = Instant::now();
 
         let zeta: SC::Challenge = challenger.sample_ext_element();
-
         debug!("PROVER: zeta: {:?}", zeta);
 
         let preprocessed_opening_points = pk
             .preprocessed_trace
             .iter()
-            .map(|trace| {
+            .zip(pk.local_only.iter())
+            .map(|(trace, local_only)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
-                vec![zeta, domain.next_point(zeta).unwrap()]
+                if !local_only {
+                    vec![zeta, domain.next_point(zeta).unwrap()]
+                } else {
+                    vec![zeta]
+                }
             })
-            .collect::<Vec<_>>();
+            .collect_vec();
 
         let main_opening_points = main_domains
             .iter()
+            .zip(chips.iter())
+            .map(|(domain, chip)| {
+                if !chip.local_only() {
+                    vec![zeta, domain.next_point(zeta).unwrap()]
+                } else {
+                    vec![zeta]
+                }
+            })
+            .collect_vec();
+
+        let permutation_opening_points = main_domains
+            .iter()
             .map(|domain| vec![zeta, domain.next_point(zeta).unwrap()])
-            .collect::<Vec<_>>();
+            .collect_vec();
 
         let num_quotient_chunks = quotient_degrees.iter().sum();
-        let quotient_opening_points = (0..num_quotient_chunks)
-            .map(|_| vec![zeta])
-            .collect::<Vec<_>>();
+        let quotient_opening_points = (0..num_quotient_chunks).map(|_| vec![zeta]).collect_vec();
 
-        // Split the trace_opening_points to the global and local chips.
-        let mut global_trace_opening_points = Vec::with_capacity(global_chip_ordering.len());
-        let mut local_trace_opening_points = Vec::with_capacity(local_chip_ordering.len());
-        for (i, trace_opening_point) in main_opening_points.clone().into_iter().enumerate() {
-            let scope = all_chip_scopes[i];
-            if scope == LookupScope::Global {
-                global_trace_opening_points.push(trace_opening_point);
-            } else {
-                local_trace_opening_points.push(trace_opening_point);
-            }
-        }
-
-        let rounds = if let Some(global_main_data) = global_main_data.as_ref() {
-            vec![
-                (&pk.preprocessed_prover_data, preprocessed_opening_points),
-                (global_main_data, global_trace_opening_points),
-                (&local_main_data, local_trace_opening_points),
-                (&permutation_data, main_opening_points),
-                (&quotient_data, quotient_opening_points),
-            ]
-        } else {
-            vec![
-                (&pk.preprocessed_prover_data, preprocessed_opening_points),
-                (&local_main_data, local_trace_opening_points),
-                (&permutation_data, main_opening_points),
-                (&quotient_data, quotient_opening_points),
-            ]
-        };
+        let rounds = vec![
+            (&pk.preprocessed_prover_data, preprocessed_opening_points),
+            (&data.data, main_opening_points),
+            (&permutation_data, permutation_opening_points),
+            (&quotient_data, quotient_opening_points),
+        ];
 
         let (opened_values, opening_proof) = pcs.open(rounds, challenger);
 
         // Collect the opened values for each chip.
-        let (
-            preprocessed_values,
-            global_main_values,
-            local_main_values,
-            permutation_values,
-            mut quotient_values,
-        ) = if global_main_data.is_some() {
-            let [preprocessed_values, global_main_values, local_main_values, permutation_values, quotient_values] =
-                opened_values.try_into().unwrap();
-            (
-                preprocessed_values,
-                Some(global_main_values),
-                local_main_values,
-                permutation_values,
-                quotient_values,
-            )
-        } else {
-            let [preprocessed_values, local_main_values, permutation_values, quotient_values] =
-                opened_values.try_into().unwrap();
-            (
-                preprocessed_values,
-                None,
-                local_main_values,
-                permutation_values,
-                quotient_values,
-            )
-        };
-
+        let [preprocessed_values, main_values, permutation_values, mut quotient_values] =
+            opened_values.try_into().unwrap();
+        assert!(main_values.len() == chips.len());
         let preprocessed_opened_values = preprocessed_values
             .into_iter()
-            .map(|op| {
-                let [local, next] = op.try_into().unwrap();
-                (local, next)
+            .zip(pk.local_only.iter())
+            .map(|(op, local_only)| {
+                if !local_only {
+                    let [local, next] = op.try_into().unwrap();
+                    (local, next)
+                } else {
+                    let [local] = op.try_into().unwrap();
+                    let width = local.len();
+                    (local, vec![SC::Challenge::ZERO; width])
+                }
             })
-            .collect::<Vec<_>>();
-        // Merge the global and local main values.
-        let mut main_values =
-            Vec::with_capacity(global_chip_ordering.len() + local_chip_ordering.len());
-        for chip in ordered_chips.iter() {
-            let global_order = global_chip_ordering.get(&chip.name());
-            let local_order = local_chip_ordering.get(&chip.name());
-            match (global_order, local_order) {
-                (Some(&global_order), None) => {
-                    let global_main_values = global_main_values
-                        .as_ref()
-                        .expect("Global main values should be Some");
-                    main_values.push(global_main_values[global_order].clone());
-                }
-                (None, Some(&local_order)) => {
-                    main_values.push(local_main_values[local_order].clone());
-                }
-                _ => unreachable!(),
-            }
-        }
-        assert!(main_values.len() == ordered_chips.len());
+            .collect_vec();
 
         let main_opened_values = main_values
             .into_iter()
-            .map(|v| {
-                let [local, next] = v.try_into().unwrap();
-                (local, next)
+            .zip(chips.iter())
+            .map(|(op, chip)| {
+                if !chip.local_only() {
+                    let [local, next] = op.try_into().unwrap();
+                    (local, next)
+                } else {
+                    let [local] = op.try_into().unwrap();
+                    let width = local.len();
+                    (local, vec![SC::Challenge::ZERO; width])
+                }
             })
-            .collect::<Vec<_>>();
+            .collect_vec();
         let permutation_opened_values = permutation_values
             .into_iter()
             .map(|op| {
                 let [local, next] = op.try_into().unwrap();
                 (local, next)
             })
-            .collect::<Vec<_>>();
+            .collect_vec();
 
         let mut quotient_opened_values = Vec::with_capacity(quotient_degrees.len());
         for degree in quotient_degrees.iter() {
@@ -781,14 +704,24 @@ where
             .into_iter()
             .zip_eq(permutation_opened_values)
             .zip_eq(quotient_opened_values)
-            .zip_eq(cumulative_sums.clone())
+            .zip_eq(regional_cumulative_sums)
+            .zip_eq(global_cumulative_sums)
             .zip_eq(log_main_degrees.iter().copied())
             .enumerate()
             .map(
-                |(i, ((((main, permutation), quotient), cumulative_sums), log_main_degree))| {
+                |(
+                    i,
+                    (
+                        (
+                            (((main, permutation), quotient), regional_cumulative_sum),
+                            global_cumulative_sum,
+                        ),
+                        log_main_degree,
+                    ),
+                )| {
                     let preprocessed = pk
                         .preprocessed_chip_ordering
-                        .get(&ordered_chips[i].name())
+                        .get(&chips[i].name())
                         .map(|&index| preprocessed_opened_values[index].clone())
                         .unwrap_or((vec![], vec![]));
 
@@ -803,8 +736,8 @@ where
                         permutation_local,
                         permutation_next,
                         quotient,
-                        global_cumulative_sum: cumulative_sums[0],
-                        regional_cumulative_sum: cumulative_sums[1],
+                        global_cumulative_sum,
+                        regional_cumulative_sum,
                         log_main_degree,
                     })
                 },
@@ -826,8 +759,7 @@ where
         // final base proof
         BaseProof::<SC> {
             commitments: BaseCommitments {
-                global_main_commit,
-                regional_main_commit,
+                main_commit: data.commitment,
                 permutation_commit,
                 quotient_commit,
             },
@@ -837,111 +769,9 @@ where
             opening_proof,
             log_main_degrees,
             log_quotient_degrees,
-            main_chip_ordering: all_chips_ordering.into(),
-            public_values: local_public_values,
+            main_chip_ordering: data.main_chip_ordering,
+            public_values: data.public_values,
         }
-    }
-
-    /// Merge the global and local chips' sorted traces.
-    #[allow(clippy::type_complexity)]
-    fn merge_chunk_traces<'a, 'b>(
-        &'a self,
-        global_traces: &'b [RowMajorMatrix<SC::Val>],
-        global_chip_ordering: &'b HashMap<String, usize>,
-        regional_traces: &'b [RowMajorMatrix<SC::Val>],
-        regional_chip_ordering: &'b HashMap<String, usize>,
-    ) -> (
-        HashMap<String, usize>,
-        Vec<LookupScope>,
-        Vec<MergedProverDataItem<'b, RowMajorMatrix<SC::Val>>>,
-    )
-    where
-        'a: 'b,
-    {
-        // Get the sort order of the chips.
-        let global_chips = global_chip_ordering
-            .iter()
-            .sorted_by_key(|(_, &i)| i)
-            .map(|chip| chip.0.clone())
-            .collect::<Vec<_>>();
-        let regional_chips = regional_chip_ordering
-            .iter()
-            .sorted_by_key(|(_, &i)| i)
-            .map(|chip| chip.0.clone())
-            .collect::<Vec<_>>();
-
-        let mut merged_chips = Vec::with_capacity(global_traces.len() + regional_traces.len());
-        let mut merged_prover_data = Vec::with_capacity(global_chips.len() + regional_chips.len());
-
-        assert!(global_traces.len() == global_chips.len());
-        let mut global_iter = global_traces.iter().zip(global_chips.iter()).enumerate();
-        assert!(regional_traces.len() == regional_chips.len());
-        let mut regional_iter = regional_traces
-            .iter()
-            .zip(regional_chips.iter())
-            .enumerate();
-
-        let mut global_next = global_iter.next();
-        let mut regional_next = regional_iter.next();
-
-        let mut chip_scopes = Vec::new();
-
-        while global_next.is_some() || regional_next.is_some() {
-            match (global_next, regional_next) {
-                (Some(global), Some(regional)) => {
-                    let (global_prover_data_idx, (global_trace, global_chip)) = global;
-                    let (regional_prover_data_idx, (regional_trace, regional_chip)) = regional;
-                    if (Reverse(global_trace.height()), global_chip)
-                        < (Reverse(regional_trace.height()), regional_chip)
-                    {
-                        merged_chips.push(global_chip.clone());
-                        chip_scopes.push(LookupScope::Global);
-                        merged_prover_data.push(MergedProverDataItem {
-                            trace: global_trace,
-                            main_data_idx: global_prover_data_idx,
-                        });
-                        global_next = global_iter.next();
-                    } else {
-                        merged_chips.push(regional_chip.clone());
-                        chip_scopes.push(LookupScope::Regional);
-                        merged_prover_data.push(MergedProverDataItem {
-                            trace: regional_trace,
-                            main_data_idx: regional_prover_data_idx,
-                        });
-                        regional_next = regional_iter.next();
-                    }
-                }
-                (Some(global), None) => {
-                    let (global_prover_data_idx, (global_trace, global_chip)) = global;
-                    merged_chips.push(global_chip.clone());
-                    chip_scopes.push(LookupScope::Global);
-                    merged_prover_data.push(MergedProverDataItem {
-                        trace: global_trace,
-                        main_data_idx: global_prover_data_idx,
-                    });
-                    global_next = global_iter.next();
-                }
-                (None, Some(regional)) => {
-                    let (regional_prover_data_idx, (regional_trace, regional_chip)) = regional;
-                    merged_chips.push(regional_chip.clone());
-                    chip_scopes.push(LookupScope::Regional);
-                    merged_prover_data.push(MergedProverDataItem {
-                        trace: regional_trace,
-                        main_data_idx: regional_prover_data_idx,
-                    });
-                    regional_next = regional_iter.next();
-                }
-                (None, None) => break,
-            }
-        }
-
-        let chip_ordering = merged_chips
-            .iter()
-            .enumerate()
-            .map(|(i, name)| (name.clone(), i))
-            .collect();
-
-        (chip_ordering, chip_scopes, merged_prover_data)
     }
 }
 

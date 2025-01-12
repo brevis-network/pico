@@ -322,6 +322,10 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
             }
         }
     }
+
+    fn local_only(&self) -> bool {
+        true
+    }
 }
 
 impl<F, E: EllipticCurve + WeierstrassParameters> BaseAir<F> for WeierstrassDoubleAssignChip<F, E> {
@@ -341,14 +345,9 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &WeierstrassDoubleAssignCols<CB::Var, E::BaseField> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &WeierstrassDoubleAssignCols<CB::Var, E::BaseField> = (*next).borrow();
 
         // Constrain the incrementing nonce.
         builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         let num_words_field_element = E::BaseField::NUM_LIMBS / 4;
         let p_x = limbs_from_prev_access(&local.p_access[0..num_words_field_element]);

@@ -106,6 +106,39 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             [
+                (ext_alu.clone(), 16),
+                (base_alu.clone(), 15),
+                (mem_var.clone(), 19),
+                (poseidon2_wide.clone(), 17),
+                (mem_const.clone(), 16),
+                (batch_fri.clone(), 20),
+                (exp_reverse_bits_len.clone(), 16),
+                (select.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            [
+                (ext_alu.clone(), 16),
+                (base_alu.clone(), 15),
+                (mem_var.clone(), 18),
+                (poseidon2_wide.clone(), 16),
+                (mem_const.clone(), 17),
+                (batch_fri.clone(), 19),
+                (exp_reverse_bits_len.clone(), 17),
+                (select.clone(), 19),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            [
+                (ext_alu.clone(), 16),
+                (base_alu.clone(), 16),
+                (mem_var.clone(), 19),
+                (poseidon2_wide.clone(), 17),
+                (mem_const.clone(), 18),
+                (batch_fri.clone(), 19),
+                (exp_reverse_bits_len.clone(), 18),
+                (select.clone(), 19),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            [
                 (ext_alu.clone(), 17),
                 (base_alu.clone(), 16),
                 (mem_var.clone(), 20),
@@ -116,6 +149,18 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
                 (select.clone(), 20),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
+            // recursion shape for all 22 log_size chips
+            // [
+            //     (ext_alu.clone(), 16),
+            //     (base_alu.clone(), 15),
+            //     (mem_var.clone(), 18),
+            //     (poseidon2_wide.clone(), 16),
+            //     (mem_const.clone(), 16),
+            //     (batch_fri.clone(), 19),
+            //     (exp_reverse_bits_len.clone(), 18),
+            //     (select.clone(), 19),
+            //     (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            // ],
         ]
         .map(HashMap::from)
         .to_vec();

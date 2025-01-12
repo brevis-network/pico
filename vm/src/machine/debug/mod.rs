@@ -28,11 +28,12 @@ pub fn debug_all_constraints<SC, C>(
     challenger: &mut SC::Challenger,
     chips: &[MetaChip<SC::Val, C>],
     chunks: &[C::Record],
+    has_global: bool,
 ) where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val> + for<'b> Air<DebugConstraintFolder<'b, SC::Val, SC::Challenge>>,
 {
-    let mut debugger = IncrementalConstraintDebugger::new(pk, challenger);
+    let mut debugger = IncrementalConstraintDebugger::new(pk, challenger, has_global);
 
     debugger.debug_incremental(chips, chunks);
     debugger.print_results();

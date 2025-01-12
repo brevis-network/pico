@@ -36,6 +36,7 @@ use crate::{
     instances::compiler_v2::shapes::riscv_shape::RiscvPadShape,
 };
 use hashbrown::HashMap;
+use itertools::Itertools;
 use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{mem::take, sync::Arc};
@@ -394,6 +395,14 @@ impl RecordBehavior for EmulationRecord {
                     .get(&chunk)
                     .map_or(0, hashbrown::HashMap::len),
             );
+            stats.insert(
+                "memory_read_write Events".to_string(),
+                self.cpu_events
+                    .iter()
+                    .filter(|e| e.instruction.is_memory_instruction())
+                    .collect_vec()
+                    .len(),
+            );
         }
         // stats.insert("Range lookups".to_string(), self.range_lookups.len());
 
@@ -554,6 +563,13 @@ impl RangeRecordBehavior for EmulationRecord {
             .or_insert(0) += 1;
     }
 
+    fn all_range_lookup_events(&self) -> Box<dyn Iterator<Item = (RangeLookupEvent, usize)> + '_> {
+        Box::new(
+            self.range_lookups
+                .iter()
+                .flat_map(|(_, chunk_events)| chunk_events.iter().map(|(k, v)| (*k, *v))),
+        )
+    }
     fn range_lookup_events(
         &self,
         _chunk: Option<u32>,

@@ -3,9 +3,14 @@
 use crate::{
     compiler::{program::ProgramBehavior, riscv::instruction::Instruction},
     instances::compiler_v2::shapes::riscv_shape::RiscvPadShape,
+    machine::{
+        lookup::LookupType,
+        septic::{SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
+    },
 };
 use alloc::sync::Arc;
-use p3_field::Field;
+use p3_field::{FieldExtensionAlgebra, PrimeField};
+use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -57,7 +62,7 @@ impl Program {
     }
 }
 
-impl<F: Field> ProgramBehavior<F> for Program {
+impl<F: PrimeField> ProgramBehavior<F> for Program {
     fn pc_start(&self) -> F {
         F::from_canonical_u32(self.pc_start)
     }
@@ -70,5 +75,35 @@ impl<F: Field> ProgramBehavior<F> for Program {
             memory_image: self.memory_image.clone(),
             preprocessed_shape: self.preprocessed_shape.clone(),
         }
+    }
+
+    fn initial_global_cumulative_sum(&self) -> SepticDigest<F> {
+        let mut digests: Vec<SepticCurveComplete<F>> = self
+            .memory_image
+            .iter()
+            .par_bridge()
+            .map(|(&addr, &word)| {
+                let values = [
+                    (LookupType::Memory as u32) << 24,
+                    0,
+                    addr,
+                    word & 255,
+                    (word >> 8) & 255,
+                    (word >> 16) & 255,
+                    (word >> 24) & 255,
+                ];
+                let x_start =
+                    SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values[i]));
+                let (point, _) = SepticCurve::<F>::lift_x(x_start);
+                SepticCurveComplete::Affine(point.neg())
+            })
+            .collect();
+        digests.push(SepticCurveComplete::Affine(SepticDigest::<F>::zero().0));
+        SepticDigest(
+            digests
+                .into_par_iter()
+                .reduce(|| SepticCurveComplete::Infinity, |a, b| a + b)
+                .point(),
+        )
     }
 }

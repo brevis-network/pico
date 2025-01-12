@@ -10,7 +10,6 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        lookup::LookupScope,
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
@@ -19,11 +18,10 @@ use crate::{
 };
 use anyhow::Result;
 use p3_air::Air;
-use p3_challenger::CanObserve;
 use p3_field::{FieldAlgebra, PrimeField32, PrimeField64};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument};
+use tracing::{info, instrument};
 
 pub struct RiscvMachine<SC, C>
 where
@@ -73,58 +71,6 @@ where
         let pk = witness.pk();
         pk.observed_by(&mut challenger);
 
-        /*
-        First phase
-         */
-
-        let mut emulator = MetaEmulator::setup_riscv(witness);
-
-        loop {
-            let (batch_records, done) = emulator.next_record_batch();
-
-            self.complement_record(batch_records);
-
-            if let Some(shape_config) = shape_config {
-                for record in batch_records.iter_mut() {
-                    shape_config
-                        .padding_shape(record)
-                        .expect("padding_shape failed");
-                }
-            }
-
-            //#[cfg(feature = "debug")]
-            for record in &mut *batch_records {
-                debug!("riscv record stats: chunk {}", record.chunk_index());
-                let stats = record.stats();
-                for (key, value) in &stats {
-                    debug!("   |- {:<25}: {}", key, value);
-                }
-            }
-
-            let commitments = batch_records
-                .into_par_iter()
-                .map(|record| {
-                    self.base_machine
-                        .commit(record, LookupScope::Global)
-                        .unwrap()
-                })
-                .collect::<Vec<_>>();
-
-            // todo optimize: parallel
-            for commitment in commitments {
-                challenger.observe(commitment.commitment);
-                challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
-            }
-
-            if done {
-                break;
-            }
-        }
-
-        /*
-        Second phase
-        */
-
         let mut emulator = MetaEmulator::setup_riscv(witness);
 
         // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
@@ -134,10 +80,14 @@ where
         let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
             pk,
             &mut self.config().challenger(),
+            self.base_machine.has_global(),
         );
         #[cfg(feature = "debug-lookups")]
-        let mut global_lookup_debugger =
-            crate::machine::debug::IncrementalLookupDebugger::new(pk, LookupScope::Global, None);
+        let mut global_lookup_debugger = crate::machine::debug::IncrementalLookupDebugger::new(
+            pk,
+            crate::machine::lookup::LookupScope::Global,
+            None,
+        );
 
         loop {
             let (batch_records, done) = emulator.next_record_batch();
@@ -167,18 +117,13 @@ where
             let batch_proofs = batch_records
                 .into_par_iter()
                 .map(|record| {
-                    let regional_commitment = self
-                        .base_machine
-                        .commit(record, LookupScope::Regional)
-                        .unwrap();
-                    let global_commitment = self.base_machine.commit(record, LookupScope::Global);
+                    let main_commitment = self.base_machine.commit(record).unwrap();
 
                     let proof = self.base_machine.prove_plain(
                         witness.pk(),
                         &mut challenger.clone(),
                         record.chunk_index(),
-                        regional_commitment,
-                        global_commitment,
+                        main_commitment,
                     );
 
                     proof
@@ -244,57 +189,12 @@ where
             >,
         >,
     {
-        let start_p1 = Instant::now();
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
 
         // Get pk from witness and observe with challenger
         let pk = witness.pk();
         pk.observed_by(&mut challenger);
-
-        /*
-        First phase
-         */
-
-        let mut emulator = MetaEmulator::setup_riscv(witness);
-        // TODO: it seems emulator.next_record_batch() always return "done = true", no need for loop
-        loop {
-            let (batch_records, done) = emulator.next_record_batch();
-            self.complement_record(batch_records);
-
-            //#[cfg(feature = "debug")]
-            for record in &mut *batch_records {
-                let stats = record.stats();
-                info!("RISCV record stats: chunk {}", record.chunk_index());
-                for (key, value) in &stats {
-                    info!("   |- {:<26}: {}", key, value);
-                }
-            }
-
-            let commitments = batch_records
-                .into_par_iter()
-                .map(|record| {
-                    self.base_machine
-                        .commit(record, LookupScope::Global)
-                        .unwrap()
-                })
-                .collect::<Vec<_>>();
-
-            // todo optimize: parallel
-            for commitment in commitments {
-                challenger.observe(commitment.commitment);
-                challenger.observe_slice(&commitment.public_values[..self.num_public_values()]);
-            }
-
-            if done {
-                break;
-            }
-        }
-        info!("--- Finish riscv phase 1 in {:?}", start_p1.elapsed());
-
-        /*
-        Second phase
-        */
 
         let mut emulator = MetaEmulator::setup_riscv(witness);
 
@@ -305,10 +205,14 @@ where
         let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
             pk,
             &mut self.config().challenger(),
+            self.base_machine.has_global(),
         );
         #[cfg(feature = "debug-lookups")]
-        let mut global_lookup_debugger =
-            crate::machine::debug::IncrementalLookupDebugger::new(pk, LookupScope::Global, None);
+        let mut global_lookup_debugger = crate::machine::debug::IncrementalLookupDebugger::new(
+            pk,
+            crate::machine::lookup::LookupScope::Global,
+            None,
+        );
 
         let start_p2 = Instant::now();
         let mut batch_num = 1;
@@ -325,6 +229,15 @@ where
                 start_local.elapsed()
             );
             chunk_num += batch_records.len() as u32;
+
+            // set index for each record
+            for record in batch_records.into_iter() {
+                let stats = record.stats();
+                info!("RISCV record stats: chunk {}", record.chunk_index());
+                for (key, value) in &stats {
+                    info!("   |- {:<28}: {}", key, value);
+                }
+            }
 
             #[cfg(feature = "debug")]
             constraint_debugger.debug_incremental(&self.chips(), batch_records);
@@ -344,18 +257,13 @@ where
                 .map(|record| {
                     let start_chunk = Instant::now();
 
-                    let regional_commitment = self
-                        .base_machine
-                        .commit(record, LookupScope::Regional)
-                        .unwrap();
-                    let global_commitment = self.base_machine.commit(record, LookupScope::Global);
+                    let main_commitment = self.base_machine.commit(record).unwrap();
 
                     let proof = self.base_machine.prove_plain(
                         witness.pk(),
                         &mut challenger.clone(),
                         record.chunk_index(),
-                        regional_commitment,
-                        global_commitment,
+                        main_commitment,
                     );
 
                     info!(
@@ -419,7 +327,7 @@ where
         let mut prev_last_initialize_addr_bits = [<Val<SC>>::ZERO; 32];
         let mut prev_last_finalize_addr_bits = [<Val<SC>>::ZERO; 32];
 
-        let mut flag_extra = true;
+        // let mut flag_extra = true;
         let mut committed_value_digest_prev = Default::default();
         let mut deferred_proofs_digest_prev = Default::default();
         let zero_cvd = Default::default();
@@ -428,6 +336,11 @@ where
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
                 each_proof.public_values.as_ref().borrow();
+
+            println!(
+                "chunk: {}, execution chunk: {}",
+                public_values.chunk, public_values.execution_chunk
+            );
 
             // beginning constraints
             if i == 0 && !each_proof.includes_chip("Cpu") {
@@ -441,6 +354,14 @@ where
             if each_proof.includes_chip("Cpu") {
                 execution_proof_count += <Val<SC>>::ONE;
 
+                if public_values.execution_chunk != execution_proof_count {
+                    println!(
+                        "execution chunk: {}, execution_proof_count: {}",
+                        public_values.execution_chunk, execution_proof_count
+                    );
+                    panic!("Execution chunk number mismatch");
+                }
+
                 if each_proof.log_main_degree() > MAX_LOG_CHUNK_SIZE {
                     panic!("Cpu log degree too large");
                 }
@@ -451,10 +372,6 @@ where
             } else {
                 if public_values.start_pc != public_values.next_pc {
                     panic!("Non-Cpu proof start_pc is not equal to next_pc");
-                }
-                if flag_extra {
-                    execution_proof_count += <Val<SC>>::ONE;
-                    flag_extra = false;
                 }
             }
             if !each_proof.includes_chip("MemoryInitialize")
@@ -483,9 +400,7 @@ where
             if public_values.chunk != proof_count {
                 panic!("Chunk number mismatch");
             }
-            if public_values.execution_chunk != execution_proof_count {
-                panic!("Execution chunk number mismatch");
-            }
+
             if public_values.exit_code != <Val<SC>>::ZERO {
                 panic!("Exit code is not zero");
             }
@@ -521,7 +436,7 @@ where
         }
 
         // Verify the proofs.
-        self.base_machine.verify_ensemble(vk, &proof.proofs())?;
+        self.base_machine.verify_riscv(vk, &proof.proofs())?;
 
         Ok(())
     }
