@@ -66,7 +66,7 @@ pub struct CycleTrackerEntry {
 /// TODO fully document.
 /// Taken from [`sp1_recursion_core::runtime::Runtime`].
 /// Many missing things (compared to the old `Runtime`) will need to be implemented.
-pub struct Runtime<'a, F, EF, ExternalPerm, InternalPerm, const WIDTH: usize, const D: u64>
+pub struct Runtime<'a, F, EF, ExternalPerm, InternalPerm, const D: u64>
 where
     F: PrimeField32 + Field,
     EF: ExtensionField<F>,
@@ -122,7 +122,8 @@ where
     pub debug_stdout: Box<dyn Write + 'a>,
 
     /// Entries for dealing with the Poseidon2 hash state.
-    perm: Option<Poseidon2<<F as Field>::Packing, ExternalPerm, InternalPerm, WIDTH, D>>,
+    perm:
+        Option<Poseidon2<<F as Field>::Packing, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>>,
 
     _marker_ef: PhantomData<EF>,
 }
@@ -158,7 +159,7 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
 }
 
 impl<F, EF, ExternalPerm, InternalPerm, const D: u64>
-    Runtime<'_, F, EF, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>
+    Runtime<'_, F, EF, ExternalPerm, InternalPerm, D>
 where
     F: PrimeField32 + Field,
     EF: ExtensionField<F>,

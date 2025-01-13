@@ -59,10 +59,10 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
     // Extension field-related
 
     /// Asserts that the two field extensions are equal.
-    fn assert_ext_eq<I: Into<Self::Expr>>(
+    fn assert_ext_eq<I: Into<Self::Expr>, const W: u32>(
         &mut self,
-        left: BinomialExtension<I>,
-        right: BinomialExtension<I>,
+        left: BinomialExtension<I, W>,
+        right: BinomialExtension<I, W>,
     ) {
         for (left, right) in left.0.into_iter().zip(right.0) {
             self.assert_eq(left, right);
@@ -70,9 +70,9 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
     }
 
     /// Checks if an extension element is a base element.
-    fn assert_is_base_element<I: Into<Self::Expr> + Clone>(
+    fn assert_is_base_element<I: Into<Self::Expr> + Clone, const W: u32>(
         &mut self,
-        element: BinomialExtension<I>,
+        element: BinomialExtension<I, W>,
     ) {
         let base_slice = element.as_base_slice();
         let degree = base_slice.len();
@@ -82,12 +82,12 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
     }
 
     /// Performs an if else on extension elements.
-    fn if_else_ext(
+    fn if_else_ext<const W: u32>(
         &mut self,
         condition: impl Into<Self::Expr> + Clone,
-        a: BinomialExtension<impl Into<Self::Expr> + Clone>,
-        b: BinomialExtension<impl Into<Self::Expr> + Clone>,
-    ) -> BinomialExtension<Self::Expr> {
+        a: BinomialExtension<impl Into<Self::Expr> + Clone, W>,
+        b: BinomialExtension<impl Into<Self::Expr> + Clone, W>,
+    ) -> BinomialExtension<Self::Expr, W> {
         BinomialExtension(array::from_fn(|i| {
             self.if_else(condition.clone(), a.0[i].clone(), b.0[i].clone())
         }))

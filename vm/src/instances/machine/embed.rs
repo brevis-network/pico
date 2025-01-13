@@ -2,12 +2,8 @@ use crate::{
     compiler::recursion_v2::{
         circuit::utils::assert_embed_public_values_valid, program::RecursionProgram,
     },
-    configs::{
-        config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
-    },
+    configs::config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
-    instances::configs::embed_bb_bn254_poseidon2::StarkConfig as EmbedSC,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -18,12 +14,13 @@ use crate::{
     recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use p3_air::Air;
-use p3_field::FieldAlgebra;
-use std::{any::type_name, borrow::Borrow, time::Instant};
+use p3_field::{FieldAlgebra, PrimeField32};
+use std::{any::type_name, borrow::Borrow, marker::PhantomData, time::Instant};
 use tracing::{info, instrument, trace};
 
-pub struct EmbedMachine<SC, C, I>
+pub struct EmbedMachine<PrevSC, SC, C, I>
 where
+    PrevSC: StarkGenericConfig,
     SC: StarkGenericConfig,
     C: ChipBehavior<
             Val<SC>,
@@ -34,11 +31,16 @@ where
 {
     base_machine: BaseMachine<SC, C>,
 
-    phantom: std::marker::PhantomData<I>,
+    phantom: std::marker::PhantomData<(PrevSC, I)>,
 }
 
-impl<C, I> MachineBehavior<EmbedSC, C, I> for EmbedMachine<EmbedSC, C, I>
+impl<PrevSC, EmbedSC, C, I> MachineBehavior<EmbedSC, C, I> for EmbedMachine<PrevSC, EmbedSC, C, I>
 where
+    PrevSC: StarkGenericConfig,
+    EmbedSC: StarkGenericConfig<Val = PrevSC::Val>,
+    Val<EmbedSC>: PrimeField32,
+    Com<EmbedSC>: Send + Sync,
+    PcsProverData<EmbedSC>: Send + Sync,
     C: ChipBehavior<
             Val<EmbedSC>,
             Program = RecursionProgram<Val<EmbedSC>>,
@@ -98,7 +100,7 @@ where
         }
 
         // assert public value digest
-        assert_embed_public_values_valid(&BabyBearPoseidon2::new(), public_values);
+        assert_embed_public_values_valid(&PrevSC::new(), public_values);
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;
@@ -109,8 +111,9 @@ where
     }
 }
 
-impl<SC, C, I> EmbedMachine<SC, C, I>
+impl<PrevSC, SC, C, I> EmbedMachine<PrevSC, SC, C, I>
 where
+    PrevSC: StarkGenericConfig,
     SC: StarkGenericConfig,
     C: ChipBehavior<
             Val<SC>,
@@ -124,7 +127,7 @@ where
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
-            phantom: std::marker::PhantomData,
+            phantom: PhantomData,
         }
     }
 }

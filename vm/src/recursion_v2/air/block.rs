@@ -47,17 +47,17 @@ impl<T> Block<T> {
 }
 
 impl<T: Clone> Block<T> {
-    pub fn as_extension<F: Field, AB: ChipBuilder<F, Var = T>>(
+    pub fn as_extension<F: Field, AB: ChipBuilder<F, Var = T>, const W: u32>(
         &self,
-    ) -> BinomialExtension<AB::Expr> {
+    ) -> BinomialExtension<AB::Expr, W> {
         let arr: [AB::Expr; 4] = self.0.clone().map(|x| AB::Expr::ZERO + x);
         BinomialExtension(arr)
     }
 
-    pub fn as_extension_from_base<F: Field, AB: ChipBuilder<F, Var = T>>(
+    pub fn as_extension_from_base<F: Field, AB: ChipBuilder<F, Var = T>, const W: u32>(
         &self,
         base: AB::Expr,
-    ) -> BinomialExtension<AB::Expr> {
+    ) -> BinomialExtension<AB::Expr, W> {
         let mut arr: [AB::Expr; 4] = self.0.clone().map(|_| AB::Expr::ZERO);
         arr[0] = base;
 

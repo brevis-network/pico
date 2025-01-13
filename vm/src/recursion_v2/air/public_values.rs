@@ -10,7 +10,7 @@ use crate::{
         RECURSION_NUM_PVS_V2,
     },
     recursion_v2::air::public_values::circuit::{
-        config::CircuitConfig, hash::Posedion2BabyBearHasherVariable,
+        config::CircuitConfig, hash::Posedion2FieldHasherVariable,
     },
 };
 use core::fmt::Debug;
@@ -191,7 +191,7 @@ pub(crate) fn embed_public_values_digest<C, H>(
 ) -> [Felt<C::F>; DIGEST_SIZE]
 where
     C: CircuitConfig,
-    H: Posedion2BabyBearHasherVariable<C>,
+    H: Posedion2FieldHasherVariable<C>,
 {
     let input = public_values
         .riscv_vk_digest
@@ -212,7 +212,7 @@ pub(crate) fn assert_embed_public_values_valid<C, H>(
     public_values: &RecursionPublicValues<Felt<C::F>>,
 ) where
     C: CircuitConfig,
-    H: Posedion2BabyBearHasherVariable<C>,
+    H: Posedion2FieldHasherVariable<C>,
 {
     let expected_digest = embed_public_values_digest::<C, H>(builder, public_values);
     for (value, expected) in public_values.digest.iter().copied().zip_eq(expected_digest) {
@@ -227,7 +227,7 @@ pub(crate) fn recursion_public_values_digest<C, H>(
 ) -> [Felt<C::F>; DIGEST_SIZE]
 where
     C: CircuitConfig,
-    H: Posedion2BabyBearHasherVariable<C>,
+    H: Posedion2FieldHasherVariable<C>,
 {
     let pv_slice = public_values.as_array();
     H::poseidon2_hash(builder, &pv_slice[..NUM_PV_ELMS_TO_HASH])
@@ -239,7 +239,7 @@ pub(crate) fn assert_recursion_public_values_valid<C, H>(
     public_values: &RecursionPublicValues<Felt<C::F>>,
 ) where
     C: CircuitConfig,
-    H: Posedion2BabyBearHasherVariable<C>,
+    H: Posedion2FieldHasherVariable<C>,
 {
     let digest = recursion_public_values_digest::<C, H>(builder, public_values);
     for (value, expected) in public_values.digest.iter().copied().zip_eq(digest) {

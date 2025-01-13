@@ -3,6 +3,7 @@ use p3_baby_bear::BabyBear;
 use p3_field::FieldAlgebra;
 use pico_vm::{
     compiler::recursion_v2::circuit::stark::dummy_challenger,
+    configs::config::StarkGenericConfig,
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
@@ -31,8 +32,8 @@ use pico_vm::{
     },
     machine::{keys::HashableKey, machine::MachineBehavior},
     primitives::consts::{
-        COMBINE_DEGREE, COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, RECURSION_NUM_PVS_V2,
-        RISCV_NUM_PVS,
+        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
+        COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
     },
 };
 use rayon::{iter::ParallelIterator, prelude::IntoParallelRefIterator};
@@ -43,12 +44,25 @@ use std::{
 
 pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGEST_SIZE] {
     // COMBINE_DEGREE == CONVERT_DEGREE == COMPRESS_DEGREE == 3
-    let recursion_shape_config =
-        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
+    let recursion_shape_config = RecursionShapeConfig::<
+        BabyBear,
+        RecursionChipType<
+            BabyBear,
+            COMBINE_DEGREE,
+            BABYBEAR_W,
+            BABYBEAR_NUM_EXTERNAL_ROUNDS,
+            BABYBEAR_NUM_INTERNAL_ROUNDS,
+            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+        >,
+    >::default();
 
     match shape {
         PicoRecursionProgramShape::Convert(shape) => {
-            let chips = RiscvChipType::<BabyBear>::all_chips();
+            let chips = RiscvChipType::<
+                BabyBear,
+                { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+            >::all_chips();
             let riscv_machine = RiscvMachine::new(RiscvSC::new(), chips, RISCV_NUM_PVS);
 
             let base_machine = riscv_machine.base_machine();
@@ -74,24 +88,52 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
                 flag_first_chunk: false,
             };
 
-            let mut program =
-                ConvertVerifierCircuit::<RecursionFC, RiscvSC>::build(base_machine, &stdin);
+            let mut program = ConvertVerifierCircuit::<
+                RecursionFC,
+                RiscvSC,
+                { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+            >::build(base_machine, &stdin);
 
             recursion_shape_config.padding_shape(&mut program);
 
-            let machine = ConvertMachine::new(
+            let machine = ConvertMachine::<
+                _,
+                _,
+                { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+            >::new(
                 RecursionSC::new(),
-                RecursionChipType::<BabyBear, CONVERT_DEGREE>::all_chips(),
+                RecursionChipType::<
+                    BabyBear,
+                    CONVERT_DEGREE,
+                    BABYBEAR_W,
+                    BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                    BABYBEAR_NUM_INTERNAL_ROUNDS,
+                    { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+                >::all_chips(),
                 RECURSION_NUM_PVS_V2,
             );
 
             let (_pk, vk) = machine.setup_keys(&program);
-            vk.hash_babybear()
+            vk.hash_field()
         }
         PicoRecursionProgramShape::Combine(shape) => {
-            let machine = CombineVkMachine::new(
+            let machine = CombineVkMachine::<
+                _,
+                _,
+                { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+            >::new(
                 RecursionSC::new(),
-                RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
+                RecursionChipType::<
+                    BabyBear,
+                    COMBINE_DEGREE,
+                    BABYBEAR_W,
+                    BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                    BABYBEAR_NUM_INTERNAL_ROUNDS,
+                    { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+                >::all_chips(),
                 RECURSION_NUM_PVS_V2,
             );
 
@@ -106,37 +148,73 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
             let mut program_with_vk = CombineVkVerifierCircuit::<
                 RecursionFC,
                 RecursionSC,
-                RecursionChipType<BabyBear, COMBINE_DEGREE>,
+                RecursionChipType<
+                    BabyBear,
+                    COMBINE_DEGREE,
+                    BABYBEAR_W,
+                    BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                    BABYBEAR_NUM_INTERNAL_ROUNDS,
+                    { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+                >,
             >::build(base_machine, &stdin_with_vk);
 
             recursion_shape_config.padding_shape(&mut program_with_vk);
 
             let (_pk, vk) = machine.setup_keys(&program_with_vk);
-            vk.hash_babybear()
+            vk.hash_field()
         }
         PicoRecursionProgramShape::Compress(shape) => {
             // TODO: all_chips ?
-            let combine_machine = CombineVkMachine::new(
+            let combine_machine = CombineVkMachine::<
+                _,
+                _,
+                { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+            >::new(
                 RecursionSC::new(),
-                RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
+                RecursionChipType::<
+                    BabyBear,
+                    COMBINE_DEGREE,
+                    BABYBEAR_W,
+                    BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                    BABYBEAR_NUM_INTERNAL_ROUNDS,
+                    { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+                >::all_chips(),
                 RECURSION_NUM_PVS_V2,
             );
             let machine = CompressVkMachine::new(
                 RecursionSC::compress(),
-                RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
+                RecursionChipType::<
+                    BabyBear,
+                    COMPRESS_DEGREE,
+                    BABYBEAR_W,
+                    BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                    BABYBEAR_NUM_INTERNAL_ROUNDS,
+                    { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+                >::compress_chips(),
                 RECURSION_NUM_PVS_V2,
             );
             let combine_base_machine = combine_machine.base_machine();
             let stdin_with_vk = RecursionVkStdin::dummy(combine_base_machine, &shape);
-            let mut program_with_vk = CompressVkVerifierCircuit::<RecursionFC, RecursionSC>::build(
-                combine_base_machine,
-                &stdin_with_vk,
-            );
-            let compress_pad_shape =
-                RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_shape();
+            let mut program_with_vk = CompressVkVerifierCircuit::<
+                RecursionFC,
+                RecursionSC,
+                BABYBEAR_W,
+                BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+                { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+            >::build(combine_base_machine, &stdin_with_vk);
+            let compress_pad_shape = RecursionChipType::<
+                BabyBear,
+                COMPRESS_DEGREE,
+                BABYBEAR_W,
+                BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+                { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+            >::compress_shape();
             program_with_vk.shape = Some(compress_pad_shape);
             let (_pk, vk) = machine.setup_keys(&program_with_vk);
-            vk.hash_babybear()
+            vk.hash_field()
         }
     }
 }
@@ -164,10 +242,23 @@ fn save_vk_map(
 fn main() {
     // TODO: remove redundant count (merkle tree height set to 0 for dummy shape count)
     let start_time = std::time::Instant::now();
-    let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
+    let riscv_shape_config = RiscvShapeConfig::<
+        BabyBear,
+        { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
+        BABYBEAR_NUM_INTERNAL_ROUNDS,
+    >::default();
     // COMBINE_DEGREE == COMPRESS_DEGREE == 3
-    let recursion_shape_config =
-        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
+    let recursion_shape_config = RecursionShapeConfig::<
+        BabyBear,
+        RecursionChipType<
+            BabyBear,
+            COMBINE_DEGREE,
+            BABYBEAR_W,
+            BABYBEAR_NUM_EXTERNAL_ROUNDS,
+            BABYBEAR_NUM_INTERNAL_ROUNDS,
+            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+        >,
+    >::default();
 
     let riscv_recursion_shapes = riscv_shape_config
         .generate_all_allowed_shapes()

@@ -3,20 +3,26 @@ use std::marker::PhantomData;
 
 use super::event::Poseidon2PermuteEvent;
 use crate::{
-    chips::{
-        chips::poseidon2_wide_v2::{NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH},
-        poseidon2::{external_linear_layer, internal_linear_layer},
-    },
+    chips::poseidon2::{external_linear_layer, internal_linear_layer},
     emulator::riscv::syscalls::{
         precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
     },
-    primitives::RC_16_30_U32,
+    primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
 };
 
-pub(crate) struct Poseidon2PermuteSyscall<F: PrimeField32>(pub(crate) PhantomData<F>);
+pub(crate) struct Poseidon2PermuteSyscall<
+    F: PrimeField32,
+    const HALF_EXTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS: usize,
+>(pub(crate) PhantomData<F>);
 
-impl<F: PrimeField32> Poseidon2PermuteSyscall<F> {
-    pub fn full_round(state: &mut [F; WIDTH], round_constants: &[F; WIDTH]) {
+impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+    Poseidon2PermuteSyscall<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+{
+    pub fn full_round(
+        state: &mut [F; PERMUTATION_WIDTH],
+        round_constants: &[F; PERMUTATION_WIDTH],
+    ) {
         for (s, r) in state.iter_mut().zip(round_constants.iter()) {
             *s += *r;
             Self::sbox(s);
@@ -24,10 +30,10 @@ impl<F: PrimeField32> Poseidon2PermuteSyscall<F> {
         external_linear_layer(state);
     }
 
-    pub fn partial_round(state: &mut [F; WIDTH], round_constant: &F) {
+    pub fn partial_round(state: &mut [F; PERMUTATION_WIDTH], round_constant: &F) {
         state[0] += *round_constant;
         Self::sbox(&mut state[0]);
-        internal_linear_layer(state);
+        internal_linear_layer::<F, _>(state);
     }
 
     #[inline]
@@ -36,7 +42,9 @@ impl<F: PrimeField32> Poseidon2PermuteSyscall<F> {
     }
 }
 
-impl<F: PrimeField32> Syscall for Poseidon2PermuteSyscall<F> {
+impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> Syscall
+    for Poseidon2PermuteSyscall<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+{
     fn num_extra_cycles(&self) -> u32 {
         1
     }
@@ -55,10 +63,10 @@ impl<F: PrimeField32> Syscall for Poseidon2PermuteSyscall<F> {
         let mut state_read_records = Vec::new();
         let mut state_write_records = Vec::new();
 
-        let (state_records, state_values) = ctx.mr_slice(input_memory_ptr, WIDTH);
+        let (state_records, state_values) = ctx.mr_slice(input_memory_ptr, PERMUTATION_WIDTH);
         state_read_records.extend_from_slice(&state_records);
 
-        let mut state: [F; WIDTH] = state_values
+        let mut state: [F; PERMUTATION_WIDTH] = state_values
             .clone()
             .into_iter()
             .map(F::from_wrapped_u32)
@@ -69,21 +77,21 @@ impl<F: PrimeField32> Syscall for Poseidon2PermuteSyscall<F> {
         // Perform permutation on the state
         external_linear_layer(&mut state);
 
-        for round in 0..NUM_EXTERNAL_ROUNDS / 2 {
+        for round in 0..HALF_EXTERNAL_ROUNDS {
             Self::full_round(&mut state, &RC_16_30_U32[round].map(F::from_wrapped_u32));
         }
 
         for round in 0..NUM_INTERNAL_ROUNDS {
             Self::partial_round(
                 &mut state,
-                &RC_16_30_U32[round + NUM_EXTERNAL_ROUNDS / 2].map(F::from_wrapped_u32)[0],
+                &RC_16_30_U32[round + HALF_EXTERNAL_ROUNDS].map(F::from_wrapped_u32)[0],
             );
         }
 
-        for round in 0..NUM_EXTERNAL_ROUNDS / 2 {
+        for round in 0..HALF_EXTERNAL_ROUNDS {
             Self::full_round(
                 &mut state,
-                &RC_16_30_U32[round + NUM_INTERNAL_ROUNDS + NUM_EXTERNAL_ROUNDS / 2]
+                &RC_16_30_U32[round + NUM_INTERNAL_ROUNDS + HALF_EXTERNAL_ROUNDS]
                     .map(F::from_wrapped_u32),
             );
         }

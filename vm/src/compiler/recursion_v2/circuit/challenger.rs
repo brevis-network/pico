@@ -8,7 +8,6 @@ use crate::{
     },
     recursion_v2::{air::ChallengerPublicValues, runtime::NUM_BITS},
 };
-use p3_baby_bear::BabyBear;
 use p3_field::{Field, FieldAlgebra};
 
 pub trait CanCopyChallenger<FC: FieldGenericConfig> {
@@ -61,7 +60,7 @@ pub struct DuplexChallengerVariable<FC: FieldGenericConfig> {
     pub output_buffer: Vec<Felt<FC::F>>,
 }
 
-impl<FC: FieldGenericConfig<F = BabyBear>> DuplexChallengerVariable<FC> {
+impl<FC: FieldGenericConfig> DuplexChallengerVariable<FC> {
     /// Creates a new duplex challenger with the default state.
     pub fn new(builder: &mut Builder<FC>) -> Self {
         DuplexChallengerVariable::<FC> {
@@ -151,15 +150,13 @@ impl<FC: FieldGenericConfig<F = BabyBear>> DuplexChallengerVariable<FC> {
     }
 }
 
-impl<FC: FieldGenericConfig<F = BabyBear>> CanCopyChallenger<FC> for DuplexChallengerVariable<FC> {
+impl<FC: FieldGenericConfig> CanCopyChallenger<FC> for DuplexChallengerVariable<FC> {
     fn copy(&self, builder: &mut Builder<FC>) -> Self {
         DuplexChallengerVariable::copy(self, builder)
     }
 }
 
-impl<FC: FieldGenericConfig<F = BabyBear>> CanObserveVariable<FC, Felt<FC::F>>
-    for DuplexChallengerVariable<FC>
-{
+impl<FC: FieldGenericConfig> CanObserveVariable<FC, Felt<FC::F>> for DuplexChallengerVariable<FC> {
     fn observe(&mut self, builder: &mut Builder<FC>, value: Felt<FC::F>) {
         DuplexChallengerVariable::observe(self, builder, value);
     }
@@ -175,7 +172,7 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CanObserveVariable<FC, Felt<FC::F>>
     }
 }
 
-impl<FC: FieldGenericConfig<F = BabyBear>, const N: usize> CanObserveVariable<FC, [Felt<FC::F>; N]>
+impl<FC: FieldGenericConfig, const N: usize> CanObserveVariable<FC, [Felt<FC::F>; N]>
     for DuplexChallengerVariable<FC>
 {
     fn observe(&mut self, builder: &mut Builder<FC>, values: [Felt<FC::F>; N]) {
@@ -185,15 +182,13 @@ impl<FC: FieldGenericConfig<F = BabyBear>, const N: usize> CanObserveVariable<FC
     }
 }
 
-impl<FC: FieldGenericConfig<F = BabyBear>> CanSampleVariable<FC, Felt<FC::F>>
-    for DuplexChallengerVariable<FC>
-{
+impl<FC: FieldGenericConfig> CanSampleVariable<FC, Felt<FC::F>> for DuplexChallengerVariable<FC> {
     fn sample(&mut self, builder: &mut Builder<FC>) -> Felt<FC::F> {
         DuplexChallengerVariable::sample(self, builder)
     }
 }
 
-impl<FC: FieldGenericConfig<F = BabyBear>> CanSampleBitsVariable<FC, Felt<FC::F>>
+impl<FC: FieldGenericConfig> CanSampleBitsVariable<FC, Felt<FC::F>>
     for DuplexChallengerVariable<FC>
 {
     fn sample_bits(&mut self, builder: &mut Builder<FC>, nb_bits: usize) -> Vec<Felt<FC::F>> {
@@ -201,7 +196,7 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CanSampleBitsVariable<FC, Felt<FC::F>
     }
 }
 
-impl<FC: FieldGenericConfig<F = BabyBear>> FieldChallengerVariable<FC, Felt<FC::F>>
+impl<FC: FieldGenericConfig> FieldChallengerVariable<FC, Felt<FC::F>>
     for DuplexChallengerVariable<FC>
 {
     fn sample_ext(&mut self, builder: &mut Builder<FC>) -> Ext<FC::F, FC::EF> {

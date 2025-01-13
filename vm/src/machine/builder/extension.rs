@@ -6,12 +6,12 @@ use p3_field::Field;
 use std::array;
 
 /// A builder that can operation on extension elements.
-pub trait ExtensionBuilder<F: Field>: ChipBuilder<F> {
+pub trait ExtensionBuilder<F: Field, const W: u32>: ChipBuilder<F> {
     /// Asserts that the two field extensions are equal.
     fn assert_ext_eq<I: Into<Self::Expr>>(
         &mut self,
-        left: BinomialExtension<I>,
-        right: BinomialExtension<I>,
+        left: BinomialExtension<I, W>,
+        right: BinomialExtension<I, W>,
     ) {
         for (left, right) in left.0.into_iter().zip(right.0) {
             self.assert_eq(left, right);
@@ -21,7 +21,7 @@ pub trait ExtensionBuilder<F: Field>: ChipBuilder<F> {
     /// Checks if an extension element is a base element.
     fn assert_is_base_element<I: Into<Self::Expr> + Clone>(
         &mut self,
-        element: BinomialExtension<I>,
+        element: BinomialExtension<I, W>,
     ) {
         let base_slice = element.as_base_slice();
         let degree = base_slice.len();
@@ -34,9 +34,9 @@ pub trait ExtensionBuilder<F: Field>: ChipBuilder<F> {
     fn if_else_ext(
         &mut self,
         condition: impl Into<Self::Expr> + Clone,
-        a: BinomialExtension<impl Into<Self::Expr> + Clone>,
-        b: BinomialExtension<impl Into<Self::Expr> + Clone>,
-    ) -> BinomialExtension<Self::Expr> {
+        a: BinomialExtension<impl Into<Self::Expr> + Clone, W>,
+        b: BinomialExtension<impl Into<Self::Expr> + Clone, W>,
+    ) -> BinomialExtension<Self::Expr, W> {
         BinomialExtension(array::from_fn(|i| {
             self.if_else(condition.clone(), a.0[i].clone(), b.0[i].clone())
         }))

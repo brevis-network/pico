@@ -1,18 +1,19 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            config::{BabyBearFriConfigVariable, CircuitConfig},
+            config::{CircuitConfig, FieldFriConfigVariable},
             hash::{FieldHasher, FieldHasherVariable},
             merkle_tree::MerkleProof,
             stark::MerkleProofVariable,
+            types::FriProofVariable,
             witness::{WitnessWriter, Witnessable},
         },
-        ir::Felt,
+        ir::{Ext, Felt},
         prelude::Builder,
     },
     configs::{
-        config::{StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val},
+        config::{Com, PcsProof, StarkGenericConfig, Val},
+        stark_config::bb_poseidon2::BabyBearPoseidon2,
     },
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
@@ -26,27 +27,32 @@ use crate::{
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         machine::BaseMachine,
     },
-    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
+    primitives::consts::{
+        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
+        DIGEST_SIZE,
+    },
 };
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
-use p3_field::FieldAlgebra;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{FieldAlgebra, TwoAdicField};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "SC::Digest: Serialize"))]
 #[serde(bound(deserialize = "SC::Digest: Deserialize<'de>"))]
-pub struct MerkleProofStdin<SC: FieldHasher<BabyBear>> {
-    pub vk_merkle_proofs: Vec<MerkleProof<BabyBear, SC>>,
+pub struct MerkleProofStdin<SC: StarkGenericConfig + FieldHasher<Val<SC>>> {
+    pub vk_merkle_proofs: Vec<MerkleProof<Val<SC>, SC>>,
     pub vk_values: Vec<SC::Digest>,
     pub merkle_root: SC::Digest,
 }
 
 /// An input layout for the merkle proof verifier.
-pub struct MerkleProofStdinVariable<
-    CC: CircuitConfig<F = BabyBear>,
-    SC: FieldHasherVariable<CC> + BabyBearFriConfigVariable<CC>,
-> {
+pub struct MerkleProofStdinVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    SC: FieldHasherVariable<CC> + FieldFriConfigVariable<CC, Val = CC::F>,
+{
     /// The merkle proofs to verify.
     pub vk_merkle_proofs: Vec<MerkleProofVariable<CC, SC>>,
     // TODO: we can remove the vk_values here
@@ -54,11 +60,11 @@ pub struct MerkleProofStdinVariable<
     pub merkle_root: SC::DigestVariable,
 }
 
-impl<CC: CircuitConfig<F = BabyBear>, SC: BabyBearFriConfigVariable<CC>> Witnessable<CC>
-    for MerkleProofStdin<SC>
+impl<CC, SC> Witnessable<CC> for MerkleProofStdin<SC>
 where
-    SC: FieldHasher<BabyBear>,
-    <SC as FieldHasher<BabyBear>>::Digest: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    SC: FieldFriConfigVariable<CC, Val = CC::F> + FieldHasher<CC::F>,
+    SC::Digest: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    CC: CircuitConfig,
 {
     type WitnessVariable = MerkleProofStdinVariable<CC, SC>;
 
@@ -109,9 +115,11 @@ where
     }
 }
 
-impl MerkleProofStdin<BabyBearPoseidon2> {
+impl<SC: StarkGenericConfig + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZE]>>
+    MerkleProofStdin<SC>
+{
     pub fn dummy(num_proofs: usize, height: usize) -> Self {
-        let dummy_digest = [BabyBear::ZERO; DIGEST_SIZE];
+        let dummy_digest = [Val::<SC>::ZERO; DIGEST_SIZE];
         let vk_merkle_proofs = vec![
             MerkleProof {
                 index: 0,
@@ -132,7 +140,7 @@ impl MerkleProofStdin<BabyBearPoseidon2> {
 #[derive(Clone)]
 pub struct RecursionVkStdin<'a, SC, C>
 where
-    SC: FieldHasher<BabyBear> + StarkGenericConfig,
+    SC: StarkGenericConfig + FieldHasher<Val<SC>>,
     C: ChipBehavior<Val<SC>>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
@@ -141,22 +149,35 @@ where
     pub recursion_stdin: RecursionStdin<'a, SC, C>,
 }
 
-pub struct RecursionVkStdinVariable<
-    CC: CircuitConfig<F = BabyBear>,
-    SC: BabyBearFriConfigVariable<CC>,
-> {
+pub struct RecursionVkStdinVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+{
     pub resursion_stdin_var: RecursionStdinVariable<CC, SC>,
     pub merkle_proof_var: MerkleProofStdinVariable<CC, SC>,
 }
 
-impl<CC, C> Witnessable<CC> for RecursionVkStdin<'_, BabyBearPoseidon2, C>
+impl<CC, SC, C> Witnessable<CC> for RecursionVkStdin<'_, SC, C>
 where
-    CC: CircuitConfig<F = SC_Val, EF = SC_Challenge, Bit = Felt<BabyBear>>,
-    C: ChipBehavior<BabyBear>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
+    CC: CircuitConfig,
+    CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+            CC,
+            Val = CC::F,
+            Challenge = CC::EF,
+            Domain = TwoAdicMultiplicativeCoset<CC::F>,
+        > + FieldHasher<CC::F>,
+    SC::Digest: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    C: ChipBehavior<CC::F>
+        + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    type WitnessVariable = RecursionVkStdinVariable<CC, BabyBearPoseidon2>;
+    type WitnessVariable = RecursionVkStdinVariable<CC, SC>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         RecursionVkStdinVariable {
@@ -171,9 +192,32 @@ where
     }
 }
 
-impl<'a> RecursionVkStdin<'a, BabyBearPoseidon2, RecursionChipType<BabyBear, 3>> {
+impl<'a>
+    RecursionVkStdin<
+        'a,
+        BabyBearPoseidon2,
+        RecursionChipType<
+            BabyBear,
+            3,
+            BABYBEAR_W,
+            BABYBEAR_NUM_EXTERNAL_ROUNDS,
+            BABYBEAR_NUM_INTERNAL_ROUNDS,
+            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+        >,
+    >
+{
     pub fn dummy(
-        machine: &'a BaseMachine<BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>>,
+        machine: &'a BaseMachine<
+            BabyBearPoseidon2,
+            RecursionChipType<
+                BabyBear,
+                COMBINE_DEGREE,
+                BABYBEAR_W,
+                BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+                { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+            >,
+        >,
         shape: &RecursionVkShape,
     ) -> Self {
         let recursion_stdin = RecursionStdin::dummy(machine, &shape.recursion_shape);

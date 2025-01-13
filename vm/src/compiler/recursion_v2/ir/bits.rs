@@ -1,5 +1,9 @@
 use super::{Array, Builder, DslIr, Felt, Usize, Var};
-use crate::{configs::config::FieldGenericConfig, recursion_v2::runtime::NUM_BITS};
+use crate::{
+    configs::config::FieldGenericConfig,
+    machine::field::{FieldBehavior, FieldType},
+    recursion_v2::runtime::NUM_BITS,
+};
 use p3_field::{Field, FieldAlgebra};
 
 impl<FC: FieldGenericConfig> Builder<FC> {
@@ -20,7 +24,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
 
         self.assert_var_eq(sum, num);
 
-        self.less_than_bb_modulus(output.clone());
+        self.less_than_modulus(output.clone());
 
         output
     }
@@ -71,7 +75,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
 
         self.assert_felt_eq(sum, num);
 
-        self.less_than_bb_modulus(output.clone());
+        self.less_than_modulus(output.clone());
 
         output
     }
@@ -170,25 +174,34 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         result_bits
     }
 
-    /// Checks that the LE bit decomposition of a number is less than the babybear modulus.
+    /// Checks that the LE bit decomposition of a number is less than the babybear/koalabear modulus.
     ///
     /// SAFETY: This function assumes that the num_bits values are already verified to be boolean.
     ///
     /// The babybear modulus in LE bits is: 100_000_000_000_000_000_000_000_000_111_1.
     /// To check that the num_bits array is less than that value, we first check if the most
     /// significant bits are all 1.  If it is, then we assert that the other bits are all 0.
-    fn less_than_bb_modulus(&mut self, num_bits: Array<FC, Var<FC::N>>) {
+    /// The koalabear modulus in LE bits is: 100_000_000_000_000_000_000_000_111_111_1.
+    /// To check that the num_bits array is less than that value, we first check if the most
+    /// significant bits are all 1.  If it is, then we assert that the other bits are all 0.
+    fn less_than_modulus(&mut self, num_bits: Array<FC, Var<FC::N>>) {
         let one: Var<_> = self.eval(FC::N::ONE);
         let zero: Var<_> = self.eval(FC::N::ZERO);
 
-        let mut most_sig_4_bits = one;
-        for i in (NUM_BITS - 4)..NUM_BITS {
+        let one_start_id = match FC::F::field_type() {
+            FieldType::TypeBabyBear => 3,
+            FieldType::TypeKoalaBear => 0,
+            _ => unreachable!(),
+        };
+
+        let mut most_sig_bits = one;
+        for i in (24 + one_start_id)..NUM_BITS {
             let bit = self.get(&num_bits, i);
-            most_sig_4_bits = self.eval(bit * most_sig_4_bits);
+            most_sig_bits = self.eval(bit * most_sig_bits);
         }
 
         let mut sum_least_sig_bits = zero;
-        for i in 0..(NUM_BITS - 4) {
+        for i in 0..(24 + one_start_id) {
             let bit = self.get(&num_bits, i);
             sum_least_sig_bits = self.eval(bit + sum_least_sig_bits);
         }
@@ -196,7 +209,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         // If the most significant 4 bits are all 1, then check the sum of the least significant
         // bits, else return zero.
         let check: Var<_> =
-            self.eval(most_sig_4_bits * sum_least_sig_bits + (one - most_sig_4_bits) * zero);
+            self.eval(most_sig_bits * sum_least_sig_bits + (one - most_sig_bits) * zero);
         self.assert_var_eq(check, zero);
     }
 }

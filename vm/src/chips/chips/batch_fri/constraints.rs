@@ -7,17 +7,20 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder, RecursionBuilder},
         extension::BinomialExtension,
     },
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::Field;
+use p3_field::{extension::BinomiallyExtendable, Field};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
-impl<F: Field, CB, const DEGREE: usize> Air<CB> for BatchFRIChip<DEGREE, F>
+impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB, const DEGREE: usize, const W: u32>
+    Air<CB> for BatchFRIChip<DEGREE, W, F>
 where
     CB: ChipBuilder<F>,
 {
     fn eval(&self, builder: &mut CB) {
+        assert_eq!(F::from_canonical_u32(W), F::W);
         let main = builder.main();
         let (local, next) = (main.row_slice(0), main.row_slice(1));
         let local: &BatchFRICols<CB::Var> = (*local).borrow();
@@ -53,9 +56,9 @@ where
 
         // Constrain the accumulator value of the first row.
         builder.when_first_row().assert_ext_eq(
-            local.acc.as_extension::<F, CB>(),
-            local.alpha_pow.as_extension::<F, CB>()
-                * (local.p_at_z.as_extension::<F, CB>()
+            local.acc.as_extension::<F, CB, W>(),
+            local.alpha_pow.as_extension::<F, CB, W>()
+                * (local.p_at_z.as_extension::<F, CB, W>()
                     - BinomialExtension::from_base(local.p_at_x.into())),
         );
 
@@ -64,9 +67,9 @@ where
             .when_transition()
             .when(prepr_local.is_end)
             .assert_ext_eq(
-                next.acc.as_extension::<F, CB>(),
-                next.alpha_pow.as_extension::<F, CB>()
-                    * (next.p_at_z.as_extension::<F, CB>()
+                next.acc.as_extension::<F, CB, W>(),
+                next.alpha_pow.as_extension::<F, CB, W>()
+                    * (next.p_at_z.as_extension::<F, CB, W>()
                         - BinomialExtension::from_base(next.p_at_x.into())),
             );
 
@@ -75,10 +78,10 @@ where
             .when_transition()
             .when_not(prepr_local.is_end)
             .assert_ext_eq(
-                next.acc.as_extension::<F, CB>(),
-                local.acc.as_extension::<F, CB>()
-                    + next.alpha_pow.as_extension::<F, CB>()
-                        * (next.p_at_z.as_extension::<F, CB>()
+                next.acc.as_extension::<F, CB, W>(),
+                local.acc.as_extension::<F, CB, W>()
+                    + next.alpha_pow.as_extension::<F, CB, W>()
+                        * (next.p_at_z.as_extension::<F, CB, W>()
                             - BinomialExtension::from_base(next.p_at_x.into())),
             );
     }

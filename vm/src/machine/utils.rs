@@ -9,7 +9,6 @@ use hashbrown::HashMap;
 use hybrid_array::ArraySize;
 use itertools::Itertools;
 use p3_air::{Air, PairCol};
-use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PackedValue};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -22,7 +21,6 @@ use rayon::ThreadPoolBuilder;
 use crate::{
     chips::{chips::riscv_memory::read_write::columns::MemoryCols, gadgets::utils::limbs::Limbs},
     configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
-    instances::configs::riscv_config::StarkConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, SymbolicConstraintFolder},
@@ -385,14 +383,15 @@ where
     builder.constraints()
 }
 
-pub fn assert_vk_digest<SC: StarkGenericConfig>(
-    proof: &MetaProof<SC>,
-    riscv_vk: &BaseVerifyingKey<StarkConfig>,
-) where
-    <SC as StarkGenericConfig>::Val: PartialEq<BabyBear>,
+pub fn assert_vk_digest<SC, SC2>(proof: &MetaProof<SC>, riscv_vk: &BaseVerifyingKey<SC2>)
+where
+    SC: StarkGenericConfig,
+    SC2: StarkGenericConfig,
+    BaseVerifyingKey<SC2>: HashableKey<SC2::Val>,
+    SC::Val: PartialEq<SC2::Val>,
 {
     let public_values: &RecursionPublicValues<_> = proof.proofs[0].public_values.as_ref().borrow();
-    assert_eq!(public_values.riscv_vk_digest, riscv_vk.hash_babybear());
+    assert_eq!(public_values.riscv_vk_digest, riscv_vk.hash_field());
 }
 
 fn compute_degree<F: Field>(expr: &SymbolicExpression<F>) -> usize {

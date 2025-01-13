@@ -1,5 +1,5 @@
 use crate::{
-    chips::chips::{poseidon2_wide_v2::WIDTH, recursion_memory_v2::MemoryAccessCols},
+    chips::chips::recursion_memory_v2::MemoryAccessCols, primitives::consts::PERMUTATION_WIDTH,
     recursion_v2::types::Address,
 };
 use pico_derive::AlignedBorrow;
@@ -10,7 +10,7 @@ pub const PREPROCESSED_POSEIDON2_WIDTH: usize = size_of::<Poseidon2PreprocessedC
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Poseidon2PreprocessedCols<T: Copy> {
-    pub input: [Address<T>; WIDTH],
-    pub output: [MemoryAccessCols<T>; WIDTH],
+    pub input: [Address<T>; PERMUTATION_WIDTH],
+    pub output: [MemoryAccessCols<T>; PERMUTATION_WIDTH],
     pub is_real_neg: T,
 }

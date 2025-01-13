@@ -248,6 +248,21 @@ pub enum DslIr<FC: FieldGenericConfig> {
     Poseidon2AbsorbBabyBear(Var<FC::N>, Array<FC, Felt<FC::F>>),
     /// Finalize and return the hash digest of a specified hash instance.
     Poseidon2FinalizeBabyBear(Var<FC::N>, Array<FC, Felt<FC::F>>),
+    /// Permutes an array of baby bear elements using Poseidon2 (output = p2_permute(array)).
+    Poseidon2PermuteKoalaBear(Box<(Array<FC, Felt<FC::F>>, Array<FC, Felt<FC::F>>)>),
+    /// Compresses two koala bear element arrays using Poseidon2 (output = p2_compress(array1,
+    /// array2)).
+    Poseidon2CompressKoalaBear(
+        Box<(
+            Array<FC, Felt<FC::F>>,
+            Array<FC, Felt<FC::F>>,
+            Array<FC, Felt<FC::F>>,
+        )>,
+    ),
+    /// Absorb an array of koala bear elements for a specified hash instance.
+    Poseidon2AbsorbKoalaBear(Var<FC::N>, Array<FC, Felt<FC::F>>),
+    /// Finalize and return the hash digest of a specified hash instance.
+    Poseidon2FinalizeKoalaBear(Var<FC::N>, Array<FC, Felt<FC::F>>),
     /// Permutes an array of Bn254 elements using Poseidon2 (output = p2_permute(array)). Should
     /// only be used when target is a gnark circuit.
     CircuitPoseidon2Permute([Var<FC::N>; 3]),
@@ -255,6 +270,10 @@ pub enum DslIr<FC: FieldGenericConfig> {
     CircuitPoseidon2PermuteBabyBear(Box<[Felt<FC::F>; 16]>),
     /// Permutates an array of BabyBear elements in the circuit using the skinny precompile.
     CircuitV2Poseidon2PermuteBabyBear(Box<([Felt<FC::F>; 16], [Felt<FC::F>; 16])>),
+    /// Permutates an array of KoalaBear elements in the circuit.
+    CircuitPoseidon2PermuteKoalaBear(Box<[Felt<FC::F>; 16]>),
+    /// Permutates an array of KoalaBear elements in the circuit using the skinny precompile.
+    CircuitV2Poseidon2PermuteKoalaBear(Box<([Felt<FC::F>; 16], [Felt<FC::F>; 16])>),
     /// Commits the public values.
     CircuitV2CommitPublicValues(Box<RecursionPublicValues<Felt<FC::F>>>),
 

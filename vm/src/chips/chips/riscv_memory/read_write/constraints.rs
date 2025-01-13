@@ -103,7 +103,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
             is_memory_instruction.clone(),
         );
 
-        // Range check the addr_word to be a valid babybear word.
+        // Range check the addr_word to be a valid field word.
         FieldWordRangeChecker::<CB::F>::range_check(
             builder,
             local.addr_word,

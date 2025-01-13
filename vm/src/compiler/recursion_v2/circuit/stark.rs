@@ -1,11 +1,14 @@
 use super::{
     builder::CircuitV2Builder,
     challenger::CanObserveVariable,
-    config::{BabyBearFriConfigVariable, CircuitConfig},
+    config::{CircuitConfig, FieldFriConfigVariable},
     hash::FieldHasherVariable,
     types::{BaseVerifyingKeyVariable, TwoAdicPcsMatsVariable, TwoAdicPcsRoundVariable},
 };
-use crate::compiler::recursion_v2::circuit::types::FriProofVariable;
+use crate::{
+    compiler::recursion_v2::circuit::types::FriProofVariable,
+    instances::configs::riscv_bb_poseidon2::StarkConfig as RiscvSC,
+};
 use crate::{
     compiler::recursion_v2::{
         circuit::{
@@ -16,7 +19,6 @@ use crate::{
         prelude::*,
     },
     configs::config::{Challenger, FieldGenericConfig, StarkGenericConfig, Val},
-    instances::configs::riscv_config::StarkConfig as RiscvSC,
     machine::{
         chip::ChipBehavior,
         folder::{
@@ -34,14 +36,13 @@ use hashbrown::HashMap;
 use itertools::{izip, Itertools};
 use p3_air::{Air, BaseAir};
 use p3_baby_bear::BabyBear;
-use p3_commit::{Mmcs, Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
+use p3_commit::{Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
-use p3_matrix::dense::RowMajorMatrix;
 
 /// Reference: [pico_machine::stark::BaseProof]
 #[allow(clippy::type_complexity)]
 #[derive(Clone)]
-pub struct BaseProofVariable<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>> {
+pub struct BaseProofVariable<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<CC>> {
     pub commitments: BaseCommitments<SC::DigestVariable>,
     pub opened_values: BaseOpenedValues<Felt<CC::F>, Ext<CC::F, CC::EF>>,
     pub opening_proof: FriProofVariable<CC, SC>,
@@ -76,22 +77,16 @@ pub struct StarkVerifier<FC: FieldGenericConfig, SC: StarkGenericConfig, A> {
 
 impl<CC, SC, A> StarkVerifier<CC, SC, A>
 where
+    CC: CircuitConfig,
     CC::F: TwoAdicField,
-    CC: CircuitConfig<F = SC::Val>,
-    SC: BabyBearFriConfigVariable<CC>,
-    <SC::ValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>: Clone,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+    SC::ValMmcs: Clone,
     A: ChipBehavior<Val<SC>>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
 {
-    pub fn natural_domain_for_degree(
-        config: &SC,
-        degree: usize,
-    ) -> TwoAdicMultiplicativeCoset<CC::F> {
-        <SC::Pcs as Pcs<SC::Challenge, SC::FriChallenger>>::natural_domain_for_degree(
-            config.pcs(),
-            degree,
-        )
+    pub fn natural_domain_for_degree(config: &SC, degree: usize) -> SC::Domain {
+        SC::Pcs::natural_domain_for_degree(config.pcs(), degree)
     }
 
     #[allow(unused_variables)]
@@ -187,7 +182,7 @@ where
             .map(|(name, domain, _)| {
                 let i = main_chip_ordering[name];
                 if !chips[i].local_only() {
-                    TwoAdicPcsMatsVariable::<CC> {
+                    TwoAdicPcsMatsVariable::<CC, SC::Domain> {
                         domain: *domain,
                         points: vec![zeta, domain.next_point_variable(builder, zeta)],
                         values: vec![
@@ -200,7 +195,7 @@ where
                         ],
                     }
                 } else {
-                    TwoAdicPcsMatsVariable::<CC> {
+                    TwoAdicPcsMatsVariable::<CC, SC::Domain> {
                         domain: *domain,
                         points: vec![zeta],
                         values: vec![opened_values.chips_opened_values[i]
@@ -217,13 +212,13 @@ where
             .zip_eq(chips.iter())
             .map(|((domain, values), chip)| {
                 if !chip.local_only() {
-                    TwoAdicPcsMatsVariable::<CC> {
+                    TwoAdicPcsMatsVariable::<CC, SC::Domain> {
                         domain: *domain,
                         points: vec![zeta, domain.next_point_variable(builder, zeta)],
                         values: vec![values.main_local.clone(), values.main_next.clone()],
                     }
                 } else {
-                    TwoAdicPcsMatsVariable::<CC> {
+                    TwoAdicPcsMatsVariable::<CC, SC::Domain> {
                         domain: *domain,
                         points: vec![zeta],
                         values: vec![values.main_local.clone()],
@@ -235,14 +230,16 @@ where
         let perm_domains_points_and_opens = trace_domains
             .iter()
             .zip_eq(opened_values.chips_opened_values.iter())
-            .map(|(domain, values)| TwoAdicPcsMatsVariable::<CC> {
-                domain: *domain,
-                points: vec![zeta, domain.next_point_variable(builder, zeta)],
-                values: vec![
-                    values.permutation_local.clone(),
-                    values.permutation_next.clone(),
-                ],
-            })
+            .map(
+                |(domain, values)| TwoAdicPcsMatsVariable::<CC, SC::Domain> {
+                    domain: *domain,
+                    points: vec![zeta, domain.next_point_variable(builder, zeta)],
+                    values: vec![
+                        values.permutation_local.clone(),
+                        values.permutation_next.clone(),
+                    ],
+                },
+            )
             .collect_vec();
 
         let quotient_chunk_domains = trace_domains
@@ -267,17 +264,19 @@ where
                     .quotient
                     .iter()
                     .zip_eq(qc_domains)
-                    .map(move |(values, q_domain)| TwoAdicPcsMatsVariable::<CC> {
-                        domain: *q_domain,
-                        points: vec![zeta],
-                        values: vec![values.clone()],
-                    })
+                    .map(
+                        move |(values, q_domain)| TwoAdicPcsMatsVariable::<CC, SC::Domain> {
+                            domain: *q_domain,
+                            points: vec![zeta],
+                            values: vec![values.clone()],
+                        },
+                    )
             })
             .collect_vec();
 
         // Create the pcs rounds.
         let prep_commit = vk.commit;
-        let prep_round: TwoAdicPcsRoundVariable<CC, SC> = TwoAdicPcsRoundVariable {
+        let prep_round = TwoAdicPcsRoundVariable {
             batch_commit: prep_commit,
             domains_points_and_opens: preprocessed_domains_points_and_opens,
         };
@@ -362,7 +361,7 @@ where
     }
 }
 
-impl<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>> BaseProofVariable<CC, SC> {
+impl<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<CC>> BaseProofVariable<CC, SC> {
     pub fn contains_cpu(&self) -> bool {
         self.main_chip_ordering.contains_key("Cpu")
     }

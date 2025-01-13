@@ -288,6 +288,9 @@ where
             DslIr::CircuitV2Poseidon2PermuteBabyBear(data) => {
                 f(self.poseidon2_permute(data.0, data.1))
             }
+            DslIr::CircuitV2Poseidon2PermuteKoalaBear(data) => {
+                f(self.poseidon2_permute(data.0, data.1))
+            }
             DslIr::CircuitV2ExpReverseBits(dst, base, exp) => {
                 f(self.exp_reverse_bits(dst, base, exp))
             }

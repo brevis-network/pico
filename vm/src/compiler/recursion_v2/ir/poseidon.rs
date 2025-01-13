@@ -1,6 +1,7 @@
 use super::{Array, Builder, DslIr, Ext, Felt, Usize, Var};
 use crate::{
     configs::config::FieldGenericConfig,
+    machine::field::{FieldBehavior, FieldType},
     primitives::consts::{DIGEST_SIZE, PERMUTATION_WIDTH},
     recursion_v2::runtime::HASH_RATE,
 };
@@ -18,10 +19,21 @@ impl<FC: FieldGenericConfig> Builder<FC> {
             }
             Array::Dyn(_, len) => self.array::<Felt<FC::F>>(*len),
         };
-        self.push_op(DslIr::Poseidon2PermuteBabyBear(Box::new((
-            output.clone(),
-            array.clone(),
-        ))));
+        match FC::F::field_type() {
+            FieldType::TypeBabyBear => {
+                self.push_op(DslIr::Poseidon2PermuteBabyBear(Box::new((
+                    output.clone(),
+                    array.clone(),
+                ))));
+            }
+            FieldType::TypeKoalaBear => {
+                self.push_op(DslIr::Poseidon2PermuteKoalaBear(Box::new((
+                    output.clone(),
+                    array.clone(),
+                ))));
+            }
+            _ => unreachable!(),
+        }
         output
     }
 
@@ -29,10 +41,21 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     ///
     /// Reference: [p3_poseidon2::Poseidon2]
     pub fn poseidon2_permute_mut(&mut self, array: &Array<FC, Felt<FC::F>>) {
-        self.push_op(DslIr::Poseidon2PermuteBabyBear(Box::new((
-            array.clone(),
-            array.clone(),
-        ))));
+        match FC::F::field_type() {
+            FieldType::TypeBabyBear => {
+                self.push_op(DslIr::Poseidon2PermuteBabyBear(Box::new((
+                    array.clone(),
+                    array.clone(),
+                ))));
+            }
+            FieldType::TypeKoalaBear => {
+                self.push_op(DslIr::Poseidon2PermuteKoalaBear(Box::new((
+                    array.clone(),
+                    array.clone(),
+                ))));
+            }
+            _ => unreachable!(),
+        }
     }
 
     /// Applies the Poseidon2 absorb function to the given array.
@@ -43,10 +66,21 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         p2_hash_and_absorb_num: Var<FC::N>,
         input: &Array<FC, Felt<FC::F>>,
     ) {
-        self.push_op(DslIr::Poseidon2AbsorbBabyBear(
-            p2_hash_and_absorb_num,
-            input.clone(),
-        ));
+        match FC::F::field_type() {
+            FieldType::TypeBabyBear => {
+                self.push_op(DslIr::Poseidon2AbsorbBabyBear(
+                    p2_hash_and_absorb_num,
+                    input.clone(),
+                ));
+            }
+            FieldType::TypeKoalaBear => {
+                self.push_op(DslIr::Poseidon2AbsorbKoalaBear(
+                    p2_hash_and_absorb_num,
+                    input.clone(),
+                ));
+            }
+            _ => unreachable!(),
+        }
     }
 
     /// Applies the Poseidon2 finalize to the given hash number.
@@ -57,10 +91,21 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         p2_hash_num: Var<FC::N>,
         output: &Array<FC, Felt<FC::F>>,
     ) {
-        self.push_op(DslIr::Poseidon2FinalizeBabyBear(
-            p2_hash_num,
-            output.clone(),
-        ));
+        match FC::F::field_type() {
+            FieldType::TypeBabyBear => {
+                self.push_op(DslIr::Poseidon2FinalizeBabyBear(
+                    p2_hash_num,
+                    output.clone(),
+                ));
+            }
+            FieldType::TypeKoalaBear => {
+                self.push_op(DslIr::Poseidon2FinalizeKoalaBear(
+                    p2_hash_num,
+                    output.clone(),
+                ));
+            }
+            _ => unreachable!(),
+        }
     }
 
     /// Applies the Poseidon2 compression function to the given array.
@@ -91,11 +136,23 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         left: &Array<FC, Felt<FC::F>>,
         right: &Array<FC, Felt<FC::F>>,
     ) {
-        self.push_op(DslIr::Poseidon2CompressBabyBear(Box::new((
-            result.clone(),
-            left.clone(),
-            right.clone(),
-        ))));
+        match FC::F::field_type() {
+            FieldType::TypeBabyBear => {
+                self.push_op(DslIr::Poseidon2CompressBabyBear(Box::new((
+                    result.clone(),
+                    left.clone(),
+                    right.clone(),
+                ))));
+            }
+            FieldType::TypeKoalaBear => {
+                self.push_op(DslIr::Poseidon2CompressKoalaBear(Box::new((
+                    result.clone(),
+                    left.clone(),
+                    right.clone(),
+                ))));
+            }
+            _ => unreachable!(),
+        }
     }
 
     /// Applies the Poseidon2 permutation to the given array.

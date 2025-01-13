@@ -1,7 +1,7 @@
 use super::septic::SepticDigest;
 use crate::{
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
-    primitives::{consts::DIGEST_SIZE, poseidon2_hash},
+    primitives::{consts::DIGEST_SIZE, POSEIDON2_BB_HASHER, POSEIDON2_KB_HASHER},
 };
 use alloc::sync::Arc;
 use hashbrown::HashMap;
@@ -9,7 +9,9 @@ use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, TwoAdicField};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
+use p3_symmetric::CryptographicHasher;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub struct BaseProvingKey<SC: StarkGenericConfig> {
@@ -89,17 +91,17 @@ impl<SC: StarkGenericConfig> BaseVerifyingKey<SC> {
 }
 
 /// A trait for keys that can be hashed into a digest.
-pub trait HashableKey {
+pub trait HashableKey<F> {
     /// Hash the key into a digest of BabyBear elements.
-    fn hash_babybear(&self) -> [BabyBear; DIGEST_SIZE];
+    fn hash_field(&self) -> [F; DIGEST_SIZE];
 }
 
 impl<SC: StarkGenericConfig<Val = BabyBear, Domain = TwoAdicMultiplicativeCoset<BabyBear>>>
-    HashableKey for BaseVerifyingKey<SC>
+    HashableKey<BabyBear> for BaseVerifyingKey<SC>
 where
     <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: AsRef<[BabyBear; DIGEST_SIZE]>,
 {
-    fn hash_babybear(&self) -> [BabyBear; DIGEST_SIZE] {
+    fn hash_field(&self) -> [BabyBear; DIGEST_SIZE] {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
         let num_inputs = DIGEST_SIZE + 1 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
@@ -114,6 +116,30 @@ where
             inputs.push(g);
         }
 
-        poseidon2_hash(inputs)
+        POSEIDON2_BB_HASHER.hash_iter(inputs)
+    }
+}
+
+impl<SC: StarkGenericConfig<Val = KoalaBear, Domain = TwoAdicMultiplicativeCoset<KoalaBear>>>
+    HashableKey<KoalaBear> for BaseVerifyingKey<SC>
+where
+    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: AsRef<[KoalaBear; DIGEST_SIZE]>,
+{
+    fn hash_field(&self) -> [KoalaBear; DIGEST_SIZE] {
+        let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
+        let num_inputs = DIGEST_SIZE + 1 + (4 * prep_domains.len());
+        let mut inputs = Vec::with_capacity(num_inputs);
+        inputs.extend(self.commit.as_ref());
+        inputs.push(self.pc_start);
+        for domain in prep_domains {
+            inputs.push(KoalaBear::from_canonical_usize(domain.log_n));
+            let size = 1 << domain.log_n;
+            inputs.push(KoalaBear::from_canonical_usize(size));
+            let g = KoalaBear::two_adic_generator(domain.log_n);
+            inputs.push(domain.shift);
+            inputs.push(g);
+        }
+
+        POSEIDON2_KB_HASHER.hash_iter(inputs)
     }
 }

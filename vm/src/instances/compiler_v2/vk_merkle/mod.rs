@@ -2,8 +2,8 @@ pub mod builder;
 pub mod stdin;
 
 use crate::{
-    compiler::recursion_v2::circuit::merkle_tree::MerkleTree,
-    configs::{config::Val, stark_config::bb_poseidon2::BabyBearPoseidon2},
+    compiler::recursion_v2::circuit::{hash::FieldHasher, merkle_tree::MerkleTree},
+    configs::config::{StarkGenericConfig, Val},
     instances::compiler_v2::{
         recursion_circuit::stdin::RecursionStdin,
         vk_merkle::stdin::{MerkleProofStdin, RecursionVkStdin},
@@ -11,25 +11,28 @@ use crate::{
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::HashableKey,
+        keys::{BaseVerifyingKey, HashableKey},
     },
     primitives::consts::DIGEST_SIZE,
 };
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
 use std::collections::BTreeMap;
 
-pub struct VkMerkleManager {
-    pub allowed_vk_map: BTreeMap<[BabyBear; DIGEST_SIZE], usize>,
-    pub merkle_root: [BabyBear; DIGEST_SIZE],
-    pub merkle_tree: MerkleTree<BabyBear, BabyBearPoseidon2>,
+pub struct VkMerkleManager<SC: StarkGenericConfig + FieldHasher<Val<SC>>> {
+    pub allowed_vk_map: BTreeMap<[Val<SC>; DIGEST_SIZE], usize>,
+    pub merkle_root: [Val<SC>; DIGEST_SIZE],
+    pub merkle_tree: MerkleTree<Val<SC>, SC>,
 }
 
-impl VkMerkleManager {
+impl<SC> VkMerkleManager<SC>
+where
+    SC: StarkGenericConfig + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZE]>,
+    SC::Val: Ord,
+{
     /// Initialize the VkMerkleManager from a file
     pub fn new_from_file(file_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         // Deserialize the vk_map from the file
-        let allowed_vk_map: BTreeMap<[BabyBear; DIGEST_SIZE], usize> =
+        let allowed_vk_map: BTreeMap<[Val<SC>; DIGEST_SIZE], usize> =
             bincode::deserialize(std::fs::read(file_path)?.as_slice())?;
 
         // Generate Merkle root and tree from the allowed_vk_map
@@ -46,19 +49,21 @@ impl VkMerkleManager {
     /// Generate a RecursionVkStdin from a given RecursionStdin input
     pub fn add_vk_merkle_proof<'a, C>(
         &self,
-        stdin: RecursionStdin<'a, BabyBearPoseidon2, C>,
-    ) -> RecursionVkStdin<'a, BabyBearPoseidon2, C>
+        stdin: RecursionStdin<'a, SC, C>,
+    ) -> RecursionVkStdin<'a, SC, C>
     where
-        C: ChipBehavior<Val<BabyBearPoseidon2>>
-            + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-            + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
+        SC::Val: Ord,
+        BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
+        C: ChipBehavior<Val<SC>>
+            + for<'b> Air<ProverConstraintFolder<'b, SC>>
+            + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
     {
         // Map over vks_and_proofs to extract vk digests and their indices
         let (indices, vk_digests): (Vec<usize>, Vec<_>) = stdin
             .vks
             .iter()
             .map(|vk| {
-                let vk_digest = vk.hash_babybear(); // Compute the vk digest
+                let vk_digest = vk.hash_field(); // Compute the vk digest
                 let index = self
                     .allowed_vk_map
                     .get(&vk_digest)

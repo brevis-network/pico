@@ -5,9 +5,10 @@ use crate::{
             circuit::{
                 builder::CircuitV2Builder,
                 challenger::CanObserveVariable,
-                config::{BabyBearFriConfigVariable, CircuitConfig},
+                config::{CircuitConfig, FieldFriConfigVariable},
                 constraints::RecursiveVerifierConstraintFolder,
                 stark::StarkVerifier,
+                types::FriProofVariable,
                 witness::Witnessable,
             },
             ir::compiler::DslIrCompiler,
@@ -16,16 +17,15 @@ use crate::{
         },
         word::Word,
     },
-    configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
-    instances::configs::recur_config::{
-        FieldConfig as RiscvFC, FieldConfig as RecursionFC, StarkConfig as RecursionSC,
-    },
+    configs::config::{Challenge, Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         machine::BaseMachine,
     },
-    primitives::consts::{ADDR_NUM_BITS, DIGEST_SIZE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2},
+    primitives::consts::{
+        ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
+    },
     recursion_v2::{
         air::{
             assert_recursion_public_values_valid, recursion_public_values_digest,
@@ -36,10 +36,12 @@ use crate::{
 };
 use itertools::Itertools;
 use p3_air::Air;
-use p3_field::FieldAlgebra;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32, TwoAdicField};
 use std::{
     array,
     borrow::{Borrow, BorrowMut},
+    fmt::Debug,
     marker::PhantomData,
 };
 
@@ -48,37 +50,52 @@ pub struct CombineVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig
     PhantomData<(FC, SC, C)>,
 );
 
-impl<C> CombineVerifierCircuit<RecursionFC, RecursionSC, C>
+impl<F, CC, SC, C> CombineVerifierCircuit<CC, SC, C>
 where
+    F: PrimeField32
+        + BinomiallyExtendable<EXTENSION_DEGREE>
+        + TwoAdicField
+        + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<CC, Val = F, Domain = TwoAdicMultiplicativeCoset<F>>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'a> Air<ProverConstraintFolder<'a, RecursionSC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, RecursionSC>>
-        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, RecursionFC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
+        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {
     pub fn build(
-        machine: &BaseMachine<RecursionSC, C>,
-        input: &RecursionStdin<RecursionSC, C>,
-    ) -> RecursionProgram<Val<RecursionSC>> {
+        machine: &BaseMachine<SC, C>,
+        input: &RecursionStdin<SC, C>,
+    ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
-        let mut builder = Builder::<RecursionFC>::new();
+        let mut builder = Builder::<CC>::new();
         let input = input.read(&mut builder);
         Self::build_verifier(&mut builder, machine, input);
 
         let operations = builder.into_operations();
 
         // Compile the program.
-        let mut compiler = DslIrCompiler::<RiscvFC>::default();
+        let mut compiler = DslIrCompiler::<CC>::default();
         compiler.compile(operations)
     }
 }
 
 impl<CC, SC, C> CombineVerifierCircuit<CC, SC, C>
 where
-    SC: BabyBearFriConfigVariable<CC>,
-    CC: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
+    CC: CircuitConfig,
+    CC::F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + TwoAdicField,
+    SC: FieldFriConfigVariable<
+        CC,
+        Val = CC::F,
+        Challenge = CC::EF,
+        Domain = TwoAdicMultiplicativeCoset<Val<SC>>,
+    >,
     C: ChipBehavior<
             Val<SC>,
             Program = RecursionProgram<Val<SC>>,

@@ -3,61 +3,166 @@ use crate::{
     compiler::recursion_v2::{
         circuit::{
             challenger::CanObserveVariable,
-            config::{BabyBearFriConfigVariable, CircuitConfig},
+            config::{CircuitConfig, FieldFriConfigVariable},
+            constraints::RecursiveVerifierConstraintFolder,
             stark::StarkVerifier,
+            types::FriProofVariable,
             witness::Witnessable,
         },
         ir::compiler::DslIrCompiler,
         prelude::*,
         program::RecursionProgram,
     },
-    configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
-    instances::{
-        chiptype::recursion_chiptype_v2::RecursionChipType,
-        configs::recur_config::{
-            FieldConfig as RiscvFC, FieldConfig as RecursionFC, StarkConfig as RecursionSC,
-        },
+    configs::config::{Challenge, Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
+    instances::chiptype::recursion_chiptype_v2::RecursionChipType,
+    machine::{
+        chip::ChipBehavior,
+        folder::{ProverConstraintFolder, VerifierConstraintFolder},
+        machine::BaseMachine,
     },
-    machine::machine::BaseMachine,
-    primitives::consts::COMPRESS_DEGREE,
+    primitives::consts::{COMPRESS_DEGREE, EXTENSION_DEGREE},
     recursion_v2::air::{
         assert_recursion_public_values_valid, embed_public_values_digest, RecursionPublicValues,
     },
 };
-use p3_field::FieldAlgebra;
-use std::{borrow::BorrowMut, marker::PhantomData};
+use p3_air::Air;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32, TwoAdicField};
+use std::{borrow::BorrowMut, fmt::Debug, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
-pub struct EmbedVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(
-    PhantomData<(FC, SC)>,
-);
+pub struct EmbedVerifierCircuit<
+    FC: FieldGenericConfig,
+    SC: StarkGenericConfig,
+    const W: u32,
+    const NUM_EXTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+>(PhantomData<(FC, SC)>);
 
-impl EmbedVerifierCircuit<RecursionFC, RecursionSC> {
+impl<
+        F,
+        CC,
+        SC,
+        const W: u32,
+        const NUM_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+    >
+    EmbedVerifierCircuit<
+        CC,
+        SC,
+        W,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    >
+where
+    F: PrimeField32
+        + TwoAdicField
+        + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+        + BinomiallyExtendable<EXTENSION_DEGREE>,
+    CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<CC, Val = F, Domain = TwoAdicMultiplicativeCoset<F>>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+
+    RecursionChipType<
+        Val<SC>,
+        COMPRESS_DEGREE,
+        W,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    >: ChipBehavior<Val<SC>>
+        + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
+        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+{
     pub fn build(
-        machine: &BaseMachine<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>,
-        input: &RecursionStdin<RecursionSC, RecursionChipType<Val<RecursionSC>, COMPRESS_DEGREE>>,
-    ) -> RecursionProgram<Val<RecursionSC>> {
+        machine: &BaseMachine<
+            SC,
+            RecursionChipType<
+                Val<SC>,
+                COMPRESS_DEGREE,
+                W,
+                NUM_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            >,
+        >,
+        input: &RecursionStdin<
+            SC,
+            RecursionChipType<
+                Val<SC>,
+                COMPRESS_DEGREE,
+                W,
+                NUM_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            >,
+        >,
+    ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
-        let mut builder = Builder::<RecursionFC>::new();
+        let mut builder = Builder::<CC>::new();
         let input = input.read(&mut builder);
         Self::build_verifier(&mut builder, machine, input);
 
         let operations = builder.into_operations();
 
         // Compile the program.
-        let mut compiler = DslIrCompiler::<RiscvFC>::default();
+        let mut compiler = DslIrCompiler::<CC>::default();
         compiler.compile(operations)
     }
 }
 
-impl<CC, SC> EmbedVerifierCircuit<CC, SC>
+impl<
+        CC,
+        SC,
+        const W: u32,
+        const NUM_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+    >
+    EmbedVerifierCircuit<
+        CC,
+        SC,
+        W,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    >
 where
-    SC: BabyBearFriConfigVariable<CC>,
-    CC: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
+    CC: CircuitConfig<EF = Challenge<SC>>,
+    CC::F: TwoAdicField + PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+
+    RecursionChipType<
+        Val<SC>,
+        COMPRESS_DEGREE,
+        W,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    >: ChipBehavior<Val<SC>>
+        + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
+        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,
-        machine: &BaseMachine<SC, RecursionChipType<SC::Val, COMPRESS_DEGREE>>,
+        machine: &BaseMachine<
+            SC,
+            RecursionChipType<
+                SC::Val,
+                COMPRESS_DEGREE,
+                W,
+                NUM_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            >,
+        >,
         input: RecursionStdinVariable<CC, SC>,
     ) {
         // Read input.

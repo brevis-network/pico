@@ -1,13 +1,15 @@
 use super::{InitialProverSetup, MachineProver};
 use crate::{
+    chips::precompiles::poseidon2::Poseidon2PermuteChip,
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
-    emulator::riscv::stdin::EmulatorStdin,
+    emulator::riscv::{record::EmulationRecord, stdin::EmulatorStdin},
     instances::{chiptype::riscv_chiptype::RiscvChipType, machine::riscv::RiscvMachine},
     machine::{
+        chip::ChipBehavior,
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
@@ -18,20 +20,24 @@ use crate::{
 use alloc::sync::Arc;
 use p3_field::PrimeField32;
 
-pub type RiscvChips<SC> = RiscvChipType<Val<SC>>;
+pub type RiscvChips<SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> =
+    RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>;
 
-pub struct RiscvProver<SC, P>
+pub struct RiscvProver<SC, P, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
 where
     SC: StarkGenericConfig,
     Val<SC>: PrimeField32,
+    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
 {
     program: Arc<P>,
-    machine: RiscvMachine<SC, RiscvChips<SC>>,
+    machine: RiscvMachine<SC, RiscvChips<SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
     pk: BaseProvingKey<SC>,
     vk: BaseVerifyingKey<SC>,
 }
 
-impl<SC> InitialProverSetup for RiscvProver<SC, Program>
+impl<SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> InitialProverSetup
+    for RiscvProver<SC, Program, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
 where
     SC: Send + StarkGenericConfig,
     Com<SC>: Send + Sync,
@@ -39,6 +45,8 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32,
+    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
 {
     type Input<'a> = (SC, &'a [u8]);
 
@@ -56,7 +64,8 @@ where
     }
 }
 
-impl<SC> MachineProver<SC> for RiscvProver<SC, Program>
+impl<SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> MachineProver<SC>
+    for RiscvProver<SC, Program, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
 where
     SC: Send + StarkGenericConfig,
     Com<SC>: Send + Sync,
@@ -64,9 +73,11 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32,
+    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
 {
     type Witness = EmulatorStdin<Program, Vec<u8>>;
-    type Chips = RiscvChips<SC>;
+    type Chips = RiscvChips<SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>;
 
     fn machine(&self) -> &BaseMachine<SC, Self::Chips> {
         self.machine.base_machine()

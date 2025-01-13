@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{Com, SimpleFriConfig, StarkGenericConfig, ZeroCommitment},
+    configs::config::{Com, SimpleFriConfig, StarkGenericConfig, Val, ZeroCommitment},
     primitives::{consts::DIGEST_SIZE, pico_poseidon2bb_init, PicoPoseidon2BabyBear},
 };
 use log::info;
@@ -10,7 +10,7 @@ use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
 use p3_fri::{FriConfig, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
+use p3_symmetric::{CryptographicHasher, PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
 
 pub type SC_Val = BabyBear;
@@ -43,40 +43,6 @@ impl Serialize for BabyBearPoseidon2 {
 }
 
 impl BabyBearPoseidon2 {
-    pub fn new() -> Self {
-        let perm = pico_poseidon2bb_init();
-        let hash = SC_Hash::new(perm.clone());
-        let compress = SC_Compress::new(perm.clone());
-        let val_mmcs = SC_ValMmcs::new(hash, compress);
-        let challenge_mmcs = SC_ChallengeMmcs::new(val_mmcs.clone());
-        let dft = SC_Dft::default();
-        let num_queries = match std::env::var("FRI_QUERIES") {
-            Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 100,
-        };
-        info!("NUM_QUERIES: {}", num_queries);
-
-        let fri_config = FriConfig {
-            log_blowup: 1,
-            num_queries,
-            proof_of_work_bits: 16,
-            mmcs: challenge_mmcs,
-        };
-        let pcs = SC_Pcs::new(dft, val_mmcs, fri_config);
-
-        let simple_fri_config = SimpleFriConfig {
-            log_blowup: 1,
-            num_queries,
-            proof_of_work_bits: 16,
-        };
-
-        Self {
-            perm,
-            pcs,
-            simple_fri_config,
-        }
-    }
-
     pub fn compress() -> Self {
         let perm = pico_poseidon2bb_init();
         let hash = SC_Hash::new(perm.clone());
@@ -135,6 +101,40 @@ impl StarkGenericConfig for BabyBearPoseidon2 {
     type Challenger = SC_Challenger;
     type Pcs = SC_Pcs;
 
+    fn new() -> Self {
+        let perm = pico_poseidon2bb_init();
+        let hash = SC_Hash::new(perm.clone());
+        let compress = SC_Compress::new(perm.clone());
+        let val_mmcs = SC_ValMmcs::new(hash, compress);
+        let challenge_mmcs = SC_ChallengeMmcs::new(val_mmcs.clone());
+        let dft = SC_Dft::default();
+        let num_queries = match std::env::var("FRI_QUERIES") {
+            Ok(num_queries) => num_queries.parse().unwrap(),
+            Err(_) => 100,
+        };
+        info!("NUM_QUERIES: {}", num_queries);
+
+        let fri_config = FriConfig {
+            log_blowup: 1,
+            num_queries,
+            proof_of_work_bits: 16,
+            mmcs: challenge_mmcs,
+        };
+        let pcs = SC_Pcs::new(dft, val_mmcs, fri_config);
+
+        let simple_fri_config = SimpleFriConfig {
+            log_blowup: 1,
+            num_queries,
+            proof_of_work_bits: 16,
+        };
+
+        Self {
+            perm,
+            pcs,
+            simple_fri_config,
+        }
+    }
+
     fn pcs(&self) -> &Self::Pcs {
         &self.pcs
     }
@@ -145,6 +145,11 @@ impl StarkGenericConfig for BabyBearPoseidon2 {
 
     fn name(&self) -> String {
         "BabyBearPoseidon2".to_string()
+    }
+
+    fn hash_slice(&self, input: &[Val<Self>]) -> [Val<Self>; DIGEST_SIZE] {
+        let hash = SC_Hash::new(self.perm.clone());
+        hash.hash_slice(input)
     }
 }
 

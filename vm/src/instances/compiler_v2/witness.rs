@@ -2,24 +2,26 @@ use crate::{
     compiler::recursion_v2::{
         circuit::{
             challenger::DuplexChallengerVariable,
-            config::{BabyBearFriConfigVariable, CircuitConfig},
-            hash::FieldHasherVariable,
-            types::{BaseVerifyingKeyVariable, FriProofVariable},
+            config::{CircuitConfig, FieldFriConfigVariable},
+            types::BaseVerifyingKeyVariable,
             witness::{WitnessWriter, Witnessable},
         },
-        ir::Builder,
+        ir::{Builder, Felt},
     },
-    configs::{
-        config::{Com, PcsProof},
-        stark_config::bb_poseidon2::{SC_Challenge, SC_Perm, SC_Val},
-    },
-    machine::keys::BaseVerifyingKey,
+    configs::config::Com,
+    machine::{keys::BaseVerifyingKey, septic::SepticDigest},
 };
 use p3_challenger::DuplexChallenger;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{ExtensionField, PrimeField, TwoAdicField};
+use p3_symmetric::CryptographicPermutation;
 
-impl<CC> Witnessable<CC> for DuplexChallenger<SC_Val, SC_Perm, 16, 8>
+impl<Perm, CC> Witnessable<CC> for DuplexChallenger<CC::F, Perm, 16, 8>
 where
-    CC: CircuitConfig<F = SC_Val, EF = SC_Challenge>,
+    CC: CircuitConfig,
+    CC::F: PrimeField + TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: ExtensionField<CC::F> + TwoAdicField,
+    Perm: CryptographicPermutation<[CC::F; 16]>,
 {
     type WitnessVariable = DuplexChallengerVariable<CC>;
 
@@ -41,11 +43,13 @@ where
     }
 }
 
-impl<CC: CircuitConfig<F = SC_Val, EF = SC_Challenge>, SC: BabyBearFriConfigVariable<CC>>
-    Witnessable<CC> for BaseVerifyingKey<SC>
+impl<CC, SC> Witnessable<CC> for BaseVerifyingKey<SC>
 where
-    Com<SC>: Witnessable<CC, WitnessVariable = <SC as FieldHasherVariable<CC>>::DigestVariable>,
-    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    CC: CircuitConfig,
+    CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    SepticDigest<CC::F>: Witnessable<CC, WitnessVariable = SepticDigest<Felt<CC::F>>>,
 {
     type WitnessVariable = BaseVerifyingKeyVariable<CC, SC>;
 

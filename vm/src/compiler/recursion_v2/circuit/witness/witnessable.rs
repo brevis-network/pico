@@ -1,18 +1,14 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            config::{BabyBearFriConfigVariable, CircuitConfig},
+            config::{CircuitConfig, FieldFriConfigVariable},
             hash::FieldHasherVariable,
             stark::BaseProofVariable,
             types::FriProofVariable,
         },
         ir::{Builder, Ext, Felt},
     },
-    configs::{
-        config::{Com, PcsProof},
-        stark_config::bb_poseidon2::SC_Val,
-    },
-    instances::configs::recur_config as rcf,
+    configs::config::{Com, PcsProof},
     machine::{
         proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
         septic::{SepticCurve, SepticDigest, SepticExtension},
@@ -21,6 +17,7 @@ use crate::{
 use itertools::Itertools;
 use p3_baby_bear::BabyBear;
 use p3_field::extension::BinomialExtensionField;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::DenseStorage;
 use std::sync::Arc;
 
@@ -80,32 +77,39 @@ impl<CC: CircuitConfig, T: Witnessable<CC>, U: Witnessable<CC>> Witnessable<CC> 
     }
 }
 
-impl<CC: CircuitConfig<F = rcf::SC_Val>> Witnessable<CC> for rcf::SC_Val {
-    type WitnessVariable = Felt<rcf::SC_Val>;
+macro_rules! impl_witnessable {
+    ($base:ident) => {
+        impl<CC: CircuitConfig<F = $base>> Witnessable<CC> for $base {
+            type WitnessVariable = Felt<CC::F>;
 
-    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
-        CC::read_felt(builder)
-    }
+            fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+                CC::read_felt(builder)
+            }
 
-    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
-        witness.write_felt(*self);
-    }
+            fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+                witness.write_felt(*self);
+            }
+        }
+
+        impl<CC: CircuitConfig<F = $base, EF = BinomialExtensionField<$base, 4>>> Witnessable<CC>
+            for BinomialExtensionField<$base, 4>
+        {
+            type WitnessVariable = Ext<CC::F, CC::EF>;
+
+            fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+                CC::read_ext(builder)
+            }
+
+            fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+                // vec![Block::from(self.as_base_slice())]
+                witness.write_ext(*self);
+            }
+        }
+    };
 }
 
-impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
-    for rcf::SC_Challenge
-{
-    type WitnessVariable = Ext<rcf::SC_Val, rcf::SC_Challenge>;
-
-    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
-        CC::read_ext(builder)
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
-        // vec![Block::from(self.as_base_slice())]
-        witness.write_ext(*self);
-    }
-}
+impl_witnessable!(BabyBear);
+impl_witnessable!(KoalaBear);
 
 impl<CC: CircuitConfig, T: Witnessable<CC>, const N: usize> Witnessable<CC> for [T; N] {
     type WitnessVariable = [T::WitnessVariable; N];
@@ -157,11 +161,11 @@ impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for Vec<T> {
     }
 }
 
-impl<
-        CC: CircuitConfig<F = BabyBear, EF = BinomialExtensionField<SC_Val, 4>>,
-        SC: BabyBearFriConfigVariable<CC>,
-    > Witnessable<CC> for BaseProof<SC>
+impl<CC: CircuitConfig, SC: FieldFriConfigVariable<CC, Val = CC::F, Challenge = CC::EF>>
+    Witnessable<CC> for BaseProof<SC>
 where
+    CC::F: Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
     Com<SC>: Witnessable<CC, WitnessVariable = <SC as FieldHasherVariable<CC>>::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
 {
@@ -195,7 +199,11 @@ where
     }
 }
 
-impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for BaseCommitments<T> {
+impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for BaseCommitments<T>
+where
+    CC::F: Witnessable<CC>,
+    CC::EF: Witnessable<CC>,
+{
     type WitnessVariable = BaseCommitments<T::WitnessVariable>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
@@ -216,8 +224,10 @@ impl<CC: CircuitConfig, T: Witnessable<CC>> Witnessable<CC> for BaseCommitments<
     }
 }
 
-impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
-    for BaseOpenedValues<rcf::SC_Val, rcf::SC_Challenge>
+impl<CC: CircuitConfig> Witnessable<CC> for BaseOpenedValues<CC::F, CC::EF>
+where
+    CC::F: Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
 {
     type WitnessVariable = BaseOpenedValues<Felt<CC::F>, Ext<CC::F, CC::EF>>;
 
@@ -245,8 +255,10 @@ impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
     }
 }
 
-impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
-    for ChipOpenedValues<rcf::SC_Val, rcf::SC_Challenge>
+impl<CC: CircuitConfig> Witnessable<CC> for ChipOpenedValues<CC::F, CC::EF>
+where
+    CC::F: Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
 {
     type WitnessVariable = ChipOpenedValues<Felt<CC::F>, Ext<CC::F, CC::EF>>;
 
@@ -288,8 +300,9 @@ impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
     }
 }
 
-impl<CC: CircuitConfig<F = rcf::SC_Val, EF = rcf::SC_Challenge>> Witnessable<CC>
-    for SepticDigest<rcf::SC_Val>
+impl<CC: CircuitConfig> Witnessable<CC> for SepticDigest<CC::F>
+where
+    CC::F: Witnessable<CC, WitnessVariable = Felt<CC::F>>,
 {
     type WitnessVariable = SepticDigest<Felt<CC::F>>;
 

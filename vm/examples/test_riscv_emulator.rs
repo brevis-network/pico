@@ -1,11 +1,19 @@
 use itertools::enumerate;
 use p3_baby_bear::BabyBear;
+use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
 use pico_vm::{
-    compiler::riscv::compiler::{Compiler, SourceType},
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
+    },
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
-        riscv::riscv_emulator::{EmulatorMode, RiscvEmulator},
+        riscv::{
+            riscv_emulator::{EmulatorMode, RiscvEmulator},
+            stdin::EmulatorStdin,
+        },
     },
     machine::logger::setup_logger,
 };
@@ -15,11 +23,7 @@ use tracing::{debug, info, trace};
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
-fn main() {
-    setup_logger();
-
-    let (elf, stdin, _) = parse_args::parse_args();
-
+fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8>>) {
     let start = Instant::now();
 
     info!("\n Creating Program..");
@@ -28,7 +32,7 @@ fn main() {
     let pc_start = program.pc_start;
 
     info!("\n Creating emulator (at {:?})..", start.elapsed());
-    let mut emulator = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::test_opts());
+    let mut emulator = RiscvEmulator::new::<F>(program, EmulatorOpts::test_opts());
     info!(
         "Running with chunk size: {}, batch size: {}",
         emulator.chunk_size, emulator.chunk_batch_size
@@ -95,5 +99,16 @@ fn main() {
             );
             break;
         }
+    }
+}
+
+fn main() {
+    setup_logger();
+
+    let (elf, stdin, args) = parse_args::parse_args();
+    match args.field.as_str() {
+        "bb" => run::<BabyBear>(elf, stdin),
+        "kb" => run::<KoalaBear>(elf, stdin),
+        _ => panic!("Invalid field: {}", args.field),
     }
 }

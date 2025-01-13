@@ -106,7 +106,7 @@ impl<F: Field> CpuChip<F> {
                 * (ecall_cols.is_halt.result + ecall_cols.is_commit_deferred_proofs.result),
         );
 
-        // Babybear range check the operand_to_check word.
+        // Range check the operand_to_check word.
         FieldWordRangeChecker::<CB::F>::range_check::<CB>(
             builder,
             ecall_cols.operand_to_check,

@@ -1,16 +1,17 @@
 use crate::{
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+        keys::BaseVerifyingKey,
         machine::{BaseMachine, MachineBehavior},
-        proof::MetaProof,
+        proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
 };
 use anyhow::Result;
 use p3_air::Air;
-use p3_field::PrimeField64;
+use p3_field::PrimeField32;
 use std::{any::type_name, time::Instant};
 use tracing::info;
 
@@ -27,13 +28,18 @@ where
 
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for SimpleMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + Send + Sync,
+    Val<SC>: PrimeField32,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+    BaseProof<SC>: Send + Sync,
+    PcsProof<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: Send + Sync,
     C: ChipBehavior<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
-    SC::Val: PrimeField64,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {

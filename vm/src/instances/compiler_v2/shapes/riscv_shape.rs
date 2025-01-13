@@ -1,6 +1,8 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::instances::compiler_v2::shapes::ProofShape;
+use crate::{
+    chips::precompiles::poseidon2::Poseidon2PermuteChip, instances::compiler_v2::shapes::ProofShape,
+};
 use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
 use p3_field::PrimeField;
@@ -269,7 +271,11 @@ fn add_none_if_missing(shapes: &mut [RiscvShapeSpec]) {
 }
 
 /// A structure that enables fixing the shape of an EmulationRecord.
-pub struct RiscvShapeConfig<F: PrimeField32> {
+pub struct RiscvShapeConfig<
+    F: PrimeField32,
+    const HALF_EXTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS: usize,
+> {
     included_shapes: Vec<HashMap<String, usize>>,
     allowed_preprocessed_log_heights: HashMap<String, Vec<Option<usize>>>,
     allowed_log_heights: Vec<HashMap<String, Vec<Option<usize>>>>,
@@ -294,14 +300,22 @@ struct RiscvShapeSpec {
     is_potentially_maximal: bool,
 }
 
-impl<F: PrimeField32> RiscvShapeConfig<F> {
+impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+    RiscvShapeConfig<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+where
+    Poseidon2PermuteChip<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+        ChipBehavior<F, Record = EmulationRecord, Program = Program>,
+{
     /// Fix the preprocessed shape of the proof.
     pub fn padding_preprocessed_shape(&self, program: &mut Program) -> Result<(), RiscvShapeError> {
         if program.preprocessed_shape.is_some() {
             return Err(RiscvShapeError::PreprocessedShapeAlreadyFixed);
         }
 
-        let heights = RiscvChipType::<F>::preprocessed_heights(program);
+        let heights =
+            RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::preprocessed_heights(
+                program,
+            );
         let prep_shape =
             Self::find_shape_from_allowed_heights(&heights, &self.allowed_preprocessed_log_heights)
                 .ok_or(RiscvShapeError::PreprocessedShapeError)?;
@@ -381,7 +395,10 @@ impl<F: PrimeField32> RiscvShapeConfig<F> {
         // If cpu is included, try to fix the shape as a riscv.
         if !record.cpu_events.is_empty() {
             // Get the heights of the core airs in the record.
-            let heights = RiscvChipType::<F>::riscv_heights(record);
+            let heights =
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::riscv_heights(
+                    record,
+                );
 
             // Try to find a shape within the included shapes.
             for (i, allowed_log_heights) in self.allowed_log_heights.iter().enumerate() {
@@ -424,7 +441,7 @@ impl<F: PrimeField32> RiscvShapeConfig<F> {
         // If the record is a global memory init/finalize record, try to fix the shape as such.
         if !record.memory_initialize_events.is_empty() || !record.memory_finalize_events.is_empty()
         {
-            let heights = RiscvChipType::<F>::get_memory_init_final_heights(record);
+            let heights = RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::get_memory_init_final_heights(record);
             let shape =
                 Self::find_shape_from_allowed_heights(&heights, &self.memory_allowed_log_heights)
                     .ok_or(RiscvShapeError::ShapeError(modify_stats_with_log2(
@@ -454,9 +471,13 @@ impl<F: PrimeField32> RiscvShapeConfig<F> {
         for (chip_name, (mem_events_per_row, allowed_log_heights)) in
             self.precompile_allowed_log_heights.iter()
         {
-            if let Some((precompile_events, mem_events)) =
-                RiscvChipType::<F>::get_precompile_heights(chip_name, record)
-            {
+            if let Some((precompile_events, mem_events)) = RiscvChipType::<
+                F,
+                HALF_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+            >::get_precompile_heights(
+                chip_name, record
+            ) {
                 for allowed_log_height in allowed_log_heights {
                     if precompile_events <= (1usize << allowed_log_height) {
                         for shape in self.get_precompile_shapes(
@@ -665,22 +686,36 @@ impl<F: PrimeField32> RiscvShapeConfig<F> {
     }
 }
 
-impl<F: PrimeField32> Default for RiscvShapeConfig<F> {
+impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> Default
+    for RiscvShapeConfig<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+where
+    Poseidon2PermuteChip<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+        ChipBehavior<F, Record = EmulationRecord, Program = Program>,
+{
     fn default() -> Self {
         // Preprocessed chip heights.
         let program_heights = vec![Some(19), Some(20), Some(21), Some(22)];
 
         let allowed_preprocessed_log_heights = HashMap::from([
             (
-                RiscvChipType::<F>::Program(ProgramChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Program(
+                    ProgramChip::default(),
+                )
+                .name(),
                 program_heights,
             ),
             (
-                RiscvChipType::<F>::Byte(ByteChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Byte(
+                    ByteChip::default(),
+                )
+                .name(),
                 vec![Some(16)],
             ),
             (
-                RiscvChipType::<F>::Range(RangeCheckChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Range(
+                    RangeCheckChip::default(),
+                )
+                .name(),
                 vec![Some(16)],
             ),
         ]);
@@ -1210,47 +1245,80 @@ impl<F: PrimeField32> Default for RiscvShapeConfig<F> {
         for spec in riscv_shapes {
             let short_allowed_log_heights = HashMap::from([
                 (
-                    RiscvChipType::<F>::Cpu(CpuChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Cpu(
+                        CpuChip::default(),
+                    )
+                    .name(),
                     spec.cpu_height,
                 ),
                 (
-                    RiscvChipType::<F>::AddSub(AddSubChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::AddSub(
+                        AddSubChip::default(),
+                    )
+                    .name(),
                     spec.add_sub_height,
                 ),
                 (
-                    RiscvChipType::<F>::Bitwise(BitwiseChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Bitwise(
+                        BitwiseChip::default(),
+                    )
+                    .name(),
                     spec.bitwise_height,
                 ),
                 (
-                    RiscvChipType::<F>::DivRem(DivRemChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::DivRem(
+                        DivRemChip::default(),
+                    )
+                    .name(),
                     spec.divrem_height,
                 ),
                 (
-                    RiscvChipType::<F>::Mul(MulChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Mul(
+                        MulChip::default(),
+                    )
+                    .name(),
                     spec.mul_height,
                 ),
                 (
-                    RiscvChipType::<F>::SR(ShiftRightChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SR(
+                        ShiftRightChip::default(),
+                    )
+                    .name(),
                     spec.shift_right_height,
                 ),
                 (
-                    RiscvChipType::<F>::SLL(SLLChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SLL(
+                        SLLChip::default(),
+                    )
+                    .name(),
                     spec.shift_left_height,
                 ),
                 (
-                    RiscvChipType::<F>::Lt(LtChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Lt(
+                        LtChip::default(),
+                    )
+                    .name(),
                     spec.lt_height,
                 ),
                 (
-                    RiscvChipType::<F>::MemoryLocal(MemoryLocalChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryLocal(
+                        MemoryLocalChip::default(),
+                    )
+                    .name(),
                     spec.memory_local_height,
                 ),
                 (
-                    RiscvChipType::<F>::MemoryReadWrite(MemoryReadWriteChip::default()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryReadWrite(
+                        MemoryReadWriteChip::default(),
+                    )
+                    .name(),
                     spec.memory_read_write_height,
                 ),
                 (
-                    RiscvChipType::<F>::SyscallRiscv(SyscallChip::riscv()).name(),
+                    RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SyscallRiscv(
+                        SyscallChip::riscv(),
+                    )
+                    .name(),
                     spec.syscall_riscv_height,
                 ),
             ]);
@@ -1281,13 +1349,17 @@ impl<F: PrimeField32> Default for RiscvShapeConfig<F> {
         ];
         let memory_allowed_log_heights = HashMap::from([
             (
-                RiscvChipType::<F>::MemoryInitialize(MemoryInitializeFinalizeChip::new(Initialize))
-                    .name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryInitialize(
+                    MemoryInitializeFinalizeChip::new(Initialize),
+                )
+                .name(),
                 memory_init_heights,
             ),
             (
-                RiscvChipType::<F>::MemoryFinalize(MemoryInitializeFinalizeChip::new(Finalize))
-                    .name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryFinalize(
+                    MemoryInitializeFinalizeChip::new(Finalize),
+                )
+                .name(),
                 memory_finalize_heights,
             ),
         ]);
@@ -1295,7 +1367,10 @@ impl<F: PrimeField32> Default for RiscvShapeConfig<F> {
         let mut precompile_allowed_log_heights = HashMap::new();
         let precompile_heights = (4..19).collect::<Vec<_>>();
         // let precompile_heights = vec![3,4];
-        for (chip_name, mem_events_per_row) in RiscvChipType::<F>::get_all_precompile_chips() {
+        for (chip_name, mem_events_per_row) in
+            RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::get_all_precompile_chips(
+            )
+        {
             precompile_allowed_log_heights
                 .insert(chip_name, (mem_events_per_row, precompile_heights.clone()));
         }

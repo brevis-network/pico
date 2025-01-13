@@ -1,14 +1,13 @@
 use crate::{
     compiler::recursion_v2::{constraints::Constraint, ir::Witness},
-    instances::{
-        compiler_v2::onchain_circuit::gnark::witness::GnarkWitness,
-        configs::embed_config::FieldConfig as EmbedFC,
-    },
+    configs::config::FieldGenericConfig,
 };
 use std::{fs::File, io::Write, path::PathBuf};
 
+use super::gnark::witness::GnarkWitness;
+
 #[allow(unused)]
-pub fn build_gnark_config(
+pub fn build_gnark_config<EmbedFC: FieldGenericConfig>(
     constraints: Vec<Constraint>,
     witness: Witness<EmbedFC>,
     build_dir: PathBuf,

@@ -1,14 +1,21 @@
 use super::{Array, Builder, DslIr, Ext, Felt, SymbolicExt, Usize, Var, Variable};
-use crate::configs::config::FieldGenericConfig;
+use crate::{
+    configs::config::FieldGenericConfig,
+    machine::field::{FieldBehavior, FieldType},
+};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use std::ops::{Add, Mul, MulAssign};
 
 impl<FC: FieldGenericConfig> Builder<FC> {
     /// The generator for the field.
     ///
-    /// Reference: [p3_baby_bear::BabyBear]
+    /// Reference: [p3_baby_bear::BabyBear] and [p3_koala_bear::KoalaBear]
     pub fn generator(&mut self) -> Felt<FC::F> {
-        self.eval(FC::F::from_canonical_u32(31))
+        match FC::F::field_type() {
+            FieldType::TypeBabyBear => self.eval(FC::F::from_canonical_u32(31)),
+            FieldType::TypeKoalaBear => self.eval(FC::F::from_canonical_u32(3)),
+            _ => unreachable!(),
+        }
     }
 
     /// Select a variable based on a condition.

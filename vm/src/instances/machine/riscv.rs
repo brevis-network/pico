@@ -1,4 +1,5 @@
 use crate::{
+    chips::precompiles::poseidon2::Poseidon2PermuteChip,
     compiler::{riscv::program::Program, word::Word},
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{
@@ -18,7 +19,7 @@ use crate::{
 };
 use anyhow::Result;
 use p3_air::Air;
-use p3_field::{FieldAlgebra, PrimeField32, PrimeField64};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{info, instrument};
@@ -46,14 +47,14 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     SC::Domain: Send + Sync,
-    SC::Val: PrimeField64,
+    SC::Val: PrimeField32,
 {
     /// Prove with shape config
     #[instrument(name = "riscv_prove_with_shape", level = "debug", skip_all)]
-    pub fn prove_with_shape(
+    pub fn prove_with_shape<const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>(
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
-        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        shape_config: Option<&RiscvShapeConfig<SC::Val, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
     ) -> MetaProof<SC>
     where
         C: for<'a> Air<
@@ -63,6 +64,8 @@ where
                 <SC as StarkGenericConfig>::Challenge,
             >,
         >,
+        Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+            ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
     {
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
@@ -165,7 +168,6 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     SC::Domain: Send + Sync,
-    SC::Val: PrimeField64,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {

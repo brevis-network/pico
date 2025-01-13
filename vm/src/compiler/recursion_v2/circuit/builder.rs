@@ -3,12 +3,14 @@
 use crate::{
     compiler::recursion_v2::prelude::*,
     configs::config::FieldGenericConfig,
-    machine::septic::{SepticCurve, SepticDigest, SepticExtension},
+    machine::{
+        field::{FieldBehavior, FieldType},
+        septic::{SepticCurve, SepticDigest, SepticExtension},
+    },
     primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE},
     recursion_v2::{air::RecursionPublicValues, runtime::HASH_RATE, types::WIDTH},
 };
 use itertools::Itertools;
-use p3_baby_bear::BabyBear;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use std::iter::repeat;
 
@@ -60,7 +62,7 @@ pub trait CircuitV2Builder<FC: FieldGenericConfig> {
     fn hint_felts_v2(&mut self, len: usize) -> Vec<Felt<FC::F>>;
 }
 
-impl<FC: FieldGenericConfig<F = BabyBear>> CircuitV2Builder<FC> for Builder<FC> {
+impl<FC: FieldGenericConfig> CircuitV2Builder<FC> for Builder<FC> {
     fn bits2num_v2_f(
         &mut self,
         bits: impl IntoIterator<Item = Felt<<FC as FieldGenericConfig>::F>>,
@@ -89,15 +91,25 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CircuitV2Builder<FC> for Builder<FC> 
             })
             .sum();
 
-        // Range check the bits to be less than the BabyBear modulus.
+        // Range check the bits to be less than the field modulus.
 
         assert!(num_bits <= 31, "num_bits must be less than or equal to 31");
 
         // If there are less than 31 bits, there is nothing to check.
         if num_bits > 30 {
+            let one_start_idx = match FC::F::field_type() {
+                FieldType::TypeBabyBear => 3,
+                FieldType::TypeKoalaBear => 0,
+                _ => unimplemented!("Unsupported field type"),
+            };
+
             // Since BabyBear modulus is 2^31 - 2^27 + 1, if any of the top `4` bits are zero, the
             // number is less than 2^27, and we can stop the iteration. Othwriwse, if all the top
             // `4` bits are '1`, we need to check that all the bottom `27` are '0`
+
+            // Since KoalaBear modulus is 2^31 - 2^24 + 1, if any of the top `7` bits are zero, the
+            // number is less than 2^24, and we can stop the iteration. Othwriwse, if all the top
+            // `7` bits are '1`, we need to check that all the bottom `24` are '0`
 
             // Get a flag that is zero if any of the top `4` bits are zero, and one otherwise. We
             // can do this by simply taking their product (which is bitwise AND).
@@ -105,14 +117,13 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CircuitV2Builder<FC> for Builder<FC> 
                 output
                     .iter()
                     .rev()
-                    .take(4)
+                    .take(7 - one_start_idx)
                     .copied()
                     .map(SymbolicFelt::from)
                     .product::<SymbolicFelt<_>>(),
             );
 
-            // Assert that if all the top `4` bits are one, then all the bottom `27` bits are zero.
-            for bit in output.iter().take(27).copied() {
+            for bit in output.iter().take(24 + one_start_idx).copied() {
                 self.assert_felt_eq(bit * are_all_top_bits_one, FC::F::ZERO);
             }
         }
@@ -151,9 +162,15 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CircuitV2Builder<FC> for Builder<FC> 
     /// Applies the Poseidon2 permutation to the given array.
     fn poseidon2_permute_v2(&mut self, array: [Felt<FC::F>; WIDTH]) -> [Felt<FC::F>; WIDTH] {
         let output: [Felt<FC::F>; WIDTH] = core::array::from_fn(|_| self.uninit());
-        self.push_op(DslIr::CircuitV2Poseidon2PermuteBabyBear(Box::new((
-            output, array,
-        ))));
+        self.push_op(match FC::F::field_type() {
+            FieldType::TypeBabyBear => {
+                DslIr::CircuitV2Poseidon2PermuteBabyBear(Box::new((output, array)))
+            }
+            FieldType::TypeKoalaBear => {
+                DslIr::CircuitV2Poseidon2PermuteKoalaBear(Box::new((output, array)))
+            }
+            _ => unimplemented!("Poseidon2 permutation not implemented for this field"),
+        });
         output
     }
 
@@ -192,7 +209,7 @@ impl<FC: FieldGenericConfig<F = BabyBear>> CircuitV2Builder<FC> for Builder<FC> 
         self.push_op(DslIr::CircuitExt2Felt(felts, ext));
         // Verify that the decomposed extension element is correct.
         let mut reconstructed_ext: Ext<FC::F, FC::EF> = self.constant(FC::EF::ZERO);
-        for i in 0..4 {
+        for i in 0..FC::EF::D {
             let felt = felts[i];
             let monomial: Ext<FC::F, FC::EF> = self.constant(FC::EF::monomial(i));
             reconstructed_ext = self.eval(reconstructed_ext + monomial * felt);

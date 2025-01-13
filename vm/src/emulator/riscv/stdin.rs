@@ -1,8 +1,24 @@
 use crate::{
-    compiler::recursion_v2::{
-        circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
+    chips::{
+        chips::{poseidon2_skinny_v2::Poseidon2SkinnyChip, poseidon2_wide_v2::Poseidon2WideChip},
+        precompiles::poseidon2::Poseidon2PermuteChip,
     },
-    configs::config::{StarkGenericConfig, Val},
+    compiler::{
+        recursion_v2::{
+            circuit::{
+                challenger::DuplexChallengerVariable,
+                config::{CircuitConfig, FieldFriConfigVariable},
+                constraints::RecursiveVerifierConstraintFolder,
+                hash::FieldHasher,
+                types::FriProofVariable,
+                witness::Witnessable,
+            },
+            ir::{Ext, Felt},
+            program::RecursionProgram,
+        },
+        riscv::program::Program,
+    },
+    configs::config::{Challenge, Challenger, Com, PcsProof, StarkGenericConfig, Val},
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
@@ -13,26 +29,25 @@ use crate::{
                 builder::CombineVkVerifierCircuit, stdin::RecursionVkStdin, VkMerkleManager,
             },
         },
-        configs::{
-            recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
-            riscv_config::StarkConfig as RiscvSC,
-        },
     },
     machine::{
         chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
+        folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
+        keys::{BaseVerifyingKey, HashableKey},
         machine::BaseMachine,
         proof::BaseProof,
     },
-    primitives::consts::{COMBINE_DEGREE, CONVERT_DEGREE, DIGEST_SIZE},
+    primitives::consts::{COMBINE_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE},
     recursion_v2::runtime::RecursionRecord,
 };
 use alloc::sync::Arc;
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use serde::{Deserialize, Serialize};
-use std::array;
+use std::{array, fmt::Debug};
+
+use super::record::EmulationRecord;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct EmulatorStdinBuilder<I> {
@@ -112,24 +127,78 @@ impl EmulatorStdinBuilder<Vec<u8>> {
 }
 
 // for convert stdin, converting riscv proofs to recursion proofs
-impl<'a>
+impl<'a, SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
     EmulatorStdin<
-        RecursionProgram<Val<RecursionSC>>,
-        ConvertStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
+        RecursionProgram<Val<SC>>,
+        ConvertStdin<'a, SC, RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
     >
+where
+    SC: StarkGenericConfig,
+    Val<SC>: PrimeField32,
+    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
 {
     /// Construct the recursion stdin for riscv_compress.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// batch_size should be greater than 1
-    pub fn setup_for_convert(
-        riscv_vk: &'a BaseVerifyingKey<RiscvSC>,
-        vk_root: [Val<RiscvSC>; DIGEST_SIZE],
-        machine: &'a BaseMachine<RiscvSC, RiscvChipType<Val<RiscvSC>>>,
-        proofs: &[BaseProof<RiscvSC>],
-        recursion_config: Option<
-            RecursionShapeConfig<BabyBear, RecursionChipType<BabyBear, CONVERT_DEGREE>>,
+    pub fn setup_for_convert<
+        F,
+        CC,
+        const W: u32,
+        const NUM_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+    >(
+        riscv_vk: &'a BaseVerifyingKey<SC>,
+        vk_root: [Val<SC>; DIGEST_SIZE],
+        machine: &'a BaseMachine<
+            SC,
+            RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
         >,
-    ) -> Self {
+        proofs: &[BaseProof<SC>],
+        recursion_config: Option<
+            RecursionShapeConfig<
+                Val<SC>,
+                RecursionChipType<
+                    Val<SC>,
+                    CONVERT_DEGREE,
+                    W,
+                    NUM_EXTERNAL_ROUNDS,
+                    NUM_INTERNAL_ROUNDS,
+                    NUM_INTERNAL_ROUNDS_MINUS_ONE,
+                >,
+            >,
+        >,
+    ) -> Self
+    where
+        F: TwoAdicField
+            + PrimeField32
+            + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+            + BinomiallyExtendable<EXTENSION_DEGREE>,
+        SC: FieldFriConfigVariable<
+            CC,
+            Val = F,
+            Domain = TwoAdicMultiplicativeCoset<F>,
+            FriChallengerVariable = DuplexChallengerVariable<CC>,
+            DigestVariable = [Felt<F>; DIGEST_SIZE],
+        >,
+        CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug,
+        Challenge<SC>: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+        Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+        PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+        Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
+
+        Poseidon2SkinnyChip<CONVERT_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>:
+            Air<SymbolicConstraintFolder<F>>
+                + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+        Poseidon2WideChip<
+            CONVERT_DEGREE,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            F,
+        >: Air<SymbolicConstraintFolder<F>>
+            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+    {
         // initialize for base_ and reconstruct_challenger
         let [mut base_challenger, mut reconstruct_challenger] =
             array::from_fn(|_| machine.config().challenger());
@@ -157,8 +226,12 @@ impl<'a>
                     flag_first_chunk,
                     vk_root,
                 };
-                let mut program =
-                    ConvertVerifierCircuit::<RecursionFC, RiscvSC>::build(machine, &input);
+                let mut program = ConvertVerifierCircuit::<
+                    CC,
+                    SC,
+                    HALF_EXTERNAL_ROUNDS,
+                    NUM_INTERNAL_ROUNDS,
+                >::build(machine, &input);
 
                 if let Some(config) = &recursion_config {
                     config.padding_shape(&mut program);
@@ -182,30 +255,41 @@ impl<'a>
 }
 
 // for recursion stdin
-impl<'a, C> EmulatorStdin<RecursionProgram<Val<RecursionSC>>, RecursionStdin<'a, RecursionSC, C>>
+impl<'a, C, SC> EmulatorStdin<RecursionProgram<Val<SC>>, RecursionStdin<'a, SC, C>>
 where
+    SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, RecursionFC>>
-        + Send,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     /// Construct the recursion stdin for one layer of combine.
-    pub fn setup_for_combine(
-        vk_root: [Val<RecursionSC>; DIGEST_SIZE],
-        vks: &[BaseVerifyingKey<RecursionSC>],
-        proofs: &[BaseProof<RecursionSC>],
-        machine: &'a BaseMachine<RecursionSC, C>,
+    pub fn setup_for_combine<F, CC>(
+        vk_root: [Val<SC>; DIGEST_SIZE],
+        vks: &[BaseVerifyingKey<SC>],
+        proofs: &[BaseProof<SC>],
+        machine: &'a BaseMachine<SC, C>,
         combine_size: usize,
         flag_complete: bool,
-    ) -> (
-        Self,
-        Option<BaseVerifyingKey<RecursionSC>>,
-        Option<BaseProof<RecursionSC>>,
-    ) {
+    ) -> (Self, Option<BaseVerifyingKey<SC>>, Option<BaseProof<SC>>)
+    where
+        F: PrimeField32
+            + BinomiallyExtendable<EXTENSION_DEGREE>
+            + TwoAdicField
+            + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+        CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug + Send + Sync,
+        CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+        SC: FieldFriConfigVariable<CC, Val = F, Domain = TwoAdicMultiplicativeCoset<F>>
+            + Send
+            + Sync,
+        C: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>> + Send + Sync,
+        Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+        PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+        BaseVerifyingKey<SC>: Send + Sync,
+        BaseProof<SC>: Send + Sync,
+    {
         assert_eq!(vks.len(), proofs.len());
 
         let mut last_vk = None;
@@ -227,9 +311,7 @@ where
                         flag_complete,
                         vk_root,
                     };
-                    let program = CombineVerifierCircuit::<RecursionFC, RecursionSC, C>::build(
-                        machine, &input,
-                    );
+                    let program = CombineVerifierCircuit::<CC, SC, C>::build(machine, &input);
 
                     program.print_stats();
 
@@ -257,36 +339,81 @@ where
 }
 
 // for recursion_vk stdin
-impl<'a, C> EmulatorStdin<RecursionProgram<Val<RecursionSC>>, RecursionVkStdin<'a, RecursionSC, C>>
+impl<'a, C, SC> EmulatorStdin<RecursionProgram<Val<SC>>, RecursionVkStdin<'a, SC, C>>
 where
+    SC: StarkGenericConfig + FieldHasher<Val<SC>>,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, RecursionFC>>
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
         + Send,
 {
     /// Construct the recursion stdin for one layer of combine.
     #[allow(clippy::too_many_arguments)]
-    pub fn setup_for_combine_vk(
-        vk_root: [Val<RecursionSC>; DIGEST_SIZE],
-        vks: &[BaseVerifyingKey<RecursionSC>],
-        proofs: &[BaseProof<RecursionSC>],
-        machine: &'a BaseMachine<RecursionSC, C>,
+    pub fn setup_for_combine_vk<
+        F,
+        CC,
+        const W: u32,
+        const NUM_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+    >(
+        vk_root: [Val<SC>; DIGEST_SIZE],
+        vks: &[BaseVerifyingKey<SC>],
+        proofs: &[BaseProof<SC>],
+        machine: &'a BaseMachine<SC, C>,
         combine_size: usize,
         flag_complete: bool,
-        vk_manager: &VkMerkleManager,
+        vk_manager: &VkMerkleManager<SC>,
         recursion_shape_config: &RecursionShapeConfig<
-            BabyBear,
-            RecursionChipType<BabyBear, COMBINE_DEGREE>,
+            F,
+            RecursionChipType<
+                F,
+                COMBINE_DEGREE,
+                W,
+                NUM_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            >,
         >,
-    ) -> (
-        Self,
-        Option<BaseVerifyingKey<RecursionSC>>,
-        Option<BaseProof<RecursionSC>>,
-    ) {
+    ) -> (Self, Option<BaseVerifyingKey<SC>>, Option<BaseProof<SC>>)
+    where
+        F: TwoAdicField
+            + PrimeField32
+            + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+            + BinomiallyExtendable<EXTENSION_DEGREE>,
+        SC: FieldFriConfigVariable<
+                CC,
+                Val = F,
+                Domain = TwoAdicMultiplicativeCoset<F>,
+                FriChallengerVariable = DuplexChallengerVariable<CC>,
+                DigestVariable = [Felt<F>; DIGEST_SIZE],
+            > + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZE]>,
+        CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug,
+        Challenge<SC>: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+        Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+        PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+        Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
+        BaseVerifyingKey<SC>: HashableKey<F> + Send + Sync,
+        BaseProof<SC>: Send + Sync,
+        C: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+
+        BaseMachine<SC, C>: Send + Sync,
+
+        Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>:
+            Air<SymbolicConstraintFolder<F>>
+                + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+        Poseidon2WideChip<
+            COMBINE_DEGREE,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            F,
+        >: Air<SymbolicConstraintFolder<F>>
+            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+    {
         assert_eq!(vks.len(), proofs.len());
 
         let mut last_vk = None;
@@ -309,10 +436,7 @@ where
                     };
 
                     let input = vk_manager.add_vk_merkle_proof(input);
-                    let mut program =
-                        CombineVkVerifierCircuit::<RecursionFC, RecursionSC, C>::build(
-                            machine, &input,
-                        );
+                    let mut program = CombineVkVerifierCircuit::<CC, SC, C>::build(machine, &input);
 
                     recursion_shape_config.padding_shape(&mut program);
 

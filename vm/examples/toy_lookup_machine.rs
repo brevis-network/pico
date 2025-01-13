@@ -4,6 +4,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     chips::chips::toys::lookup_toy::{AddLookedChip, AddLookingChip},
     compiler::riscv::program::Program,
+    configs::config::StarkGenericConfig,
     emulator::riscv::record::EmulationRecord,
     instances::{configs::riscv_config::StarkConfig as RiscvSC, machine::simple::SimpleMachine},
     machine::{

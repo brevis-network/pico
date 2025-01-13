@@ -1,5 +1,5 @@
 use crate::{
-    configs::config::{Com, StarkGenericConfig, ZeroCommitment},
+    configs::config::{Com, StarkGenericConfig, Val, ZeroCommitment},
     primitives::{consts::DIGEST_SIZE, pico_poseidon2m31_init, PicoPoseidon2Mersenne31},
 };
 use p3_challenger::DuplexChallenger;
@@ -9,7 +9,7 @@ use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
 use p3_fri::FriConfig;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_mersenne_31::Mersenne31;
-use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
+use p3_symmetric::{CryptographicHasher, PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
 use std::marker::PhantomData;
 
@@ -31,8 +31,29 @@ pub struct M31Poseidon2 {
     pcs: SC_Pcs,
 }
 
-impl M31Poseidon2 {
-    pub fn new() -> Self {
+impl Serialize for M31Poseidon2 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        std::marker::PhantomData::<M31Poseidon2>.serialize(serializer)
+    }
+}
+
+impl Clone for M31Poseidon2 {
+    fn clone(&self) -> Self {
+        Self::new()
+    }
+}
+
+impl StarkGenericConfig for M31Poseidon2 {
+    type Val = SC_Val;
+    type Domain = <SC_Pcs as Pcs<SC_Challenge, SC_Challenger>>::Domain;
+    type Challenge = SC_Challenge;
+    type Challenger = SC_Challenger;
+    type Pcs = SC_Pcs;
+
+    fn new() -> Self {
         let perm = pico_poseidon2m31_init();
         let hash = SC_Hash::new(perm.clone());
         let compress = SC_Compress::new(perm.clone());
@@ -50,35 +71,6 @@ impl M31Poseidon2 {
         };
         Self { perm, pcs }
     }
-}
-
-impl Serialize for M31Poseidon2 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        std::marker::PhantomData::<M31Poseidon2>.serialize(serializer)
-    }
-}
-
-impl Clone for M31Poseidon2 {
-    fn clone(&self) -> Self {
-        Self::new()
-    }
-}
-
-impl Default for M31Poseidon2 {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StarkGenericConfig for M31Poseidon2 {
-    type Val = SC_Val;
-    type Domain = <SC_Pcs as Pcs<SC_Challenge, SC_Challenger>>::Domain;
-    type Challenge = SC_Challenge;
-    type Challenger = SC_Challenger;
-    type Pcs = SC_Pcs;
 
     fn pcs(&self) -> &Self::Pcs {
         &self.pcs
@@ -90,6 +82,11 @@ impl StarkGenericConfig for M31Poseidon2 {
 
     fn name(&self) -> String {
         "M31Poseidon2".to_string()
+    }
+
+    fn hash_slice(&self, input: &[Val<Self>]) -> [Val<Self>; DIGEST_SIZE] {
+        let hash = SC_Hash::new(self.perm.clone());
+        hash.hash_slice(input)
     }
 }
 

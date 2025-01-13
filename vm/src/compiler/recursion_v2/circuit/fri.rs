@@ -1,6 +1,6 @@
 use super::{
     challenger::{CanObserveVariable, CanSampleBitsVariable, FieldChallengerVariable},
-    config::{BabyBearFriConfigVariable, CircuitConfig},
+    config::{CircuitConfig, FieldFriConfigVariable},
     types::{FriChallengesVariable, FriProofVariable, QueryProofVariable, TwoAdicPcsRoundVariable},
 };
 use crate::{
@@ -33,8 +33,8 @@ pub struct PolynomialBatchShape {
 }
 
 pub fn verify_shape_and_sample_challenges<
-    CC: CircuitConfig<F = BabyBear>,
-    SC: BabyBearFriConfigVariable<CC>,
+    CC: CircuitConfig<F = SC::Val>,
+    SC: FieldFriConfigVariable<CC>,
 >(
     builder: &mut Builder<CC>,
     config: &SimpleFriConfig,
@@ -71,13 +71,15 @@ pub fn verify_shape_and_sample_challenges<
     }
 }
 
-pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>>(
+pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<CC>>(
     builder: &mut Builder<CC>,
     config: &SimpleFriConfig,
     proof: &FriProofVariable<CC, SC>,
     challenger: &mut SC::FriChallengerVariable,
-    rounds: Vec<TwoAdicPcsRoundVariable<CC, SC>>,
-) {
+    rounds: Vec<TwoAdicPcsRoundVariable<CC, SC, SC::Domain>>,
+) where
+    CC::F: TwoAdicField,
+{
     let alpha = challenger.sample_ext(builder);
 
     let fri_challenges =
@@ -236,13 +238,15 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfig
     );
 }
 
-pub fn verify_challenges<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>>(
+pub fn verify_challenges<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<CC>>(
     builder: &mut Builder<CC>,
     config: &SimpleFriConfig,
     proof: FriProofVariable<CC, SC>,
     challenges: &FriChallengesVariable<CC>,
     reduced_openings: Vec<[Ext<CC::F, CC::EF>; 32]>,
-) {
+) where
+    SC::Val: p3_field::TwoAdicField,
+{
     let log_max_height = proof.commit_phase_commits.len() + config.log_blowup;
     for ((index_bits, query_proof), ro) in challenges
         .query_indices
@@ -264,7 +268,7 @@ pub fn verify_challenges<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVa
     }
 }
 
-pub fn verify_query<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>>(
+pub fn verify_query<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<CC>>(
     builder: &mut Builder<CC>,
     commit_phase_commits: &[SC::DigestVariable],
     index_bits: &[CC::Bit],
@@ -272,7 +276,10 @@ pub fn verify_query<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariabl
     betas: &[Ext<CC::F, CC::EF>],
     reduced_openings: [Ext<CC::F, CC::EF>; 32],
     log_max_height: usize,
-) -> Ext<CC::F, CC::EF> {
+) -> Ext<CC::F, CC::EF>
+where
+    CC::F: TwoAdicField,
+{
     let mut folded_eval: Ext<_, _> = builder.constant(CC::EF::ZERO);
     let two_adic_generator: Felt<_> = builder.constant(CC::F::two_adic_generator(log_max_height));
 
@@ -367,7 +374,7 @@ pub fn verify_query<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariabl
     folded_eval
 }
 
-pub fn verify_batch<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>>(
+pub fn verify_batch<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<CC>>(
     builder: &mut Builder<CC>,
     commit: SC::DigestVariable,
     heights: &[usize],

@@ -4,6 +4,7 @@ use crate::{
         alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
         exp_reverse_bits_v2::ExpReverseBitsLenChip,
+        poseidon2_skinny_v2::Poseidon2SkinnyChip,
         poseidon2_wide_v2::Poseidon2WideChip,
         public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
@@ -13,11 +14,13 @@ use crate::{
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType, compiler_v2::shapes::ProofShape,
     },
-    machine::chip::ChipBehavior,
+    machine::{chip::ChipBehavior, folder::SymbolicConstraintFolder},
     primitives::consts::EXTENSION_DEGREE,
+    recursion_v2::runtime::RecursionRecord,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
+use p3_air::Air;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_util::log2_ceil_usize;
 use serde::{Deserialize, Serialize};
@@ -71,26 +74,118 @@ pub struct RecursionShapeConfig<F, A> {
     _marker: PhantomData<(F, A)>,
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usize> Default
-    for RecursionShapeConfig<F, RecursionChipType<F, DEGREE>>
+impl<
+        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+        const DEGREE: usize,
+        const W: u32,
+        const NUM_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+    > Default
+    for RecursionShapeConfig<
+        F,
+        RecursionChipType<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >,
+    >
+where
+    RecursionChipType<
+        F,
+        DEGREE,
+        W,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    >: ChipBehavior<F>,
 {
     fn default() -> Self {
-        let mem_const =
-            RecursionChipType::<F, DEGREE>::MemoryConst(MemoryConstChip::default()).name();
-        let mem_var = RecursionChipType::<F, DEGREE>::MemoryVar(MemoryVarChip::default()).name();
-        let base_alu = RecursionChipType::<F, DEGREE>::BaseAlu(BaseAluChip::default()).name();
-        let ext_alu = RecursionChipType::<F, DEGREE>::ExtAlu(ExtAluChip::default()).name();
-        let poseidon2_wide =
-            RecursionChipType::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::default()).name();
-        let exp_reverse_bits_len =
-            RecursionChipType::<F, DEGREE>::ExpReverseBitsLen(ExpReverseBitsLenChip::default())
-                .name();
+        let mem_const = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::MemoryConst(MemoryConstChip::default())
+        .name();
+        let mem_var = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::MemoryVar(MemoryVarChip::default())
+        .name();
+        let base_alu = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::BaseAlu(BaseAluChip::default())
+        .name();
+        let ext_alu = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::ExtAlu(ExtAluChip::default())
+        .name();
+        let poseidon2_wide = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::Poseidon2Wide(Poseidon2WideChip::default())
+        .name();
+        let exp_reverse_bits_len = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::ExpReverseBitsLen(ExpReverseBitsLenChip::default())
+        .name();
 
-        let public_values =
-            RecursionChipType::<F, DEGREE>::PublicValues(PublicValuesChip::default()).name();
-        let batch_fri =
-            RecursionChipType::<F, DEGREE>::BatchFRI(BatchFRIChip::<DEGREE, F>::default()).name();
-        let select = RecursionChipType::<F, DEGREE>::Select(SelectChip::default()).name();
+        let public_values = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::PublicValues(PublicValuesChip::default())
+        .name();
+        let batch_fri = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::BatchFRI(BatchFRIChip::<DEGREE, W, F>::default())
+        .name();
+        let select = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::Select(SelectChip::default())
+        .name();
 
         // Specify allowed shapes.
         let allowed_shapes = [
@@ -171,8 +266,36 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
     }
 }
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usize>
-    RecursionShapeConfig<F, RecursionChipType<F, DEGREE>>
+impl<
+        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+        const DEGREE: usize,
+        const W: u32,
+        const NUM_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+    >
+    RecursionShapeConfig<
+        F,
+        RecursionChipType<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >,
+    >
+where
+    Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>: Air<SymbolicConstraintFolder<F>>
+        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+    Poseidon2WideChip<
+        DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        F,
+    >: Air<SymbolicConstraintFolder<F>>
+        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
 {
     pub fn get_all_shape_combinations(
         &self,
@@ -191,7 +314,14 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const DEGREE: usi
     // Get the allowed shape with a minimal hamming distance from the current shape.
     pub fn padding_shape(&self, program: &mut RecursionProgram<F>) {
         info!("-------------Recursion Padding Shape-------------");
-        let heights = RecursionChipType::<F, DEGREE>::chip_heights(program);
+        let heights = RecursionChipType::<
+            F,
+            DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >::chip_heights(program);
         let mut min_distance = usize::MAX;
         let mut closest_shape = None;
         for shape in self.allowed_shapes.iter() {

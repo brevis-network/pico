@@ -8,6 +8,7 @@ use crate::{
 };
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
 use std::mem::size_of;
 
 // todo: further cleanup since these might be repetitive
@@ -153,6 +154,26 @@ pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = Bab
     15,
 ]);
 
+pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] =
+    KoalaBear::new_array([
+        KoalaBear::ORDER_U32 - 2,
+        1,
+        2,
+        (KoalaBear::ORDER_U32 + 1) >> 1,
+        3,
+        4,
+        (KoalaBear::ORDER_U32 - 1) >> 1,
+        KoalaBear::ORDER_U32 - 3,
+        KoalaBear::ORDER_U32 - 4,
+        KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 8),
+        KoalaBear::ORDER_U32 - ((KoalaBear::ORDER_U32 - 1) >> 3),
+        KoalaBear::ORDER_U32 - 127,
+        (KoalaBear::ORDER_U32 - 1) >> 8,
+        (KoalaBear::ORDER_U32 - 1) >> 3,
+        (KoalaBear::ORDER_U32 - 1) >> 4,
+        127,
+    ]);
+
 /*
 Poseidon2
  */
@@ -168,7 +189,23 @@ pub const MULTI_FIELD_CHALLENGER_RATE: usize = 2;
 pub const MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 
 pub const BABYBEAR_S_BOX_DEGREE: u64 = 7;
+pub const BABYBEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
+pub const BABYBEAR_NUM_INTERNAL_ROUNDS: usize = 13;
+pub const BABYBEAR_NUM_ROUNDS: usize = BABYBEAR_NUM_EXTERNAL_ROUNDS + BABYBEAR_NUM_INTERNAL_ROUNDS;
+
+pub const KOALABEAR_S_BOX_DEGREE: u64 = 3;
+pub const KOALABEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
+pub const KOALABEAR_NUM_INTERNAL_ROUNDS: usize = 20;
+pub const KOALABEAR_NUM_ROUNDS: usize =
+    KOALABEAR_NUM_EXTERNAL_ROUNDS + KOALABEAR_NUM_INTERNAL_ROUNDS;
 
 pub const MERSENNE31_S_BOX_DEGREE: u64 = 5;
+pub const MERSENNE31_NUM_EXTERNAL_ROUNDS: usize = 8;
+pub const MERSENNE31_NUM_INTERNAL_ROUNDS: usize = 14;
+pub const MERSENNE31_NUM_ROUNDS: usize =
+    MERSENNE31_NUM_EXTERNAL_ROUNDS + MERSENNE31_NUM_INTERNAL_ROUNDS;
 
 pub const BN254_S_BOX_DEGREE: u64 = 5;
+
+pub const BABYBEAR_W: u32 = 11;
+pub const KOALABEAR_W: u32 = 3;

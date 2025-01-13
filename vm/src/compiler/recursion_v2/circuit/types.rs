@@ -1,6 +1,6 @@
 use super::{
     challenger::CanObserveVariable,
-    config::{BabyBearFriConfigVariable, CircuitConfig},
+    config::{CircuitConfig, FieldFriConfigVariable},
     hash::FieldHasherVariable,
 };
 use crate::{
@@ -13,14 +13,16 @@ use p3_field::{FieldAlgebra, TwoAdicField};
 use p3_matrix::Dimensions;
 
 #[derive(Clone)]
-pub struct BaseVerifyingKeyVariable<
-    CC: CircuitConfig<F = SC::Val>,
-    SC: BabyBearFriConfigVariable<CC>,
-> {
+pub struct BaseVerifyingKeyVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+{
     pub commit: SC::DigestVariable,
     pub pc_start: Felt<CC::F>,
     pub initial_global_cumulative_sum: SepticDigest<Felt<CC::F>>,
-    pub preprocessed_info: Vec<(String, TwoAdicMultiplicativeCoset<CC::F>, Dimensions)>,
+    pub preprocessed_info: Vec<(String, SC::Domain, Dimensions)>,
     pub preprocessed_chip_ordering: HashMap<String, usize>,
 }
 
@@ -65,20 +67,23 @@ pub struct FriChallengesVariable<CC: CircuitConfig> {
 // }
 
 #[derive(Clone)]
-pub struct TwoAdicPcsRoundVariable<CC: CircuitConfig, H: FieldHasherVariable<CC>> {
+pub struct TwoAdicPcsRoundVariable<CC: CircuitConfig, H: FieldHasherVariable<CC>, Domain> {
     pub batch_commit: H::DigestVariable,
-    pub domains_points_and_opens: Vec<TwoAdicPcsMatsVariable<CC>>,
+    pub domains_points_and_opens: Vec<TwoAdicPcsMatsVariable<CC, Domain>>,
 }
 
 #[derive(Clone)]
-pub struct TwoAdicPcsMatsVariable<CC: CircuitConfig> {
-    pub domain: TwoAdicMultiplicativeCoset<CC::F>,
+pub struct TwoAdicPcsMatsVariable<CC: CircuitConfig, Domain> {
+    pub domain: Domain,
     pub points: Vec<Ext<CC::F, CC::EF>>,
     pub values: Vec<Vec<Ext<CC::F, CC::EF>>>,
 }
 
-impl<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>>
-    BaseVerifyingKeyVariable<CC, SC>
+impl<CC, SC> BaseVerifyingKeyVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
 {
     pub fn observed_by<Challenger>(&self, builder: &mut Builder<CC>, challenger: &mut Challenger)
     where
@@ -99,7 +104,7 @@ impl<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>>
 
     /// Hash the verifying key + prep domains into a single digest.
     /// poseidon2( commit[0..8] || pc_start || prep_domains[N].{log_n, .size, .shift, .g})
-    pub fn hash_babybear(&self, builder: &mut Builder<CC>) -> SC::DigestVariable
+    pub fn hash_field(&self, builder: &mut Builder<CC>) -> SC::DigestVariable
     where
         CC::F: TwoAdicField,
         SC::DigestVariable: IntoIterator<Item = Felt<CC::F>>,

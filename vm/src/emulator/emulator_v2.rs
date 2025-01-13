@@ -1,9 +1,14 @@
 use crate::{
+    chips::precompiles::poseidon2::Poseidon2PermuteChip,
     compiler::{
         recursion_v2::{circuit::witness::witnessable::Witnessable, program::RecursionProgram},
         riscv::program::Program,
     },
-    configs::config::{Challenge, StarkGenericConfig, Val},
+    configs::{
+        config::{Challenge, StarkGenericConfig, Val},
+        field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
+        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+    },
     emulator::riscv::{
         record::EmulationRecord,
         riscv_emulator::{EmulatorMode, RiscvEmulator},
@@ -15,10 +20,6 @@ use crate::{
             recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,
             vk_merkle::stdin::RecursionVkStdin,
         },
-        configs::{
-            recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
-            riscv_config::StarkConfig as RiscvSC,
-        },
     },
     machine::{
         chip::ChipBehavior,
@@ -27,12 +28,12 @@ use crate::{
         machine::BaseMachine,
         witness::ProvingWitness,
     },
-    primitives::consts::{BABYBEAR_S_BOX_DEGREE, PERMUTATION_WIDTH},
+    primitives::consts::{BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE},
     recursion_v2::runtime::{RecursionRecord, Runtime},
 };
 use p3_air::Air;
 use p3_field::PrimeField32;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 // todo: refactor
 
@@ -50,8 +51,7 @@ where
     pub stdin: &'a EmulatorStdin<P, I>,
     pub emulator: Option<E>,
     pub batch_size: usize, // max parallelism
-    pointer: usize,
-    machine: Option<&'a BaseMachine<SC, C>>, // used for setting-up and generating keys
+    pub _sc_and_chip: PhantomData<(SC, C)>,
 }
 
 // MetaEmulator for riscv
@@ -84,8 +84,7 @@ where
             stdin: proving_witness.stdin.as_ref().unwrap(),
             emulator: Some(emulator),
             batch_size: opts.chunk_batch_size,
-            pointer: 0,
-            machine: None,
+            _sc_and_chip: PhantomData,
         }
     }
 
@@ -99,275 +98,6 @@ where
     }
 }
 
-// MetaEmulator for convert
-impl<'a, C>
-    MetaEmulator<
-        'a,
-        RecursionSC,
-        C,
-        RecursionProgram<Val<RecursionSC>>,
-        ConvertStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
-        RecursionEmulator<RecursionSC>,
-    >
-where
-    C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
-{
-    pub fn setup_convert(
-        proving_witness: &'a ProvingWitness<
-            RecursionSC,
-            C,
-            ConvertStdin<'a, RiscvSC, RiscvChipType<Val<RiscvSC>>>,
-        >,
-        machine: &'a BaseMachine<RecursionSC, C>,
-    ) -> Self {
-        let batch_size = match proving_witness.opts {
-            Some(opts) => opts.chunk_batch_size,
-            None => 0,
-        };
-        Self {
-            stdin: proving_witness.stdin.as_ref().unwrap(),
-            emulator: None,
-            batch_size,
-            pointer: 0,
-            machine: Some(machine),
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn next_record_keys(
-        &mut self,
-    ) -> (
-        RecursionRecord<Val<RecursionSC>>,
-        BaseProvingKey<RecursionSC>,
-        BaseVerifyingKey<RecursionSC>,
-        bool,
-    ) {
-        let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-        let (pk, vk) = self.machine.unwrap().setup_keys(program);
-        let mut emulator = RecursionEmulator::<RecursionSC> {
-            recursion_program: program.clone().into(),
-            config: self.machine.unwrap().config(),
-        };
-        let record = emulator.run_riscv(input);
-        self.pointer += 1;
-        (record, pk, vk, done)
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn next_record_keys_batch(
-        &mut self,
-    ) -> (
-        Vec<RecursionRecord<Val<RecursionSC>>>,
-        Vec<BaseProvingKey<RecursionSC>>,
-        Vec<BaseVerifyingKey<RecursionSC>>,
-        bool,
-    ) {
-        let mut batch_records = vec![];
-        let mut batch_pks = vec![];
-        let mut batch_vks = vec![];
-        loop {
-            let (record, pk, vk, done) = self.next_record_keys();
-            batch_records.push(record);
-            batch_pks.push(pk);
-            batch_vks.push(vk);
-            if done {
-                return (batch_records, batch_pks, batch_vks, true);
-            }
-            if batch_records.len() >= self.batch_size {
-                break;
-            }
-        }
-        (batch_records, batch_pks, batch_vks, false)
-    }
-}
-
-// MetaEmulator for recursion combine
-impl<'a, C, PrevC>
-    MetaEmulator<
-        'a,
-        RecursionSC,
-        C,
-        RecursionProgram<Val<RecursionSC>>,
-        RecursionStdin<'a, RecursionSC, PrevC>,
-        RecursionEmulator<RecursionSC>,
-    >
-where
-    PrevC: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
-    C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
-{
-    pub fn setup_combine(
-        proving_witness: &'a ProvingWitness<RecursionSC, C, RecursionStdin<'a, RecursionSC, PrevC>>,
-        machine: &'a BaseMachine<RecursionSC, C>,
-    ) -> Self {
-        let batch_size = match proving_witness.opts {
-            Some(opts) => opts.chunk_batch_size,
-            None => 0,
-        };
-        Self {
-            stdin: proving_witness.stdin.as_ref().unwrap(),
-            emulator: None,
-            batch_size,
-            pointer: 0,
-            machine: Some(machine),
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn next_record_keys(
-        &mut self,
-    ) -> (
-        RecursionRecord<Val<RecursionSC>>,
-        BaseProvingKey<RecursionSC>,
-        BaseVerifyingKey<RecursionSC>,
-        bool,
-    ) {
-        let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-        let (pk, vk) = self.machine.unwrap().setup_keys(program);
-        let mut emulator = RecursionEmulator::<RecursionSC> {
-            recursion_program: program.clone().into(),
-            config: self.machine.unwrap().config(),
-        };
-        let record = emulator.run_recursion(input);
-        self.pointer += 1;
-        (record, pk, vk, done)
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn next_record_keys_batch(
-        &mut self,
-    ) -> (
-        Vec<RecursionRecord<Val<RecursionSC>>>,
-        Vec<BaseProvingKey<RecursionSC>>,
-        Vec<BaseVerifyingKey<RecursionSC>>,
-        bool,
-    ) {
-        let mut batch_records = vec![];
-        let mut batch_pks = vec![];
-        let mut batch_vks = vec![];
-        loop {
-            let (record, pk, vk, done) = self.next_record_keys();
-            batch_records.push(record);
-            batch_pks.push(pk);
-            batch_vks.push(vk);
-            if done {
-                return (batch_records, batch_pks, batch_vks, true);
-            }
-            if batch_records.len() >= self.batch_size {
-                break;
-            }
-        }
-        (batch_records, batch_pks, batch_vks, false)
-    }
-}
-
-// MetaEmulator for recursion combine
-impl<'a, C, PrevC>
-    MetaEmulator<
-        'a,
-        RecursionSC,
-        C,
-        RecursionProgram<Val<RecursionSC>>,
-        RecursionVkStdin<'a, RecursionSC, PrevC>,
-        RecursionEmulator<RecursionSC>,
-    >
-where
-    PrevC: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
-    C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
-{
-    pub fn setup_combine_vk(
-        proving_witness: &'a ProvingWitness<
-            RecursionSC,
-            C,
-            RecursionVkStdin<'a, RecursionSC, PrevC>,
-        >,
-        machine: &'a BaseMachine<RecursionSC, C>,
-    ) -> Self {
-        let batch_size = match proving_witness.opts {
-            Some(opts) => opts.chunk_batch_size,
-            None => 0,
-        };
-        Self {
-            stdin: proving_witness.stdin.as_ref().unwrap(),
-            emulator: None,
-            batch_size,
-            pointer: 0,
-            machine: Some(machine),
-        }
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    pub fn next_record_keys(
-        &mut self,
-    ) -> (
-        RecursionRecord<Val<RecursionSC>>,
-        BaseProvingKey<RecursionSC>,
-        BaseVerifyingKey<RecursionSC>,
-        bool,
-    ) {
-        let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-        let (pk, vk) = self.machine.unwrap().setup_keys(program);
-        let mut emulator = RecursionEmulator::<RecursionSC> {
-            recursion_program: program.clone().into(),
-            config: self.machine.unwrap().config(),
-        };
-        let record = emulator.run_recursion_vk(input);
-        self.pointer += 1;
-        (record, pk, vk, done)
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn next_record_keys_batch(
-        &mut self,
-    ) -> (
-        Vec<RecursionRecord<Val<RecursionSC>>>,
-        Vec<BaseProvingKey<RecursionSC>>,
-        Vec<BaseVerifyingKey<RecursionSC>>,
-        bool,
-    ) {
-        let mut batch_records = vec![];
-        let mut batch_pks = vec![];
-        let mut batch_vks = vec![];
-        loop {
-            let (record, pk, vk, done) = self.next_record_keys();
-            batch_records.push(record);
-            batch_pks.push(pk);
-            batch_vks.push(vk);
-            if done {
-                return (batch_records, batch_pks, batch_vks, true);
-            }
-            if batch_records.len() >= self.batch_size {
-                break;
-            }
-        }
-        (batch_records, batch_pks, batch_vks, false)
-    }
-}
-
 // Recursion emulator
 pub struct RecursionEmulator<SC>
 where
@@ -377,86 +107,403 @@ where
     pub config: Arc<SC>,
 }
 
-impl RecursionEmulator<RecursionSC> {
-    pub fn run_riscv<RiscvC>(
-        &mut self,
-        stdin: &ConvertStdin<RiscvSC, RiscvC>,
-    ) -> RecursionRecord<Val<RecursionSC>>
-    where
-        RiscvC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-            + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
-    {
-        let mut witness_stream = Vec::new();
-        Witnessable::<RecursionFC>::write(&stdin, &mut witness_stream);
+macro_rules! impl_emulator {
+    ($emul_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident, $s_box_degree:ident) => {
+        // Meta emulator for recursive circuits.
+        // P and I for the native program and input types
+        // E for the emulator type
+        pub struct $emul_name<
+            'a,
+            C,
+            P,
+            I,
+            E,
+            const HALF_EXTERNAL_ROUNDS: usize,
+            const NUM_INTERNAL_ROUNDS: usize,
+        > where
+            C: ChipBehavior<Val<$recur_sc>>
+                + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+        {
+            pub stdin: &'a EmulatorStdin<P, I>,
+            pub emulator: Option<E>,
+            pub batch_size: usize, // max parallelism
+            pointer: usize,
+            machine: Option<&'a BaseMachine<$recur_sc, C>>, // used for setting-up and generating keys
+        }
 
-        let mut runtime = Runtime::<
-            Val<RecursionSC>,
-            Challenge<RecursionSC>,
-            _,
-            _,
-            PERMUTATION_WIDTH,
-            BABYBEAR_S_BOX_DEGREE,
-        >::new(self.recursion_program.clone(), self.config.perm.clone());
+        // MetaEmulator for convert
+        impl<'a, C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+            $emul_name<
+                'a,
+                C,
+                RecursionProgram<Val<$recur_sc>>,
+                ConvertStdin<
+                    'a,
+                    $riscv_sc,
+                    RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
+                >,
+                RecursionEmulator<$recur_sc>,
+                HALF_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+            >
+        where
+            C: ChipBehavior<
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+            Poseidon2PermuteChip<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+                ChipBehavior<Val<$riscv_sc>, Record = EmulationRecord, Program = Program>,
+        {
+            pub fn setup_convert(
+                proving_witness: &'a ProvingWitness<
+                    $recur_sc,
+                    C,
+                    ConvertStdin<
+                        'a,
+                        $riscv_sc,
+                        RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
+                    >,
+                >,
+                machine: &'a BaseMachine<$recur_sc, C>,
+            ) -> Self {
+                let batch_size = match proving_witness.opts {
+                    Some(opts) => opts.chunk_batch_size,
+                    None => 0,
+                };
+                Self {
+                    stdin: proving_witness.stdin.as_ref().unwrap(),
+                    emulator: None,
+                    batch_size,
+                    pointer: 0,
+                    machine: Some(machine),
+                }
+            }
 
-        runtime.witness_stream = witness_stream.into();
-        runtime.run().unwrap();
-        runtime.record
-    }
+            #[allow(clippy::should_implement_trait)]
+            pub fn next_record_keys(
+                &mut self,
+            ) -> (
+                RecursionRecord<Val<$recur_sc>>,
+                BaseProvingKey<$recur_sc>,
+                BaseVerifyingKey<$recur_sc>,
+                bool,
+            ) {
+                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
+                let (pk, vk) = self.machine.unwrap().setup_keys(program);
+                let mut emulator = RecursionEmulator::<$recur_sc> {
+                    recursion_program: program.clone().into(),
+                    config: self.machine.unwrap().config(),
+                };
+                let record = emulator.run_riscv(input);
+                self.pointer += 1;
+                (record, pk, vk, done)
+            }
 
-    pub fn run_recursion<RecursionC>(
-        &mut self,
-        stdin: &RecursionStdin<RecursionSC, RecursionC>,
-    ) -> RecursionRecord<Val<RecursionSC>>
-    where
-        RecursionC: ChipBehavior<
-                Val<RecursionSC>,
-                Program = RecursionProgram<Val<RecursionSC>>,
-                Record = RecursionRecord<Val<RecursionSC>>,
-            > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
-    {
-        let mut witness_stream = Vec::new();
-        Witnessable::<RecursionFC>::write(&stdin, &mut witness_stream);
+            #[allow(clippy::type_complexity)]
+            pub fn next_record_keys_batch(
+                &mut self,
+            ) -> (
+                Vec<RecursionRecord<Val<$recur_sc>>>,
+                Vec<BaseProvingKey<$recur_sc>>,
+                Vec<BaseVerifyingKey<$recur_sc>>,
+                bool,
+            ) {
+                let mut batch_records = vec![];
+                let mut batch_pks = vec![];
+                let mut batch_vks = vec![];
+                loop {
+                    let (record, pk, vk, done) = self.next_record_keys();
+                    batch_records.push(record);
+                    batch_pks.push(pk);
+                    batch_vks.push(vk);
+                    if done {
+                        return (batch_records, batch_pks, batch_vks, true);
+                    }
+                    if batch_records.len() >= self.batch_size {
+                        break;
+                    }
+                }
+                (batch_records, batch_pks, batch_vks, false)
+            }
+        }
 
-        let mut runtime = Runtime::<
-            Val<RecursionSC>,
-            Challenge<RecursionSC>,
-            _,
-            _,
-            PERMUTATION_WIDTH,
-            BABYBEAR_S_BOX_DEGREE,
-        >::new(self.recursion_program.clone(), self.config.perm.clone());
-        runtime.witness_stream = witness_stream.into();
-        runtime.run().unwrap();
-        runtime.record
-    }
+        // MetaEmulator for recursion combine
+        impl<'a, C, PrevC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+            $emul_name<
+                'a,
+                C,
+                RecursionProgram<Val<$recur_sc>>,
+                RecursionStdin<'a, $recur_sc, PrevC>,
+                RecursionEmulator<$recur_sc>,
+                HALF_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+            >
+        where
+            PrevC: ChipBehavior<
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+            C: ChipBehavior<
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+        {
+            pub fn setup_combine(
+                proving_witness: &'a ProvingWitness<
+                    $recur_sc,
+                    C,
+                    RecursionStdin<'a, $recur_sc, PrevC>,
+                >,
+                machine: &'a BaseMachine<$recur_sc, C>,
+            ) -> Self {
+                let batch_size = match proving_witness.opts {
+                    Some(opts) => opts.chunk_batch_size,
+                    None => 0,
+                };
+                Self {
+                    stdin: proving_witness.stdin.as_ref().unwrap(),
+                    emulator: None,
+                    batch_size,
+                    pointer: 0,
+                    machine: Some(machine),
+                }
+            }
 
-    pub fn run_recursion_vk<RecursionC>(
-        &mut self,
-        stdin: &RecursionVkStdin<RecursionSC, RecursionC>,
-    ) -> RecursionRecord<Val<RecursionSC>>
-    where
-        RecursionC: ChipBehavior<
-                Val<RecursionSC>,
-                Program = RecursionProgram<Val<RecursionSC>>,
-                Record = RecursionRecord<Val<RecursionSC>>,
-            > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
-    {
-        let mut witness_stream = Vec::new();
-        Witnessable::<RecursionFC>::write(&stdin, &mut witness_stream);
+            #[allow(clippy::should_implement_trait)]
+            pub fn next_record_keys(
+                &mut self,
+            ) -> (
+                RecursionRecord<Val<$recur_sc>>,
+                BaseProvingKey<$recur_sc>,
+                BaseVerifyingKey<$recur_sc>,
+                bool,
+            ) {
+                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
+                let (pk, vk) = self.machine.unwrap().setup_keys(program);
+                let mut emulator = RecursionEmulator::<$recur_sc> {
+                    recursion_program: program.clone().into(),
+                    config: self.machine.unwrap().config(),
+                };
+                let record = emulator.run_recursion(input);
+                self.pointer += 1;
+                (record, pk, vk, done)
+            }
 
-        let mut runtime = Runtime::<
-            Val<RecursionSC>,
-            Challenge<RecursionSC>,
-            _,
-            _,
-            PERMUTATION_WIDTH,
-            BABYBEAR_S_BOX_DEGREE,
-        >::new(self.recursion_program.clone(), self.config.perm.clone());
-        runtime.witness_stream = witness_stream.into();
-        runtime.run().unwrap();
-        runtime.record
-    }
+            #[allow(clippy::type_complexity)]
+            pub fn next_record_keys_batch(
+                &mut self,
+            ) -> (
+                Vec<RecursionRecord<Val<$recur_sc>>>,
+                Vec<BaseProvingKey<$recur_sc>>,
+                Vec<BaseVerifyingKey<$recur_sc>>,
+                bool,
+            ) {
+                let mut batch_records = vec![];
+                let mut batch_pks = vec![];
+                let mut batch_vks = vec![];
+                loop {
+                    let (record, pk, vk, done) = self.next_record_keys();
+                    batch_records.push(record);
+                    batch_pks.push(pk);
+                    batch_vks.push(vk);
+                    if done {
+                        return (batch_records, batch_pks, batch_vks, true);
+                    }
+                    if batch_records.len() >= self.batch_size {
+                        break;
+                    }
+                }
+                (batch_records, batch_pks, batch_vks, false)
+            }
+        }
+
+        // MetaEmulator for recursion combine
+        impl<'a, C, PrevC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+            $emul_name<
+                'a,
+                C,
+                RecursionProgram<Val<$recur_sc>>,
+                RecursionVkStdin<'a, $recur_sc, PrevC>,
+                RecursionEmulator<$recur_sc>,
+                HALF_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+            >
+        where
+            PrevC: ChipBehavior<
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+            C: ChipBehavior<
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+        {
+            pub fn setup_combine_vk(
+                proving_witness: &'a ProvingWitness<
+                    $recur_sc,
+                    C,
+                    RecursionVkStdin<'a, $recur_sc, PrevC>,
+                >,
+                machine: &'a BaseMachine<$recur_sc, C>,
+            ) -> Self {
+                let batch_size = match proving_witness.opts {
+                    Some(opts) => opts.chunk_batch_size,
+                    None => 0,
+                };
+                Self {
+                    stdin: proving_witness.stdin.as_ref().unwrap(),
+                    emulator: None,
+                    batch_size,
+                    pointer: 0,
+                    machine: Some(machine),
+                }
+            }
+            #[allow(clippy::should_implement_trait)]
+            pub fn next_record_keys(
+                &mut self,
+            ) -> (
+                RecursionRecord<Val<$recur_sc>>,
+                BaseProvingKey<$recur_sc>,
+                BaseVerifyingKey<$recur_sc>,
+                bool,
+            ) {
+                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
+                let (pk, vk) = self.machine.unwrap().setup_keys(program);
+                let mut emulator = RecursionEmulator::<$recur_sc> {
+                    recursion_program: program.clone().into(),
+                    config: self.machine.unwrap().config(),
+                };
+                let record = emulator.run_recursion_vk(input);
+                self.pointer += 1;
+                (record, pk, vk, done)
+            }
+            #[allow(clippy::type_complexity)]
+            pub fn next_record_keys_batch(
+                &mut self,
+            ) -> (
+                Vec<RecursionRecord<Val<$recur_sc>>>,
+                Vec<BaseProvingKey<$recur_sc>>,
+                Vec<BaseVerifyingKey<$recur_sc>>,
+                bool,
+            ) {
+                let mut batch_records = vec![];
+                let mut batch_pks = vec![];
+                let mut batch_vks = vec![];
+                loop {
+                    let (record, pk, vk, done) = self.next_record_keys();
+                    batch_records.push(record);
+                    batch_pks.push(pk);
+                    batch_vks.push(vk);
+                    if done {
+                        return (batch_records, batch_pks, batch_vks, true);
+                    }
+                    if batch_records.len() >= self.batch_size {
+                        break;
+                    }
+                }
+                (batch_records, batch_pks, batch_vks, false)
+            }
+        }
+
+        impl RecursionEmulator<$recur_sc> {
+            pub fn run_riscv<RiscvC>(
+                &mut self,
+                stdin: &ConvertStdin<$riscv_sc, RiscvC>,
+            ) -> RecursionRecord<Val<$recur_sc>>
+            where
+                RiscvC: ChipBehavior<Val<$riscv_sc>, Program = Program, Record = EmulationRecord>
+                    + for<'b> Air<ProverConstraintFolder<'b, $riscv_sc>>
+                    + for<'b> Air<VerifierConstraintFolder<'b, $riscv_sc>>,
+            {
+                let mut witness_stream = Vec::new();
+                Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
+
+                let mut runtime =
+                    Runtime::<Val<$recur_sc>, Challenge<$recur_sc>, _, _, $s_box_degree>::new(
+                        self.recursion_program.clone(),
+                        self.config.perm.clone(),
+                    );
+
+                runtime.witness_stream = witness_stream.into();
+                runtime.run().unwrap();
+                runtime.record
+            }
+
+            pub fn run_recursion<RecursionC>(
+                &mut self,
+                stdin: &RecursionStdin<$recur_sc, RecursionC>,
+            ) -> RecursionRecord<Val<$recur_sc>>
+            where
+                RecursionC: ChipBehavior<
+                        Val<$recur_sc>,
+                        Program = RecursionProgram<Val<$recur_sc>>,
+                        Record = RecursionRecord<Val<$recur_sc>>,
+                    > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                    + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+            {
+                let mut witness_stream = Vec::new();
+                Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
+
+                let mut runtime =
+                    Runtime::<Val<$recur_sc>, Challenge<$recur_sc>, _, _, $s_box_degree>::new(
+                        self.recursion_program.clone(),
+                        self.config.perm.clone(),
+                    );
+                runtime.witness_stream = witness_stream.into();
+                runtime.run().unwrap();
+                runtime.record
+            }
+
+            pub fn run_recursion_vk<RecursionC>(
+                &mut self,
+                stdin: &RecursionVkStdin<$recur_sc, RecursionC>,
+            ) -> RecursionRecord<Val<$recur_sc>>
+            where
+                RecursionC: ChipBehavior<
+                        Val<$recur_sc>,
+                        Program = RecursionProgram<Val<$recur_sc>>,
+                        Record = RecursionRecord<Val<$recur_sc>>,
+                    > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                    + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+            {
+                let mut witness_stream = Vec::new();
+                Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
+                let mut runtime =
+                    Runtime::<Val<$recur_sc>, Challenge<$recur_sc>, _, _, $s_box_degree>::new(
+                        self.recursion_program.clone(),
+                        self.config.perm.clone(),
+                    );
+                runtime.witness_stream = witness_stream.into();
+                runtime.run().unwrap();
+                runtime.record
+            }
+        }
+    };
 }
+
+impl_emulator!(
+    BabyBearMetaEmulator,
+    BabyBearPoseidon2,
+    BabyBearSimple,
+    BabyBearPoseidon2,
+    BABYBEAR_S_BOX_DEGREE
+);
+
+impl_emulator!(
+    KoalaBearMetaEmulator,
+    KoalaBearPoseidon2,
+    KoalaBearSimple,
+    KoalaBearPoseidon2,
+    KOALABEAR_S_BOX_DEGREE
+);

@@ -1,16 +1,16 @@
 use crate::{
-    compiler::{recursion_v2::program::RecursionProgram, riscv::program::Program},
+    compiler::{
+        recursion_v2::{circuit::hash::FieldHasher, program::RecursionProgram},
+        riscv::program::Program,
+    },
     configs::config::{StarkGenericConfig, Val},
     emulator::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, stdin::EmulatorStdin},
     },
-    instances::{
-        compiler_v2::{
-            recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,
-            vk_merkle::stdin::RecursionVkStdin,
-        },
-        configs::{recur_config::StarkConfig as RecursionSC, riscv_config::StarkConfig as RiscvSC},
+    instances::compiler_v2::{
+        recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,
+        vk_merkle::stdin::RecursionVkStdin,
     },
     machine::{
         chip::ChipBehavior,
@@ -132,21 +132,22 @@ where
 }
 
 // implement Witness for riscv-recursion machine
-impl<'a, C, PrevC> ProvingWitness<RecursionSC, C, ConvertStdin<'a, RiscvSC, PrevC>>
+impl<'a, C, PrevC, SC> ProvingWitness<SC, C, ConvertStdin<'a, SC, PrevC>>
 where
-    PrevC: ChipBehavior<Val<RiscvSC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, RiscvSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RiscvSC>>,
+    SC: StarkGenericConfig,
+    PrevC: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
+        + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub fn setup_for_convert(
-        stdin: EmulatorStdin<C::Program, ConvertStdin<'a, RiscvSC, PrevC>>,
-        config: Arc<RecursionSC>,
+        stdin: EmulatorStdin<C::Program, ConvertStdin<'a, SC, PrevC>>,
+        config: Arc<SC>,
         opts: EmulatorOpts,
     ) -> Self {
         Self {
@@ -165,27 +166,28 @@ where
 }
 
 // implement Witness for recursion-recursion machine
-impl<'a, C, PrevC> ProvingWitness<RecursionSC, C, RecursionStdin<'a, RecursionSC, PrevC>>
+impl<'a, C, PrevC, SC> ProvingWitness<SC, C, RecursionStdin<'a, SC, PrevC>>
 where
+    SC: StarkGenericConfig,
     PrevC: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub fn setup_for_recursion(
-        vk_root: [Val<RecursionSC>; DIGEST_SIZE],
-        stdin: EmulatorStdin<C::Program, RecursionStdin<'a, RecursionSC, PrevC>>,
-        last_vk: Option<BaseVerifyingKey<RecursionSC>>,
-        last_proof: Option<BaseProof<RecursionSC>>,
-        config: Arc<RecursionSC>,
+        vk_root: [Val<SC>; DIGEST_SIZE],
+        stdin: EmulatorStdin<C::Program, RecursionStdin<'a, SC, PrevC>>,
+        last_vk: Option<BaseVerifyingKey<SC>>,
+        last_proof: Option<BaseProof<SC>>,
+        config: Arc<SC>,
         opts: EmulatorOpts,
     ) -> Self {
         let flag_empty_stdin = stdin.flag_empty;
@@ -205,27 +207,28 @@ where
 }
 
 // implement Witness for recursion-recursion machine
-impl<'a, C, PrevC> ProvingWitness<RecursionSC, C, RecursionVkStdin<'a, RecursionSC, PrevC>>
+impl<'a, C, SC, PrevC> ProvingWitness<SC, C, RecursionVkStdin<'a, SC, PrevC>>
 where
+    SC: StarkGenericConfig + FieldHasher<Val<SC>>,
     PrevC: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     pub fn setup_for_recursion_vk(
-        vk_root: [Val<RecursionSC>; DIGEST_SIZE],
-        stdin: EmulatorStdin<C::Program, RecursionVkStdin<'a, RecursionSC, PrevC>>,
-        last_vk: Option<BaseVerifyingKey<RecursionSC>>,
-        last_proof: Option<BaseProof<RecursionSC>>,
-        config: Arc<RecursionSC>,
+        vk_root: [Val<SC>; DIGEST_SIZE],
+        stdin: EmulatorStdin<C::Program, RecursionVkStdin<'a, SC, PrevC>>,
+        last_vk: Option<BaseVerifyingKey<SC>>,
+        last_proof: Option<BaseProof<SC>>,
+        config: Arc<SC>,
         opts: EmulatorOpts,
     ) -> Self {
         let flag_empty_stdin = stdin.flag_empty;

@@ -1,5 +1,5 @@
 use super::{
-    config::{BabyBearFriConfigVariable, CircuitConfig},
+    config::{CircuitConfig, FieldFriConfigVariable},
     domain::PolynomialSpaceVariable,
     stark::StarkVerifier,
 };
@@ -16,7 +16,6 @@ use crate::{
 };
 use core::iter::Iterator;
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
 use p3_commit::{LagrangeSelectors, Mmcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 use p3_matrix::{
@@ -36,9 +35,9 @@ pub type RecursiveVerifierConstraintFolder<'a, FC> = GenericVerifierConstraintFo
 impl<C, SC, A> StarkVerifier<C, SC, A>
 where
     C::F: TwoAdicField,
-    SC: BabyBearFriConfigVariable<C>,
+    SC: FieldFriConfigVariable<C>,
     C: CircuitConfig<F = SC::Val>,
-    <SC::ValMmcs as Mmcs<BabyBear>>::ProverData<RowMajorMatrix<BabyBear>>: Clone,
+    <SC::ValMmcs as Mmcs<SC::Val>>::ProverData<RowMajorMatrix<SC::Val>>: Clone,
     A: ChipBehavior<C::F> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
 {
     #[allow(clippy::too_many_arguments)]

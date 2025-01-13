@@ -21,7 +21,9 @@ use p3_maybe_rayon::prelude::ParallelIterator;
 use rayon::prelude::{IndexedParallelIterator, ParallelSliceMut};
 use std::borrow::BorrowMut;
 
-impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> for ExtAluChip<F> {
+impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>, const W: u32> ChipBehavior<F>
+    for ExtAluChip<F, W>
+{
     type Record = RecursionRecord<F>;
 
     type Program = RecursionProgram<F>;

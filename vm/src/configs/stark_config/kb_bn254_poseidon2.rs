@@ -1,37 +1,27 @@
 use crate::{
     configs::config::{Com, SimpleFriConfig, StarkGenericConfig, Val, ZeroCommitment},
     primitives::{
-        consts::{
-            DIGEST_SIZE, MULTI_FIELD_CHALLENGER_DIGEST_SIZE, MULTI_FIELD_CHALLENGER_RATE,
-            MULTI_FIELD_CHALLENGER_WIDTH,
-        },
+        consts::{DIGEST_SIZE, MULTI_FIELD_CHALLENGER_RATE, MULTI_FIELD_CHALLENGER_WIDTH},
         pico_poseidon2bn254_init,
     },
 };
-use p3_baby_bear::BabyBear;
 use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{extension::BinomialExtensionField, FieldAlgebra};
 use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof, TwoAdicFriPcs};
+use p3_koala_bear::KoalaBear;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
 use tracing::info;
 
-pub type SC_Val = BabyBear;
-pub type SC_Perm = Poseidon2Bn254<MULTI_FIELD_CHALLENGER_WIDTH>;
-pub type SC_Hash = MultiField32PaddingFreeSponge<
-    SC_Val,
-    Bn254Fr,
-    SC_Perm,
-    3,
-    16,
-    MULTI_FIELD_CHALLENGER_DIGEST_SIZE,
->;
-pub type SC_DigestHash = Hash<SC_Val, Bn254Fr, MULTI_FIELD_CHALLENGER_DIGEST_SIZE>;
-pub type SC_Digest = [Bn254Fr; MULTI_FIELD_CHALLENGER_DIGEST_SIZE];
+pub type SC_Val = KoalaBear;
+pub type SC_Perm = Poseidon2Bn254<3>;
+pub type SC_Hash = MultiField32PaddingFreeSponge<SC_Val, Bn254Fr, SC_Perm, 3, 16, 1>;
+pub type SC_DigestHash = Hash<SC_Val, Bn254Fr, 1>;
+pub type SC_Digest = [Bn254Fr; 1];
 pub type SC_Compress = TruncatedPermutation<SC_Perm, 2, 1, 3>;
 pub type SC_ValMmcs = MerkleTreeMmcs<SC_Val, Bn254Fr, SC_Hash, SC_Compress, 1>;
 pub type SC_Challenge = BinomialExtensionField<SC_Val, 4>;
@@ -52,40 +42,40 @@ pub type SC_QueryProof = QueryProof<SC_Challenge, SC_ChallengeMmcs, SC_InputProo
 pub type SC_CommitPhaseStep = CommitPhaseProofStep<SC_Challenge, SC_ChallengeMmcs>;
 pub type SC_PcsProof = FriProof<SC_Challenge, SC_ChallengeMmcs, SC_Val, SC_InputProof>;
 
-pub struct BabyBearBn254Poseidon2 {
+pub struct KoalaBearBn254Poseidon2 {
     pub perm: SC_Perm,
     pcs: SC_Pcs,
     simple_fri_config: SimpleFriConfig,
 }
 
-impl Serialize for BabyBearBn254Poseidon2 {
+impl Serialize for KoalaBearBn254Poseidon2 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        std::marker::PhantomData::<BabyBearBn254Poseidon2>.serialize(serializer)
+        std::marker::PhantomData::<KoalaBearBn254Poseidon2>.serialize(serializer)
     }
 }
 
-impl Clone for BabyBearBn254Poseidon2 {
+impl Clone for KoalaBearBn254Poseidon2 {
     fn clone(&self) -> Self {
         Self::new()
     }
 }
 
-impl BabyBearBn254Poseidon2 {
+impl KoalaBearBn254Poseidon2 {
     pub fn fri_config(&self) -> &SimpleFriConfig {
         &self.simple_fri_config
     }
 }
 
-impl Default for BabyBearBn254Poseidon2 {
+impl Default for KoalaBearBn254Poseidon2 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StarkGenericConfig for BabyBearBn254Poseidon2 {
+impl StarkGenericConfig for KoalaBearBn254Poseidon2 {
     type Val = SC_Val;
     type Domain = <SC_Pcs as p3_commit::Pcs<SC_Challenge, SC_Challenger>>::Domain;
     type Challenge = SC_Challenge;
@@ -119,7 +109,7 @@ impl StarkGenericConfig for BabyBearBn254Poseidon2 {
             proof_of_work_bits: 16,
         };
 
-        BabyBearBn254Poseidon2 {
+        KoalaBearBn254Poseidon2 {
             perm,
             pcs,
             simple_fri_config,
@@ -135,7 +125,7 @@ impl StarkGenericConfig for BabyBearBn254Poseidon2 {
     }
 
     fn name(&self) -> String {
-        "BabyBearBn254Poseidon2".to_string()
+        "KoalaBearBn254Poseidon2".to_string()
     }
 
     fn hash_slice(&self, _input: &[Val<Self>]) -> [Val<Self>; DIGEST_SIZE] {
@@ -143,8 +133,8 @@ impl StarkGenericConfig for BabyBearBn254Poseidon2 {
     }
 }
 
-impl ZeroCommitment<BabyBearBn254Poseidon2> for SC_Pcs {
-    fn zero_commitment(&self) -> Com<BabyBearBn254Poseidon2> {
+impl ZeroCommitment<KoalaBearBn254Poseidon2> for SC_Pcs {
+    fn zero_commitment(&self) -> Com<KoalaBearBn254Poseidon2> {
         SC_DigestHash::from([Bn254Fr::ZERO; 1])
     }
 }

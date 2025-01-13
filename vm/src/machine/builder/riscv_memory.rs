@@ -125,8 +125,8 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
         // `current_comp_val <= prev_comp_val`, then `current_comp_val-prev_comp_val-1 < 0` and will
         // underflow in the prime field, resulting in a value that is `>= 2^24` as long as both
         // `current_comp_val, prev_comp_val` are range-checked to be `<2^24` and as long as we're
-        // working in a field larger than `2 * 2^24` (which is true of the BabyBear and Mersenne31
-        // prime).
+        // working in a field larger than `2 * 2^24` (which is true of the BabyBear, KoalaBear and
+        // Mersenne31 prime).
         let diff_minus_one = current_comp_val - prev_comp_value - Self::Expr::ONE;
 
         // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb

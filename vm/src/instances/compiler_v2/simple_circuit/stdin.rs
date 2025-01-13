@@ -1,17 +1,14 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            config::{BabyBearFriConfigVariable, CircuitConfig},
+            config::{CircuitConfig, FieldFriConfigVariable},
             stark::BaseProofVariable,
-            types::BaseVerifyingKeyVariable,
+            types::{BaseVerifyingKeyVariable, FriProofVariable},
             witness::{witnessable::Witnessable, WitnessWriter},
         },
         prelude::*,
     },
-    configs::{
-        config::StarkGenericConfig,
-        stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val},
-    },
+    configs::config::{Challenger, Com, PcsProof, StarkGenericConfig},
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -21,9 +18,9 @@ use crate::{
     },
 };
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
-use p3_field::FieldAlgebra;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{FieldAlgebra, TwoAdicField};
 
 pub struct SimpleRecursionStdin<'a, SC, C>
 where
@@ -40,10 +37,12 @@ where
     // todo: vk_root
 }
 
-pub struct SimpleRecursionStdinVariable<
-    CC: CircuitConfig<F = BabyBear>,
-    SC: BabyBearFriConfigVariable<CC>,
-> {
+pub struct SimpleRecursionStdinVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+{
     pub vk: BaseVerifyingKeyVariable<CC, SC>,
     pub base_proofs: Vec<BaseProofVariable<CC, SC>>,
     pub flag_complete: Felt<CC::F>,
@@ -80,20 +79,31 @@ where
     }
 }
 
-impl<CC, C> Witnessable<CC> for SimpleRecursionStdin<'_, BabyBearPoseidon2, C>
+impl<CC, SC, C> Witnessable<CC> for SimpleRecursionStdin<'_, SC, C>
 where
-    CC: CircuitConfig<F = SC_Val, EF = SC_Challenge, Bit = Felt<BabyBear>>,
-    C: ChipBehavior<BabyBear>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
+    CC: CircuitConfig,
+    CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+        CC,
+        Val = CC::F,
+        Challenge = CC::EF,
+        Domain = TwoAdicMultiplicativeCoset<CC::F>,
+    >,
+    Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    C: ChipBehavior<CC::F>
+        + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    type WitnessVariable = SimpleRecursionStdinVariable<CC, BabyBearPoseidon2>;
+    type WitnessVariable = SimpleRecursionStdinVariable<CC, SC>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let vk = self.vk.read(builder);
         let base_proofs = self.base_proofs.read(builder);
-        let flag_complete = SC_Val::from_bool(self.flag_complete).read(builder);
-        let flag_first_chunk = SC_Val::from_bool(self.flag_first_chunk).read(builder);
+        let flag_complete = CC::F::from_bool(self.flag_complete).read(builder);
+        let flag_first_chunk = CC::F::from_bool(self.flag_first_chunk).read(builder);
 
         SimpleRecursionStdinVariable {
             vk,

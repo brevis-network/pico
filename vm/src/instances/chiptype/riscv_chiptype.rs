@@ -125,20 +125,34 @@ define_chip_type!(
     ]
 );
 
-impl<F: PrimeField32> RiscvChipType<F> {
+impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+    RiscvChipType<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+where
+    Poseidon2PermuteChip<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+        ChipBehavior<F, Record = EmulationRecord, Program = Program>,
+{
     /// Get the heights of the preprocessed chips for a given program.
     pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(String, usize)> {
         vec![
             (
-                RiscvChipType::<F>::Program(ProgramChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Program(
+                    ProgramChip::default(),
+                )
+                .name(),
                 program.instructions.len(),
             ),
             (
-                RiscvChipType::<F>::Byte(ByteChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Byte(
+                    ByteChip::default(),
+                )
+                .name(),
                 1 << 16,
             ),
             (
-                RiscvChipType::<F>::Range(RangeCheckChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Range(
+                    RangeCheckChip::default(),
+                )
+                .name(),
                 1 << 16,
             ),
         ]
@@ -148,39 +162,39 @@ impl<F: PrimeField32> RiscvChipType<F> {
     pub(crate) fn riscv_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
         vec![
             (
-                RiscvChipType::<F>::Cpu(CpuChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Cpu(CpuChip::default()).name(),
                 record.cpu_events.len(),
             ),
             (
-                RiscvChipType::<F>::DivRem(DivRemChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::DivRem(DivRemChip::default()).name(),
                 record.divrem_events.len(),
             ),
             (
-                RiscvChipType::<F>::AddSub(AddSubChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::AddSub(AddSubChip::default()).name(),
                 record.add_events.len() + record.sub_events.len(),
             ),
             (
-                RiscvChipType::<F>::Bitwise(BitwiseChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Bitwise(BitwiseChip::default()).name(),
                 record.bitwise_events.len(),
             ),
             (
-                RiscvChipType::<F>::Mul(MulChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Mul(MulChip::default()).name(),
                 record.mul_events.len(),
             ),
             (
-                RiscvChipType::<F>::SR(ShiftRightChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SR(ShiftRightChip::default()).name(),
                 record.shift_right_events.len(),
             ),
             (
-                RiscvChipType::<F>::SLL(SLLChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SLL(SLLChip::default()).name(),
                 record.shift_left_events.len(),
             ),
             (
-                RiscvChipType::<F>::Lt(LtChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Lt(LtChip::default()).name(),
                 record.lt_events.len(),
             ),
             (
-                RiscvChipType::<F>::MemoryLocal(MemoryLocalChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryLocal(MemoryLocalChip::default()).name(),
                 record
                     .get_local_mem_events()
                     .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
@@ -188,7 +202,7 @@ impl<F: PrimeField32> RiscvChipType<F> {
                     .count(),
             ),
             (
-                RiscvChipType::<F>::MemoryReadWrite(MemoryReadWriteChip::default()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryReadWrite(MemoryReadWriteChip::default()).name(),
                 record
                     .cpu_events
                     .iter()
@@ -196,7 +210,7 @@ impl<F: PrimeField32> RiscvChipType<F> {
                     .count(),
             ),
             (
-                RiscvChipType::<F>::SyscallRiscv(SyscallChip::riscv()).name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SyscallRiscv(SyscallChip::riscv()).name(),
                 record.syscall_events.len(),
             ),
         ]
@@ -205,13 +219,17 @@ impl<F: PrimeField32> RiscvChipType<F> {
     pub(crate) fn get_memory_init_final_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
         vec![
             (
-                RiscvChipType::<F>::MemoryInitialize(MemoryInitializeFinalizeChip::new(Initialize))
-                    .name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryInitialize(
+                    MemoryInitializeFinalizeChip::new(Initialize),
+                )
+                .name(),
                 record.memory_initialize_events.len(),
             ),
             (
-                RiscvChipType::<F>::MemoryFinalize(MemoryInitializeFinalizeChip::new(Finalize))
-                    .name(),
+                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryFinalize(
+                    MemoryInitializeFinalizeChip::new(Finalize),
+                )
+                .name(),
                 record.memory_finalize_events.len(),
             ),
         ]

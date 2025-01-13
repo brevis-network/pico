@@ -1,13 +1,11 @@
-use crate::primitives::consts::POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY;
+use crate::{
+    machine::field::{FieldBehavior, FieldType},
+    primitives::consts::{
+        PERMUTATION_WIDTH, POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY,
+        POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY,
+    },
+};
 use p3_field::{FieldAlgebra, PrimeField32};
-
-/// The width of the permutation.
-pub const WIDTH: usize = 16;
-pub const RATE: usize = WIDTH / 2;
-
-pub const NUM_EXTERNAL_ROUNDS: usize = 8;
-pub const NUM_INTERNAL_ROUNDS: usize = 13;
-pub const NUM_ROUNDS: usize = NUM_EXTERNAL_ROUNDS + NUM_INTERNAL_ROUNDS;
 
 pub(crate) fn apply_m_4<AF>(x: &mut [AF])
 where
@@ -25,23 +23,33 @@ where
     x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
 }
 
-pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; WIDTH]) {
-    for j in (0..WIDTH).step_by(4) {
+pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; PERMUTATION_WIDTH]) {
+    for j in (0..PERMUTATION_WIDTH).step_by(4) {
         apply_m_4(&mut state[j..j + 4]);
     }
     let sums: [AF; 4] = core::array::from_fn(|k| {
-        (0..WIDTH)
+        (0..PERMUTATION_WIDTH)
             .step_by(4)
             .map(|j| state[j + k].clone())
             .sum::<AF>()
     });
 
-    for j in 0..WIDTH {
+    for j in 0..PERMUTATION_WIDTH {
         state[j] += sums[j % 4].clone();
     }
 }
 
-pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
+pub(crate) fn external_linear_layer_immut<AF: FieldAlgebra + Copy>(
+    state: &[AF; PERMUTATION_WIDTH],
+) -> [AF; PERMUTATION_WIDTH] {
+    let mut state = *state;
+    external_linear_layer(&mut state);
+    state
+}
+
+pub(crate) fn internal_linear_layer<FF: FieldBehavior, F: FieldAlgebra>(
+    state: &mut [F; PERMUTATION_WIDTH],
+) {
     let part_sum: F = state[1..].iter().cloned().sum();
     let full_sum = part_sum.clone() + state[0].clone();
 
@@ -50,12 +58,21 @@ pub(crate) fn internal_linear_layer<F: FieldAlgebra>(state: &mut [F; WIDTH]) {
     state[1] = full_sum.clone() + state[1].clone();
     state[2] = full_sum.clone() + state[2].double();
 
-    let matmul_constants: [F; WIDTH] = POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
-        .iter()
-        .map(|x| F::from_wrapped_u32(x.as_canonical_u32()))
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
+    let matmul_constants: [F; PERMUTATION_WIDTH] = match FF::field_type() {
+        FieldType::TypeBabyBear => POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
+            .iter()
+            .map(|x| F::from_wrapped_u32(x.as_canonical_u32()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap(),
+        FieldType::TypeKoalaBear => POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY
+            .iter()
+            .map(|x| F::from_wrapped_u32(x.as_canonical_u32()))
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap(),
+        _ => unimplemented!("{:?}", FF::field_type()),
+    };
 
     // For the remaining elements we use multiplication.
     // This could probably be improved slightly by making use of the

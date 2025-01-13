@@ -1,3 +1,4 @@
+use crate::primitives::consts::DIGEST_SIZE;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{ExtensionField, Field, PrimeField, TwoAdicField};
@@ -50,6 +51,8 @@ pub trait StarkGenericConfig: Clone + Serialize + Sync {
         + Sync
         + ZeroCommitment<Self>;
 
+    fn new() -> Self;
+
     /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;
 
@@ -58,6 +61,8 @@ pub trait StarkGenericConfig: Clone + Serialize + Sync {
 
     /// Name of config
     fn name(&self) -> String;
+
+    fn hash_slice(&self, input: &[Val<Self>]) -> [Val<Self>; DIGEST_SIZE];
 }
 
 pub trait FieldGenericConfig: Clone + Default {

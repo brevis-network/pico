@@ -3,23 +3,20 @@ use crate::{
         recursion_v2::ir::{Builder, Felt, Var},
         word::Word,
     },
-    configs::{config::FieldGenericConfig, stark_config::bb_poseidon2::BabyBearPoseidon2},
+    configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
     primitives::consts::DIGEST_SIZE,
     recursion_v2::air::{ChallengerPublicValues, RecursionPublicValues},
 };
 use itertools::Itertools;
-use p3_baby_bear::BabyBear;
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
-use p3_symmetric::CryptographicHasher;
 use std::mem::MaybeUninit;
 
 // todo: make generic
-pub fn embed_public_values_digest(
-    config: &BabyBearPoseidon2,
-    public_values: &RecursionPublicValues<BabyBear>,
-) -> [BabyBear; 8] {
-    let hash = crate::configs::stark_config::bb_poseidon2::SC_Hash::new(config.perm.clone());
+pub fn embed_public_values_digest<SC: StarkGenericConfig>(
+    config: &SC,
+    public_values: &RecursionPublicValues<Val<SC>>,
+) -> [Val<SC>; 8] {
     let input = (public_values.riscv_vk_digest)
         .into_iter()
         .chain(
@@ -28,13 +25,13 @@ pub fn embed_public_values_digest(
                 .flat_map(|word| word.0.into_iter()),
         )
         .collect::<Vec<_>>();
-    hash.hash_slice(&input)
+    config.hash_slice(&input)
 }
 
 // todo: make generic
-pub fn assert_embed_public_values_valid(
-    config: &BabyBearPoseidon2,
-    public_values: &RecursionPublicValues<BabyBear>,
+pub fn assert_embed_public_values_valid<SC: StarkGenericConfig>(
+    config: &SC,
+    public_values: &RecursionPublicValues<Val<SC>>,
 ) {
     let expected_digest = embed_public_values_digest(config, public_values);
     for (value, expected) in public_values.digest.iter().copied().zip_eq(expected_digest) {
@@ -49,13 +46,13 @@ pub(crate) unsafe fn uninit_challenger_pv<FC: FieldGenericConfig>(
     unsafe { MaybeUninit::zeroed().assume_init() }
 }
 
-/// Convert 8 BabyBear words into a Bn254Fr field element by shifting by 31 bits each time. The last
+/// Convert 8 BabyBear or KoalaBear words into a Bn254Fr field element by shifting by 31 bits each time. The last
 /// word becomes the least significant bits.
 #[allow(dead_code)]
-pub fn babybears_to_bn254(digest: &[BabyBear; 8]) -> Bn254Fr {
+pub fn fields_to_bn254<F: PrimeField32>(digest: &[F; 8]) -> Bn254Fr {
     let mut result = Bn254Fr::ZERO;
     for word in digest.iter() {
-        // Since BabyBear prime is less than 2^31, we can shift by 31 bits each time and still be
+        // Since BabyBear/KoalaBear prime is less than 2^31, we can shift by 31 bits each time and still be
         // within the Bn254Fr field, so we don't have to truncate the top 3 bits.
         result *= Bn254Fr::from_canonical_u64(1 << 31);
         result += Bn254Fr::from_canonical_u32(word.as_canonical_u32());
@@ -63,13 +60,13 @@ pub fn babybears_to_bn254(digest: &[BabyBear; 8]) -> Bn254Fr {
     result
 }
 
-/// Convert 32 BabyBear bytes into a Bn254Fr field element. The first byte's most significant 3 bits
+/// Convert 32 BabyBear or KoalaBear bytes into a Bn254Fr field element. The first byte's most significant 3 bits
 /// (which would become the 3 most significant bits) are truncated.
 #[allow(dead_code)]
-pub fn babybear_bytes_to_bn254(bytes: &[BabyBear; 32]) -> Bn254Fr {
+pub fn field_bytes_to_bn254<F: PrimeField32>(bytes: &[F; 32]) -> Bn254Fr {
     let mut result = Bn254Fr::ZERO;
     for (i, byte) in bytes.iter().enumerate() {
-        debug_assert!(byte < &BabyBear::from_canonical_u32(256));
+        debug_assert!(byte < &F::from_canonical_u32(256));
         if i == 0 {
             // 32 bytes is more than Bn254 prime, so we need to truncate the top 3 bits.
             result = Bn254Fr::from_canonical_u32(byte.as_canonical_u32() & 0x1f);

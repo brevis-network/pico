@@ -1,6 +1,8 @@
 use pico_vm::{
+    configs::config::StarkGenericConfig,
     instances::configs::riscv_config::StarkConfig as RiscvBBSC,
     machine::logger::setup_logger,
+    primitives::consts::{BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W},
     proverchain::{
         CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
         MachineProver, ProverChain, RiscvProver,
@@ -18,7 +20,15 @@ fn main() {
     let convert = ConvertProver::new_with_prev(&riscv);
     let combine = CombineProver::new_with_prev(&convert);
     let compress = CompressProver::new_with_prev(&combine);
-    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress);
+    let embed = EmbedProver::<
+        _,
+        _,
+        Vec<u8>,
+        BABYBEAR_W,
+        BABYBEAR_NUM_EXTERNAL_ROUNDS,
+        BABYBEAR_NUM_INTERNAL_ROUNDS,
+        { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+    >::new_with_prev(&compress);
 
     let proof = riscv.prove(riscv_stdin);
     assert!(riscv.verify(&proof));

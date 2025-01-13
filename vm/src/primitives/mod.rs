@@ -1,6 +1,10 @@
 //! pico-recursion-primitives contains types and functions that are used in both sp1-core and sp1-zkvm.
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
+use consts::{
+    BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
+    KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
+};
 use ff::PrimeField;
 pub use halo2curves::bn256::Fr as FFBn254Fr;
 use lazy_static::lazy_static;
@@ -10,7 +14,6 @@ use p3_field::FieldAlgebra;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_mersenne_31::{Mersenne31, Poseidon2Mersenne31};
 use p3_poseidon2::ExternalLayerConstants;
-use p3_symmetric::CryptographicHasher;
 
 pub mod consts;
 use p3_symmetric::PaddingFreeSponge;
@@ -21,9 +24,9 @@ use zkhash::{
     poseidon2::poseidon2_instance_bn256::RC3,
 };
 
-pub type PicoPoseidon2BabyBear = Poseidon2BabyBear<16>;
-pub type PicoPoseidon2KoalaBear = Poseidon2KoalaBear<16>;
-pub type PicoPoseidon2Mersenne31 = Poseidon2Mersenne31<16>;
+pub type PicoPoseidon2BabyBear = Poseidon2BabyBear<PERMUTATION_WIDTH>;
+pub type PicoPoseidon2KoalaBear = Poseidon2KoalaBear<PERMUTATION_WIDTH>;
+pub type PicoPoseidon2Mersenne31 = Poseidon2Mersenne31<PERMUTATION_WIDTH>;
 pub type PicoPoseidon2Bn254 = Poseidon2Bn254<3>;
 
 lazy_static! {
@@ -2209,8 +2212,8 @@ lazy_static! {
 Poseidon2 on BabyBear
  */
 pub fn pico_poseidon2bb_init() -> PicoPoseidon2BabyBear {
-    const ROUNDS_F: usize = 8;
-    const ROUNDS_P: usize = 13;
+    const ROUNDS_F: usize = BABYBEAR_NUM_EXTERNAL_ROUNDS;
+    const ROUNDS_P: usize = BABYBEAR_NUM_INTERNAL_ROUNDS;
 
     let mut round_constants = RC_16_30_BabyBear.to_vec();
     let internal_start = ROUNDS_F / 2;
@@ -2232,8 +2235,8 @@ pub fn pico_poseidon2bb_init() -> PicoPoseidon2BabyBear {
 Poseidon2 on KoalaBear
  */
 pub fn pico_poseidon2kb_init() -> PicoPoseidon2KoalaBear {
-    const ROUNDS_F: usize = 8;
-    const ROUNDS_P: usize = 20;
+    const ROUNDS_F: usize = KOALABEAR_NUM_EXTERNAL_ROUNDS;
+    const ROUNDS_P: usize = KOALABEAR_NUM_INTERNAL_ROUNDS;
 
     let mut round_constants = RC_16_30_KoalaBear.to_vec();
     let internal_start = ROUNDS_F / 2;
@@ -2251,18 +2254,21 @@ pub fn pico_poseidon2kb_init() -> PicoPoseidon2KoalaBear {
     PicoPoseidon2KoalaBear::new(external_round_constants, internal_round_constants)
 }
 
-pub fn poseidon2_hash(input: Vec<BabyBear>) -> [BabyBear; 8] {
-    POSEIDON2_BB_HASHER.hash_iter(input)
-}
-
-pub fn poseidon2_hasher() -> PaddingFreeSponge<PicoPoseidon2BabyBear, 16, 8, 8> {
+pub fn poseidon2_bb_hasher() -> PaddingFreeSponge<PicoPoseidon2BabyBear, 16, 8, 8> {
     let hasher = pico_poseidon2bb_init();
     PaddingFreeSponge::<PicoPoseidon2BabyBear, 16, 8, 8>::new(hasher)
 }
 
+pub fn poseidon2_kb_hasher() -> PaddingFreeSponge<PicoPoseidon2KoalaBear, 16, 8, 8> {
+    let hasher = pico_poseidon2kb_init();
+    PaddingFreeSponge::<PicoPoseidon2KoalaBear, 16, 8, 8>::new(hasher)
+}
+
 lazy_static! {
     pub static ref POSEIDON2_BB_HASHER: PaddingFreeSponge::<PicoPoseidon2BabyBear, 16, 8, 8> =
-        poseidon2_hasher();
+        poseidon2_bb_hasher();
+    pub static ref POSEIDON2_KB_HASHER: PaddingFreeSponge::<PicoPoseidon2KoalaBear, 16, 8, 8> =
+        poseidon2_kb_hasher();
 }
 
 /*

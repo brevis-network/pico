@@ -1,17 +1,17 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            config::{BabyBearFriConfigVariable, CircuitConfig},
+            config::{CircuitConfig, FieldFriConfigVariable},
             fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
             stark::BaseProofVariable,
-            types::BaseVerifyingKeyVariable,
+            types::{BaseVerifyingKeyVariable, FriProofVariable},
             witness::{witnessable::Witnessable, WitnessWriter},
         },
         prelude::*,
     },
     configs::{
-        config::{StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val},
+        config::{Challenger, Com, PcsProof, StarkGenericConfig},
+        stark_config::bb_poseidon2::BabyBearPoseidon2,
     },
     instances::compiler_v2::shapes::ProofShape,
     machine::{
@@ -29,8 +29,8 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
 use p3_baby_bear::BabyBear;
-use p3_commit::Pcs;
-use p3_field::{ExtensionField, Field, FieldAlgebra};
+use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
+use p3_field::{ExtensionField, Field, FieldAlgebra, TwoAdicField};
 use p3_matrix::Dimensions;
 use std::sync::Arc;
 
@@ -38,7 +38,7 @@ use std::sync::Arc;
 pub struct ConvertStdin<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
+    C: ChipBehavior<SC::Val>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -52,7 +52,11 @@ where
     pub vk_root: [SC::Val; DIGEST_SIZE],
 }
 
-pub struct ConvertStdinVariable<CC: CircuitConfig<F = BabyBear>, SC: BabyBearFriConfigVariable<CC>>
+pub struct ConvertStdinVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
 {
     pub riscv_vk: BaseVerifyingKeyVariable<CC, SC>,
     pub proofs: Vec<BaseProofVariable<CC, SC>>,
@@ -61,10 +65,11 @@ pub struct ConvertStdinVariable<CC: CircuitConfig<F = BabyBear>, SC: BabyBearFri
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
 }
 
-impl<'a, SC, C> ConvertStdin<'a, SC, C>
+impl<'a, F, SC, C> ConvertStdin<'a, SC, C>
 where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
+    F: Field,
+    SC: StarkGenericConfig<Val = F>,
+    C: ChipBehavior<F>
         + for<'b> Air<ProverConstraintFolder<'b, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
@@ -92,20 +97,31 @@ where
     }
 }
 
-impl<CC, C> Witnessable<CC> for ConvertStdin<'_, BabyBearPoseidon2, C>
+impl<CC, SC, C> Witnessable<CC> for ConvertStdin<'_, SC, C>
 where
-    CC: CircuitConfig<F = SC_Val, EF = SC_Challenge, Bit = Felt<BabyBear>>,
-    C: ChipBehavior<BabyBear>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
+    CC: CircuitConfig,
+    CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+        CC,
+        Val = CC::F,
+        Challenge = CC::EF,
+        Domain = TwoAdicMultiplicativeCoset<CC::F>,
+    >,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
+    C: ChipBehavior<CC::F>
+        + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    type WitnessVariable = ConvertStdinVariable<CC, BabyBearPoseidon2>;
+    type WitnessVariable = ConvertStdinVariable<CC, SC>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let riscv_vk = self.riscv_vk.read(builder);
         let proofs = self.proofs.read(builder);
-        let flag_complete = SC_Val::from_bool(self.flag_complete).read(builder);
-        let flag_first_chunk = SC_Val::from_bool(self.flag_first_chunk).read(builder);
+        let flag_complete = CC::F::from_bool(self.flag_complete).read(builder);
+        let flag_first_chunk = CC::F::from_bool(self.flag_first_chunk).read(builder);
         let vk_root = self.vk_root.read(builder);
 
         ConvertStdinVariable {

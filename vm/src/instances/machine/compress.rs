@@ -1,22 +1,22 @@
 use crate::{
     compiler::recursion_v2::program::RecursionProgram,
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
-    instances::{
-        compiler_v2::recursion_circuit::stdin::RecursionStdin,
-        configs::recur_config::StarkConfig as RecursionSC,
-    },
+    instances::compiler_v2::recursion_circuit::stdin::RecursionStdin,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+        keys::BaseVerifyingKey,
         machine::{BaseMachine, MachineBehavior},
-        proof::MetaProof,
+        proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
+    primitives::consts::EXTENSION_DEGREE,
     recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use p3_air::Air;
-use p3_field::FieldAlgebra;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{info, instrument, trace};
 
@@ -33,41 +33,46 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<C> MachineBehavior<RecursionSC, C, RecursionStdin<'_, RecursionSC, C>>
-    for CompressMachine<RecursionSC, C>
+impl<F, SC, C> MachineBehavior<SC, C, RecursionStdin<'_, SC, C>> for CompressMachine<SC, C>
 where
+    F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + TwoAdicField,
+    SC: StarkGenericConfig<Val = F, Domain = TwoAdicMultiplicativeCoset<F>> + Send + Sync,
+    Val<SC>: PrimeField32,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+    BaseProof<SC>: Send + Sync,
+    PcsProof<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: Send + Sync,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
+        + Send
+        + Sync,
+    BaseVerifyingKey<SC>: Send + Sync,
+    BaseProof<SC>: Send + Sync,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!(
-            "Compress Recursion Machine <{}>",
-            type_name::<RecursionSC>()
-        )
+        format!("Compress Recursion Machine <{}>", type_name::<SC>())
     }
 
     /// Get the base machine
-    fn base_machine(&self) -> &BaseMachine<RecursionSC, C> {
+    fn base_machine(&self) -> &BaseMachine<SC, C> {
         &self.base_machine
     }
 
     /// Get the prover of the machine.
     #[instrument(name = "compress_prove", level = "debug", skip_all)]
-    fn prove(
-        &self,
-        witness: &ProvingWitness<RecursionSC, C, RecursionStdin<RecursionSC, C>>,
-    ) -> MetaProof<RecursionSC>
+    fn prove(&self, witness: &ProvingWitness<SC, C, RecursionStdin<SC, C>>) -> MetaProof<SC>
     where
         C: for<'c> Air<
             DebugConstraintFolder<
                 'c,
-                <RecursionSC as StarkGenericConfig>::Val,
-                <RecursionSC as StarkGenericConfig>::Challenge,
+                <SC as StarkGenericConfig>::Val,
+                <SC as StarkGenericConfig>::Challenge,
             >,
         >,
     {
@@ -88,7 +93,7 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<RecursionSC>) -> anyhow::Result<()> {
+    fn verify(&self, proof: &MetaProof<SC>) -> anyhow::Result<()> {
         let vk = proof.vks().first().unwrap();
 
         info!("PERF-machine=convert");
@@ -101,7 +106,7 @@ where
         trace!("public values: {:?}", public_values);
 
         // assert completion
-        if public_values.flag_complete != <Val<RecursionSC>>::ONE {
+        if public_values.flag_complete != <Val<SC>>::ONE {
             panic!("flag_complete is not 1");
         }
 

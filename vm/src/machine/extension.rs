@@ -11,9 +11,9 @@ use pico_derive::AlignedBorrow;
 /// A binomial extension element represented over a generic type `T`.
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(C)]
-pub struct BinomialExtension<T>(pub [T; EXTENSION_DEGREE]);
+pub struct BinomialExtension<T, const W: u32>(pub [T; EXTENSION_DEGREE]);
 
-impl<T> BinomialExtension<T> {
+impl<T, const W: u32> BinomialExtension<T, W> {
     /// Creates a new binomial extension element from a base element.
     pub fn from_base(b: T) -> Self
     where
@@ -31,12 +31,12 @@ impl<T> BinomialExtension<T> {
 
     /// Creates a new binomial extension element from a binomial extension element.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn from<S: Into<T> + Clone>(from: BinomialExtension<S>) -> Self {
+    pub fn from<S: Into<T> + Clone>(from: BinomialExtension<S, W>) -> Self {
         BinomialExtension(core::array::from_fn(|i| from.0[i].clone().into()))
     }
 }
 
-impl<T: Add<Output = T> + Clone> Add for BinomialExtension<T> {
+impl<T: Add<Output = T> + Clone, const W: u32> Add for BinomialExtension<T, W> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -46,7 +46,7 @@ impl<T: Add<Output = T> + Clone> Add for BinomialExtension<T> {
     }
 }
 
-impl<T: Sub<Output = T> + Clone> Sub for BinomialExtension<T> {
+impl<T: Sub<Output = T> + Clone, const W: u32> Sub for BinomialExtension<T, W> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -56,12 +56,14 @@ impl<T: Sub<Output = T> + Clone> Sub for BinomialExtension<T> {
     }
 }
 
-impl<T: Add<Output = T> + Mul<Output = T> + FieldAlgebra> Mul for BinomialExtension<T> {
+impl<T: Add<Output = T> + Mul<Output = T> + FieldAlgebra, const W: u32> Mul
+    for BinomialExtension<T, W>
+{
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
         let mut result = [T::ZERO, T::ZERO, T::ZERO, T::ZERO];
-        let w = T::from_canonical_u32(11);
+        let w = T::from_canonical_u32(W);
 
         for i in 0..EXTENSION_DEGREE {
             for j in 0..EXTENSION_DEGREE {
@@ -78,7 +80,7 @@ impl<T: Add<Output = T> + Mul<Output = T> + FieldAlgebra> Mul for BinomialExtens
     }
 }
 
-impl<F> Div for BinomialExtension<F>
+impl<F, const W: u32> Div for BinomialExtension<F, W>
 where
     F: BinomiallyExtendable<EXTENSION_DEGREE>,
 {
@@ -92,7 +94,7 @@ where
     }
 }
 
-impl<F> BinomialExtension<F>
+impl<F, const W: u32> BinomialExtension<F, W>
 where
     F: BinomiallyExtendable<4>,
 {
@@ -113,7 +115,7 @@ where
     }
 }
 
-impl<T: FieldAlgebra + Copy> Neg for BinomialExtension<T> {
+impl<T: FieldAlgebra + Copy, const W: u32> Neg for BinomialExtension<T, W> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
@@ -121,7 +123,8 @@ impl<T: FieldAlgebra + Copy> Neg for BinomialExtension<T> {
     }
 }
 
-impl<AF> From<BinomialExtensionField<AF, EXTENSION_DEGREE>> for BinomialExtension<AF>
+impl<AF, const W: u32> From<BinomialExtensionField<AF, EXTENSION_DEGREE>>
+    for BinomialExtension<AF, W>
 where
     AF: FieldAlgebra + Copy,
     AF::F: BinomiallyExtendable<EXTENSION_DEGREE>,
@@ -132,17 +135,18 @@ where
     }
 }
 
-impl<AF> From<BinomialExtension<AF>> for BinomialExtensionField<AF, EXTENSION_DEGREE>
+impl<AF, const W: u32> From<BinomialExtension<AF, W>>
+    for BinomialExtensionField<AF, EXTENSION_DEGREE>
 where
     AF: FieldAlgebra + Copy,
     AF::F: BinomiallyExtendable<EXTENSION_DEGREE>,
 {
-    fn from(value: BinomialExtension<AF>) -> Self {
+    fn from(value: BinomialExtension<AF, W>) -> Self {
         BinomialExtensionField::from_base_slice(&value.0)
     }
 }
 
-impl<T> IntoIterator for BinomialExtension<T> {
+impl<T, const W: u32> IntoIterator for BinomialExtension<T, W> {
     type Item = T;
     type IntoIter = core::array::IntoIter<T, EXTENSION_DEGREE>;
 

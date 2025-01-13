@@ -8,6 +8,7 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
+    configs::config::StarkGenericConfig,
     emulator::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},

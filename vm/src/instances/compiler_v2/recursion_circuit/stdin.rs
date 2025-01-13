@@ -1,16 +1,16 @@
 use crate::{
     compiler::recursion_v2::{
         circuit::{
-            config::{BabyBearFriConfigVariable, CircuitConfig},
+            config::{CircuitConfig, FieldFriConfigVariable},
             stark::BaseProofVariable,
-            types::BaseVerifyingKeyVariable,
+            types::{BaseVerifyingKeyVariable, FriProofVariable},
             witness::{witnessable::Witnessable, WitnessWriter},
         },
         prelude::*,
     },
     configs::{
-        config::{StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::{BabyBearPoseidon2, SC_Challenge, SC_Val},
+        config::{Com, PcsProof, StarkGenericConfig, Val},
+        stark_config::bb_poseidon2::BabyBearPoseidon2,
     },
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
@@ -25,12 +25,16 @@ use crate::{
         machine::BaseMachine,
         proof::BaseProof,
     },
-    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
+    primitives::consts::{
+        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
+        DIGEST_SIZE,
+    },
 };
 use alloc::sync::Arc;
 use p3_air::Air;
 use p3_baby_bear::BabyBear;
-use p3_field::FieldAlgebra;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{FieldAlgebra, TwoAdicField};
 
 #[derive(Clone)]
 pub struct RecursionStdin<'a, SC, C>
@@ -47,19 +51,44 @@ where
     pub vk_root: [SC::Val; DIGEST_SIZE],
 }
 
-pub struct RecursionStdinVariable<
-    CC: CircuitConfig<F = BabyBear>,
-    SC: BabyBearFriConfigVariable<CC>,
-> {
+pub struct RecursionStdinVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+{
     pub vks: Vec<BaseVerifyingKeyVariable<CC, SC>>,
     pub proofs: Vec<BaseProofVariable<CC, SC>>,
     pub flag_complete: Felt<CC::F>,
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
 }
 
-impl<'a> RecursionStdin<'a, BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>> {
+impl<'a>
+    RecursionStdin<
+        'a,
+        BabyBearPoseidon2,
+        RecursionChipType<
+            BabyBear,
+            COMBINE_DEGREE,
+            BABYBEAR_W,
+            BABYBEAR_NUM_EXTERNAL_ROUNDS,
+            BABYBEAR_NUM_INTERNAL_ROUNDS,
+            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+        >,
+    >
+{
     pub fn dummy(
-        machine: &'a BaseMachine<BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>>,
+        machine: &'a BaseMachine<
+            BabyBearPoseidon2,
+            RecursionChipType<
+                BabyBear,
+                COMBINE_DEGREE,
+                BABYBEAR_W,
+                BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                BABYBEAR_NUM_INTERNAL_ROUNDS,
+                { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
+            >,
+        >,
         shape: &RecursionShape,
     ) -> Self {
         let vks_and_proofs: Vec<_> = shape
@@ -110,19 +139,29 @@ where
     }
 }
 
-impl<CC, C> Witnessable<CC> for RecursionStdin<'_, BabyBearPoseidon2, C>
+impl<CC, SC, C> Witnessable<CC> for RecursionStdin<'_, SC, C>
 where
-    CC: CircuitConfig<F = SC_Val, EF = SC_Challenge, Bit = Felt<BabyBear>>,
-    C: ChipBehavior<BabyBear>
-        + for<'b> Air<ProverConstraintFolder<'b, BabyBearPoseidon2>>
-        + for<'b> Air<VerifierConstraintFolder<'b, BabyBearPoseidon2>>,
+    CC: CircuitConfig,
+    CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+        CC,
+        Val = CC::F,
+        Challenge = CC::EF,
+        Domain = TwoAdicMultiplicativeCoset<CC::F>,
+    >,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    C: ChipBehavior<CC::F>
+        + for<'b> Air<ProverConstraintFolder<'b, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    type WitnessVariable = RecursionStdinVariable<CC, BabyBearPoseidon2>;
+    type WitnessVariable = RecursionStdinVariable<CC, SC>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let vks = self.vks.as_ref().read(builder);
         let proofs = self.proofs.as_ref().read(builder);
-        let flag_complete = SC_Val::from_bool(self.flag_complete).read(builder);
+        let flag_complete = CC::F::from_bool(self.flag_complete).read(builder);
         let vk_root = self.vk_root.read(builder);
 
         RecursionStdinVariable {

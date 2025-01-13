@@ -13,13 +13,14 @@ use p3_field::{extension::BinomiallyExtendable, Field};
 use p3_matrix::Matrix;
 use std::{borrow::Borrow, iter::zip};
 
-impl<F> BaseAir<F> for ExtAluChip<F> {
+impl<F, const W: u32> BaseAir<F> for ExtAluChip<F, W> {
     fn width(&self) -> usize {
         NUM_EXT_ALU_COLS
     }
 }
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for ExtAluChip<F>
+impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB, const W: u32> Air<CB>
+    for ExtAluChip<F, W>
 where
     CB: ChipBuilder<F>,
 {
@@ -43,9 +44,9 @@ where
             },
         ) in zip(local.values, prep_local.accesses)
         {
-            let in1 = vals.in1.as_extension::<F, CB>();
-            let in2 = vals.in2.as_extension::<F, CB>();
-            let out = vals.out.as_extension::<F, CB>();
+            let in1 = vals.in1.as_extension::<F, CB, W>();
+            let in2 = vals.in2.as_extension::<F, CB, W>();
+            let out = vals.out.as_extension::<F, CB, W>();
 
             // Check exactly one flag is enabled.
             let is_real = is_add + is_sub + is_mul + is_div;

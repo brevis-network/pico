@@ -1,15 +1,20 @@
 use crate::{
+    chips::chips::{
+        poseidon2_skinny_v2::Poseidon2SkinnyChip, poseidon2_wide_v2::Poseidon2WideChip,
+    },
     compiler::recursion_v2::{
         circuit::{
-            config::{BabyBearFriConfigVariable, CircuitConfig},
+            config::{CircuitConfig, FieldFriConfigVariable},
             constraints::RecursiveVerifierConstraintFolder,
+            hash::FieldHasher,
             merkle_tree::merkle_verify,
+            types::FriProofVariable,
             witness::Witnessable,
         },
-        ir::{compiler::DslIrCompiler, Builder, Felt},
+        ir::{compiler::DslIrCompiler, Builder, Ext, Felt},
         program::RecursionProgram,
     },
-    configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
+    configs::config::{Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::{
@@ -22,51 +27,63 @@ use crate::{
                 VkMerkleManager,
             },
         },
-        configs::{
-            recur_bb_poseidon2::{FieldConfig, StarkConfig},
-            recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
-        },
     },
     machine::{
         chip::ChipBehavior,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
         machine::BaseMachine,
     },
-    primitives::consts::{COMBINE_DEGREE, COMPRESS_DEGREE},
+    primitives::consts::{COMBINE_DEGREE, COMPRESS_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE},
     recursion_v2::runtime::RecursionRecord,
 };
 use p3_air::Air;
-use p3_baby_bear::BabyBear;
-use std::marker::PhantomData;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
+use std::{fmt::Debug, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
 pub struct CombineVkVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig, C>(
     PhantomData<(FC, SC, C)>,
 );
 
-impl<C> CombineVkVerifierCircuit<FieldConfig, StarkConfig, C>
+impl<CC, SC, C> CombineVkVerifierCircuit<CC, SC, C>
 where
+    CC: CircuitConfig<N = Val<SC>, F = Val<SC>> + Debug,
+    CC::F: TwoAdicField
+        + PrimeField32
+        + BinomiallyExtendable<EXTENSION_DEGREE>
+        + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+            CC,
+            Challenge = CC::EF,
+            Domain = TwoAdicMultiplicativeCoset<CC::F>,
+            DigestVariable = [Felt<Val<SC>>; DIGEST_SIZE],
+        > + FieldHasher<Val<SC>>,
+    <SC as FieldHasher<Val<SC>>>::Digest: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'a> Air<ProverConstraintFolder<'a, RecursionSC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, RecursionSC>>
-        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, RecursionFC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
+        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {
     pub fn build(
-        machine: &BaseMachine<RecursionSC, C>,
-        input: &RecursionVkStdin<RecursionSC, C>,
-    ) -> RecursionProgram<Val<RecursionSC>> {
+        machine: &BaseMachine<SC, C>,
+        input: &RecursionVkStdin<SC, C>,
+    ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
-        let mut builder = Builder::<RecursionFC>::new();
+        let mut builder = Builder::<CC>::new();
         let input = input.read(&mut builder);
         let RecursionVkStdinVariable {
             resursion_stdin_var,
             merkle_proof_var,
         } = input;
 
-        let vk_root: [Felt<BabyBear>; 8] = merkle_proof_var.merkle_root.map(|x| builder.eval(x));
+        let vk_root: [Felt<Val<SC>>; 8] = merkle_proof_var.merkle_root.map(|x| builder.eval(x));
 
         // Constraint that the vk_root of the merkle tree aligns with the vk_root of the recursion_stdin
         for (expected, actual) in vk_root.iter().zip(resursion_stdin_var.vk_root.iter()) {
@@ -77,7 +94,7 @@ where
         let vk_digests = resursion_stdin_var
             .vks
             .iter()
-            .map(|vk| vk.hash_babybear(&mut builder))
+            .map(|vk| vk.hash_field(&mut builder))
             .collect::<Vec<_>>();
 
         MerkleProofVerifier::verify(&mut builder, vk_digests, merkle_proof_var);
@@ -85,7 +102,7 @@ where
         let operations = builder.into_operations();
 
         // Compile the program.
-        let mut compiler = DslIrCompiler::<FieldConfig>::default();
+        let mut compiler = DslIrCompiler::<CC>::default();
         compiler.compile(operations)
     }
 }
@@ -97,7 +114,7 @@ pub struct MerkleProofVerifier<C, SC> {
 
 impl<CC, SC> MerkleProofVerifier<CC, SC>
 where
-    SC: BabyBearFriConfigVariable<CC>,
+    SC: FieldFriConfigVariable<CC>,
     CC: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
 {
     /// Verify (via Merkle tree) that the vkey digests of a proof belong to a specified set (encoded
@@ -122,24 +139,130 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct CompressVkVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(
-    PhantomData<(FC, SC)>,
-);
+pub struct CompressVkVerifierCircuit<
+    FC: FieldGenericConfig,
+    SC: StarkGenericConfig,
+    const W: u32,
+    const NUM_EXTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+>(PhantomData<(FC, SC)>);
 
-impl CompressVkVerifierCircuit<FieldConfig, StarkConfig> {
+impl<
+        CC,
+        SC,
+        const W: u32,
+        const NUM_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+    >
+    CompressVkVerifierCircuit<
+        CC,
+        SC,
+        W,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    >
+where
+    CC: CircuitConfig<N = Val<SC>, F = Val<SC>> + Debug,
+    CC::F: TwoAdicField
+        + PrimeField32
+        + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+        + BinomiallyExtendable<EXTENSION_DEGREE>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+        CC,
+        Challenge = CC::EF,
+        Domain = TwoAdicMultiplicativeCoset<CC::F>,
+        DigestVariable = [Felt<Val<SC>>; DIGEST_SIZE],
+    >,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    for<'a> RecursionVkStdin<
+        'a,
+        SC,
+        RecursionChipType<
+            Val<SC>,
+            COMPRESS_DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >,
+    >: Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
+
+    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
+        Air<ProverConstraintFolder<'b, SC>>,
+    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
+        Air<VerifierConstraintFolder<'b, SC>>,
+    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
+        Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
+        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
+
+    for<'b> Poseidon2WideChip<
+        COMBINE_DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        CC::F,
+    >: Air<ProverConstraintFolder<'b, SC>>,
+    for<'b> Poseidon2WideChip<
+        COMBINE_DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        CC::F,
+    >: Air<VerifierConstraintFolder<'b, SC>>,
+    for<'b> Poseidon2WideChip<
+        COMBINE_DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        CC::F,
+    >: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Poseidon2WideChip<
+        COMBINE_DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        CC::F,
+    >: ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
+{
     pub fn build(
-        machine: &BaseMachine<StarkConfig, RecursionChipType<Val<StarkConfig>, COMBINE_DEGREE>>,
-        input: &RecursionVkStdin<StarkConfig, RecursionChipType<Val<StarkConfig>, COMBINE_DEGREE>>,
-    ) -> RecursionProgram<Val<StarkConfig>> {
+        machine: &BaseMachine<
+            SC,
+            RecursionChipType<
+                Val<SC>,
+                COMBINE_DEGREE,
+                W,
+                NUM_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            >,
+        >,
+        input: &RecursionVkStdin<
+            SC,
+            RecursionChipType<
+                Val<SC>,
+                COMBINE_DEGREE,
+                W,
+                NUM_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            >,
+        >,
+    ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
-        let mut builder = Builder::<FieldConfig>::new();
+        let mut builder = Builder::<CC>::new();
         let input = input.read(&mut builder);
         let RecursionVkStdinVariable {
             resursion_stdin_var,
             merkle_proof_var,
         } = input;
 
-        let vk_root: [Felt<BabyBear>; 8] = merkle_proof_var.merkle_root.map(|x| builder.eval(x));
+        let vk_root: [Felt<Val<SC>>; 8] = merkle_proof_var.merkle_root.map(|x| builder.eval(x));
 
         // Constraint that the vk_root of the merkle tree aligns with the vk_root of the recursion_stdin
         for (expected, actual) in vk_root.iter().zip(resursion_stdin_var.vk_root.iter()) {
@@ -150,7 +273,7 @@ impl CompressVkVerifierCircuit<FieldConfig, StarkConfig> {
         let vk_digests = resursion_stdin_var
             .vks
             .iter()
-            .map(|vk| vk.hash_babybear(&mut builder))
+            .map(|vk| vk.hash_field(&mut builder))
             .collect::<Vec<_>>();
 
         MerkleProofVerifier::verify(&mut builder, vk_digests, merkle_proof_var);
@@ -160,35 +283,142 @@ impl CompressVkVerifierCircuit<FieldConfig, StarkConfig> {
         let operations = builder.into_operations();
 
         // Compile the program.
-        let mut compiler = DslIrCompiler::<FieldConfig>::default();
+        let mut compiler = DslIrCompiler::<CC>::default();
         compiler.compile(operations)
     }
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct EmbedVkVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(
-    PhantomData<(FC, SC)>,
-);
+pub struct EmbedVkVerifierCircuit<
+    FC: FieldGenericConfig,
+    SC: StarkGenericConfig,
+    const W: u32,
+    const NUM_EXTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+>(PhantomData<(FC, SC)>);
 
-impl EmbedVkVerifierCircuit<FieldConfig, StarkConfig> {
+impl<
+        CC,
+        SC,
+        const W: u32,
+        const NUM_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+    >
+    EmbedVkVerifierCircuit<
+        CC,
+        SC,
+        W,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    >
+where
+    CC: CircuitConfig<N = Val<SC>, F = Val<SC>> + Debug,
+    CC::F: TwoAdicField
+        + PrimeField32
+        + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+        + BinomiallyExtendable<EXTENSION_DEGREE>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+        CC,
+        Challenge = CC::EF,
+        Domain = TwoAdicMultiplicativeCoset<CC::F>,
+        DigestVariable = [Felt<Val<SC>>; DIGEST_SIZE],
+    >,
+    SC::DigestVariable: IntoIterator<Item = Felt<CC::F>>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    for<'a> RecursionVkStdin<
+        'a,
+        SC,
+        RecursionChipType<
+            Val<SC>,
+            COMPRESS_DEGREE,
+            W,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        >,
+    >: Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
+
+    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
+        Air<ProverConstraintFolder<'b, SC>>,
+    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
+        Air<VerifierConstraintFolder<'b, SC>>,
+    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
+        Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
+        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
+
+    for<'b> Poseidon2WideChip<
+        COMPRESS_DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        CC::F,
+    >: Air<ProverConstraintFolder<'b, SC>>,
+    for<'b> Poseidon2WideChip<
+        COMPRESS_DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        CC::F,
+    >: Air<VerifierConstraintFolder<'b, SC>>,
+    for<'b> Poseidon2WideChip<
+        COMPRESS_DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        CC::F,
+    >: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Poseidon2WideChip<
+        COMPRESS_DEGREE,
+        NUM_EXTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS,
+        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        CC::F,
+    >: ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
+{
     pub fn build(
-        machine: &BaseMachine<StarkConfig, RecursionChipType<Val<StarkConfig>, COMPRESS_DEGREE>>,
-        input: &RecursionVkStdin<StarkConfig, RecursionChipType<Val<StarkConfig>, COMPRESS_DEGREE>>,
-        vk_manager: VkMerkleManager,
-    ) -> RecursionProgram<Val<StarkConfig>> {
+        machine: &BaseMachine<
+            SC,
+            RecursionChipType<
+                Val<SC>,
+                COMPRESS_DEGREE,
+                W,
+                NUM_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            >,
+        >,
+        input: &RecursionVkStdin<
+            SC,
+            RecursionChipType<
+                Val<SC>,
+                COMPRESS_DEGREE,
+                W,
+                NUM_EXTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS,
+                NUM_INTERNAL_ROUNDS_MINUS_ONE,
+            >,
+        >,
+        vk_manager: VkMerkleManager<SC>,
+    ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
-        let mut builder = Builder::<FieldConfig>::new();
+        let mut builder = Builder::<CC>::new();
         let input = input.read(&mut builder);
 
         // static vk_root in the embed circuit
-        let static_vk_root: [Felt<BabyBear>; 8] = vk_manager.merkle_root.map(|x| builder.eval(x));
+        let static_vk_root: [Felt<Val<SC>>; 8] = vk_manager.merkle_root.map(|x| builder.eval(x));
 
         let RecursionVkStdinVariable {
             resursion_stdin_var,
             merkle_proof_var,
         } = input;
 
-        let vk_root: [Felt<BabyBear>; 8] = merkle_proof_var.merkle_root.map(|x| builder.eval(x));
+        let vk_root: [Felt<Val<SC>>; 8] = merkle_proof_var.merkle_root.map(|x| builder.eval(x));
 
         // Constraint that the vk_root of the merkle tree aligns with the hardcoded vk_root
         for (expected, actual) in vk_root.iter().zip(static_vk_root.iter()) {
@@ -204,7 +434,7 @@ impl EmbedVkVerifierCircuit<FieldConfig, StarkConfig> {
         let vk_digests = resursion_stdin_var
             .vks
             .iter()
-            .map(|vk| vk.hash_babybear(&mut builder))
+            .map(|vk| vk.hash_field(&mut builder))
             .collect::<Vec<_>>();
 
         MerkleProofVerifier::verify(&mut builder, vk_digests, merkle_proof_var);
@@ -214,7 +444,7 @@ impl EmbedVkVerifierCircuit<FieldConfig, StarkConfig> {
         let operations = builder.into_operations();
 
         // Compile the program.
-        let mut compiler = DslIrCompiler::<FieldConfig>::default();
+        let mut compiler = DslIrCompiler::<CC>::default();
         compiler.compile(operations)
     }
 }
