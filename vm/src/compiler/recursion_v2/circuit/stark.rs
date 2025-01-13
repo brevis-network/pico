@@ -39,6 +39,7 @@ use p3_field::{FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 
 /// Reference: [pico_machine::stark::BaseProof]
+#[allow(clippy::type_complexity)]
 #[derive(Clone)]
 pub struct BaseProofVariable<CC: CircuitConfig<F = SC::Val>, SC: BabyBearFriConfigVariable<CC>> {
     pub commitments: BaseCommitments<SC::DigestVariable>,

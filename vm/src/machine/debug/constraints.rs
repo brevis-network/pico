@@ -202,6 +202,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn debug_constraints_incremental<C>(
         &mut self,
         chip: &MetaChip<SC::Val, C>,

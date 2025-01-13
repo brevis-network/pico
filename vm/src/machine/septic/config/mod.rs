@@ -3,7 +3,7 @@ mod babybear;
 #[cfg(feature = "babybear")]
 pub use babybear::*;
 
-#[cfg(feature = "koalabear")]
+#[cfg(all(feature = "koalabear", not(feature = "babybear")))]
 mod koalabear;
-#[cfg(feature = "koalabear")]
+#[cfg(all(feature = "koalabear", not(feature = "babybear")))]
 pub use koalabear::*;

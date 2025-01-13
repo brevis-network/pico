@@ -231,7 +231,7 @@ where
             chunk_num += batch_records.len() as u32;
 
             // set index for each record
-            for record in batch_records.into_iter() {
+            for record in batch_records.iter_mut() {
                 let stats = record.stats();
                 info!("RISCV record stats: chunk {}", record.chunk_index());
                 for (key, value) in &stats {
@@ -369,10 +369,8 @@ where
                 if public_values.start_pc == <Val<SC>>::ZERO {
                     panic!("First proof start_pc is zero");
                 }
-            } else {
-                if public_values.start_pc != public_values.next_pc {
-                    panic!("Non-Cpu proof start_pc is not equal to next_pc");
-                }
+            } else if public_values.start_pc != public_values.next_pc {
+                panic!("Non-Cpu proof start_pc is not equal to next_pc");
             }
             if !each_proof.includes_chip("MemoryInitialize")
                 && public_values.previous_initialize_addr_bits

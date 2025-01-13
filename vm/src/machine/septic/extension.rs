@@ -417,9 +417,7 @@ impl<F: FieldAlgebra> Mul for SepticExtension<F> {
 
         // 3) Now res[0..7] is our final polynomial of degree <= 6
         let mut out = [F::ZERO; 7];
-        for i in 0..7 {
-            out[i] = res[i].clone();
-        }
+        out.clone_from_slice(&res[..7]);
         Self(out)
     }
 }
@@ -621,7 +619,7 @@ impl<T> SepticBlock<T> {
 impl<T: Field> SepticBlock<T> {
     /// Takes a `SepticBlock` into a `SepticExtension` of expressions.
     pub fn as_extension<AB: SepticExtensionBuilder<T>>(&self) -> SepticExtension<AB::Expr> {
-        let arr: [AB::Expr; 7] = self.0.clone().map(|x| AB::Expr::ZERO + x);
+        let arr: [AB::Expr; 7] = self.0.map(|x| AB::Expr::ZERO + x);
         SepticExtension(arr)
     }
 
@@ -630,7 +628,7 @@ impl<T: Field> SepticBlock<T> {
         &self,
         base: AB::Expr,
     ) -> SepticExtension<AB::Expr> {
-        let mut arr: [AB::Expr; 7] = self.0.clone().map(|_| AB::Expr::ZERO);
+        let mut arr: [AB::Expr; 7] = self.0.map(|_| AB::Expr::ZERO);
         arr[0] = base;
 
         SepticExtension(arr)

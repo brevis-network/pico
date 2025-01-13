@@ -170,7 +170,7 @@ impl<'a>
             })
             .unzip();
 
-        let flag_empty = programs.len() == 0;
+        let flag_empty = programs.is_empty();
 
         Self {
             programs: programs.into(),
@@ -241,7 +241,7 @@ where
                 }
             });
 
-        let flag_empty = programs.len() == 0;
+        let flag_empty = programs.is_empty();
 
         (
             Self {
@@ -269,6 +269,7 @@ where
         + Send,
 {
     /// Construct the recursion stdin for one layer of combine.
+    #[allow(clippy::too_many_arguments)]
     pub fn setup_for_combine_vk(
         vk_root: [Val<RecursionSC>; DIGEST_SIZE],
         vks: &[BaseVerifyingKey<RecursionSC>],
@@ -325,7 +326,7 @@ where
                 }
             });
 
-        let flag_empty = programs.len() == 0;
+        let flag_empty = programs.is_empty();
 
         (
             Self {

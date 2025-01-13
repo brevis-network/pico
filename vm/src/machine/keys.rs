@@ -40,7 +40,7 @@ where
             preprocessed_trace: self.preprocessed_trace.clone(),
             preprocessed_prover_data: self.preprocessed_prover_data.clone(),
             preprocessed_chip_ordering: self.preprocessed_chip_ordering.clone(),
-            initial_global_cumulative_sum: self.initial_global_cumulative_sum.clone(),
+            initial_global_cumulative_sum: self.initial_global_cumulative_sum,
             local_only: self.local_only.clone(),
         }
     }

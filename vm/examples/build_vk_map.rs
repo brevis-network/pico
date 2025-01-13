@@ -255,7 +255,7 @@ fn main() {
         })
         .collect();
 
-    let mut vk_map = load_vk_map("vk_map.bin");
+    let vk_map = load_vk_map("vk_map.bin");
     let mut vk_set: BTreeSet<[BabyBear; DIGEST_SIZE]> = vk_map.keys().copied().collect();
 
     let new_vk_set: BTreeSet<_> = results.into_iter().collect();

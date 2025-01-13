@@ -477,8 +477,7 @@ impl<F: PrimeField32> RiscvShapeConfig<F> {
                                 let new_height_log = allowed_log_height;
 
                                 let old_mem_events_log = log2_ceil_usize(
-                                    (mem_events + (NUM_LOCAL_MEMORY_ENTRIES_PER_ROW - 1))
-                                        / NUM_LOCAL_MEMORY_ENTRIES_PER_ROW,
+                                    mem_events.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW),
                                 );
                                 let new_mem_events_log = mem_events_height;
 

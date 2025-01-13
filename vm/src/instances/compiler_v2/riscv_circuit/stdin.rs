@@ -155,7 +155,7 @@ where
         .collect::<HashMap<_, _>>();
     let chips = machine.chips();
     let chunk_chips =
-        order_chips::<BabyBearPoseidon2, CB>(&*chips, &chip_ordering).collect::<Vec<_>>();
+        order_chips::<BabyBearPoseidon2, CB>(&chips, &chip_ordering).collect::<Vec<_>>();
     let opened_values = BaseOpenedValues {
         chips_opened_values: chunk_chips
             .iter()
