@@ -12,5 +12,4 @@ pub struct AuipcCols<T> {
     /// The current program counter.
     pub pc: Word<T>,
     pub pc_range_checker: FieldWordRangeChecker<T>,
-    pub auipc_nonce: T,
 }

@@ -17,8 +17,6 @@ pub struct SyscallCols<T> {
     /// The top 8 bits of clk of the syscall.
     pub clk_8: T,
 
-    pub nonce: T,
-
     /// The syscall_id of the syscall.
     pub syscall_id: T,
 

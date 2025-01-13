@@ -64,9 +64,6 @@ pub struct MemoryChipCols<T> {
     /// > (is_lb | is_lh) & (most_sig_byte_decomp[7] == 1) & (not writing to x0)
     pub mem_value_is_neg_not_x0: T,
 
-    pub addr_word_nonce: T,
-    pub unsigned_mem_val_nonce: T,
-
     /// Memory instructions
     pub instruction: MemoryInstructionCols<T>,
 }

@@ -23,7 +23,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use std::borrow::BorrowMut;
 
@@ -99,19 +99,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
         }
 
         // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
+        RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_SHA_EXTEND_COLS,
-        );
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut ShaExtendCols<F> =
-                trace.values[i * NUM_SHA_EXTEND_COLS..(i + 1) * NUM_SHA_EXTEND_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
-
-        trace
+        )
     }
 
     fn extra_record(&self, input: &Self::Record, output: &mut Self::Record) {

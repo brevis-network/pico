@@ -68,7 +68,6 @@ where
                     record.append(&mut extra);
                 }
             });
-            record.register_nonces();
         });
         debug!("complement record in {:?}", begin.elapsed());
     }

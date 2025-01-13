@@ -49,8 +49,6 @@ pub struct EmulationRecord {
     /// The program.
     pub program: Arc<Program>,
     pub unconstrained: bool,
-    /// The nonce lookup.
-    pub nonce_lookup: HashMap<u128, u32>,
 
     pub cpu_events: Vec<CpuEvent>,
 
@@ -288,7 +286,6 @@ impl EmulationRecord {
     #[must_use]
     pub fn defer(&mut self) -> EmulationRecord {
         let mut emulation_record = EmulationRecord::new(self.program.clone());
-        emulation_record.nonce_lookup = self.nonce_lookup.clone();
         emulation_record.precompile_events = take(&mut self.precompile_events);
         // emulation_record.uint256_mul_events = take(&mut self.uint256_mul_events);
         // emulation_record.memory_initialize_events =
@@ -318,7 +315,6 @@ impl EmulationRecord {
                 let remainder = precompile_event_chunks.remainder().to_vec();
                 if !remainder.is_empty() {
                     let mut emulation_record = EmulationRecord::new(self.program.clone());
-                    emulation_record.nonce_lookup = self.nonce_lookup.clone();
                     emulation_record
                         .precompile_events
                         .insert(syscall_code, remainder);
@@ -331,7 +327,6 @@ impl EmulationRecord {
             let mut records = precompile_event_chunks
                 .map(|event_chunk| {
                     let mut emulation_record = EmulationRecord::new(self.program.clone());
-                    emulation_record.nonce_lookup = self.nonce_lookup.clone();
                     emulation_record
                         .precompile_events
                         .insert(syscall_code, event_chunk.to_vec());
@@ -447,7 +442,6 @@ impl RecordBehavior for EmulationRecord {
         // self.ed_add_events.append(&mut extra.ed_add_events);
         // self.ed_decompress_events
         //     .append(&mut extra.ed_decompress_events);
-        self.nonce_lookup.extend(extra.nonce_lookup.clone());
         self.syscall_events.append(&mut extra.syscall_events);
         self.precompile_events.append(&mut extra.precompile_events);
         if self.byte_lookups.is_empty() {
@@ -460,53 +454,6 @@ impl RecordBehavior for EmulationRecord {
         } else {
             add_chunked_range_lookup_events(&mut self.range_lookups, vec![&extra.range_lookups]);
         }
-    }
-
-    fn register_nonces(&mut self) {
-        self.add_events.iter().enumerate().for_each(|(i, event)| {
-            self.nonce_lookup.insert(event.lookup_id, i as u32);
-        });
-
-        self.sub_events.iter().enumerate().for_each(|(i, event)| {
-            self.nonce_lookup
-                .insert(event.lookup_id, (self.add_events.len() + i) as u32);
-        });
-
-        self.mul_events.iter().enumerate().for_each(|(i, event)| {
-            self.nonce_lookup.insert(event.lookup_id, i as u32);
-        });
-
-        self.bitwise_events
-            .iter()
-            .enumerate()
-            .for_each(|(i, event)| {
-                self.nonce_lookup.insert(event.lookup_id, i as u32);
-            });
-
-        self.shift_left_events
-            .iter()
-            .enumerate()
-            .for_each(|(i, event)| {
-                self.nonce_lookup.insert(event.lookup_id, i as u32);
-            });
-
-        self.shift_right_events
-            .iter()
-            .enumerate()
-            .for_each(|(i, event)| {
-                self.nonce_lookup.insert(event.lookup_id, i as u32);
-            });
-
-        self.divrem_events
-            .iter()
-            .enumerate()
-            .for_each(|(i, event)| {
-                self.nonce_lookup.insert(event.lookup_id, i as u32);
-            });
-
-        self.lt_events.iter().enumerate().for_each(|(i, event)| {
-            self.nonce_lookup.insert(event.lookup_id, i as u32);
-        });
     }
 
     fn public_values<F: FieldAlgebra>(&self) -> Vec<F> {

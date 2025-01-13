@@ -67,7 +67,6 @@ pub struct EdDecompressCols<T> {
     pub is_real: T,
     pub chunk: T,
     pub clk: T,
-    pub nonce: T,
     pub ptr: T,
     pub sign: T,
     pub x_access: Array<MemoryWriteCols<T>, WordsFieldElement>,
@@ -94,13 +93,6 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         self.chunk = F::from_canonical_u32(event.chunk);
         self.clk = F::from_canonical_u32(event.clk);
         self.ptr = F::from_canonical_u32(event.ptr);
-        self.nonce = F::from_canonical_u32(
-            record
-                .nonce_lookup
-                .get(&event.lookup_id)
-                .copied()
-                .unwrap_or_default(),
-        );
         self.sign = F::from_bool(event.sign);
         for i in 0..8 {
             self.x_access[i].populate(event.x_memory_records[i], &mut new_range_lookup_events);
@@ -258,7 +250,6 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.looked_syscall(
             self.chunk,
             self.clk,
-            self.nonce,
             CB::F::from_canonical_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
             self.ptr,
             self.sign,
@@ -300,7 +291,6 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
         let mut rows = Vec::new();
-        let mut nonces = Vec::new();
         let events: Vec<_> = input
             .get_precompile_events(SyscallCode::ED_DECOMPRESS)
             .iter()
@@ -325,9 +315,6 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
             cols.populate::<E::BaseField, E>(event.clone(), output);
 
             rows.push(row);
-
-            let nonce = *input.nonce_lookup.get(&event.lookup_id).unwrap();
-            nonces.push(nonce);
         }
 
         let log_rows = input.shape_chip_size(&self.name());
@@ -343,21 +330,10 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
             log_rows,
         );
 
-        let mut trace = RowMajorMatrix::new(
+        RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_ED_DECOMPRESS_COLS,
-        );
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut EdDecompressCols<F> = trace.values
-                [i * NUM_ED_DECOMPRESS_COLS..(i + 1) * NUM_ED_DECOMPRESS_COLS]
-                .borrow_mut();
-            let nonce = nonces.get(i).unwrap_or(&0);
-            cols.nonce = F::from_canonical_u32(*nonce);
-        }
-
-        trace
+        )
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

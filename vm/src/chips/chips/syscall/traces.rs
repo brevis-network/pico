@@ -43,7 +43,6 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
             cols.chunk = F::from_canonical_u32(syscall_event.chunk);
             cols.clk_16 = F::from_canonical_u16(clk_16);
             cols.clk_8 = F::from_canonical_u8(clk_8);
-            cols.nonce = F::from_canonical_u32(syscall_event.nonce);
             cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
             cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
             cols.arg2 = F::from_canonical_u32(syscall_event.arg2);

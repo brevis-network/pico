@@ -21,7 +21,7 @@ use crate::{
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::borrow::BorrowMut;
 
@@ -174,13 +174,6 @@ impl<F: PrimeField> ChipBehavior<F> for MulChip<F> {
         // Pad the trace based on shape
         let log_rows = input.shape_chip_size(&self.name());
         pad_to_power_of_two::<NUM_MUL_COLS, F>(&mut trace.values, log_rows);
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut MulCols<F> =
-                trace.values[i * NUM_MUL_COLS..(i + 1) * NUM_MUL_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
 
         trace
     }

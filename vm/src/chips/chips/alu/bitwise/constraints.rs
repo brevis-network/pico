@@ -7,7 +7,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use core::borrow::Borrow;
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::Matrix;
 
@@ -25,9 +25,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &BitwiseCols<CB::Var> = (*local).borrow();
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
 
         // Get the opcode for the operation.
         let opcode = local.is_xor * ByteOpcode::XOR.as_field::<CB::F>()
@@ -51,7 +48,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.nonce,
             is_real.clone(),
         );
 

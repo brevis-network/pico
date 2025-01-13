@@ -61,7 +61,6 @@ where
             local.op_b_val(),
             local.op_c_val(),
             local.chunk,
-            CB::Expr::ZERO, // local.nonce,
             is_memory_instruction,
         );
 
@@ -72,7 +71,6 @@ where
             local.op_b_val(),
             local.op_c_val(),
             local.chunk,
-            local.nonce,
             is_alu_instruction,
         );
 

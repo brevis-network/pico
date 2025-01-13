@@ -23,7 +23,7 @@ use crate::{
     },
     recursion_v2::air::IsZeroOperation,
 };
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, BaseAir};
 use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
@@ -43,15 +43,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &Uint256MulCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &Uint256MulCols<CB::Var> = (*next).borrow();
-
-        // Constrain the incrementing nonce.
-        // builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(next.is_real * (local.nonce + CB::Expr::ONE), next.nonce);
-        // .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
 
         // We are computing (x * y) % modulus. The value of x is stored in the "prev_value" of
         // the x_memory, since we write to it later.
@@ -144,7 +135,6 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            local.nonce,
             CB::F::from_canonical_u32(SyscallCode::UINT256_MUL.syscall_id()),
             local.x_ptr,
             local.y_ptr,

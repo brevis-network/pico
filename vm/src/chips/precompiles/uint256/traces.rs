@@ -19,7 +19,7 @@ use crate::{
 use hashbrown::HashMap;
 use num::{BigUint, One, Zero};
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
 impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
@@ -52,7 +52,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
             .collect();
 
         // Generate the trace rows & corresponding records for each event.
-        let (_rows, nonces): (Vec<[F; NUM_UINT256_MUL_COLS]>, Vec<_>) = events
+        let mut rows = events
             .iter()
             .map(|event| {
                 let mut new_range_check_events = HashMap::new();
@@ -118,14 +118,9 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 chunked_byte_lookup_events.push(new_byte_lookup_events);
                 rangecheck_lookup_events.push(new_range_check_events);
 
-                let nonce = *input.nonce_lookup.get(&event.lookup_id).unwrap();
-
-                (row, nonce)
+                row
             })
-            .unzip();
-        // .collect::<Vec<_>>();
-
-        let mut rows = _rows.clone();
+            .collect();
 
         let log_rows = input.shape_chip_size(&self.name());
         println!("Log rows in uint256mul: {:?}", log_rows);
@@ -150,21 +145,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
         output.add_rangecheck_lookup_events(rangecheck_lookup_events);
 
         // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_UINT256_MUL_COLS,
-        );
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut Uint256MulCols<F> =
-                trace.values[i * NUM_UINT256_MUL_COLS..(i + 1) * NUM_UINT256_MUL_COLS].borrow_mut();
-            // cols.nonce = F::from_canonical_usize(i);
-            let nonce = nonces.get(i).unwrap_or(&0);
-            cols.nonce = F::from_canonical_u32(*nonce);
-        }
-
-        trace
+        RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_UINT256_MUL_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {

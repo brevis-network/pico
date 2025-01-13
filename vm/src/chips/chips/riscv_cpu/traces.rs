@@ -60,12 +60,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
                         let idx = i * chunk_size + j;
                         let cols: &mut CpuCols<F> = row.borrow_mut();
                         let mut byte_lookup_events = Vec::new();
-                        self.event_to_row(
-                            &input.cpu_events[idx],
-                            &input.nonce_lookup,
-                            cols,
-                            &mut byte_lookup_events,
-                        );
+                        self.event_to_row(&input.cpu_events[idx], cols, &mut byte_lookup_events);
                     });
             });
 
@@ -91,8 +86,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
                 ops.iter().for_each(|op| {
                     let mut row = [F::ZERO; NUM_CPU_COLS];
                     let cols: &mut CpuCols<F> = row.as_mut_slice().borrow_mut();
-                    let alu_events =
-                        self.event_to_row(op, &HashMap::new(), cols, &mut range_events);
+                    let alu_events = self.event_to_row(op, cols, &mut range_events);
                     alu_events.into_iter().for_each(|(key, value)| {
                         alu.entry(key).or_insert(Vec::default()).extend(value);
                     });
@@ -118,7 +112,6 @@ impl<F: PrimeField32> CpuChip<F> {
     fn event_to_row(
         &self,
         event: &CpuEvent,
-        nonce_lookup: &HashMap<u128, u32>,
         cols: &mut CpuCols<F>,
         blu_events: &mut impl RangeRecordBehavior,
     ) -> HashMap<Opcode, Vec<AluEvent>> {
@@ -128,14 +121,6 @@ impl<F: PrimeField32> CpuChip<F> {
 
         // Populate chunk and clk columns.
         self.populate_chunk_clk(cols, event, blu_events);
-
-        // Populate the nonce.
-        cols.nonce = F::from_canonical_u32(
-            nonce_lookup
-                .get(&event.alu_lookup_id)
-                .copied()
-                .unwrap_or_default(),
-        );
 
         // Populate basic fields.
         cols.pc = F::from_canonical_u32(event.pc);
@@ -188,10 +173,10 @@ impl<F: PrimeField32> CpuChip<F> {
             Some(chunk),
         ));
 
-        self.populate_branch(cols, event, &mut new_alu_events, nonce_lookup);
-        self.populate_jump(cols, event, &mut new_alu_events, nonce_lookup);
-        self.populate_auipc(cols, event, &mut new_alu_events, nonce_lookup);
-        let is_halt = self.populate_ecall(cols, event, nonce_lookup);
+        self.populate_branch(cols, event, &mut new_alu_events);
+        self.populate_jump(cols, event, &mut new_alu_events);
+        self.populate_auipc(cols, event, &mut new_alu_events);
+        let is_halt = self.populate_ecall(cols, event);
 
         cols.is_sequential_instr = F::from_bool(
             !event.instruction.is_branch_instruction()

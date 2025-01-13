@@ -23,7 +23,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::{borrow::BorrowMut, marker::PhantomData};
 use tracing::debug;
@@ -80,12 +80,6 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
         debug_assert!(padded_row_template.len() == NUM_SLR_COLS);
         for i in rows * NUM_SLR_COLS..trace.values.len() {
             trace.values[i] = padded_row_template[i % NUM_SLR_COLS];
-        }
-
-        for i in 0..trace.height() {
-            let cols: &mut ShiftRightCols<F> =
-                trace.values[i * NUM_SLR_COLS..(i + 1) * NUM_SLR_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
         }
 
         trace

@@ -27,7 +27,7 @@ use crate::{
 use hybrid_array::{typenum::Unsigned, Array};
 use itertools::Itertools;
 use num::{BigUint, Zero};
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, BaseAir};
 use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
@@ -67,7 +67,6 @@ where
 {
     pub is_real: F,
     pub chunk: F,
-    pub nonce: F,
     pub clk: F,
     pub x_ptr: F,
     pub y_ptr: F,
@@ -248,20 +247,10 @@ where
         );
 
         // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
+        RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             num_fp2_mul_cols::<P>(),
-        );
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut Fp2MulCols<F, P> = trace.values
-                [i * num_fp2_mul_cols::<P>()..(i + 1) * num_fp2_mul_cols::<P>()]
-                .borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
-
-        trace
+        )
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -309,7 +298,6 @@ where
         let local = main.row_slice(0);
         let local: &Fp2MulCols<CB::Var, P> = (*local).borrow();
 
-        builder.when_first_row().assert_zero(local.nonce);
         let num_words_field_element = <P as NumLimbs>::Limbs::USIZE / 4;
 
         let p_x = limbs_from_prev_access(&local.x_access[0..num_words_field_element]);
@@ -423,7 +411,6 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            local.nonce,
             syscall_id_felt,
             local.x_ptr,
             local.y_ptr,

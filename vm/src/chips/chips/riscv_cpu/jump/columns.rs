@@ -19,7 +19,4 @@ pub struct JumpCols<T> {
 
     // A range checker for `op_a` which may contain `pc + 4`.
     pub op_a_range_checker: FieldWordRangeChecker<T>,
-
-    pub jal_nonce: T,
-    pub jalr_nonce: T,
 }

@@ -21,7 +21,7 @@ use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{Field, PrimeField};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use tracing::debug;
 
@@ -55,12 +55,6 @@ impl<F: PrimeField> ChipBehavior<F> for BitwiseChip<F> {
         // Pad the trace based on shape
         let log_rows = input.shape_chip_size(&self.name());
         pad_to_power_of_two::<NUM_BITWISE_COLS, F>(&mut trace.values, log_rows);
-
-        for i in 0..trace.height() {
-            let cols: &mut BitwiseCols<F> =
-                trace.values[i * NUM_BITWISE_COLS..(i + 1) * NUM_BITWISE_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
 
         trace
     }

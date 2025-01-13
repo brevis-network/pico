@@ -28,7 +28,6 @@ pub const MERSENNE31_NUM_POSEIDON2_COLS: usize = size_of::<
 pub struct Poseidon2Cols<T, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> {
     pub chunk: T,
     pub clk: T,
-    pub nonce: T,
     pub input_memory_ptr: T,
     pub input_memory: [MemoryReadCols<T>; PERMUTATION_WIDTH],
 

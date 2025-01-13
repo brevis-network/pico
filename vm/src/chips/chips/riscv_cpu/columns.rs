@@ -22,8 +22,6 @@ pub struct CpuCols<T: Copy> {
     /// The current chunk.
     pub chunk: T,
 
-    pub nonce: T,
-
     /// The clock cycle value.  This should be within 24 bits.
     pub clk: T,
     /// The least significant 16 bit limb of clk.

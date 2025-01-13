@@ -19,7 +19,7 @@ use hashbrown::HashMap;
 use itertools::{izip, Itertools};
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use rayon::prelude::*;
 use std::marker::PhantomData;
 use tracing::debug;
@@ -60,13 +60,6 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
         // Pad the trace based on shape
         let log_rows = input.shape_chip_size(&self.name());
         pad_to_power_of_two::<NUM_LT_COLS, F>(&mut trace.values, log_rows);
-
-        // assign nonce to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut LtCols<F> =
-                trace.values[i * NUM_LT_COLS..(i + 1) * NUM_LT_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
 
         trace
     }

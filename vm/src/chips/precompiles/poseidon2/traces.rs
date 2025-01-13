@@ -34,7 +34,7 @@ use crate::{
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::borrow::BorrowMut;
 use tracing::debug;
@@ -86,7 +86,7 @@ macro_rules! impl_poseidon2_permute_chip {
                 // Generate the trace rows & corresponding records for each chunk of events concurrently.
                 let mut new_byte_lookup_events = Vec::new();
 
-                let (mut rows, nonces): (Vec<[F; $num_cols]>, Vec<_>) = events
+                let mut rows: Vec<[F; $num_cols]>= events
                     .iter()
                     .map(|event| {
                         let mut row: [F; $num_cols] = [F::ZERO; $num_cols];
@@ -98,32 +98,15 @@ macro_rules! impl_poseidon2_permute_chip {
                                                 event, Some(&mut row), &mut new_byte_lookup_events
                                             );
 
-                        // Retrieve the nonce using the event's lookup_id.
-                        let nonce = *input.nonce_lookup.get(&event.lookup_id).unwrap();
-
-                        (row, nonce)
+                        row
                     })
-                    .unzip();
+                    .collect();
 
                 let log_rows = input.shape_chip_size(&self.name());
                 pad_rows_fixed(&mut rows, || [F::ZERO; $num_cols], log_rows);
 
                 // Convert the trace to a row major matrix.
-                let mut trace =
-                    RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), $num_cols);
-
-                // Write the nonces to the trace.
-                for i in 0..trace.height() {
-                    let cols: &mut Poseidon2Cols<
-                        F,
-                        { $num_external_rounds / 2 },
-                        $num_internal_rounds,
-                    > = trace.values[i * $num_cols..(i + 1) * $num_cols].borrow_mut();
-                    let nonce = nonces.get(i).unwrap_or(&0);
-                    cols.nonce = F::from_canonical_u32(*nonce);
-                }
-
-                trace
+                RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), $num_cols)
             }
 
             fn is_active(&self, record: &Self::Record) -> bool {

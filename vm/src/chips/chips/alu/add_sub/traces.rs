@@ -20,7 +20,7 @@ use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use tracing::debug;
 
@@ -84,13 +84,6 @@ impl<F: PrimeField> ChipBehavior<F> for AddSubChip<F> {
         // Pad the trace based on shape
         let log_rows = input.shape_chip_size(&self.name());
         pad_to_power_of_two::<NUM_ADD_SUB_COLS, F>(&mut trace.values, log_rows);
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut AddSubCols<F> =
-                trace.values[i * NUM_ADD_SUB_COLS..(i + 1) * NUM_ADD_SUB_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
 
         trace
     }

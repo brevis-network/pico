@@ -16,7 +16,6 @@ impl<F: Field> CpuChip<F> {
         cols: &mut CpuCols<F>,
         event: &CpuEvent,
         alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
-        nonce_lookup: &HashMap<u128, u32>,
     ) {
         if event.instruction.is_branch_instruction() {
             let branch_columns = cols.opcode_specific.branch_mut();
@@ -54,12 +53,6 @@ impl<F: Field> CpuChip<F> {
                 c: event.b,
                 sub_lookups: create_alu_lookups(),
             };
-            branch_columns.a_lt_b_nonce = F::from_canonical_u32(
-                nonce_lookup
-                    .get(&event.branch_lt_lookup_id)
-                    .copied()
-                    .unwrap_or_default(),
-            );
 
             alu_events
                 .entry(alu_op_code)
@@ -76,12 +69,6 @@ impl<F: Field> CpuChip<F> {
                 c: event.a,
                 sub_lookups: create_alu_lookups(),
             };
-            branch_columns.a_gt_b_nonce = F::from_canonical_u32(
-                nonce_lookup
-                    .get(&event.branch_gt_lookup_id)
-                    .copied()
-                    .unwrap_or_default(),
-            );
 
             alu_events
                 .entry(alu_op_code)
@@ -119,12 +106,6 @@ impl<F: Field> CpuChip<F> {
                     c: event.c,
                     sub_lookups: create_alu_lookups(),
                 };
-                branch_columns.next_pc_nonce = F::from_canonical_u32(
-                    nonce_lookup
-                        .get(&event.branch_add_lookup_id)
-                        .copied()
-                        .unwrap_or_default(),
-                );
 
                 alu_events
                     .entry(Opcode::ADD)

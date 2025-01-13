@@ -29,12 +29,6 @@ where
         let local: &KeccakMemCols<CB::Var> = (*local).borrow();
         let next: &KeccakMemCols<CB::Var> = (*next).borrow();
 
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(local.nonce + CB::Expr::ONE, next.nonce);
-
         let first_step = local.keccak.step_flags[0];
         let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
         let not_final_step = CB::Expr::ONE - final_step;
@@ -70,7 +64,6 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            local.nonce,
             CB::F::from_canonical_u32(SyscallCode::KECCAK_PERMUTE.syscall_id()),
             local.state_addr,
             CB::Expr::ZERO,

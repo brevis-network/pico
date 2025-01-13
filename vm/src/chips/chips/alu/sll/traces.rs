@@ -12,7 +12,7 @@ use crate::{
 use hashbrown::HashMap;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::{borrow::BorrowMut, marker::PhantomData};
 use tracing::debug;
@@ -62,12 +62,6 @@ impl<F: PrimeField> ChipBehavior<F> for SLLChip<F> {
         debug_assert!(padded_row_template.len() == NUM_SLL_COLS);
         for i in rows * NUM_SLL_COLS..trace.values.len() {
             trace.values[i] = padded_row_template[i % NUM_SLL_COLS];
-        }
-
-        for i in 0..trace.height() {
-            let cols: &mut ShiftLeftCols<F> =
-                trace.values[i * NUM_SLL_COLS..(i + 1) * NUM_SLL_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
         }
 
         trace

@@ -38,7 +38,6 @@ where
                 builder.looked_syscall(
                     local.chunk,
                     local.clk_16 + local.clk_8 * CB::Expr::from_canonical_u32(1 << 16),
-                    local.nonce,
                     local.syscall_id,
                     local.arg1,
                     local.arg2,
@@ -64,7 +63,6 @@ where
                 builder.looking_syscall(
                     local.chunk,
                     local.clk_16 + local.clk_8 * CB::Expr::from_canonical_u32(1 << 16),
-                    local.nonce,
                     local.syscall_id,
                     local.arg1,
                     local.arg2,

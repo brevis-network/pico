@@ -26,9 +26,6 @@ pub struct Uint256MulCols<T> {
     /// The clock cycle of the syscall.
     pub clk: T,
 
-    /// The nonce of the operation.
-    pub nonce: T,
-
     /// The pointer to the first input.
     pub x_ptr: T,
 

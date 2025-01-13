@@ -13,9 +13,6 @@ pub struct DivRemCols<T> {
     /// The chunk number, used for byte lookup table.
     pub chunk: T,
 
-    /// The nonce of the operation.
-    pub nonce: T,
-
     /// The output operand.
     pub a: Word<T>,
 
@@ -95,22 +92,11 @@ pub struct DivRemCols<T> {
     /// Flag to indicate whether `c` is negative.
     pub c_neg: T,
 
-    /// The lower nonce of the operation.
-    pub lower_nonce: T,
-
-    /// The upper nonce of the operation.
-    pub upper_nonce: T,
-
-    /// The absolute nonce of the operation.
-    pub abs_nonce: T,
-
     /// Selector to determine whether an ALU Event is sent for absolute value computation of `c`.
     pub abs_c_alu_event: T,
-    pub abs_c_alu_event_nonce: T,
 
     /// Selector to determine whether an ALU Event is sent for absolute value computation of `rem`.
     pub abs_rem_alu_event: T,
-    pub abs_rem_alu_event_nonce: T,
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,

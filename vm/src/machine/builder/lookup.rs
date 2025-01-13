@@ -43,7 +43,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
         chunk: impl Into<Self::Expr>,
-        nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
@@ -51,7 +50,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
             .chain(once(chunk.into()))
-            .chain(once(nonce.into()))
             .collect();
 
         self.looking(SymbolicLookup::new(
@@ -71,7 +69,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
         chunk: impl Into<Self::Expr>,
-        nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
@@ -79,7 +76,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
             .chain(once(chunk.into()))
-            .chain(once(nonce.into()))
             .collect();
 
         self.looked(SymbolicLookup::new(
@@ -99,7 +95,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
         chunk: impl Into<Self::Expr>,
-        nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
@@ -107,7 +102,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
             .chain(once(chunk.into()))
-            .chain(once(nonce.into()))
             .collect();
 
         self.looking(SymbolicLookup::new(
@@ -127,7 +121,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
         chunk: impl Into<Self::Expr>,
-        nonce: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
@@ -135,7 +128,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
             .chain(once(chunk.into()))
-            .chain(once(nonce.into()))
             .collect();
 
         self.looked(SymbolicLookup::new(
@@ -247,7 +239,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         &mut self,
         chunk: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr> + Clone,
-        nonce: impl Into<Self::Expr> + Clone,
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: impl Into<Self::Expr> + Clone,
         arg2: impl Into<Self::Expr> + Clone,
@@ -258,7 +249,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             vec![
                 chunk.clone().into(),
                 clk.clone().into(),
-                nonce.clone().into(),
                 syscall_id.clone().into(),
                 arg1.clone().into(),
                 arg2.clone().into(),
@@ -274,7 +264,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         &mut self,
         chunk: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr> + Clone,
-        nonce: impl Into<Self::Expr> + Clone,
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: impl Into<Self::Expr> + Clone,
         arg2: impl Into<Self::Expr> + Clone,
@@ -285,7 +274,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             vec![
                 chunk.clone().into(),
                 clk.clone().into(),
-                nonce.clone().into(),
                 syscall_id.clone().into(),
                 arg1.clone().into(),
                 arg2.clone().into(),

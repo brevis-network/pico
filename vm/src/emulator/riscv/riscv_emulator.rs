@@ -146,7 +146,6 @@ impl RiscvEmulator {
             arg1,
             arg2,
             lookup_id,
-            nonce: self.record.nonce_lookup[&lookup_id],
         }
     }
 
@@ -861,20 +860,18 @@ impl RiscvEmulator {
                     .syscall_counts
                     .entry(syscall_for_count)
                     .or_insert(0);
-                let (threshold, multiplier) = match syscall_for_count {
-                    SyscallCode::KECCAK_PERMUTE => (self.opts.split_opts.keccak, 24),
-                    SyscallCode::SHA_EXTEND => (self.opts.split_opts.sha_extend, 48),
-                    SyscallCode::SHA_COMPRESS => (self.opts.split_opts.sha_compress, 80),
-                    _ => (self.opts.split_opts.deferred, 1),
+                let threshold = match syscall_for_count {
+                    SyscallCode::KECCAK_PERMUTE => self.opts.split_opts.keccak,
+                    SyscallCode::SHA_EXTEND => self.opts.split_opts.sha_extend,
+                    SyscallCode::SHA_COMPRESS => self.opts.split_opts.sha_compress,
+                    _ => self.opts.split_opts.deferred,
                 };
-                let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
                 if self.log_syscalls {
                     debug!(
-                        ">>syscall_id: {:?}, syscall_count: {:?}, threshold: {:?} nonce: {:?} syscall_lookup_id: {:?}",
-                        syscall_id, syscall_count, threshold, nonce, syscall_lookup_id
+                        ">>syscall_id: {:?}, syscall_count: {:?}, threshold: {:?}, syscall_lookup_id: {:?}",
+                        syscall_id, syscall_count, threshold, syscall_lookup_id
                     );
                 }
-                self.record.nonce_lookup.insert(syscall_lookup_id, nonce);
                 *syscall_count += 1;
 
                 let syscall_impl = self.get_syscall(syscall).cloned();

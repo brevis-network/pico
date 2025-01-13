@@ -16,7 +16,6 @@ impl<F: Field> CpuChip<F> {
         cols: &mut CpuCols<F>,
         event: &CpuEvent,
         alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
-        nonce_lookup: &HashMap<u128, u32>,
     ) {
         if matches!(event.instruction.opcode, Opcode::AUIPC) {
             let auipc_columns = cols.opcode_specific.auipc_mut();
@@ -34,12 +33,6 @@ impl<F: Field> CpuChip<F> {
                 c: event.b,
                 sub_lookups: create_alu_lookups(),
             };
-            auipc_columns.auipc_nonce = F::from_canonical_u32(
-                nonce_lookup
-                    .get(&event.auipc_lookup_id)
-                    .copied()
-                    .unwrap_or_default(),
-            );
 
             alu_events
                 .entry(Opcode::ADD)

@@ -63,12 +63,7 @@ impl<F: PrimeField> ChipBehavior<F> for MemoryReadWriteChip<F> {
                         let idx = i * chunk_size + j;
                         let cols: &mut MemoryChipCols<F> = row.borrow_mut();
                         let mut byte_lookup_events = Vec::new();
-                        self.event_to_row(
-                            mem_events[idx],
-                            &input.nonce_lookup,
-                            cols,
-                            &mut byte_lookup_events,
-                        );
+                        self.event_to_row(mem_events[idx], cols, &mut byte_lookup_events);
                     });
             });
 
@@ -100,8 +95,7 @@ impl<F: PrimeField> ChipBehavior<F> for MemoryReadWriteChip<F> {
                 ops.iter().for_each(|op| {
                     let mut row = [F::ZERO; NUM_MEMORY_CHIP_COLS];
                     let cols: &mut MemoryChipCols<F> = row.as_mut_slice().borrow_mut();
-                    let alu_events =
-                        self.event_to_row(op, &HashMap::new(), cols, &mut range_events);
+                    let alu_events = self.event_to_row(op, cols, &mut range_events);
                     alu_events.into_iter().for_each(|(key, value)| {
                         alu.entry(key).or_insert(Vec::default()).extend(value);
                     });
@@ -129,7 +123,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
     fn event_to_row(
         &self,
         event: &CpuEvent,
-        nonce_lookup: &HashMap<u128, u32>,
         cols: &mut MemoryChipCols<F>,
         range_events: &mut impl RangeRecordBehavior,
     ) -> HashMap<Opcode, Vec<AluEvent>> {
@@ -145,7 +138,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         }
 
         cols.instruction.populate(event);
-        self.populate_memory(cols, event, &mut alu_events, range_events, nonce_lookup);
+        self.populate_memory(cols, event, &mut alu_events, range_events);
 
         alu_events
     }
@@ -156,7 +149,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         event: &CpuEvent,
         new_alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
         range_events: &mut impl RangeRecordBehavior,
-        nonce_lookup: &HashMap<u128, u32>,
     ) {
         assert!(
             matches!(
@@ -187,12 +179,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let aligned_addr_ls_byte = (aligned_addr & 0x000000FF) as u8;
         let bits: [bool; 8] = array::from_fn(|i| aligned_addr_ls_byte & (1 << i) != 0);
         cols.aa_least_sig_byte_decomp = array::from_fn(|i| F::from_bool(bits[i + 2]));
-        cols.addr_word_nonce = F::from_canonical_u32(
-            nonce_lookup
-                .get(&event.memory_add_lookup_id)
-                .copied()
-                .unwrap_or_default(),
-        );
 
         // Add event to ALU check to check that addr == b + c
         let add_event = AluEvent {
@@ -272,12 +258,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
                         c: sign_value,
                         sub_lookups: create_alu_lookups(),
                     };
-                    cols.unsigned_mem_val_nonce = F::from_canonical_u32(
-                        nonce_lookup
-                            .get(&event.memory_sub_lookup_id)
-                            .copied()
-                            .unwrap_or_default(),
-                    );
 
                     new_alu_events
                         .entry(Opcode::SUB)

@@ -20,9 +20,6 @@ where
         let zero: CB::Expr = CB::F::ZERO.into();
         let one: CB::Expr = CB::F::ONE.into();
 
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-
         // Check that the MSB of most_significant_byte matches local.b_msb using lookup.
         {
             let byte = local.b[WORD_SIZE - 1];
@@ -202,7 +199,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.nonce,
             local.is_real,
         );
     }

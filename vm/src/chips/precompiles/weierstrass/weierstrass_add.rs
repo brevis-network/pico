@@ -53,7 +53,6 @@ pub const fn num_weierstrass_add_cols<P: FieldParameters + NumWords>() -> usize 
 pub struct WeierstrassAddAssignCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
     pub chunk: T,
-    pub nonce: T,
     pub clk: T,
     pub p_ptr: T,
     pub q_ptr: T,
@@ -262,21 +261,10 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
         );
 
         // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
+        RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             num_weierstrass_add_cols::<E::BaseField>(),
-        );
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut WeierstrassAddAssignCols<F, E::BaseField> = trace.values[i
-                * num_weierstrass_add_cols::<E::BaseField>()
-                ..(i + 1) * num_weierstrass_add_cols::<E::BaseField>()]
-                .borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
-
-        trace
+        )
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -323,9 +311,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &WeierstrassAddAssignCols<CB::Var, E::BaseField> = (*local).borrow();
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
 
         let num_words_field_element = <E::BaseField as NumLimbs>::Limbs::USIZE / 4;
 
@@ -472,7 +457,6 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            local.nonce,
             syscall_id_felt,
             local.p_ptr,
             local.q_ptr,

@@ -89,9 +89,6 @@ where
         let one: CB::Expr = CB::F::ONE.into();
         let zero: CB::Expr = CB::F::ZERO.into();
 
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-
         // Calculate whether b, remainder, and c are negative.
         {
             // Negative if and only if op code is signed & MSB = 1.
@@ -125,7 +122,6 @@ where
                 local.quotient,
                 local.c,
                 local.chunk,
-                local.lower_nonce,
                 local.is_real,
             );
 
@@ -150,7 +146,6 @@ where
                 local.quotient,
                 local.c,
                 local.chunk,
-                local.upper_nonce,
                 local.is_real,
             );
         }
@@ -318,7 +313,6 @@ where
                 local.c,
                 local.abs_c,
                 local.chunk,
-                local.abs_c_alu_event_nonce,
                 local.abs_c_alu_event,
             );
             builder.looking_alu(
@@ -327,7 +321,6 @@ where
                 local.remainder,
                 local.abs_remainder,
                 local.chunk,
-                local.abs_rem_alu_event_nonce,
                 local.abs_rem_alu_event,
             );
 
@@ -373,7 +366,6 @@ where
                 local.abs_remainder,
                 local.max_abs_c_or_1,
                 local.chunk,
-                local.abs_nonce,
                 local.remainder_check_multiplicity,
             );
         }
@@ -453,7 +445,6 @@ where
                 local.b,
                 local.c,
                 local.chunk,
-                local.nonce,
                 local.is_real,
             );
         }

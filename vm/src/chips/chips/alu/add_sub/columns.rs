@@ -11,9 +11,6 @@ pub struct AddSubCols<T> {
     /// The chunk number, used for byte lookup table.
     pub chunk: T,
 
-    /// The nonce of the operation.
-    pub nonce: T,
-
     /// Instance of `AddGadget` to handle addition logic in `AddSubChip`'s ALU operations.
     /// It's result will be `a` for the add operation and `b` for the sub operation.
     pub add_operation: AddGadget<T>,

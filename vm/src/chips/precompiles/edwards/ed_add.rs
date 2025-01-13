@@ -66,7 +66,6 @@ pub struct EdAddAssignCols<T> {
     pub is_real: T,
     pub chunk: T,
     pub clk: T,
-    pub nonce: T,
     pub p_ptr: T,
     pub q_ptr: T,
     pub p_access: [MemoryWriteCols<T>; WORDS_CURVE_POINT],
@@ -165,19 +164,16 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
             input.chunk_index(),
             events.len()
         );
-        let (_rows, nonces): (Vec<[F; NUM_ED_ADD_COLS]>, Vec<_>) = events
+        let mut rows: Vec<[F; NUM_ED_ADD_COLS]> = events
             .par_iter()
             .map(|event| {
                 let mut row = [F::ZERO; NUM_ED_ADD_COLS];
                 let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
                 let mut rlu = Vec::new();
                 Self::event_to_row(event, cols, &mut rlu);
-                let nonce = *input.nonce_lookup.get(&event.lookup_id).unwrap();
-                (row, nonce)
+                row
             })
-            .unzip();
-
-        let mut rows = _rows.clone();
+            .collect();
 
         let log_rows = input.shape_chip_size(&self.name());
         pad_rows_fixed(
@@ -201,20 +197,10 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
         );
 
         // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
+        RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_ED_ADD_COLS,
-        );
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut EdAddAssignCols<F> =
-                trace.values[i * NUM_ED_ADD_COLS..(i + 1) * NUM_ED_ADD_COLS].borrow_mut();
-            let nonce = nonces.get(i).unwrap_or(&0);
-            cols.nonce = F::from_canonical_u32(*nonce);
-        }
-
-        trace
+        )
     }
 
     fn extra_record(&self, input: &Self::Record, output: &mut Self::Record) {
@@ -425,7 +411,6 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            local.nonce,
             CB::F::from_canonical_u32(SyscallCode::ED_ADD.syscall_id()),
             local.p_ptr,
             local.q_ptr,

@@ -83,7 +83,6 @@ impl<F: Field> CpuChip<F> {
                 branch_cols.pc,
                 local.op_c_val(),
                 local.chunk,
-                branch_cols.next_pc_nonce,
                 local.branching,
             );
 
@@ -194,7 +193,6 @@ impl<F: Field> CpuChip<F> {
             local.op_a_val(),
             local.op_b_val(),
             local.chunk,
-            branch_cols.a_lt_b_nonce,
             is_branch_instruction.clone(),
         );
 
@@ -206,7 +204,6 @@ impl<F: Field> CpuChip<F> {
             local.op_b_val(),
             local.op_a_val(),
             local.chunk,
-            branch_cols.a_gt_b_nonce,
             is_branch_instruction.clone(),
         );
     }

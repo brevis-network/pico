@@ -54,9 +54,6 @@ where
         let one: CB::Expr = CB::F::ONE.into();
         let byte_mask = CB::F::from_canonical_u8(BYTE_MASK);
 
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-
         // Calculate the MSBs.
         let (b_msb, c_msb) = {
             let msb_pairs = [
@@ -196,7 +193,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.nonce,
             local.is_real,
         );
     }

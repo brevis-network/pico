@@ -12,9 +12,6 @@ pub trait RecordBehavior: Default + Send + Sync {
 
     fn public_values<F: FieldAlgebra>(&self) -> Vec<F>;
 
-    /// Registers the nonces of the record.
-    fn register_nonces(&mut self) {}
-
     fn chunk_index(&self) -> usize;
 
     fn unconstrained(&self) -> bool {

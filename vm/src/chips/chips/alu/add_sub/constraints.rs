@@ -6,7 +6,7 @@ use crate::{
     compiler::riscv::opcode::Opcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
-use p3_air::{Air, AirBuilder};
+use p3_air::Air;
 use p3_field::Field;
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
@@ -19,9 +19,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &AddSubCols<CB::Var> = (*local).borrow();
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
 
         // Evaluate the addition operation.
         AddGadget::<CB::F>::eval(
@@ -44,7 +41,6 @@ where
             local.operand_1,
             local.operand_2,
             local.chunk,
-            local.nonce,
             local.is_add,
         );
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
@@ -54,7 +50,6 @@ where
             local.add_operation.value,
             local.operand_2,
             local.chunk,
-            local.nonce,
             local.is_sub,
         );
 

@@ -3,17 +3,11 @@ use crate::{
     chips::chips::{riscv_cpu::event::CpuEvent, riscv_memory::read_write::columns::MemoryCols},
     emulator::riscv::syscalls::SyscallCode,
 };
-use hashbrown::HashMap;
 use p3_field::Field;
 
 impl<F: Field> CpuChip<F> {
     /// Populate columns related to ECALL.
-    pub(crate) fn populate_ecall(
-        &self,
-        cols: &mut CpuCols<F>,
-        event: &CpuEvent,
-        nonce_lookup: &HashMap<u128, u32>,
-    ) -> bool {
+    pub(crate) fn populate_ecall(&self, cols: &mut CpuCols<F>, event: &CpuEvent) -> bool {
         let mut is_halt = false;
 
         if cols.opcode_selector.is_ecall == F::ONE {
@@ -69,14 +63,6 @@ impl<F: Field> CpuChip<F> {
                 let digest_idx = cols.op_b_access.value().to_u32() as usize;
                 ecall_cols.index_bitmap[digest_idx] = F::ONE;
             }
-
-            // Write the syscall nonce.
-            ecall_cols.syscall_nonce = F::from_canonical_u32(
-                nonce_lookup
-                    .get(&event.syscall_lookup_id)
-                    .copied()
-                    .unwrap_or_default(),
-            );
 
             is_halt = syscall_id == F::from_canonical_u32(SyscallCode::HALT.syscall_id());
 

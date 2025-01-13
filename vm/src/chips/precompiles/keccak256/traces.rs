@@ -131,16 +131,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
             });
 
         // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(values, NUM_KECCAK_MEM_COLS);
-
-        // Write the nonce to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut KeccakMemCols<F> =
-                trace.values[i * NUM_KECCAK_MEM_COLS..(i + 1) * NUM_KECCAK_MEM_COLS].borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
-
-        trace
+        RowMajorMatrix::new(values, NUM_KECCAK_MEM_COLS)
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

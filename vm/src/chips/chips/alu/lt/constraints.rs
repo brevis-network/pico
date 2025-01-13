@@ -25,9 +25,6 @@ where
         let mut b_cmp: Word<CB::Expr> = local.b.map(|x| x.into());
         let mut c_cmp: Word<CB::Expr> = local.c.map(|x| x.into());
 
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-
         b_cmp[3] = local.b[3] * local.is_slt_u + local.b_masked * local.is_slt;
         c_cmp[3] = local.c[3] * local.is_slt_u + local.c_masked * local.is_slt;
 
@@ -156,14 +153,6 @@ where
         // SLT looked
         let lt_op_code = local.is_slt * CB::F::from_canonical_u32(Opcode::SLT as u32)
             + local.is_slt_u * CB::F::from_canonical_u32(Opcode::SLTU as u32);
-        builder.looked_alu(
-            lt_op_code,
-            local.a,
-            local.b,
-            local.c,
-            local.chunk,
-            local.nonce,
-            is_real,
-        )
+        builder.looked_alu(lt_op_code, local.a, local.b, local.c, local.chunk, is_real)
     }
 }

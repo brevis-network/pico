@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, BaseAir};
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 
@@ -33,17 +33,9 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let local = main.row_slice(0);
         let local: &Poseidon2Cols<CB::Var, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS> =
             (*local).borrow();
-        let next: &Poseidon2Cols<CB::Var, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS> =
-            (*next).borrow();
-
-        // Constrain the incrementing nonce.
-        // builder.when_first_row().assert_zero(local.nonce);
-        builder
-            .when_transition()
-            .assert_eq(next.is_real * (local.nonce + CB::Expr::ONE), next.nonce);
 
         // Load from memory to the state
         for (i, word) in local.input_memory.iter().enumerate() {
@@ -120,7 +112,6 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            local.nonce,
             CB::F::from_canonical_u32(SyscallCode::POSEIDON2_PERMUTE.syscall_id()),
             local.input_memory_ptr,
             local.output_memory_ptr,

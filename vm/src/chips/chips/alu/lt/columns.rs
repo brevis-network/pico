@@ -8,8 +8,6 @@ use std::mem::size_of;
 pub struct LtCols<T: Copy> {
     /// The chunk number, used for byte lookup table.
     pub chunk: T,
-    /// The nonce of the operation.
-    pub nonce: T,
     /// If the opcode is SLT.
     pub is_slt: T,
     /// If the opcode is SLTU.

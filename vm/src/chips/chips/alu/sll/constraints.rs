@@ -23,9 +23,6 @@ where
         let one: CB::Expr = CB::F::ONE.into();
         let base: CB::Expr = CB::F::from_canonical_u32(1 << BYTE_SIZE).into();
 
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
-
         // Check the sum of c_lsb[i] * 2^i equals c[0].
         let mut c_byte_sum = zero.clone();
         for i in 0..BYTE_SIZE {
@@ -129,7 +126,6 @@ where
             local.b,
             local.c,
             local.chunk,
-            local.nonce,
             local.is_real,
         );
     }

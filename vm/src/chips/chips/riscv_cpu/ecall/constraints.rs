@@ -56,7 +56,6 @@ impl<F: Field> CpuChip<F> {
         builder.looking_syscall(
             local.chunk,
             local.clk,
-            ecall_cols.syscall_nonce,
             syscall_id,
             local.op_b_val().reduce::<CB>(),
             local.op_c_val().reduce::<CB>(),

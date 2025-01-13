@@ -52,7 +52,6 @@ pub const fn num_weierstrass_double_cols<P: FieldParameters + NumWords>() -> usi
 pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
     pub chunk: T,
-    pub nonce: T,
     pub clk: T,
     pub p_ptr: T,
     pub p_access: Array<MemoryWriteCols<T>, P::WordsCurvePoint>,
@@ -287,21 +286,10 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
         );
 
         // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
+        RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             num_weierstrass_double_cols::<E::BaseField>(),
-        );
-
-        // Write the nonces to the trace.
-        for i in 0..trace.height() {
-            let cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField> = trace.values[i
-                * num_weierstrass_double_cols::<E::BaseField>()
-                ..(i + 1) * num_weierstrass_double_cols::<E::BaseField>()]
-                .borrow_mut();
-            cols.nonce = F::from_canonical_usize(i);
-        }
-
-        trace
+        )
     }
 
     fn is_active(&self, chunk: &Self::Record) -> bool {
@@ -345,9 +333,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &WeierstrassDoubleAssignCols<CB::Var, E::BaseField> = (*local).borrow();
-
-        // Constrain the incrementing nonce.
-        builder.when_first_row().assert_zero(local.nonce);
 
         let num_words_field_element = E::BaseField::NUM_LIMBS / 4;
         let p_x = limbs_from_prev_access(&local.p_access[0..num_words_field_element]);
@@ -502,7 +487,6 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            local.nonce,
             syscall_id_felt,
             local.p_ptr,
             CB::Expr::ZERO,
