@@ -459,8 +459,7 @@ where
             })
             .collect::<Vec<_>>();
 
-        let pcs = config.pcs();
-        let (permutation_commit, permutation_data) = pcs.commit(perm_domain);
+        let (permutation_commit, permutation_data) = config.pcs().commit(perm_domain);
 
         info!(
             "PERF-step=commit_permutation-chunk={}-user_time={}",
@@ -530,12 +529,14 @@ where
                                 .preprocessed_chip_ordering
                                 .get(&chips[i].name())
                                 .map(|index| {
-                                    pcs.get_evaluations_on_domain(
-                                        &pk.preprocessed_prover_data,
-                                        *index,
-                                        *quotient_domain,
-                                    )
-                                    .to_row_major_matrix()
+                                    config
+                                        .pcs()
+                                        .get_evaluations_on_domain(
+                                            &pk.preprocessed_prover_data,
+                                            *index,
+                                            *quotient_domain,
+                                        )
+                                        .to_row_major_matrix()
                                 })
                                 .unwrap_or_else(|| {
                                     RowMajorMatrix::new_col(vec![
@@ -543,11 +544,13 @@ where
                                         quotient_domain.size()
                                     ])
                                 });
-                            let main_trace_on_quotient_domain = pcs
+                            let main_trace_on_quotient_domain = config
+                                .pcs()
                                 .get_evaluations_on_domain(&data.data, i, *quotient_domain)
                                 .to_row_major_matrix();
 
-                            let permutation_trace_on_quotient_domains = pcs
+                            let permutation_trace_on_quotient_domains = config
+                                .pcs()
                                 .get_evaluations_on_domain(&permutation_data, i, *quotient_domain)
                                 .to_row_major_matrix();
 

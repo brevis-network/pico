@@ -47,14 +47,12 @@ pub trait StarkGenericConfig: Clone + Serialize + Sync {
         + Clone;
 
     /// The PCS used to commit to trace polynomials.
-    type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain>
-        + Sync
-        + ZeroCommitment<Self>;
+    type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain> + ZeroCommitment<Self>;
 
     fn new() -> Self;
 
     /// Get the PCS used by this configuration.
-    fn pcs(&self) -> &Self::Pcs;
+    fn pcs(&self) -> Self::Pcs;
 
     /// Initialize a new challenger.
     fn challenger(&self) -> Self::Challenger;

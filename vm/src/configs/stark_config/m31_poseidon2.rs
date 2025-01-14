@@ -28,7 +28,7 @@ pub type SC_DigestHash = p3_symmetric::Hash<SC_Val, SC_Val, DIGEST_SIZE>;
 
 pub struct M31Poseidon2 {
     pub perm: SC_Perm,
-    pcs: SC_Pcs,
+    val_mmcs: SC_ValMmcs,
 }
 
 impl Serialize for M31Poseidon2 {
@@ -58,22 +58,20 @@ impl StarkGenericConfig for M31Poseidon2 {
         let hash = SC_Hash::new(perm.clone());
         let compress = SC_Compress::new(perm.clone());
         let val_mmcs = SC_ValMmcs::new(hash, compress);
-        let challenge_mmcs = SC_ChallengeMmcs::new(val_mmcs.clone());
-        let pcs = SC_Pcs {
-            mmcs: val_mmcs,
+        Self { perm, val_mmcs }
+    }
+
+    fn pcs(&self) -> Self::Pcs {
+        SC_Pcs {
+            mmcs: self.val_mmcs.clone(),
             fri_config: FriConfig {
                 log_blowup: 1,
                 num_queries: 100,
                 proof_of_work_bits: 16,
-                mmcs: challenge_mmcs,
+                mmcs: SC_ChallengeMmcs::new(self.val_mmcs.clone()),
             },
             _phantom: PhantomData,
-        };
-        Self { perm, pcs }
-    }
-
-    fn pcs(&self) -> &Self::Pcs {
-        &self.pcs
+        }
     }
 
     fn challenger(&self) -> Self::Challenger {

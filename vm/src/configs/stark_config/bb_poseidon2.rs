@@ -2,7 +2,6 @@ use crate::{
     configs::config::{Com, SimpleFriConfig, StarkGenericConfig, Val, ZeroCommitment},
     primitives::{consts::DIGEST_SIZE, pico_poseidon2bb_init, PicoPoseidon2BabyBear},
 };
-use log::info;
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
 use p3_commit::{ExtensionMmcs, Pcs};
@@ -29,8 +28,9 @@ pub type SC_DigestHash = p3_symmetric::Hash<SC_Val, SC_Val, DIGEST_SIZE>;
 
 pub struct BabyBearPoseidon2 {
     pub perm: SC_Perm,
-    pcs: SC_Pcs,
     simple_fri_config: SimpleFriConfig,
+    log_blowup: usize,
+    num_queries: usize,
 }
 
 impl Serialize for BabyBearPoseidon2 {
@@ -39,46 +39,6 @@ impl Serialize for BabyBearPoseidon2 {
         S: serde::Serializer,
     {
         std::marker::PhantomData::<BabyBearPoseidon2>.serialize(serializer)
-    }
-}
-
-impl BabyBearPoseidon2 {
-    pub fn compress() -> Self {
-        let perm = pico_poseidon2bb_init();
-        let hash = SC_Hash::new(perm.clone());
-        let compress = SC_Compress::new(perm.clone());
-        let val_mmcs = SC_ValMmcs::new(hash, compress);
-        let challenge_mmcs = SC_ChallengeMmcs::new(val_mmcs.clone());
-        let dft = SC_Dft::default();
-        let num_queries = match std::env::var("FRI_QUERIES") {
-            Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 50,
-        };
-        info!("NUM_QUERIES: {}", num_queries);
-
-        let fri_config = FriConfig {
-            log_blowup: 2,
-            num_queries,
-            proof_of_work_bits: 16,
-            mmcs: challenge_mmcs,
-        };
-        let pcs = SC_Pcs::new(dft, val_mmcs, fri_config);
-
-        let simple_fri_config = SimpleFriConfig {
-            log_blowup: 2,
-            num_queries,
-            proof_of_work_bits: 16,
-        };
-
-        Self {
-            perm,
-            pcs,
-            simple_fri_config,
-        }
-    }
-
-    pub fn fri_config(&self) -> &SimpleFriConfig {
-        &self.simple_fri_config
     }
 }
 
@@ -103,40 +63,37 @@ impl StarkGenericConfig for BabyBearPoseidon2 {
 
     fn new() -> Self {
         let perm = pico_poseidon2bb_init();
-        let hash = SC_Hash::new(perm.clone());
-        let compress = SC_Compress::new(perm.clone());
-        let val_mmcs = SC_ValMmcs::new(hash, compress);
-        let challenge_mmcs = SC_ChallengeMmcs::new(val_mmcs.clone());
-        let dft = SC_Dft::default();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
             Err(_) => 100,
         };
-        info!("NUM_QUERIES: {}", num_queries);
 
-        let fri_config = FriConfig {
-            log_blowup: 1,
-            num_queries,
-            proof_of_work_bits: 16,
-            mmcs: challenge_mmcs,
-        };
-        let pcs = SC_Pcs::new(dft, val_mmcs, fri_config);
-
+        let log_blowup = 1;
         let simple_fri_config = SimpleFriConfig {
-            log_blowup: 1,
+            log_blowup,
             num_queries,
             proof_of_work_bits: 16,
         };
 
         Self {
             perm,
-            pcs,
             simple_fri_config,
+            log_blowup,
+            num_queries,
         }
     }
 
-    fn pcs(&self) -> &Self::Pcs {
-        &self.pcs
+    fn pcs(&self) -> Self::Pcs {
+        let hash = SC_Hash::new(self.perm.clone());
+        let compress = SC_Compress::new(self.perm.clone());
+        let val_mmcs = SC_ValMmcs::new(hash, compress);
+        let fri_config = FriConfig {
+            log_blowup: self.log_blowup,
+            num_queries: self.num_queries,
+            proof_of_work_bits: 16,
+            mmcs: SC_ChallengeMmcs::new(val_mmcs.clone()),
+        };
+        SC_Pcs::new(SC_Dft::default(), val_mmcs.clone(), fri_config)
     }
 
     fn challenger(&self) -> Self::Challenger {
@@ -150,6 +107,34 @@ impl StarkGenericConfig for BabyBearPoseidon2 {
     fn hash_slice(&self, input: &[Val<Self>]) -> [Val<Self>; DIGEST_SIZE] {
         let hash = SC_Hash::new(self.perm.clone());
         hash.hash_slice(input)
+    }
+}
+
+impl BabyBearPoseidon2 {
+    pub fn compress() -> Self {
+        let perm = pico_poseidon2bb_init();
+        let num_queries = match std::env::var("FRI_QUERIES") {
+            Ok(num_queries) => num_queries.parse().unwrap(),
+            Err(_) => 50,
+        };
+
+        let log_blowup = 2;
+        let simple_fri_config = SimpleFriConfig {
+            log_blowup,
+            num_queries,
+            proof_of_work_bits: 16,
+        };
+
+        Self {
+            perm,
+            simple_fri_config,
+            log_blowup,
+            num_queries,
+        }
+    }
+
+    pub fn fri_config(&self) -> &SimpleFriConfig {
+        &self.simple_fri_config
     }
 }
 

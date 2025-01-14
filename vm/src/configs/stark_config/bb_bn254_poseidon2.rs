@@ -18,7 +18,6 @@ use p3_fri::{BatchOpening, CommitPhaseProofStep, FriConfig, FriProof, QueryProof
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
-use tracing::info;
 
 pub type SC_Val = BabyBear;
 pub type SC_Perm = Poseidon2Bn254<MULTI_FIELD_CHALLENGER_WIDTH>;
@@ -54,8 +53,8 @@ pub type SC_PcsProof = FriProof<SC_Challenge, SC_ChallengeMmcs, SC_Val, SC_Input
 
 pub struct BabyBearBn254Poseidon2 {
     pub perm: SC_Perm,
-    pcs: SC_Pcs,
     simple_fri_config: SimpleFriConfig,
+    num_queries: usize,
 }
 
 impl Serialize for BabyBearBn254Poseidon2 {
@@ -94,24 +93,11 @@ impl StarkGenericConfig for BabyBearBn254Poseidon2 {
 
     fn new() -> Self {
         let perm = pico_poseidon2bn254_init();
-        let hash = SC_Hash::new(perm.clone()).unwrap();
-        let compress = SC_Compress::new(perm.clone());
-        let val_mmcs = SC_ValMmcs::new(hash, compress);
-        let challenge_mmcs = SC_ChallengeMmcs::new(val_mmcs.clone());
-        let dft = SC_Dft::default();
 
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
             Err(_) => 25,
         };
-        info!("NUM_QUERIES: {}", num_queries);
-        let fri_config = FriConfig {
-            log_blowup: 4,
-            num_queries,
-            proof_of_work_bits: 16,
-            mmcs: challenge_mmcs,
-        };
-        let pcs = SC_Pcs::new(dft, val_mmcs, fri_config);
 
         let simple_fri_config = SimpleFriConfig {
             log_blowup: 4,
@@ -121,13 +107,22 @@ impl StarkGenericConfig for BabyBearBn254Poseidon2 {
 
         BabyBearBn254Poseidon2 {
             perm,
-            pcs,
             simple_fri_config,
+            num_queries,
         }
     }
 
-    fn pcs(&self) -> &Self::Pcs {
-        &self.pcs
+    fn pcs(&self) -> Self::Pcs {
+        let hash = SC_Hash::new(self.perm.clone()).unwrap();
+        let compress = SC_Compress::new(self.perm.clone());
+        let val_mmcs = SC_ValMmcs::new(hash, compress);
+        let fri_config = FriConfig {
+            log_blowup: 4,
+            num_queries: self.num_queries,
+            proof_of_work_bits: 16,
+            mmcs: SC_ChallengeMmcs::new(val_mmcs.clone()),
+        };
+        SC_Pcs::new(SC_Dft::default(), val_mmcs.clone(), fri_config)
     }
 
     fn challenger(&self) -> Self::Challenger {

@@ -246,7 +246,7 @@ where
             let batch_proofs = batch_records.par_iter().map(|record| {
                 let start_chunk = Instant::now();
 
-                let main_commitment = self.base_machine.commit(&record).unwrap();
+                let main_commitment = self.base_machine.commit(record).unwrap();
 
                 let proof = self.base_machine.prove_plain(
                     witness.pk(),

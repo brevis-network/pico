@@ -80,7 +80,7 @@ where
     A: ChipBehavior<Val<SC>>,
 {
     pub fn natural_domain_for_degree(config: &SC, degree: usize) -> SC::Domain {
-        SC::Pcs::natural_domain_for_degree(config.pcs(), degree)
+        SC::Pcs::natural_domain_for_degree(&config.pcs(), degree)
     }
 
     #[allow(unused_variables)]

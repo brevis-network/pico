@@ -253,7 +253,7 @@ where
             let domain = <<BabyBearPoseidon2 as StarkGenericConfig>::Pcs as Pcs<
                 <BabyBearPoseidon2 as StarkGenericConfig>::Challenge,
                 <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
-            >>::natural_domain_for_degree(pcs, 1 << log_height);
+            >>::natural_domain_for_degree(&pcs, 1 << log_height);
             (
                 name.to_owned(),
                 domain,

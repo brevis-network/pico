@@ -63,6 +63,7 @@ pub struct CpuEvent {
 }
 
 impl CpuEvent {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chunk: u32,
         clk: u32,
