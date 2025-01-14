@@ -12,7 +12,6 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
-        folder::ProverConstraintFolder,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -22,10 +21,8 @@ use crate::{
         COMBINE_SIZE, CONVERT_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS,
         KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS_V2,
     },
-    proverchain::VerifierConstraintFolder,
     recursion_v2::runtime::RecursionRecord,
 };
-use p3_air::Air;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
 type ConvertChips<
@@ -70,24 +67,19 @@ pub struct CombineProver<
     Val<PrevSC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
     SC: StarkGenericConfig,
     Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
-
     CombineChips<SC, W, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>:
         ChipBehavior<
-                Val<SC>,
-                Program = RecursionProgram<Val<SC>>,
-                Record = RecursionRecord<Val<SC>>,
-            > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
-
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        >,
     ConvertChips<
         PrevSC,
         W,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: ChipBehavior<Val<PrevSC>>
-        + for<'a> Air<ProverConstraintFolder<'a, PrevSC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, PrevSC>>,
+    >: ChipBehavior<Val<PrevSC>>,
 {
     machine: CombineMachine<
         SC,

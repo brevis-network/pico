@@ -58,26 +58,26 @@ macro_rules! run {
             info!("\n Creating emulator (at {:?})..", start.elapsed());
             let mut emulator =
                 RiscvEmulator::new::<Val<$riscv_sc>>(program, EmulatorOpts::default());
-            emulator.run_with_stdin(stdin).unwrap();
+            let records = emulator.run(Some(stdin)).unwrap();
 
             // TRICKY: We copy the memory initialize and finalize events from the second (last)
             // record to this record, since the memory lookups could only work if has the
             // full lookups in the all records.
             assert_eq!(
-                emulator.records.len(),
+                records.len(),
                 2,
                 "We could only test for one record for now and the last is the final one",
             );
-            for record in &emulator.records {
+            for record in &records {
                 debug!("record events: {:?}", record.stats());
             }
-            let mut record = emulator.records[0].clone();
+            let mut record = records[0].clone();
             assert!(record.memory_initialize_events.is_empty());
             assert!(record.memory_finalize_events.is_empty());
-            emulator.records[1]
+            records[1]
                 .memory_initialize_events
                 .clone_into(&mut record.memory_initialize_events);
-            emulator.records[1]
+            records[1]
                 .memory_finalize_events
                 .clone_into(&mut record.memory_finalize_events);
             let program = record.program.clone();

@@ -13,7 +13,6 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
-        folder::ProverConstraintFolder,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -23,10 +22,8 @@ use crate::{
         DIGEST_SIZE, EXTENSION_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS,
         KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS_V2,
     },
-    proverchain::VerifierConstraintFolder,
     recursion_v2::runtime::RecursionRecord,
 };
-use p3_air::Air;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
 type RecursionChips<
@@ -62,11 +59,10 @@ pub struct ConvertProver<
 
     RecursionChips<SC, W, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>:
         ChipBehavior<
-                Val<SC>,
-                Program = RecursionProgram<Val<SC>>,
-                Record = RecursionRecord<Val<SC>>,
-            > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        >,
 {
     machine: ConvertMachine<
         SC,

@@ -26,7 +26,15 @@ pub struct BaseVerifier<SC, C> {
 impl<SC, C> Clone for BaseVerifier<SC, C> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<SC, C> Default for BaseVerifier<SC, C> {
+    fn default() -> Self {
+        Self {
+            _phantom: core::marker::PhantomData,
         }
     }
 }
@@ -34,13 +42,11 @@ impl<SC, C> Clone for BaseVerifier<SC, C> {
 impl<SC, C> BaseVerifier<SC, C>
 where
     SC: StarkGenericConfig,
-    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
+    C: ChipBehavior<SC::Val>,
 {
     /// Initialize verifier with the same config and chips as prover.
     pub fn new() -> Self {
-        Self {
-            _phantom: std::marker::PhantomData,
-        }
+        Self::default()
     }
 
     /// Verify the proof.
@@ -53,7 +59,10 @@ where
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,
         num_public_values: usize,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    {
         let BaseProof {
             commitments,
             opened_values,
@@ -346,16 +355,6 @@ where
         }
 
         Ok(())
-    }
-}
-
-impl<SC, C> Default for BaseVerifier<SC, C>
-where
-    SC: StarkGenericConfig,
-    C: for<'a> Air<VerifierConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
-{
-    fn default() -> Self {
-        Self::new()
     }
 }
 

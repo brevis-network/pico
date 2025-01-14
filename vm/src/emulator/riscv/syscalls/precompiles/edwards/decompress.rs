@@ -12,7 +12,7 @@ use crate::chips::gadgets::{
 use crate::{
     chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
     emulator::riscv::syscalls::{
-        precompiles::{edwards::event::EdDecompressEvent, PrecompileEvent},
+        precompiles::{EdDecompressEvent, PrecompileEvent},
         syscall_context::SyscallContext,
         Syscall, SyscallCode,
     },

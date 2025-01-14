@@ -13,11 +13,13 @@ use sysinfo::System;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorOpts {
     /// The size of a chunk in terms of cycles.
-    pub chunk_size: usize,
+    pub chunk_size: u32,
     /// The size of a batch of chunks in terms of cycles.
-    pub chunk_batch_size: usize,
+    pub chunk_batch_size: u32,
     /// Options for splitting deferred events.
     pub split_opts: SplitOpts,
+    /// The maximum number of cpu cycles to use for emulation.
+    pub max_cycles: Option<u64>,
 }
 
 impl Default for EmulatorOpts {
@@ -28,13 +30,14 @@ impl Default for EmulatorOpts {
         Self {
             chunk_size: env::var("CHUNK_SIZE").map_or_else(
                 |_| DEFAULT_CHUNK_SIZE,
-                |s| s.parse::<usize>().unwrap_or(DEFAULT_CHUNK_SIZE),
+                |s| s.parse::<u32>().unwrap_or(DEFAULT_CHUNK_SIZE),
             ),
             chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
                 |_| DEFAULT_CHUNK_BATCH_SIZE,
-                |s| s.parse::<usize>().unwrap_or(DEFAULT_CHUNK_BATCH_SIZE),
+                |s| s.parse::<u32>().unwrap_or(DEFAULT_CHUNK_BATCH_SIZE),
             ),
             split_opts: SplitOpts::new(split_threshold),
+            max_cycles: None,
         }
     }
 }
@@ -44,17 +47,18 @@ impl EmulatorOpts {
         Self {
             chunk_size: env::var("CHUNK_SIZE").map_or_else(
                 |_| TEST_CHUNK_SIZE,
-                |s| s.parse::<usize>().unwrap_or(TEST_CHUNK_SIZE),
+                |s| s.parse::<u32>().unwrap_or(TEST_CHUNK_SIZE),
             ),
             chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
                 |_| TEST_CHUNK_BATCH_SIZE,
-                |s| s.parse::<usize>().unwrap_or(TEST_CHUNK_BATCH_SIZE),
+                |s| s.parse::<u32>().unwrap_or(TEST_CHUNK_BATCH_SIZE),
             ),
             split_opts: SplitOpts::new(TEST_DEFERRED_SPLIT_THRESHOLD),
+            max_cycles: None,
         }
     }
 
-    fn bench_default_opts() -> (usize, usize, usize) {
+    fn bench_default_opts() -> (usize, u32, u32) {
         let split_threshold = env::var("SPLIT_THRESHOLD")
             .map(|s| {
                 s.parse::<usize>()
@@ -81,13 +85,14 @@ impl EmulatorOpts {
         Self {
             chunk_size: env::var("CHUNK_SIZE").map_or_else(
                 |_| default_chunk_size,
-                |s| s.parse::<usize>().unwrap_or(default_chunk_size),
+                |s| s.parse::<u32>().unwrap_or(default_chunk_size),
             ),
             chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
                 |_| default_chunk_batch_size,
-                |s| s.parse::<usize>().unwrap_or(default_chunk_batch_size),
+                |s| s.parse::<u32>().unwrap_or(default_chunk_batch_size),
             ),
             split_opts: SplitOpts::new(split_threshold),
+            ..Default::default()
         }
     }
 
@@ -97,9 +102,10 @@ impl EmulatorOpts {
             chunk_size: BENCH_RECURSION_MAX_CHUNK_SIZE,
             chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
                 |_| default_chunk_batch_size,
-                |s| s.parse::<usize>().unwrap_or(default_chunk_batch_size),
+                |s| s.parse::<u32>().unwrap_or(default_chunk_batch_size),
             ),
             split_opts: SplitOpts::new(split_threshold),
+            ..Default::default()
         }
     }
 }
@@ -134,7 +140,7 @@ impl SplitOpts {
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn chunk_size(total_available_mem: u64) -> usize {
+fn chunk_size(total_available_mem: u64) -> u32 {
     let log_shard_size = match total_available_mem {
         0..=14 => 17,
         m => (((m as f64).log2() * 0.619) + 16.2).floor() as usize,
@@ -142,7 +148,7 @@ fn chunk_size(total_available_mem: u64) -> usize {
     std::cmp::min(1 << log_shard_size, BENCH_MAX_CHUNK_SIZE)
 }
 
-fn chunk_batch_size(total_available_mem: u64) -> usize {
+fn chunk_batch_size(total_available_mem: u64) -> u32 {
     match total_available_mem {
         0..=16 => 1,
         17..=48 => 2,

@@ -78,9 +78,9 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
             let reconstruct_challenger = dummy_challenger(&base_machine.config());
 
             let stdin = ConvertStdin {
-                machine: base_machine,
-                riscv_vk: &vk,
-                proofs: chunk_proofs,
+                machine: base_machine.clone(),
+                riscv_vk: vk,
+                proofs: chunk_proofs.into(),
                 base_challenger,
                 reconstruct_challenger,
                 flag_complete: shape.is_complete,

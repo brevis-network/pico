@@ -23,7 +23,6 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::BaseMachine,
         witness::ProvingWitness,
@@ -31,9 +30,9 @@ use crate::{
     primitives::consts::{BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE},
     recursion_v2::runtime::{RecursionRecord, Runtime},
 };
-use p3_air::Air;
+use alloc::sync::Arc;
 use p3_field::PrimeField32;
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
 // todo: refactor
 
@@ -41,60 +40,43 @@ use std::{marker::PhantomData, sync::Arc};
 // SC and C for configs in the emulated machine
 // P and I for the native program and input types
 // E for the emulator type
-pub struct MetaEmulator<'a, SC, C, P, I, E>
+pub struct MetaEmulator<SC, C, P, I, E>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
-    pub stdin: &'a EmulatorStdin<P, I>,
+    pub stdin: EmulatorStdin<P, I>,
     pub emulator: Option<E>,
-    pub batch_size: usize, // max parallelism
+    pub batch_size: u32, // max parallelism
     pub _sc_and_chip: PhantomData<(SC, C)>,
 }
 
 // MetaEmulator for riscv
-impl<'a, SC, C> MetaEmulator<'a, SC, C, Program, Vec<u8>, RiscvEmulator>
+impl<SC, C> MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>
 where
     SC: StarkGenericConfig,
     SC::Val: PrimeField32,
-    C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
-    pub fn setup_riscv(proving_witness: &'a ProvingWitness<SC, C, Vec<u8>>) -> Self {
+    pub fn setup_riscv(proving_witness: &ProvingWitness<SC, C, Vec<u8>>) -> Self {
         // create a new emulator based on the emulator type
         let opts = proving_witness.opts.unwrap();
         let mut emulator =
             RiscvEmulator::new::<SC::Val>(proving_witness.program.clone().unwrap(), opts);
         emulator.emulator_mode = EmulatorMode::Trace;
-        for each in proving_witness
-            .stdin
-            .as_ref()
-            .unwrap()
-            .inputs
-            .iter()
-            .cloned()
-        {
-            emulator.state.input_stream.push(each);
-        }
+        emulator.write_stdin(proving_witness.stdin.as_ref().unwrap());
 
         Self {
-            stdin: proving_witness.stdin.as_ref().unwrap(),
+            stdin: proving_witness.stdin.clone().unwrap(),
             emulator: Some(emulator),
             batch_size: opts.chunk_batch_size,
             _sc_and_chip: PhantomData,
         }
     }
 
-    pub fn next_record_batch(&mut self) -> (&mut [EmulationRecord], bool) {
+    pub fn next_record_batch(&mut self) -> (Vec<EmulationRecord>, bool) {
         let emulator = self.emulator.as_mut().unwrap();
-        let mut done = false;
-        if emulator.emulate_to_batch().unwrap() {
-            done = true;
-        }
-        (emulator.batch_records.as_mut_slice(), done)
+        emulator.emulate_batch().unwrap()
     }
 }
 
@@ -121,13 +103,11 @@ macro_rules! impl_emulator {
             const HALF_EXTERNAL_ROUNDS: usize,
             const NUM_INTERNAL_ROUNDS: usize,
         > where
-            C: ChipBehavior<Val<$recur_sc>>
-                + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
-                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+            C: ChipBehavior<Val<$recur_sc>>,
         {
             pub stdin: &'a EmulatorStdin<P, I>,
             pub emulator: Option<E>,
-            pub batch_size: usize, // max parallelism
+            pub batch_size: u32, // max parallelism
             pointer: usize,
             machine: Option<&'a BaseMachine<$recur_sc, C>>, // used for setting-up and generating keys
         }
@@ -139,7 +119,6 @@ macro_rules! impl_emulator {
                 C,
                 RecursionProgram<Val<$recur_sc>>,
                 ConvertStdin<
-                    'a,
                     $riscv_sc,
                     RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
                 >,
@@ -149,11 +128,10 @@ macro_rules! impl_emulator {
             >
         where
             C: ChipBehavior<
-                    Val<$recur_sc>,
-                    Program = RecursionProgram<Val<$recur_sc>>,
-                    Record = RecursionRecord<Val<$recur_sc>>,
-                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
-                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+                Val<$recur_sc>,
+                Program = RecursionProgram<Val<$recur_sc>>,
+                Record = RecursionRecord<Val<$recur_sc>>,
+            >,
             Poseidon2PermuteChip<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
                 ChipBehavior<Val<$riscv_sc>, Record = EmulationRecord, Program = Program>,
         {
@@ -162,7 +140,6 @@ macro_rules! impl_emulator {
                     $recur_sc,
                     C,
                     ConvertStdin<
-                        'a,
                         $riscv_sc,
                         RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
                     >,
@@ -222,7 +199,7 @@ macro_rules! impl_emulator {
                     if done {
                         return (batch_records, batch_pks, batch_vks, true);
                     }
-                    if batch_records.len() >= self.batch_size {
+                    if batch_records.len() >= self.batch_size as usize {
                         break;
                     }
                 }
@@ -243,17 +220,15 @@ macro_rules! impl_emulator {
             >
         where
             PrevC: ChipBehavior<
-                    Val<$recur_sc>,
-                    Program = RecursionProgram<Val<$recur_sc>>,
-                    Record = RecursionRecord<Val<$recur_sc>>,
-                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
-                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+                Val<$recur_sc>,
+                Program = RecursionProgram<Val<$recur_sc>>,
+                Record = RecursionRecord<Val<$recur_sc>>,
+            >,
             C: ChipBehavior<
-                    Val<$recur_sc>,
-                    Program = RecursionProgram<Val<$recur_sc>>,
-                    Record = RecursionRecord<Val<$recur_sc>>,
-                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
-                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+                Val<$recur_sc>,
+                Program = RecursionProgram<Val<$recur_sc>>,
+                Record = RecursionRecord<Val<$recur_sc>>,
+            >,
         {
             pub fn setup_combine(
                 proving_witness: &'a ProvingWitness<
@@ -316,7 +291,7 @@ macro_rules! impl_emulator {
                     if done {
                         return (batch_records, batch_pks, batch_vks, true);
                     }
-                    if batch_records.len() >= self.batch_size {
+                    if batch_records.len() >= self.batch_size as usize {
                         break;
                     }
                 }
@@ -337,17 +312,15 @@ macro_rules! impl_emulator {
             >
         where
             PrevC: ChipBehavior<
-                    Val<$recur_sc>,
-                    Program = RecursionProgram<Val<$recur_sc>>,
-                    Record = RecursionRecord<Val<$recur_sc>>,
-                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
-                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+                Val<$recur_sc>,
+                Program = RecursionProgram<Val<$recur_sc>>,
+                Record = RecursionRecord<Val<$recur_sc>>,
+            >,
             C: ChipBehavior<
-                    Val<$recur_sc>,
-                    Program = RecursionProgram<Val<$recur_sc>>,
-                    Record = RecursionRecord<Val<$recur_sc>>,
-                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
-                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+                Val<$recur_sc>,
+                Program = RecursionProgram<Val<$recur_sc>>,
+                Record = RecursionRecord<Val<$recur_sc>>,
+            >,
         {
             pub fn setup_combine_vk(
                 proving_witness: &'a ProvingWitness<
@@ -408,7 +381,7 @@ macro_rules! impl_emulator {
                     if done {
                         return (batch_records, batch_pks, batch_vks, true);
                     }
-                    if batch_records.len() >= self.batch_size {
+                    if batch_records.len() >= self.batch_size as usize {
                         break;
                     }
                 }
@@ -422,9 +395,7 @@ macro_rules! impl_emulator {
                 stdin: &ConvertStdin<$riscv_sc, RiscvC>,
             ) -> RecursionRecord<Val<$recur_sc>>
             where
-                RiscvC: ChipBehavior<Val<$riscv_sc>, Program = Program, Record = EmulationRecord>
-                    + for<'b> Air<ProverConstraintFolder<'b, $riscv_sc>>
-                    + for<'b> Air<VerifierConstraintFolder<'b, $riscv_sc>>,
+                RiscvC: ChipBehavior<Val<$riscv_sc>, Program = Program, Record = EmulationRecord>,
             {
                 let mut witness_stream = Vec::new();
                 Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
@@ -446,11 +417,10 @@ macro_rules! impl_emulator {
             ) -> RecursionRecord<Val<$recur_sc>>
             where
                 RecursionC: ChipBehavior<
-                        Val<$recur_sc>,
-                        Program = RecursionProgram<Val<$recur_sc>>,
-                        Record = RecursionRecord<Val<$recur_sc>>,
-                    > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
-                    + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                >,
             {
                 let mut witness_stream = Vec::new();
                 Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
@@ -471,11 +441,10 @@ macro_rules! impl_emulator {
             ) -> RecursionRecord<Val<$recur_sc>>
             where
                 RecursionC: ChipBehavior<
-                        Val<$recur_sc>,
-                        Program = RecursionProgram<Val<$recur_sc>>,
-                        Record = RecursionRecord<Val<$recur_sc>>,
-                    > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
-                    + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>,
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                >,
             {
                 let mut witness_stream = Vec::new();
                 Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);

@@ -362,7 +362,7 @@ where
 {
     get_symbolic_constraints(air, preprocessed_width)
         .iter()
-        .map(|c| compute_degree(c))
+        .map(compute_degree)
         .max()
         .unwrap_or(0)
 }

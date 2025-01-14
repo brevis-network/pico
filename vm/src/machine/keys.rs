@@ -28,7 +28,7 @@ pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// The starting global digest of the program, after incorporating the initial memory.
     pub initial_global_cumulative_sum: SepticDigest<SC::Val>,
     /// The preprocessed chip local only information.
-    pub local_only: Vec<bool>,
+    pub local_only: Arc<[bool]>,
 }
 
 impl<SC: StarkGenericConfig> Clone for BaseProvingKey<SC>
@@ -70,7 +70,7 @@ pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     /// start pc of program
     pub pc_start: SC::Val,
     /// The preprocessed information.
-    pub preprocessed_info: Arc<Vec<(String, Dom<SC>, Dimensions)>>,
+    pub preprocessed_info: Arc<[(String, Dom<SC>, Dimensions)]>,
     /// the index of for chips, chip name for key
     pub preprocessed_chip_ordering: Arc<HashMap<String, usize>>,
     /// The starting global digest of the program, after incorporating the initial memory.

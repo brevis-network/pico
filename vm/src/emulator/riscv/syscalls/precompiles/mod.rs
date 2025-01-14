@@ -9,29 +9,19 @@ pub mod weierstrass;
 
 use crate::{
     chips::chips::riscv_memory::event::MemoryLocalEvent,
-    emulator::riscv::syscalls::{
-        precompiles::{
-            ec::event::{EllipticCurveDecompressEvent, EllipticCurveDoubleEvent},
-            edwards::event::{EdDecompressEvent, EllipticCurveAddEvent},
-            fptower::event::{Fp2AddSubEvent, Fp2MulEvent, FpEvent},
-            keccak256::event::KeccakPermuteEvent,
-            poseidon2::event::Poseidon2PermuteEvent,
-            sha256::event::{ShaCompressEvent, ShaExtendEvent},
-            uint256::event::Uint256MulEvent,
-        },
-        SyscallCode, SyscallEvent,
-    },
+    emulator::riscv::syscalls::{SyscallCode, SyscallEvent},
 };
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
-// pub use ec::*;
-// pub use fptower::*;
-// pub use keccak256::*;
-// pub use poseidon2::*;
-// pub use uint256::*;
-// pub use weierstrass::*;
-// pub use sha256::*;
+
+pub use ec::event::{EllipticCurveDecompressEvent, EllipticCurveDoubleEvent};
+pub use edwards::event::{EdDecompressEvent, EllipticCurveAddEvent};
+pub use fptower::event::{Fp2AddSubEvent, Fp2MulEvent, FpEvent};
+pub use keccak256::event::KeccakPermuteEvent;
+pub use poseidon2::event::Poseidon2PermuteEvent;
+pub use sha256::event::{ShaCompressEvent, ShaExtendEvent};
+pub use uint256::event::Uint256MulEvent;
 
 #[derive(Clone, Debug, Serialize, Deserialize, EnumIter)]
 /// Precompile event.  There should be one variant for every precompile syscall.

@@ -18,20 +18,13 @@ use crate::{
             riscv_circuit::stdin::dummy_vk_and_chunk_proof, shapes::compress_shape::RecursionShape,
         },
     },
-    machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
-        machine::BaseMachine,
-        proof::BaseProof,
-    },
+    machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},
     primitives::consts::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
         DIGEST_SIZE,
     },
 };
 use alloc::sync::Arc;
-use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
@@ -40,9 +33,7 @@ use p3_field::{FieldAlgebra, TwoAdicField};
 pub struct RecursionStdin<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
     pub machine: &'a BaseMachine<SC, C>,
     pub vks: Arc<[BaseVerifyingKey<SC>]>,
@@ -118,9 +109,7 @@ impl<'a>
 impl<'a, SC, C> RecursionStdin<'a, SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<SC::Val>,
 {
     pub fn new(
         machine: &'a BaseMachine<SC, C>,
@@ -152,9 +141,7 @@ where
     >,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-    C: ChipBehavior<CC::F>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<CC::F>,
 {
     type WitnessVariable = RecursionStdinVariable<CC, SC>;
 

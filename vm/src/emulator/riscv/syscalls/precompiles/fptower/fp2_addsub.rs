@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use crate::{
     chips::gadgets::field::field_op::FieldOperation,
     emulator::riscv::syscalls::{
-        precompiles::{fptower::event::Fp2AddSubEvent, PrecompileEvent},
+        precompiles::{Fp2AddSubEvent, PrecompileEvent},
         Syscall, SyscallCode, SyscallContext,
     },
 };

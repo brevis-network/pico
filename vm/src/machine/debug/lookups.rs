@@ -3,13 +3,11 @@ use crate::{
     configs::config::StarkGenericConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseProvingKey,
         lookup::{LookupScope, LookupType, VirtualPairLookup},
     },
 };
 use log::{error, info};
-use p3_air::Air;
 use p3_field::{Field, FieldAlgebra, PrimeField64};
 use p3_matrix::Matrix;
 use std::{collections::BTreeMap, fmt::Display, iter::repeat};
@@ -229,9 +227,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalLookupDebugger<'a, SC> {
 
     pub fn debug_incremental<C>(&mut self, chips: &[MetaChip<SC::Val, C>], chunks: &[C::Record])
     where
-        C: ChipBehavior<SC::Val>
-            + for<'b> Air<ProverConstraintFolder<'b, SC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        C: ChipBehavior<SC::Val>,
         SC::Val: PrimeField64,
     {
         if self.scope == LookupScope::Regional {

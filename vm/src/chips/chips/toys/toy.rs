@@ -161,7 +161,7 @@ mod tests {
         let rng = &mut thread_rng();
 
         let [a, b, result] = array::from_fn(|_| F::from_canonical_u8(rng.gen()));
-        let is_add = F::from_bool(rng.gen::<bool>());
+        let is_add = F::from_bool(rng.gen());
         let cols = ToyCols::new(&a, &b, &result, &is_add);
 
         let mut expected_row = vec![a, b, result, is_add];

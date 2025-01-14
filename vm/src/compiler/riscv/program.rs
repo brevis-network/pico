@@ -60,6 +60,11 @@ impl Program {
             })
             .copied()
     }
+
+    pub fn fetch(&self, pc: u32) -> Instruction {
+        let idx = (pc - self.pc_base) as usize / 4;
+        self.instructions[idx]
+    }
 }
 
 impl<F: PrimeField> ProgramBehavior<F> for Program {

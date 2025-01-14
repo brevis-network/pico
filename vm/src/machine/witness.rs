@@ -14,7 +14,6 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         proof::BaseProof,
     },
@@ -22,7 +21,6 @@ use crate::{
     recursion_v2::runtime::RecursionRecord,
 };
 use alloc::sync::Arc;
-use p3_air::Air;
 
 #[derive(Default)]
 pub struct ProvingWitness<SC, C, I>
@@ -132,21 +130,18 @@ where
 }
 
 // implement Witness for riscv-recursion machine
-impl<'a, C, PrevC, SC> ProvingWitness<SC, C, ConvertStdin<'a, SC, PrevC>>
+impl<C, PrevC, SC> ProvingWitness<SC, C, ConvertStdin<SC, PrevC>>
 where
     SC: StarkGenericConfig,
-    PrevC: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    PrevC: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
 {
     pub fn setup_for_convert(
-        stdin: EmulatorStdin<C::Program, ConvertStdin<'a, SC, PrevC>>,
+        stdin: EmulatorStdin<C::Program, ConvertStdin<SC, PrevC>>,
         config: Arc<SC>,
         opts: EmulatorOpts,
     ) -> Self {
@@ -170,17 +165,15 @@ impl<'a, C, PrevC, SC> ProvingWitness<SC, C, RecursionStdin<'a, SC, PrevC>>
 where
     SC: StarkGenericConfig,
     PrevC: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
 {
     pub fn setup_for_recursion(
         vk_root: [Val<SC>; DIGEST_SIZE],
@@ -211,17 +204,15 @@ impl<'a, C, SC, PrevC> ProvingWitness<SC, C, RecursionVkStdin<'a, SC, PrevC>>
 where
     SC: StarkGenericConfig + FieldHasher<Val<SC>>,
     PrevC: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
 {
     pub fn setup_for_recursion_vk(
         vk_root: [Val<SC>; DIGEST_SIZE],

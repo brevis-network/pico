@@ -24,11 +24,10 @@ pub struct CompressVkMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
 {
     base_machine: BaseMachine<SC, C>,
 }
@@ -37,11 +36,10 @@ impl<C> MachineBehavior<RecursionSC, C, RecursionVkStdin<'_, RecursionSC, C>>
     for CompressVkMachine<RecursionSC, C>
 where
     C: ChipBehavior<
-            Val<RecursionSC>,
-            Program = RecursionProgram<Val<RecursionSC>>,
-            Record = RecursionRecord<Val<RecursionSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, RecursionSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, RecursionSC>>,
+        Val<RecursionSC>,
+        Program = RecursionProgram<Val<RecursionSC>>,
+        Record = RecursionRecord<Val<RecursionSC>>,
+    >,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -63,13 +61,13 @@ where
         witness: &ProvingWitness<RecursionSC, C, RecursionVkStdin<RecursionSC, C>>,
     ) -> MetaProof<RecursionSC>
     where
-        C: for<'c> Air<
-            DebugConstraintFolder<
-                'c,
-                <RecursionSC as StarkGenericConfig>::Val,
-                <RecursionSC as StarkGenericConfig>::Challenge,
-            >,
-        >,
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <RecursionSC as StarkGenericConfig>::Val,
+                    <RecursionSC as StarkGenericConfig>::Challenge,
+                >,
+            > + for<'a> Air<ProverConstraintFolder<'a, RecursionSC>>,
     {
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
@@ -88,7 +86,10 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<RecursionSC>) -> anyhow::Result<()> {
+    fn verify(&self, proof: &MetaProof<RecursionSC>) -> anyhow::Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, RecursionSC>>,
+    {
         let vk = proof.vks().first().unwrap();
 
         info!("PERF-machine=convert");
@@ -118,11 +119,10 @@ impl<SC, C> CompressVkMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {

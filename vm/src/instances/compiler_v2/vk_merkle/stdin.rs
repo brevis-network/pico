@@ -22,17 +22,12 @@ use crate::{
             shapes::compress_shape::RecursionVkShape,
         },
     },
-    machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        machine::BaseMachine,
-    },
+    machine::{chip::ChipBehavior, machine::BaseMachine},
     primitives::consts::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
         DIGEST_SIZE,
     },
 };
-use p3_air::Air;
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
@@ -141,9 +136,7 @@ impl<SC: StarkGenericConfig + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZ
 pub struct RecursionVkStdin<'a, SC, C>
 where
     SC: StarkGenericConfig + FieldHasher<Val<SC>>,
-    C: ChipBehavior<Val<SC>>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
     pub merkle_proof_stdin: MerkleProofStdin<SC>,
     pub recursion_stdin: RecursionStdin<'a, SC, C>,
@@ -173,9 +166,7 @@ where
     SC::Digest: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-    C: ChipBehavior<CC::F>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<CC::F>,
 {
     type WitnessVariable = RecursionVkStdinVariable<CC, SC>;
 

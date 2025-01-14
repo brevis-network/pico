@@ -24,11 +24,10 @@ pub struct CompressMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
 {
     base_machine: BaseMachine<SC, C>,
 }
@@ -125,11 +124,10 @@ impl<SC, C> CompressMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {

@@ -68,7 +68,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         let mut trace = RowMajorMatrix::new(values, NUM_CPU_COLS);
 
         // Pad the trace to a power of two.
-        Self::pad_to_power_of_two(self, &input.shape, &mut trace.values);
+        Self::pad_to_power_of_two(self, input.shape.as_ref(), &mut trace.values);
 
         trace
     }
@@ -190,7 +190,7 @@ impl<F: PrimeField32> CpuChip<F> {
         new_alu_events
     }
 
-    fn pad_to_power_of_two(&self, shape: &Option<RiscvPadShape>, values: &mut Vec<F>) {
+    fn pad_to_power_of_two(&self, shape: Option<&RiscvPadShape>, values: &mut Vec<F>) {
         let n_real_rows = values.len() / NUM_CPU_COLS;
         let padded_nb_rows = if let Some(shape) = shape {
             1 << shape.inner[&self.name()]

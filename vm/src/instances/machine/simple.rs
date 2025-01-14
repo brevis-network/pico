@@ -18,9 +18,7 @@ use tracing::info;
 pub struct SimpleMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
     /// Base proving machine
     base_machine: BaseMachine<SC, C>,
@@ -54,7 +52,8 @@ where
     /// Get the prover of the machine.
     fn prove(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> MetaProof<SC>
     where
-        C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
+        C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>
+            + for<'a> Air<ProverConstraintFolder<'a, SC>>,
     {
         info!("PERF-machine=simple");
         let begin = Instant::now();
@@ -71,7 +70,10 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<SC>) -> Result<()> {
+    fn verify(&self, proof: &MetaProof<SC>) -> Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    {
         // panic if proofs is empty
         info!("PERF-machine=simple");
         let begin = Instant::now();
@@ -93,9 +95,7 @@ where
 impl<SC, C> SimpleMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<SC::Val>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {

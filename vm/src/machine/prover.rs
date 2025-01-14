@@ -22,7 +22,7 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
-use p3_matrix::{dense::RowMajorMatrix, Dimensions, Matrix};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use rayon::ThreadPoolBuilder;
@@ -36,21 +36,28 @@ pub struct BaseProver<SC, C> {
 impl<SC, C> Clone for BaseProver<SC, C> {
     fn clone(&self) -> Self {
         Self {
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 }
 
-#[allow(clippy::new_without_default)]
+impl<SC, C> Default for BaseProver<SC, C> {
+    fn default() -> Self {
+        Self {
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
 impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C>
 where
-    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
+    C: ChipBehavior<SC::Val>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
     pub fn new() -> Self {
         Self {
-            _phantom: std::marker::PhantomData,
+            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -64,15 +71,15 @@ where
 
         let local_only = chips_and_preprocessed
             .iter()
-            .map(|(_, local_only, _)| local_only.to_owned())
-            .collect::<Vec<_>>();
+            .map(|(_, local_only, _)| *local_only)
+            .collect();
 
         // Get the chip ordering.
-        let preprocessed_chip_ordering = chips_and_preprocessed
+        let preprocessed_chip_ordering: HashMap<_, _> = chips_and_preprocessed
             .iter()
             .enumerate()
             .map(|(i, (name, _, _))| (name.to_owned(), i))
-            .collect::<HashMap<_, _>>();
+            .collect();
         let preprocessed_chip_ordering = Arc::new(preprocessed_chip_ordering);
 
         let pcs = config.pcs();
@@ -82,15 +89,12 @@ where
             let domain = pcs.natural_domain_for_degree(trace.height());
             (name, trace, domain)
         });
-        let preprocessed_info_vec: Vec<(String, SC::Domain, Dimensions)> = preprocessed_iter
+        let preprocessed_info = preprocessed_iter
             .clone()
             .map(|(name, trace, domain)| (name.to_owned(), domain, trace.dimensions()))
             .collect();
 
-        let preprocessed_info: Arc<Vec<(String, SC::Domain, Dimensions)>> =
-            Arc::new(preprocessed_info_vec);
-
-        let domains_and_preprocessed: Vec<_> = preprocessed_iter
+        let domains_and_preprocessed = preprocessed_iter
             .map(|(_, trace, domain)| (domain, trace.to_owned()))
             .collect();
 
@@ -398,7 +402,10 @@ where
         challenger: &mut SC::Challenger,
         chunk_index: usize,
         num_public_values: usize,
-    ) -> BaseProof<SC> {
+    ) -> BaseProof<SC>
+    where
+        C: for<'a> Air<ProverConstraintFolder<'a, SC>>,
+    {
         let begin = Instant::now();
 
         let chips = order_chips::<SC, C>(chips, &data.main_chip_ordering).collect_vec();

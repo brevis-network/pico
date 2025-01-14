@@ -23,14 +23,19 @@ use p3_matrix::{
     stack::VerticalPair,
 };
 
+type F<FC> = <FC as FieldGenericConfig>::F;
+type EF<FC> = <FC as FieldGenericConfig>::EF;
+
 pub type RecursiveVerifierConstraintFolder<'a, FC> = GenericVerifierConstraintFolder<
     'a,
-    <FC as FieldGenericConfig>::F,
-    <FC as FieldGenericConfig>::EF,
-    Felt<<FC as FieldGenericConfig>::F>,
-    Ext<<FC as FieldGenericConfig>::F, <FC as FieldGenericConfig>::EF>,
-    SymbolicExt<<FC as FieldGenericConfig>::F, <FC as FieldGenericConfig>::EF>,
+    F<FC>,
+    EF<FC>,
+    Felt<F<FC>>,
+    Ext<F<FC>, EF<FC>>,
+    SymbolicExt<F<FC>, EF<FC>>,
 >;
+
+type Opening<FC> = ChipOpenedValues<Felt<F<FC>>, Ext<F<FC>, EF<FC>>>;
 
 impl<C, SC, A> StarkVerifier<C, SC, A>
 where
@@ -45,7 +50,7 @@ where
     pub fn verify_constraints(
         builder: &mut Builder<C>,
         chip: &MetaChip<SC::Val, A>,
-        opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        opening: &Opening<C>,
         trace_domain: TwoAdicMultiplicativeCoset<C::F>,
         qc_domains: Vec<TwoAdicMultiplicativeCoset<C::F>>,
         zeta: Ext<C::F, C::EF>,
@@ -77,7 +82,7 @@ where
     pub fn eval_constraints(
         builder: &mut Builder<C>,
         chip: &MetaChip<SC::Val, A>,
-        opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        opening: &Opening<C>,
         selectors: &LagrangeSelectors<Ext<C::F, C::EF>>,
         alpha: Ext<C::F, C::EF>,
         permutation_challenges: &[Ext<C::F, C::EF>],
@@ -136,7 +141,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn recompute_quotient(
         builder: &mut Builder<C>,
-        opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
+        opening: &Opening<C>,
         qc_domains: &[TwoAdicMultiplicativeCoset<C::F>],
         zeta: Ext<C::F, C::EF>,
     ) -> Ext<C::F, C::EF> {

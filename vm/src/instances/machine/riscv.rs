@@ -27,9 +27,7 @@ use tracing::{info, instrument};
 pub struct RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<SC::Val>,
 {
     base_machine: BaseMachine<SC, C>,
 }
@@ -39,15 +37,11 @@ impl<SC, C> RiscvMachine<SC, C>
 where
     SC: Send + StarkGenericConfig,
     Val<SC>: PrimeField32,
-    C: Send
-        + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     SC::Domain: Send + Sync,
-    SC::Val: PrimeField32,
 {
     /// Prove with shape config
     #[instrument(name = "riscv_prove_with_shape", level = "debug", skip_all)]
@@ -58,12 +52,12 @@ where
     ) -> MetaProof<SC>
     where
         C: for<'a> Air<
-            DebugConstraintFolder<
-                'a,
-                <SC as StarkGenericConfig>::Val,
-                <SC as StarkGenericConfig>::Challenge,
-            >,
-        >,
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
         Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
             ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
     {
@@ -93,8 +87,8 @@ where
         );
 
         loop {
-            let (batch_records, done) = emulator.next_record_batch();
-            self.complement_record(batch_records);
+            let (mut batch_records, done) = emulator.next_record_batch();
+            self.complement_record(&mut batch_records);
 
             if let Some(shape_config) = shape_config {
                 for record in batch_records.iter_mut() {
@@ -105,36 +99,33 @@ where
             }
 
             #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(&self.chips(), batch_records);
+            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
             #[cfg(feature = "debug-lookups")]
             {
                 crate::machine::debug::debug_regional_lookups(
                     pk,
                     &self.chips(),
-                    batch_records,
+                    &batch_records,
                     None,
                 );
-                global_lookup_debugger.debug_incremental(&self.chips(), batch_records);
+                global_lookup_debugger.debug_incremental(&self.chips(), &batch_records);
             }
 
-            let batch_proofs = batch_records
-                .into_par_iter()
-                .map(|record| {
-                    let main_commitment = self.base_machine.commit(record).unwrap();
+            let batch_proofs = batch_records.par_iter().map(|record| {
+                let main_commitment = self.base_machine.commit(record).unwrap();
 
-                    let proof = self.base_machine.prove_plain(
-                        witness.pk(),
-                        &mut challenger.clone(),
-                        record.chunk_index(),
-                        main_commitment,
-                    );
+                let proof = self.base_machine.prove_plain(
+                    witness.pk(),
+                    &mut challenger.clone(),
+                    record.chunk_index(),
+                    main_commitment,
+                );
 
-                    proof
-                })
-                .collect::<Vec<_>>();
+                proof
+            });
 
             // extend all_proofs to include batch_proofs
-            all_proofs.extend(batch_proofs);
+            all_proofs.par_extend(batch_proofs);
 
             if done {
                 break;
@@ -160,10 +151,7 @@ impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
 where
     SC: Send + StarkGenericConfig,
     Val<SC>: PrimeField32,
-    C: Send
-        + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
@@ -184,12 +172,12 @@ where
     fn prove(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> MetaProof<SC>
     where
         C: for<'a> Air<
-            DebugConstraintFolder<
-                'a,
-                <SC as StarkGenericConfig>::Val,
-                <SC as StarkGenericConfig>::Challenge,
-            >,
-        >,
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
     {
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
@@ -221,8 +209,9 @@ where
         let mut chunk_num = 0;
         loop {
             let start_local = Instant::now();
-            let (batch_records, done) = emulator.next_record_batch();
-            self.complement_record(batch_records);
+            let (mut batch_records, done) = emulator.next_record_batch();
+            self.complement_record(&mut batch_records);
+
             info!(
                 "--- Generate riscv records for batch {}, chunk {}-{} in {:?}",
                 batch_num,
@@ -233,7 +222,7 @@ where
             chunk_num += batch_records.len() as u32;
 
             // set index for each record
-            for record in batch_records.iter_mut() {
+            for record in batch_records.iter() {
                 let stats = record.stats();
                 info!("RISCV record stats: chunk {}", record.chunk_index());
                 for (key, value) in &stats {
@@ -242,44 +231,41 @@ where
             }
 
             #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(&self.chips(), batch_records);
+            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
             #[cfg(feature = "debug-lookups")]
             {
                 crate::machine::debug::debug_regional_lookups(
                     pk,
                     &self.chips(),
-                    batch_records,
+                    &batch_records,
                     None,
                 );
-                global_lookup_debugger.debug_incremental(&self.chips(), batch_records);
+                global_lookup_debugger.debug_incremental(&self.chips(), &batch_records);
             }
 
-            let batch_proofs = batch_records
-                .into_par_iter()
-                .map(|record| {
-                    let start_chunk = Instant::now();
+            let batch_proofs = batch_records.par_iter().map(|record| {
+                let start_chunk = Instant::now();
 
-                    let main_commitment = self.base_machine.commit(record).unwrap();
+                let main_commitment = self.base_machine.commit(&record).unwrap();
 
-                    let proof = self.base_machine.prove_plain(
-                        witness.pk(),
-                        &mut challenger.clone(),
-                        record.chunk_index(),
-                        main_commitment,
-                    );
+                let proof = self.base_machine.prove_plain(
+                    witness.pk(),
+                    &mut challenger.clone(),
+                    record.chunk_index(),
+                    main_commitment,
+                );
 
-                    info!(
-                        "--- Prove riscv batch {} chunk {} in {:?}",
-                        batch_num,
-                        record.chunk_index(),
-                        start_chunk.elapsed()
-                    );
-                    proof
-                })
-                .collect::<Vec<_>>();
+                info!(
+                    "--- Prove riscv batch {} chunk {} in {:?}",
+                    batch_num,
+                    record.chunk_index(),
+                    start_chunk.elapsed()
+                );
+                proof
+            });
 
             // extend all_proofs to include batch_proofs
-            all_proofs.extend(batch_proofs);
+            all_proofs.par_extend(batch_proofs);
 
             info!(
                 "--- Finish riscv batch {} in {:?}",
@@ -308,14 +294,20 @@ where
         info!("RiscV execution report:");
         info!("|- cycles:           {}", riscv_emulator.state.global_clk);
         info!("|- chunk_num:        {}", all_proofs.len());
-        info!("|- chunk_size:       {}", riscv_emulator.chunk_size);
-        info!("|- chunk_batch_size: {}", riscv_emulator.chunk_batch_size);
+        info!("|- chunk_size:       {}", riscv_emulator.opts.chunk_size);
+        info!(
+            "|- chunk_batch_size: {}",
+            riscv_emulator.opts.chunk_batch_size
+        );
 
         MetaProof::new(all_proofs.into(), vks.into())
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<SC>) -> Result<()> {
+    fn verify(&self, proof: &MetaProof<SC>) -> Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    {
         // Assert single vk
         assert_eq!(proof.vks().len(), 1);
 
@@ -488,9 +480,7 @@ fn transition_with_condition<'a, T: Copy + core::fmt::Debug + Eq>(
 impl<SC, C> RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<SC::Val>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {

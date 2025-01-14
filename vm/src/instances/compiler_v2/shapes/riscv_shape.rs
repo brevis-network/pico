@@ -272,7 +272,7 @@ fn add_none_if_missing(shapes: &mut [RiscvShapeSpec]) {
 
 /// A structure that enables fixing the shape of an EmulationRecord.
 pub struct RiscvShapeConfig<
-    F: PrimeField32,
+    F: PrimeField,
     const HALF_EXTERNAL_ROUNDS: usize,
     const NUM_INTERNAL_ROUNDS: usize,
 > {

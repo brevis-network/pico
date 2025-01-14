@@ -20,7 +20,7 @@ use crate::{
     emulator::riscv::{
         record::EmulationRecord,
         syscalls::{
-            precompiles::{keccak256::event::KeccakPermuteEvent, PrecompileEvent},
+            precompiles::{KeccakPermuteEvent, PrecompileEvent},
             SyscallCode,
         },
     },

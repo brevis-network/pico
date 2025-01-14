@@ -127,9 +127,9 @@ fn main() {
     info!("\n Creating Runtime..");
     let mut runtime = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
-    runtime.run().unwrap();
+    let batch_records = runtime.run(None).unwrap();
 
-    let records = &mut vec![runtime.records[0].clone()];
+    let records = &mut vec![batch_records[0].clone()];
 
     info!("\n Generating proof");
     // Generate the proof.
@@ -160,9 +160,9 @@ fn main() {
     info!("\n Creating Runtime..");
     let mut runtime = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
-    runtime.run().unwrap();
+    runtime.run(None).unwrap();
 
-    let records = &mut vec![runtime.records[0].clone()];
+    let records = &mut vec![batch_records[0].clone()];
 
     info!("\n Generating proof");
     // Generate the proof.

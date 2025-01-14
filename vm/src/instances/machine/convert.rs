@@ -35,11 +35,10 @@ pub struct ConvertMachine<
 > where
     SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
 {
     base_machine: BaseMachine<SC, C>,
 }
@@ -49,11 +48,10 @@ impl<SC, C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
@@ -71,7 +69,6 @@ macro_rules! impl_convert_machine {
                 $recur_sc,
                 C,
                 ConvertStdin<
-                    '_,
                     $riscv_sc,
                     RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
                 >,
@@ -82,8 +79,7 @@ macro_rules! impl_convert_machine {
                     Val<$recur_sc>,
                     Program = RecursionProgram<Val<$recur_sc>>,
                     Record = RecursionRecord<Val<$recur_sc>>,
-                > + for<'a> Air<ProverConstraintFolder<'a, $recur_sc>>
-                + for<'a> Air<VerifierConstraintFolder<'a, $recur_sc>>,
+                >,
             Poseidon2PermuteChip<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
                 ChipBehavior<Val<$riscv_sc>, Record = EmulationRecord, Program = Program>,
         {
@@ -111,13 +107,13 @@ macro_rules! impl_convert_machine {
                 >,
             ) -> MetaProof<$recur_sc>
             where
-                C: for<'c> Air<
-                    DebugConstraintFolder<
-                        'c,
-                        <$recur_sc as StarkGenericConfig>::Val,
-                        <$recur_sc as StarkGenericConfig>::Challenge,
-                    >,
-                >,
+                C: for<'a> Air<
+                        DebugConstraintFolder<
+                            'a,
+                            <$recur_sc as StarkGenericConfig>::Val,
+                            <$recur_sc as StarkGenericConfig>::Challenge,
+                        >,
+                    > + for<'a> Air<ProverConstraintFolder<'a, $recur_sc>>,
                 Poseidon2PermuteChip<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
                     ChipBehavior<Val<$riscv_sc>, Record = EmulationRecord, Program = Program>,
             {
@@ -191,7 +187,10 @@ macro_rules! impl_convert_machine {
             }
 
             /// Verify the proof.
-            fn verify(&self, proof: &MetaProof<$recur_sc>) -> Result<()> {
+            fn verify(&self, proof: &MetaProof<$recur_sc>) -> Result<()>
+            where
+                C: for<'a> Air<VerifierConstraintFolder<'a, $recur_sc>>,
+            {
                 info!("PERF-machine=recursion");
                 let begin = Instant::now();
 

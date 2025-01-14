@@ -6,14 +6,8 @@ mod riscv;
 
 use crate::{
     configs::config::{StarkGenericConfig, Val},
-    machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        machine::BaseMachine,
-        proof::MetaProof,
-    },
+    machine::{chip::ChipBehavior, machine::BaseMachine, proof::MetaProof},
 };
-use p3_air::Air;
 
 // re-exports
 pub use combine::CombineProver;
@@ -42,9 +36,7 @@ where
     SC: StarkGenericConfig,
 {
     type Witness;
-    type Chips: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>;
+    type Chips: ChipBehavior<Val<SC>>;
 
     fn machine(&self) -> &BaseMachine<SC, Self::Chips>;
     fn prove(&self, witness: Self::Witness) -> MetaProof<SC>;

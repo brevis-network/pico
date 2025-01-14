@@ -503,7 +503,7 @@ macro_rules! run {
 
             info!("\n Begin Onchain..");
             let onchain_stdin = OnchainStdin {
-                machine: embed_machine.base_machine(),
+                machine: embed_machine.base_machine().clone(),
                 vk: embed_proof.vks().first().unwrap().clone(),
                 proof: embed_proof.proofs().first().unwrap().clone(),
                 flag_complete: true,

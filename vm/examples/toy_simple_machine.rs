@@ -112,9 +112,9 @@ fn main() {
     info!("\n Creating Runtime..");
     let mut runtime = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
-    runtime.run().unwrap();
+    let batch_records = runtime.run(None).unwrap();
 
-    let record = &runtime.records[0];
+    let record = &batch_records[0];
     let mut records = vec![record.clone(), record.clone()];
 
     // Setup config and chips.

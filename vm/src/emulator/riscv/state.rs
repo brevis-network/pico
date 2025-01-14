@@ -4,12 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::{
-    chips::chips::riscv_memory::event::MemoryRecord,
-    emulator::riscv::{
-        record::{EmulationRecord, MemoryAccessRecord},
-        riscv_emulator::EmulatorMode,
-        syscalls::SyscallCode,
-    },
+    chips::chips::riscv_memory::event::MemoryRecord, emulator::riscv::syscalls::SyscallCode,
 };
 
 /// Holds data describing the current state of a program's emulation.
@@ -18,6 +13,9 @@ use crate::{
 pub struct RiscvEmulationState {
     /// The global clock keeps track of how many instrutions have been emulated through all chunks.
     pub global_clk: u64,
+
+    /// Current batch number
+    pub current_batch: u32,
 
     /// The chunk clock keeps track of how many chunks have been emulated.
     pub current_chunk: u32,
@@ -46,9 +44,6 @@ pub struct RiscvEmulationState {
     /// A ptr to the current position in the input stream incremented by HINT_READ opcode.
     pub input_stream_ptr: usize,
 
-    /// A ptr to the current position in the proof stream, incremented after verifying a proof.
-    pub proof_stream_ptr: usize,
-
     /// A stream of public values from the program (global to entire program).
     pub public_values_stream: Vec<u8>,
 
@@ -62,45 +57,19 @@ pub struct RiscvEmulationState {
     pub syscall_counts: HashMap<SyscallCode, u64>,
 }
 
-/// Holds data to track changes made to the runtime since a fork point.
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
-pub struct ForkState {
-    /// The `global_clk` value at the fork point.
-    pub global_clk: u64,
-    /// The original `clk` value at the fork point.
-    pub clk: u32,
-    /// The original `pc` value at the fork point.
-    pub pc: u32,
-    /// All memory changes since the fork point.
-    pub memory_diff: HashMap<u32, Option<MemoryRecord>, BuildNoHashHasher<u32>>,
-    /// The original memory access record at the fork point.
-    pub op_record: MemoryAccessRecord,
-    /// The original emulation record at the fork point.
-    pub record: EmulationRecord,
-    /// Whether `emit_events` was enabled at the fork point.
-    pub emulator_mode: EmulatorMode,
-}
-
 impl RiscvEmulationState {
     #[must_use]
     /// Create a new [`EmulationState`].
     pub fn new(pc_start: u32) -> Self {
         Self {
             global_clk: 0,
+            current_batch: 0,
             // Start at chunk 1 since chunk 0 is reserved for memory initialization.
             current_chunk: 1,
             current_execution_chunk: 1,
             clk: 0,
             pc: pc_start,
-            memory: HashMap::default(),
-            uninitialized_memory: HashMap::default(),
-            input_stream: Vec::new(),
-            input_stream_ptr: 0,
-            public_values_stream: Vec::new(),
-            public_values_stream_ptr: 0,
-            proof_stream_ptr: 0,
-            syscall_counts: HashMap::new(),
+            ..Default::default()
         }
     }
 }

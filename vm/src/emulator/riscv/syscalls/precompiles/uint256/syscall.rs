@@ -6,7 +6,7 @@ use crate::{
         precompiles::uint256::UINT256_NUM_WORDS,
     },
     emulator::riscv::syscalls::{
-        precompiles::{uint256::event::Uint256MulEvent, PrecompileEvent},
+        precompiles::{PrecompileEvent, Uint256MulEvent},
         syscall_context::SyscallContext,
         Syscall, SyscallCode,
     },

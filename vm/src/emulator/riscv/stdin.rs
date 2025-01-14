@@ -127,10 +127,10 @@ impl EmulatorStdinBuilder<Vec<u8>> {
 }
 
 // for convert stdin, converting riscv proofs to recursion proofs
-impl<'a, SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+impl<SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
     EmulatorStdin<
         RecursionProgram<Val<SC>>,
-        ConvertStdin<'a, SC, RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
+        ConvertStdin<SC, RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
     >
 where
     SC: StarkGenericConfig,
@@ -148,9 +148,9 @@ where
         const NUM_EXTERNAL_ROUNDS: usize,
         const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
     >(
-        riscv_vk: &'a BaseVerifyingKey<SC>,
+        riscv_vk: &BaseVerifyingKey<SC>,
         vk_root: [Val<SC>; DIGEST_SIZE],
-        machine: &'a BaseMachine<
+        machine: &BaseMachine<
             SC,
             RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
         >,
@@ -186,7 +186,6 @@ where
         Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
         PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
         Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
-
         Poseidon2SkinnyChip<CONVERT_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>:
             Air<SymbolicConstraintFolder<F>>
                 + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
@@ -217,9 +216,9 @@ where
                 let flag_first_chunk = i == 0;
 
                 let input = ConvertStdin {
-                    machine,
-                    riscv_vk,
-                    proofs: vec![proof.clone()],
+                    machine: machine.clone(),
+                    riscv_vk: riscv_vk.clone(),
+                    proofs: Arc::new([proof.clone()]),
                     base_challenger: base_challenger.clone(),
                     reconstruct_challenger: reconstruct_challenger.clone(),
                     flag_complete,

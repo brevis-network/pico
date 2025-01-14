@@ -9,28 +9,19 @@ use crate::{
         prelude::*,
     },
     configs::config::{Challenger, Com, PcsProof, StarkGenericConfig},
-    machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
-        machine::BaseMachine,
-        proof::BaseProof,
-    },
+    machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},
 };
-use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
 
-pub struct SimpleRecursionStdin<'a, SC, C>
+pub struct SimpleRecursionStdin<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<SC::Val>,
 {
-    pub vk: &'a BaseVerifyingKey<SC>,
-    pub machine: &'a BaseMachine<SC, C>,
+    pub vk: BaseVerifyingKey<SC>,
+    pub machine: BaseMachine<SC, C>,
     pub base_proofs: Vec<BaseProof<SC>>,
     pub flag_complete: bool,
     pub flag_first_chunk: bool,
@@ -49,17 +40,15 @@ where
     pub flag_first_chunk: Felt<CC::F>,
 }
 
-impl<'a, SC, C> SimpleRecursionStdin<'a, SC, C>
+impl<SC, C> SimpleRecursionStdin<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<SC::Val>,
 {
     pub fn construct(
-        machine: &'a BaseMachine<SC, C>,
-        vk: &'a BaseVerifyingKey<SC>,
-        base_challenger: &'a mut SC::Challenger,
+        machine: &BaseMachine<SC, C>,
+        vk: &BaseVerifyingKey<SC>,
+        base_challenger: &mut SC::Challenger,
         base_proof: BaseProof<SC>,
     ) -> Self {
         let num_public_values = machine.num_public_values();
@@ -70,8 +59,8 @@ where
         base_challenger.observe_slice(&base_proof.public_values[0..num_public_values]);
 
         Self {
-            vk,
-            machine,
+            vk: vk.clone(),
+            machine: machine.clone(),
             base_proofs,
             flag_complete: true,
             flag_first_chunk: true,
@@ -79,7 +68,7 @@ where
     }
 }
 
-impl<CC, SC, C> Witnessable<CC> for SimpleRecursionStdin<'_, SC, C>
+impl<CC, SC, C> Witnessable<CC> for SimpleRecursionStdin<SC, C>
 where
     CC: CircuitConfig,
     CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
@@ -93,9 +82,7 @@ where
     Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-    C: ChipBehavior<CC::F>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<CC::F>,
 {
     type WitnessVariable = SimpleRecursionStdinVariable<CC, SC>;
 

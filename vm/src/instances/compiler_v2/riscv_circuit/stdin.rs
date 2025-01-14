@@ -16,7 +16,6 @@ use crate::{
     instances::compiler_v2::shapes::ProofShape,
     machine::{
         chip::{ChipBehavior, MetaChip},
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::BaseVerifyingKey,
         machine::BaseMachine,
         proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
@@ -27,7 +26,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{Air, BaseAir};
+use p3_air::BaseAir;
 use p3_baby_bear::BabyBear;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{ExtensionField, Field, FieldAlgebra, TwoAdicField};
@@ -35,16 +34,14 @@ use p3_matrix::Dimensions;
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct ConvertStdin<'a, SC, C>
+pub struct ConvertStdin<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<SC::Val>,
 {
-    pub machine: &'a BaseMachine<SC, C>,
-    pub riscv_vk: &'a BaseVerifyingKey<SC>,
-    pub proofs: Vec<BaseProof<SC>>,
+    pub machine: BaseMachine<SC, C>,
+    pub riscv_vk: BaseVerifyingKey<SC>,
+    pub proofs: Arc<[BaseProof<SC>]>,
     pub base_challenger: SC::Challenger,
     pub reconstruct_challenger: SC::Challenger,
     pub flag_complete: bool,
@@ -65,18 +62,16 @@ where
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
 }
 
-impl<'a, F, SC, C> ConvertStdin<'a, SC, C>
+impl<F, SC, C> ConvertStdin<SC, C>
 where
     F: Field,
     SC: StarkGenericConfig<Val = F>,
-    C: ChipBehavior<F>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<F>,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        machine: &'a BaseMachine<SC, C>,
-        riscv_vk: &'a BaseVerifyingKey<SC>,
+        machine: &BaseMachine<SC, C>,
+        riscv_vk: &BaseVerifyingKey<SC>,
         proofs: Vec<BaseProof<SC>>,
         base_challenger: SC::Challenger,
         reconstruct_challenger: SC::Challenger,
@@ -85,9 +80,9 @@ where
         vk_root: [SC::Val; DIGEST_SIZE],
     ) -> Self {
         Self {
-            machine,
-            riscv_vk,
-            proofs,
+            machine: machine.clone(),
+            riscv_vk: riscv_vk.clone(),
+            proofs: proofs.into(),
             base_challenger,
             reconstruct_challenger,
             flag_complete,
@@ -97,7 +92,7 @@ where
     }
 }
 
-impl<CC, SC, C> Witnessable<CC> for ConvertStdin<'_, SC, C>
+impl<CC, SC, C> Witnessable<CC> for ConvertStdin<SC, C>
 where
     CC: CircuitConfig,
     CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
@@ -111,15 +106,13 @@ where
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
-    C: ChipBehavior<CC::F>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<CC::F>,
 {
     type WitnessVariable = ConvertStdinVariable<CC, SC>;
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         let riscv_vk = self.riscv_vk.read(builder);
-        let proofs = self.proofs.read(builder);
+        let proofs = self.proofs.as_ref().read(builder);
         let flag_complete = CC::F::from_bool(self.flag_complete).read(builder);
         let flag_first_chunk = CC::F::from_bool(self.flag_first_chunk).read(builder);
         let vk_root = self.vk_root.read(builder);
@@ -135,7 +128,7 @@ where
 
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
         self.riscv_vk.write(witness);
-        self.proofs.write(witness);
+        self.proofs.as_ref().write(witness);
         self.flag_complete.write(witness);
         self.flag_first_chunk.write(witness);
         self.vk_root.write(witness);
@@ -151,9 +144,7 @@ pub fn dummy_vk_and_chunk_proof<CB>(
     BaseProof<BabyBearPoseidon2>,
 )
 where
-    CB: ChipBehavior<BabyBear>
-        + for<'a> Air<ProverConstraintFolder<'a, BabyBearPoseidon2>>
-        + for<'a> Air<VerifierConstraintFolder<'a, BabyBearPoseidon2>>,
+    CB: ChipBehavior<BabyBear>,
 {
     // Make a dummy commitment.
     let commitments = BaseCommitments {

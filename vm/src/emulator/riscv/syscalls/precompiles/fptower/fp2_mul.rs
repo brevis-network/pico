@@ -4,7 +4,7 @@ use num::BigUint;
 use std::marker::PhantomData;
 
 use crate::emulator::riscv::syscalls::{
-    precompiles::{fptower::event::Fp2MulEvent, PrecompileEvent},
+    precompiles::{Fp2MulEvent, PrecompileEvent},
     Syscall, SyscallCode, SyscallContext,
 };
 

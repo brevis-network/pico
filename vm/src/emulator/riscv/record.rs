@@ -1,11 +1,4 @@
-use super::syscalls::precompiles::{
-    // edwards::event::{EdDecompressEvent, EllipticCurveAddEvent},
-    // fptower::event::{Fp2AddSubEvent, Fp2MulEvent, FpEvent},
-    // keccak256::event::KeccakPermuteEvent,
-    // poseidon2::event::Poseidon2PermuteEvent,
-    PrecompileEvent,
-    PrecompileEvents,
-};
+use super::syscalls::precompiles::{PrecompileEvent, PrecompileEvents};
 use crate::{
     chips::chips::{
         alu::event::AluEvent,
@@ -22,15 +15,7 @@ use crate::{
         record::RecordBehavior,
         riscv::{
             public_values::PublicValues,
-            syscalls::{
-                // precompiles::{
-                //     ec::event::{EllipticCurveDecompressEvent, EllipticCurveDoubleEvent},
-                //     sha256::event::{ShaCompressEvent, ShaExtendEvent},
-                //     uint256::event::Uint256MulEvent,
-                // },
-                SyscallCode,
-                SyscallEvent,
-            },
+            syscalls::{SyscallCode, SyscallEvent},
         },
     },
     instances::compiler_v2::shapes::riscv_shape::RiscvPadShape,
@@ -78,50 +63,8 @@ pub struct EmulationRecord {
     pub memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of all the chunk's local memory events.
     pub cpu_local_memory_access: Vec<MemoryLocalEvent>,
-    // TODO: remove all the discrete precompile events
-    /// A trace of the keccak256 permute events.
-    // pub keccak_permute_events: Vec<KeccakPermuteEvent>,
-    // /// A trace of the Poseidon2 permute events.
-    // pub poseidon2_permute_events: Vec<Poseidon2PermuteEvent>,
-    // /// A trace of the sha256 extend events.
-    // pub sha_extend_events: Vec<ShaExtendEvent>,
-    // /// A trace of the sha256 compress events.
-    // pub sha_compress_events: Vec<ShaCompressEvent>,
-    // /// BN254 events
-    // pub fp_bn254_events: Vec<FpEvent>,
-    // pub fp2_bn254_addsub_events: Vec<Fp2AddSubEvent>,
-    // pub fp2_bn254_mul_events: Vec<Fp2MulEvent>,
-    // /// BLS381 events
-    // pub fp_bls381_events: Vec<FpEvent>,
-    // pub fp2_bls381_addsub_events: Vec<Fp2AddSubEvent>,
-    // pub fp2_bls381_mul_events: Vec<Fp2MulEvent>,
-    // /// A trace of the ED Add events.
-    // pub ed_add_events: Vec<EllipticCurveAddEvent>,
-    // /// A trace of the ED Decompress events.
-    // pub ed_decompress_events: Vec<EdDecompressEvent>,
-    // /// A trace of the uint256 mul events.
-    // pub uint256_mul_events: Vec<Uint256MulEvent>,
     /// Public values
     pub public_values: PublicValues<u32, u32>,
-    //
-    // /// A trace of the bls12381 add events.
-    // pub bls12381_add_events: Vec<EllipticCurveAddEvent>,
-    // /// A trace of the bn254 add events.
-    // pub bn254_add_events: Vec<EllipticCurveAddEvent>,
-    // /// A trace of the secp256k1 add events.
-    // pub secp256k1_add_events: Vec<EllipticCurveAddEvent>,
-    //
-    // /// A trace of the bls12381 decompress events.
-    // pub bls12381_decompress_events: Vec<EllipticCurveDecompressEvent>,
-    // /// A trace of the k256 decompress events.
-    // pub k256_decompress_events: Vec<EllipticCurveDecompressEvent>,
-    //
-    // /// A trace of the bn254 double events.
-    // pub bn254_double_events: Vec<EllipticCurveDoubleEvent>,
-    // /// A trace of the bls12381 double events.
-    // pub bls12381_double_events: Vec<EllipticCurveDoubleEvent>,
-    // /// A trace of the secp256k1 double events.
-    // pub secp256k1_double_events: Vec<EllipticCurveDoubleEvent>,
     /// A trace of the precompile events.
     pub precompile_events: PrecompileEvents,
     /// A trace of all the syscall events.

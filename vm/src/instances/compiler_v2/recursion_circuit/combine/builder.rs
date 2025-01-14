@@ -18,11 +18,7 @@ use crate::{
         word::Word,
     },
     configs::config::{Challenge, Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
-    machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        machine::BaseMachine,
-    },
+    machine::{chip::ChipBehavior, machine::BaseMachine},
     primitives::consts::{
         ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
     },
@@ -65,9 +61,7 @@ where
             Val<SC>,
             Program = RecursionProgram<Val<SC>>,
             Record = RecursionRecord<Val<SC>>,
-        > + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
+        > + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {
     pub fn build(
         machine: &BaseMachine<SC, C>,
@@ -100,9 +94,7 @@ where
             Val<SC>,
             Program = RecursionProgram<Val<SC>>,
             Record = RecursionRecord<Val<SC>>,
-        > + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
+        > + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,

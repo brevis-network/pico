@@ -1,5 +1,5 @@
 use crate::emulator::riscv::syscalls::{
-    precompiles::{keccak256::event::KeccakPermuteEvent, PrecompileEvent},
+    precompiles::{KeccakPermuteEvent, PrecompileEvent},
     syscall_context::SyscallContext,
     Syscall, SyscallCode,
 };

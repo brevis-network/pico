@@ -9,26 +9,17 @@ use crate::{
         ir::{Builder, Ext, Felt},
     },
     configs::config::{Com, PcsProof, StarkGenericConfig, Val},
-    machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
-        machine::BaseMachine,
-        proof::BaseProof,
-    },
+    machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},
 };
-use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
 
-pub struct OnchainStdin<'a, SC, C>
+pub struct OnchainStdin<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
-    pub machine: &'a BaseMachine<SC, C>,
+    pub machine: BaseMachine<SC, C>,
     pub vk: BaseVerifyingKey<SC>,
     pub proof: BaseProof<SC>,
     pub flag_complete: bool,
@@ -45,7 +36,7 @@ where
     pub flag_complete: Felt<CC::F>,
 }
 
-impl<CC, SC, C> Witnessable<CC> for OnchainStdin<'_, SC, C>
+impl<CC, SC, C> Witnessable<CC> for OnchainStdin<SC, C>
 where
     CC: CircuitConfig,
     CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
@@ -58,9 +49,7 @@ where
     >,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-    C: ChipBehavior<Val<SC>>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
     type WitnessVariable = OnchainStdinVariable<CC, SC>;
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {

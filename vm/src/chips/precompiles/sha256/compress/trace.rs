@@ -13,7 +13,7 @@ use crate::{
     emulator::riscv::{
         record::EmulationRecord,
         syscalls::{
-            precompiles::{sha256::event::ShaCompressEvent, PrecompileEvent},
+            precompiles::{PrecompileEvent, ShaCompressEvent},
             SyscallCode,
         },
     },

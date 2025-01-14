@@ -23,11 +23,10 @@ where
     PrevSC: StarkGenericConfig,
     SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
 {
     base_machine: BaseMachine<SC, C>,
 
@@ -42,11 +41,10 @@ where
     Com<EmbedSC>: Send + Sync,
     PcsProverData<EmbedSC>: Send + Sync,
     C: ChipBehavior<
-            Val<EmbedSC>,
-            Program = RecursionProgram<Val<EmbedSC>>,
-            Record = RecursionRecord<Val<EmbedSC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, EmbedSC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, EmbedSC>>,
+        Val<EmbedSC>,
+        Program = RecursionProgram<Val<EmbedSC>>,
+        Record = RecursionRecord<Val<EmbedSC>>,
+    >,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -63,7 +61,8 @@ where
     #[instrument(name = "embed_prove", level = "debug", skip_all)]
     fn prove(&self, witness: &ProvingWitness<EmbedSC, C, I>) -> MetaProof<EmbedSC>
     where
-        C: for<'c> Air<DebugConstraintFolder<'c, Val<EmbedSC>, Challenge<EmbedSC>>>,
+        C: for<'a> Air<DebugConstraintFolder<'a, Val<EmbedSC>, Challenge<EmbedSC>>>
+            + for<'a> Air<ProverConstraintFolder<'a, EmbedSC>>,
     {
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
@@ -82,7 +81,10 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<EmbedSC>) -> anyhow::Result<()> {
+    fn verify(&self, proof: &MetaProof<EmbedSC>) -> anyhow::Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, EmbedSC>>,
+    {
         let vk = proof.vks().first().unwrap();
 
         info!("PERF-machine=embed");
@@ -116,11 +118,10 @@ where
     PrevSC: StarkGenericConfig,
     SC: StarkGenericConfig,
     C: ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {

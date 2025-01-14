@@ -6,26 +6,18 @@ use super::{
     types::{BaseVerifyingKeyVariable, TwoAdicPcsMatsVariable, TwoAdicPcsRoundVariable},
 };
 use crate::{
-    compiler::recursion_v2::circuit::types::FriProofVariable,
-    instances::configs::riscv_bb_poseidon2::StarkConfig as RiscvSC,
-};
-use crate::{
     compiler::recursion_v2::{
         circuit::{
             challenger::FieldChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
-            domain::PolynomialSpaceVariable, fri::verify_two_adic_pcs,
+            domain::PolynomialSpaceVariable, fri::verify_two_adic_pcs, types::FriProofVariable,
         },
         ir::{Ext, Felt},
         prelude::*,
     },
     configs::config::{Challenger, FieldGenericConfig, StarkGenericConfig, Val},
+    instances::configs::riscv_bb_poseidon2::StarkConfig as RiscvSC,
     machine::{
         chip::ChipBehavior,
-        folder::{
-            // todo: use v2
-            ProverConstraintFolder,
-            VerifierConstraintFolder,
-        },
         lookup::LookupScope,
         machine::BaseMachine,
         proof::{BaseCommitments, BaseOpenedValues},
@@ -39,12 +31,16 @@ use p3_baby_bear::BabyBear;
 use p3_commit::{Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 
+type F<FC> = <FC as FieldGenericConfig>::F;
+type EF<FC> = <FC as FieldGenericConfig>::EF;
+type Opening<FC> = BaseOpenedValues<Felt<F<FC>>, Ext<F<FC>, EF<FC>>>;
+
 /// Reference: [pico_machine::stark::BaseProof]
 #[allow(clippy::type_complexity)]
 #[derive(Clone)]
 pub struct BaseProofVariable<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<CC>> {
     pub commitments: BaseCommitments<SC::DigestVariable>,
-    pub opened_values: BaseOpenedValues<Felt<CC::F>, Ext<CC::F, CC::EF>>,
+    pub opened_values: Opening<CC>,
     pub opening_proof: FriProofVariable<CC, SC>,
     pub log_main_degrees: Vec<usize>,
     pub log_quotient_degrees: Vec<usize>,
@@ -81,9 +77,7 @@ where
     CC::F: TwoAdicField,
     SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
     SC::ValMmcs: Clone,
-    A: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    A: ChipBehavior<Val<SC>>,
 {
     pub fn natural_domain_for_degree(config: &SC, degree: usize) -> SC::Domain {
         SC::Pcs::natural_domain_for_degree(config.pcs(), degree)

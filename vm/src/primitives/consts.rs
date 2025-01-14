@@ -60,26 +60,26 @@ For chunks
 
 pub const MAX_LOG_CHUNK_SIZE: usize = 22;
 
-pub const DEFAULT_CHUNK_SIZE: usize = 1 << MAX_LOG_CHUNK_SIZE;
+pub const DEFAULT_CHUNK_SIZE: u32 = 1 << MAX_LOG_CHUNK_SIZE;
 
-pub const DEFAULT_CHUNK_BATCH_SIZE: usize = 16;
+pub const DEFAULT_CHUNK_BATCH_SIZE: u32 = 16;
 /// The threshold for splitting deferred events.
 pub const DEFERRED_SPLIT_THRESHOLD: usize = 1 << 19;
 
-pub const TEST_CHUNK_SIZE: usize = 1 << 16;
+pub const TEST_CHUNK_SIZE: u32 = 1 << 16;
 
-pub const TEST_CHUNK_BATCH_SIZE: usize = 2;
+pub const TEST_CHUNK_BATCH_SIZE: u32 = 2;
 
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 
 // for benchmark
 pub const BENCH_MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 18;
 
-pub const BENCH_MAX_CHUNK_SIZE: usize = 1 << 21;
+pub const BENCH_MAX_CHUNK_SIZE: u32 = 1 << 21;
 
-pub const BENCH_MAX_CHUNK_BATCH_SIZE: usize = 8;
+pub const BENCH_MAX_CHUNK_BATCH_SIZE: u32 = 8;
 
-pub const BENCH_RECURSION_MAX_CHUNK_SIZE: usize = 1 << 22;
+pub const BENCH_RECURSION_MAX_CHUNK_SIZE: u32 = 1 << 22;
 
 /*
 For RiscV

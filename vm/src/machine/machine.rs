@@ -27,9 +27,7 @@ use tracing::debug;
 pub trait MachineBehavior<SC, C, I>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<Val<SC>>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
@@ -82,10 +80,13 @@ where
     /// Get the prover of the machine.
     fn prove(&self, witness: &ProvingWitness<SC, C, I>) -> MetaProof<SC>
     where
-        C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>;
+        C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>
+            + for<'a> Air<ProverConstraintFolder<'a, SC>>;
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<SC>) -> Result<()>;
+    fn verify(&self, proof: &MetaProof<SC>) -> Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, SC>>;
 }
 
 /// A basic machine that includes elemental proving gadgets.
@@ -93,9 +94,7 @@ where
 pub struct BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
     /// Configuration of the machine
     config: Arc<SC>,
@@ -119,9 +118,7 @@ where
 impl<SC, C> Clone for BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -138,9 +135,7 @@ where
 impl<SC, C> BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<Val<SC>>,
 {
     /// Name of BaseMachine.
     pub fn name(&self) -> String {
@@ -185,9 +180,7 @@ where
 impl<SC, C> BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    C: ChipBehavior<Val<SC>>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
@@ -238,7 +231,8 @@ where
         records: &[C::Record],
     ) -> Vec<BaseProof<SC>>
     where
-        C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>,
+        C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>
+            + for<'a> Air<ProverConstraintFolder<'a, SC>>,
         SC::Val: PrimeField64,
     {
         let mut challenger = self.config().challenger();
@@ -282,7 +276,10 @@ where
         challenger: &mut SC::Challenger,
         chunk_index: usize,
         main_commitment: MainTraceCommitments<SC>,
-    ) -> BaseProof<SC> {
+    ) -> BaseProof<SC>
+    where
+        C: for<'a> Air<ProverConstraintFolder<'a, SC>>,
+    {
         self.prover.prove(
             &self.config(),
             &self.chips(),
@@ -294,7 +291,10 @@ where
         )
     }
 
-    pub fn verify_riscv(&self, vk: &BaseVerifyingKey<SC>, proofs: &[BaseProof<SC>]) -> Result<()> {
+    pub fn verify_riscv(&self, vk: &BaseVerifyingKey<SC>, proofs: &[BaseProof<SC>]) -> Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    {
         assert!(!proofs.is_empty());
 
         let mut challenger = self.config().challenger();
@@ -335,11 +335,10 @@ where
     }
 
     /// Verify a batch of BaseProofs with a single vk
-    pub fn verify_ensemble(
-        &self,
-        vk: &BaseVerifyingKey<SC>,
-        proofs: &[BaseProof<SC>],
-    ) -> Result<()> {
+    pub fn verify_ensemble(&self, vk: &BaseVerifyingKey<SC>, proofs: &[BaseProof<SC>]) -> Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    {
         assert!(!proofs.is_empty());
 
         let mut challenger = self.config().challenger();
@@ -385,7 +384,10 @@ where
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        C: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
+    {
         self.verifier.verify(
             &self.config(),
             &self.chips(),

@@ -23,22 +23,13 @@ pub const fn get_msb(a: [u8; WORD_SIZE]) -> u8 {
 /// Creates a new ALU lookup id.
 #[must_use]
 pub fn create_alu_lookup_id() -> u128 {
-    let mut rng = thread_rng();
-    rng.gen()
+    thread_rng().gen()
 }
 
 /// Creates a new ALU lookup ids.
 #[must_use]
 pub fn create_alu_lookups() -> [u128; 6] {
-    let mut rng = thread_rng();
-    [
-        rng.gen(),
-        rng.gen(),
-        rng.gen(),
-        rng.gen(),
-        rng.gen(),
-        rng.gen(),
-    ]
+    thread_rng().gen()
 }
 
 /// Returns sorted and formatted rows of a table of counts (e.g. `opcode_counts`).

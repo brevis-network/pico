@@ -6,6 +6,8 @@ pub mod riscv_memory;
 pub mod riscv_program;
 pub mod toys;
 
+pub mod events;
+
 // Recursion chips
 pub mod alu_base;
 pub mod alu_ext;

@@ -1,5 +1,5 @@
 use crate::emulator::riscv::syscalls::{
-    precompiles::{sha256::event::ShaCompressEvent, PrecompileEvent},
+    precompiles::{PrecompileEvent, ShaCompressEvent},
     syscall_context::SyscallContext,
     Syscall, SyscallCode,
 };

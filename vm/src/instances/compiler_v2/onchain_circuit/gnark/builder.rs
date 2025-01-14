@@ -17,13 +17,7 @@ use crate::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::onchain_circuit::stdin::{OnchainStdin, OnchainStdinVariable},
     },
-    machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
-        machine::BaseMachine,
-        proof::BaseProof,
-    },
+    machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},
     primitives::consts::{
         EMBED_DEGREE, EXTENSION_DEGREE, MULTI_FIELD_CHALLENGER_DIGEST_SIZE,
         MULTI_FIELD_CHALLENGER_RATE, MULTI_FIELD_CHALLENGER_WIDTH,
@@ -89,8 +83,7 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Witnessable<CC, WitnessVariable = BaseProofVariable<CC, SC>>,
     BaseVerifyingKey<SC>: Witnessable<CC, WitnessVariable = BaseVerifyingKeyVariable<CC, SC>>,
-    for<'a> OnchainStdin<
-        'a,
+    OnchainStdin<
         SC,
         RecursionChipType<
             Val<SC>,
@@ -109,10 +102,7 @@ where
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: ChipBehavior<Val<SC>>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
-        + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    >: ChipBehavior<Val<SC>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
         input: &OnchainStdin<
@@ -133,7 +123,7 @@ where
 
             let input_var = input.read(&mut builder);
 
-            Self::build_verifier(&mut builder, input.machine, &input_var);
+            Self::build_verifier(&mut builder, &input.machine, &input_var);
 
             let mut backend = ConstraintCompiler::<CC>::default();
             backend.emit(builder.into_operations())

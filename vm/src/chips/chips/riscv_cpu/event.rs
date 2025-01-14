@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    chips::chips::riscv_memory::event::MemoryRecordEnum, compiler::riscv::instruction::Instruction,
+    chips::{chips::riscv_memory::event::MemoryRecordEnum, utils::create_alu_lookup_id},
+    compiler::riscv::instruction::Instruction,
+    emulator::riscv::record::MemoryAccessRecord,
 };
 
 /// CPU Event.
@@ -58,4 +60,49 @@ pub struct CpuEvent {
     pub jump_jalr_lookup_id: u128,
     /// The auipc lookup id.
     pub auipc_lookup_id: u128,
+}
+
+impl CpuEvent {
+    pub fn new(
+        chunk: u32,
+        clk: u32,
+        pc: u32,
+        next_pc: u32,
+        instruction: Instruction,
+        a: u32,
+        b: u32,
+        c: u32,
+        memory: Option<u32>,
+        record: MemoryAccessRecord,
+        exit_code: u32,
+        alu_lookup_id: u128,
+        syscall_lookup_id: u128,
+    ) -> Self {
+        Self {
+            chunk,
+            clk,
+            pc,
+            next_pc,
+            instruction,
+            a,
+            a_record: record.a,
+            b,
+            b_record: record.b,
+            c,
+            c_record: record.c,
+            memory,
+            memory_record: record.memory,
+            exit_code,
+            alu_lookup_id,
+            syscall_lookup_id,
+            memory_add_lookup_id: create_alu_lookup_id(),
+            memory_sub_lookup_id: create_alu_lookup_id(),
+            branch_lt_lookup_id: create_alu_lookup_id(),
+            branch_gt_lookup_id: create_alu_lookup_id(),
+            branch_add_lookup_id: create_alu_lookup_id(),
+            jump_jal_lookup_id: create_alu_lookup_id(),
+            jump_jalr_lookup_id: create_alu_lookup_id(),
+            auipc_lookup_id: create_alu_lookup_id(),
+        }
+    }
 }

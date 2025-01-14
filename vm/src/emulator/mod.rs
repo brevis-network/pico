@@ -1,4 +1,3 @@
-pub mod context;
 pub mod emulator_v2;
 pub mod opts;
 pub mod record;

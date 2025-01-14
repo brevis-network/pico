@@ -143,7 +143,7 @@ impl<'a> SyscallContext<'a> {
     /// Get a slice of words, but doesn't use a memory record.
     #[must_use]
     pub fn slice_unsafe(&mut self, addr: u32, len: usize) -> Vec<u32> {
-        let mut values = Vec::new();
+        let mut values = Vec::with_capacity(len);
         for i in 0..len {
             values.push(self.rt.word(addr + i as u32 * 4));
         }

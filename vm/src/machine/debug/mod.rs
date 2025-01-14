@@ -6,7 +6,7 @@ pub use lookups::IncrementalLookupDebugger;
 
 use super::{
     chip::{ChipBehavior, MetaChip},
-    folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+    folder::DebugConstraintFolder,
     keys::BaseProvingKey,
     lookup::{LookupScope, LookupType},
 };
@@ -46,9 +46,7 @@ pub fn debug_global_lookups<SC, C>(
     types: Option<&[LookupType]>,
 ) where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<SC::Val>,
     SC::Val: PrimeField64,
 {
     info!("Debugging global lookups");
@@ -64,9 +62,7 @@ pub fn debug_regional_lookups<SC, C>(
     types: Option<&[LookupType]>,
 ) where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<SC::Val>,
     SC::Val: PrimeField64,
 {
     chunks.iter().for_each(|chunk| {
@@ -87,9 +83,7 @@ pub fn debug_all_lookups<SC, C>(
     types: Option<&[LookupType]>,
 ) where
     SC: StarkGenericConfig,
-    C: ChipBehavior<SC::Val>
-        + for<'b> Air<ProverConstraintFolder<'b, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    C: ChipBehavior<SC::Val>,
     SC::Val: PrimeField64,
 {
     debug_regional_lookups(pk, chips, chunks, types);

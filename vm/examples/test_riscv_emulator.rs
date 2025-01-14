@@ -35,7 +35,7 @@ fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8
     let mut emulator = RiscvEmulator::new::<F>(program, EmulatorOpts::test_opts());
     info!(
         "Running with chunk size: {}, batch size: {}",
-        emulator.chunk_size, emulator.chunk_batch_size
+        emulator.opts.chunk_size, emulator.opts.chunk_batch_size
     );
 
     emulator.emulator_mode = EmulatorMode::Trace;
@@ -43,17 +43,14 @@ fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8
         emulator.state.input_stream.push(input.clone());
     }
 
-    let mut done = false;
     let mut record_count = 0;
     let mut execution_record_count = 0;
     let mut prev_next_pc = pc_start;
 
     loop {
-        if emulator.emulate_to_batch().unwrap() {
-            done = true;
-        }
+        let (batch_records, done) = emulator.emulate_batch().unwrap();
 
-        for (i, record) in enumerate(emulator.batch_records.iter()) {
+        for (i, record) in enumerate(batch_records.iter()) {
             if !record.cpu_events.is_empty() {
                 execution_record_count += 1;
             }
@@ -93,10 +90,7 @@ fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8
         }
 
         if done {
-            assert_eq!(
-                emulator.batch_records.last().unwrap().public_values.next_pc,
-                0
-            );
+            assert_eq!(batch_records.last().unwrap().public_values.next_pc, 0);
             break;
         }
     }
