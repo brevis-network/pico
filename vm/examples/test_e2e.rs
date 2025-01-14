@@ -42,7 +42,7 @@ use pico_vm::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_S_BOX_DEGREE,
         BABYBEAR_W, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE,
         EMBED_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS,
-        KOALABEAR_S_BOX_DEGREE, KOALABEAR_W, RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
+        KOALABEAR_S_BOX_DEGREE, KOALABEAR_W, RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
     recursion_v2::runtime::Runtime,
 };
@@ -168,7 +168,7 @@ macro_rules! run {
                     $num_internal_rounds,
                     { $num_internal_rounds - 1 },
                 >::all_chips(),
-                RECURSION_NUM_PVS_V2,
+                RECURSION_NUM_PVS,
             );
 
             info!("Generating CONVERT proof (at {:?})..", start.elapsed());
@@ -251,7 +251,7 @@ macro_rules! run {
                         $num_internal_rounds,
                         { $num_internal_rounds - 1 },
                     >::all_chips(),
-                    RECURSION_NUM_PVS_V2,
+                    RECURSION_NUM_PVS,
                 );
 
             info!("Generating COMBINE proof (at {:?})..", start.elapsed());
@@ -334,7 +334,7 @@ macro_rules! run {
                     $num_internal_rounds,
                     { $num_internal_rounds - 1 },
                 >::compress_chips(),
-                RECURSION_NUM_PVS_V2,
+                RECURSION_NUM_PVS,
             );
 
             info!("Generating COMPRESS proof (at {:?})..", start.elapsed());
@@ -431,7 +431,7 @@ macro_rules! run {
                     $num_internal_rounds,
                     { $num_internal_rounds - 1 },
                 >::embed_chips(),
-                RECURSION_NUM_PVS_V2,
+                RECURSION_NUM_PVS,
             );
 
             info!("Generating EMBED proof (at {:?})..", start.elapsed());

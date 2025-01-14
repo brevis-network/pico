@@ -1,6 +1,6 @@
 use crate::{
     chips::{
-        chips::{poseidon2_skinny_v2::Poseidon2SkinnyChip, poseidon2_wide_v2::Poseidon2WideChip},
+        chips::{poseidon2::Poseidon2Chip, poseidon2_skinny_v2::Poseidon2SkinnyChip},
         precompiles::poseidon2::Poseidon2PermuteChip,
     },
     compiler::{
@@ -189,7 +189,7 @@ where
         Poseidon2SkinnyChip<CONVERT_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>:
             Air<SymbolicConstraintFolder<F>>
                 + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-        Poseidon2WideChip<
+        Poseidon2Chip<
             CONVERT_DEGREE,
             NUM_EXTERNAL_ROUNDS,
             NUM_INTERNAL_ROUNDS,
@@ -404,7 +404,7 @@ where
         Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>:
             Air<SymbolicConstraintFolder<F>>
                 + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-        Poseidon2WideChip<
+        Poseidon2Chip<
             COMBINE_DEGREE,
             NUM_EXTERNAL_ROUNDS,
             NUM_INTERNAL_ROUNDS,

@@ -11,7 +11,7 @@ use crate::{
     compiler::word::Word,
     emulator::riscv::public_values::PublicValues,
     machine::builder::{ChipBaseBuilder, ChipBuilder},
-    primitives::consts::MAX_NUM_PVS_V2,
+    primitives::consts::MAX_NUM_PVS,
 };
 use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir};
@@ -141,7 +141,7 @@ where
 
         let local_addr_bits = local.addr_bits.bits;
 
-        let public_values_array: [CB::Expr; MAX_NUM_PVS_V2] =
+        let public_values_array: [CB::Expr; MAX_NUM_PVS] =
             array::from_fn(|i| builder.public_values()[i].into());
         let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
             public_values_array.as_slice().borrow();

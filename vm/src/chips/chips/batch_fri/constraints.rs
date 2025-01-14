@@ -14,8 +14,8 @@ use p3_field::{extension::BinomiallyExtendable, Field};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB, const DEGREE: usize, const W: u32>
-    Air<CB> for BatchFRIChip<DEGREE, W, F>
+impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB, const W: u32> Air<CB>
+    for BatchFRIChip<W, F>
 where
     CB: ChipBuilder<F>,
 {
@@ -28,18 +28,6 @@ where
         let prepr = builder.preprocessed();
         let (prepr_local, _prepr_next) = (prepr.row_slice(0), prepr.row_slice(1));
         let prepr_local: &BatchFRIPreprocessedCols<CB::Var> = (*prepr_local).borrow();
-        // let prepr_next: &BatchFRIPreprocessedCols<CB::Var> = (*prepr_next).borrow();
-
-        // Dummy constraints to normalize to DEGREE.
-        let lhs = (0..DEGREE)
-            .map(|_| prepr_local.is_real.into())
-            .product::<CB::Expr>();
-        let rhs = (0..DEGREE)
-            .map(|_| prepr_local.is_real.into())
-            .product::<CB::Expr>();
-        builder.assert_eq(lhs, rhs);
-
-        // self.eval_batch_fri::<AB>(builder, local, next, prepr_local, prepr_next);
 
         // Constrain memory read for alpha_pow, p_at_z, and p_at_x.
         builder.looked_block(

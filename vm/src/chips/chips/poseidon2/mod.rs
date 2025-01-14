@@ -1,16 +1,20 @@
 mod columns;
 mod constraints;
 mod traces;
+pub mod utils;
 
-use crate::chips::chips::poseidon2_wide_v2::columns::{
-    permutation::Poseidon2, Poseidon2Degree3, Poseidon2Degree9,
+use crate::{
+    chips::chips::poseidon2::columns::permutation::{
+        PermutationNoSbox, PermutationSBox, Poseidon2,
+    },
+    machine::field::{FieldBehavior, FieldType},
 };
 use p3_field::Field;
 use std::{borrow::Borrow, marker::PhantomData, ops::Deref};
 
-/// A chip that implements addition for the opcode Poseidon2Wide.
+/// A chip that implements addition for the opcode Poseidon2.
 #[derive(Default, Debug, Clone, Copy)]
-pub struct Poseidon2WideChip<
+pub struct Poseidon2Chip<
     const DEGREE: usize,
     const NUM_EXTERNAL_ROUNDS: usize,
     const NUM_INTERNAL_ROUNDS: usize,
@@ -28,7 +32,7 @@ impl<
         const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
         F: Field,
     >
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -46,20 +50,31 @@ impl<
     where
         T: Copy + 'a,
     {
-        if DEGREE == 3 {
-            let convert: &Poseidon2Degree3<
-                T,
-                NUM_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            > = (*row).borrow();
-            Box::new(*convert)
-        } else if DEGREE == 9 || DEGREE == 17 {
-            let convert: &Poseidon2Degree9<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE> =
+        if F::field_type() == FieldType::TypeBabyBear {
+            if DEGREE == 3 {
+                let convert: &PermutationSBox<
+                    T,
+                    NUM_EXTERNAL_ROUNDS,
+                    NUM_INTERNAL_ROUNDS,
+                    NUM_INTERNAL_ROUNDS_MINUS_ONE,
+                > = (*row).borrow();
+                Box::new(*convert)
+            } else if DEGREE == 9 {
+                let convert: &PermutationNoSbox<
+                    T,
+                    NUM_EXTERNAL_ROUNDS,
+                    NUM_INTERNAL_ROUNDS_MINUS_ONE,
+                > = (*row).borrow();
+                Box::new(*convert)
+            } else {
+                panic!("Unsupported degree");
+            }
+        } else if F::field_type() == FieldType::TypeKoalaBear {
+            let convert: &PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE> =
                 (*row).borrow();
             Box::new(*convert)
         } else {
-            panic!("Unsupported degree");
+            panic!("Unsupported field type");
         }
     }
 }
@@ -68,13 +83,9 @@ impl<
 #[allow(unused_imports)]
 pub(crate) mod tests {
 
-    use super::Poseidon2WideChip;
+    use super::Poseidon2Chip;
     use crate::{
-        compiler::recursion_v2::{
-            instruction::{mem, poseidon2},
-            program::RecursionProgram,
-        },
-        machine::{chip::ChipBehavior, logger::setup_logger},
+        machine::chip::ChipBehavior,
         primitives::{
             consts::{
                 BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS,
@@ -85,16 +96,16 @@ pub(crate) mod tests {
         recursion_v2::{
             runtime::RecursionRecord,
             //tests::run_recursion_test_machine,
-            types::{MemAccessKind, Poseidon2Event},
+            types::Poseidon2Event,
         },
     };
     use p3_baby_bear::BabyBear;
-    use p3_field::{FieldAlgebra, PrimeField32};
+    use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
     use rand::{prelude::StdRng, SeedableRng};
-    use std::{iter::once, marker::PhantomData};
+    use std::marker::PhantomData;
     use zkhash::ark_ff::UniformRand;
 
     #[test]
@@ -122,7 +133,7 @@ pub(crate) mod tests {
             ],
             ..Default::default()
         };
-        let chip_3 = Poseidon2WideChip::<
+        let chip_3 = Poseidon2Chip::<
             3,
             BABYBEAR_NUM_EXTERNAL_ROUNDS,
             BABYBEAR_NUM_INTERNAL_ROUNDS,
@@ -161,7 +172,7 @@ pub(crate) mod tests {
             ],
             ..Default::default()
         };
-        let chip_3 = Poseidon2WideChip::<
+        let chip_3 = Poseidon2Chip::<
             3,
             KOALABEAR_NUM_EXTERNAL_ROUNDS,
             KOALABEAR_NUM_INTERNAL_ROUNDS,
@@ -200,7 +211,7 @@ pub(crate) mod tests {
             ],
             ..Default::default()
         };
-        let chip_9 = Poseidon2WideChip::<
+        let chip_9 = Poseidon2Chip::<
             9,
             BABYBEAR_NUM_EXTERNAL_ROUNDS,
             BABYBEAR_NUM_INTERNAL_ROUNDS,
@@ -213,52 +224,4 @@ pub(crate) mod tests {
             chip_9.generate_main(&chunk, &mut RecursionRecord::default());
         println!("{:?}", main_trace.values)
     }
-
-    /*
-    #[test]
-    fn test_poseidon2_wide_v2() {
-        setup_logger();
-
-        let input = [1; WIDTH];
-        let output = pico_poseidon2bb_init()
-            .permute(input.map(BabyBear::from_canonical_u32))
-            .map(|x| BabyBear::as_canonical_u32(&x));
-
-        let rng = &mut rand::thread_rng();
-        let input_1: [BabyBear; WIDTH] = std::array::from_fn(|_| BabyBear::rand(rng));
-        let output_1 = pico_poseidon2bb_init()
-            .permute(input_1)
-            .map(|x| BabyBear::as_canonical_u32(&x));
-        let input_1 = input_1.map(|x| BabyBear::as_canonical_u32(&x));
-
-        let instructions = (0..WIDTH)
-            .map(|i| mem(MemAccessKind::Write, 1, i as u32, input[i]))
-            .chain(once(poseidon2(
-                [1; WIDTH],
-                std::array::from_fn(|i| (i + WIDTH) as u32),
-                std::array::from_fn(|i| i as u32),
-            )))
-            .chain((0..WIDTH).map(|i| mem(MemAccessKind::Read, 1, (i + WIDTH) as u32, output[i])))
-            .chain(
-                (0..WIDTH)
-                    .map(|i| mem(MemAccessKind::Write, 1, (2 * WIDTH + i) as u32, input_1[i])),
-            )
-            .chain(once(poseidon2(
-                [1; WIDTH],
-                std::array::from_fn(|i| (i + 3 * WIDTH) as u32),
-                std::array::from_fn(|i| (i + 2 * WIDTH) as u32),
-            )))
-            .chain(
-                (0..WIDTH)
-                    .map(|i| mem(MemAccessKind::Read, 1, (i + 3 * WIDTH) as u32, output_1[i])),
-            )
-            .collect::<Vec<_>>();
-
-        let program = RecursionProgram {
-            instructions,
-            ..Default::default()
-        };
-        run_recursion_test_machine(program);
-    }
-    */
 }

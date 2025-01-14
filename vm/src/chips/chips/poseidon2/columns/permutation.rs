@@ -1,12 +1,10 @@
 use super::{
-    BABYBEAR_POSEIDON2_DEGREE3_COL_MAP, BABYBEAR_POSEIDON2_DEGREE9_COL_MAP,
-    KOALABEAR_POSEIDON2_DEGREE3_COL_MAP, KOALABEAR_POSEIDON2_DEGREE9_COL_MAP,
+    BABYBEAR_POSEIDON2_HD_COL_MAP, BABYBEAR_POSEIDON2_LD_COL_MAP, KOALABEAR_POSEIDON2_COL_MAP,
 };
 use crate::primitives::consts::{
     BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
     KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
 };
-use paste::paste;
 use pico_derive::AlignedBorrow;
 use std::{borrow::BorrowMut, mem::size_of};
 
@@ -224,65 +222,89 @@ impl<
     }
 }
 
-macro_rules! impl_permutation_mut {
-    ($name:ident, $capital_name:ident) => {
-        paste! {
-            pub fn [<$name _ permutation_mut>]<
-                'a,
-                'b: 'a,
-                T,
-                const DEGREE: usize,
-                const NUM_EXTERNAL_ROUNDS: usize,
-                const NUM_INTERNAL_ROUNDS: usize,
-                const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-            >(
-                row: &'b mut [T],
-            ) -> &'b mut (dyn Poseidon2Mut<
-                T,
-                NUM_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            > + 'a)
-            where
-                T: Copy,
-            {
-                assert_eq!(NUM_EXTERNAL_ROUNDS, [<$capital_name _ NUM_EXTERNAL_ROUNDS>]);
-                assert_eq!(NUM_INTERNAL_ROUNDS, [<$capital_name _ NUM_INTERNAL_ROUNDS>]);
+// ... existing code ...
 
-                if DEGREE == 3 {
-                    let start = [<$capital_name _ POSEIDON2_DEGREE3_COL_MAP>].state.external_rounds_state[0][0];
-                    let end = start
-                        + size_of::<
-                            PermutationSBox<
-                                u8,
-                                NUM_EXTERNAL_ROUNDS,
-                                NUM_INTERNAL_ROUNDS,
-                                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-                            >,
-                        >();
-                    let convert: &mut PermutationSBox<
-                        T,
-                        NUM_EXTERNAL_ROUNDS,
-                        NUM_INTERNAL_ROUNDS,
-                        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-                    > = row[start..end].borrow_mut();
-                    convert
-                } else if DEGREE == 9 || DEGREE == 17 {
-                    let start = [<$capital_name _ POSEIDON2_DEGREE9_COL_MAP>].state.external_rounds_state[0][0];
-                    let end = start
-                        + size_of::<PermutationNoSbox<u8, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>>(
-                        );
+pub fn babybear_permutation_mut<
+    'a,
+    'b: 'a,
+    T,
+    const DEGREE: usize,
+    const NUM_EXTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+>(
+    row: &'b mut [T],
+) -> &'b mut (dyn Poseidon2Mut<
+    T,
+    NUM_EXTERNAL_ROUNDS,
+    NUM_INTERNAL_ROUNDS,
+    NUM_INTERNAL_ROUNDS_MINUS_ONE,
+> + 'a)
+where
+    T: Copy,
+{
+    assert_eq!(NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_EXTERNAL_ROUNDS);
+    assert_eq!(NUM_INTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS);
 
-                    let convert: &mut PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE> =
-                        row[start..end].borrow_mut();
-                    convert
-                } else {
-                    panic!("Unsupported degree");
-                }
-            }
-        }
+    if DEGREE == 3 {
+        let start = BABYBEAR_POSEIDON2_LD_COL_MAP.state.external_rounds_state[0][0];
+        let end = start
+            + size_of::<
+                PermutationSBox<
+                    u8,
+                    NUM_EXTERNAL_ROUNDS,
+                    NUM_INTERNAL_ROUNDS,
+                    NUM_INTERNAL_ROUNDS_MINUS_ONE,
+                >,
+            >();
+        let convert: &mut PermutationSBox<
+            T,
+            NUM_EXTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS,
+            NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        > = row[start..end].borrow_mut();
+        convert
+    } else if DEGREE == 9 {
+        let start = BABYBEAR_POSEIDON2_HD_COL_MAP.state.external_rounds_state[0][0];
+        let end = start
+            + size_of::<PermutationNoSbox<u8, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>>(
+            );
+        let convert: &mut PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE> =
+            row[start..end].borrow_mut();
+        convert
+    } else {
+        panic!("Unsupported degree");
     }
 }
 
-impl_permutation_mut!(babybear, BABYBEAR);
-impl_permutation_mut!(koalabear, KOALABEAR);
+pub fn koalabear_permutation_mut<
+    'a,
+    'b: 'a,
+    T,
+    const DEGREE: usize,
+    const NUM_EXTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS: usize,
+    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
+>(
+    row: &'b mut [T],
+) -> &'b mut (dyn Poseidon2Mut<
+    T,
+    NUM_EXTERNAL_ROUNDS,
+    NUM_INTERNAL_ROUNDS,
+    NUM_INTERNAL_ROUNDS_MINUS_ONE,
+> + 'a)
+where
+    T: Copy,
+{
+    assert_eq!(NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS);
+    assert_eq!(NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS);
+
+    let start = KOALABEAR_POSEIDON2_COL_MAP.state.external_rounds_state[0][0];
+    let end = start
+        + size_of::<PermutationNoSbox<u8, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>>();
+    let convert: &mut PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE> =
+        row[start..end].borrow_mut();
+    convert
+}
+
+// ... existing code ...

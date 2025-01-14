@@ -9,13 +9,13 @@ use super::{
     NUM_EXP_REVERSE_BITS_LEN_COLS,
 };
 
-impl<F, const DEGREE: usize> BaseAir<F> for ExpReverseBitsLenChip<DEGREE, F> {
+impl<F> BaseAir<F> for ExpReverseBitsLenChip<F> {
     fn width(&self) -> usize {
         NUM_EXP_REVERSE_BITS_LEN_COLS
     }
 }
 
-impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
+impl<F: Field> ExpReverseBitsLenChip<F> {
     pub fn eval_exp_reverse_bits_len<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
@@ -24,17 +24,6 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
         next: &ExpReverseBitsLenCols<CB::Var>,
         next_preprocess: &ExpReverseBitsLenPreprocessedCols<CB::Var>,
     ) {
-        // Dummy constraints to normalize to DEGREE when DEGREE > 3.
-        if DEGREE > 3 {
-            let lhs = (0..DEGREE)
-                .map(|_| local_preprocess.is_real.into())
-                .product::<CB::Expr>();
-            let rhs = (0..DEGREE)
-                .map(|_| local_preprocess.is_real.into())
-                .product::<CB::Expr>();
-            builder.assert_eq(lhs, rhs);
-        }
-
         // Constrain mem read for x.  The read mult is one for only the first row, and zero for all
         // others.
         builder.looking_single(
@@ -111,7 +100,7 @@ impl<const DEGREE: usize, F: Field> ExpReverseBitsLenChip<DEGREE, F> {
     }
 }
 
-impl<F: Field, CB, const DEGREE: usize> Air<CB> for ExpReverseBitsLenChip<DEGREE, F>
+impl<F: Field, CB> Air<CB> for ExpReverseBitsLenChip<F>
 where
     CB: ChipBuilder<F>,
 {

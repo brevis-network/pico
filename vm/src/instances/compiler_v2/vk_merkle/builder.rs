@@ -1,7 +1,5 @@
 use crate::{
-    chips::chips::{
-        poseidon2_skinny_v2::Poseidon2SkinnyChip, poseidon2_wide_v2::Poseidon2WideChip,
-    },
+    chips::chips::{poseidon2::Poseidon2Chip, poseidon2_skinny_v2::Poseidon2SkinnyChip},
     compiler::recursion_v2::{
         circuit::{
             config::{CircuitConfig, FieldFriConfigVariable},
@@ -201,28 +199,28 @@ where
     Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 
-    for<'b> Poseidon2WideChip<
+    for<'b> Poseidon2Chip<
         COMBINE_DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
         CC::F,
     >: Air<ProverConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2WideChip<
+    for<'b> Poseidon2Chip<
         COMBINE_DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
         CC::F,
     >: Air<VerifierConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2WideChip<
+    for<'b> Poseidon2Chip<
         COMBINE_DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
         CC::F,
     >: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Poseidon2WideChip<
+    Poseidon2Chip<
         COMBINE_DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -352,28 +350,28 @@ where
     Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 
-    for<'b> Poseidon2WideChip<
+    for<'b> Poseidon2Chip<
         COMPRESS_DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
         CC::F,
     >: Air<ProverConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2WideChip<
+    for<'b> Poseidon2Chip<
         COMPRESS_DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
         CC::F,
     >: Air<VerifierConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2WideChip<
+    for<'b> Poseidon2Chip<
         COMPRESS_DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
         CC::F,
     >: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Poseidon2WideChip<
+    Poseidon2Chip<
         COMPRESS_DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,

@@ -3,9 +3,9 @@ use crate::{
         alu_base::BaseAluChip,
         alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
-        exp_reverse_bits_v2::ExpReverseBitsLenChip,
+        exp_reverse_bits::ExpReverseBitsLenChip,
+        poseidon2::Poseidon2Chip,
         poseidon2_skinny_v2::Poseidon2SkinnyChip,
-        poseidon2_wide_v2::Poseidon2WideChip,
         public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,
@@ -147,7 +147,7 @@ where
             NUM_EXTERNAL_ROUNDS,
             NUM_INTERNAL_ROUNDS,
             NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >::Poseidon2Wide(Poseidon2WideChip::default())
+        >::Poseidon2Wide(Poseidon2Chip::default())
         .name();
         let exp_reverse_bits_len = RecursionChipType::<
             F,
@@ -175,7 +175,7 @@ where
             NUM_EXTERNAL_ROUNDS,
             NUM_INTERNAL_ROUNDS,
             NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >::BatchFRI(BatchFRIChip::<DEGREE, W, F>::default())
+        >::BatchFRI(BatchFRIChip::<W, F>::default())
         .name();
         let select = RecursionChipType::<
             F,
@@ -288,7 +288,7 @@ impl<
 where
     Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>: Air<SymbolicConstraintFolder<F>>
         + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,

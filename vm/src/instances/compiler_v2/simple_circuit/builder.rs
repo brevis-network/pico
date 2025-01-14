@@ -20,7 +20,7 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::{chip::ChipBehavior, machine::BaseMachine},
-    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS_V2},
+    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
     recursion_v2::air::RecursionPublicValues,
 };
 use p3_commit::TwoAdicMultiplicativeCoset;
@@ -161,7 +161,7 @@ where
             // Initialize the public values we will commit to.
             let zero: Felt<_> = builder.eval(CC::F::ZERO);
 
-            let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS_V2];
+            let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
             let recursion_public_values: &mut RecursionPublicValues<_> =
                 recursion_public_values_stream.as_mut_slice().borrow_mut();
 

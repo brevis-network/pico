@@ -6,9 +6,9 @@ use super::{
     Poseidon2PermuteChip,
 };
 use crate::{
-    chips::{
-        chips::rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
-        poseidon2::{external_linear_layer, internal_linear_layer},
+    chips::chips::{
+        poseidon2::utils::{external_linear_layer, internal_linear_layer},
+        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
     },
     compiler::riscv::program::Program,
     emulator::{

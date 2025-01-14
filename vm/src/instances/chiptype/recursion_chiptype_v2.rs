@@ -3,9 +3,9 @@ use crate::{
         alu_base::{columns::NUM_BASE_ALU_ENTRIES_PER_ROW, BaseAluChip},
         alu_ext::{columns::NUM_EXT_ALU_ENTRIES_PER_ROW, ExtAluChip},
         batch_fri::BatchFRIChip,
-        exp_reverse_bits_v2::ExpReverseBitsLenChip,
+        exp_reverse_bits::ExpReverseBitsLenChip,
+        poseidon2::Poseidon2Chip,
         poseidon2_skinny_v2::Poseidon2SkinnyChip,
-        poseidon2_wide_v2::Poseidon2WideChip,
         public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory_v2::{
             constant::{columns::NUM_CONST_MEM_ENTRIES_PER_ROW, MemoryConstChip},
@@ -45,13 +45,13 @@ pub enum RecursionChipType<
 > {
     MemoryConst(MemoryConstChip<F>),
     MemoryVar(MemoryVarChip<F>),
-    ExpReverseBitsLen(ExpReverseBitsLenChip<DEGREE, F>),
+    ExpReverseBitsLen(ExpReverseBitsLenChip<F>),
     BaseAlu(BaseAluChip<F>),
     ExtAlu(ExtAluChip<F, W>),
     Select(SelectChip<F>),
     Poseidon2Skinny(Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>),
     Poseidon2Wide(
-        Poseidon2WideChip<
+        Poseidon2Chip<
             DEGREE,
             NUM_EXTERNAL_ROUNDS,
             NUM_INTERNAL_ROUNDS,
@@ -59,7 +59,7 @@ pub enum RecursionChipType<
             F,
         >,
     ),
-    BatchFRI(BatchFRIChip<DEGREE, W, F>),
+    BatchFRI(BatchFRIChip<W, F>),
     PublicValues(PublicValuesChip<F>),
 }
 
@@ -82,7 +82,7 @@ impl<
 where
     Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>:
         ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -202,7 +202,7 @@ impl<
     >
 where
     Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>: BaseAir<F>,
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -268,7 +268,7 @@ where
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
     >: BaseAir<<AB as AirBuilder>::F>,
     Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>: Air<AB>,
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -313,7 +313,7 @@ impl<
 where
     Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>: Air<SymbolicConstraintFolder<F>>
         + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -330,7 +330,7 @@ where
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
-            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2Chip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
@@ -344,7 +344,7 @@ where
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
-            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2Chip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
@@ -358,7 +358,7 @@ where
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
-            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2Chip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
@@ -372,7 +372,7 @@ where
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
-            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2Chip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
@@ -386,7 +386,7 @@ where
             MetaChip::new(Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default())),
             MetaChip::new(Self::BaseAlu(BaseAluChip::default())),
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
-            MetaChip::new(Self::Poseidon2Wide(Poseidon2WideChip::default())),
+            MetaChip::new(Self::Poseidon2Wide(Poseidon2Chip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
         ]
@@ -440,7 +440,7 @@ where
             //     },
             // ),
             (
-                Self::Poseidon2Wide(Poseidon2WideChip::<
+                Self::Poseidon2Wide(Poseidon2Chip::<
                     DEGREE,
                     NUM_EXTERNAL_ROUNDS,
                     NUM_INTERNAL_ROUNDS,
@@ -448,18 +448,18 @@ where
                     F,
                 >::default()),
                 if F::field_type() == FieldType::TypeKoalaBear {
-                    heights.poseidon2_wide_events
+                    heights.poseidon2_events
                 } else {
                     0
                 },
             ),
             (
-                Self::BatchFRI(BatchFRIChip::<DEGREE, W, F>::default()),
+                Self::BatchFRI(BatchFRIChip::<W, F>::default()),
                 heights.batch_fri_events,
             ),
             (Self::Select(SelectChip::default()), heights.select_events),
             (
-                Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE, F>::default()),
+                Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<F>::default()),
                 heights.exp_reverse_bits_len_events,
             ),
             (
@@ -480,7 +480,7 @@ where
                 (Self::BaseAlu(BaseAluChip::default()), 15),
                 (Self::ExtAlu(ExtAluChip::default()), 15),
                 (
-                    Self::Poseidon2Wide(Poseidon2WideChip::<
+                    Self::Poseidon2Wide(Poseidon2Chip::<
                         DEGREE,
                         NUM_EXTERNAL_ROUNDS,
                         NUM_INTERNAL_ROUNDS,
@@ -490,14 +490,14 @@ where
                     16,
                 ),
                 (
-                    Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE, F>::default()),
+                    Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<F>::default()),
                     17,
                 ),
                 (
                     Self::PublicValues(PublicValuesChip::default()),
                     PUB_VALUES_LOG_HEIGHT,
                 ),
-                (Self::BatchFRI(BatchFRIChip::<DEGREE, W, F>::default()), 18),
+                (Self::BatchFRI(BatchFRIChip::<W, F>::default()), 18),
                 (Self::Select(SelectChip::default()), 18),
             ]
             .map(|(chip, log_height)| (chip.name(), log_height)),
@@ -512,7 +512,7 @@ pub struct RecursionEventCount {
     pub mem_var_events: usize,
     pub base_alu_events: usize,
     pub ext_alu_events: usize,
-    pub poseidon2_wide_events: usize,
+    pub poseidon2_events: usize,
     pub batch_fri_events: usize,
     pub select_events: usize,
     pub exp_reverse_bits_len_events: usize,
@@ -526,7 +526,7 @@ impl<F> AddAssign<&Instruction<F>> for RecursionEventCount {
             Instruction::ExtAlu(_) => self.ext_alu_events += 1,
             Instruction::Mem(_) => self.mem_const_events += 1,
             Instruction::Select(_) => self.select_events += 1,
-            Instruction::Poseidon2(_) => self.poseidon2_wide_events += 1,
+            Instruction::Poseidon2(_) => self.poseidon2_events += 1,
             Instruction::ExpReverseBitsLen(ExpReverseBitsInstr { addrs, .. }) => {
                 self.exp_reverse_bits_len_events += addrs.exp.len()
             }

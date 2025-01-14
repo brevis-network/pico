@@ -22,7 +22,7 @@ use crate::{
         septic::SepticDigest,
         utils::order_chips,
     },
-    primitives::consts::{DIGEST_SIZE, MAX_NUM_PVS_V2},
+    primitives::consts::{DIGEST_SIZE, MAX_NUM_PVS},
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -240,9 +240,7 @@ where
     let log_blowup = machine.config().fri_config().log_blowup;
     let opening_proof = dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
 
-    let public_values = (0..MAX_NUM_PVS_V2)
-        .map(|_| BabyBear::ZERO)
-        .collect::<Vec<_>>();
+    let public_values = (0..MAX_NUM_PVS).map(|_| BabyBear::ZERO).collect::<Vec<_>>();
 
     // Get the preprocessed chip information.
     let config = machine.config();

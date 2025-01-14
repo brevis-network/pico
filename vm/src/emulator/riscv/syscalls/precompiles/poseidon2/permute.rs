@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use super::event::Poseidon2PermuteEvent;
 use crate::{
-    chips::poseidon2::{external_linear_layer, internal_linear_layer},
+    chips::chips::poseidon2::utils::{external_linear_layer, internal_linear_layer},
     emulator::riscv::syscalls::{
         precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
     },

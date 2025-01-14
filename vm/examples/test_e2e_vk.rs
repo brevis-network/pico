@@ -39,7 +39,7 @@ use pico_vm::{
     primitives::consts::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_S_BOX_DEGREE,
         BABYBEAR_W, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE, EMBED_DEGREE,
-        RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
+        RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
     recursion_v2::runtime::Runtime,
 };
@@ -179,7 +179,7 @@ fn main() {
             BABYBEAR_NUM_INTERNAL_ROUNDS,
             { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
         >::all_chips(),
-        RECURSION_NUM_PVS_V2,
+        RECURSION_NUM_PVS,
     );
 
     // Setup stdin and witness
@@ -262,7 +262,7 @@ fn main() {
             BABYBEAR_NUM_INTERNAL_ROUNDS,
             { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
         >::all_chips(),
-        RECURSION_NUM_PVS_V2,
+        RECURSION_NUM_PVS,
     );
 
     for (i, vk) in convert_proof.vks().iter().enumerate() {
@@ -345,7 +345,7 @@ fn main() {
             BABYBEAR_NUM_INTERNAL_ROUNDS,
             { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
         >::compress_chips(),
-        RECURSION_NUM_PVS_V2,
+        RECURSION_NUM_PVS,
     );
 
     let compress_stdin = RecursionStdin::new(
@@ -438,7 +438,7 @@ fn main() {
             BABYBEAR_NUM_INTERNAL_ROUNDS,
             { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
         >::embed_chips(),
-        RECURSION_NUM_PVS_V2,
+        RECURSION_NUM_PVS,
     );
 
     let embed_stdin = RecursionStdin::new(

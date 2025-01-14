@@ -9,7 +9,7 @@ use crate::{
     },
     configs::config::FieldGenericConfig,
     machine::septic::SepticCurve,
-    primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS_V2},
+    primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS},
     recursion_v2::{
         air::{Block, RecursionPublicValues},
         runtime::*,
@@ -653,7 +653,7 @@ where
             let _ = x.read(self);
         });
         let pv_addrs = unsafe {
-            transmute::<RecursionPublicValues<Felt<FC::F>>, [Felt<FC::F>; RECURSION_NUM_PVS_V2]>(
+            transmute::<RecursionPublicValues<Felt<FC::F>>, [Felt<FC::F>; RECURSION_NUM_PVS]>(
                 *public_values,
             )
         }

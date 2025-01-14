@@ -5,9 +5,6 @@ pub const NUM_BATCH_FRI_COLS: usize = core::mem::size_of::<BatchFRICols<u8>>();
 pub const NUM_BATCH_FRI_PREPROCESSED_COLS: usize =
     core::mem::size_of::<BatchFRIPreprocessedCols<u8>>();
 
-#[derive(Clone, Debug, Copy, Default)]
-pub struct BatchFRIChip<const DEGREE: usize>;
-
 /// The preprocessed columns for a batch FRI invocation.
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]

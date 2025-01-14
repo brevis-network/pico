@@ -10,7 +10,7 @@ use crate::{
         lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
         septic::SepticDigest,
     },
-    primitives::consts::MAX_NUM_PVS_V2,
+    primitives::consts::MAX_NUM_PVS,
 };
 use p3_air::{AirBuilder, ExtensionBuilder, PairBuilder};
 use p3_field::{ExtensionField, Field, FieldAlgebra};
@@ -57,7 +57,7 @@ impl<F: Field> SymbolicConstraintFolder<F> {
             })
             .collect();
 
-        let public_values = (0..MAX_NUM_PVS_V2)
+        let public_values = (0..MAX_NUM_PVS)
             .map(move |index| SymbolicVariable::new(Entry::Public, index))
             .collect();
 

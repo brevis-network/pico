@@ -189,7 +189,7 @@ impl<'a>
         BabyBearPoseidon2,
         RecursionChipType<
             BabyBear,
-            3,
+            COMBINE_DEGREE,
             BABYBEAR_W,
             BABYBEAR_NUM_EXTERNAL_ROUNDS,
             BABYBEAR_NUM_INTERNAL_ROUNDS,

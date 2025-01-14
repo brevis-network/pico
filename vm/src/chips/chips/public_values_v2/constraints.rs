@@ -2,7 +2,7 @@ use super::columns::{PublicValuesCols, PublicValuesPreprocessedCols, NUM_PUBLIC_
 use crate::{
     chips::chips::public_values_v2::PublicValuesChip,
     machine::builder::{ChipBuilder, RecursionBuilder},
-    primitives::consts::RECURSION_NUM_PVS_V2,
+    primitives::consts::RECURSION_NUM_PVS,
     recursion_v2::air::RecursionPublicValues,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
@@ -26,7 +26,7 @@ impl<F: Field, CB: ChipBuilder<F>> Air<CB> for PublicValuesChip<F> {
         let local_preprocessed: &PublicValuesPreprocessedCols<CB::Var> =
             (*local_preprocessed).borrow();
         let pv = builder.public_values();
-        let pv_elements: [CB::Expr; RECURSION_NUM_PVS_V2] = core::array::from_fn(|i| pv[i].into());
+        let pv_elements: [CB::Expr; RECURSION_NUM_PVS] = core::array::from_fn(|i| pv[i].into());
         let public_values: &RecursionPublicValues<CB::Expr> = pv_elements.as_slice().borrow();
 
         // Constrain mem read for the public value element.

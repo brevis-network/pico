@@ -6,9 +6,9 @@ use super::{
     Poseidon2SkinnyChip,
 };
 use crate::{
-    chips::{
-        chips::recursion_memory_v2::MemoryAccessCols,
-        poseidon2::{external_linear_layer, internal_linear_layer},
+    chips::chips::{
+        poseidon2::utils::{external_linear_layer, internal_linear_layer},
+        recursion_memory_v2::MemoryAccessCols,
     },
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},

@@ -29,7 +29,7 @@ use pico_vm::{
     primitives::consts::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_S_BOX_DEGREE,
         BABYBEAR_W, KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS,
-        KOALABEAR_S_BOX_DEGREE, KOALABEAR_W, MAX_NUM_PVS_V2, RISCV_NUM_PVS, RISCV_SIMPLE_DEGREE,
+        KOALABEAR_S_BOX_DEGREE, KOALABEAR_W, MAX_NUM_PVS, RISCV_NUM_PVS, RISCV_SIMPLE_DEGREE,
     },
     recursion_v2::runtime::Runtime as RecursionRuntime,
 };
@@ -264,7 +264,7 @@ macro_rules! run {
                     $num_internal_rounds,
                     { $num_internal_rounds - 1 },
                 >::all_chips(),
-                MAX_NUM_PVS_V2,
+                MAX_NUM_PVS,
             );
             let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
 

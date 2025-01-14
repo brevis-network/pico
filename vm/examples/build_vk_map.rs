@@ -33,7 +33,7 @@ use pico_vm::{
     machine::{keys::HashableKey, machine::MachineBehavior},
     primitives::consts::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
-        COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, RECURSION_NUM_PVS_V2, RISCV_NUM_PVS,
+        COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
 };
 use rayon::{iter::ParallelIterator, prelude::IntoParallelRefIterator};
@@ -112,7 +112,7 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
                     BABYBEAR_NUM_INTERNAL_ROUNDS,
                     { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
                 >::all_chips(),
-                RECURSION_NUM_PVS_V2,
+                RECURSION_NUM_PVS,
             );
 
             let (_pk, vk) = machine.setup_keys(&program);
@@ -134,7 +134,7 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
                     BABYBEAR_NUM_INTERNAL_ROUNDS,
                     { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
                 >::all_chips(),
-                RECURSION_NUM_PVS_V2,
+                RECURSION_NUM_PVS,
             );
 
             // let recursion_machine = RiscvRecursionMachine::new(
@@ -180,7 +180,7 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
                     BABYBEAR_NUM_INTERNAL_ROUNDS,
                     { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
                 >::all_chips(),
-                RECURSION_NUM_PVS_V2,
+                RECURSION_NUM_PVS,
             );
             let machine = CompressVkMachine::new(
                 RecursionSC::compress(),
@@ -192,7 +192,7 @@ pub fn vk_digest_from_shape(shape: PicoRecursionProgramShape) -> [BabyBear; DIGE
                     BABYBEAR_NUM_INTERNAL_ROUNDS,
                     { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
                 >::compress_chips(),
-                RECURSION_NUM_PVS_V2,
+                RECURSION_NUM_PVS,
             );
             let combine_base_machine = combine_machine.base_machine();
             let stdin_with_vk = RecursionVkStdin::dummy(combine_base_machine, &shape);

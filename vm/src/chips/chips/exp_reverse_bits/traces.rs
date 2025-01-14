@@ -1,6 +1,6 @@
 use crate::{
     chips::chips::{
-        exp_reverse_bits_v2::{
+        exp_reverse_bits::{
             columns::{
                 ExpReverseBitsLenCols, ExpReverseBitsLenPreprocessedCols,
                 NUM_EXP_REVERSE_BITS_LEN_COLS, NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS,
@@ -22,7 +22,7 @@ use std::borrow::BorrowMut;
 #[cfg(debug_assertions)]
 use p3_matrix::Matrix;
 
-impl<F: PrimeField32, const DEGREE: usize> ChipBehavior<F> for ExpReverseBitsLenChip<DEGREE, F> {
+impl<F: PrimeField32> ChipBehavior<F> for ExpReverseBitsLenChip<F> {
     type Record = RecursionRecord<F>;
 
     type Program = RecursionProgram<F>;

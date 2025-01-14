@@ -19,7 +19,7 @@ use crate::{
     primitives::consts::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMPRESS_DEGREE,
         DIGEST_SIZE, EXTENSION_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS,
-        KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS_V2,
+        KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS,
     },
     proverchain::ChipBehavior,
     recursion_v2::runtime::{RecursionRecord, Runtime},
@@ -141,7 +141,7 @@ macro_rules! impl_compress_prover {
                         $num_internal_rounds,
                         { $num_internal_rounds - 1 },
                     >::compress_chips(),
-                    RECURSION_NUM_PVS_V2,
+                    RECURSION_NUM_PVS,
                 );
                 Self {
                     machine,

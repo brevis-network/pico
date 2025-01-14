@@ -20,7 +20,7 @@ use crate::{
     configs::config::{Challenge, Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
     machine::{chip::ChipBehavior, machine::BaseMachine},
     primitives::consts::{
-        ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS_V2,
+        ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
     },
     recursion_v2::{
         air::{
@@ -121,7 +121,7 @@ where
         */
 
         // Public values output.
-        let mut compress_public_values_stream = [zero; RECURSION_NUM_PVS_V2];
+        let mut compress_public_values_stream = [zero; RECURSION_NUM_PVS];
         let compress_public_values: &mut RecursionPublicValues<_> =
             compress_public_values_stream.as_mut_slice().borrow_mut();
 

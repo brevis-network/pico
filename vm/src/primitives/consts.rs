@@ -29,13 +29,9 @@ pub const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
 For public values
  */
 
-pub const MAX_NUM_PVS: usize = 370;
-
 pub const RISCV_NUM_PVS: usize = size_of::<PublicValues<Word<u8>, u8>>();
-
-pub const RECURSION_NUM_PVS_V2: usize = size_of::<RecursionPublicValues<u8>>();
-
-pub const MAX_NUM_PVS_V2: usize = RECURSION_NUM_PVS_V2;
+pub const RECURSION_NUM_PVS: usize = size_of::<RecursionPublicValues<u8>>();
+pub const MAX_NUM_PVS: usize = RECURSION_NUM_PVS;
 
 /*
 For Extensions

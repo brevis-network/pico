@@ -24,7 +24,7 @@ use crate::{
     primitives::consts::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, DIGEST_SIZE,
         EMBED_DEGREE, EXTENSION_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS,
-        KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS_V2,
+        KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS,
     },
     proverchain::ChipBehavior,
     recursion_v2::runtime::{RecursionRecord, Runtime},
@@ -144,7 +144,7 @@ macro_rules! impl_embeded_prover {
                         $num_internal_rounds,
                         { $num_internal_rounds - 1 },
                     >::embed_chips(),
-                    RECURSION_NUM_PVS_V2,
+                    RECURSION_NUM_PVS,
                 );
                 Self {
                     machine,

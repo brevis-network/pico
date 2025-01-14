@@ -6,8 +6,8 @@ use crate::{
     },
     machine::septic::SepticDigest,
     primitives::consts::{
-        DIGEST_SIZE, MAX_NUM_PVS_V2, PERMUTATION_RATE, PERMUTATION_WIDTH, PV_DIGEST_NUM_WORDS,
-        RECURSION_NUM_PVS_V2,
+        DIGEST_SIZE, MAX_NUM_PVS, PERMUTATION_RATE, PERMUTATION_WIDTH, PV_DIGEST_NUM_WORDS,
+        RECURSION_NUM_PVS,
     },
     recursion_v2::air::public_values::circuit::{
         config::CircuitConfig, hash::Posedion2FieldHasherVariable,
@@ -30,8 +30,8 @@ pub const CHALLENGER_STATE_NUM_ELTS: usize = size_of::<ChallengerPublicValues<u8
 pub const RECURSIVE_PROOF_NUM_PV_ELTS: usize = size_of::<RecursionPublicValues<u8>>();
 
 const fn make_col_map() -> RecursionPublicValues<usize> {
-    let indices_arr = indices_arr::<RECURSION_NUM_PVS_V2>();
-    unsafe { transmute::<[usize; RECURSION_NUM_PVS_V2], RecursionPublicValues<usize>>(indices_arr) }
+    let indices_arr = indices_arr::<RECURSION_NUM_PVS>();
+    unsafe { transmute::<[usize; RECURSION_NUM_PVS], RecursionPublicValues<usize>>(indices_arr) }
 }
 
 pub const RECURSION_PUBLIC_VALUES_COL_MAP: RecursionPublicValues<usize> = make_col_map();
@@ -41,7 +41,7 @@ pub const NUM_PV_ELMS_TO_HASH: usize = RECURSION_PUBLIC_VALUES_COL_MAP.digest[0]
 
 // Recursive proof has more public values than core proof, so the max number constant defined in
 // pico_core should be set to `RECURSION_NUM_PVS`.
-const_assert_eq!(RECURSION_NUM_PVS_V2, MAX_NUM_PVS_V2);
+const_assert_eq!(RECURSION_NUM_PVS, MAX_NUM_PVS);
 
 #[derive(AlignedBorrow, Serialize, Deserialize, Clone, Copy, Default, Debug)]
 #[repr(C)]
@@ -145,8 +145,8 @@ pub struct RecursionPublicValues<T> {
 
 /// Converts the public values to an array of elements.
 impl<F: Default + Copy> RecursionPublicValues<F> {
-    pub fn to_vec(&self) -> [F; RECURSION_NUM_PVS_V2] {
-        let mut ret = [F::default(); RECURSION_NUM_PVS_V2];
+    pub fn to_vec(&self) -> [F; RECURSION_NUM_PVS] {
+        let mut ret = [F::default(); RECURSION_NUM_PVS];
         let pv: &mut RecursionPublicValues<F> = ret.as_mut_slice().borrow_mut();
 
         *pv = *self;
@@ -156,9 +156,9 @@ impl<F: Default + Copy> RecursionPublicValues<F> {
 
 /// Converts the public values to an array of elements.
 impl<F: Copy> RecursionPublicValues<F> {
-    pub fn as_array(&self) -> [F; RECURSION_NUM_PVS_V2] {
+    pub fn as_array(&self) -> [F; RECURSION_NUM_PVS] {
         unsafe {
-            let mut ret = [MaybeUninit::<F>::zeroed().assume_init(); RECURSION_NUM_PVS_V2];
+            let mut ret = [MaybeUninit::<F>::zeroed().assume_init(); RECURSION_NUM_PVS];
             let pv: &mut RecursionPublicValues<F> = ret.as_mut_slice().borrow_mut();
             *pv = *self;
             ret
@@ -168,7 +168,7 @@ impl<F: Copy> RecursionPublicValues<F> {
 
 impl<T: Copy> IntoIterator for RecursionPublicValues<T> {
     type Item = T;
-    type IntoIter = std::array::IntoIter<T, RECURSION_NUM_PVS_V2>;
+    type IntoIter = std::array::IntoIter<T, RECURSION_NUM_PVS>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.as_array().into_iter()

@@ -27,9 +27,7 @@ use crate::{
         lookup::LookupScope,
         machine::BaseMachine,
     },
-    primitives::consts::{
-        ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS_V2,
-    },
+    primitives::consts::{ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS},
     recursion_v2::air::{recursion_public_values_digest, RecursionPublicValues},
 };
 use p3_air::Air;
@@ -302,7 +300,7 @@ where
             let zero: Felt<_> = builder.eval(CC::F::ZERO);
 
             // Initialize the public values we will commit to.
-            let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS_V2];
+            let mut recursion_public_values_stream = [zero; RECURSION_NUM_PVS];
             let recursion_public_values: &mut RecursionPublicValues<_> =
                 recursion_public_values_stream.as_mut_slice().borrow_mut();
 

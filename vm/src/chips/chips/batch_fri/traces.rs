@@ -15,15 +15,13 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
-impl<F, const DEGREE: usize, const W: u32> BaseAir<F> for BatchFRIChip<DEGREE, W, F> {
+impl<F, const W: u32> BaseAir<F> for BatchFRIChip<W, F> {
     fn width(&self) -> usize {
         NUM_BATCH_FRI_COLS
     }
 }
 
-impl<F: PrimeField32, const DEGREE: usize, const W: u32> ChipBehavior<F>
-    for BatchFRIChip<DEGREE, W, F>
-{
+impl<F: PrimeField32, const W: u32> ChipBehavior<F> for BatchFRIChip<W, F> {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;
 

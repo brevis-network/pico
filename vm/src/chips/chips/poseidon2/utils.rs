@@ -7,9 +7,9 @@ use crate::{
 };
 use p3_field::{FieldAlgebra, PrimeField32};
 
-pub(crate) fn apply_m_4<AF>(x: &mut [AF])
+pub(crate) fn apply_m_4<FA>(x: &mut [FA])
 where
-    AF: FieldAlgebra,
+    FA: FieldAlgebra,
 {
     let t01 = x[0].clone() + x[1].clone();
     let t23 = x[2].clone() + x[3].clone();
@@ -23,15 +23,15 @@ where
     x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
 }
 
-pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; PERMUTATION_WIDTH]) {
+pub(crate) fn external_linear_layer<FA: FieldAlgebra>(state: &mut [FA; PERMUTATION_WIDTH]) {
     for j in (0..PERMUTATION_WIDTH).step_by(4) {
         apply_m_4(&mut state[j..j + 4]);
     }
-    let sums: [AF; 4] = core::array::from_fn(|k| {
+    let sums: [FA; 4] = core::array::from_fn(|k| {
         (0..PERMUTATION_WIDTH)
             .step_by(4)
             .map(|j| state[j + k].clone())
-            .sum::<AF>()
+            .sum::<FA>()
     });
 
     for j in 0..PERMUTATION_WIDTH {
@@ -39,18 +39,18 @@ pub(crate) fn external_linear_layer<AF: FieldAlgebra>(state: &mut [AF; PERMUTATI
     }
 }
 
-pub(crate) fn external_linear_layer_immut<AF: FieldAlgebra + Copy>(
-    state: &[AF; PERMUTATION_WIDTH],
-) -> [AF; PERMUTATION_WIDTH] {
+pub(crate) fn external_linear_layer_immut<FA: FieldAlgebra + Copy>(
+    state: &[FA; PERMUTATION_WIDTH],
+) -> [FA; PERMUTATION_WIDTH] {
     let mut state = *state;
     external_linear_layer(&mut state);
     state
 }
 
-pub(crate) fn internal_linear_layer<FF: FieldBehavior, F: FieldAlgebra>(
-    state: &mut [F; PERMUTATION_WIDTH],
+pub(crate) fn internal_linear_layer<FB: FieldBehavior, FA: FieldAlgebra>(
+    state: &mut [FA; PERMUTATION_WIDTH],
 ) {
-    let part_sum: F = state[1..].iter().cloned().sum();
+    let part_sum: FA = state[1..].iter().cloned().sum();
     let full_sum = part_sum.clone() + state[0].clone();
 
     // The first three diagonal elements are -2, 1, 2 so we do something custom.
@@ -58,20 +58,20 @@ pub(crate) fn internal_linear_layer<FF: FieldBehavior, F: FieldAlgebra>(
     state[1] = full_sum.clone() + state[1].clone();
     state[2] = full_sum.clone() + state[2].double();
 
-    let matmul_constants: [F; PERMUTATION_WIDTH] = match FF::field_type() {
+    let matmul_constants: [FA; PERMUTATION_WIDTH] = match FB::field_type() {
         FieldType::TypeBabyBear => POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY
             .iter()
-            .map(|x| F::from_wrapped_u32(x.as_canonical_u32()))
+            .map(|x| FA::from_wrapped_u32(x.as_canonical_u32()))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap(),
         FieldType::TypeKoalaBear => POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY
             .iter()
-            .map(|x| F::from_wrapped_u32(x.as_canonical_u32()))
+            .map(|x| FA::from_wrapped_u32(x.as_canonical_u32()))
             .collect::<Vec<_>>()
             .try_into()
             .unwrap(),
-        _ => unimplemented!("{:?}", FF::field_type()),
+        _ => unimplemented!("{:?}", FB::field_type()),
     };
 
     // For the remaining elements we use multiplication.

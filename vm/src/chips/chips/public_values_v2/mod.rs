@@ -18,7 +18,7 @@ mod tests {
         chips::chips::public_values_v2::PublicValuesChip,
         compiler::recursion_v2::{instruction, program::RecursionProgram},
         machine::{chip::ChipBehavior, logger::setup_logger},
-        primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS_V2},
+        primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
         recursion_v2::{
             air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
             runtime::RecursionRecord,
@@ -39,25 +39,25 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let mut random_felt = move || -> F { F::from_canonical_u32(rng.gen_range(0..1 << 16)) };
-        let random_pv_elements: [F; RECURSION_NUM_PVS_V2] = array::from_fn(|_| random_felt());
+        let random_pv_elements: [F; RECURSION_NUM_PVS] = array::from_fn(|_| random_felt());
         let addr = 0u32;
-        let public_values_addrs: [u32; RECURSION_NUM_PVS_V2] = array::from_fn(|i| i as u32 + addr);
+        let public_values_addrs: [u32; RECURSION_NUM_PVS] = array::from_fn(|i| i as u32 + addr);
 
         assert_eq!(
             public_values_addrs.len(),
-            RECURSION_NUM_PVS_V2,
+            RECURSION_NUM_PVS,
             "public_values_addrs length mismatch"
         );
         assert_eq!(
             random_pv_elements.len(),
-            RECURSION_NUM_PVS_V2,
+            RECURSION_NUM_PVS,
             "random_pv_elements length mismatch"
         );
 
         let mut instructions = Vec::new();
         // Allocate the memory for the public values hash.
 
-        for i in 0..RECURSION_NUM_PVS_V2 {
+        for i in 0..RECURSION_NUM_PVS {
             let mult = (NUM_PV_ELMS_TO_HASH..NUM_PV_ELMS_TO_HASH + DIGEST_SIZE).contains(&i);
             instructions.push(instruction::mem_block(
                 MemAccessKind::Write,
@@ -83,7 +83,7 @@ mod tests {
         type F = BabyBear;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
-        let random_felts: [F; RECURSION_NUM_PVS_V2] =
+        let random_felts: [F; RECURSION_NUM_PVS] =
             array::from_fn(|_| F::from_canonical_u32(rng.gen_range(0..1 << 16)));
         let random_public_values: &RecursionPublicValues<F> = random_felts.as_slice().borrow();
         println!("random_public_values: {:?}", random_public_values);

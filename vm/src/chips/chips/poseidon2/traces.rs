@@ -1,15 +1,14 @@
 use std::borrow::BorrowMut;
 
+use super::columns::permutation::{babybear_permutation_mut, koalabear_permutation_mut};
 use crate::{
-    chips::{
-        chips::{
-            poseidon2_wide_v2::{
-                columns::preprocessed::{Poseidon2PreprocessedCols, PREPROCESSED_POSEIDON2_WIDTH},
-                Poseidon2WideChip,
-            },
-            recursion_memory_v2::MemoryAccessCols,
+    chips::chips::{
+        poseidon2::{
+            columns::preprocessed::{Poseidon2PreprocessedCols, PREPROCESSED_POSEIDON2_WIDTH},
+            utils::{external_linear_layer, external_linear_layer_immut, internal_linear_layer},
+            Poseidon2Chip,
         },
-        poseidon2::{external_linear_layer, external_linear_layer_immut, internal_linear_layer},
+        recursion_memory_v2::MemoryAccessCols,
     },
     compiler::recursion_v2::{instruction::Instruction::Poseidon2, program::RecursionProgram},
     machine::{
@@ -24,8 +23,6 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 
-use super::columns::permutation::{babybear_permutation_mut, koalabear_permutation_mut};
-
 impl<
         F: PrimeField32,
         const DEGREE: usize,
@@ -33,7 +30,7 @@ impl<
         const NUM_INTERNAL_ROUNDS: usize,
         const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
     > ChipBehavior<F>
-    for Poseidon2WideChip<
+    for Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -41,7 +38,7 @@ impl<
         F,
     >
 where
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -54,7 +51,7 @@ where
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
-        format!("Poseidon2WideDeg{}", DEGREE)
+        format!("Poseidon2Deg{}", DEGREE)
     }
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
@@ -150,7 +147,7 @@ impl<
         const NUM_INTERNAL_ROUNDS: usize,
         const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
     >
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -304,18 +301,12 @@ impl<
         r: usize,
     ) -> [F; PERMUTATION_WIDTH] {
         let mut state = {
-            // For the first round, apply the linear layer.
             let round_state: &[F; PERMUTATION_WIDTH] = if r == 0 {
                 &external_linear_layer_immut(&external_rounds_state[r])
             } else {
                 &external_rounds_state[r]
             };
 
-            // Add round constants.
-            //
-            // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
-            // columns for it, and instead include it in the constraint for the x^3 part of the
-            // sbox.
             let round = if r < NUM_EXTERNAL_ROUNDS / 2 {
                 r
             } else {
@@ -370,18 +361,17 @@ impl<
         let mut state: [F; PERMUTATION_WIDTH] = *internal_rounds_state;
         let mut sbox_deg_3: [F; NUM_INTERNAL_ROUNDS] = [F::ZERO; NUM_INTERNAL_ROUNDS];
         for r in 0..NUM_INTERNAL_ROUNDS {
-            // Add the round constant to the 0th state element.
-            // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
-            // columns for it, just like for external rounds.
             let round = r + NUM_EXTERNAL_ROUNDS / 2;
             let add_rc = state[0] + F::from_wrapped_u32(RC_16_30_U32[round][0]);
 
             // Apply the sbox.
             if F::field_type() == FieldType::TypeBabyBear {
+                // BabyBear version
                 sbox_deg_3[r] = add_rc * add_rc * add_rc;
                 let sbox_deg_7 = sbox_deg_3[r] * sbox_deg_3[r] * add_rc;
                 state[0] = sbox_deg_7;
             } else if F::field_type() == FieldType::TypeKoalaBear {
+                // KoalaBear version
                 sbox_deg_3[r] = add_rc * add_rc * add_rc;
                 state[0] = sbox_deg_3[r];
             } else {
@@ -390,11 +380,6 @@ impl<
 
             internal_linear_layer::<F, _>(&mut state);
 
-            // Optimization: since we're only applying the sbox to the 0th state element, we only
-            // need to have columns for the 0th state element at every step. This is because the
-            // linear layer is degree 1, so all state elements at the end can be expressed as a
-            // degree-3 polynomial of the state at the beginning of the internal rounds and the 0th
-            // state element at rounds prior to the current round
             if r < NUM_INTERNAL_ROUNDS - 1 {
                 internal_rounds_s0[r] = state[0];
             }

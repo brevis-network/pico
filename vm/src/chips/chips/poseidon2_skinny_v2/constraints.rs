@@ -6,7 +6,7 @@ use super::{
     Poseidon2SkinnyChip,
 };
 use crate::{
-    chips::poseidon2::{external_linear_layer, internal_linear_layer},
+    chips::chips::poseidon2::utils::{external_linear_layer, internal_linear_layer},
     machine::builder::{ChipBuilder, RecursionBuilder},
     primitives::consts::{
         BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,

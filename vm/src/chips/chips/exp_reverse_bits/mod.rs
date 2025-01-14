@@ -6,7 +6,7 @@ use columns::*;
 use std::marker::PhantomData;
 
 #[derive(Clone, Debug, Copy, Default)]
-pub struct ExpReverseBitsLenChip<const DEGREE: usize, F> {
+pub struct ExpReverseBitsLenChip<F> {
     pub _phantom: PhantomData<fn(F) -> F>,
 }
 
@@ -120,7 +120,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let chip = ExpReverseBitsLenChip::<3, F> {
+        let chip = ExpReverseBitsLenChip::<F> {
             _phantom: PhantomData,
         };
         let main_trace: RowMajorMatrix<F> =

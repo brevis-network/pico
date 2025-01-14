@@ -40,7 +40,7 @@ use crate::{
         FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
         PrintInstr,
     },
-    primitives::consts::{PERMUTATION_WIDTH, RECURSION_NUM_PVS_V2},
+    primitives::consts::{PERMUTATION_WIDTH, RECURSION_NUM_PVS},
 };
 use memory::*;
 pub use opcode::*;
@@ -497,7 +497,7 @@ where
 
                 Instruction::CommitPublicValues(instr) => {
                     let pv_addrs = instr.pv_addrs.as_array();
-                    let pv_values: [F; RECURSION_NUM_PVS_V2] =
+                    let pv_values: [F; RECURSION_NUM_PVS] =
                         array::from_fn(|i| self.memory.mr(pv_addrs[i]).val[0]);
                     self.record.public_values = *pv_values.as_slice().borrow();
                     self.record

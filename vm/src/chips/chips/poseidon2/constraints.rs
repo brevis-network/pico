@@ -1,14 +1,11 @@
 use super::columns::{
-    BABYBEAR_NUM_POSEIDON2_DEGREE3_COLS, BABYBEAR_NUM_POSEIDON2_DEGREE9_COLS,
-    KOALABEAR_NUM_POSEIDON2_DEGREE3_COLS, KOALABEAR_NUM_POSEIDON2_DEGREE9_COLS,
+    BABYBEAR_NUM_POSEIDON2_HD_COLS, BABYBEAR_NUM_POSEIDON2_LD_COLS, KOALABEAR_NUM_POSEIDON2_COLS,
 };
 use crate::{
-    chips::{
-        chips::poseidon2_wide_v2::{
-            columns::{permutation::Poseidon2, preprocessed::Poseidon2PreprocessedCols},
-            Poseidon2WideChip,
-        },
-        poseidon2::{external_linear_layer, internal_linear_layer},
+    chips::chips::poseidon2::{
+        columns::{permutation::Poseidon2, preprocessed::Poseidon2PreprocessedCols},
+        utils::{external_linear_layer, internal_linear_layer},
+        Poseidon2Chip,
     },
     machine::{
         builder::{ChipBuilder, RecursionBuilder},
@@ -27,10 +24,10 @@ use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::{array, borrow::Borrow};
 
-macro_rules! impl_poseidon2_wide_chip {
-    ($num_external_rounds:expr, $num_internal_rounds:expr, $num_col_degree_3:expr, $num_col_degree_9:expr) => {
+macro_rules! impl_poseidon2_chip {
+    ($num_external_rounds:expr, $num_internal_rounds:expr, $num_col_ld:expr, $num_col_hd:expr) => {
         impl<F, const DEGREE: usize> BaseAir<F>
-            for Poseidon2WideChip<
+            for Poseidon2Chip<
                 DEGREE,
                 $num_external_rounds,
                 $num_internal_rounds,
@@ -40,9 +37,9 @@ macro_rules! impl_poseidon2_wide_chip {
         {
             fn width(&self) -> usize {
                 if DEGREE == 3 {
-                    $num_col_degree_3
-                } else if DEGREE == 9 || DEGREE == 17 {
-                    $num_col_degree_9
+                    $num_col_ld
+                } else if DEGREE == 9 {
+                    $num_col_hd
                 } else {
                     panic!("Unsupported degree: {}", DEGREE);
                 }
@@ -50,7 +47,7 @@ macro_rules! impl_poseidon2_wide_chip {
         }
 
         impl<F: Field, CB: ChipBuilder<F>, const DEGREE: usize> Air<CB>
-            for Poseidon2WideChip<
+            for Poseidon2Chip<
                 DEGREE,
                 $num_external_rounds,
                 $num_internal_rounds,
@@ -106,18 +103,18 @@ macro_rules! impl_poseidon2_wide_chip {
     };
 }
 
-impl_poseidon2_wide_chip!(
+impl_poseidon2_chip!(
     BABYBEAR_NUM_EXTERNAL_ROUNDS,
     BABYBEAR_NUM_INTERNAL_ROUNDS,
-    BABYBEAR_NUM_POSEIDON2_DEGREE3_COLS,
-    BABYBEAR_NUM_POSEIDON2_DEGREE9_COLS
+    BABYBEAR_NUM_POSEIDON2_LD_COLS,
+    BABYBEAR_NUM_POSEIDON2_HD_COLS
 );
 
-impl_poseidon2_wide_chip!(
+impl_poseidon2_chip!(
     KOALABEAR_NUM_EXTERNAL_ROUNDS,
     KOALABEAR_NUM_INTERNAL_ROUNDS,
-    KOALABEAR_NUM_POSEIDON2_DEGREE3_COLS,
-    KOALABEAR_NUM_POSEIDON2_DEGREE9_COLS
+    KOALABEAR_NUM_POSEIDON2_COLS,
+    KOALABEAR_NUM_POSEIDON2_COLS
 );
 
 impl<
@@ -127,7 +124,7 @@ impl<
         const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
         F: Field,
     >
-    Poseidon2WideChip<
+    Poseidon2Chip<
         DEGREE,
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
@@ -187,15 +184,9 @@ impl<
         } else if F::field_type() == FieldType::TypeKoalaBear {
             let mut sbox_deg_3: [CB::Expr; PERMUTATION_WIDTH] = array::from_fn(|_| CB::Expr::ZERO);
             for i in 0..PERMUTATION_WIDTH {
-                let calculated_sbox_deg_3 =
-                    add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
+                sbox_deg_3[i] = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
 
-                if let Some(external_sbox) = local_row.external_rounds_sbox() {
-                    builder.assert_eq(external_sbox[r][i].into(), calculated_sbox_deg_3);
-                    sbox_deg_3[i] = external_sbox[r][i].into();
-                } else {
-                    sbox_deg_3[i] = calculated_sbox_deg_3;
-                }
+                assert!(local_row.external_rounds_sbox().is_none());
             }
             state = sbox_deg_3;
         } else {
