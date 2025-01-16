@@ -37,9 +37,7 @@ impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2Chip<DEGREE, BabyBearConfig
 
 impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2Chip<DEGREE, KoalaBearConfig, F> {
     fn width(&self) -> usize {
-        if DEGREE == 3 {
-            KOALABEAR_NUM_POSEIDON2_COLS
-        } else if DEGREE == 9 {
+        if DEGREE == 3 || DEGREE == 9 {
             KOALABEAR_NUM_POSEIDON2_COLS
         } else {
             panic!("Unsupported degree: {}", DEGREE);

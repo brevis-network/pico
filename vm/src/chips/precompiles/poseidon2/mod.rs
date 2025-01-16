@@ -6,6 +6,7 @@ use crate::configs::config::Poseidon2Config;
 use core::marker::PhantomData;
 use typenum::Unsigned;
 
+#[allow(clippy::type_complexity)]
 #[derive(Debug)]
 pub struct Poseidon2PermuteChip<F, Config>(PhantomData<fn(F, Config) -> (F, Config)>);
 

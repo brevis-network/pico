@@ -14,6 +14,7 @@ use p3_field::Field;
 use std::{borrow::Borrow, marker::PhantomData, ops::Deref};
 
 /// A chip that implements addition for the opcode Poseidon2.
+#[allow(clippy::type_complexity)]
 #[derive(Debug, Clone, Copy)]
 pub struct Poseidon2Chip<const DEGREE: usize, Config, F> {
     pub _phantom: PhantomData<fn(F, Config) -> (F, Config)>,

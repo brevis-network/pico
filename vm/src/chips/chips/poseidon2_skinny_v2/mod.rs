@@ -8,6 +8,7 @@ pub mod trace;
 
 /// A chip that implements the Poseidon2 permutation in the skinny variant
 /// (one external round per row and one row for all internal rounds).
+#[allow(clippy::type_complexity)]
 pub struct Poseidon2SkinnyChip<const DEGREE: usize, Config, F>(
     PhantomData<fn(F, Config) -> (F, Config)>,
 );

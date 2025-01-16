@@ -11,6 +11,7 @@ use pico_vm::{
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
+#[allow(clippy::unit_arg)]
 fn main() {
     setup_logger();
     let (elf, riscv_stdin, _) = parse_args::parse_args();

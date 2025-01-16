@@ -1,5 +1,4 @@
 use anyhow::Result;
-use bincode;
 use clap::{
     builder::{NonEmptyStringValueParser, TypedValueParser},
     Parser,
@@ -65,6 +64,7 @@ const PROGRAMS: &[Benchmark] = &[
     },
 ];
 
+#[allow(clippy::type_complexity)]
 fn load<P>(bench: &Benchmark) -> Result<(Vec<u8>, EmulatorStdin<P, Vec<u8>>)> {
     let elf = std::fs::read(bench.elf)?;
     let stdin = match bench.input {

@@ -45,7 +45,7 @@ impl<F: Field> CpuChip<F> {
             ByteOpcode::U8Range,
             0,
             0,
-            clk_8bit_limb.into(),
+            clk_8bit_limb,
             0,
         ));
     }

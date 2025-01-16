@@ -2,7 +2,7 @@
 macro_rules! impl_chip_behavior {
     ($enum_name:ident, $F:ident, [ $( ($variant:ident, $chip_type:ident) ),+ ]) => {
 
-        impl<$F: PrimeField32 + crate::machine::field::FieldSpecificPoseidon2Config> ChipBehavior<$F> for $enum_name<$F> {
+        impl<$F: PrimeField32 + $crate::machine::field::FieldSpecificPoseidon2Config> ChipBehavior<$F> for $enum_name<$F> {
             type Record = EmulationRecord;
             type Program = Program;
 

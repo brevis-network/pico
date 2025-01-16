@@ -12,6 +12,7 @@ use crate::{
 };
 use typenum::Unsigned;
 
+#[allow(clippy::type_complexity)]
 pub(crate) struct Poseidon2PermuteSyscall<F, Config>(
     pub(crate) PhantomData<fn(F, Config) -> (F, Config)>,
 );
