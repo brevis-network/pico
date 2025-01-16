@@ -19,6 +19,8 @@ where
     pub proofs: Arc<[BaseProof<SC>]>,
 
     pub vks: Arc<[BaseVerifyingKey<SC>]>,
+
+    pub pv_stream: Option<Vec<u8>>,
 }
 
 impl<SC> MetaProof<SC>
@@ -26,8 +28,16 @@ where
     SC: StarkGenericConfig,
 {
     /// Create a new MetaProof
-    pub fn new(proofs: Arc<[BaseProof<SC>]>, vks: Arc<[BaseVerifyingKey<SC>]>) -> Self {
-        Self { proofs, vks }
+    pub fn new(
+        proofs: Arc<[BaseProof<SC>]>,
+        vks: Arc<[BaseVerifyingKey<SC>]>,
+        pv_stream: Option<Vec<u8>>,
+    ) -> Self {
+        Self {
+            proofs,
+            vks,
+            pv_stream,
+        }
     }
 
     /// Get the number of the proof and config

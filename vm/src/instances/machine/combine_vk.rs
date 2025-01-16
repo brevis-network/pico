@@ -249,7 +249,7 @@ macro_rules! impl_combine_vk_machine {
                 }
 
                 // construct meta proof
-                MetaProof::new(all_proofs.into(), all_vks.into())
+                MetaProof::new(all_proofs.into(), all_vks.into(), None)
             }
 
             /// Verify the proof.

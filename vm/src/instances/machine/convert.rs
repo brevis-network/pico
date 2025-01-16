@@ -183,7 +183,7 @@ macro_rules! impl_convert_machine {
                 }
 
                 // construct meta proof
-                MetaProof::new(all_proofs.into(), all_vks.into())
+                MetaProof::new(all_proofs.into(), all_vks.into(), None)
             }
 
             /// Verify the proof.

@@ -66,7 +66,7 @@ where
 
         // Construct the metaproof with proofs and vks where vks is a repetition of the same witness.vk
         let vks = vec![witness.vk.clone().unwrap()].into();
-        MetaProof::new(proofs.into(), vks)
+        MetaProof::new(proofs.into(), vks, None)
     }
 
     /// Verify the proof.

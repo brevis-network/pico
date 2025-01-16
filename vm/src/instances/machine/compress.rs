@@ -88,7 +88,7 @@ where
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();
-        MetaProof::new(proofs.into(), vks)
+        MetaProof::new(proofs.into(), vks, None)
     }
 
     /// Verify the proof.

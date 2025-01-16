@@ -78,6 +78,30 @@ where
         let emulator = self.emulator.as_mut().unwrap();
         emulator.emulate_batch().unwrap()
     }
+
+    pub fn get_pv_stream_with_dryrun(&mut self) -> Vec<u8> {
+        loop {
+            let (_, done) = self.next_record_batch();
+            if done {
+                break;
+            }
+        }
+        self.emulator
+            .as_ref()
+            .unwrap()
+            .state
+            .public_values_stream
+            .clone()
+    }
+
+    pub fn get_pv_stream(&mut self) -> Vec<u8> {
+        self.emulator
+            .as_ref()
+            .unwrap()
+            .state
+            .public_values_stream
+            .clone()
+    }
 }
 
 // Recursion emulator

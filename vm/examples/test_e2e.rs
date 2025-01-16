@@ -19,7 +19,7 @@ use pico_vm::{
             kb_bn254_poseidon2::KoalaBearBn254Poseidon2, kb_poseidon2::KoalaBearPoseidon2,
         },
     },
-    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{emulator_v2::MetaEmulator, opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
@@ -46,6 +46,7 @@ use pico_vm::{
     },
     recursion_v2::runtime::Runtime,
 };
+
 use std::{
     path::PathBuf,
     sync::Arc,
@@ -94,6 +95,26 @@ macro_rules! run {
             };
             info!("core_opts: {:?}", core_opts);
 
+            // Getting public values stream.
+            info!(
+                "Generating public values stream (at {:?})..",
+                start.elapsed()
+            );
+            let riscv_witness = ProvingWitness::<
+                $riscv_sc,
+                RiscvChipType<Val<$riscv_sc>, { $num_external_rounds / 2 }, $num_internal_rounds>,
+                Vec<u8>,
+            >::setup_for_riscv(
+                riscv_program.clone(),
+                riscv_stdin.clone(),
+                core_opts.clone(),
+                riscv_pk.clone(),
+                riscv_vk.clone(),
+            );
+            let mut emulator = MetaEmulator::setup_riscv(&riscv_witness);
+            let pv_stream = emulator.get_pv_stream_with_dryrun();
+            info!("Public values stream: {:?}", pv_stream);
+
             // Generate the proof.
             info!("Generating RISCV proof (at {:?})..", start.elapsed());
             let (riscv_proof, riscv_time) = timed_run(|| {
@@ -111,6 +132,9 @@ macro_rules! run {
                 "PERF-step=prove-user_time={}",
                 riscv_start.elapsed().as_millis()
             );
+
+            // assert pv_stream is the same as dryrun
+            assert_eq!(riscv_proof.pv_stream.clone().unwrap(), pv_stream);
 
             let riscv_proof_size = bincode::serialize(&riscv_proof.proofs()).unwrap().len();
             info!("PERF-step=proof_size-{}", riscv_proof_size);

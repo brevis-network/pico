@@ -143,7 +143,8 @@ where
         // TODO: print some summary numbers
         info!("RiscV proofs generated with {} chunks.", all_proofs.len());
 
-        MetaProof::new(all_proofs.into(), vks.into())
+        let pv_stream = emulator.get_pv_stream();
+        MetaProof::new(all_proofs.into(), vks.into(), Some(pv_stream))
     }
 }
 
@@ -290,7 +291,10 @@ where
         global_lookup_debugger.print_results();
 
         // TODO: print more summary numbers
+
+        let pv_stream = emulator.get_pv_stream();
         let riscv_emulator = emulator.emulator.unwrap();
+
         info!("RiscV execution report:");
         info!("|- cycles:           {}", riscv_emulator.state.global_clk);
         info!("|- chunk_num:        {}", all_proofs.len());
@@ -300,7 +304,7 @@ where
             riscv_emulator.opts.chunk_batch_size
         );
 
-        MetaProof::new(all_proofs.into(), vks.into())
+        MetaProof::new(all_proofs.into(), vks.into(), Some(pv_stream))
     }
 
     /// Verify the proof.
