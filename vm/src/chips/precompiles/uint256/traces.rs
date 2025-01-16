@@ -16,7 +16,6 @@ use crate::{
     machine::chip::ChipBehavior,
     recursion_v2::{air::IsZeroOperation, stark::utils::pad_rows_fixed},
 };
-use hashbrown::HashMap;
 use num::{BigUint, One, Zero};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -36,8 +35,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
         // The record update is used by extra_record
-        let mut chunked_byte_lookup_events = Vec::new();
-        let mut rangecheck_lookup_events = Vec::new();
+        let mut byte_lookup_events = vec![];
 
         let events: Vec<_> = input
             .get_precompile_events(SyscallCode::UINT256_MUL)
@@ -55,8 +53,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
         let mut rows = events
             .iter()
             .map(|event| {
-                let mut new_range_check_events = HashMap::new();
-                let mut new_byte_lookup_events = HashMap::new();
+                let mut new_byte_lookup_events = vec![];
 
                 let mut row: [F; NUM_UINT256_MUL_COLS] = [F::ZERO; NUM_UINT256_MUL_COLS];
                 let cols: &mut Uint256MulCols<F> = row.as_mut_slice().borrow_mut();
@@ -76,11 +73,11 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 // Populate memory columns.
                 for i in 0..UINT256_NUM_WORDS {
                     cols.x_memory[i]
-                        .populate(event.x_memory_records[i], &mut new_range_check_events);
+                        .populate(event.x_memory_records[i], &mut new_byte_lookup_events);
                     cols.y_memory[i]
-                        .populate(event.y_memory_records[i], &mut new_range_check_events);
+                        .populate(event.y_memory_records[i], &mut new_byte_lookup_events);
                     cols.modulus_memory[i]
-                        .populate(event.modulus_memory_records[i], &mut new_range_check_events);
+                        .populate(event.modulus_memory_records[i], &mut new_byte_lookup_events);
                 }
 
                 let modulus_bytes = words_to_bytes_le_vec(&event.modulus);
@@ -97,7 +94,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                     modulus.clone()
                 };
                 let result = cols.output.populate_with_modulus(
-                    &mut new_range_check_events,
+                    &mut new_byte_lookup_events,
                     event.chunk,
                     &x,
                     &y,
@@ -115,8 +112,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                     );
                 }
 
-                chunked_byte_lookup_events.push(new_byte_lookup_events);
-                rangecheck_lookup_events.push(new_range_check_events);
+                byte_lookup_events.extend(new_byte_lookup_events);
 
                 row
             })
@@ -141,8 +137,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
             log_rows,
         );
 
-        output.add_chunked_byte_lookup_events(chunked_byte_lookup_events.iter().collect());
-        output.add_rangecheck_lookup_events(rangecheck_lookup_events);
+        output.add_byte_lookup_events(byte_lookup_events);
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect(), NUM_UINT256_MUL_COLS)

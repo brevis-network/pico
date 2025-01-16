@@ -1,5 +1,5 @@
 use crate::{
-    chips::chips::rangecheck::event::RangeRecordBehavior,
+    chips::chips::byte::event::ByteRecordBehavior,
     compiler::word::Word,
     machine::builder::{ChipLookupBuilder, ChipRangeBuilder},
     primitives::consts::WORD_SIZE,
@@ -36,7 +36,7 @@ impl<F: Field> Add4Operation<F> {
     #[allow(clippy::too_many_arguments)]
     pub fn populate(
         &mut self,
-        record: &mut impl RangeRecordBehavior,
+        record: &mut impl ByteRecordBehavior,
         chunk: u32,
         a_u32: u32,
         b_u32: u32,
@@ -88,17 +88,16 @@ impl<F: Field> Add4Operation<F> {
         b: Word<CB::Var>,
         c: Word<CB::Var>,
         d: Word<CB::Var>,
-        chunk: CB::Var,
         is_real: CB::Var,
         cols: Add4Operation<CB::Var>,
     ) {
         // Range check each byte.
         {
-            builder.slice_range_check_u8(&a.0, chunk, is_real);
-            builder.slice_range_check_u8(&b.0, chunk, is_real);
-            builder.slice_range_check_u8(&c.0, chunk, is_real);
-            builder.slice_range_check_u8(&d.0, chunk, is_real);
-            builder.slice_range_check_u8(&cols.value.0, chunk, is_real);
+            builder.slice_range_check_u8(&a.0, is_real);
+            builder.slice_range_check_u8(&b.0, is_real);
+            builder.slice_range_check_u8(&c.0, is_real);
+            builder.slice_range_check_u8(&d.0, is_real);
+            builder.slice_range_check_u8(&cols.value.0, is_real);
         }
 
         builder.assert_bool(is_real);

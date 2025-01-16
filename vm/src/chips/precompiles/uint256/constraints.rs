@@ -82,7 +82,6 @@ where
             &y_limbs,
             &p_modulus,
             FieldOperation::Mul,
-            local.chunk,
             local.is_real,
         );
 

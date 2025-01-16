@@ -50,6 +50,12 @@ where
                 ByteOpcode::MSB => {
                     builder.looked_byte(field_op, local.msb, local.b, CB::F::ZERO, mult)
                 }
+                ByteOpcode::U8Range => {
+                    builder.looked_byte(field_op, CB::F::ZERO, local.b, local.c, mult)
+                }
+                ByteOpcode::U16Range => {
+                    builder.looked_byte(field_op, local.value_u16, CB::F::ZERO, CB::F::ZERO, mult)
+                }
             }
         }
     }

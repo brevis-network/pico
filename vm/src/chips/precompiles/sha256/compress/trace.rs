@@ -5,10 +5,7 @@ use super::{
     ShaCompressChip, SHA_COMPRESS_K,
 };
 use crate::{
-    chips::chips::{
-        byte::event::{ByteLookupEvent, ByteRecordBehavior},
-        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
-    },
+    chips::chips::byte::event::{ByteLookupEvent, ByteRecordBehavior},
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::{
         record::EmulationRecord,
@@ -52,7 +49,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
             } else {
                 unreachable!()
             };
-            self.event_to_rows(event, &mut wrapped_rows, &mut Vec::new(), &mut Vec::new());
+            self.event_to_rows(event, &mut wrapped_rows, &mut Vec::new());
         }
         let mut rows = wrapped_rows.unwrap();
         let num_real_rows = rows.len();
@@ -105,21 +102,18 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
             .collect();
 
         let chunk_size = std::cmp::max(compress_events.len() / num_cpus::get(), 1);
-        let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) =
-            compress_events
-                .par_chunks(chunk_size)
-                .map(|events| {
-                    let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
-                    let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
-                    events.iter().for_each(|event| {
-                        self.event_to_rows(event, &mut None, &mut blu, &mut range);
-                    });
-                    (blu, range)
-                })
-                .unzip();
+        let blu_batches: Vec<HashMap<_, _>> = compress_events
+            .par_chunks(chunk_size)
+            .map(|events| {
+                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+                events.iter().for_each(|event| {
+                    self.event_to_rows(event, &mut None, &mut blu);
+                });
+                blu
+            })
+            .collect();
 
         output.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
-        output.add_rangecheck_lookup_events(range_batches);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
@@ -139,7 +133,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         event: &ShaCompressEvent,
         rows: &mut Option<Vec<[F; NUM_SHA_COMPRESS_COLS]>>,
         brb: &mut impl ByteRecordBehavior,
-        rrb: &mut impl RangeRecordBehavior,
     ) {
         let chunk = event.chunk;
 
@@ -161,7 +154,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             cols.octet_num[octet_num_idx] = F::ONE;
             cols.is_initialize = F::ONE;
 
-            cols.mem.populate_read(event.h_read_records[j], rrb);
+            cols.mem.populate_read(event.h_read_records[j], brb);
             cols.mem_addr = F::from_canonical_u32(event.h_ptr + (j * 4) as u32);
 
             cols.a = Word::from(event.h_read_records[0].value);
@@ -198,7 +191,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             cols.clk = F::from_canonical_u32(event.clk);
             cols.w_ptr = F::from_canonical_u32(event.w_ptr);
             cols.h_ptr = F::from_canonical_u32(event.h_ptr);
-            cols.mem.populate_read(event.w_i_read_records[j], rrb);
+            cols.mem.populate_read(event.w_i_read_records[j], brb);
             cols.mem_addr = F::from_canonical_u32(event.w_ptr + (j * 4) as u32);
 
             let a = h_array[0];
@@ -225,13 +218,13 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             let s1 = cols.s1.populate(brb, chunk, s1_intermediate, e_rr_25);
 
             let e_and_f = cols.e_and_f.populate(brb, chunk, e, f);
-            let e_not = cols.e_not.populate(rrb, chunk, e);
+            let e_not = cols.e_not.populate(brb, chunk, e);
             let e_not_and_g = cols.e_not_and_g.populate(brb, chunk, e_not, g);
             let ch = cols.ch.populate(brb, chunk, e_and_f, e_not_and_g);
 
             let temp1 = cols
                 .temp1
-                .populate(rrb, chunk, h, s1, ch, event.w[j], SHA_COMPRESS_K[j]);
+                .populate(brb, chunk, h, s1, ch, event.w[j], SHA_COMPRESS_K[j]);
 
             let a_rr_2 = cols.a_rr_2.populate(brb, chunk, a, 2);
             let a_rr_13 = cols.a_rr_13.populate(brb, chunk, a, 13);
@@ -245,10 +238,10 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             let maj_intermediate = cols.maj_intermediate.populate(brb, chunk, a_and_b, a_and_c);
             let maj = cols.maj.populate(brb, chunk, maj_intermediate, b_and_c);
 
-            let temp2 = cols.temp2.populate(rrb, chunk, s0, maj);
+            let temp2 = cols.temp2.populate(brb, chunk, s0, maj);
 
-            let d_add_temp1 = cols.d_add_temp1.populate(rrb, chunk, d, temp1);
-            let temp1_add_temp2 = cols.temp1_add_temp2.populate(rrb, chunk, temp1, temp2);
+            let d_add_temp1 = cols.d_add_temp1.populate(brb, chunk, d, temp1);
+            let temp1_add_temp2 = cols.temp1_add_temp2.populate(brb, chunk, temp1, temp2);
 
             h_array[7] = g;
             h_array[6] = f;
@@ -288,8 +281,8 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             cols.octet_num[octet_num_idx] = F::ONE;
             cols.is_finalize = F::ONE;
 
-            cols.finalize_add.populate(rrb, chunk, og_h[j], h_array[j]);
-            cols.mem.populate_write(event.h_write_records[j], rrb);
+            cols.finalize_add.populate(brb, chunk, og_h[j], h_array[j]);
+            cols.mem.populate_write(event.h_write_records[j], brb);
             cols.mem_addr = F::from_canonical_u32(event.h_ptr + (j * 4) as u32);
 
             v[j] = h_array[j];

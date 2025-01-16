@@ -110,6 +110,11 @@ impl<F: Field> ByteChip<F> {
                         let msb = (b & 0b1000_0000) != 0;
                         col.msb = F::from_bool(msb);
                     }
+                    ByteOpcode::U8Range => (),
+                    ByteOpcode::U16Range => {
+                        let v = ((b as u32) << 8) + c as u32;
+                        col.value_u16 = F::from_canonical_u32(v);
+                    }
                 };
             }
         }

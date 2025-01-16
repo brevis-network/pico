@@ -135,7 +135,6 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
             diff_minus_one,
             mem_access.diff_16bit_limb.clone(),
             mem_access.diff_8bit_limb.clone(),
-            chunk.clone(),
             do_check,
         );
     }

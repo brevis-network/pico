@@ -2,7 +2,10 @@
 
 use super::ChipBuilder;
 use crate::{
-    compiler::{riscv::opcode::RangeCheckOpcode, word::Word},
+    compiler::{
+        riscv::opcode::{ByteOpcode, RangeCheckOpcode},
+        word::Word,
+    },
     configs::config::StarkGenericConfig,
     machine::{
         builder::{AirBuilder, FilteredAirBuilder},
@@ -174,17 +177,15 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
     /// Sends a new range lookup
     fn looking_rangecheck(
         &mut self,
-        opcode: RangeCheckOpcode,
-        value: impl Into<Self::Expr>,
-        _chunk: impl Into<Self::Expr>,
+        opcode: ByteOpcode,
+        a1: impl Into<Self::Expr>,
+        a2: impl Into<Self::Expr>,
+        b: impl Into<Self::Expr>,
+        c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        self.looking(SymbolicLookup::new(
-            vec![Self::Expr::from_canonical_u8(opcode as u8), value.into()],
-            multiplicity.into(),
-            LookupType::RangeUnified,
-            LookupScope::Regional,
-        ))
+        let opcode = Self::Expr::from_canonical_u8(opcode as u8);
+        self.looking_byte_pair(opcode, a1, a2, b, c, multiplicity);
     }
 
     /// Receives a new range lookup

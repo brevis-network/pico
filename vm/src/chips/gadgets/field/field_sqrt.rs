@@ -7,10 +7,7 @@ use pico_derive::AlignedBorrow;
 
 use crate::{
     chips::{
-        chips::{
-            byte::event::{ByteLookupEvent, ByteRecordBehavior},
-            rangecheck::event::RangeRecordBehavior,
-        },
+        chips::byte::event::{ByteLookupEvent, ByteRecordBehavior},
         gadgets::{
             field::field_op::FieldOperation,
             utils::{
@@ -58,7 +55,6 @@ where
     pub fn populate(
         &mut self,
         blu: &mut impl ByteRecordBehavior,
-        rlu: &mut impl RangeRecordBehavior,
         chunk: u32,
         a: &BigUint,
         sqrt_fn: impl Fn(&BigUint) -> BigUint,
@@ -70,7 +66,7 @@ where
         // Use FieldOpCols to compute result * result.
         let sqrt_squared =
             self.multiplication
-                .populate(rlu, chunk, &sqrt, &sqrt, FieldOperation::Mul);
+                .populate(blu, chunk, &sqrt, &sqrt, FieldOperation::Mul);
 
         // If the result is indeed the square root of a, then result * result = a.
         assert_eq!(sqrt_squared, a.clone());
@@ -96,7 +92,7 @@ where
         blu.add_byte_lookup_event(and_event);
 
         // Add the byte range check for `sqrt`.
-        rlu.add_u8_range_checks(
+        blu.add_u8_range_checks(
             self.multiplication
                 .result
                 .0
@@ -122,7 +118,6 @@ where
         builder: &mut CB,
         a: &Limbs<CB::Var, P::Limbs>,
         is_odd: impl Into<CB::Expr>,
-        chunk: CB::Var,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
         V: Into<CB::Expr>,
@@ -135,14 +130,7 @@ where
         multiplication.result = *a;
 
         // Compute sqrt * sqrt. We pass in P since we want its BaseField to be the mod.
-        multiplication.eval(
-            builder,
-            &sqrt,
-            &sqrt,
-            FieldOperation::Mul,
-            chunk,
-            is_real.clone(),
-        );
+        multiplication.eval(builder, &sqrt, &sqrt, FieldOperation::Mul, is_real.clone());
 
         let modulus_limbs = P::to_limbs_field_slice(&P::modulus());
         self.range.eval(
@@ -153,7 +141,7 @@ where
         );
 
         // Range check that `sqrt` limbs are bytes.
-        builder.slice_range_check_u8(sqrt.0.as_slice(), chunk, is_real.clone());
+        builder.slice_range_check_u8(sqrt.0.as_slice(), is_real.clone());
 
         // Assert that the square root is the positive one, i.e., with least significant bit 0.
         // This is done by computing LSB = least_significant_byte & 1.

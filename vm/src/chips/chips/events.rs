@@ -3,7 +3,6 @@
 pub use super::{
     alu::event::AluEvent,
     byte::event::ByteLookupEvent,
-    rangecheck::event::RangeLookupEvent,
     riscv_cpu::event::CpuEvent,
     riscv_memory::event::{
         MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord,

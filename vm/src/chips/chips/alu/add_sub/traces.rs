@@ -7,7 +7,7 @@ use crate::{
             },
             event::AluEvent,
         },
-        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
+        byte::event::ByteRecordBehavior,
     },
     compiler::{
         riscv::{opcode::Opcode, program::Program},
@@ -17,7 +17,6 @@ use crate::{
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use core::borrow::BorrowMut;
-use hashbrown::HashMap;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
@@ -99,20 +98,20 @@ impl<F: PrimeField> ChipBehavior<F> for AddSubChip<F> {
             .chunks(chunk_size)
             .chain(input.sub_events.chunks(chunk_size));
 
-        let range_batches = event_iter
+        let blu_batches = event_iter
             .par_bridge()
-            .map(|events| {
-                let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu = vec![];
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                     let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut range);
+                    self.event_to_row(event, cols, &mut blu);
                 });
-                range
+                blu
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        extra.add_rangecheck_lookup_events(range_batches);
+        extra.add_byte_lookup_events(blu_batches);
 
         debug!("{} chip - extra_record", self.name());
     }
@@ -132,7 +131,7 @@ impl<F: Field> AddSubChip<F> {
         &self,
         event: &AluEvent,
         cols: &mut AddSubCols<F>,
-        blu: &mut impl RangeRecordBehavior,
+        blu: &mut impl ByteRecordBehavior,
     ) {
         let is_add = event.opcode == Opcode::ADD;
         cols.chunk = F::from_canonical_u32(event.chunk);

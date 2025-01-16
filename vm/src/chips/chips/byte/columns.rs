@@ -1,4 +1,4 @@
-use super::NUM_BYTE_OPS;
+use crate::compiler::riscv::opcode::NUM_BYTE_OPS;
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
@@ -39,6 +39,9 @@ pub struct BytePreprocessedCols<T> {
     // TODO: maybe this can be moved into RangeCheckChip?
     /// The most significant bit of `b`.
     pub msb: T,
+
+    /// A u16 value used for `U16Range`.
+    pub value_u16: T,
 }
 
 /// For each byte operation in the preprocessed table, a corresponding ByteMultCols row tracks the

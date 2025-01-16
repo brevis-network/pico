@@ -12,7 +12,6 @@ use crate::{
                 mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip,
             },
             byte::ByteChip,
-            rangecheck::RangeCheckChip,
             riscv_cpu::CpuChip,
             riscv_memory::{
                 initialize_finalize::{
@@ -110,7 +109,6 @@ define_chip_type!(
         (AddSub, AddSubChip),
         (Bitwise, BitwiseChip),
         (Byte, ByteChip),
-        (Range, RangeCheckChip),
         (KeecakP, KeccakPermuteChip),
         (FpBn254, FpOpBn254),
         (Fp2AddSubBn254, Fp2AddSubBn254),
@@ -144,13 +142,6 @@ where
             (
                 RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Byte(
                     ByteChip::default(),
-                )
-                .name(),
-                1 << 16,
-            ),
-            (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Range(
-                    RangeCheckChip::default(),
                 )
                 .name(),
                 1 << 16,
@@ -300,7 +291,6 @@ where
         // Remove the preprocessed chips.
         excluded_chip_names.insert(Self::Program(ProgramChip::default()).name());
         excluded_chip_names.insert(Self::Byte(ByteChip::default()).name());
-        excluded_chip_names.insert(Self::Range(RangeCheckChip::default()).name());
 
         all_chips
             .into_iter()

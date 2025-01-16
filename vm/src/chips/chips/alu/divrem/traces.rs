@@ -10,7 +10,6 @@ use crate::{
                 event::AluEvent,
             },
             byte::event::{ByteLookupEvent, ByteRecordBehavior},
-            rangecheck::event::RangeRecordBehavior,
         },
         utils::create_alu_lookups,
     },

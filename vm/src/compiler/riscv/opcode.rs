@@ -121,6 +121,10 @@ pub enum ByteOpcode {
     LTU = 5,
     /// Most Significant Bit.
     MSB = 6,
+    /// Unsigned 8-bit Range Check.
+    U8Range = 7,
+    /// Unsigned 16-bit Range Check.
+    U16Range = 8,
 }
 
 /// Range Check Opcode.
@@ -197,7 +201,7 @@ impl Display for Opcode {
 }
 
 /// The number of different byte operations.
-pub const NUM_BYTE_OPS: usize = 7;
+pub const NUM_BYTE_OPS: usize = 9;
 
 impl From<Opcode> for ByteOpcode {
     /// Convert an opcode to a byte opcode.
@@ -224,6 +228,8 @@ impl ByteOpcode {
             ByteOpcode::ShrCarry,
             ByteOpcode::LTU,
             ByteOpcode::MSB,
+            ByteOpcode::U8Range,
+            ByteOpcode::U16Range,
         ];
         assert_eq!(opcodes.len(), NUM_BYTE_OPS);
         opcodes

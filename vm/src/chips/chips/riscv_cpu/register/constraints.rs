@@ -55,11 +55,7 @@ impl<F: Field> CpuChip<F> {
 
         // Always range check the word value in `op_a`, as JUMP instructions may witness
         // an invalid word and write it to memory.
-        builder.slice_range_check_u8(
-            &local.op_a_access.access.value.0,
-            local.chunk,
-            local.is_real,
-        );
+        builder.slice_range_check_u8(&local.op_a_access.access.value.0, local.is_real);
 
         // If we are performing a branch or a store, then the value of `a` is the previous value.
         builder

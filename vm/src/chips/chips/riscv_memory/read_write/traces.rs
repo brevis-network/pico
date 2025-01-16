@@ -9,7 +9,8 @@ use crate::{
     chips::{
         chips::{
             alu::event::AluEvent,
-            rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
+            byte::event::ByteRecordBehavior,
+            events::ByteLookupEvent,
             riscv_cpu::event::CpuEvent,
             riscv_memory::event::{
                 MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
@@ -18,7 +19,7 @@ use crate::{
         utils::create_alu_lookups,
     },
     compiler::riscv::{
-        opcode::{Opcode, RangeCheckOpcode},
+        opcode::{ByteOpcode, Opcode},
         program::Program,
         register::Register::X0,
     },
@@ -86,27 +87,29 @@ impl<F: PrimeField> ChipBehavior<F> for MemoryReadWriteChip<F> {
             .collect_vec();
         // Generate the trace rows for each event.
         let chunk_size = std::cmp::max(mem_events.len() / num_cpus::get(), 1);
-        let (alu_events, range_events): (Vec<_>, Vec<_>) = mem_events
+        let (alu_events, blu_events): (Vec<_>, Vec<_>) = mem_events
             .par_chunks(chunk_size)
             .map(|ops: &[&CpuEvent]| {
                 let mut alu = HashMap::new();
                 // The range map stores range (u8) lookup event -> multiplicity.
-                let mut range_events: HashMap<RangeLookupEvent, usize> = HashMap::new();
+                let mut blu = vec![];
                 ops.iter().for_each(|op| {
                     let mut row = [F::ZERO; NUM_MEMORY_CHIP_COLS];
                     let cols: &mut MemoryChipCols<F> = row.as_mut_slice().borrow_mut();
-                    let alu_events = self.event_to_row(op, cols, &mut range_events);
+                    let alu_events = self.event_to_row(op, cols, &mut blu);
                     alu_events.into_iter().for_each(|(key, value)| {
                         alu.entry(key).or_insert(Vec::default()).extend(value);
                     });
                 });
-                (alu, range_events)
+                (alu, blu)
             })
             .unzip();
-        for alu_events_chunk in alu_events.into_iter() {
+        for alu_events_chunk in alu_events {
             extra.add_alu_events(alu_events_chunk);
         }
-        extra.add_rangecheck_lookup_events(range_events);
+        for blu_events_chunk in blu_events {
+            extra.add_byte_lookup_events(blu_events_chunk);
+        }
 
         debug!("{} chip - extra_record", self.name());
     }
@@ -124,7 +127,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         &self,
         event: &CpuEvent,
         cols: &mut MemoryChipCols<F>,
-        range_events: &mut impl RangeRecordBehavior,
+        blu_events: &mut impl ByteRecordBehavior,
     ) -> HashMap<Opcode, Vec<AluEvent>> {
         let mut alu_events = HashMap::new();
 
@@ -134,11 +137,11 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // Populate memory accesses for reading from memory.
         assert_eq!(event.memory_record.is_some(), event.memory.is_some());
         if let Some(record) = event.memory_record {
-            cols.memory_access.populate(record, range_events);
+            cols.memory_access.populate(record, blu_events);
         }
 
         cols.instruction.populate(event);
-        self.populate_memory(cols, event, &mut alu_events, range_events);
+        self.populate_memory(cols, event, &mut alu_events, blu_events);
 
         alu_events
     }
@@ -148,7 +151,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         cols: &mut MemoryChipCols<F>,
         event: &CpuEvent,
         new_alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
-        range_events: &mut impl RangeRecordBehavior,
+        blu_events: &mut impl ByteRecordBehavior,
     ) {
         assert!(
             matches!(
@@ -281,22 +284,20 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // Add event to byte lookup for byte range checking each byte in the memory addr
         let addr_bytes = memory_addr.to_le_bytes();
         for byte_pair in addr_bytes.chunks_exact(2) {
-            range_events.add_range_lookup_event(RangeLookupEvent::new(
-                RangeCheckOpcode::U8,
-                byte_pair[0] as u16,
-                Some(chunk),
-            ));
-            range_events.add_range_lookup_event(RangeLookupEvent::new(
-                RangeCheckOpcode::U8,
-                byte_pair[1] as u16,
-                Some(chunk),
+            blu_events.add_byte_lookup_event(ByteLookupEvent::new(
+                chunk,
+                ByteOpcode::U8Range,
+                0,
+                0,
+                byte_pair[0],
+                byte_pair[1],
             ));
         }
     }
 }
 
 impl<F: Field> MemoryWriteCols<F> {
-    pub fn populate(&mut self, record: MemoryWriteRecord, output: &mut impl RangeRecordBehavior) {
+    pub fn populate(&mut self, record: MemoryWriteRecord, output: &mut impl ByteRecordBehavior) {
         let current_record = MemoryRecord {
             value: record.value,
             chunk: record.chunk,
@@ -314,7 +315,7 @@ impl<F: Field> MemoryWriteCols<F> {
 }
 
 impl<F: Field> MemoryReadCols<F> {
-    pub fn populate(&mut self, record: MemoryReadRecord, output: &mut impl RangeRecordBehavior) {
+    pub fn populate(&mut self, record: MemoryReadRecord, output: &mut impl ByteRecordBehavior) {
         let current_record = MemoryRecord {
             value: record.value,
             chunk: record.chunk,
@@ -331,7 +332,7 @@ impl<F: Field> MemoryReadCols<F> {
 }
 
 impl<F: Field> MemoryReadWriteCols<F> {
-    pub fn populate(&mut self, record: MemoryRecordEnum, output: &mut impl RangeRecordBehavior) {
+    pub fn populate(&mut self, record: MemoryRecordEnum, output: &mut impl ByteRecordBehavior) {
         match record {
             MemoryRecordEnum::Read(read_record) => self.populate_read(read_record, output),
             MemoryRecordEnum::Write(write_record) => self.populate_write(write_record, output),
@@ -341,7 +342,7 @@ impl<F: Field> MemoryReadWriteCols<F> {
     pub fn populate_write(
         &mut self,
         record: MemoryWriteRecord,
-        output: &mut impl RangeRecordBehavior,
+        output: &mut impl ByteRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -361,7 +362,7 @@ impl<F: Field> MemoryReadWriteCols<F> {
     pub fn populate_read(
         &mut self,
         record: MemoryReadRecord,
-        output: &mut impl RangeRecordBehavior,
+        output: &mut impl ByteRecordBehavior,
     ) {
         let current_record = MemoryRecord {
             value: record.value,
@@ -384,7 +385,7 @@ impl<F: Field> MemoryAccessCols<F> {
         &mut self,
         current_record: MemoryRecord,
         prev_record: MemoryRecord,
-        output: &mut impl RangeRecordBehavior,
+        output: &mut impl ByteRecordBehavior,
     ) {
         self.value = current_record.value.into();
 
@@ -417,6 +418,6 @@ impl<F: Field> MemoryAccessCols<F> {
         // Add a range table lookup with the U16 op.
         output.add_u16_range_check(diff_16bit_limb, Some(chunk));
         // Add a range table lookup with the U8 op.
-        output.add_u8_range_check(diff_8bit_limb as u8, Some(chunk));
+        output.add_u8_range_check(diff_8bit_limb as u8, 0, Some(chunk));
     }
 }

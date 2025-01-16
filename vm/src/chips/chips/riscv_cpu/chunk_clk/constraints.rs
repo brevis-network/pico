@@ -1,6 +1,6 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    compiler::riscv::opcode::RangeCheckOpcode,
+    compiler::riscv::opcode::ByteOpcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
 };
 use p3_air::AirBuilder;
@@ -28,9 +28,11 @@ impl<F: Field> CpuChip<F> {
 
         // Verify that the chunk value is within 16 bits.
         builder.looking_rangecheck(
-            RangeCheckOpcode::U16,
+            ByteOpcode::U16Range,
             local.chunk,
-            local.chunk,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
             local.is_real,
         );
 
@@ -56,7 +58,6 @@ impl<F: Field> CpuChip<F> {
             local.clk,
             local.clk_16bit_limb,
             local.clk_8bit_limb,
-            local.chunk,
             local.is_real,
         );
     }

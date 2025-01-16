@@ -7,7 +7,7 @@ use core::{
 
 use crate::{
     chips::{
-        chips::rangecheck::event::RangeRecordBehavior,
+        chips::byte::event::ByteRecordBehavior,
         gadgets::{
             field::field_op::FieldOperation,
             utils::{
@@ -90,7 +90,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
-        blu_events: &mut impl RangeRecordBehavior,
+        blu_events: &mut impl ByteRecordBehavior,
         chunk: u32,
         cols: &mut Fp2AddSubCols<F, P>,
         p_x: BigUint,
@@ -188,7 +188,7 @@ where
 
         new_byte_lookup_events
             .iter()
-            .for_each(|x| output.add_range_lookup_event(*x));
+            .for_each(|x| output.add_byte_lookup_event(*x));
 
         let log_rows = input.shape_chip_size(&self.name());
         pad_rows_fixed(
@@ -305,7 +305,6 @@ where
                 CB::Expr::ONE - local.is_add,
                 CB::F::ZERO,
                 CB::F::ZERO,
-                local.chunk,
                 local.is_real,
             );
 
@@ -318,7 +317,6 @@ where
                 CB::Expr::ONE - local.is_add,
                 CB::F::ZERO,
                 CB::F::ZERO,
-                local.chunk,
                 local.is_real,
             );
         }

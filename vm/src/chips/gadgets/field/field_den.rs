@@ -7,7 +7,7 @@ use pico_derive::AlignedBorrow;
 
 use crate::{
     chips::{
-        chips::rangecheck::event::RangeRecordBehavior,
+        chips::byte::event::ByteRecordBehavior,
         gadgets::utils::{field_params::FieldParameters, limbs::Limbs, polynomial::Polynomial},
     },
     machine::builder::{ChipBuilder, ChipRangeBuilder},
@@ -38,7 +38,7 @@ pub struct FieldDenCols<T, P: FieldParameters> {
 impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
     pub fn populate(
         &mut self,
-        record: &mut impl RangeRecordBehavior,
+        record: &mut impl ByteRecordBehavior,
         chunk: u32,
         a: &BigUint,
         b: &BigUint,
@@ -111,7 +111,6 @@ where
         a: &Limbs<CB::Var, P::Limbs>,
         b: &Limbs<CB::Var, P::Limbs>,
         sign: bool,
-        chunk: CB::Var,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
         V: Into<CB::Expr>,
@@ -145,9 +144,9 @@ where
         eval_field_operation::<F, CB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
 
         // Range checks for the result, carry, and witness columns.
-        builder.slice_range_check_u8(&self.result.0, chunk, is_real.clone());
-        builder.slice_range_check_u8(&self.carry.0, chunk, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_low.0, chunk, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_high.0, chunk, is_real);
+        builder.slice_range_check_u8(&self.result.0, is_real.clone());
+        builder.slice_range_check_u8(&self.carry.0, is_real.clone());
+        builder.slice_range_check_u8(&self.witness_low.0, is_real.clone());
+        builder.slice_range_check_u8(&self.witness_high.0, is_real);
     }
 }

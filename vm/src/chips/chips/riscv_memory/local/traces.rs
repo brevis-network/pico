@@ -3,7 +3,7 @@ use super::{
     MemoryLocalChip,
 };
 use crate::{
-    chips::{chips::rangecheck::event::RangeLookupEvent, utils::zeroed_f_vec},
+    chips::{chips::byte::event::ByteRecordBehavior, utils::zeroed_f_vec},
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
     machine::{
@@ -13,7 +13,6 @@ use crate::{
     },
     recursion_v2::stark::utils::next_power_of_two,
 };
-use hashbrown::HashMap;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
@@ -184,10 +183,10 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         let nb_rows = (events.len() + 3) / 4;
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
-        let rangecheck_events = events
+        let blu_events = events
             .par_chunks(chunk_size * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
-            .map(|events| {
-                let mut blu: HashMap<RangeLookupEvent, usize> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu = vec![];
                 events
                     .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
                     .for_each(|events| {
@@ -217,7 +216,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
                 blu
             })
             .collect::<Vec<_>>();
-        extra.add_rangecheck_lookup_events(rangecheck_events);
+        extra.add_byte_lookup_events(blu_events);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

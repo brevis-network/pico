@@ -1,6 +1,6 @@
 use crate::{
-    chips::chips::rangecheck::event::RangeRecordBehavior,
-    compiler::riscv::opcode::RangeCheckOpcode,
+    chips::chips::byte::event::ByteRecordBehavior,
+    compiler::riscv::opcode::ByteOpcode,
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, SepticExtensionBuilder},
         lookup::LookupType,
@@ -79,7 +79,7 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
         shard: u32,
         value: u32,
         is_real: bool,
-        blu: &mut impl RangeRecordBehavior,
+        blu: &mut impl ByteRecordBehavior,
     ) {
         if is_real {
             blu.add_u8_range_checks(value.to_le_bytes(), Some(shard));
@@ -121,7 +121,7 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
         clk_8: u8,
         syscall_id: u32,
         is_real: bool,
-        blu: &mut impl RangeRecordBehavior,
+        blu: &mut impl ByteRecordBehavior,
     ) {
         if is_real {
             blu.add_u16_range_checks(&[shard as u16, clk_16], Some(shard));
@@ -282,9 +282,16 @@ impl<F: Field> GlobalInteractionOperation<F> {
 
         // Range check for message space.
         // Range check shard to be a valid u16.
-        builder.looking_rangecheck(RangeCheckOpcode::U16, shard.clone(), shard.clone(), is_real);
+        builder.looking_rangecheck(
+            ByteOpcode::U16Range,
+            shard.clone(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            is_real,
+        );
         // Range check the word value to be valid u8 word.
-        builder.slice_range_check_u8(&value, shard, is_real);
+        builder.slice_range_check_u8(&value, is_real);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -322,16 +329,25 @@ impl<F: Field> GlobalInteractionOperation<F> {
         // Range check for message space.
         // Range check shard to be a valid u16.
         builder.looking_rangecheck(
-            RangeCheckOpcode::U16,
+            ByteOpcode::U16Range,
             shard.clone(),
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
             AB::Expr::ZERO,
             is_real,
         );
 
         // Range check clk_8 and syscall_id to be u8.
-        builder.slice_range_check_u8(&[clk_8, syscall_id], shard, is_real);
+        builder.slice_range_check_u8(&[clk_8, syscall_id], is_real);
 
         // Range check clk_16 to be u16.
-        builder.looking_rangecheck(RangeCheckOpcode::U16, clk_16, AB::Expr::ZERO, is_real);
+        builder.looking_rangecheck(
+            ByteOpcode::U16Range,
+            clk_16,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            AB::Expr::ZERO,
+            is_real,
+        );
     }
 }

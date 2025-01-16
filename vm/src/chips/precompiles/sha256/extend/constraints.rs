@@ -179,7 +179,6 @@ where
             local.s0.value,
             *local.w_i_minus_7.value(),
             local.s1.value,
-            local.chunk,
             local.is_real,
             local.s2,
         );

@@ -237,7 +237,7 @@ macro_rules! run {
 
             // // TODO: The number of CPU and range_check events keeps changing
             let mut expected_stats = HashMap::<String, usize>::new();
-            expected_stats.insert("poseidon2_events".to_string(), 592);
+            expected_stats.insert("poseidon2_events".to_string(), 574);
             expected_stats.insert("poseidon2_hash_events".to_string(), 8000);
             expected_stats.insert("poseidon2_compress_events".to_string(), 24598);
             expected_stats.insert("range_check_events".to_string(), 67000);

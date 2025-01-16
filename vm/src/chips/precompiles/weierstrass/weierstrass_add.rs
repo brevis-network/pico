@@ -1,7 +1,7 @@
 use crate::{
     chips::{
         chips::{
-            rangecheck::event::RangeRecordBehavior,
+            byte::event::ByteRecordBehavior,
             riscv_memory::read_write::columns::{MemoryCols, MemoryReadCols, MemoryWriteCols},
         },
         gadgets::{
@@ -84,7 +84,7 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
 
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
-        rlu_events: &mut impl RangeRecordBehavior,
+        blu_events: &mut impl ByteRecordBehavior,
         chunk: u32,
         cols: &mut WeierstrassAddAssignCols<F, E::BaseField>,
         p_x: BigUint,
@@ -99,14 +99,14 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
         let slope = {
             let slope_numerator =
                 cols.slope_numerator
-                    .populate(rlu_events, chunk, &q_y, &p_y, FieldOperation::Sub);
+                    .populate(blu_events, chunk, &q_y, &p_y, FieldOperation::Sub);
 
             let slope_denominator =
                 cols.slope_denominator
-                    .populate(rlu_events, chunk, &q_x, &p_x, FieldOperation::Sub);
+                    .populate(blu_events, chunk, &q_x, &p_x, FieldOperation::Sub);
 
             cols.slope.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &slope_numerator,
                 &slope_denominator,
@@ -118,12 +118,12 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
         let x = {
             let slope_squared =
                 cols.slope_squared
-                    .populate(rlu_events, chunk, &slope, &slope, FieldOperation::Mul);
+                    .populate(blu_events, chunk, &slope, &slope, FieldOperation::Mul);
             let p_x_plus_q_x =
                 cols.p_x_plus_q_x
-                    .populate(rlu_events, chunk, &p_x, &q_x, FieldOperation::Add);
+                    .populate(blu_events, chunk, &p_x, &q_x, FieldOperation::Add);
             cols.x3_ins.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &slope_squared,
                 &p_x_plus_q_x,
@@ -135,16 +135,16 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
         {
             let p_x_minus_x =
                 cols.p_x_minus_x
-                    .populate(rlu_events, chunk, &p_x, &x, FieldOperation::Sub);
+                    .populate(blu_events, chunk, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &slope,
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
             cols.y3_ins.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &slope_times_p_x_minus_x,
                 &p_y,
@@ -236,7 +236,7 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
         }
         new_byte_lookup_events
             .iter()
-            .for_each(|x| output.add_range_lookup_event(*x));
+            .for_each(|x| output.add_byte_lookup_event(*x));
 
         let log_rows = input.shape_chip_size(&self.name());
         pad_rows_fixed(
@@ -322,30 +322,19 @@ where
 
         // slope = (q.y - p.y) / (q.x - p.x).
         let slope = {
-            local.slope_numerator.eval(
-                builder,
-                &q_y,
-                &p_y,
-                FieldOperation::Sub,
-                local.chunk,
-                local.is_real,
-            );
+            local
+                .slope_numerator
+                .eval(builder, &q_y, &p_y, FieldOperation::Sub, local.is_real);
 
-            local.slope_denominator.eval(
-                builder,
-                &q_x,
-                &p_x,
-                FieldOperation::Sub,
-                local.chunk,
-                local.is_real,
-            );
+            local
+                .slope_denominator
+                .eval(builder, &q_x, &p_x, FieldOperation::Sub, local.is_real);
 
             local.slope.eval(
                 builder,
                 &local.slope_numerator.result,
                 &local.slope_denominator.result,
                 FieldOperation::Div,
-                local.chunk,
                 local.is_real,
             );
 
@@ -354,30 +343,19 @@ where
 
         // x = slope * slope - self.x - other.x.
         let x = {
-            local.slope_squared.eval(
-                builder,
-                slope,
-                slope,
-                FieldOperation::Mul,
-                local.chunk,
-                local.is_real,
-            );
+            local
+                .slope_squared
+                .eval(builder, slope, slope, FieldOperation::Mul, local.is_real);
 
-            local.p_x_plus_q_x.eval(
-                builder,
-                &p_x,
-                &q_x,
-                FieldOperation::Add,
-                local.chunk,
-                local.is_real,
-            );
+            local
+                .p_x_plus_q_x
+                .eval(builder, &p_x, &q_x, FieldOperation::Add, local.is_real);
 
             local.x3_ins.eval(
                 builder,
                 &local.slope_squared.result,
                 &local.p_x_plus_q_x.result,
                 FieldOperation::Sub,
-                local.chunk,
                 local.is_real,
             );
 
@@ -386,21 +364,15 @@ where
 
         // y = slope * (p.x - x_3n) - q.y.
         {
-            local.p_x_minus_x.eval(
-                builder,
-                &p_x,
-                x,
-                FieldOperation::Sub,
-                local.chunk,
-                local.is_real,
-            );
+            local
+                .p_x_minus_x
+                .eval(builder, &p_x, x, FieldOperation::Sub, local.is_real);
 
             local.slope_times_p_x_minus_x.eval(
                 builder,
                 slope,
                 &local.p_x_minus_x.result,
                 FieldOperation::Mul,
-                local.chunk,
                 local.is_real,
             );
 
@@ -409,7 +381,6 @@ where
                 &local.slope_times_p_x_minus_x.result,
                 &p_y,
                 FieldOperation::Sub,
-                local.chunk,
                 local.is_real,
             );
         }

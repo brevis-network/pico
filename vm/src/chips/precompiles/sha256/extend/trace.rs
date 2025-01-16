@@ -1,9 +1,6 @@
 use crate::{
     chips::{
-        chips::{
-            byte::event::{ByteLookupEvent, ByteRecordBehavior},
-            rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
-        },
+        chips::byte::event::{ByteLookupEvent, ByteRecordBehavior},
         precompiles::sha256::extend::{
             columns::{ShaExtendCols, NUM_SHA_EXTEND_COLS},
             ShaExtendChip,
@@ -69,12 +66,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
                 unreachable!()
             };
 
-            self.event_to_rows(
-                event,
-                &mut wrapped_rows,
-                &mut new_byte_lookup_events,
-                &mut Vec::new(),
-            );
+            self.event_to_rows(event, &mut wrapped_rows, &mut new_byte_lookup_events);
         }
 
         let mut rows = wrapped_rows.unwrap();
@@ -118,20 +110,18 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
             })
             .collect();
         let chunk_size = std::cmp::max(extend_events.len() / num_cpus::get(), 1);
-        let (blu_batches, range_batches): (Vec<HashMap<_, _>>, Vec<HashMap<_, _>>) = extend_events
+        let blu_batches: Vec<HashMap<_, _>> = extend_events
             .par_chunks(chunk_size)
             .map(|events| {
                 let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
-                let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
-                    self.event_to_rows(event, &mut None, &mut blu, &mut range);
+                    self.event_to_rows(event, &mut None, &mut blu);
                 });
-                (blu, range)
+                blu
             })
-            .unzip();
+            .collect();
 
         output.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
-        output.add_rangecheck_lookup_events(range_batches);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
@@ -151,7 +141,6 @@ impl<F: PrimeField32> ShaExtendChip<F> {
         event: &ShaExtendEvent,
         rows: &mut Option<Vec<[F; NUM_SHA_EXTEND_COLS]>>,
         brb: &mut impl ByteRecordBehavior,
-        rrb: &mut impl RangeRecordBehavior,
     ) {
         let chunk = event.chunk;
         for j in 0..48usize {
@@ -163,10 +152,10 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             cols.clk = F::from_canonical_u32(event.clk);
             cols.w_ptr = F::from_canonical_u32(event.w_ptr);
 
-            cols.w_i_minus_15.populate(event.w_i_minus_15_reads[j], rrb);
-            cols.w_i_minus_2.populate(event.w_i_minus_2_reads[j], rrb);
-            cols.w_i_minus_16.populate(event.w_i_minus_16_reads[j], rrb);
-            cols.w_i_minus_7.populate(event.w_i_minus_7_reads[j], rrb);
+            cols.w_i_minus_15.populate(event.w_i_minus_15_reads[j], brb);
+            cols.w_i_minus_2.populate(event.w_i_minus_2_reads[j], brb);
+            cols.w_i_minus_16.populate(event.w_i_minus_16_reads[j], brb);
+            cols.w_i_minus_7.populate(event.w_i_minus_7_reads[j], brb);
 
             // `s0 := (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18) xor (w[i-15] rightshift
             // 3)`.
@@ -200,9 +189,9 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             let w_i_minus_7 = event.w_i_minus_7_reads[j].value;
             let w_i_minus_16 = event.w_i_minus_16_reads[j].value;
             cols.s2
-                .populate(rrb, chunk, w_i_minus_16, s0, w_i_minus_7, s1);
+                .populate(brb, chunk, w_i_minus_16, s0, w_i_minus_7, s1);
 
-            cols.w_i.populate(event.w_i_writes[j], rrb);
+            cols.w_i.populate(event.w_i_writes[j], brb);
 
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);

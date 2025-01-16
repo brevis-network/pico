@@ -110,11 +110,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         );
 
         // Check that each addr_word element is a byte.
-        builder.slice_range_check_u8(
-            &local.addr_word.0,
-            local.chunk,
-            is_memory_instruction.clone(),
-        );
+        builder.slice_range_check_u8(&local.addr_word.0, is_memory_instruction.clone());
 
         // Evaluate the addr_offset column and offset flags.
         self.eval_offset_value_flags(builder, local);

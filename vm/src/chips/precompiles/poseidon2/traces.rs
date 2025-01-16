@@ -7,8 +7,9 @@ use super::{
 };
 use crate::{
     chips::chips::{
+        byte::event::ByteRecordBehavior,
+        events::ByteLookupEvent,
         poseidon2::utils::{external_linear_layer, internal_linear_layer},
-        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
     },
     compiler::riscv::program::Program,
     emulator::{
@@ -143,7 +144,7 @@ macro_rules! impl_poseidon2_permute_chip {
                 let blu_batches = events
                     .par_chunks(chunk_size)
                     .map(|events| {
-                        let mut blu: Vec<RangeLookupEvent> = Vec::new();
+                        let mut blu: Vec<ByteLookupEvent> = Vec::new();
                         events.iter().for_each(|event| {
                             Poseidon2PermuteChip::<
                                 F,
@@ -160,7 +161,7 @@ macro_rules! impl_poseidon2_permute_chip {
                     .collect::<Vec<_>>();
                 for blu in blu_batches {
                     for e in blu {
-                        extra.add_range_lookup_event(e);
+                        extra.add_byte_lookup_event(e);
                     }
                 }
             }
@@ -172,7 +173,7 @@ macro_rules! impl_poseidon2_permute_chip {
             fn event_to_row(
                 event: &Poseidon2PermuteEvent,
                 input_row: Option<&mut [F; $num_cols]>,
-                blu: &mut impl RangeRecordBehavior,
+                blu: &mut impl ByteRecordBehavior,
             ) {
                 let mut row: [F; $num_cols] = [F::ZERO; $num_cols];
                 let cols: &mut Poseidon2Cols<

@@ -1,15 +1,11 @@
 use super::columns::{ShiftLeftCols, NUM_SLL_COLS};
 use crate::{
-    chips::chips::{
-        alu::event::AluEvent,
-        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
-    },
+    chips::chips::{alu::event::AluEvent, byte::event::ByteRecordBehavior},
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::record::EmulationRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };
-use hashbrown::HashMap;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
@@ -70,21 +66,21 @@ impl<F: PrimeField> ChipBehavior<F> for SLLChip<F> {
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(input.shift_left_events.len() / num_cpus::get(), 1);
 
-        let range_batches = input
+        let blu_batches = input
             .shift_left_events
             .par_chunks(chunk_size)
-            .map(|events| {
-                let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu_events = vec![];
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_SLL_COLS];
                     let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut range);
+                    self.event_to_row(event, cols, &mut blu_events);
                 });
-                range
+                blu_events
             })
             .collect::<Vec<_>>();
 
-        extra.add_rangecheck_lookup_events(range_batches);
+        extra.add_byte_lookup_events(blu_batches);
         debug!("{} chip - extra_record", self.name());
     }
 
@@ -102,7 +98,7 @@ impl<F: Field> SLLChip<F> {
         &self,
         event: &AluEvent,
         cols: &mut ShiftLeftCols<F>,
-        blu: &mut impl RangeRecordBehavior,
+        blu: &mut impl ByteRecordBehavior,
     ) {
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();

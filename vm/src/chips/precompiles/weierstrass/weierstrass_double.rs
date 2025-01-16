@@ -1,7 +1,7 @@
 use crate::{
     chips::{
         chips::{
-            rangecheck::event::RangeRecordBehavior,
+            byte::event::ByteRecordBehavior,
             riscv_memory::read_write::columns::{MemoryCols, MemoryWriteCols},
         },
         gadgets::{
@@ -82,7 +82,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
     }
 
     fn populate_field_ops(
-        rlu_events: &mut impl RangeRecordBehavior,
+        blu_events: &mut impl ByteRecordBehavior,
         chunk: u32,
         cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField>,
         p_x: BigUint,
@@ -98,16 +98,16 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
             let slope_numerator = {
                 let p_x_squared =
                     cols.p_x_squared
-                        .populate(rlu_events, chunk, &p_x, &p_x, FieldOperation::Mul);
+                        .populate(blu_events, chunk, &p_x, &p_x, FieldOperation::Mul);
                 let p_x_squared_times_3 = cols.p_x_squared_times_3.populate(
-                    rlu_events,
+                    blu_events,
                     chunk,
                     &p_x_squared,
                     &BigUint::from(3u32),
                     FieldOperation::Mul,
                 );
                 cols.slope_numerator.populate(
-                    rlu_events,
+                    blu_events,
                     chunk,
                     &a,
                     &p_x_squared_times_3,
@@ -117,7 +117,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
 
             // slope_denominator = 2 * y.
             let slope_denominator = cols.slope_denominator.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &BigUint::from(2u32),
                 &p_y,
@@ -125,7 +125,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
             );
 
             cols.slope.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &slope_numerator,
                 &slope_denominator,
@@ -137,12 +137,12 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
         let x = {
             let slope_squared =
                 cols.slope_squared
-                    .populate(rlu_events, chunk, &slope, &slope, FieldOperation::Mul);
+                    .populate(blu_events, chunk, &slope, &slope, FieldOperation::Mul);
             let p_x_plus_p_x =
                 cols.p_x_plus_p_x
-                    .populate(rlu_events, chunk, &p_x, &p_x, FieldOperation::Add);
+                    .populate(blu_events, chunk, &p_x, &p_x, FieldOperation::Add);
             cols.x3_ins.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &slope_squared,
                 &p_x_plus_p_x,
@@ -154,16 +154,16 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
         {
             let p_x_minus_x =
                 cols.p_x_minus_x
-                    .populate(rlu_events, chunk, &p_x, &x, FieldOperation::Sub);
+                    .populate(blu_events, chunk, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &slope,
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
             cols.y3_ins.populate(
-                rlu_events,
+                blu_events,
                 chunk,
                 &slope_times_p_x_minus_x,
                 &p_y,
@@ -268,7 +268,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
         let mut rows = Vec::new();
         for row in rows_only {
             rows.extend(row.0);
-            output.add_range_lookup_events(row.1);
+            output.add_byte_lookup_events(row.1);
         }
 
         let log_rows = input.shape_chip_size(&self.name());
@@ -345,21 +345,15 @@ where
         let slope = {
             // slope_numerator = a + (p.x * p.x) * 3.
             {
-                local.p_x_squared.eval(
-                    builder,
-                    &p_x,
-                    &p_x,
-                    FieldOperation::Mul,
-                    local.chunk,
-                    local.is_real,
-                );
+                local
+                    .p_x_squared
+                    .eval(builder, &p_x, &p_x, FieldOperation::Mul, local.is_real);
 
                 local.p_x_squared_times_3.eval(
                     builder,
                     &local.p_x_squared.result,
                     &E::BaseField::to_limbs_field::<CB::Expr, _>(&BigUint::from(3u32)),
                     FieldOperation::Mul,
-                    local.chunk,
                     local.is_real,
                 );
 
@@ -368,7 +362,6 @@ where
                     &a,
                     &local.p_x_squared_times_3.result,
                     FieldOperation::Add,
-                    local.chunk,
                     local.is_real,
                 );
             };
@@ -379,7 +372,6 @@ where
                 &E::BaseField::to_limbs_field::<CB::Expr, _>(&BigUint::from(2u32)),
                 &p_y,
                 FieldOperation::Mul,
-                local.chunk,
                 local.is_real,
             );
 
@@ -388,7 +380,6 @@ where
                 &local.slope_numerator.result,
                 &local.slope_denominator.result,
                 FieldOperation::Div,
-                local.chunk,
                 local.is_real,
             );
 
@@ -397,28 +388,17 @@ where
 
         // x = slope * slope - (p.x + p.x).
         let x = {
-            local.slope_squared.eval(
-                builder,
-                slope,
-                slope,
-                FieldOperation::Mul,
-                local.chunk,
-                local.is_real,
-            );
-            local.p_x_plus_p_x.eval(
-                builder,
-                &p_x,
-                &p_x,
-                FieldOperation::Add,
-                local.chunk,
-                local.is_real,
-            );
+            local
+                .slope_squared
+                .eval(builder, slope, slope, FieldOperation::Mul, local.is_real);
+            local
+                .p_x_plus_p_x
+                .eval(builder, &p_x, &p_x, FieldOperation::Add, local.is_real);
             local.x3_ins.eval(
                 builder,
                 &local.slope_squared.result,
                 &local.p_x_plus_p_x.result,
                 FieldOperation::Sub,
-                local.chunk,
                 local.is_real,
             );
             &local.x3_ins.result
@@ -426,20 +406,14 @@ where
 
         // y = slope * (p.x - x) - p.y.
         {
-            local.p_x_minus_x.eval(
-                builder,
-                &p_x,
-                x,
-                FieldOperation::Sub,
-                local.chunk,
-                local.is_real,
-            );
+            local
+                .p_x_minus_x
+                .eval(builder, &p_x, x, FieldOperation::Sub, local.is_real);
             local.slope_times_p_x_minus_x.eval(
                 builder,
                 slope,
                 &local.p_x_minus_x.result,
                 FieldOperation::Mul,
-                local.chunk,
                 local.is_real,
             );
             local.y3_ins.eval(
@@ -447,7 +421,6 @@ where
                 &local.slope_times_p_x_minus_x.result,
                 &p_y,
                 FieldOperation::Sub,
-                local.chunk,
                 local.is_real,
             );
         }

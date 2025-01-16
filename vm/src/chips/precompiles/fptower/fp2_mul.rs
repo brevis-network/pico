@@ -7,7 +7,7 @@ use core::{
 
 use crate::{
     chips::{
-        chips::rangecheck::event::RangeRecordBehavior,
+        chips::byte::event::ByteRecordBehavior,
         gadgets::{
             field::field_op::FieldOperation,
             utils::{
@@ -92,7 +92,7 @@ where
     }
 
     fn populate_field_ops(
-        blu_events: &mut impl RangeRecordBehavior,
+        blu_events: &mut impl ByteRecordBehavior,
         chunk: u32,
         cols: &mut Fp2MulCols<F, P>,
         p_x: BigUint,
@@ -223,7 +223,7 @@ where
 
         new_byte_lookup_events
             .iter()
-            .for_each(|x| output.add_range_lookup_event(*x));
+            .for_each(|x| output.add_byte_lookup_event(*x));
 
         let log_rows = input.shape_chip_size(&self.name());
         pad_rows_fixed(
@@ -319,7 +319,6 @@ where
                 &q_x,
                 &p_modulus,
                 FieldOperation::Mul,
-                local.chunk,
                 local.is_real,
             );
 
@@ -329,7 +328,6 @@ where
                 &q_y,
                 &p_modulus,
                 FieldOperation::Mul,
-                local.chunk,
                 local.is_real,
             );
 
@@ -339,7 +337,6 @@ where
                 &local.a1_mul_b1.result,
                 &p_modulus,
                 FieldOperation::Sub,
-                local.chunk,
                 local.is_real,
             );
         }
@@ -351,7 +348,6 @@ where
                 &q_y,
                 &p_modulus,
                 FieldOperation::Mul,
-                local.chunk,
                 local.is_real,
             );
 
@@ -361,7 +357,6 @@ where
                 &q_x,
                 &p_modulus,
                 FieldOperation::Mul,
-                local.chunk,
                 local.is_real,
             );
 
@@ -371,7 +366,6 @@ where
                 &local.a1_mul_b0.result,
                 &p_modulus,
                 FieldOperation::Add,
-                local.chunk,
                 local.is_real,
             );
         }

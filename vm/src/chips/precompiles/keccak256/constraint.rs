@@ -127,11 +127,7 @@ where
 
         // Range check all the values in `state_mem` to be bytes.
         for i in 0..STATE_NUM_WORDS {
-            builder.slice_range_check_u8(
-                &local.state_mem[i].value().0,
-                local.chunk,
-                local.do_memory_check,
-            );
+            builder.slice_range_check_u8(&local.state_mem[i].value().0, local.do_memory_check);
         }
 
         let mut sub_builder =

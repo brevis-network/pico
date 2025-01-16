@@ -5,12 +5,13 @@ use super::{
 use crate::{
     chips::chips::{
         alu::event::AluEvent,
-        rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
+        byte::event::ByteRecordBehavior,
+        events::ByteLookupEvent,
         riscv_cpu::event::CpuEvent,
         riscv_memory::{event::MemoryRecordEnum, read_write::columns::MemoryCols},
     },
     compiler::riscv::{
-        opcode::{Opcode, RangeCheckOpcode::U8},
+        opcode::{ByteOpcode, Opcode},
         program::Program,
     },
     emulator::riscv::record::EmulationRecord,
@@ -76,28 +77,30 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         // Generate the trace rows for each event.
         let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
-        let (alu_events, range_events): (Vec<_>, Vec<_>) = input
+        let (alu_events, blu_events): (Vec<_>, Vec<_>) = input
             .cpu_events
             .par_chunks(chunk_size)
             .map(|ops: &[CpuEvent]| {
                 let mut alu = HashMap::new();
                 // The range map stores range (u8) lookup event -> multiplicity.
-                let mut range_events: HashMap<RangeLookupEvent, usize> = HashMap::new();
+                let mut blu = vec![];
                 ops.iter().for_each(|op| {
                     let mut row = [F::ZERO; NUM_CPU_COLS];
                     let cols: &mut CpuCols<F> = row.as_mut_slice().borrow_mut();
-                    let alu_events = self.event_to_row(op, cols, &mut range_events);
+                    let alu_events = self.event_to_row(op, cols, &mut blu);
                     alu_events.into_iter().for_each(|(key, value)| {
                         alu.entry(key).or_insert(Vec::default()).extend(value);
                     });
                 });
-                (alu, range_events)
+                (alu, blu)
             })
             .unzip();
-        for alu_events_chunk in alu_events.into_iter() {
+        for alu_events_chunk in alu_events {
             extra.add_alu_events(alu_events_chunk);
         }
-        extra.add_rangecheck_lookup_events(range_events);
+        for blu_events_chunk in blu_events {
+            extra.add_byte_lookup_events(blu_events_chunk);
+        }
 
         debug!("{} chip - extra_record", self.name());
     }
@@ -113,7 +116,7 @@ impl<F: PrimeField32> CpuChip<F> {
         &self,
         event: &CpuEvent,
         cols: &mut CpuCols<F>,
-        blu_events: &mut impl RangeRecordBehavior,
+        blu_events: &mut impl ByteRecordBehavior,
     ) -> HashMap<Opcode, Vec<AluEvent>> {
         let chunk = event.chunk;
 
@@ -152,25 +155,21 @@ impl<F: PrimeField32> CpuChip<F> {
             .iter()
             .map(|x| x.as_canonical_u32())
             .collect::<Vec<_>>();
-        blu_events.add_range_lookup_event(RangeLookupEvent::new(
-            U8,
-            a_bytes[0] as u16,
-            Some(chunk),
+        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
+            chunk,
+            ByteOpcode::U8Range,
+            0,
+            0,
+            a_bytes[0] as u8,
+            a_bytes[1] as u8,
         ));
-        blu_events.add_range_lookup_event(RangeLookupEvent::new(
-            U8,
-            a_bytes[1] as u16,
-            Some(chunk),
-        ));
-        blu_events.add_range_lookup_event(RangeLookupEvent::new(
-            U8,
-            a_bytes[2] as u16,
-            Some(chunk),
-        ));
-        blu_events.add_range_lookup_event(RangeLookupEvent::new(
-            U8,
-            a_bytes[3] as u16,
-            Some(chunk),
+        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
+            chunk,
+            ByteOpcode::U8Range,
+            0,
+            0,
+            a_bytes[2] as u8,
+            a_bytes[3] as u8,
         ));
 
         self.populate_branch(cols, event, &mut new_alu_events);

@@ -1,5 +1,5 @@
 use crate::{
-    chips::chips::rangecheck::event::RangeRecordBehavior,
+    chips::chips::byte::event::ByteRecordBehavior,
     compiler::word::Word,
     machine::builder::{ChipLookupBuilder, ChipRangeBuilder},
     primitives::consts::WORD_SIZE,
@@ -17,7 +17,7 @@ pub struct NotOperation<T> {
 }
 
 impl<F: Field> NotOperation<F> {
-    pub fn populate(&mut self, record: &mut impl RangeRecordBehavior, chunk: u32, x: u32) -> u32 {
+    pub fn populate(&mut self, record: &mut impl ByteRecordBehavior, chunk: u32, x: u32) -> u32 {
         let expected = !x;
         let x_bytes = x.to_le_bytes();
         for i in 0..WORD_SIZE {
@@ -36,7 +36,7 @@ impl<F: Field> NotOperation<F> {
         is_real: impl Into<CB::Expr> + Copy,
     ) {
         for i in (0..WORD_SIZE).step_by(2) {
-            builder.slice_range_check_u8(&[a[i], a[i + 1]], chunk, is_real);
+            builder.slice_range_check_u8(&[a[i], a[i + 1]], is_real);
         }
 
         // For any byte b, b + !b = 0xFF.

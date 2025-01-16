@@ -9,7 +9,7 @@ use typenum::Unsigned;
 
 use crate::{
     chips::{
-        chips::rangecheck::event::RangeRecordBehavior,
+        chips::byte::event::ByteRecordBehavior,
         gadgets::{
             field::utils::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
             utils::{field_params::FieldParameters, limbs::Limbs, polynomial::Polynomial},
@@ -70,7 +70,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
     /// Populate result and carry columns from the equation (a*b + c) % modulus
     pub fn populate_mul_and_carry(
         &mut self,
-        record: &mut impl RangeRecordBehavior,
+        record: &mut impl ByteRecordBehavior,
         chunk: u32,
         a: &BigUint,
         b: &BigUint,
@@ -191,7 +191,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
     #[allow(clippy::too_many_arguments)]
     pub fn populate_with_modulus(
         &mut self,
-        record: &mut impl RangeRecordBehavior,
+        record: &mut impl ByteRecordBehavior,
         chunk: u32,
         a: &BigUint,
         b: &BigUint,
@@ -252,7 +252,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
     /// parameters).
     pub fn populate(
         &mut self,
-        record: &mut impl RangeRecordBehavior,
+        record: &mut impl ByteRecordBehavior,
         chunk: u32,
         a: &BigUint,
         b: &BigUint,
@@ -275,7 +275,6 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         is_sub: impl Into<CB::Expr> + Clone,
         is_mul: impl Into<CB::Expr> + Clone,
         is_div: impl Into<CB::Expr> + Clone,
-        chunk: impl Into<CB::Expr> + Clone,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
         V: Into<CB::Expr>,
@@ -299,7 +298,7 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_div = p_res_param * p_b.clone();
         let p_op = p_add * is_add + p_sub * is_sub + p_mul * is_mul + p_div * is_div;
 
-        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, chunk, is_real);
+        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -310,7 +309,6 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         b: &(impl Into<Polynomial<CB::Expr>> + Clone),
         c: &(impl Into<Polynomial<CB::Expr>> + Clone),
         modulus: &(impl Into<Polynomial<CB::Expr>> + Clone),
-        chunk: CB::Var,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
         V: Into<CB::Expr>,
@@ -323,7 +321,7 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_result: Polynomial<_> = self.result.into();
         let p_op = p_a * p_b + p_c;
 
-        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, chunk, is_real);
+        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -334,7 +332,6 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         b: &(impl Into<Polynomial<CB::Expr>> + Clone),
         modulus: &(impl Into<Polynomial<CB::Expr>> + Clone),
         op: FieldOperation,
-        chunk: impl Into<CB::Expr> + Clone,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
         V: Into<CB::Expr>,
@@ -351,7 +348,7 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
             FieldOperation::Add | FieldOperation::Sub => p_a + p_b,
             FieldOperation::Mul | FieldOperation::Div => p_a * p_b,
         };
-        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, chunk, is_real);
+        self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result, is_real);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -361,7 +358,6 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         op: impl Into<Polynomial<CB::Expr>>,
         modulus: impl Into<Polynomial<CB::Expr>>,
         result: impl Into<Polynomial<CB::Expr>>,
-        chunk: impl Into<CB::Expr> + Clone,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
         V: Into<CB::Expr>,
@@ -379,10 +375,10 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
 
         // TODO: remove chunk here after recursion v2
         // Range checks for the result, carry, and witness columns.
-        builder.slice_range_check_u8(&self.result.0, chunk.clone(), is_real.clone());
-        builder.slice_range_check_u8(&self.carry.0, chunk.clone(), is_real.clone());
-        builder.slice_range_check_u8(p_witness_low.coefficients(), chunk.clone(), is_real.clone());
-        builder.slice_range_check_u8(p_witness_high.coefficients(), chunk.clone(), is_real);
+        builder.slice_range_check_u8(&self.result.0, is_real.clone());
+        builder.slice_range_check_u8(&self.carry.0, is_real.clone());
+        builder.slice_range_check_u8(p_witness_low.coefficients(), is_real.clone());
+        builder.slice_range_check_u8(p_witness_high.coefficients(), is_real);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -392,14 +388,13 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         a: &(impl Into<Polynomial<CB::Expr>> + Clone),
         b: &(impl Into<Polynomial<CB::Expr>> + Clone),
         op: FieldOperation,
-        chunk: impl Into<CB::Expr> + Clone,
         is_real: impl Into<CB::Expr> + Clone,
     ) where
         V: Into<CB::Expr>,
         Limbs<V, P::Limbs>: Copy,
     {
         let p_limbs = Polynomial::from_iter(P::modulus_field_iter::<CB::F>().map(CB::Expr::from));
-        self.eval_with_modulus::<F, CB>(builder, a, b, &p_limbs, op, chunk, is_real);
+        self.eval_with_modulus::<F, CB>(builder, a, b, &p_limbs, op, is_real);
     }
 }
 

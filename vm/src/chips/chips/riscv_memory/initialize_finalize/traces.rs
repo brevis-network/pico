@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     chips::chips::{
-        rangecheck::event::RangeLookupEvent, riscv_memory::event::MemoryInitializeFinalizeEvent,
+        byte::event::ByteRecordBehavior, riscv_memory::event::MemoryInitializeFinalizeEvent,
     },
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
@@ -12,7 +12,6 @@ use crate::{
         chip::ChipBehavior, lookup::LookupScope, septic::SepticDigest, utils::pad_to_power_of_two,
     },
 };
-use hashbrown::HashMap;
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
@@ -158,10 +157,10 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
         memory_events.sort_by_key(|event| event.addr);
         let chunk_size = std::cmp::max(memory_events.len() / num_cpus::get(), 1);
 
-        let rangecheck_events = memory_events
+        let blu_events = memory_events
             .par_chunks(chunk_size)
-            .map(|events| {
-                let mut blu: HashMap<RangeLookupEvent, usize> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu = vec![];
                 events.iter().for_each(|event| {
                     let MemoryInitializeFinalizeEvent {
                         addr: _addr,
@@ -184,8 +183,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                 });
                 blu
             })
-            .collect::<Vec<_>>();
-        extra.add_rangecheck_lookup_events(rangecheck_events);
+            .collect();
+        extra.add_byte_lookup_events(blu_events);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

@@ -2,7 +2,6 @@ use crate::{
     chips::{
         chips::{
             byte::event::ByteRecordBehavior,
-            rangecheck::event::RangeRecordBehavior,
             riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
         },
         gadgets::{
@@ -88,33 +87,25 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         record: &mut EmulationRecord,
     ) {
         let mut new_byte_lookup_events = Vec::new();
-        let mut new_range_lookup_events = Vec::new();
         self.is_real = F::from_bool(true);
         self.chunk = F::from_canonical_u32(event.chunk);
         self.clk = F::from_canonical_u32(event.clk);
         self.ptr = F::from_canonical_u32(event.ptr);
         self.sign = F::from_bool(event.sign);
         for i in 0..8 {
-            self.x_access[i].populate(event.x_memory_records[i], &mut new_range_lookup_events);
-            self.y_access[i].populate(event.y_memory_records[i], &mut new_range_lookup_events);
+            self.x_access[i].populate(event.x_memory_records[i], &mut new_byte_lookup_events);
+            self.y_access[i].populate(event.y_memory_records[i], &mut new_byte_lookup_events);
         }
 
         let y = &BigUint::from_bytes_le(&event.y_bytes);
-        self.populate_field_ops::<E>(
-            &mut new_byte_lookup_events,
-            &mut new_range_lookup_events,
-            event.chunk,
-            y,
-        );
+        self.populate_field_ops::<E>(&mut new_byte_lookup_events, event.chunk, y);
 
         record.add_byte_lookup_events(new_byte_lookup_events);
-        record.add_range_lookup_events(new_range_lookup_events);
     }
 
     fn populate_field_ops<E: EdwardsParameters>(
         &mut self,
         blu_events: &mut impl ByteRecordBehavior,
-        rlu_events: &mut impl RangeRecordBehavior,
         chunk: u32,
         y: &BigUint,
     ) {
@@ -123,26 +114,24 @@ impl<F: PrimeField32> EdDecompressCols<F> {
             .populate(blu_events, chunk, y, &Ed25519BaseField::modulus());
         let yy = self
             .yy
-            .populate(rlu_events, chunk, y, y, FieldOperation::Mul);
+            .populate(blu_events, chunk, y, y, FieldOperation::Mul);
         let u = self
             .u
-            .populate(rlu_events, chunk, &yy, &one, FieldOperation::Sub);
+            .populate(blu_events, chunk, &yy, &one, FieldOperation::Sub);
         let dyy = self
             .dyy
-            .populate(rlu_events, chunk, &E::d_biguint(), &yy, FieldOperation::Mul);
+            .populate(blu_events, chunk, &E::d_biguint(), &yy, FieldOperation::Mul);
         let v = self
             .v
-            .populate(rlu_events, chunk, &one, &dyy, FieldOperation::Add);
+            .populate(blu_events, chunk, &one, &dyy, FieldOperation::Add);
         let u_div_v = self
             .u_div_v
-            .populate(rlu_events, chunk, &u, &v, FieldOperation::Div);
-        let x = self
-            .x
-            .populate(blu_events, rlu_events, chunk, &u_div_v, |p| {
-                ed25519_sqrt(p).expect("ed25519_sqrt failed, syscall invariant violated")
-            });
+            .populate(blu_events, chunk, &u, &v, FieldOperation::Div);
+        let x = self.x.populate(blu_events, chunk, &u_div_v, |p| {
+            ed25519_sqrt(p).expect("ed25519_sqrt failed, syscall invariant violated")
+        });
         self.neg_x
-            .populate(rlu_events, chunk, &BigUint::zero(), &x, FieldOperation::Sub);
+            .populate(blu_events, chunk, &BigUint::zero(), &x, FieldOperation::Sub);
     }
 }
 
@@ -163,20 +152,13 @@ impl<V: Copy> EdDecompressCols<V> {
             &limbs_from_slice::<CB::Expr, P::Limbs, CB::F>(max_num_limbs),
             self.is_real,
         );
-        self.yy.eval(
-            builder,
-            &y,
-            &y,
-            FieldOperation::Mul,
-            self.chunk,
-            self.is_real,
-        );
+        self.yy
+            .eval(builder, &y, &y, FieldOperation::Mul, self.is_real);
         self.u.eval(
             builder,
             &self.yy.result,
             &[CB::Expr::ONE].iter(),
             FieldOperation::Sub,
-            self.chunk,
             self.is_real,
         );
         let d_biguint = E::d_biguint();
@@ -186,7 +168,6 @@ impl<V: Copy> EdDecompressCols<V> {
             &d_const,
             &self.yy.result,
             FieldOperation::Mul,
-            self.chunk,
             self.is_real,
         );
         self.v.eval(
@@ -194,7 +175,6 @@ impl<V: Copy> EdDecompressCols<V> {
             &[CB::Expr::ONE].iter(),
             &self.dyy.result,
             FieldOperation::Add,
-            self.chunk,
             self.is_real,
         );
         self.u_div_v.eval(
@@ -202,22 +182,15 @@ impl<V: Copy> EdDecompressCols<V> {
             &self.u.result,
             &self.v.result,
             FieldOperation::Div,
-            self.chunk,
             self.is_real,
         );
-        self.x.eval(
-            builder,
-            &self.u_div_v.result,
-            CB::F::ZERO,
-            self.chunk,
-            self.is_real,
-        );
+        self.x
+            .eval(builder, &self.u_div_v.result, CB::F::ZERO, self.is_real);
         self.neg_x.eval(
             builder,
             &[CB::Expr::ZERO].iter(),
             &self.x.multiplication.result,
             FieldOperation::Sub,
-            self.chunk,
             self.is_real,
         );
 
@@ -324,7 +297,7 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
                 let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
                 let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
                 let zero = BigUint::zero();
-                cols.populate_field_ops::<E>(&mut vec![], &mut vec![], 0, &zero);
+                cols.populate_field_ops::<E>(&mut vec![], 0, &zero);
                 row
             },
             log_rows,

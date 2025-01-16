@@ -381,7 +381,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
                 local.k,
                 local.mem.access.value,
             ],
-            local.chunk,
             local.is_compression,
             local.temp1,
         );
@@ -479,7 +478,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.s0.value,
             local.maj.value,
             local.temp2,
-            local.chunk,
             local.is_compression.into(),
         );
 
@@ -489,7 +487,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.d,
             local.temp1.value,
             local.d_add_temp1,
-            local.chunk,
             local.is_compression.into(),
         );
 
@@ -499,7 +496,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.temp1.value,
             local.temp2.value,
             local.temp1_add_temp2,
-            local.chunk,
             local.is_compression.into(),
         );
 
@@ -575,7 +571,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.mem.prev_value,
             local.finalized_operand,
             local.finalize_add,
-            local.chunk,
             local.is_finalize.into(),
         );
 

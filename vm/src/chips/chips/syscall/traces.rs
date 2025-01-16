@@ -1,6 +1,6 @@
 use crate::{
     chips::chips::{
-        rangecheck::event::RangeLookupEvent,
+        byte::event::ByteRecordBehavior,
         syscall::{columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS},
     },
     compiler::riscv::program::Program,
@@ -8,7 +8,6 @@ use crate::{
     machine::{chip::ChipBehavior, lookup::LookupScope, septic::SepticDigest},
     recursion_v2::stark::utils::pad_rows_fixed,
 };
-use hashbrown::HashMap;
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
@@ -118,10 +117,10 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
                 .collect::<Vec<_>>(),
         };
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
-        let rangecheck_events = events
+        let blu_events = events
             .par_chunks(chunk_size)
-            .map(|events| {
-                let mut blu: HashMap<RangeLookupEvent, usize> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu = vec![];
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_SYSCALL_COLS];
                     let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
@@ -139,8 +138,8 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
                 });
                 blu
             })
-            .collect::<Vec<_>>();
-        extra.add_rangecheck_lookup_events(rangecheck_events);
+            .collect();
+        extra.add_byte_lookup_events(blu_events);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

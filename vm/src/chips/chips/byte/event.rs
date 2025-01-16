@@ -1,6 +1,7 @@
 use crate::compiler::riscv::opcode::ByteOpcode;
 use hashbrown::HashMap;
 use itertools::Itertools;
+use p3_field::PrimeField32;
 use p3_maybe_rayon::prelude::{
     IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -56,6 +57,59 @@ pub trait ByteRecordBehavior {
             b,
             c,
         });
+    }
+
+    /// Adds a `ByteLookupEvent` to verify `a` and `b` are indeed bytes to the chunk.
+    fn add_u8_range_check(&mut self, b: u8, c: u8, chunk: Option<u32>) {
+        self.add_byte_lookup_event(ByteLookupEvent::new(
+            chunk.unwrap_or_default(),
+            ByteOpcode::U8Range,
+            0,
+            0,
+            b,
+            c,
+        ));
+    }
+
+    /// Adds a `ByteLookupEvent` to verify `a` is indeed u16.
+    fn add_u16_range_check(&mut self, a: u16, chunk: Option<u32>) {
+        let b = a >> 8;
+        let c = a & u8::MAX as u16;
+        self.add_byte_lookup_event(ByteLookupEvent::new(
+            chunk.unwrap_or_default(),
+            ByteOpcode::U16Range,
+            0,
+            0,
+            b as u8,
+            c as u8,
+        ));
+    }
+
+    /// Adds `ByteLookupEvent`s to verify that all the bytes in the input slice are indeed bytes.
+    fn add_u8_range_checks(&mut self, bytes: impl IntoIterator<Item = u8>, chunk: Option<u32>) {
+        for mut pair in &bytes.into_iter().chunks(2) {
+            let b = pair.next().unwrap();
+            let c = pair.next().unwrap_or_default();
+            self.add_u8_range_check(b, c, chunk);
+        }
+    }
+
+    /// Adds `ByteLookupEvent`s to verify that all the field elements in the input slice are indeed
+    /// bytes.
+    fn add_u8_range_checks_field<F: PrimeField32>(
+        &mut self,
+        field_values: &[F],
+        chunk: Option<u32>,
+    ) {
+        self.add_u8_range_checks(
+            field_values.iter().map(|x| x.as_canonical_u32() as u8),
+            chunk,
+        );
+    }
+
+    /// Adds `ByteLookupEvent`s to verify that all the bytes in the input slice are indeed bytes.
+    fn add_u16_range_checks(&mut self, ls: &[u16], chunk: Option<u32>) {
+        ls.iter().for_each(|x| self.add_u16_range_check(*x, chunk));
     }
 }
 

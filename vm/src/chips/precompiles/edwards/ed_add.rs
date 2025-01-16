@@ -1,7 +1,7 @@
 use crate::{
     chips::{
         chips::{
-            rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
+            byte::event::ByteRecordBehavior,
             riscv_memory::read_write::columns::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
         },
         gadgets::{
@@ -45,7 +45,6 @@ use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
-use hashbrown::HashMap;
 use num::{BigUint, Zero};
 use p3_air::{Air, BaseAir};
 use p3_field::{Field, PrimeField32};
@@ -94,7 +93,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
 
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
-        record: &mut impl RangeRecordBehavior,
+        record: &mut impl ByteRecordBehavior,
         chunk: u32,
         cols: &mut EdAddAssignCols<F>,
         p_x: BigUint,
@@ -218,20 +217,20 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
 
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
-        let rlu_batches = events
+        let blu_batches = events
             .par_chunks(chunk_size)
-            .map(|events| {
-                let mut range: HashMap<RangeLookupEvent, usize> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu_events = vec![];
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_ED_ADD_COLS];
                     let cols: &mut EdAddAssignCols<F> = row.as_mut_slice().borrow_mut();
-                    Self::event_to_row(event, cols, &mut range);
+                    Self::event_to_row(event, cols, &mut blu_events);
                 });
-                range
+                blu_events
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        output.add_rangecheck_lookup_events(rlu_batches);
+        output.add_byte_lookup_events(blu_batches);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
@@ -252,7 +251,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
     fn event_to_row(
         event: &EllipticCurveAddEvent,
         cols: &mut EdAddAssignCols<F>,
-        rlu: &mut impl RangeRecordBehavior,
+        rlu: &mut impl ByteRecordBehavior,
     ) {
         // Decode affine points.
         let p = &event.p;
@@ -310,30 +309,20 @@ where
         // x3_numerator = x1 * y2 + x2 * y1.
         local
             .x3_numerator
-            .eval(builder, &[x1, x2], &[y2, y1], local.chunk, local.is_real);
+            .eval(builder, &[x1, x2], &[y2, y1], local.is_real);
 
         // y3_numerator = y1 * y2 + x1 * x2.
         local
             .y3_numerator
-            .eval(builder, &[y1, x1], &[y2, x2], local.chunk, local.is_real);
+            .eval(builder, &[y1, x1], &[y2, x2], local.is_real);
 
         // f = x1 * x2 * y1 * y2.
-        local.x1_mul_y1.eval(
-            builder,
-            &x1,
-            &y1,
-            FieldOperation::Mul,
-            local.chunk,
-            local.is_real,
-        );
-        local.x2_mul_y2.eval(
-            builder,
-            &x2,
-            &y2,
-            FieldOperation::Mul,
-            local.chunk,
-            local.is_real,
-        );
+        local
+            .x1_mul_y1
+            .eval(builder, &x1, &y1, FieldOperation::Mul, local.is_real);
+        local
+            .x2_mul_y2
+            .eval(builder, &x2, &y2, FieldOperation::Mul, local.is_real);
 
         let x1_mul_y1 = local.x1_mul_y1.result;
         let x2_mul_y2 = local.x2_mul_y2.result;
@@ -342,7 +331,6 @@ where
             &x1_mul_y1,
             &x2_mul_y2,
             FieldOperation::Mul,
-            local.chunk,
             local.is_real,
         );
 
@@ -350,14 +338,9 @@ where
         let f = local.f.result;
         let d_biguint = E::d_biguint();
         let d_const = E::BaseField::to_limbs_field::<CB::Expr, _>(&d_biguint);
-        local.d_mul_f.eval(
-            builder,
-            &f,
-            &d_const,
-            FieldOperation::Mul,
-            local.chunk,
-            local.is_real,
-        );
+        local
+            .d_mul_f
+            .eval(builder, &f, &d_const, FieldOperation::Mul, local.is_real);
 
         let d_mul_f = local.d_mul_f.result;
 
@@ -367,7 +350,6 @@ where
             &local.x3_numerator.result,
             &d_mul_f,
             true,
-            local.chunk,
             local.is_real,
         );
 
@@ -377,7 +359,6 @@ where
             &local.y3_numerator.result,
             &d_mul_f,
             false,
-            local.chunk,
             local.is_real,
         );
 

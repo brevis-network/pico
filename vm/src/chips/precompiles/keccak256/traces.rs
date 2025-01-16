@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     chips::{
-        chips::rangecheck::event::{RangeLookupEvent, RangeRecordBehavior},
+        chips::{byte::event::ByteRecordBehavior, events::ByteLookupEvent},
         utils::zeroed_f_vec,
     },
     compiler::riscv::program::Program,
@@ -60,11 +60,11 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
             })
             .collect();
 
-        let blu_events: Vec<Vec<RangeLookupEvent>> = events
+        let blu_events: Vec<Vec<ByteLookupEvent>> = events
             .par_chunks(chunk_size)
             .map(|ops: &[&KeccakPermuteEvent]| {
                 // The blu map stores chunk -> map(byte lookup event -> multiplicity).
-                let mut blu: Vec<RangeLookupEvent> = Vec::new();
+                let mut blu: Vec<ByteLookupEvent> = Vec::new();
                 let mut rounds = zeroed_f_vec::<F>(NUM_KECCAK_MEM_COLS * NUM_ROUNDS);
                 ops.iter().for_each(|event| {
                     Self::populate_chunk(event, &mut rounds, &mut blu);
@@ -75,7 +75,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
 
         for blu in blu_events {
             for e in blu {
-                extra.add_range_lookup_event(e);
+                extra.add_byte_lookup_event(e);
             }
         }
     }
@@ -149,7 +149,7 @@ impl<F: PrimeField32> KeccakPermuteChip<F> {
     pub fn populate_chunk(
         event: &KeccakPermuteEvent,
         rounds: &mut [F],
-        new_byte_lookup_events: &mut Vec<RangeLookupEvent>,
+        new_byte_lookup_events: &mut Vec<ByteLookupEvent>,
     ) {
         let start_clk = event.clk;
         let chunk = event.chunk;

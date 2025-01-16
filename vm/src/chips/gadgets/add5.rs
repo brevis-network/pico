@@ -1,5 +1,5 @@
 use crate::{
-    chips::chips::rangecheck::event::RangeRecordBehavior,
+    chips::chips::byte::event::ByteRecordBehavior,
     compiler::word::Word,
     machine::builder::{ChipLookupBuilder, ChipRangeBuilder},
     primitives::consts::WORD_SIZE,
@@ -38,7 +38,7 @@ impl<F: Field> Add5Operation<F> {
     #[allow(clippy::too_many_arguments)]
     pub fn populate(
         &mut self,
-        record: &mut impl RangeRecordBehavior,
+        record: &mut impl ByteRecordBehavior,
         chunk: u32,
         a_u32: u32,
         b_u32: u32,
@@ -91,7 +91,6 @@ impl<F: Field> Add5Operation<F> {
     pub fn eval<CB: ChipLookupBuilder<F>>(
         builder: &mut CB,
         words: &[Word<CB::Var>; 5],
-        chunk: CB::Var,
         is_real: CB::Var,
         cols: Add5Operation<CB::Var>,
     ) {
@@ -100,8 +99,8 @@ impl<F: Field> Add5Operation<F> {
         {
             words
                 .iter()
-                .for_each(|word| builder.slice_range_check_u8(&word.0, chunk, is_real));
-            builder.slice_range_check_u8(&cols.value.0, chunk, is_real);
+                .for_each(|word| builder.slice_range_check_u8(&word.0, is_real));
+            builder.slice_range_check_u8(&cols.value.0, is_real);
         }
         let mut builder_is_real = builder.when(is_real);
 

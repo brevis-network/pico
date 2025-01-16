@@ -2,7 +2,7 @@ use super::{limbs_from_prev_access, words_to_bytes_le_slice};
 use crate::{
     chips::{
         chips::{
-            rangecheck::event::RangeRecordBehavior,
+            byte::event::ByteRecordBehavior,
             riscv_memory::read_write::columns::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
         },
         gadgets::{
@@ -90,7 +90,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
-        blu_events: &mut impl RangeRecordBehavior,
+        blu_events: &mut impl ByteRecordBehavior,
         chunk: u32,
         cols: &mut FpOpCols<F, P>,
         p: BigUint,
@@ -187,7 +187,7 @@ where
 
         new_byte_lookup_events
             .iter()
-            .for_each(|x| output.add_range_lookup_event(*x));
+            .for_each(|x| output.add_byte_lookup_event(*x));
 
         let log_rows = input.shape_chip_size(&self.name());
         pad_rows_fixed(
@@ -306,7 +306,6 @@ where
             local.is_sub,
             local.is_mul,
             CB::F::ZERO,
-            local.chunk,
             local.is_real,
         );
 

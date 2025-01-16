@@ -15,7 +15,6 @@ use crate::{
             mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip,
         },
         byte::ByteChip,
-        rangecheck::RangeCheckChip,
         riscv_cpu::CpuChip,
         riscv_memory::{
             initialize_finalize::{
@@ -707,13 +706,6 @@ where
             (
                 RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Byte(
                     ByteChip::default(),
-                )
-                .name(),
-                vec![Some(16)],
-            ),
-            (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Range(
-                    RangeCheckChip::default(),
                 )
                 .name(),
                 vec![Some(16)],

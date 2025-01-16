@@ -4,7 +4,6 @@ use crate::{
         chips::{
             alu::mul::{columns::MulCols, BYTE_MASK, PRODUCT_SIZE},
             byte::event::{ByteLookupEvent, ByteRecordBehavior},
-            rangecheck::event::RangeRecordBehavior,
         },
         utils::get_msb,
     },
