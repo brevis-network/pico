@@ -39,10 +39,8 @@ use pico_vm::{
     },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_S_BOX_DEGREE,
-        BABYBEAR_W, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE,
-        EMBED_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS,
-        KOALABEAR_S_BOX_DEGREE, KOALABEAR_W, RECURSION_NUM_PVS, RISCV_NUM_PVS,
+        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
+        DIGEST_SIZE, EMBED_DEGREE, KOALABEAR_S_BOX_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
     recursion_v2::runtime::Runtime,
 };
@@ -57,8 +55,9 @@ use tracing::info;
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
+#[rustfmt::skip]
 macro_rules! run {
-    ($func_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident, $embed_cc:ident, $embed_sc:ident, $s_box_degree:ident, $field_w:ident, $num_external_rounds:ident, $num_internal_rounds:ident) => {
+    ($func_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident, $embed_cc:ident, $embed_sc:ident, $s_box_degree:ident) => {
         fn $func_name(
             elf: &'static [u8],
             riscv_stdin: EmulatorStdin<Program, Vec<u8>>,
@@ -73,16 +72,11 @@ macro_rules! run {
             let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
             let riscv_program = riscv_compiler.compile();
 
-            let riscv_machine =
-                RiscvMachine::new(
-                    $riscv_sc::new(),
-                    RiscvChipType::<
-                        Val<$riscv_sc>,
-                        { $num_external_rounds / 2 },
-                        $num_internal_rounds,
-                    >::all_chips(),
-                    RISCV_NUM_PVS,
-                );
+            let riscv_machine = RiscvMachine::new(
+                $riscv_sc::new(),
+                RiscvChipType::<Val<$riscv_sc>>::all_chips(),
+                RISCV_NUM_PVS,
+            );
 
             // Setup machine prover, verifier, pk and vk.
             let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
@@ -100,17 +94,14 @@ macro_rules! run {
                 "Generating public values stream (at {:?})..",
                 start.elapsed()
             );
-            let riscv_witness = ProvingWitness::<
-                $riscv_sc,
-                RiscvChipType<Val<$riscv_sc>, { $num_external_rounds / 2 }, $num_internal_rounds>,
-                Vec<u8>,
-            >::setup_for_riscv(
-                riscv_program.clone(),
-                riscv_stdin.clone(),
-                core_opts.clone(),
-                riscv_pk.clone(),
-                riscv_vk.clone(),
-            );
+            let riscv_witness = ProvingWitness::<$riscv_sc, RiscvChipType<Val<$riscv_sc>>, Vec<u8>>
+                ::setup_for_riscv(
+                    riscv_program.clone(),
+                    riscv_stdin.clone(),
+                    core_opts.clone(),
+                    riscv_pk.clone(),
+                    riscv_vk.clone()
+                );
             let mut emulator = MetaEmulator::setup_riscv(&riscv_witness);
             let pv_stream = emulator.get_pv_stream_with_dryrun();
             info!("Public values stream: {:?}", pv_stream);
@@ -184,14 +175,7 @@ macro_rules! run {
             info!("Setting up CONVERT..");
             let convert_machine = ConvertMachine::new(
                 $recur_sc::new(),
-                RecursionChipType::<
-                    Val<$recur_sc>,
-                    CONVERT_DEGREE,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >::all_chips(),
+                RecursionChipType::<Val<$recur_sc>, CONVERT_DEGREE>::all_chips(),
                 RECURSION_NUM_PVS,
             );
 
@@ -200,9 +184,6 @@ macro_rules! run {
                 let convert_stdin = EmulatorStdin::setup_for_convert::<
                     <$recur_cc as FieldGenericConfig>::F,
                     $recur_cc,
-                    $field_w,
-                    $num_external_rounds,
-                    { $num_internal_rounds - 1 },
                 >(
                     &riscv_vk,
                     vk_root,
@@ -264,19 +245,11 @@ macro_rules! run {
             let vk_root = [Val::<$recur_sc>::ZERO; DIGEST_SIZE];
 
             info!("Setting up COMBINE");
-            let combine_machine =
-                CombineMachine::<_, _, { $num_external_rounds / 2 }, $num_internal_rounds>::new(
-                    $recur_sc::new(),
-                    RecursionChipType::<
-                        Val<$recur_sc>,
-                        COMBINE_DEGREE,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
-                    >::all_chips(),
-                    RECURSION_NUM_PVS,
-                );
+            let combine_machine = CombineMachine::<_, _>::new(
+                $recur_sc::new(),
+                RecursionChipType::<Val<$recur_sc>, COMBINE_DEGREE>::all_chips(),
+                RECURSION_NUM_PVS,
+            );
 
             info!("Generating COMBINE proof (at {:?})..", start.elapsed());
             let (combine_proof, combine_time) = timed_run(|| {
@@ -350,14 +323,7 @@ macro_rules! run {
             info!("Setting up COMPRESS");
             let compress_machine = CompressMachine::new(
                 $recur_sc::compress(),
-                RecursionChipType::<
-                    Val<$recur_sc>,
-                    COMPRESS_DEGREE,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >::compress_chips(),
+                RecursionChipType::<Val<$recur_sc>, COMPRESS_DEGREE>::compress_chips(),
                 RECURSION_NUM_PVS,
             );
 
@@ -371,15 +337,10 @@ macro_rules! run {
                     vk_root,
                 );
 
-                let compress_program =
-                    CompressVerifierCircuit::<
-                        $recur_cc,
-                        $recur_sc,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
-                    >::build(combine_machine.base_machine(), &compress_stdin);
+                let compress_program = CompressVerifierCircuit::<$recur_cc, $recur_sc>::build(
+                    combine_machine.base_machine(),
+                    &compress_stdin,
+                );
                 compress_program.print_stats();
                 let (compress_pk, compress_vk) = compress_machine.setup_keys(&compress_program);
                 let record = {
@@ -447,14 +408,7 @@ macro_rules! run {
             info!("Setting up EMBED");
             let embed_machine = EmbedMachine::<$recur_sc, _, _, Vec<u8>>::new(
                 $embed_sc::new(),
-                RecursionChipType::<
-                    Val<$embed_sc>,
-                    EMBED_DEGREE,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >::embed_chips(),
+                RecursionChipType::<Val<$embed_sc>, EMBED_DEGREE>::embed_chips(),
                 RECURSION_NUM_PVS,
             );
 
@@ -467,14 +421,10 @@ macro_rules! run {
                     true,
                     vk_root,
                 );
-                let embed_program = EmbedVerifierCircuit::<
-                    $recur_cc,
-                    $recur_sc,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >::build(compress_machine.base_machine(), &embed_stdin);
+                let embed_program = EmbedVerifierCircuit::<$recur_cc, $recur_sc>::build(
+                    compress_machine.base_machine(),
+                    &embed_stdin,
+                );
 
                 embed_program.print_stats();
                 let (embed_pk, embed_vk) = embed_machine.setup_keys(&embed_program);
@@ -532,14 +482,8 @@ macro_rules! run {
                 proof: embed_proof.proofs().first().unwrap().clone(),
                 flag_complete: true,
             };
-            let (constraints, witness) = OnchainVerifierCircuit::<
-                $embed_cc,
-                $embed_sc,
-                $field_w,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >::build(&onchain_stdin);
+            let (constraints, witness) =
+                OnchainVerifierCircuit::<$embed_cc, $embed_sc>::build(&onchain_stdin);
 
             build_gnark_config(constraints, witness, PathBuf::from("./"));
             info!("Finished exporting gnark data");
@@ -554,10 +498,7 @@ run!(
     BabyBearPoseidon2,
     BabyBearBn254,
     BabyBearBn254Poseidon2,
-    BABYBEAR_S_BOX_DEGREE,
-    BABYBEAR_W,
-    BABYBEAR_NUM_EXTERNAL_ROUNDS,
-    BABYBEAR_NUM_INTERNAL_ROUNDS
+    BABYBEAR_S_BOX_DEGREE
 );
 
 run!(
@@ -567,10 +508,7 @@ run!(
     KoalaBearPoseidon2,
     KoalaBearBn254,
     KoalaBearBn254Poseidon2,
-    KOALABEAR_S_BOX_DEGREE,
-    KOALABEAR_W,
-    KOALABEAR_NUM_EXTERNAL_ROUNDS,
-    KOALABEAR_NUM_INTERNAL_ROUNDS
+    KOALABEAR_S_BOX_DEGREE
 );
 
 struct TimeStats {

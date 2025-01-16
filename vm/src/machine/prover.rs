@@ -49,18 +49,20 @@ impl<SC, C> Default for BaseProver<SC, C> {
     }
 }
 
+impl<SC, C> BaseProver<SC, C> {
+    pub fn new() -> Self {
+        Self {
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
 impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C>
 where
     C: ChipBehavior<SC::Val>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
-    pub fn new() -> Self {
-        Self {
-            _phantom: core::marker::PhantomData,
-        }
-    }
-
     pub fn setup_keys(
         &self,
         config: &SC,

@@ -56,6 +56,7 @@ use crate::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
+        field::FieldSpecificPoseidon2Config,
         lookup::{LookupScope, LookupType},
     },
 };
@@ -123,29 +124,19 @@ define_chip_type!(
     ]
 );
 
-impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    RiscvChipType<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F>
 where
-    Poseidon2PermuteChip<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+    Poseidon2PermuteChip<F, F::Poseidon2Config>:
         ChipBehavior<F, Record = EmulationRecord, Program = Program>,
 {
     /// Get the heights of the preprocessed chips for a given program.
     pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(String, usize)> {
         vec![
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Program(
-                    ProgramChip::default(),
-                )
-                .name(),
+                Self::Program(Default::default()).name(),
                 program.instructions.len(),
             ),
-            (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Byte(
-                    ByteChip::default(),
-                )
-                .name(),
-                1 << 16,
-            ),
+            (Self::Byte(Default::default()).name(), 1 << 16),
         ]
     }
 
@@ -153,39 +144,36 @@ where
     pub(crate) fn riscv_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
         vec![
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Cpu(CpuChip::default()).name(),
+                Self::Cpu(Default::default()).name(),
                 record.cpu_events.len(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::DivRem(DivRemChip::default()).name(),
+                Self::DivRem(Default::default()).name(),
                 record.divrem_events.len(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::AddSub(AddSubChip::default()).name(),
+                Self::AddSub(Default::default()).name(),
                 record.add_events.len() + record.sub_events.len(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Bitwise(BitwiseChip::default()).name(),
+                Self::Bitwise(Default::default()).name(),
                 record.bitwise_events.len(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Mul(MulChip::default()).name(),
+                Self::Mul(Default::default()).name(),
                 record.mul_events.len(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SR(ShiftRightChip::default()).name(),
+                Self::SR(Default::default()).name(),
                 record.shift_right_events.len(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SLL(SLLChip::default()).name(),
+                Self::SLL(Default::default()).name(),
                 record.shift_left_events.len(),
             ),
+            (Self::Lt(Default::default()).name(), record.lt_events.len()),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::Lt(LtChip::default()).name(),
-                record.lt_events.len(),
-            ),
-            (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryLocal(MemoryLocalChip::default()).name(),
+                Self::MemoryLocal(Default::default()).name(),
                 record
                     .get_local_mem_events()
                     .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
@@ -193,7 +181,7 @@ where
                     .count(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryReadWrite(MemoryReadWriteChip::default()).name(),
+                Self::MemoryReadWrite(Default::default()).name(),
                 record
                     .cpu_events
                     .iter()
@@ -201,7 +189,7 @@ where
                     .count(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::SyscallRiscv(SyscallChip::riscv()).name(),
+                Self::SyscallRiscv(SyscallChip::riscv()).name(),
                 record.syscall_events.len(),
             ),
         ]
@@ -210,17 +198,11 @@ where
     pub(crate) fn get_memory_init_final_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
         vec![
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryInitialize(
-                    MemoryInitializeFinalizeChip::new(Initialize),
-                )
-                .name(),
+                Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(Initialize)).name(),
                 record.memory_initialize_events.len(),
             ),
             (
-                RiscvChipType::<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::MemoryFinalize(
-                    MemoryInitializeFinalizeChip::new(Finalize),
-                )
-                .name(),
+                Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(Finalize)).name(),
                 record.memory_finalize_events.len(),
             ),
         ]
@@ -249,16 +231,16 @@ where
 
     pub(crate) fn get_all_riscv_chips() -> Vec<MetaChip<F, Self>> {
         vec![
-            MetaChip::new(Self::Cpu(CpuChip::default())),
-            MetaChip::new(Self::AddSub(AddSubChip::default())),
-            MetaChip::new(Self::Bitwise(BitwiseChip::default())),
-            MetaChip::new(Self::Mul(MulChip::default())),
-            MetaChip::new(Self::DivRem(DivRemChip::default())),
-            MetaChip::new(Self::SLL(SLLChip::default())),
-            MetaChip::new(Self::SR(ShiftRightChip::default())),
-            MetaChip::new(Self::Lt(LtChip::default())),
-            MetaChip::new(Self::MemoryLocal(MemoryLocalChip::default())),
-            MetaChip::new(Self::MemoryReadWrite(MemoryReadWriteChip::default())),
+            MetaChip::new(Self::Cpu(Default::default())),
+            MetaChip::new(Self::AddSub(Default::default())),
+            MetaChip::new(Self::Bitwise(Default::default())),
+            MetaChip::new(Self::Mul(Default::default())),
+            MetaChip::new(Self::DivRem(Default::default())),
+            MetaChip::new(Self::SLL(Default::default())),
+            MetaChip::new(Self::SR(Default::default())),
+            MetaChip::new(Self::Lt(Default::default())),
+            MetaChip::new(Self::MemoryLocal(Default::default())),
+            MetaChip::new(Self::MemoryReadWrite(Default::default())),
             MetaChip::new(Self::SyscallRiscv(SyscallChip::riscv())),
         ]
     }

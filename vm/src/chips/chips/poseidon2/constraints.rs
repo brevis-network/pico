@@ -7,15 +7,13 @@ use crate::{
         utils::{external_linear_layer, internal_linear_layer},
         Poseidon2Chip,
     },
+    configs::config::Poseidon2Config,
     machine::{
         builder::{ChipBuilder, RecursionBuilder},
         field::{FieldBehavior, FieldType},
     },
     primitives::{
-        consts::{
-            BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS,
-            KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
-        },
+        consts::{BabyBearConfig, KoalaBearConfig, PERMUTATION_WIDTH},
         RC_16_30_U32,
     },
 };
@@ -23,125 +21,87 @@ use p3_air::{Air, BaseAir};
 use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::{array, borrow::Borrow};
+use typenum::Unsigned;
 
-macro_rules! impl_poseidon2_chip {
-    ($num_external_rounds:expr, $num_internal_rounds:expr, $num_col_ld:expr, $num_col_hd:expr) => {
-        impl<F, const DEGREE: usize> BaseAir<F>
-            for Poseidon2Chip<
-                DEGREE,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-                F,
-            >
-        {
-            fn width(&self) -> usize {
-                if DEGREE == 3 {
-                    $num_col_ld
-                } else if DEGREE == 9 {
-                    $num_col_hd
-                } else {
-                    panic!("Unsupported degree: {}", DEGREE);
-                }
-            }
+impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2Chip<DEGREE, BabyBearConfig, F> {
+    fn width(&self) -> usize {
+        if DEGREE == 3 {
+            BABYBEAR_NUM_POSEIDON2_LD_COLS
+        } else if DEGREE == 9 {
+            BABYBEAR_NUM_POSEIDON2_HD_COLS
+        } else {
+            panic!("Unsupported degree: {}", DEGREE);
         }
-
-        impl<F: Field, CB: ChipBuilder<F>, const DEGREE: usize> Air<CB>
-            for Poseidon2Chip<
-                DEGREE,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-                F,
-            >
-        where
-            CB::Var: 'static,
-        {
-            fn eval(&self, builder: &mut CB) {
-                let main = builder.main();
-                let preprocessed = builder.preprocessed();
-                let local_row = Self::convert::<CB::Var>(main.row_slice(0));
-                let preprocessed_local = preprocessed.row_slice(0);
-                let preprocessed_local: &Poseidon2PreprocessedCols<_> =
-                    (*preprocessed_local).borrow();
-
-                // Dummy constraints to normalize to DEGREE.
-                let lhs = (0..DEGREE)
-                    .map(|_| local_row.external_rounds_state()[0][0].into())
-                    .product::<CB::Expr>();
-                let rhs = (0..DEGREE)
-                    .map(|_| local_row.external_rounds_state()[0][0].into())
-                    .product::<CB::Expr>();
-                builder.assert_eq(lhs, rhs);
-
-                // For now, include only memory constraints.
-                (0..PERMUTATION_WIDTH).for_each(|i| {
-                    builder.looking_single(
-                        preprocessed_local.input[i],
-                        local_row.external_rounds_state()[0][i],
-                        preprocessed_local.is_real_neg,
-                    )
-                });
-
-                (0..PERMUTATION_WIDTH).for_each(|i| {
-                    builder.looking_single(
-                        preprocessed_local.output[i].addr,
-                        local_row.perm_output()[i],
-                        preprocessed_local.output[i].mult,
-                    )
-                });
-
-                // Apply the external rounds.
-                for r in 0..$num_external_rounds {
-                    self.eval_external_round(builder, local_row.as_ref(), r);
-                }
-
-                // Apply the internal rounds.
-                self.eval_internal_rounds(builder, local_row.as_ref());
-            }
-        }
-    };
+    }
 }
 
-impl_poseidon2_chip!(
-    BABYBEAR_NUM_EXTERNAL_ROUNDS,
-    BABYBEAR_NUM_INTERNAL_ROUNDS,
-    BABYBEAR_NUM_POSEIDON2_LD_COLS,
-    BABYBEAR_NUM_POSEIDON2_HD_COLS
-);
+impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2Chip<DEGREE, KoalaBearConfig, F> {
+    fn width(&self) -> usize {
+        if DEGREE == 3 {
+            KOALABEAR_NUM_POSEIDON2_COLS
+        } else if DEGREE == 9 {
+            KOALABEAR_NUM_POSEIDON2_COLS
+        } else {
+            panic!("Unsupported degree: {}", DEGREE);
+        }
+    }
+}
 
-impl_poseidon2_chip!(
-    KOALABEAR_NUM_EXTERNAL_ROUNDS,
-    KOALABEAR_NUM_INTERNAL_ROUNDS,
-    KOALABEAR_NUM_POSEIDON2_COLS,
-    KOALABEAR_NUM_POSEIDON2_COLS
-);
-
-impl<
-        const DEGREE: usize,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-        F: Field,
-    >
-    Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >
+impl<F: Field, Config: Poseidon2Config, CB: ChipBuilder<F>, const DEGREE: usize> Air<CB>
+    for Poseidon2Chip<DEGREE, Config, F>
+where
+    Self: BaseAir<F>,
+    CB::Var: 'static,
 {
+    fn eval(&self, builder: &mut CB) {
+        let main = builder.main();
+        let preprocessed = builder.preprocessed();
+        let local_row = Self::convert::<CB::Var>(main.row_slice(0));
+        let preprocessed_local = preprocessed.row_slice(0);
+        let preprocessed_local: &Poseidon2PreprocessedCols<_> = (*preprocessed_local).borrow();
+
+        // Dummy constraints to normalize to DEGREE.
+        let lhs = (0..DEGREE)
+            .map(|_| local_row.external_rounds_state()[0][0].into())
+            .product::<CB::Expr>();
+        let rhs = (0..DEGREE)
+            .map(|_| local_row.external_rounds_state()[0][0].into())
+            .product::<CB::Expr>();
+        builder.assert_eq(lhs, rhs);
+
+        // For now, include only memory constraints.
+        (0..PERMUTATION_WIDTH).for_each(|i| {
+            builder.looking_single(
+                preprocessed_local.input[i],
+                local_row.external_rounds_state()[0][i],
+                preprocessed_local.is_real_neg,
+            )
+        });
+
+        (0..PERMUTATION_WIDTH).for_each(|i| {
+            builder.looking_single(
+                preprocessed_local.output[i].addr,
+                local_row.perm_output()[i],
+                preprocessed_local.output[i].mult,
+            )
+        });
+
+        // Apply the external rounds.
+        for r in 0..Config::ExternalRounds::USIZE {
+            self.eval_external_round(builder, local_row.as_ref(), r);
+        }
+
+        // Apply the internal rounds.
+        self.eval_internal_rounds(builder, local_row.as_ref());
+    }
+}
+
+impl<const DEGREE: usize, Config: Poseidon2Config, F: Field> Poseidon2Chip<DEGREE, Config, F> {
     /// Eval the constraints for the external rounds.
     fn eval_external_round<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local_row: &dyn Poseidon2<
-            CB::Var,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
+        local_row: &dyn Poseidon2<CB::Var, Config>,
         r: usize,
     ) {
         let mut local_state: [CB::Expr; PERMUTATION_WIDTH] =
@@ -153,10 +113,10 @@ impl<
         }
 
         // Add the round constants.
-        let round = if r < NUM_EXTERNAL_ROUNDS / 2 {
+        let round = if r < Config::ExternalRounds::USIZE / 2 {
             r
         } else {
-            r + NUM_INTERNAL_ROUNDS
+            r + Config::InternalRounds::USIZE
         };
         let add_rc: [CB::Expr; PERMUTATION_WIDTH] = array::from_fn(|i| {
             local_state[i].clone() + CB::F::from_wrapped_u32(RC_16_30_U32[round][i])
@@ -196,9 +156,9 @@ impl<
         // Apply the linear layer.
         external_linear_layer(&mut state);
 
-        let next_state = if r == (NUM_EXTERNAL_ROUNDS / 2) - 1 {
+        let next_state = if r == (Config::ExternalRounds::USIZE / 2) - 1 {
             local_row.internal_rounds_state()
-        } else if r == NUM_EXTERNAL_ROUNDS - 1 {
+        } else if r == Config::ExternalRounds::USIZE - 1 {
             local_row.perm_output()
         } else {
             &local_row.external_rounds_state()[r + 1]
@@ -213,19 +173,14 @@ impl<
     fn eval_internal_rounds<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local_row: &dyn Poseidon2<
-            CB::Var,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
+        local_row: &dyn Poseidon2<CB::Var, Config>,
     ) {
         let state = &local_row.internal_rounds_state();
         let s0 = local_row.internal_rounds_s0();
         let mut state: [CB::Expr; PERMUTATION_WIDTH] = array::from_fn(|i| state[i].into());
-        for r in 0..NUM_INTERNAL_ROUNDS {
+        for r in 0..Config::InternalRounds::USIZE {
             // Add the round constant.
-            let round = r + NUM_EXTERNAL_ROUNDS / 2;
+            let round = r + Config::ExternalRounds::USIZE / 2;
             let add_rc = if r == 0 {
                 state[0].clone()
             } else {
@@ -250,12 +205,12 @@ impl<
 
             internal_linear_layer::<F, _>(&mut state);
 
-            if r < NUM_INTERNAL_ROUNDS - 1 {
+            if r < Config::InternalRoundsM1::USIZE {
                 builder.assert_eq(s0[r], state[0].clone());
             }
         }
 
-        let external_state = local_row.external_rounds_state()[NUM_EXTERNAL_ROUNDS / 2];
+        let external_state = local_row.external_rounds_state()[Config::ExternalRounds::USIZE / 2];
         for i in 0..PERMUTATION_WIDTH {
             builder.assert_eq(external_state[i], state[i].clone())
         }

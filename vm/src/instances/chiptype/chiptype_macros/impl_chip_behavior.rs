@@ -2,8 +2,7 @@
 macro_rules! impl_chip_behavior {
     ($enum_name:ident, $F:ident, [ $( ($variant:ident, $chip_type:ident) ),+ ]) => {
 
-        impl<$F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> ChipBehavior<$F> for $enum_name<$F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
-        where Poseidon2PermuteChip<$F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>: ChipBehavior<$F, Record = EmulationRecord, Program = Program> {
+        impl<$F: PrimeField32 + crate::machine::field::FieldSpecificPoseidon2Config> ChipBehavior<$F> for $enum_name<$F> {
             type Record = EmulationRecord;
             type Program = Program;
 

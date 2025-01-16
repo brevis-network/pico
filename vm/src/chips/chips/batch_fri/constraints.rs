@@ -14,13 +14,11 @@ use p3_field::{extension::BinomiallyExtendable, Field};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
-impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB, const W: u32> Air<CB>
-    for BatchFRIChip<W, F>
+impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for BatchFRIChip<F>
 where
     CB: ChipBuilder<F>,
 {
     fn eval(&self, builder: &mut CB) {
-        assert_eq!(F::from_canonical_u32(W), F::W);
         let main = builder.main();
         let (local, next) = (main.row_slice(0), main.row_slice(1));
         let local: &BatchFRICols<CB::Var> = (*local).borrow();
@@ -44,9 +42,9 @@ where
 
         // Constrain the accumulator value of the first row.
         builder.when_first_row().assert_ext_eq(
-            local.acc.as_extension::<F, CB, W>(),
-            local.alpha_pow.as_extension::<F, CB, W>()
-                * (local.p_at_z.as_extension::<F, CB, W>()
+            local.acc.as_extension::<F, CB>(),
+            local.alpha_pow.as_extension::<F, CB>()
+                * (local.p_at_z.as_extension::<F, CB>()
                     - BinomialExtension::from_base(local.p_at_x.into())),
         );
 
@@ -55,9 +53,9 @@ where
             .when_transition()
             .when(prepr_local.is_end)
             .assert_ext_eq(
-                next.acc.as_extension::<F, CB, W>(),
-                next.alpha_pow.as_extension::<F, CB, W>()
-                    * (next.p_at_z.as_extension::<F, CB, W>()
+                next.acc.as_extension::<F, CB>(),
+                next.alpha_pow.as_extension::<F, CB>()
+                    * (next.p_at_z.as_extension::<F, CB>()
                         - BinomialExtension::from_base(next.p_at_x.into())),
             );
 
@@ -66,10 +64,10 @@ where
             .when_transition()
             .when_not(prepr_local.is_end)
             .assert_ext_eq(
-                next.acc.as_extension::<F, CB, W>(),
-                local.acc.as_extension::<F, CB, W>()
-                    + next.alpha_pow.as_extension::<F, CB, W>()
-                        * (next.p_at_z.as_extension::<F, CB, W>()
+                next.acc.as_extension::<F, CB>(),
+                local.acc.as_extension::<F, CB>()
+                    + next.alpha_pow.as_extension::<F, CB>()
+                        * (next.p_at_z.as_extension::<F, CB>()
                             - BinomialExtension::from_base(next.p_at_x.into())),
             );
     }

@@ -1,142 +1,139 @@
 use super::{
     BABYBEAR_POSEIDON2_HD_COL_MAP, BABYBEAR_POSEIDON2_LD_COL_MAP, KOALABEAR_POSEIDON2_COL_MAP,
 };
-use crate::primitives::consts::{
-    BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
-    KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
+use crate::{
+    configs::config::Poseidon2Config,
+    primitives::consts::{BabyBearConfig, KoalaBearConfig, PERMUTATION_WIDTH},
 };
+use hybrid_array::{Array, ArraySize};
 use pico_derive::AlignedBorrow;
 use std::{borrow::BorrowMut, mem::size_of};
 
-#[derive(AlignedBorrow, Clone, Copy)]
+type ArrayType<T, N> = <N as ArraySize>::ArrayType<T>;
+type Perm<T> = [T; PERMUTATION_WIDTH];
+
+#[derive(AlignedBorrow, Clone)]
 #[repr(C)]
-pub struct PermutationState<
-    T: Copy,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> {
-    pub external_rounds_state: [[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS],
-    pub internal_rounds_state: [T; PERMUTATION_WIDTH],
-    pub internal_rounds_s0: [T; NUM_INTERNAL_ROUNDS_MINUS_ONE],
-    pub output_state: [T; PERMUTATION_WIDTH],
+pub struct PermutationState<T, Config: Poseidon2Config> {
+    //pub external_rounds_state: [[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS],
+    //pub internal_rounds_state: [T; PERMUTATION_WIDTH],
+    //pub internal_rounds_s0: [T; NUM_INTERNAL_ROUNDS_MINUS_ONE],
+    //pub output_state: [T; PERMUTATION_WIDTH],
+    pub external_rounds_state: Array<Perm<T>, Config::ExternalRounds>,
+    pub internal_rounds_state: Perm<T>,
+    pub internal_rounds_s0: Array<T, Config::InternalRoundsM1>,
+    pub output_state: Perm<T>,
 }
 
-#[derive(AlignedBorrow, Clone, Copy)]
-#[repr(C)]
-pub struct PermutationSBoxState<
+impl<T, Config> Copy for PermutationState<T, Config>
+where
     T: Copy,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-> {
-    pub external_rounds_sbox_state: [[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS],
-    pub internal_rounds_sbox_state: [T; NUM_INTERNAL_ROUNDS],
+    Config: Poseidon2Config,
+    ArrayType<Perm<T>, Config::ExternalRounds>: Copy,
+    ArrayType<T, Config::InternalRoundsM1>: Copy,
+{
+}
+
+#[derive(AlignedBorrow, Clone)]
+#[repr(C)]
+pub struct PermutationSBoxState<T, Config: Poseidon2Config> {
+    pub external_rounds_sbox_state: Array<Perm<T>, Config::ExternalRounds>,
+    pub internal_rounds_sbox_state: Array<T, Config::InternalRounds>,
+}
+
+impl<T, Config> Copy for PermutationSBoxState<T, Config>
+where
+    T: Copy,
+    Config: Poseidon2Config,
+    ArrayType<Perm<T>, Config::ExternalRounds>: Copy,
+    ArrayType<T, Config::InternalRounds>: Copy,
+{
 }
 
 /// Trait that describes getter functions for the permutation columns.
-pub trait Poseidon2<
-    T: Copy,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
->
-{
-    fn external_rounds_state(&self) -> &[[T; PERMUTATION_WIDTH]];
+pub trait Poseidon2<T, Config: Poseidon2Config> {
+    fn external_rounds_state(&self) -> &[Perm<T>];
 
-    fn internal_rounds_state(&self) -> &[T; PERMUTATION_WIDTH];
+    fn internal_rounds_state(&self) -> &Perm<T>;
 
-    fn internal_rounds_s0(&self) -> &[T; NUM_INTERNAL_ROUNDS_MINUS_ONE];
+    fn internal_rounds_s0(&self) -> &Array<T, Config::InternalRoundsM1>;
 
-    fn external_rounds_sbox(&self) -> Option<&[[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS]>;
+    fn external_rounds_sbox(&self) -> Option<&Array<Perm<T>, Config::ExternalRounds>>;
 
-    fn internal_rounds_sbox(&self) -> Option<&[T; NUM_INTERNAL_ROUNDS]>;
+    fn internal_rounds_sbox(&self) -> Option<&Array<T, Config::InternalRounds>>;
 
-    fn perm_output(&self) -> &[T; PERMUTATION_WIDTH];
+    fn perm_output(&self) -> &Perm<T>;
 }
 
 /// Trait that describes setter functions for the permutation columns.
-pub trait Poseidon2Mut<
-    T: Copy,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
->
-{
+pub trait Poseidon2Mut<T, Config: Poseidon2Config> {
     #[allow(clippy::type_complexity)]
     fn get_cols_mut(
         &mut self,
     ) -> (
-        &mut [[T; PERMUTATION_WIDTH]],
-        &mut [T; PERMUTATION_WIDTH],
-        &mut [T; NUM_INTERNAL_ROUNDS_MINUS_ONE],
-        Option<&mut [[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS]>,
-        Option<&mut [T; NUM_INTERNAL_ROUNDS]>,
-        &mut [T; PERMUTATION_WIDTH],
+        &mut [Perm<T>],
+        &mut Perm<T>,
+        &mut Array<T, Config::InternalRoundsM1>,
+        Option<&mut Array<Perm<T>, Config::ExternalRounds>>,
+        Option<&mut Array<T, Config::InternalRounds>>,
+        &mut Perm<T>,
     );
 }
 
 /// Permutation columns struct with S-boxes.
-#[derive(AlignedBorrow, Clone, Copy)]
+#[derive(AlignedBorrow, Clone)]
 #[repr(C)]
-pub struct PermutationSBox<
-    T: Copy,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> {
-    pub state: PermutationState<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>,
-    pub sbox_state: PermutationSBoxState<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
+pub struct PermutationSBox<T, Config: Poseidon2Config> {
+    pub state: PermutationState<T, Config>,
+    pub sbox_state: PermutationSBoxState<T, Config>,
 }
 
-impl<
-        T: Copy,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    > Poseidon2<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
-    for PermutationSBox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
+impl<T, Config> Copy for PermutationSBox<T, Config>
+where
+    T: Copy,
+    Config: Poseidon2Config,
+    ArrayType<Perm<T>, Config::ExternalRounds>: Copy,
+    ArrayType<T, Config::InternalRounds>: Copy,
+    ArrayType<T, Config::InternalRoundsM1>: Copy,
 {
-    fn external_rounds_state(&self) -> &[[T; PERMUTATION_WIDTH]] {
+}
+
+impl<T, Config: Poseidon2Config> Poseidon2<T, Config> for PermutationSBox<T, Config> {
+    fn external_rounds_state(&self) -> &[Perm<T>] {
         &self.state.external_rounds_state
     }
 
-    fn internal_rounds_state(&self) -> &[T; PERMUTATION_WIDTH] {
+    fn internal_rounds_state(&self) -> &Perm<T> {
         &self.state.internal_rounds_state
     }
 
-    fn internal_rounds_s0(&self) -> &[T; NUM_INTERNAL_ROUNDS_MINUS_ONE] {
+    fn internal_rounds_s0(&self) -> &Array<T, Config::InternalRoundsM1> {
         &self.state.internal_rounds_s0
     }
 
-    fn external_rounds_sbox(&self) -> Option<&[[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS]> {
+    fn external_rounds_sbox(&self) -> Option<&Array<Perm<T>, Config::ExternalRounds>> {
         Some(&self.sbox_state.external_rounds_sbox_state)
     }
 
-    fn internal_rounds_sbox(&self) -> Option<&[T; NUM_INTERNAL_ROUNDS]> {
+    fn internal_rounds_sbox(&self) -> Option<&Array<T, Config::InternalRounds>> {
         Some(&self.sbox_state.internal_rounds_sbox_state)
     }
 
-    fn perm_output(&self) -> &[T; PERMUTATION_WIDTH] {
+    fn perm_output(&self) -> &Perm<T> {
         &self.state.output_state
     }
 }
 
-impl<
-        T: Copy,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    > Poseidon2Mut<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
-    for PermutationSBox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
-{
+impl<T, Config: Poseidon2Config> Poseidon2Mut<T, Config> for PermutationSBox<T, Config> {
     fn get_cols_mut(
         &mut self,
     ) -> (
-        &mut [[T; PERMUTATION_WIDTH]],
-        &mut [T; PERMUTATION_WIDTH],
-        &mut [T; NUM_INTERNAL_ROUNDS_MINUS_ONE],
-        Option<&mut [[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS]>,
-        Option<&mut [T; NUM_INTERNAL_ROUNDS]>,
-        &mut [T; PERMUTATION_WIDTH],
+        &mut [Perm<T>],
+        &mut Perm<T>,
+        &mut Array<T, Config::InternalRoundsM1>,
+        Option<&mut Array<Perm<T>, Config::ExternalRounds>>,
+        Option<&mut Array<T, Config::InternalRounds>>,
+        &mut Perm<T>,
     ) {
         (
             &mut self.state.external_rounds_state,
@@ -150,66 +147,57 @@ impl<
 }
 
 /// Permutation columns struct without S-boxes.
-#[derive(AlignedBorrow, Clone, Copy)]
+#[derive(AlignedBorrow, Clone)]
 #[repr(C)]
-pub struct PermutationNoSbox<
-    T: Copy,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> {
-    pub state: PermutationState<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>,
+pub struct PermutationNoSbox<T, Config: Poseidon2Config> {
+    pub state: PermutationState<T, Config>,
 }
 
-impl<
-        T: Copy,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    > Poseidon2<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
-    for PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
+impl<T, Config> Copy for PermutationNoSbox<T, Config>
+where
+    T: Copy,
+    Config: Poseidon2Config,
+    ArrayType<Perm<T>, Config::ExternalRounds>: Copy,
+    ArrayType<T, Config::InternalRoundsM1>: Copy,
 {
-    fn external_rounds_state(&self) -> &[[T; PERMUTATION_WIDTH]] {
+}
+
+impl<T, Config: Poseidon2Config> Poseidon2<T, Config> for PermutationNoSbox<T, Config> {
+    fn external_rounds_state(&self) -> &[Perm<T>] {
         &self.state.external_rounds_state
     }
 
-    fn internal_rounds_state(&self) -> &[T; PERMUTATION_WIDTH] {
+    fn internal_rounds_state(&self) -> &Perm<T> {
         &self.state.internal_rounds_state
     }
 
-    fn internal_rounds_s0(&self) -> &[T; NUM_INTERNAL_ROUNDS_MINUS_ONE] {
+    fn internal_rounds_s0(&self) -> &Array<T, Config::InternalRoundsM1> {
         &self.state.internal_rounds_s0
     }
 
-    fn external_rounds_sbox(&self) -> Option<&[[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS]> {
+    fn external_rounds_sbox(&self) -> Option<&Array<Perm<T>, Config::ExternalRounds>> {
         None
     }
 
-    fn internal_rounds_sbox(&self) -> Option<&[T; NUM_INTERNAL_ROUNDS]> {
+    fn internal_rounds_sbox(&self) -> Option<&Array<T, Config::InternalRounds>> {
         None
     }
 
-    fn perm_output(&self) -> &[T; PERMUTATION_WIDTH] {
+    fn perm_output(&self) -> &Perm<T> {
         &self.state.output_state
     }
 }
 
-impl<
-        T: Copy,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    > Poseidon2Mut<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
-    for PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
-{
+impl<T, Config: Poseidon2Config> Poseidon2Mut<T, Config> for PermutationNoSbox<T, Config> {
     fn get_cols_mut(
         &mut self,
     ) -> (
-        &mut [[T; PERMUTATION_WIDTH]],
-        &mut [T; PERMUTATION_WIDTH],
-        &mut [T; NUM_INTERNAL_ROUNDS_MINUS_ONE],
-        Option<&mut [[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS]>,
-        Option<&mut [T; NUM_INTERNAL_ROUNDS]>,
-        &mut [T; PERMUTATION_WIDTH],
+        &mut [Perm<T>],
+        &mut Perm<T>,
+        &mut Array<T, Config::InternalRoundsM1>,
+        Option<&mut Array<Perm<T>, Config::ExternalRounds>>,
+        Option<&mut Array<T, Config::InternalRounds>>,
+        &mut Perm<T>,
     ) {
         (
             &mut self.state.external_rounds_state,
@@ -222,89 +210,33 @@ impl<
     }
 }
 
-// ... existing code ...
-
-pub fn babybear_permutation_mut<
-    'a,
-    'b: 'a,
-    T,
-    const DEGREE: usize,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
->(
-    row: &'b mut [T],
-) -> &'b mut (dyn Poseidon2Mut<
-    T,
-    NUM_EXTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS_MINUS_ONE,
-> + 'a)
-where
-    T: Copy,
-{
-    assert_eq!(NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_EXTERNAL_ROUNDS);
-    assert_eq!(NUM_INTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS);
+pub fn babybear_permutation_mut<T, const DEGREE: usize>(
+    row: &mut [T],
+) -> &mut (dyn Poseidon2Mut<T, BabyBearConfig>) {
+    let start;
+    let len;
 
     if DEGREE == 3 {
-        let start = BABYBEAR_POSEIDON2_LD_COL_MAP.state.external_rounds_state[0][0];
-        let end = start
-            + size_of::<
-                PermutationSBox<
-                    u8,
-                    NUM_EXTERNAL_ROUNDS,
-                    NUM_INTERNAL_ROUNDS,
-                    NUM_INTERNAL_ROUNDS_MINUS_ONE,
-                >,
-            >();
-        let convert: &mut PermutationSBox<
-            T,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        > = row[start..end].borrow_mut();
+        start = BABYBEAR_POSEIDON2_LD_COL_MAP.state.external_rounds_state[0][0];
+        len = size_of::<PermutationSBox<u8, BabyBearConfig>>();
+        let convert: &mut PermutationSBox<T, BabyBearConfig> = row[start..start + len].borrow_mut();
         convert
     } else if DEGREE == 9 {
-        let start = BABYBEAR_POSEIDON2_HD_COL_MAP.state.external_rounds_state[0][0];
-        let end = start
-            + size_of::<PermutationNoSbox<u8, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>>(
-            );
-        let convert: &mut PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE> =
-            row[start..end].borrow_mut();
+        start = BABYBEAR_POSEIDON2_HD_COL_MAP.state.external_rounds_state[0][0];
+        len = size_of::<PermutationNoSbox<u8, BabyBearConfig>>();
+        let convert: &mut PermutationNoSbox<T, BabyBearConfig> =
+            row[start..start + len].borrow_mut();
         convert
     } else {
-        panic!("Unsupported degree");
+        panic!("Unsupported degree")
     }
 }
 
-pub fn koalabear_permutation_mut<
-    'a,
-    'b: 'a,
-    T,
-    const DEGREE: usize,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
->(
-    row: &'b mut [T],
-) -> &'b mut (dyn Poseidon2Mut<
-    T,
-    NUM_EXTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS_MINUS_ONE,
-> + 'a)
-where
-    T: Copy,
-{
-    assert_eq!(NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS);
-    assert_eq!(NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS);
-
+pub fn koalabear_permutation_mut<T, const _DEGREE: usize>(
+    row: &mut [T],
+) -> &mut (dyn Poseidon2Mut<T, KoalaBearConfig>) {
     let start = KOALABEAR_POSEIDON2_COL_MAP.state.external_rounds_state[0][0];
-    let end = start
-        + size_of::<PermutationNoSbox<u8, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>>();
-    let convert: &mut PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE> =
-        row[start..end].borrow_mut();
+    let len = size_of::<PermutationNoSbox<u8, KoalaBearConfig>>();
+    let convert: &mut PermutationNoSbox<T, KoalaBearConfig> = row[start..start + len].borrow_mut();
     convert
 }
-
-// ... existing code ...

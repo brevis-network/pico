@@ -3,8 +3,8 @@
 For word and bytes
  */
 use crate::{
-    compiler::word::Word, emulator::riscv::public_values::PublicValues,
-    recursion_v2::air::RecursionPublicValues,
+    compiler::word::Word, configs::config::Poseidon2Config,
+    emulator::riscv::public_values::PublicValues, recursion_v2::air::RecursionPublicValues,
 };
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
@@ -184,17 +184,41 @@ pub const MULTI_FIELD_CHALLENGER_RATE: usize = 2;
 
 pub const MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 
+#[derive(Clone, Copy, Default)]
+pub struct BabyBearConfig;
+impl Poseidon2Config for BabyBearConfig {
+    type ExternalRounds = typenum::U8;
+    type HalfExternalRounds = typenum::U4;
+    type InternalRounds = typenum::U13;
+    type InternalRoundsM1 = typenum::U12;
+}
 pub const BABYBEAR_S_BOX_DEGREE: u64 = 7;
 pub const BABYBEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
 pub const BABYBEAR_NUM_INTERNAL_ROUNDS: usize = 13;
 pub const BABYBEAR_NUM_ROUNDS: usize = BABYBEAR_NUM_EXTERNAL_ROUNDS + BABYBEAR_NUM_INTERNAL_ROUNDS;
 
+#[derive(Clone, Copy, Default)]
+pub struct KoalaBearConfig;
+impl Poseidon2Config for KoalaBearConfig {
+    type ExternalRounds = typenum::U8;
+    type HalfExternalRounds = typenum::U4;
+    type InternalRounds = typenum::U20;
+    type InternalRoundsM1 = typenum::U19;
+}
 pub const KOALABEAR_S_BOX_DEGREE: u64 = 3;
 pub const KOALABEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
 pub const KOALABEAR_NUM_INTERNAL_ROUNDS: usize = 20;
 pub const KOALABEAR_NUM_ROUNDS: usize =
     KOALABEAR_NUM_EXTERNAL_ROUNDS + KOALABEAR_NUM_INTERNAL_ROUNDS;
 
+#[derive(Clone, Copy, Default)]
+pub struct Mersenne31Config;
+impl Poseidon2Config for Mersenne31Config {
+    type ExternalRounds = typenum::U8;
+    type HalfExternalRounds = typenum::U4;
+    type InternalRounds = typenum::U14;
+    type InternalRoundsM1 = typenum::U13;
+}
 pub const MERSENNE31_S_BOX_DEGREE: u64 = 5;
 pub const MERSENNE31_NUM_EXTERNAL_ROUNDS: usize = 8;
 pub const MERSENNE31_NUM_INTERNAL_ROUNDS: usize = 14;

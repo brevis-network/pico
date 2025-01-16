@@ -1,8 +1,11 @@
 use crate::primitives::consts::DIGEST_SIZE;
+use core::ops::Add;
+use hybrid_array::ArraySize;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{ExtensionField, Field, PrimeField, TwoAdicField};
 use serde::Serialize;
+use typenum::Same;
 // Resembling Plonky3: https://github.com/Plonky3/Plonky3/blob/main/uni-stark/src/config.rs
 
 pub type PackedVal<SC> = <Val<SC> as Field>::Packing;
@@ -71,6 +74,22 @@ pub trait FieldGenericConfig: Clone + Default {
 
 pub trait ZeroCommitment<SC: StarkGenericConfig> {
     fn zero_commitment(&self) -> Com<SC>;
+}
+
+/// Trait that allows us to implement Poseidon2 chips without a bunch of const
+/// generics
+///
+/// We also slap on a bunch of typenum math bounds here because every
+/// instantiation should satisfy them here rather than at chip instantiation.
+pub trait Poseidon2Config: Copy {
+    type ExternalRounds: ArraySize + Add<typenum::U3, Output: ArraySize>;
+    // the add constraint enforces external rounds is even
+    type HalfExternalRounds: ArraySize
+        + Add<Self::HalfExternalRounds, Output: Same<Self::ExternalRounds>>;
+    type InternalRounds: ArraySize;
+    type InternalRoundsM1: ArraySize
+        + Add<typenum::U16, Output: ArraySize>
+        + Add<typenum::U1, Output: Same<Self::InternalRounds>>;
 }
 
 pub struct SimpleFriConfig {

@@ -23,7 +23,7 @@ use crate::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
-        field::{FieldBehavior, FieldType},
+        field::{FieldBehavior, FieldSpecificPoseidon2Config, FieldType},
         folder::SymbolicConstraintFolder,
     },
     primitives::consts::EXTENSION_DEGREE,
@@ -35,76 +35,44 @@ use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use std::ops::{Add, AddAssign};
 
-pub enum RecursionChipType<
-    F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
-    const DEGREE: usize,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> {
+pub enum RecursionChipType<F: FieldSpecificPoseidon2Config, const DEGREE: usize> {
     MemoryConst(MemoryConstChip<F>),
     MemoryVar(MemoryVarChip<F>),
     ExpReverseBitsLen(ExpReverseBitsLenChip<F>),
     BaseAlu(BaseAluChip<F>),
-    ExtAlu(ExtAluChip<F, W>),
+    ExtAlu(ExtAluChip<F>),
     Select(SelectChip<F>),
-    Poseidon2Skinny(Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>),
-    Poseidon2Wide(
-        Poseidon2Chip<
-            DEGREE,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            F,
-        >,
-    ),
-    BatchFRI(BatchFRIChip<W, F>),
+    Poseidon2Skinny(Poseidon2SkinnyChip<DEGREE, F::Poseidon2Config, F>),
+    Poseidon2Wide(Poseidon2Chip<DEGREE, F::Poseidon2Config, F>),
+    BatchFRI(BatchFRIChip<F>),
     PublicValues(PublicValuesChip<F>),
 }
 
 impl<
-        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
         const DEGREE: usize,
-        const W: u32,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    > ChipBehavior<F>
-    for RecursionChipType<
-        F,
-        DEGREE,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >
+    > ChipBehavior<F> for RecursionChipType<F, DEGREE>
 where
-    Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>:
+    Poseidon2SkinnyChip<DEGREE, F::Poseidon2Config, F>:
         ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >: ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+    Poseidon2Chip<DEGREE, F::Poseidon2Config, F>:
+        ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
 {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
         match self {
-            Self::MemoryConst(chip) => ChipBehavior::<F>::name(chip),
-            Self::MemoryVar(chip) => ChipBehavior::<F>::name(chip),
-            Self::Select(chip) => ChipBehavior::<F>::name(chip),
-            Self::ExpReverseBitsLen(chip) => ChipBehavior::<F>::name(chip),
-            Self::BaseAlu(chip) => ChipBehavior::<F>::name(chip),
-            Self::ExtAlu(chip) => ChipBehavior::<F>::name(chip),
-            Self::Poseidon2Skinny(chip) => ChipBehavior::<F>::name(chip),
-            Self::Poseidon2Wide(chip) => ChipBehavior::<F>::name(chip),
-            Self::BatchFRI(chip) => ChipBehavior::<F>::name(chip),
-            Self::PublicValues(chip) => ChipBehavior::<F>::name(chip),
+            Self::MemoryConst(chip) => chip.name(),
+            Self::MemoryVar(chip) => chip.name(),
+            Self::Select(chip) => chip.name(),
+            Self::ExpReverseBitsLen(chip) => chip.name(),
+            Self::BaseAlu(chip) => chip.name(),
+            Self::ExtAlu(chip) => chip.name(),
+            Self::Poseidon2Skinny(chip) => chip.name(),
+            Self::Poseidon2Wide(chip) => chip.name(),
+            Self::BatchFRI(chip) => chip.name(),
+            Self::PublicValues(chip) => chip.name(),
         }
     }
 
@@ -185,43 +153,25 @@ where
 }
 
 impl<
-        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
         const DEGREE: usize,
-        const W: u32,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    > BaseAir<F>
-    for RecursionChipType<
-        F,
-        DEGREE,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >
+    > BaseAir<F> for RecursionChipType<F, DEGREE>
 where
-    Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>: BaseAir<F>,
-    Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >: BaseAir<F>,
+    Poseidon2SkinnyChip<DEGREE, F::Poseidon2Config, F>: BaseAir<F>,
+    Poseidon2Chip<DEGREE, F::Poseidon2Config, F>: BaseAir<F>,
 {
     fn width(&self) -> usize {
         match self {
-            Self::MemoryConst(chip) => BaseAir::<F>::width(chip),
-            Self::MemoryVar(chip) => BaseAir::<F>::width(chip),
-            Self::Select(chip) => BaseAir::<F>::width(chip),
-            Self::ExpReverseBitsLen(chip) => BaseAir::<F>::width(chip),
-            Self::BaseAlu(chip) => BaseAir::<F>::width(chip),
-            Self::ExtAlu(chip) => BaseAir::<F>::width(chip),
-            Self::Poseidon2Skinny(chip) => BaseAir::<F>::width(chip),
-            Self::Poseidon2Wide(chip) => BaseAir::<F>::width(chip),
-            Self::BatchFRI(chip) => BaseAir::<F>::width(chip),
-            Self::PublicValues(chip) => BaseAir::<F>::width(chip),
+            Self::MemoryConst(chip) => chip.width(),
+            Self::MemoryVar(chip) => chip.width(),
+            Self::Select(chip) => chip.width(),
+            Self::ExpReverseBitsLen(chip) => chip.width(),
+            Self::BaseAlu(chip) => chip.width(),
+            Self::ExtAlu(chip) => chip.width(),
+            Self::Poseidon2Skinny(chip) => chip.width(),
+            Self::Poseidon2Wide(chip) => chip.width(),
+            Self::BatchFRI(chip) => chip.width(),
+            Self::PublicValues(chip) => chip.width(),
         }
     }
 
@@ -242,43 +192,17 @@ where
 }
 
 impl<
-        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
         AB: ChipBuilder<F>,
         const DEGREE: usize,
-        const W: u32,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    > Air<AB>
-    for RecursionChipType<
-        F,
-        DEGREE,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >
+    > Air<AB> for RecursionChipType<F, DEGREE>
 where
-    RecursionChipType<
-        F,
-        DEGREE,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: BaseAir<<AB as AirBuilder>::F>,
-    Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>: Air<AB>,
-    Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >: Air<AB>,
-    AB::Var: 'static,
+    RecursionChipType<F, DEGREE>: BaseAir<<AB as AirBuilder>::F>,
+    Poseidon2SkinnyChip<DEGREE, F::Poseidon2Config, F>: Air<AB>,
+    Poseidon2Chip<DEGREE, F::Poseidon2Config, F>: Air<AB>,
 {
     fn eval(&self, b: &mut AB) {
-        assert_eq!(F::W, F::from_canonical_u32(W));
+        //assert_eq!(F::W, F::from_canonical_u32(F::W::U32));
         match self {
             Self::MemoryConst(chip) => chip.eval(b),
             Self::MemoryVar(chip) => chip.eval(b),
@@ -295,31 +219,13 @@ where
 }
 
 impl<
-        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
         const DEGREE: usize,
-        const W: u32,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    >
-    RecursionChipType<
-        F,
-        DEGREE,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >
+    > RecursionChipType<F, DEGREE>
 where
-    Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>: Air<SymbolicConstraintFolder<F>>
+    Poseidon2SkinnyChip<DEGREE, F::Poseidon2Config, F>: Air<SymbolicConstraintFolder<F>>
         + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >: Air<SymbolicConstraintFolder<F>>
+    Poseidon2Chip<DEGREE, F::Poseidon2Config, F>: Air<SymbolicConstraintFolder<F>>
         + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
 {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
@@ -425,28 +331,8 @@ where
                     0
                 },
             ),
-            // (
-            //     Self::BabyBearPoseidon2Wide(Poseidon2WideChip::<
-            //         DEGREE,
-            //         BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            //         BABYBEAR_NUM_INTERNAL_ROUNDS,
-            //         { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-            //         F,
-            //     >::default()),
-            //     if F::field_type() == FieldType::TypeBabyBear {
-            //         heights.poseidon2_wide_events
-            //     } else {
-            //         0
-            //     },
-            // ),
             (
-                Self::Poseidon2Wide(Poseidon2Chip::<
-                    DEGREE,
-                    NUM_EXTERNAL_ROUNDS,
-                    NUM_INTERNAL_ROUNDS,
-                    NUM_INTERNAL_ROUNDS_MINUS_ONE,
-                    F,
-                >::default()),
+                Self::Poseidon2Wide(Poseidon2Chip::<DEGREE, F::Poseidon2Config, F>::default()),
                 if F::field_type() == FieldType::TypeKoalaBear {
                     heights.poseidon2_events
                 } else {
@@ -454,7 +340,7 @@ where
                 },
             ),
             (
-                Self::BatchFRI(BatchFRIChip::<W, F>::default()),
+                Self::BatchFRI(BatchFRIChip::default()),
                 heights.batch_fri_events,
             ),
             (Self::Select(SelectChip::default()), heights.select_events),
@@ -480,13 +366,7 @@ where
                 (Self::BaseAlu(BaseAluChip::default()), 15),
                 (Self::ExtAlu(ExtAluChip::default()), 15),
                 (
-                    Self::Poseidon2Wide(Poseidon2Chip::<
-                        DEGREE,
-                        NUM_EXTERNAL_ROUNDS,
-                        NUM_INTERNAL_ROUNDS,
-                        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-                        F,
-                    >::default()),
+                    Self::Poseidon2Wide(Poseidon2Chip::<DEGREE, F::Poseidon2Config, F>::default()),
                     16,
                 ),
                 (
@@ -497,7 +377,7 @@ where
                     Self::PublicValues(PublicValuesChip::default()),
                     PUB_VALUES_LOG_HEIGHT,
                 ),
-                (Self::BatchFRI(BatchFRIChip::<W, F>::default()), 18),
+                (Self::BatchFRI(BatchFRIChip::default()), 18),
                 (Self::Select(SelectChip::default()), 18),
             ]
             .map(|(chip, log_height)| (chip.name(), log_height)),

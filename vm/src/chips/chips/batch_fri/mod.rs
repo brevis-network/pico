@@ -5,6 +5,6 @@ mod constraints;
 mod traces;
 
 #[derive(Default)]
-pub struct BatchFRIChip<const W: u32, F> {
+pub struct BatchFRIChip<F> {
     pub _phantom: PhantomData<fn(F) -> F>,
 }

@@ -1,48 +1,26 @@
 use crate::{
     chips::{chips::recursion_memory_v2::MemoryAccessCols, utils::indices_arr},
-    primitives::consts::{
-        BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
-    },
+    configs::config::Poseidon2Config,
+    primitives::consts::{BabyBearConfig, KoalaBearConfig, PERMUTATION_WIDTH},
 };
-use paste::paste;
+use hybrid_array::Array;
 use pico_derive::AlignedBorrow;
 use std::mem::{size_of, transmute};
+use typenum::Sum;
 
-pub const NUM_POSEIDON2_PREPROCESSED_COLS: usize = size_of::<Poseidon2PreprocessedCols<u8>>();
-
-macro_rules! impl_poseidon2_cols {
-    ($name:ident, $capital_name:ident) => {
-        paste! {
-            pub const [<$capital_name _ NUM_POSEIDON2_COLS>]: usize =
-                size_of::<Poseidon2Cols<u8, { [<$capital_name _ NUM_INTERNAL_ROUNDS>] - 1 }>>();
-
-            pub const [<$capital_name _ POSEIDON2_DEGREE9_COL_MAP>]: Poseidon2Cols<
-                usize,
-                { [<$capital_name _ NUM_INTERNAL_ROUNDS>] - 1 },
-            > = [<$name _ make_col_map_degree9>]();
-
-            const fn [<$name _ make_col_map_degree9>](
-            ) -> Poseidon2Cols<usize, { [<$capital_name _ NUM_INTERNAL_ROUNDS>] - 1 }> {
-                let indices_arr = indices_arr::<[<$capital_name _ NUM_POSEIDON2_COLS>]>();
-                unsafe {
-                    transmute::<
-                        [usize; [<$capital_name _ NUM_POSEIDON2_COLS>]],
-                        Poseidon2Cols<usize, { [<$capital_name _ NUM_INTERNAL_ROUNDS>] - 1 }>,
-                    >(indices_arr)
-                }
-            }
-        }
-    };
+#[derive(AlignedBorrow, Clone)]
+#[repr(C)]
+pub struct Poseidon2Cols<T, Config: Poseidon2Config> {
+    pub state_var: [T; PERMUTATION_WIDTH],
+    pub internal_rounds_s0: Array<T, Config::InternalRoundsM1>,
 }
 
-impl_poseidon2_cols!(babybear, BABYBEAR);
-impl_poseidon2_cols!(koalabear, KOALABEAR);
-
-#[derive(AlignedBorrow, Clone, Copy)]
-#[repr(C)]
-pub struct Poseidon2Cols<T: Copy, const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize> {
-    pub state_var: [T; PERMUTATION_WIDTH],
-    pub internal_rounds_s0: [T; NUM_INTERNAL_ROUNDS_MINUS_ONE],
+impl<T, Config> Copy for Poseidon2Cols<T, Config>
+where
+    T: Copy,
+    Config: Poseidon2Config,
+    Array<T, Config::InternalRoundsM1>: Copy,
+{
 }
 
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
@@ -59,4 +37,36 @@ pub struct RoundCountersPreprocessedCols<T: Copy> {
     pub is_external_round: T,
     pub is_internal_round: T,
     pub round_constants: [T; PERMUTATION_WIDTH],
+}
+
+pub const NUM_POSEIDON2_PREPROCESSED_COLS: usize = size_of::<Poseidon2PreprocessedCols<u8>>();
+
+pub const BABYBEAR_NUM_POSEIDON2_COLS: usize = size_of::<Poseidon2Cols<u8, BabyBearConfig>>();
+pub const KOALABEAR_NUM_POSEIDON2_COLS: usize = size_of::<Poseidon2Cols<u8, KoalaBearConfig>>();
+pub const fn num_poseidon2_cols<Config: Poseidon2Config>() -> usize {
+    size_of::<Poseidon2Cols<u8, Config>>()
+}
+pub type NumPoseidon2ColsGeneric<Config> =
+    Sum<<Config as Poseidon2Config>::InternalRoundsM1, typenum::U16>;
+
+pub const BABYBEAR_POSEIDON2_DEGREE9_COL_MAP: Poseidon2Cols<usize, BabyBearConfig> =
+    babybear_make_col_map_degree9();
+pub const KOALABEAR_POSEIDON2_DEGREE9_COL_MAP: Poseidon2Cols<usize, KoalaBearConfig> =
+    koalabear_make_col_map_degree9();
+
+const fn babybear_make_col_map_degree9() -> Poseidon2Cols<usize, BabyBearConfig> {
+    let indices_arr = indices_arr::<BABYBEAR_NUM_POSEIDON2_COLS>();
+    unsafe {
+        transmute::<[usize; BABYBEAR_NUM_POSEIDON2_COLS], Poseidon2Cols<usize, BabyBearConfig>>(
+            indices_arr,
+        )
+    }
+}
+const fn koalabear_make_col_map_degree9() -> Poseidon2Cols<usize, KoalaBearConfig> {
+    let indices_arr = indices_arr::<KOALABEAR_NUM_POSEIDON2_COLS>();
+    unsafe {
+        transmute::<[usize; KOALABEAR_NUM_POSEIDON2_COLS], Poseidon2Cols<usize, KoalaBearConfig>>(
+            indices_arr,
+        )
+    }
 }

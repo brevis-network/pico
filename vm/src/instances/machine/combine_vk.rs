@@ -26,10 +26,7 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
-        COMBINE_SIZE, KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W,
-    },
+    primitives::consts::{COMBINE_DEGREE, COMBINE_SIZE},
     recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use anyhow::Result;
@@ -39,12 +36,8 @@ use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{info, instrument};
 
-pub struct CombineVkMachine<
-    SC,
-    C,
-    const HALF_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-> where
+pub struct CombineVkMachine<SC, C>
+where
     SC: StarkGenericConfig,
     C: ChipBehavior<
         Val<SC>,
@@ -56,10 +49,9 @@ pub struct CombineVkMachine<
 }
 
 macro_rules! impl_combine_vk_machine {
-    ($emul_name:ident, $recur_cc:ident, $recur_sc:ident, $field_w:ident, $num_external_rounds:ident, $num_internal_rounds:ident) => {
-        impl<C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-            MachineBehavior<$recur_sc, C, RecursionVkStdin<'_, $recur_sc, C>>
-            for CombineVkMachine<$recur_sc, C, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+    ($emul_name:ident, $recur_cc:ident, $recur_sc:ident) => {
+        impl<C> MachineBehavior<$recur_sc, C, RecursionVkStdin<'_, $recur_sc, C>>
+            for CombineVkMachine<$recur_sc, C>
         where
             C: Send
                 + ChipBehavior<
@@ -100,8 +92,6 @@ macro_rules! impl_combine_vk_machine {
                     _,
                     _,
                     _,
-                    HALF_EXTERNAL_ROUNDS,
-                    NUM_INTERNAL_ROUNDS,
                 >::setup_combine_vk(
                     proving_witness, self.base_machine()
                 );
@@ -119,7 +109,7 @@ macro_rules! impl_combine_vk_machine {
                 let vk_manager = VkMerkleManager::new_from_file("vk_map.bin").unwrap();
                 let recursion_shape_config = RecursionShapeConfig::<
                     Val<$recur_sc>,
-                    RecursionChipType<Val<$recur_sc>, COMBINE_DEGREE, $field_w, $num_external_rounds, $num_internal_rounds, {$num_internal_rounds - 1}>,
+                    RecursionChipType<Val<$recur_sc>, COMBINE_DEGREE>,
                 >::default();
 
                 loop {
@@ -214,10 +204,6 @@ macro_rules! impl_combine_vk_machine {
                     (recursion_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine_vk::<
                         <$recur_cc as FieldGenericConfig>::F,
                         $recur_cc,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
                     >(
                         proving_witness.vk_root.unwrap(),
                         &all_vks,
@@ -280,25 +266,10 @@ macro_rules! impl_combine_vk_machine {
     };
 }
 
-impl_combine_vk_machine!(
-    BabyBearMetaEmulator,
-    BabyBearSimple,
-    BabyBearPoseidon2,
-    BABYBEAR_W,
-    BABYBEAR_NUM_EXTERNAL_ROUNDS,
-    BABYBEAR_NUM_INTERNAL_ROUNDS
-);
-impl_combine_vk_machine!(
-    KoalaBearMetaEmulator,
-    KoalaBearSimple,
-    KoalaBearPoseidon2,
-    KOALABEAR_W,
-    KOALABEAR_NUM_EXTERNAL_ROUNDS,
-    KOALABEAR_NUM_INTERNAL_ROUNDS
-);
+impl_combine_vk_machine!(BabyBearMetaEmulator, BabyBearSimple, BabyBearPoseidon2);
+impl_combine_vk_machine!(KoalaBearMetaEmulator, KoalaBearSimple, KoalaBearPoseidon2);
 
-impl<SC, C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    CombineVkMachine<SC, C, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<SC, C> CombineVkMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<

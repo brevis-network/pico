@@ -1,6 +1,5 @@
 use super::{MachineProver, ProverChain};
 use crate::{
-    compiler::recursion_v2::program::RecursionProgram,
     configs::{
         config::{StarkGenericConfig, Val},
         field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
@@ -11,150 +10,49 @@ use crate::{
         chiptype::recursion_chiptype_v2::RecursionChipType, machine::combine::CombineMachine,
     },
     machine::{
-        chip::ChipBehavior,
+        field::FieldSpecificPoseidon2Config,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
     primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
-        COMBINE_SIZE, CONVERT_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS,
-        KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS,
+        COMBINE_DEGREE, COMBINE_SIZE, CONVERT_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE,
+        RECURSION_NUM_PVS,
     },
-    recursion_v2::runtime::RecursionRecord,
 };
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
-type ConvertChips<
-    SC,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> = RecursionChipType<
-    Val<SC>,
-    CONVERT_DEGREE,
-    W,
-    NUM_EXTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS_MINUS_ONE,
->;
-pub type CombineChips<
-    SC,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> = RecursionChipType<
-    Val<SC>,
-    COMBINE_DEGREE,
-    W,
-    NUM_EXTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS_MINUS_ONE,
->;
+type ConvertChips<SC> = RecursionChipType<Val<SC>, CONVERT_DEGREE>;
+pub type CombineChips<SC> = RecursionChipType<Val<SC>, COMBINE_DEGREE>;
 
-pub struct CombineProver<
-    PrevSC,
-    SC,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const HALF_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> where
+pub struct CombineProver<PrevSC, SC>
+where
     PrevSC: StarkGenericConfig,
-    Val<PrevSC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+    Val<PrevSC>:
+        PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
     SC: StarkGenericConfig,
-    Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
-    CombineChips<SC, W, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>:
-        ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        >,
-    ConvertChips<
-        PrevSC,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: ChipBehavior<Val<PrevSC>>,
+    Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
 {
-    machine: CombineMachine<
-        SC,
-        CombineChips<
-            SC,
-            W,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
-        HALF_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-    >,
+    machine: CombineMachine<SC, CombineChips<SC>>,
     opts: EmulatorOpts,
-    prev_machine: BaseMachine<
-        PrevSC,
-        ConvertChips<
-            PrevSC,
-            W,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
-    >,
+    prev_machine: BaseMachine<PrevSC, ConvertChips<PrevSC>>,
 }
 
 macro_rules! impl_combine_prover {
-    ($recur_cc:ident, $recur_sc:ident, $field_w:ident, $num_external_rounds:ident, $num_internal_rounds:ident) => {
+    ($recur_cc:ident, $recur_sc:ident) => {
         // TODO: make RecursionCombineVerifierCircuit and Hintable traits generic over FC/SC
-        impl
-            ProverChain<
-                $recur_sc,
-                ConvertChips<
-                    $recur_sc,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >,
-                $recur_sc,
-            >
-            for CombineProver<
-                $recur_sc,
-                $recur_sc,
-                $field_w,
-                $num_external_rounds,
-                { $num_external_rounds / 2 },
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >
+        impl ProverChain<$recur_sc, ConvertChips<$recur_sc>, $recur_sc>
+            for CombineProver<$recur_sc, $recur_sc>
         {
             type Opts = EmulatorOpts;
 
             fn new_with_prev(
-                prev_prover: &impl MachineProver<
-                    $recur_sc,
-                    Chips = ConvertChips<
-                        $recur_sc,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
-                    >,
-                >,
+                prev_prover: &impl MachineProver<$recur_sc, Chips = ConvertChips<$recur_sc>>,
                 opts: Self::Opts,
             ) -> Self {
                 let machine = CombineMachine::new(
                     $recur_sc::new(),
-                    CombineChips::<
-                        $recur_sc,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
-                    >::combine_chips(),
+                    CombineChips::<$recur_sc>::combine_chips(),
                     RECURSION_NUM_PVS,
                 );
                 Self {
@@ -165,25 +63,9 @@ macro_rules! impl_combine_prover {
             }
         }
 
-        impl MachineProver<$recur_sc>
-            for CombineProver<
-                $recur_sc,
-                $recur_sc,
-                $field_w,
-                $num_external_rounds,
-                { $num_external_rounds / 2 },
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >
-        {
+        impl MachineProver<$recur_sc> for CombineProver<$recur_sc, $recur_sc> {
             type Witness = MetaProof<$recur_sc>;
-            type Chips = CombineChips<
-                $recur_sc,
-                $field_w,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >;
+            type Chips = CombineChips<$recur_sc>;
 
             fn machine(&self) -> &BaseMachine<$recur_sc, Self::Chips> {
                 self.machine.base_machine()
@@ -218,17 +100,5 @@ macro_rules! impl_combine_prover {
     };
 }
 
-impl_combine_prover!(
-    BabyBearSimple,
-    BabyBearPoseidon2,
-    BABYBEAR_W,
-    BABYBEAR_NUM_EXTERNAL_ROUNDS,
-    BABYBEAR_NUM_INTERNAL_ROUNDS
-);
-impl_combine_prover!(
-    KoalaBearSimple,
-    KoalaBearPoseidon2,
-    KOALABEAR_W,
-    KOALABEAR_NUM_EXTERNAL_ROUNDS,
-    KOALABEAR_NUM_INTERNAL_ROUNDS
-);
+impl_combine_prover!(BabyBearSimple, BabyBearPoseidon2);
+impl_combine_prover!(KoalaBearSimple, KoalaBearPoseidon2);

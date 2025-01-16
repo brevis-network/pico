@@ -37,9 +37,8 @@ use pico_vm::{
         witness::ProvingWitness,
     },
     primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_S_BOX_DEGREE,
-        BABYBEAR_W, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE, EMBED_DEGREE,
-        RECURSION_NUM_PVS, RISCV_NUM_PVS,
+        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
+        EMBED_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
     recursion_v2::runtime::Runtime,
 };
@@ -52,23 +51,10 @@ mod parse_args;
 fn main() {
     setup_logger();
 
-    let riscv_shape_config = RiscvShapeConfig::<
-        BabyBear,
-        { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
-        BABYBEAR_NUM_INTERNAL_ROUNDS,
-    >::default();
+    let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
     // COMBINE_DEGREE == COMPRESS_DEGREE == CONVERT_DEGREE == 3
-    let recursion_shape_config = RecursionShapeConfig::<
-        BabyBear,
-        RecursionChipType<
-            BabyBear,
-            COMBINE_DEGREE,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >,
-    >::default();
+    let recursion_shape_config =
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
     let vk_manager = VkMerkleManager::new_from_file("vk_map.bin").unwrap();
 
     // -------- Riscv Machine --------
@@ -93,16 +79,11 @@ fn main() {
         panic!("cannot get_mut arc");
     }
 
-    let riscv_machine =
-        RiscvMachine::new(
-            RiscvBBSC::new(),
-            RiscvChipType::<
-                BabyBear,
-                { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
-                BABYBEAR_NUM_INTERNAL_ROUNDS,
-            >::all_chips(),
-            RISCV_NUM_PVS,
-        );
+    let riscv_machine = RiscvMachine::new(
+        RiscvBBSC::new(),
+        RiscvChipType::<BabyBear>::all_chips(),
+        RISCV_NUM_PVS,
+    );
 
     // Setup machine prover, verifier, pk and vk.
     let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
@@ -171,25 +152,12 @@ fn main() {
     info!("Setting up CONVERT..");
     let convert_machine = ConvertMachine::new(
         RecursionSC::new(),
-        RecursionChipType::<
-            BabyBear,
-            CONVERT_DEGREE,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >::all_chips(),
+        RecursionChipType::<BabyBear, CONVERT_DEGREE>::all_chips(),
         RECURSION_NUM_PVS,
     );
 
     // Setup stdin and witness
-    let convert_stdin = EmulatorStdin::setup_for_convert::<
-        BabyBear,
-        BabyBearSimple,
-        BABYBEAR_W,
-        BABYBEAR_NUM_EXTERNAL_ROUNDS,
-        { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-    >(
+    let convert_stdin = EmulatorStdin::setup_for_convert::<BabyBear, BabyBearSimple>(
         riscv_vk,
         vk_root,
         riscv_machine.base_machine(),
@@ -229,17 +197,8 @@ fn main() {
 
     info!("\n Begin COMBINE..");
 
-    let recursion_shape_config = RecursionShapeConfig::<
-        BabyBear,
-        RecursionChipType<
-            BabyBear,
-            COMBINE_DEGREE,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >,
-    >::default();
+    let recursion_shape_config =
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
 
     info!("PERF-machine=combine");
     let combine_start = Instant::now();
@@ -247,21 +206,9 @@ fn main() {
     let vk_root = vk_manager.merkle_root;
 
     info!("Setting up COMBINE");
-    let combine_machine = CombineVkMachine::<
-        _,
-        _,
-        { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 },
-        BABYBEAR_NUM_INTERNAL_ROUNDS,
-    >::new(
+    let combine_machine = CombineVkMachine::new(
         RecursionSC::new(),
-        RecursionChipType::<
-            BabyBear,
-            COMBINE_DEGREE,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >::all_chips(),
+        RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -273,23 +220,17 @@ fn main() {
         );
     }
     // Setup stdin and witnesses
-    let (combine_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine_vk::<
-        BabyBear,
-        BabyBearSimple,
-        BABYBEAR_W,
-        BABYBEAR_NUM_EXTERNAL_ROUNDS,
-        BABYBEAR_NUM_INTERNAL_ROUNDS,
-        { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-    >(
-        vk_root,
-        convert_proof.vks(),
-        &convert_proof.proofs(),
-        convert_machine.base_machine(),
-        COMBINE_SIZE,
-        convert_proof.proofs().len() <= COMBINE_SIZE,
-        &vk_manager,
-        &recursion_shape_config,
-    );
+    let (combine_stdin, last_vk, last_proof) =
+        EmulatorStdin::setup_for_combine_vk::<BabyBear, BabyBearSimple>(
+            vk_root,
+            convert_proof.vks(),
+            &convert_proof.proofs(),
+            convert_machine.base_machine(),
+            COMBINE_SIZE,
+            convert_proof.proofs().len() <= COMBINE_SIZE,
+            &vk_manager,
+            &recursion_shape_config,
+        );
 
     let combine_witness = ProvingWitness::setup_for_recursion_vk(
         vk_root,
@@ -337,14 +278,7 @@ fn main() {
     info!("Setting up COMPRESS");
     let compress_machine = CompressVkMachine::new(
         RecursionSC::compress(),
-        RecursionChipType::<
-            BabyBear,
-            COMPRESS_DEGREE,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >::compress_chips(),
+        RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -358,23 +292,12 @@ fn main() {
 
     let compress_vk_stdin = vk_manager.add_vk_merkle_proof(compress_stdin);
 
-    let mut compress_program = CompressVkVerifierCircuit::<
-        RecursionFC,
-        RecursionSC,
-        BABYBEAR_W,
-        BABYBEAR_NUM_EXTERNAL_ROUNDS,
-        BABYBEAR_NUM_INTERNAL_ROUNDS,
-        { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-    >::build(combine_machine.base_machine(), &compress_vk_stdin);
+    let mut compress_program = CompressVkVerifierCircuit::<RecursionFC, RecursionSC>::build(
+        combine_machine.base_machine(),
+        &compress_vk_stdin,
+    );
 
-    let compress_pad_shape = RecursionChipType::<
-        BabyBear,
-        COMPRESS_DEGREE,
-        BABYBEAR_W,
-        BABYBEAR_NUM_EXTERNAL_ROUNDS,
-        BABYBEAR_NUM_INTERNAL_ROUNDS,
-        { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-    >::compress_shape();
+    let compress_pad_shape = RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_shape();
 
     compress_program.shape = Some(compress_pad_shape);
 
@@ -430,14 +353,7 @@ fn main() {
     info!("Setting up EMBED");
     let embed_machine = EmbedMachine::<BabyBearBn254Poseidon2, _, _, Vec<u8>>::new(
         EmbedSC::new(),
-        RecursionChipType::<
-            BabyBear,
-            EMBED_DEGREE,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >::embed_chips(),
+        RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -451,15 +367,11 @@ fn main() {
 
     let embed_vk_stdin = vk_manager.add_vk_merkle_proof(embed_stdin);
 
-    let embed_vk_program =
-        EmbedVkVerifierCircuit::<
-            RecursionFC,
-            RecursionSC,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >::build(compress_machine.base_machine(), &embed_vk_stdin, vk_manager);
+    let embed_vk_program = EmbedVkVerifierCircuit::<RecursionFC, RecursionSC>::build(
+        compress_machine.base_machine(),
+        &embed_vk_stdin,
+        vk_manager,
+    );
 
     embed_vk_program.print_stats();
 

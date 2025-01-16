@@ -42,7 +42,7 @@ impl<F: Field, CB: ChipBuilder<F>> ChipBaseBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> ChipLookupBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> ChipRangeBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> ChipWordBuilder<F> for CB {}
-impl<F: Field, CB: ChipBuilder<F>, const W: u32> ExtensionBuilder<F, W> for CB {}
+impl<F: Field, CB: ChipBuilder<F>, const D: usize> ExtensionBuilder<F, D> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> RecursionBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> RiscVMemoryBuilder<F> for CB {}
 impl<F: Field, CB: ChipBuilder<F>> SepticExtensionBuilder<F> for CB {}

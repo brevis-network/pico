@@ -4,21 +4,22 @@ use std::marker::PhantomData;
 use super::event::Poseidon2PermuteEvent;
 use crate::{
     chips::chips::poseidon2::utils::{external_linear_layer, internal_linear_layer},
+    configs::config::Poseidon2Config,
     emulator::riscv::syscalls::{
         precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
     },
     primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
 };
+use typenum::Unsigned;
 
-pub(crate) struct Poseidon2PermuteSyscall<
-    F: PrimeField32,
-    const HALF_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
->(pub(crate) PhantomData<F>);
+pub(crate) struct Poseidon2PermuteSyscall<F, Config>(
+    pub(crate) PhantomData<fn(F, Config) -> (F, Config)>,
+);
 
-impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    Poseidon2PermuteSyscall<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
-{
+impl<F: PrimeField32, Config: Poseidon2Config> Poseidon2PermuteSyscall<F, Config> {
+    const NUM_INTERNAL_ROUNDS: usize = Config::InternalRounds::USIZE;
+    const HALF_EXTERNAL_ROUNDS: usize = Config::HalfExternalRounds::USIZE;
+
     pub fn full_round(
         state: &mut [F; PERMUTATION_WIDTH],
         round_constants: &[F; PERMUTATION_WIDTH],
@@ -42,9 +43,7 @@ impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUN
     }
 }
 
-impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> Syscall
-    for Poseidon2PermuteSyscall<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
-{
+impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSyscall<F, Config> {
     fn num_extra_cycles(&self) -> u32 {
         1
     }
@@ -77,21 +76,21 @@ impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUN
         // Perform permutation on the state
         external_linear_layer(&mut state);
 
-        for round in 0..HALF_EXTERNAL_ROUNDS {
+        for round in 0..Self::HALF_EXTERNAL_ROUNDS {
             Self::full_round(&mut state, &RC_16_30_U32[round].map(F::from_wrapped_u32));
         }
 
-        for round in 0..NUM_INTERNAL_ROUNDS {
+        for round in 0..Self::NUM_INTERNAL_ROUNDS {
             Self::partial_round(
                 &mut state,
-                &RC_16_30_U32[round + HALF_EXTERNAL_ROUNDS].map(F::from_wrapped_u32)[0],
+                &RC_16_30_U32[round + Self::HALF_EXTERNAL_ROUNDS].map(F::from_wrapped_u32)[0],
             );
         }
 
-        for round in 0..HALF_EXTERNAL_ROUNDS {
+        for round in 0..Self::HALF_EXTERNAL_ROUNDS {
             Self::full_round(
                 &mut state,
-                &RC_16_30_U32[round + NUM_INTERNAL_ROUNDS + HALF_EXTERNAL_ROUNDS]
+                &RC_16_30_U32[round + Self::NUM_INTERNAL_ROUNDS + Self::HALF_EXTERNAL_ROUNDS]
                     .map(F::from_wrapped_u32),
             );
         }

@@ -1,18 +1,14 @@
 use super::{InitialProverSetup, MachineProver};
 use crate::{
-    chips::precompiles::poseidon2::Poseidon2PermuteChip,
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
-    emulator::{
-        opts::EmulatorOpts,
-        riscv::{record::EmulationRecord, stdin::EmulatorStdin},
-    },
+    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{chiptype::riscv_chiptype::RiscvChipType, machine::riscv::RiscvMachine},
     machine::{
-        chip::ChipBehavior,
+        field::FieldSpecificPoseidon2Config,
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
@@ -23,33 +19,28 @@ use crate::{
 use alloc::sync::Arc;
 use p3_field::PrimeField32;
 
-pub type RiscvChips<SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> =
-    RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>;
+pub type RiscvChips<SC> = RiscvChipType<Val<SC>>;
 
-pub struct RiscvProver<SC, P, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+pub struct RiscvProver<SC, P>
 where
     SC: StarkGenericConfig,
-    Val<SC>: PrimeField32,
-    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
 {
     program: Arc<P>,
-    machine: RiscvMachine<SC, RiscvChips<SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
+    machine: RiscvMachine<SC, RiscvChips<SC>>,
     opts: EmulatorOpts,
     pk: BaseProvingKey<SC>,
     vk: BaseVerifyingKey<SC>,
 }
 
-impl<SC, const H: usize, const N: usize> RiscvProver<SC, Program, H, N>
+impl<SC> RiscvProver<SC, Program>
 where
     SC: Send + StarkGenericConfig,
     Com<SC>: Send + Sync,
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
-    Val<SC>: PrimeField32,
-    Poseidon2PermuteChip<Val<SC>, H, N>:
-        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
 {
     pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
         let witness = ProvingWitness::setup_for_riscv(
@@ -63,17 +54,14 @@ where
     }
 }
 
-impl<SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> InitialProverSetup
-    for RiscvProver<SC, Program, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<SC> InitialProverSetup for RiscvProver<SC, Program>
 where
     SC: Send + StarkGenericConfig,
     Com<SC>: Send + Sync,
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
-    Val<SC>: PrimeField32,
-    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
 {
     type Input<'a> = (SC, &'a [u8]);
     type Opts = EmulatorOpts;
@@ -93,20 +81,17 @@ where
     }
 }
 
-impl<SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> MachineProver<SC>
-    for RiscvProver<SC, Program, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<SC> MachineProver<SC> for RiscvProver<SC, Program>
 where
     SC: Send + StarkGenericConfig,
     Com<SC>: Send + Sync,
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
-    Val<SC>: PrimeField32,
-    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
 {
     type Witness = EmulatorStdin<Program, Vec<u8>>;
-    type Chips = RiscvChips<SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>;
+    type Chips = RiscvChips<SC>;
 
     fn machine(&self) -> &BaseMachine<SC, Self::Chips> {
         self.machine.base_machine()

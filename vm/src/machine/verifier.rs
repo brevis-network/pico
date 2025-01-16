@@ -39,16 +39,18 @@ impl<SC, C> Default for BaseVerifier<SC, C> {
     }
 }
 
+impl<SC, C> BaseVerifier<SC, C> {
+    /// Initialize verifier with the same config and chips as prover.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 impl<SC, C> BaseVerifier<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>,
 {
-    /// Initialize verifier with the same config and chips as prover.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Verify the proof.
     /// Assumes that challenger has already observed vk, main commits and pvs
     pub fn verify(

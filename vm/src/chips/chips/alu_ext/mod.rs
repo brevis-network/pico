@@ -5,7 +5,7 @@ mod constraints;
 mod traces;
 
 #[derive(Default)]
-pub struct ExtAluChip<F, const W: u32> {
+pub struct ExtAluChip<F> {
     pub _phantom: PhantomData<fn(F) -> F>,
 }
 
@@ -18,7 +18,7 @@ mod tests {
             program::RecursionProgram,
         },
         machine::chip::ChipBehavior,
-        primitives::consts::{BABYBEAR_W, EXTENSION_DEGREE},
+        primitives::consts::EXTENSION_DEGREE,
         recursion_v2::{
             runtime::{ExtAluOpcode, RecursionRecord},
             //tests::run_recursion_test_machine,
@@ -42,7 +42,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let chip = ExtAluChip::<_, BABYBEAR_W> {
+        let chip = ExtAluChip {
             _phantom: PhantomData,
         };
         let trace: RowMajorMatrix<F> = chip.generate_main(&chunk, &mut RecursionRecord::default());

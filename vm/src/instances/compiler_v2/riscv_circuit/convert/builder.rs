@@ -22,9 +22,7 @@ use crate::{
     emulator::riscv::public_values::PublicValues,
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        lookup::LookupScope,
+        chip::ChipBehavior, field::FieldSpecificPoseidon2Config, lookup::LookupScope,
         machine::BaseMachine,
     },
     primitives::consts::{ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS},
@@ -41,19 +39,16 @@ use std::{
 
 /// Circuit that verifies a single riscv proof and checks constraints
 #[derive(Debug, Clone, Copy)]
-pub struct ConvertVerifierCircuit<
-    CC: CircuitConfig,
-    SC: FieldFriConfig,
-    const HALF_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-> {
+pub struct ConvertVerifierCircuit<CC: CircuitConfig, SC: FieldFriConfig> {
     _phantom: PhantomData<(CC, SC)>,
 }
 
-impl<F, CC, SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    ConvertVerifierCircuit<CC, SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<F, CC, SC> ConvertVerifierCircuit<CC, SC>
 where
-    F: TwoAdicField + PrimeField32 + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    F: TwoAdicField
+        + PrimeField32
+        + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+        + FieldSpecificPoseidon2Config,
     CC: CircuitConfig<N = F, F = F, Bit = Felt<F>> + Debug,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
     SC: FieldFriConfigVariable<
@@ -68,17 +63,12 @@ where
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
 
-    RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
+    RiscvChipType<Val<SC>>:
+        ChipBehavior<Val<SC>> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {
     pub fn build(
-        machine: &BaseMachine<
-            SC,
-            RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-        >,
-        input: &ConvertStdin<SC, RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
+        machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
+        input: &ConvertStdin<SC, RiscvChipType<Val<SC>>>,
     ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
         let mut builder = Builder::<CC>::new();
@@ -93,11 +83,10 @@ where
     }
 }
 
-impl<CC, SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    ConvertVerifierCircuit<CC, SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<CC, SC> ConvertVerifierCircuit<CC, SC>
 where
     CC: CircuitConfig,
-    CC::F: TwoAdicField + PrimeField32,
+    CC::F: TwoAdicField + PrimeField32 + FieldSpecificPoseidon2Config,
     SC: FieldFriConfigVariable<
         CC,
         Val = CC::F,
@@ -107,17 +96,12 @@ where
         DigestVariable = [Felt<CC::F>; DIGEST_SIZE],
     >,
 
-    RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>: ChipBehavior<Val<SC>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
+    RiscvChipType<Val<SC>>:
+        ChipBehavior<Val<SC>> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,
-        machine: &BaseMachine<
-            SC,
-            RiscvChipType<SC::Val, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-        >,
+        machine: &BaseMachine<SC, RiscvChipType<SC::Val>>,
         input: ConvertStdinVariable<CC, SC>,
     ) {
         // Read input.

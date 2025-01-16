@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 
-use p3_air::{Air, BaseAir};
+use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 
@@ -13,6 +13,7 @@ use crate::{
         poseidon2::utils::{external_linear_layer, internal_linear_layer},
         riscv_memory::read_write::columns::MemoryCols,
     },
+    configs::config::Poseidon2Config,
     emulator::riscv::syscalls::SyscallCode,
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
@@ -21,21 +22,15 @@ use crate::{
     primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
 };
 
-impl<
-        F: PrimeField32,
-        CB: ChipBuilder<F>,
-        const HALF_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-    > Air<CB> for Poseidon2PermuteChip<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<F: PrimeField32, Config: Poseidon2Config, CB: ChipBuilder<F>> Air<CB>
+    for Poseidon2PermuteChip<F, Config>
 where
-    Poseidon2PermuteChip<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>: BaseAir<F>,
     CB::Var: Sized,
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
         let local = main.row_slice(0);
-        let local: &Poseidon2Cols<CB::Var, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS> =
-            (*local).borrow();
+        let local: &Poseidon2Cols<CB::Var, Config> = (*local).borrow();
 
         // Load from memory to the state
         for (i, word) in local.input_memory.iter().enumerate() {
@@ -50,7 +45,7 @@ where
 
         state = local.state_linear_layer.map(|x| x.into());
 
-        for round in 0..HALF_EXTERNAL_ROUNDS {
+        for round in 0..Self::HALF_EXTERNAL_ROUNDS {
             Self::eval_full_round(
                 &state,
                 &local.beginning_full_rounds[round],
@@ -60,21 +55,21 @@ where
             state = local.beginning_full_rounds[round].post.map(|x| x.into());
         }
 
-        for round in 0..NUM_INTERNAL_ROUNDS {
+        for round in 0..Self::NUM_INTERNAL_ROUNDS {
             Self::eval_partial_round(
                 &state,
                 &local.partial_rounds[round],
-                &RC_16_30_U32[round + HALF_EXTERNAL_ROUNDS].map(CB::F::from_wrapped_u32)[0],
+                &RC_16_30_U32[round + Self::HALF_EXTERNAL_ROUNDS].map(CB::F::from_wrapped_u32)[0],
                 builder,
             );
             state = local.partial_rounds[round].post.map(|x| x.into());
         }
 
-        for round in 0..HALF_EXTERNAL_ROUNDS {
+        for round in 0..Self::HALF_EXTERNAL_ROUNDS {
             Self::eval_full_round(
                 &state,
                 &local.ending_full_rounds[round],
-                &RC_16_30_U32[round + NUM_INTERNAL_ROUNDS + HALF_EXTERNAL_ROUNDS]
+                &RC_16_30_U32[round + Self::NUM_INTERNAL_ROUNDS + Self::HALF_EXTERNAL_ROUNDS]
                     .map(CB::F::from_wrapped_u32),
                 builder,
             );
@@ -124,9 +119,7 @@ where
     }
 }
 
-impl<F: PrimeField32, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    Poseidon2PermuteChip<F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
-{
+impl<F: PrimeField32, Config: Poseidon2Config> Poseidon2PermuteChip<F, Config> {
     pub fn eval_full_round<CB>(
         state: &[CB::Expr; PERMUTATION_WIDTH],
         full_round: &FullRound<CB::Var>,

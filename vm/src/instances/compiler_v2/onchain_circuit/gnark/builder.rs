@@ -17,7 +17,10 @@ use crate::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::onchain_circuit::stdin::{OnchainStdin, OnchainStdinVariable},
     },
-    machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},
+    machine::{
+        chip::ChipBehavior, field::FieldSpecificPoseidon2Config, keys::BaseVerifyingKey,
+        machine::BaseMachine, proof::BaseProof,
+    },
     primitives::consts::{
         EMBED_DEGREE, EXTENSION_DEGREE, MULTI_FIELD_CHALLENGER_DIGEST_SIZE,
         MULTI_FIELD_CHALLENGER_RATE, MULTI_FIELD_CHALLENGER_WIDTH,
@@ -32,37 +35,18 @@ use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use std::{borrow::Borrow, fmt::Debug, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
-pub struct OnchainVerifierCircuit<
-    FC: FieldGenericConfig,
-    SC: StarkGenericConfig,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
->(PhantomData<(FC, SC)>);
+pub struct OnchainVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(
+    PhantomData<(FC, SC)>,
+);
 
-impl<
-        CC,
-        SC,
-        const W: u32,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    >
-    OnchainVerifierCircuit<
-        CC,
-        SC,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >
+impl<CC, SC> OnchainVerifierCircuit<CC, SC>
 where
     CC: CircuitConfig<N = Bn254Fr> + Debug,
     CC::F: TwoAdicField
         + PrimeField32
         + BinomiallyExtendable<EXTENSION_DEGREE>
-        + Witnessable<CC, WitnessVariable = Felt<Val<SC>>>,
+        + Witnessable<CC, WitnessVariable = Felt<Val<SC>>>
+        + FieldSpecificPoseidon2Config,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
     SC: FieldFriConfigVariable<
         CC,
@@ -83,39 +67,14 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Witnessable<CC, WitnessVariable = BaseProofVariable<CC, SC>>,
     BaseVerifyingKey<SC>: Witnessable<CC, WitnessVariable = BaseVerifyingKeyVariable<CC, SC>>,
-    OnchainStdin<
-        SC,
-        RecursionChipType<
-            Val<SC>,
-            EMBED_DEGREE,
-            W,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
-    >: Witnessable<CC, WitnessVariable = OnchainStdinVariable<CC, SC>>,
+    OnchainStdin<SC, RecursionChipType<Val<SC>, EMBED_DEGREE>>:
+        Witnessable<CC, WitnessVariable = OnchainStdinVariable<CC, SC>>,
 
-    RecursionChipType<
-        Val<SC>,
-        EMBED_DEGREE,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: ChipBehavior<Val<SC>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    RecursionChipType<Val<SC>, EMBED_DEGREE>:
+        ChipBehavior<Val<SC>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
-        input: &OnchainStdin<
-            SC,
-            RecursionChipType<
-                Val<SC>,
-                EMBED_DEGREE,
-                W,
-                NUM_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            >,
-        >,
+        input: &OnchainStdin<SC, RecursionChipType<Val<SC>, EMBED_DEGREE>>,
     ) -> (Vec<Constraint>, Witness<CC>) {
         tracing::info!("building gnark constraints");
         let constraints = {
@@ -155,17 +114,7 @@ where
 
     pub fn build_verifier(
         builder: &mut Builder<CC>,
-        machine: &BaseMachine<
-            SC,
-            RecursionChipType<
-                Val<SC>,
-                EMBED_DEGREE,
-                W,
-                NUM_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            >,
-        >,
+        machine: &BaseMachine<SC, RecursionChipType<Val<SC>, EMBED_DEGREE>>,
         input: &OnchainStdinVariable<CC, SC>,
     ) {
         let OnchainStdinVariable { vk, proof, .. } = input;

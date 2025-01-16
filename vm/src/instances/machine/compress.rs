@@ -23,11 +23,6 @@ use tracing::{info, instrument, trace};
 pub struct CompressMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
 {
     base_machine: BaseMachine<SC, C>,
 }
@@ -128,8 +123,6 @@ where
         Program = RecursionProgram<Val<SC>>,
         Record = RecursionRecord<Val<SC>>,
     >,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {

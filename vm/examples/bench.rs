@@ -12,10 +12,6 @@ use pico_vm::{
         riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
     },
     machine::logger::setup_logger,
-    primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W,
-        KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W,
-    },
     proverchain::{
         CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
         MachineProver, ProverChain, RiscvProver,
@@ -133,15 +129,7 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     let convert = ConvertProver::new_with_prev(&riscv, recursion_opts);
     let combine = CombineProver::new_with_prev(&convert, recursion_opts);
     let compress = CompressProver::new_with_prev(&combine, ());
-    let embed = EmbedProver::<
-        _,
-        _,
-        Vec<u8>,
-        BABYBEAR_W,
-        BABYBEAR_NUM_EXTERNAL_ROUNDS,
-        BABYBEAR_NUM_INTERNAL_ROUNDS,
-        { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-    >::new_with_prev(&compress, ());
+    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, ());
 
     info!("Generating RiscV proof");
     let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
@@ -201,15 +189,7 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     let convert = ConvertProver::new_with_prev(&riscv, recursion_opts);
     let combine = CombineProver::new_with_prev(&convert, recursion_opts);
     let compress = CompressProver::new_with_prev(&combine, ());
-    let embed = EmbedProver::<
-        _,
-        _,
-        Vec<u8>,
-        KOALABEAR_W,
-        KOALABEAR_NUM_EXTERNAL_ROUNDS,
-        KOALABEAR_NUM_INTERNAL_ROUNDS,
-        { KOALABEAR_NUM_INTERNAL_ROUNDS - 1 },
-    >::new_with_prev(&compress, ());
+    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, ());
 
     info!("Generating RiscV proof");
     let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));

@@ -23,10 +23,7 @@ use crate::{
         },
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
-    primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
-        DIGEST_SIZE,
-    },
+    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
 };
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
@@ -183,32 +180,9 @@ where
     }
 }
 
-impl<'a>
-    RecursionVkStdin<
-        'a,
-        BabyBearPoseidon2,
-        RecursionChipType<
-            BabyBear,
-            COMBINE_DEGREE,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >,
-    >
-{
+impl<'a> RecursionVkStdin<'a, BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>> {
     pub fn dummy(
-        machine: &'a BaseMachine<
-            BabyBearPoseidon2,
-            RecursionChipType<
-                BabyBear,
-                COMBINE_DEGREE,
-                BABYBEAR_W,
-                BABYBEAR_NUM_EXTERNAL_ROUNDS,
-                BABYBEAR_NUM_INTERNAL_ROUNDS,
-                { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-            >,
-        >,
+        machine: &'a BaseMachine<BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>>,
         shape: &RecursionVkShape,
     ) -> Self {
         let recursion_stdin = RecursionStdin::dummy(machine, &shape.recursion_shape);

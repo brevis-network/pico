@@ -1,6 +1,6 @@
 use super::{combine::CombineChips, MachineProver, ProverChain};
 use crate::{
-    compiler::recursion_v2::{circuit::witness::Witnessable, program::RecursionProgram},
+    compiler::recursion_v2::circuit::witness::Witnessable,
     configs::config::{Challenge, StarkGenericConfig, Val},
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
@@ -11,134 +11,53 @@ use crate::{
         machine::compress::CompressMachine,
     },
     machine::{
+        field::FieldSpecificPoseidon2Config,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMPRESS_DEGREE,
-        DIGEST_SIZE, EXTENSION_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS,
-        KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS,
-    },
-    proverchain::ChipBehavior,
-    recursion_v2::runtime::{RecursionRecord, Runtime},
+    primitives::consts::{COMPRESS_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    recursion_v2::runtime::Runtime,
 };
 use alloc::sync::Arc;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
-pub type CompressChips<
-    SC,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> = RecursionChipType<
-    Val<SC>,
-    COMPRESS_DEGREE,
-    W,
-    NUM_EXTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS_MINUS_ONE,
->;
+pub type CompressChips<SC> = RecursionChipType<Val<SC>, COMPRESS_DEGREE>;
 
-pub struct CompressProver<
-    PrevSC,
-    SC,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> where
+pub struct CompressProver<PrevSC, SC>
+where
     PrevSC: StarkGenericConfig,
-    Val<PrevSC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+    Val<PrevSC>:
+        PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
     SC: StarkGenericConfig,
-    Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
-
-    CompressChips<SC, W, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>:
-        ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        >,
-
-    CombineChips<
-        PrevSC,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: ChipBehavior<Val<PrevSC>>,
+    Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
 {
-    machine: CompressMachine<
-        SC,
-        CompressChips<
-            SC,
-            W,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
-    >,
-    prev_machine: BaseMachine<
-        PrevSC,
-        CombineChips<
-            PrevSC,
-            W,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
-    >,
+    machine: CompressMachine<SC, CompressChips<SC>>,
+    prev_machine: BaseMachine<PrevSC, CombineChips<PrevSC>>,
 }
 
 macro_rules! impl_compress_prover {
-    ($mod_name:ident, $field_w:ident, $num_external_rounds:ident, $num_internal_rounds:ident) => {
+    ($mod_name:ident) => {
         // TODO: make RecursionCompressVerifierCircuit and Hintable traits generic over FC/SC
         impl
             ProverChain<
                 $mod_name::StarkConfig,
-                CombineChips<
-                    $mod_name::StarkConfig,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >,
+                CombineChips<$mod_name::StarkConfig>,
                 $mod_name::StarkConfig,
-            >
-            for CompressProver<
-                $mod_name::StarkConfig,
-                $mod_name::StarkConfig,
-                $field_w,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >
+            > for CompressProver<$mod_name::StarkConfig, $mod_name::StarkConfig>
         {
             type Opts = ();
 
             fn new_with_prev(
                 prev_prover: &impl MachineProver<
                     $mod_name::StarkConfig,
-                    Chips = CombineChips<
-                        $mod_name::StarkConfig,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
-                    >,
+                    Chips = CombineChips<$mod_name::StarkConfig>,
                 >,
                 _opts: Self::Opts,
             ) -> Self {
                 let machine = CompressMachine::new(
                     $mod_name::StarkConfig::compress(),
-                    CompressChips::<
-                        $mod_name::StarkConfig,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
-                    >::compress_chips(),
+                    CompressChips::<$mod_name::StarkConfig>::compress_chips(),
                     RECURSION_NUM_PVS,
                 );
                 Self {
@@ -149,23 +68,10 @@ macro_rules! impl_compress_prover {
         }
 
         impl MachineProver<$mod_name::StarkConfig>
-            for CompressProver<
-                $mod_name::StarkConfig,
-                $mod_name::StarkConfig,
-                $field_w,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >
+            for CompressProver<$mod_name::StarkConfig, $mod_name::StarkConfig>
         {
             type Witness = MetaProof<$mod_name::StarkConfig>;
-            type Chips = CompressChips<
-                $mod_name::StarkConfig,
-                $field_w,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >;
+            type Chips = CompressChips<$mod_name::StarkConfig>;
 
             fn machine(&self) -> &BaseMachine<$mod_name::StarkConfig, Self::Chips> {
                 self.machine.base_machine()
@@ -183,10 +89,6 @@ macro_rules! impl_compress_prover {
                 let program = CompressVerifierCircuit::<
                     $mod_name::FieldConfig,
                     $mod_name::StarkConfig,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
                 >::build(&self.prev_machine, &stdin);
                 let (pk, vk) = self.machine.setup_keys(&program);
 
@@ -211,15 +113,5 @@ macro_rules! impl_compress_prover {
     };
 }
 
-impl_compress_prover!(
-    recur_config,
-    BABYBEAR_W,
-    BABYBEAR_NUM_EXTERNAL_ROUNDS,
-    BABYBEAR_NUM_INTERNAL_ROUNDS
-);
-impl_compress_prover!(
-    recur_kb_config,
-    KOALABEAR_W,
-    KOALABEAR_NUM_EXTERNAL_ROUNDS,
-    KOALABEAR_NUM_INTERNAL_ROUNDS
-);
+impl_compress_prover!(recur_config);
+impl_compress_prover!(recur_kb_config);

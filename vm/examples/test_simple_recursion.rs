@@ -27,9 +27,8 @@ use pico_vm::{
     },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_S_BOX_DEGREE,
-        BABYBEAR_W, KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS,
-        KOALABEAR_S_BOX_DEGREE, KOALABEAR_W, MAX_NUM_PVS, RISCV_NUM_PVS, RISCV_SIMPLE_DEGREE,
+        BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE, MAX_NUM_PVS, RISCV_NUM_PVS,
+        RISCV_SIMPLE_DEGREE,
     },
     recursion_v2::runtime::Runtime as RecursionRuntime,
 };
@@ -43,7 +42,7 @@ use tracing::{debug, info};
 mod parse_args;
 
 macro_rules! run {
-    ($func_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident, $s_box_degree:ident, $field_w:ident, $num_external_rounds:ident, $num_internal_rounds:ident) => {
+    ($func_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident, $s_box_degree:ident) => {
         fn $func_name(
             elf: &'static [u8],
             stdin: EmulatorStdin<Program, Vec<u8>>,
@@ -195,12 +194,10 @@ macro_rules! run {
             // Get recursion program
             // Note that simple_machine is used as input for recursive verifier to build the program
             info!("\n Build recursion program (at {:?})..", start.elapsed());
-            let recursion_program = SimpleVerifierCircuit::<
-                $recur_cc,
-                $recur_sc,
-                { $num_external_rounds / 2 },
-                $num_internal_rounds,
-            >::build(simple_machine.base_machine(), &recursion_stdin);
+            let recursion_program = SimpleVerifierCircuit::<$recur_cc, $recur_sc>::build(
+                simple_machine.base_machine(),
+                &recursion_stdin,
+            );
 
             let serialized_program = bincode::serialize(&recursion_program).unwrap();
             let mut hasher = DefaultHasher::new();
@@ -256,14 +253,7 @@ macro_rules! run {
             // Note that it should only accept witnesses initialized from records
             let recursion_machine = SimpleMachine::new(
                 $recur_sc::new(),
-                RecursionChipType::<
-                    Val<$recur_sc>,
-                    RISCV_SIMPLE_DEGREE,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >::all_chips(),
+                RecursionChipType::<Val<$recur_sc>, RISCV_SIMPLE_DEGREE>::all_chips(),
                 MAX_NUM_PVS,
             );
             let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);
@@ -311,20 +301,14 @@ run!(
     BabyBearPoseidon2,
     BabyBearSimple,
     BabyBearPoseidon2,
-    BABYBEAR_S_BOX_DEGREE,
-    BABYBEAR_W,
-    BABYBEAR_NUM_EXTERNAL_ROUNDS,
-    BABYBEAR_NUM_INTERNAL_ROUNDS
+    BABYBEAR_S_BOX_DEGREE
 );
 run!(
     run_koalabear,
     KoalaBearPoseidon2,
     KoalaBearSimple,
     KoalaBearPoseidon2,
-    KOALABEAR_S_BOX_DEGREE,
-    KOALABEAR_W,
-    KOALABEAR_NUM_EXTERNAL_ROUNDS,
-    KOALABEAR_NUM_INTERNAL_ROUNDS
+    KOALABEAR_S_BOX_DEGREE
 );
 
 fn main() {

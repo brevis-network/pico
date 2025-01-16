@@ -1,5 +1,4 @@
 use crate::{
-    chips::precompiles::poseidon2::Poseidon2PermuteChip,
     compiler::{riscv::program::Program, word::Word},
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{
@@ -10,6 +9,7 @@ use crate::{
     instances::compiler_v2::shapes::riscv_shape::RiscvShapeConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
+        field::FieldSpecificPoseidon2Config,
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
@@ -36,7 +36,7 @@ where
 impl<SC, C> RiscvMachine<SC, C>
 where
     SC: Send + StarkGenericConfig,
-    Val<SC>: PrimeField32,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
     C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
@@ -45,13 +45,10 @@ where
 {
     /// Prove with shape config
     #[instrument(name = "riscv_prove_with_shape", level = "debug", skip_all)]
-    pub fn prove_with_shape_cycles<
-        const HALF_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-    >(
+    pub fn prove_with_shape_cycles(
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
-        shape_config: Option<&RiscvShapeConfig<SC::Val, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -61,8 +58,6 @@ where
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-        Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-            ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
     {
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
@@ -200,10 +195,10 @@ where
         )
     }
 
-    pub fn prove_with_shape<const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>(
+    pub fn prove_with_shape(
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
-        shape_config: Option<&RiscvShapeConfig<SC::Val, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
     ) -> MetaProof<SC>
     where
         C: for<'a> Air<
@@ -213,16 +208,11 @@ where
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-        Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-            ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
     {
         self.prove_with_shape_cycles(witness, shape_config).0
     }
 
-    pub fn prove_cycles<const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>(
-        &self,
-        witness: &ProvingWitness<SC, C, Vec<u8>>,
-    ) -> (MetaProof<SC>, u64)
+    pub fn prove_cycles(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
                 DebugConstraintFolder<
@@ -231,8 +221,6 @@ where
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-        Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-            ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
     {
         self.prove_with_shape_cycles(witness, None)
     }
@@ -573,8 +561,6 @@ impl<SC, C> RiscvMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {
         Self {

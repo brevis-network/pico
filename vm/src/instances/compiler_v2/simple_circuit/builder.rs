@@ -1,25 +1,20 @@
 use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
-    chips::precompiles::poseidon2::Poseidon2PermuteChip,
-    compiler::{
-        recursion_v2::{
-            circuit::{
-                challenger::{CanObserveVariable, DuplexChallengerVariable},
-                config::{CircuitConfig, FieldFriConfig, FieldFriConfigVariable},
-                stark::StarkVerifier,
-                types::FriProofVariable,
-                witness::Witnessable,
-                CircuitV2Builder,
-            },
-            ir::{compiler::DslIrCompiler, Builder, Ext, Felt},
-            program::RecursionProgram,
+    compiler::recursion_v2::{
+        circuit::{
+            challenger::{CanObserveVariable, DuplexChallengerVariable},
+            config::{CircuitConfig, FieldFriConfig, FieldFriConfigVariable},
+            stark::StarkVerifier,
+            types::FriProofVariable,
+            witness::Witnessable,
+            CircuitV2Builder,
         },
-        riscv::program::Program,
+        ir::{compiler::DslIrCompiler, Builder, Ext, Felt},
+        program::RecursionProgram,
     },
     configs::config::{Challenger, Com, PcsProof, Val},
-    emulator::riscv::record::EmulationRecord,
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{chip::ChipBehavior, machine::BaseMachine},
+    machine::{field::FieldSpecificPoseidon2Config, machine::BaseMachine},
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
     recursion_v2::air::RecursionPublicValues,
 };
@@ -29,19 +24,16 @@ use std::{borrow::BorrowMut, fmt::Debug, marker::PhantomData};
 
 /// A program for recursively verifying a batch of Pico proofs.
 #[derive(Debug, Clone, Copy)]
-pub struct SimpleVerifierCircuit<
-    CC: CircuitConfig,
-    SC: FieldFriConfig,
-    const HALF_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-> {
+pub struct SimpleVerifierCircuit<CC: CircuitConfig, SC: FieldFriConfig> {
     _phantom: PhantomData<(CC, SC)>,
 }
 
-impl<F, CC, SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    SimpleVerifierCircuit<CC, SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<F, CC, SC> SimpleVerifierCircuit<CC, SC>
 where
-    F: TwoAdicField + PrimeField32 + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    F: TwoAdicField
+        + PrimeField32
+        + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+        + FieldSpecificPoseidon2Config,
     CC: CircuitConfig<N = F, F = F, Bit = Felt<F>> + Debug,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
     SC: FieldFriConfigVariable<
@@ -55,18 +47,10 @@ where
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
-    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
 {
     pub fn build(
-        machine: &BaseMachine<
-            SC,
-            RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-        >,
-        input: &SimpleRecursionStdin<
-            SC,
-            RiscvChipType<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-        >,
+        machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
+        input: &SimpleRecursionStdin<SC, RiscvChipType<Val<SC>>>,
     ) -> RecursionProgram<Val<SC>> {
         let mut builder = Builder::<CC>::default();
 
@@ -83,10 +67,9 @@ where
     }
 }
 
-impl<F, CC, SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    SimpleVerifierCircuit<CC, SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<F, CC, SC> SimpleVerifierCircuit<CC, SC>
 where
-    F: TwoAdicField + PrimeField32,
+    F: TwoAdicField + PrimeField32 + FieldSpecificPoseidon2Config,
     CC: CircuitConfig<N = F, F = F, EF = SC::Challenge, Bit = Felt<F>> + Debug,
     SC: FieldFriConfigVariable<
         CC,
@@ -95,15 +78,10 @@ where
         FriChallengerVariable = DuplexChallengerVariable<CC>,
         DigestVariable = [Felt<F>; DIGEST_SIZE],
     >,
-    Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,
-        machine: &BaseMachine<
-            SC,
-            RiscvChipType<SC::Val, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-        >,
+        machine: &BaseMachine<SC, RiscvChipType<SC::Val>>,
         input: SimpleRecursionStdinVariable<CC, SC>,
     ) {
         // Read input.
@@ -141,11 +119,13 @@ where
             /*
             Verify chunk proof
              */
-            StarkVerifier::<
-                CC,
-                SC,
-                RiscvChipType<SC::Val, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-            >::verify_chunk(builder, &vk, machine, &mut challenger, &base_proof);
+            StarkVerifier::<CC, SC, RiscvChipType<SC::Val>>::verify_chunk(
+                builder,
+                &vk,
+                machine,
+                &mut challenger,
+                &base_proof,
+            );
 
             // Cumulative sum is updated by sums of all chips.
             for values in base_proof.opened_values.chips_opened_values.iter() {

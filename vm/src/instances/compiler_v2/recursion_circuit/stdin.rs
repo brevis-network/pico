@@ -19,10 +19,7 @@ use crate::{
         },
     },
     machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},
-    primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, COMBINE_DEGREE,
-        DIGEST_SIZE,
-    },
+    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
 };
 use alloc::sync::Arc;
 use p3_baby_bear::BabyBear;
@@ -54,32 +51,9 @@ where
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
 }
 
-impl<'a>
-    RecursionStdin<
-        'a,
-        BabyBearPoseidon2,
-        RecursionChipType<
-            BabyBear,
-            COMBINE_DEGREE,
-            BABYBEAR_W,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-        >,
-    >
-{
+impl<'a> RecursionStdin<'a, BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>> {
     pub fn dummy(
-        machine: &'a BaseMachine<
-            BabyBearPoseidon2,
-            RecursionChipType<
-                BabyBear,
-                COMBINE_DEGREE,
-                BABYBEAR_W,
-                BABYBEAR_NUM_EXTERNAL_ROUNDS,
-                BABYBEAR_NUM_INTERNAL_ROUNDS,
-                { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-            >,
-        >,
+        machine: &'a BaseMachine<BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>>,
         shape: &RecursionShape,
     ) -> Self {
         let vks_and_proofs: Vec<_> = shape

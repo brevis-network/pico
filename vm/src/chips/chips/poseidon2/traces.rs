@@ -11,40 +11,28 @@ use crate::{
         recursion_memory_v2::MemoryAccessCols,
     },
     compiler::recursion_v2::{instruction::Instruction::Poseidon2, program::RecursionProgram},
+    configs::config::Poseidon2Config,
     machine::{
         chip::ChipBehavior,
         field::{FieldBehavior, FieldType},
     },
-    primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
+    primitives::{
+        consts::{BabyBearConfig, KoalaBearConfig, PERMUTATION_WIDTH},
+        RC_16_30_U32,
+    },
     recursion_v2::{runtime::RecursionRecord, stark::utils::next_power_of_two},
 };
+use hybrid_array::Array;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
+use typenum::Unsigned;
 
-impl<
-        F: PrimeField32,
-        const DEGREE: usize,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    > ChipBehavior<F>
-    for Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >
+impl<F: PrimeField32, const DEGREE: usize, Config: Poseidon2Config> ChipBehavior<F>
+    for Poseidon2Chip<DEGREE, Config, F>
 where
-    Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >: BaseAir<F>,
+    Poseidon2Chip<DEGREE, Config, F>: BaseAir<F>,
 {
     type Record = RecursionRecord<F>;
 
@@ -140,20 +128,8 @@ where
     }
 }
 
-impl<
-        F: PrimeField32,
-        const DEGREE: usize,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    >
-    Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >
+impl<F: PrimeField32, const DEGREE: usize, Config: Poseidon2Config>
+    Poseidon2Chip<DEGREE, Config, F>
 {
     fn populate_perm(
         &self,
@@ -179,13 +155,7 @@ impl<
         input_row: &mut [F],
     ) {
         assert_eq!(F::field_type(), FieldType::TypeBabyBear);
-        let permutation = babybear_permutation_mut::<
-            F,
-            DEGREE,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >(input_row);
+        let permutation = babybear_permutation_mut::<F, DEGREE>(input_row);
 
         let (
             external_rounds_state,
@@ -199,10 +169,13 @@ impl<
         external_rounds_state[0] = input;
 
         // Apply the first half of external rounds.
-        for r in 0..NUM_EXTERNAL_ROUNDS / 2 {
-            let next_state =
-                self.populate_external_round(external_rounds_state, &mut external_sbox, r);
-            if r == NUM_EXTERNAL_ROUNDS / 2 - 1 {
+        for r in 0..Config::ExternalRounds::USIZE / 2 {
+            let next_state = self.populate_external_round::<BabyBearConfig>(
+                external_rounds_state,
+                &mut external_sbox,
+                r,
+            );
+            if r == Config::ExternalRounds::USIZE / 2 - 1 {
                 *internal_rounds_state = next_state;
             } else {
                 external_rounds_state[r + 1] = next_state;
@@ -210,17 +183,21 @@ impl<
         }
 
         // Apply the internal rounds.
-        external_rounds_state[NUM_EXTERNAL_ROUNDS / 2] = self.populate_internal_rounds(
-            internal_rounds_state,
-            internal_rounds_s0,
-            &mut internal_sbox,
-        );
+        external_rounds_state[Config::ExternalRounds::USIZE / 2] = self
+            .populate_internal_rounds::<BabyBearConfig>(
+                internal_rounds_state,
+                internal_rounds_s0,
+                &mut internal_sbox,
+            );
 
         // Apply the second half of external rounds.
-        for r in NUM_EXTERNAL_ROUNDS / 2..NUM_EXTERNAL_ROUNDS {
-            let next_state =
-                self.populate_external_round(external_rounds_state, &mut external_sbox, r);
-            if r == NUM_EXTERNAL_ROUNDS - 1 {
+        for r in Config::ExternalRounds::USIZE / 2..Config::ExternalRounds::USIZE {
+            let next_state = self.populate_external_round::<BabyBearConfig>(
+                external_rounds_state,
+                &mut external_sbox,
+                r,
+            );
+            if r == Config::ExternalRounds::USIZE - 1 {
                 for i in 0..PERMUTATION_WIDTH {
                     output_state[i] = next_state[i];
                     if let Some(expected_output) = expected_output {
@@ -240,13 +217,7 @@ impl<
         input_row: &mut [F],
     ) {
         assert_eq!(F::field_type(), FieldType::TypeKoalaBear);
-        let permutation = koalabear_permutation_mut::<
-            F,
-            DEGREE,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >(input_row);
+        let permutation = koalabear_permutation_mut::<F, DEGREE>(input_row);
 
         let (
             external_rounds_state,
@@ -260,10 +231,13 @@ impl<
         external_rounds_state[0] = input;
 
         // Apply the first half of external rounds.
-        for r in 0..NUM_EXTERNAL_ROUNDS / 2 {
-            let next_state =
-                self.populate_external_round(external_rounds_state, &mut external_sbox, r);
-            if r == NUM_EXTERNAL_ROUNDS / 2 - 1 {
+        for r in 0..Config::ExternalRounds::USIZE / 2 {
+            let next_state = self.populate_external_round::<KoalaBearConfig>(
+                external_rounds_state,
+                &mut external_sbox,
+                r,
+            );
+            if r == Config::ExternalRounds::USIZE / 2 - 1 {
                 *internal_rounds_state = next_state;
             } else {
                 external_rounds_state[r + 1] = next_state;
@@ -271,17 +245,21 @@ impl<
         }
 
         // Apply the internal rounds.
-        external_rounds_state[NUM_EXTERNAL_ROUNDS / 2] = self.populate_internal_rounds(
-            internal_rounds_state,
-            internal_rounds_s0,
-            &mut internal_sbox,
-        );
+        external_rounds_state[Config::ExternalRounds::USIZE / 2] = self
+            .populate_internal_rounds::<KoalaBearConfig>(
+                internal_rounds_state,
+                internal_rounds_s0,
+                &mut internal_sbox,
+            );
 
         // Apply the second half of external rounds.
-        for r in NUM_EXTERNAL_ROUNDS / 2..NUM_EXTERNAL_ROUNDS {
-            let next_state =
-                self.populate_external_round(external_rounds_state, &mut external_sbox, r);
-            if r == NUM_EXTERNAL_ROUNDS - 1 {
+        for r in Config::ExternalRounds::USIZE / 2..Config::ExternalRounds::USIZE {
+            let next_state = self.populate_external_round::<KoalaBearConfig>(
+                external_rounds_state,
+                &mut external_sbox,
+                r,
+            );
+            if r == Config::ExternalRounds::USIZE - 1 {
                 for i in 0..PERMUTATION_WIDTH {
                     output_state[i] = next_state[i];
                     if let Some(expected_output) = expected_output {
@@ -294,10 +272,10 @@ impl<
         }
     }
 
-    fn populate_external_round(
+    fn populate_external_round<Config2: Poseidon2Config>(
         &self,
         external_rounds_state: &[[F; PERMUTATION_WIDTH]],
-        sbox: &mut Option<&mut [[F; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS]>,
+        sbox: &mut Option<&mut Array<[F; PERMUTATION_WIDTH], Config2::ExternalRounds>>,
         r: usize,
     ) -> [F; PERMUTATION_WIDTH] {
         let mut state = {
@@ -307,10 +285,10 @@ impl<
                 &external_rounds_state[r]
             };
 
-            let round = if r < NUM_EXTERNAL_ROUNDS / 2 {
+            let round = if r < Config2::ExternalRounds::USIZE / 2 {
                 r
             } else {
-                r + NUM_INTERNAL_ROUNDS
+                r + Config2::InternalRounds::USIZE
             };
             let mut add_rc = *round_state;
             for i in 0..PERMUTATION_WIDTH {
@@ -352,16 +330,16 @@ impl<
         state
     }
 
-    fn populate_internal_rounds(
+    fn populate_internal_rounds<Config2: Poseidon2Config>(
         &self,
         internal_rounds_state: &[F; PERMUTATION_WIDTH],
-        internal_rounds_s0: &mut [F; NUM_INTERNAL_ROUNDS_MINUS_ONE],
-        sbox: &mut Option<&mut [F; NUM_INTERNAL_ROUNDS]>,
+        internal_rounds_s0: &mut Array<F, Config2::InternalRoundsM1>,
+        sbox: &mut Option<&mut Array<F, Config2::InternalRounds>>,
     ) -> [F; PERMUTATION_WIDTH] {
         let mut state: [F; PERMUTATION_WIDTH] = *internal_rounds_state;
-        let mut sbox_deg_3: [F; NUM_INTERNAL_ROUNDS] = [F::ZERO; NUM_INTERNAL_ROUNDS];
-        for r in 0..NUM_INTERNAL_ROUNDS {
-            let round = r + NUM_EXTERNAL_ROUNDS / 2;
+        let mut sbox_deg_3: Array<F, Config2::InternalRounds> = Array::default();
+        for r in 0..Config2::InternalRounds::USIZE {
+            let round = r + Config2::ExternalRounds::USIZE / 2;
             let add_rc = state[0] + F::from_wrapped_u32(RC_16_30_U32[round][0]);
 
             // Apply the sbox.
@@ -380,7 +358,7 @@ impl<
 
             internal_linear_layer::<F, _>(&mut state);
 
-            if r < NUM_INTERNAL_ROUNDS - 1 {
+            if r < Config::InternalRounds::USIZE - 1 {
                 internal_rounds_s0[r] = state[0];
             }
         }

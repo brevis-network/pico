@@ -2,8 +2,9 @@ use crate::{
     machine::{builder::ChipBuilder, extension::BinomialExtension},
     primitives::consts::EXTENSION_DEGREE,
 };
+use core::marker::PhantomData;
 use p3_air::AirBuilder;
-use p3_field::{ExtensionField, Field, FieldAlgebra};
+use p3_field::{extension::BinomiallyExtendable, ExtensionField, Field, FieldAlgebra};
 use pico_derive::AlignedBorrow;
 use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut};
@@ -47,21 +48,27 @@ impl<T> Block<T> {
 }
 
 impl<T: Clone> Block<T> {
-    pub fn as_extension<F: Field, AB: ChipBuilder<F, Var = T>, const W: u32>(
+    pub fn as_extension<
+        F: Field + BinomiallyExtendable<EXTENSION_DEGREE>,
+        AB: ChipBuilder<F, Var = T>,
+    >(
         &self,
-    ) -> BinomialExtension<AB::Expr, W> {
-        let arr: [AB::Expr; 4] = self.0.clone().map(|x| AB::Expr::ZERO + x);
-        BinomialExtension(arr)
+    ) -> BinomialExtension<F, AB::Expr, EXTENSION_DEGREE> {
+        let arr: [AB::Expr; EXTENSION_DEGREE] = self.0.clone().map(|x| AB::Expr::ZERO + x);
+        BinomialExtension(arr, PhantomData)
     }
 
-    pub fn as_extension_from_base<F: Field, AB: ChipBuilder<F, Var = T>, const W: u32>(
+    pub fn as_extension_from_base<
+        F: Field + BinomiallyExtendable<EXTENSION_DEGREE>,
+        AB: ChipBuilder<F, Var = T>,
+    >(
         &self,
         base: AB::Expr,
-    ) -> BinomialExtension<AB::Expr, W> {
-        let mut arr: [AB::Expr; 4] = self.0.clone().map(|_| AB::Expr::ZERO);
+    ) -> BinomialExtension<F, AB::Expr, EXTENSION_DEGREE> {
+        let mut arr: [AB::Expr; EXTENSION_DEGREE] = self.0.clone().map(|_| AB::Expr::ZERO);
         arr[0] = base;
 
-        BinomialExtension(arr)
+        BinomialExtension(arr, PhantomData)
     }
 }
 

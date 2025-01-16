@@ -1,6 +1,6 @@
 use super::{compress::CompressChips, MachineProver, ProverChain};
 use crate::{
-    compiler::recursion_v2::{circuit::witness::Witnessable, program::RecursionProgram},
+    compiler::recursion_v2::circuit::witness::Witnessable,
     configs::{
         config::{Challenge, StarkGenericConfig, Val},
         stark_config::{
@@ -16,132 +16,50 @@ use crate::{
         machine::embed::EmbedMachine,
     },
     machine::{
+        field::FieldSpecificPoseidon2Config,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, BABYBEAR_W, DIGEST_SIZE,
-        EMBED_DEGREE, EXTENSION_DEGREE, KOALABEAR_NUM_EXTERNAL_ROUNDS,
-        KOALABEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_W, RECURSION_NUM_PVS,
-    },
-    proverchain::ChipBehavior,
-    recursion_v2::runtime::{RecursionRecord, Runtime},
+    primitives::consts::{DIGEST_SIZE, EMBED_DEGREE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    recursion_v2::runtime::Runtime,
 };
 use alloc::sync::Arc;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
-pub type EmbedChips<
-    SC,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> = RecursionChipType<
-    Val<SC>,
-    EMBED_DEGREE,
-    W,
-    NUM_EXTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS,
-    NUM_INTERNAL_ROUNDS_MINUS_ONE,
->;
+pub type EmbedChips<SC> = RecursionChipType<Val<SC>, EMBED_DEGREE>;
 
-pub struct EmbedProver<
-    PrevSC,
-    SC,
-    I,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-> where
+pub struct EmbedProver<PrevSC, SC, I>
+where
     PrevSC: StarkGenericConfig,
-    Val<PrevSC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
+    Val<PrevSC>:
+        PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
     SC: StarkGenericConfig,
-    Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>,
-
-    EmbedChips<SC, W, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>:
-        ChipBehavior<
-            Val<SC>,
-            Program = RecursionProgram<Val<SC>>,
-            Record = RecursionRecord<Val<SC>>,
-        >,
-
-    CompressChips<
-        PrevSC,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: ChipBehavior<Val<PrevSC>>,
+    Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
 {
-    machine: EmbedMachine<
-        PrevSC,
-        SC,
-        EmbedChips<SC, W, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>,
-        I,
-    >,
-    prev_machine: BaseMachine<
-        PrevSC,
-        CompressChips<
-            PrevSC,
-            W,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
-    >,
+    machine: EmbedMachine<PrevSC, SC, EmbedChips<SC>, I>,
+    prev_machine: BaseMachine<PrevSC, CompressChips<PrevSC>>,
 }
 
 macro_rules! impl_embeded_prover {
-    ($mod_name:ident, $embed_sc:ident, $field_w:ident, $num_external_rounds:ident, $num_internal_rounds:ident) => {
+    ($mod_name:ident, $embed_sc:ident) => {
         // TODO: make RecursionCompressVerifierCircuit and Hintable traits generic over FC/SC
         impl<I>
-            ProverChain<
-                $mod_name::StarkConfig,
-                CompressChips<
-                    $mod_name::StarkConfig,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >,
-                $embed_sc,
-            >
-            for EmbedProver<
-                $mod_name::StarkConfig,
-                $embed_sc,
-                I,
-                $field_w,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >
+            ProverChain<$mod_name::StarkConfig, CompressChips<$mod_name::StarkConfig>, $embed_sc>
+            for EmbedProver<$mod_name::StarkConfig, $embed_sc, I>
         {
             type Opts = ();
 
             fn new_with_prev(
                 prev_prover: &impl MachineProver<
                     $mod_name::StarkConfig,
-                    Chips = CompressChips<
-                        $mod_name::StarkConfig,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
-                    >,
+                    Chips = CompressChips<$mod_name::StarkConfig>,
                 >,
                 _opts: Self::Opts,
             ) -> Self {
                 let machine = EmbedMachine::<$mod_name::StarkConfig, _, _, I>::new(
                     $embed_sc::default(),
-                    EmbedChips::<
-                        $embed_sc,
-                        $field_w,
-                        $num_external_rounds,
-                        $num_internal_rounds,
-                        { $num_internal_rounds - 1 },
-                    >::embed_chips(),
+                    EmbedChips::<$embed_sc>::embed_chips(),
                     RECURSION_NUM_PVS,
                 );
                 Self {
@@ -151,25 +69,9 @@ macro_rules! impl_embeded_prover {
             }
         }
 
-        impl<I> MachineProver<$embed_sc>
-            for EmbedProver<
-                $mod_name::StarkConfig,
-                $embed_sc,
-                I,
-                $field_w,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >
-        {
+        impl<I> MachineProver<$embed_sc> for EmbedProver<$mod_name::StarkConfig, $embed_sc, I> {
             type Witness = MetaProof<$mod_name::StarkConfig>;
-            type Chips = EmbedChips<
-                $embed_sc,
-                $field_w,
-                $num_external_rounds,
-                $num_internal_rounds,
-                { $num_internal_rounds - 1 },
-            >;
+            type Chips = EmbedChips<$embed_sc>;
 
             fn machine(&self) -> &BaseMachine<$embed_sc, Self::Chips> {
                 self.machine.base_machine()
@@ -184,14 +86,11 @@ macro_rules! impl_embeded_prover {
                     true,
                     vk_root,
                 );
-                let program = EmbedVerifierCircuit::<
-                    $mod_name::FieldConfig,
-                    $mod_name::StarkConfig,
-                    $field_w,
-                    $num_external_rounds,
-                    $num_internal_rounds,
-                    { $num_internal_rounds - 1 },
-                >::build(&self.prev_machine, &stdin);
+                let program =
+                    EmbedVerifierCircuit::<$mod_name::FieldConfig, $mod_name::StarkConfig>::build(
+                        &self.prev_machine,
+                        &stdin,
+                    );
                 let (pk, vk) = self.machine.setup_keys(&program);
 
                 let mut witness_stream = Vec::new();
@@ -215,17 +114,5 @@ macro_rules! impl_embeded_prover {
     };
 }
 
-impl_embeded_prover!(
-    recur_config,
-    BabyBearBn254Poseidon2,
-    BABYBEAR_W,
-    BABYBEAR_NUM_EXTERNAL_ROUNDS,
-    BABYBEAR_NUM_INTERNAL_ROUNDS
-);
-impl_embeded_prover!(
-    recur_kb_config,
-    KoalaBearBn254Poseidon2,
-    KOALABEAR_W,
-    KOALABEAR_NUM_EXTERNAL_ROUNDS,
-    KOALABEAR_NUM_INTERNAL_ROUNDS
-);
+impl_embeded_prover!(recur_config, BabyBearBn254Poseidon2);
+impl_embeded_prover!(recur_kb_config, KoalaBearBn254Poseidon2);

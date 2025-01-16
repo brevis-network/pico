@@ -1,14 +1,12 @@
 use crate::{
-    chips::precompiles::poseidon2::Poseidon2PermuteChip,
-    compiler::{recursion_v2::program::RecursionProgram, riscv::program::Program},
+    compiler::recursion_v2::program::RecursionProgram,
     configs::{
-        config::{Com, PcsProverData, StarkGenericConfig, Val},
+        config::{StarkGenericConfig, Val},
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     emulator::{
         emulator_v2::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
         record::RecordBehavior,
-        riscv::record::EmulationRecord,
     },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType, compiler_v2::riscv_circuit::stdin::ConvertStdin,
@@ -27,24 +25,15 @@ use p3_air::Air;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{any::type_name, time::Instant};
 use tracing::{info, instrument};
-pub struct ConvertMachine<
-    SC,
-    C,
-    const HALF_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-> where
+
+pub struct ConvertMachine<SC, C>
+where
     SC: StarkGenericConfig,
-    C: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
 {
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<SC, C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    ConvertMachine<SC, C, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<SC, C> ConvertMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
@@ -52,8 +41,6 @@ where
         Program = RecursionProgram<Val<SC>>,
         Record = RecursionRecord<Val<SC>>,
     >,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {
@@ -64,15 +51,9 @@ where
 
 macro_rules! impl_convert_machine {
     ($emul_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident) => {
-        impl<C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-            MachineBehavior<
-                $recur_sc,
-                C,
-                ConvertStdin<
-                    $riscv_sc,
-                    RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-                >,
-            > for ConvertMachine<$recur_sc, C, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+        impl<C>
+            MachineBehavior<$recur_sc, C, ConvertStdin<$riscv_sc, RiscvChipType<Val<$riscv_sc>>>>
+            for ConvertMachine<$recur_sc, C>
         where
             C: Send
                 + ChipBehavior<
@@ -80,8 +61,6 @@ macro_rules! impl_convert_machine {
                     Program = RecursionProgram<Val<$recur_sc>>,
                     Record = RecursionRecord<Val<$recur_sc>>,
                 >,
-            Poseidon2PermuteChip<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-                ChipBehavior<Val<$riscv_sc>, Record = EmulationRecord, Program = Program>,
         {
             /// Get the name of the machine.
             fn name(&self) -> String {
@@ -100,10 +79,7 @@ macro_rules! impl_convert_machine {
                 proving_witness: &ProvingWitness<
                     $recur_sc,
                     C,
-                    ConvertStdin<
-                        $riscv_sc,
-                        RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-                    >,
+                    ConvertStdin<$riscv_sc, RiscvChipType<Val<$riscv_sc>>>,
                 >,
             ) -> MetaProof<$recur_sc>
             where
@@ -114,8 +90,6 @@ macro_rules! impl_convert_machine {
                             <$recur_sc as StarkGenericConfig>::Challenge,
                         >,
                     > + for<'a> Air<ProverConstraintFolder<'a, $recur_sc>>,
-                Poseidon2PermuteChip<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-                    ChipBehavior<Val<$riscv_sc>, Record = EmulationRecord, Program = Program>,
             {
                 // setup
                 let mut emulator = $emul_name::setup_convert(proving_witness, self.base_machine());

@@ -1,6 +1,7 @@
 //! Basic AIR associting functions for the chip builder
 
 use crate::machine::extension::BinomialExtension;
+use core::marker::PhantomData;
 use itertools::Itertools;
 use p3_air::{AirBuilder, FilteredAirBuilder};
 use p3_field::{Field, FieldAlgebra};
@@ -59,10 +60,10 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
     // Extension field-related
 
     /// Asserts that the two field extensions are equal.
-    fn assert_ext_eq<I: Into<Self::Expr>, const W: u32>(
+    fn assert_ext_eq<B, I: Into<Self::Expr>, const D: usize>(
         &mut self,
-        left: BinomialExtension<I, W>,
-        right: BinomialExtension<I, W>,
+        left: BinomialExtension<B, I, D>,
+        right: BinomialExtension<B, I, D>,
     ) {
         for (left, right) in left.0.into_iter().zip(right.0) {
             self.assert_eq(left, right);
@@ -70,9 +71,9 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
     }
 
     /// Checks if an extension element is a base element.
-    fn assert_is_base_element<I: Into<Self::Expr> + Clone, const W: u32>(
+    fn assert_is_base_element<B, I: Into<Self::Expr> + Clone, const D: usize>(
         &mut self,
-        element: BinomialExtension<I, W>,
+        element: BinomialExtension<B, I, D>,
     ) {
         let base_slice = element.as_base_slice();
         let degree = base_slice.len();
@@ -82,14 +83,15 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
     }
 
     /// Performs an if else on extension elements.
-    fn if_else_ext<const W: u32>(
+    fn if_else_ext<B, const D: usize>(
         &mut self,
         condition: impl Into<Self::Expr> + Clone,
-        a: BinomialExtension<impl Into<Self::Expr> + Clone, W>,
-        b: BinomialExtension<impl Into<Self::Expr> + Clone, W>,
-    ) -> BinomialExtension<Self::Expr, W> {
-        BinomialExtension(array::from_fn(|i| {
-            self.if_else(condition.clone(), a.0[i].clone(), b.0[i].clone())
-        }))
+        a: BinomialExtension<B, impl Into<Self::Expr> + Clone, D>,
+        b: BinomialExtension<B, impl Into<Self::Expr> + Clone, D>,
+    ) -> BinomialExtension<B, Self::Expr, D> {
+        BinomialExtension(
+            array::from_fn(|i| self.if_else(condition.clone(), a.0[i].clone(), b.0[i].clone())),
+            PhantomData,
+        )
     }
 }

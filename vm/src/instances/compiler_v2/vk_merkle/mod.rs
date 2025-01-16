@@ -10,12 +10,10 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseVerifyingKey, HashableKey},
     },
     primitives::consts::DIGEST_SIZE,
 };
-use p3_air::Air;
 use std::collections::BTreeMap;
 
 pub struct VkMerkleManager<SC: StarkGenericConfig + FieldHasher<Val<SC>>> {
@@ -27,7 +25,7 @@ pub struct VkMerkleManager<SC: StarkGenericConfig + FieldHasher<Val<SC>>> {
 impl<SC> VkMerkleManager<SC>
 where
     SC: StarkGenericConfig + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZE]>,
-    SC::Val: Ord,
+    Val<SC>: Ord,
 {
     /// Initialize the VkMerkleManager from a file
     pub fn new_from_file(file_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
@@ -52,11 +50,8 @@ where
         stdin: RecursionStdin<'a, SC, C>,
     ) -> RecursionVkStdin<'a, SC, C>
     where
-        SC::Val: Ord,
         BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
-        C: ChipBehavior<Val<SC>>
-            + for<'b> Air<ProverConstraintFolder<'b, SC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        C: ChipBehavior<Val<SC>>,
     {
         // Map over vks_and_proofs to extract vk digests and their indices
         let (indices, vk_digests): (Vec<usize>, Vec<_>) = stdin

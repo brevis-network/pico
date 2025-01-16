@@ -1,27 +1,37 @@
 // TODO-Alan: refactor to use p3 BionmialExtensionField
-use std::ops::{Add, Div, Mul, Neg, Sub};
-
-use crate::primitives::consts::EXTENSION_DEGREE;
+use core::marker::PhantomData;
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
     Field, FieldAlgebra, FieldExtensionAlgebra,
 };
 use pico_derive::AlignedBorrow;
+use std::ops::{Add, Div, Mul, Neg, Sub};
+//use typenum::Unsigned;
 
-/// A binomial extension element represented over a generic type `T`.
-#[derive(AlignedBorrow, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+/// A binomial extension element represented over a generic type `T` which is
+/// mapped into by base field B
+#[derive(AlignedBorrow, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(C)]
-pub struct BinomialExtension<T, const W: u32>(pub [T; EXTENSION_DEGREE]);
+pub struct BinomialExtension<B, T, const D: usize>(pub [T; D], pub PhantomData<fn(B) -> B>);
 
-impl<T, const W: u32> BinomialExtension<T, W> {
+impl<B, T, const D: usize> Default for BinomialExtension<B, T, D>
+where
+    [T; D]: Default,
+{
+    fn default() -> Self {
+        Self(Default::default(), PhantomData)
+    }
+}
+
+impl<B, T, const D: usize> BinomialExtension<B, T, D> {
     /// Creates a new binomial extension element from a base element.
     pub fn from_base(b: T) -> Self
     where
         T: FieldAlgebra,
     {
-        let mut arr: [T; EXTENSION_DEGREE] = core::array::from_fn(|_| T::ZERO);
+        let mut arr: [T; D] = core::array::from_fn(|_| T::ZERO);
         arr[0] = b;
-        Self(arr)
+        Self(arr, PhantomData)
     }
 
     /// Returns a reference to the underlying slice.
@@ -31,58 +41,60 @@ impl<T, const W: u32> BinomialExtension<T, W> {
 
     /// Creates a new binomial extension element from a binomial extension element.
     #[allow(clippy::needless_pass_by_value)]
-    pub fn from<S: Into<T> + Clone>(from: BinomialExtension<S, W>) -> Self {
-        BinomialExtension(core::array::from_fn(|i| from.0[i].clone().into()))
+    pub fn from<S: Into<T>>(from: BinomialExtension<B, S, D>) -> Self {
+        Self(from.0.map(Into::into), PhantomData)
     }
 }
 
-impl<T: Add<Output = T> + Clone, const W: u32> Add for BinomialExtension<T, W> {
+impl<B, T: Add<Output = T> + Clone, const D: usize> Add for BinomialExtension<B, T, D> {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        Self(core::array::from_fn(|i| {
-            self.0[i].clone() + rhs.0[i].clone()
-        }))
+        Self(
+            core::array::from_fn(|i| self.0[i].clone() + rhs.0[i].clone()),
+            PhantomData,
+        )
     }
 }
 
-impl<T: Sub<Output = T> + Clone, const W: u32> Sub for BinomialExtension<T, W> {
+impl<B, T: Sub<Output = T> + Clone, const D: usize> Sub for BinomialExtension<B, T, D> {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        Self(core::array::from_fn(|i| {
-            self.0[i].clone() - rhs.0[i].clone()
-        }))
+        Self(
+            core::array::from_fn(|i| self.0[i].clone() - rhs.0[i].clone()),
+            PhantomData,
+        )
     }
 }
 
-impl<T: Add<Output = T> + Mul<Output = T> + FieldAlgebra, const W: u32> Mul
-    for BinomialExtension<T, W>
+impl<B: Field + BinomiallyExtendable<D>, T: Add + Mul + FieldAlgebra + From<B>, const D: usize> Mul
+    for BinomialExtension<B, T, D>
 {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let mut result = [T::ZERO, T::ZERO, T::ZERO, T::ZERO];
-        let w = T::from_canonical_u32(W);
+        let mut result = [T::ZERO; D];
+        //let w = T::from_canonical_u32(B::W::U32);
+        let w = T::from(B::W);
 
-        for i in 0..EXTENSION_DEGREE {
-            for j in 0..EXTENSION_DEGREE {
-                if i + j >= EXTENSION_DEGREE {
-                    result[i + j - EXTENSION_DEGREE] +=
-                        w.clone() * self.0[i].clone() * rhs.0[j].clone();
+        for i in 0..D {
+            for j in 0..D {
+                if i + j >= D {
+                    result[i + j - D] += w.clone() * self.0[i].clone() * rhs.0[j].clone();
                 } else {
                     result[i + j] += self.0[i].clone() * rhs.0[j].clone();
                 }
             }
         }
 
-        Self(result)
+        Self(result, PhantomData)
     }
 }
 
-impl<F, const W: u32> Div for BinomialExtension<F, W>
+impl<B, F, const D: usize> Div for BinomialExtension<B, F, D>
 where
-    F: BinomiallyExtendable<EXTENSION_DEGREE>,
+    F: BinomiallyExtendable<D>,
 {
     type Output = Self;
 
@@ -90,20 +102,26 @@ where
         let p3_ef_lhs = BinomialExtensionField::from_base_slice(&self.0);
         let p3_ef_rhs = BinomialExtensionField::from_base_slice(&rhs.0);
         let p3_ef_result = p3_ef_lhs / p3_ef_rhs;
-        Self(p3_ef_result.as_base_slice().try_into().unwrap())
+        Self(
+            p3_ef_result.as_base_slice().try_into().unwrap(),
+            PhantomData,
+        )
     }
 }
 
-impl<F, const W: u32> BinomialExtension<F, W>
+impl<B, F, const D: usize> BinomialExtension<B, F, D>
 where
-    F: BinomiallyExtendable<4>,
+    F: BinomiallyExtendable<D>,
 {
     /// Returns the multiplicative inverse of the element.
     #[must_use]
     pub fn inverse(&self) -> Self {
         let p3_ef = BinomialExtensionField::from_base_slice(&self.0);
         let p3_ef_inverse = p3_ef.inverse();
-        Self(p3_ef_inverse.as_base_slice().try_into().unwrap())
+        Self(
+            p3_ef_inverse.as_base_slice().try_into().unwrap(),
+            PhantomData,
+        )
     }
 
     /// Returns the multiplicative inverse of the element, if it exists.
@@ -111,44 +129,45 @@ where
     pub fn try_inverse(&self) -> Option<Self> {
         let p3_ef = BinomialExtensionField::from_base_slice(&self.0);
         let p3_ef_inverse = p3_ef.try_inverse()?;
-        Some(Self(p3_ef_inverse.as_base_slice().try_into().unwrap()))
+        Some(Self(
+            p3_ef_inverse.as_base_slice().try_into().unwrap(),
+            PhantomData,
+        ))
     }
 }
 
-impl<T: FieldAlgebra + Copy, const W: u32> Neg for BinomialExtension<T, W> {
+impl<B, T: FieldAlgebra + Copy, const D: usize> Neg for BinomialExtension<B, T, D> {
     type Output = Self;
 
     fn neg(self) -> Self::Output {
-        Self([-self.0[0], -self.0[1], -self.0[2], -self.0[3]])
+        Self(self.0.map(|x| -x), PhantomData)
     }
 }
 
-impl<AF, const W: u32> From<BinomialExtensionField<AF, EXTENSION_DEGREE>>
-    for BinomialExtension<AF, W>
+impl<B, AF, const D: usize> From<BinomialExtensionField<AF, D>> for BinomialExtension<B, AF, D>
 where
     AF: FieldAlgebra + Copy,
-    AF::F: BinomiallyExtendable<EXTENSION_DEGREE>,
+    AF::F: BinomiallyExtendable<D>,
 {
-    fn from(value: BinomialExtensionField<AF, EXTENSION_DEGREE>) -> Self {
-        let arr: [AF; EXTENSION_DEGREE] = value.as_base_slice().try_into().unwrap();
-        Self(arr)
+    fn from(value: BinomialExtensionField<AF, D>) -> Self {
+        let arr: [AF; D] = value.as_base_slice().try_into().unwrap();
+        Self(arr, PhantomData)
     }
 }
 
-impl<AF, const W: u32> From<BinomialExtension<AF, W>>
-    for BinomialExtensionField<AF, EXTENSION_DEGREE>
+impl<B, AF, const D: usize> From<BinomialExtension<B, AF, D>> for BinomialExtensionField<AF, D>
 where
     AF: FieldAlgebra + Copy,
-    AF::F: BinomiallyExtendable<EXTENSION_DEGREE>,
+    AF::F: BinomiallyExtendable<D>,
 {
-    fn from(value: BinomialExtension<AF, W>) -> Self {
+    fn from(value: BinomialExtension<B, AF, D>) -> Self {
         BinomialExtensionField::from_base_slice(&value.0)
     }
 }
 
-impl<T, const W: u32> IntoIterator for BinomialExtension<T, W> {
+impl<B, T, const D: usize> IntoIterator for BinomialExtension<B, T, D> {
     type Item = T;
-    type IntoIter = core::array::IntoIter<T, EXTENSION_DEGREE>;
+    type IntoIter = core::array::IntoIter<T, D>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()

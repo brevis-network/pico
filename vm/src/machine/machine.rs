@@ -94,7 +94,6 @@ where
 pub struct BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>,
 {
     /// Configuration of the machine
     config: Arc<SC>,
@@ -118,7 +117,6 @@ where
 impl<SC, C> Clone for BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -181,8 +179,6 @@ impl<SC, C> BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
     /// Create BaseMachine based on config and chip behavior.
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
@@ -208,7 +204,15 @@ where
             .map(|(i, _)| i)
             .collect()
     }
+}
 
+impl<SC, C> BaseMachine<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+{
     /// setup proving and verifying keys.
     pub fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let (pk, vk) = self

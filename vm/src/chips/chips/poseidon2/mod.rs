@@ -7,72 +7,51 @@ use crate::{
     chips::chips::poseidon2::columns::permutation::{
         PermutationNoSbox, PermutationSBox, Poseidon2,
     },
+    configs::config::Poseidon2Config,
     machine::field::{FieldBehavior, FieldType},
 };
 use p3_field::Field;
 use std::{borrow::Borrow, marker::PhantomData, ops::Deref};
 
 /// A chip that implements addition for the opcode Poseidon2.
-#[derive(Default, Debug, Clone, Copy)]
-pub struct Poseidon2Chip<
-    const DEGREE: usize,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    F,
-> {
-    pub _phantom: PhantomData<fn(F) -> F>,
+#[derive(Debug, Clone, Copy)]
+pub struct Poseidon2Chip<const DEGREE: usize, Config, F> {
+    pub _phantom: PhantomData<fn(F, Config) -> (F, Config)>,
 }
 
-impl<
-        'a,
-        const DEGREE: usize,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-        F: Field,
-    >
-    Poseidon2Chip<
-        DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        F,
-    >
-{
+impl<const DEGREE: usize, Config, F> Default for Poseidon2Chip<DEGREE, Config, F> {
+    fn default() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<const DEGREE: usize, Config: Poseidon2Config, F: Field> Poseidon2Chip<DEGREE, Config, F> {
     /// Transmute a row it to an immutable Poseidon2 instance.
-    pub(crate) fn convert<T>(
+    pub(crate) fn convert<'a, T>(
         row: impl Deref<Target = [T]>,
-    ) -> Box<
-        dyn Poseidon2<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>
-            + 'a,
-    >
+    ) -> Box<dyn Poseidon2<T, Config> + 'a>
     where
+        // TODO: figure out why we need T: Copy + 'a
         T: Copy + 'a,
+        Config: 'a,
+        //PermutationSBox<T, Config>: Copy + 'a,
+        //PermutationNoSbox<T, Config>: Copy + 'a,
     {
         if F::field_type() == FieldType::TypeBabyBear {
             if DEGREE == 3 {
-                let convert: &PermutationSBox<
-                    T,
-                    NUM_EXTERNAL_ROUNDS,
-                    NUM_INTERNAL_ROUNDS,
-                    NUM_INTERNAL_ROUNDS_MINUS_ONE,
-                > = (*row).borrow();
-                Box::new(*convert)
+                let convert: &PermutationSBox<T, Config> = (*row).borrow();
+                Box::new(convert.clone())
             } else if DEGREE == 9 {
-                let convert: &PermutationNoSbox<
-                    T,
-                    NUM_EXTERNAL_ROUNDS,
-                    NUM_INTERNAL_ROUNDS_MINUS_ONE,
-                > = (*row).borrow();
-                Box::new(*convert)
+                let convert: &PermutationNoSbox<T, Config> = (*row).borrow();
+                Box::new(convert.clone())
             } else {
                 panic!("Unsupported degree");
             }
         } else if F::field_type() == FieldType::TypeKoalaBear {
-            let convert: &PermutationNoSbox<T, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE> =
-                (*row).borrow();
-            Box::new(*convert)
+            let convert: &PermutationNoSbox<T, Config> = (*row).borrow();
+            Box::new(convert.clone())
         } else {
             panic!("Unsupported field type");
         }
@@ -82,15 +61,11 @@ impl<
 #[cfg(test)]
 #[allow(unused_imports)]
 pub(crate) mod tests {
-
     use super::Poseidon2Chip;
     use crate::{
         machine::chip::ChipBehavior,
         primitives::{
-            consts::{
-                BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS,
-                KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
-            },
+            consts::{BabyBearConfig, KoalaBearConfig, PERMUTATION_WIDTH},
             pico_poseidon2bb_init, pico_poseidon2kb_init,
         },
         recursion_v2::{
@@ -133,13 +108,7 @@ pub(crate) mod tests {
             ],
             ..Default::default()
         };
-        let chip_3 = Poseidon2Chip::<
-            3,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-            F,
-        > {
+        let chip_3 = Poseidon2Chip::<3, BabyBearConfig, F> {
             _phantom: PhantomData,
         };
         let main_trace: RowMajorMatrix<F> =
@@ -172,13 +141,7 @@ pub(crate) mod tests {
             ],
             ..Default::default()
         };
-        let chip_3 = Poseidon2Chip::<
-            3,
-            KOALABEAR_NUM_EXTERNAL_ROUNDS,
-            KOALABEAR_NUM_INTERNAL_ROUNDS,
-            { KOALABEAR_NUM_INTERNAL_ROUNDS - 1 },
-            F,
-        > {
+        let chip_3 = Poseidon2Chip::<3, KoalaBearConfig, F> {
             _phantom: PhantomData,
         };
         let main_trace: RowMajorMatrix<F> =
@@ -211,13 +174,7 @@ pub(crate) mod tests {
             ],
             ..Default::default()
         };
-        let chip_9 = Poseidon2Chip::<
-            9,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-            F,
-        > {
+        let chip_9 = Poseidon2Chip::<9, BabyBearConfig, F> {
             _phantom: PhantomData,
         };
         let main_trace: RowMajorMatrix<F> =

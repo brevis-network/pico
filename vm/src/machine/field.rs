@@ -1,3 +1,7 @@
+use crate::{
+    configs::config::Poseidon2Config,
+    primitives::consts::{BabyBearConfig, KoalaBearConfig, Mersenne31Config},
+};
 use p3_baby_bear::BabyBear;
 use p3_field::Field;
 use p3_koala_bear::KoalaBear;
@@ -27,4 +31,20 @@ impl<F: Field> FieldBehavior for F {
             _ => FieldType::TypeGeneralField,
         }
     }
+}
+
+pub trait FieldSpecificPoseidon2Config {
+    type Poseidon2Config: Poseidon2Config;
+}
+
+impl FieldSpecificPoseidon2Config for BabyBear {
+    type Poseidon2Config = BabyBearConfig;
+}
+
+impl FieldSpecificPoseidon2Config for KoalaBear {
+    type Poseidon2Config = KoalaBearConfig;
+}
+
+impl FieldSpecificPoseidon2Config for Mersenne31 {
+    type Poseidon2Config = Mersenne31Config;
 }

@@ -3,7 +3,7 @@ use crate::{
         circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
     },
     configs::{
-        config::{Com, PcsProverData, StarkGenericConfig, Val},
+        config::{StarkGenericConfig, Val},
         field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
@@ -30,24 +30,14 @@ use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{info, instrument};
 
-pub struct CombineMachine<
-    SC,
-    C,
-    const HALF_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-> where
+pub struct CombineMachine<SC, C>
+where
     SC: StarkGenericConfig,
-    C: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
 {
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<SC, C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
-    CombineMachine<SC, C, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+impl<SC, C> CombineMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<
@@ -55,8 +45,6 @@ where
         Program = RecursionProgram<Val<SC>>,
         Record = RecursionRecord<Val<SC>>,
     >,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {
@@ -67,8 +55,8 @@ where
 
 macro_rules! impl_combine_machine {
     ($emul_name:ident, $recur_cc:ident, $recur_sc:ident) => {
-        impl<C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> MachineBehavior<$recur_sc, C, RecursionStdin<'_, $recur_sc, C>>
-            for CombineMachine<$recur_sc, C, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+        impl<C> MachineBehavior<$recur_sc, C, RecursionStdin<'_, $recur_sc, C>>
+            for CombineMachine<$recur_sc, C>
         where
             C: ChipBehavior<
                     Val<$recur_sc>,
@@ -228,7 +216,7 @@ macro_rules! impl_combine_machine {
                     );
 
                     recursion_emulator =
-                        $emul_name::<_, _, _, _, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>::setup_combine(&recursion_witness, self.base_machine());
+                        $emul_name::<_, _, _, _>::setup_combine(&recursion_witness, self.base_machine());
 
                     last_proof = recursion_witness.proof.clone();
                     last_vk = recursion_witness.vk.clone();

@@ -1,4 +1,6 @@
-use std::marker::PhantomData;
+use crate::configs::config::Poseidon2Config;
+use core::marker::PhantomData;
+use typenum::Unsigned;
 
 pub mod columns;
 pub mod constraints;
@@ -6,20 +8,19 @@ pub mod trace;
 
 /// A chip that implements the Poseidon2 permutation in the skinny variant
 /// (one external round per row and one row for all internal rounds).
-pub struct Poseidon2SkinnyChip<
-    const DEGREE: usize,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    F,
->(PhantomData<F>);
+pub struct Poseidon2SkinnyChip<const DEGREE: usize, Config, F>(
+    PhantomData<fn(F, Config) -> (F, Config)>,
+);
 
-impl<
-        const DEGREE: usize,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        F,
-    > Default for Poseidon2SkinnyChip<DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, F>
-{
+impl<const DEGREE: usize, Config: Poseidon2Config, F> Poseidon2SkinnyChip<DEGREE, Config, F> {
+    const NUM_POSEIDON2_COLS: usize = columns::num_poseidon2_cols::<Config>();
+    const NUM_EXTERNAL_ROUNDS: usize = Config::ExternalRounds::USIZE;
+    const NUM_INTERNAL_ROUNDS: usize = Config::InternalRounds::USIZE;
+    const INTERNAL_ROUND_IDX: usize = Self::NUM_EXTERNAL_ROUNDS / 2 + 1;
+    const OUTPUT_ROUND_IDX: usize = Self::NUM_EXTERNAL_ROUNDS + 2;
+}
+
+impl<const DEGREE: usize, Config, F> Default for Poseidon2SkinnyChip<DEGREE, Config, F> {
     fn default() -> Self {
         // We only support machines with degree 9.
         assert!(DEGREE >= 9);
@@ -39,8 +40,9 @@ mod tests {
         machine::chip::ChipBehavior,
         primitives::{
             consts::{
-                BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS,
-                KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
+                BabyBearConfig, KoalaBearConfig, BABYBEAR_NUM_EXTERNAL_ROUNDS,
+                BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
+                KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
             },
             pico_poseidon2bb_init, pico_poseidon2kb_init,
         },
@@ -81,12 +83,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let chip_9 = Poseidon2SkinnyChip::<
-            9,
-            BABYBEAR_NUM_EXTERNAL_ROUNDS,
-            BABYBEAR_NUM_INTERNAL_ROUNDS,
-            _,
-        >::default();
+        let chip_9 = Poseidon2SkinnyChip::<9, BabyBearConfig, _>::default();
         let trace: RowMajorMatrix<F> =
             chip_9.generate_main(&chunk, &mut RecursionRecord::default());
         println!("Poseidon2 skinny chip: trace = {:?}", trace.values);
@@ -115,12 +112,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let chip_3 = Poseidon2SkinnyChip::<
-            9,
-            KOALABEAR_NUM_EXTERNAL_ROUNDS,
-            KOALABEAR_NUM_INTERNAL_ROUNDS,
-            _,
-        >::default();
+        let chip_3 = Poseidon2SkinnyChip::<9, KoalaBearConfig, _>::default();
         let trace: RowMajorMatrix<F> =
             chip_3.generate_main(&chunk, &mut RecursionRecord::default());
         println!("Poseidon2 skinny chip: trace = {:?}", trace.values);

@@ -4,28 +4,18 @@ use pico_derive::AlignedBorrow;
 
 use crate::{
     chips::chips::riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
-    primitives::consts::{
-        BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
-        KOALABEAR_NUM_INTERNAL_ROUNDS, MERSENNE31_NUM_EXTERNAL_ROUNDS,
-        MERSENNE31_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
-    },
+    configs::config::Poseidon2Config,
+    primitives::consts::PERMUTATION_WIDTH,
 };
+use hybrid_array::Array;
 
-pub const BABYBEAR_NUM_POSEIDON2_COLS: usize = size_of::<
-    Poseidon2Cols<u8, { BABYBEAR_NUM_EXTERNAL_ROUNDS / 2 }, BABYBEAR_NUM_INTERNAL_ROUNDS>,
->();
-
-pub const KOALABEAR_NUM_POSEIDON2_COLS: usize = size_of::<
-    Poseidon2Cols<u8, { KOALABEAR_NUM_EXTERNAL_ROUNDS / 2 }, KOALABEAR_NUM_INTERNAL_ROUNDS>,
->();
-
-pub const MERSENNE31_NUM_POSEIDON2_COLS: usize = size_of::<
-    Poseidon2Cols<u8, { MERSENNE31_NUM_EXTERNAL_ROUNDS / 2 }, MERSENNE31_NUM_INTERNAL_ROUNDS>,
->();
+pub const fn num_poseidon2_cols<Config: Poseidon2Config>() -> usize {
+    size_of::<Poseidon2Cols<u8, Config>>()
+}
 
 #[derive(AlignedBorrow)]
 #[repr(C)]
-pub struct Poseidon2Cols<T, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> {
+pub struct Poseidon2Cols<T, Config: Poseidon2Config> {
     pub chunk: T,
     pub clk: T,
     pub input_memory_ptr: T,
@@ -38,13 +28,13 @@ pub struct Poseidon2Cols<T, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNA
     pub state_linear_layer: [T; PERMUTATION_WIDTH],
 
     /// Beginning Full Rounds
-    pub beginning_full_rounds: [FullRound<T>; HALF_EXTERNAL_ROUNDS],
+    pub beginning_full_rounds: Array<FullRound<T>, Config::HalfExternalRounds>,
 
     /// Partial Rounds
-    pub partial_rounds: [PartialRound<T>; NUM_INTERNAL_ROUNDS],
+    pub partial_rounds: Array<PartialRound<T>, Config::InternalRounds>,
 
     /// Ending Full Rounds
-    pub ending_full_rounds: [FullRound<T>; HALF_EXTERNAL_ROUNDS],
+    pub ending_full_rounds: Array<FullRound<T>, Config::HalfExternalRounds>,
 
     pub is_real: T,
 }

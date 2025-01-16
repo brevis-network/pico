@@ -26,11 +26,7 @@ use crate::{
             },
         },
     },
-    machine::{
-        chip::ChipBehavior,
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        machine::BaseMachine,
-    },
+    machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config, machine::BaseMachine},
     primitives::consts::{COMBINE_DEGREE, COMPRESS_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE},
     recursion_v2::runtime::RecursionRecord,
 };
@@ -65,9 +61,7 @@ where
             Val<SC>,
             Program = RecursionProgram<Val<SC>>,
             Record = RecursionRecord<Val<SC>>,
-        > + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
+        > + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {
     pub fn build(
         machine: &BaseMachine<SC, C>,
@@ -137,37 +131,20 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct CompressVkVerifierCircuit<
-    FC: FieldGenericConfig,
-    SC: StarkGenericConfig,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
->(PhantomData<(FC, SC)>);
+pub struct CompressVkVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(
+    PhantomData<(FC, SC)>,
+);
 
-impl<
-        CC,
-        SC,
-        const W: u32,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    >
-    CompressVkVerifierCircuit<
-        CC,
-        SC,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >
+impl<CC, SC> CompressVkVerifierCircuit<CC, SC>
 where
     CC: CircuitConfig<N = Val<SC>, F = Val<SC>> + Debug,
     CC::F: TwoAdicField
         + PrimeField32
         + Witnessable<CC, WitnessVariable = Felt<CC::F>>
-        + BinomiallyExtendable<EXTENSION_DEGREE>,
+        + BinomiallyExtendable<EXTENSION_DEGREE>
+        + FieldSpecificPoseidon2Config,
+    // TODO: why do we need this?
+    Val<SC>: FieldSpecificPoseidon2Config,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
     SC: FieldFriConfigVariable<
         CC,
@@ -177,80 +154,28 @@ where
     >,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-    for<'a> RecursionVkStdin<
-        'a,
-        SC,
-        RecursionChipType<
-            Val<SC>,
-            COMPRESS_DEGREE,
-            W,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
-    >: Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
+    for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>:
+        Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
 
-    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
-        Air<ProverConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
-        Air<VerifierConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
-        Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
-        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
-
-    for<'b> Poseidon2Chip<
+    for<'b> Poseidon2SkinnyChip<
         COMBINE_DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        CC::F,
-    >: Air<ProverConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2Chip<
-        COMBINE_DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        CC::F,
-    >: Air<VerifierConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2Chip<
-        COMBINE_DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config,
         CC::F,
     >: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Poseidon2Chip<
+    Poseidon2SkinnyChip<
         COMBINE_DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+        <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config,
         CC::F,
     >: ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
+
+    for<'b> Poseidon2Chip<COMBINE_DEGREE, <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config, CC::F>:
+        Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Poseidon2Chip<COMBINE_DEGREE, <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config, CC::F>:
+        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 {
     pub fn build(
-        machine: &BaseMachine<
-            SC,
-            RecursionChipType<
-                Val<SC>,
-                COMBINE_DEGREE,
-                W,
-                NUM_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            >,
-        >,
-        input: &RecursionVkStdin<
-            SC,
-            RecursionChipType<
-                Val<SC>,
-                COMBINE_DEGREE,
-                W,
-                NUM_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            >,
-        >,
+        machine: &BaseMachine<SC, RecursionChipType<Val<SC>, COMBINE_DEGREE>>,
+        input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>, COMBINE_DEGREE>>,
     ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
         let mut builder = Builder::<CC>::new();
@@ -287,37 +212,20 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct EmbedVkVerifierCircuit<
-    FC: FieldGenericConfig,
-    SC: StarkGenericConfig,
-    const W: u32,
-    const NUM_EXTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS: usize,
-    const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
->(PhantomData<(FC, SC)>);
+pub struct EmbedVkVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig>(
+    PhantomData<(FC, SC)>,
+);
 
-impl<
-        CC,
-        SC,
-        const W: u32,
-        const NUM_EXTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS: usize,
-        const NUM_INTERNAL_ROUNDS_MINUS_ONE: usize,
-    >
-    EmbedVkVerifierCircuit<
-        CC,
-        SC,
-        W,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >
+impl<CC, SC> EmbedVkVerifierCircuit<CC, SC>
 where
     CC: CircuitConfig<N = Val<SC>, F = Val<SC>> + Debug,
     CC::F: TwoAdicField
         + PrimeField32
         + Witnessable<CC, WitnessVariable = Felt<CC::F>>
-        + BinomiallyExtendable<EXTENSION_DEGREE>,
+        + BinomiallyExtendable<EXTENSION_DEGREE>
+        + FieldSpecificPoseidon2Config,
+    // TODO: why do we need this?
+    Val<SC>: FieldSpecificPoseidon2Config,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
     SC: FieldFriConfigVariable<
         CC,
@@ -328,80 +236,28 @@ where
     SC::DigestVariable: IntoIterator<Item = Felt<CC::F>>,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-    for<'a> RecursionVkStdin<
-        'a,
-        SC,
-        RecursionChipType<
-            Val<SC>,
-            COMPRESS_DEGREE,
-            W,
-            NUM_EXTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS,
-            NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        >,
-    >: Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
+    for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>:
+        Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
 
-    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
-        Air<ProverConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
-        Air<VerifierConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
-        Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Poseidon2SkinnyChip<COMBINE_DEGREE, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, CC::F>:
-        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
-
-    for<'b> Poseidon2Chip<
-        COMPRESS_DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        CC::F,
-    >: Air<ProverConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2Chip<
-        COMPRESS_DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
-        CC::F,
-    >: Air<VerifierConstraintFolder<'b, SC>>,
-    for<'b> Poseidon2Chip<
-        COMPRESS_DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    for<'b> Poseidon2SkinnyChip<
+        COMBINE_DEGREE,
+        <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config,
         CC::F,
     >: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Poseidon2Chip<
-        COMPRESS_DEGREE,
-        NUM_EXTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS,
-        NUM_INTERNAL_ROUNDS_MINUS_ONE,
+    Poseidon2SkinnyChip<
+        COMBINE_DEGREE,
+        <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config,
         CC::F,
     >: ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
+
+    for<'b> Poseidon2Chip<COMPRESS_DEGREE, <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config, CC::F>:
+        Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Poseidon2Chip<COMPRESS_DEGREE, <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config, CC::F>:
+        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 {
     pub fn build(
-        machine: &BaseMachine<
-            SC,
-            RecursionChipType<
-                Val<SC>,
-                COMPRESS_DEGREE,
-                W,
-                NUM_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            >,
-        >,
-        input: &RecursionVkStdin<
-            SC,
-            RecursionChipType<
-                Val<SC>,
-                COMPRESS_DEGREE,
-                W,
-                NUM_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS_MINUS_ONE,
-            >,
-        >,
+        machine: &BaseMachine<SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>,
+        input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>,
         vk_manager: VkMerkleManager<SC>,
     ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.

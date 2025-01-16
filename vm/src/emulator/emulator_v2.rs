@@ -1,5 +1,4 @@
 use crate::{
-    chips::precompiles::poseidon2::Poseidon2PermuteChip,
     compiler::{
         recursion_v2::{circuit::witness::witnessable::Witnessable, program::RecursionProgram},
         riscv::program::Program,
@@ -122,15 +121,8 @@ macro_rules! impl_emulator {
         // Meta emulator for recursive circuits.
         // P and I for the native program and input types
         // E for the emulator type
-        pub struct $emul_name<
-            'a,
-            C,
-            P,
-            I,
-            E,
-            const HALF_EXTERNAL_ROUNDS: usize,
-            const NUM_INTERNAL_ROUNDS: usize,
-        > where
+        pub struct $emul_name<'a, C, P, I, E>
+        where
             C: ChipBehavior<Val<$recur_sc>>,
         {
             pub stdin: &'a EmulatorStdin<P, I>,
@@ -141,18 +133,13 @@ macro_rules! impl_emulator {
         }
 
         // MetaEmulator for convert
-        impl<'a, C, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+        impl<'a, C>
             $emul_name<
                 'a,
                 C,
                 RecursionProgram<Val<$recur_sc>>,
-                ConvertStdin<
-                    $riscv_sc,
-                    RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-                >,
+                ConvertStdin<$riscv_sc, RiscvChipType<Val<$riscv_sc>>>,
                 RecursionEmulator<$recur_sc>,
-                HALF_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
             >
         where
             C: ChipBehavior<
@@ -160,17 +147,12 @@ macro_rules! impl_emulator {
                 Program = RecursionProgram<Val<$recur_sc>>,
                 Record = RecursionRecord<Val<$recur_sc>>,
             >,
-            Poseidon2PermuteChip<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
-                ChipBehavior<Val<$riscv_sc>, Record = EmulationRecord, Program = Program>,
         {
             pub fn setup_convert(
                 proving_witness: &'a ProvingWitness<
                     $recur_sc,
                     C,
-                    ConvertStdin<
-                        $riscv_sc,
-                        RiscvChipType<Val<$riscv_sc>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>,
-                    >,
+                    ConvertStdin<$riscv_sc, RiscvChipType<Val<$riscv_sc>>>,
                 >,
                 machine: &'a BaseMachine<$recur_sc, C>,
             ) -> Self {
@@ -236,15 +218,13 @@ macro_rules! impl_emulator {
         }
 
         // MetaEmulator for recursion combine
-        impl<'a, C, PrevC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+        impl<'a, C, PrevC>
             $emul_name<
                 'a,
                 C,
                 RecursionProgram<Val<$recur_sc>>,
                 RecursionStdin<'a, $recur_sc, PrevC>,
                 RecursionEmulator<$recur_sc>,
-                HALF_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
             >
         where
             PrevC: ChipBehavior<
@@ -328,15 +308,13 @@ macro_rules! impl_emulator {
         }
 
         // MetaEmulator for recursion combine
-        impl<'a, C, PrevC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>
+        impl<'a, C, PrevC>
             $emul_name<
                 'a,
                 C,
                 RecursionProgram<Val<$recur_sc>>,
                 RecursionVkStdin<'a, $recur_sc, PrevC>,
                 RecursionEmulator<$recur_sc>,
-                HALF_EXTERNAL_ROUNDS,
-                NUM_INTERNAL_ROUNDS,
             >
         where
             PrevC: ChipBehavior<

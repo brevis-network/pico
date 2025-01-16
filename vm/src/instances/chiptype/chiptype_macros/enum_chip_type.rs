@@ -13,7 +13,7 @@ macro_rules! enum_chip_type {
     };
 
     (Poseidon2P, Poseidon2PermuteChip<$F:ident>) => {
-        Poseidon2PermuteChip<$F, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>
+        Poseidon2PermuteChip<$F, <$F as crate::machine::field::FieldSpecificPoseidon2Config>::Poseidon2Config>
     };
 
     ($variant:ident, $chip_type:ident<$F:ident>) => {
