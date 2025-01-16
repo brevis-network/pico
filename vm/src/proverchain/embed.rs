@@ -16,7 +16,6 @@ use crate::{
         machine::embed::EmbedMachine,
     },
     machine::{
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -30,7 +29,6 @@ use crate::{
     recursion_v2::runtime::{RecursionRecord, Runtime},
 };
 use alloc::sync::Arc;
-use p3_air::Air;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
 pub type EmbedChips<
@@ -64,11 +62,10 @@ pub struct EmbedProver<
 
     EmbedChips<SC, W, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>:
         ChipBehavior<
-                Val<SC>,
-                Program = RecursionProgram<Val<SC>>,
-                Record = RecursionRecord<Val<SC>>,
-            > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        >,
 
     CompressChips<
         PrevSC,
@@ -76,9 +73,7 @@ pub struct EmbedProver<
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: ChipBehavior<Val<PrevSC>>
-        + for<'a> Air<ProverConstraintFolder<'a, PrevSC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, PrevSC>>,
+    >: ChipBehavior<Val<PrevSC>>,
 {
     machine: EmbedMachine<
         PrevSC,
@@ -123,6 +118,8 @@ macro_rules! impl_embeded_prover {
                 { $num_internal_rounds - 1 },
             >
         {
+            type Opts = ();
+
             fn new_with_prev(
                 prev_prover: &impl MachineProver<
                     $mod_name::StarkConfig,
@@ -134,6 +131,7 @@ macro_rules! impl_embeded_prover {
                         { $num_internal_rounds - 1 },
                     >,
                 >,
+                _opts: Self::Opts,
             ) -> Self {
                 let machine = EmbedMachine::<$mod_name::StarkConfig, _, _, I>::new(
                     $embed_sc::default(),

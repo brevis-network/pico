@@ -11,7 +11,6 @@ use crate::{
         machine::compress::CompressMachine,
     },
     machine::{
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -25,7 +24,6 @@ use crate::{
     recursion_v2::runtime::{RecursionRecord, Runtime},
 };
 use alloc::sync::Arc;
-use p3_air::Air;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
 pub type CompressChips<
@@ -58,11 +56,10 @@ pub struct CompressProver<
 
     CompressChips<SC, W, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS_MINUS_ONE>:
         ChipBehavior<
-                Val<SC>,
-                Program = RecursionProgram<Val<SC>>,
-                Record = RecursionRecord<Val<SC>>,
-            > + for<'b> Air<ProverConstraintFolder<'b, SC>>
-            + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        >,
 
     CombineChips<
         PrevSC,
@@ -70,9 +67,7 @@ pub struct CompressProver<
         NUM_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS_MINUS_ONE,
-    >: ChipBehavior<Val<PrevSC>>
-        + for<'a> Air<ProverConstraintFolder<'a, PrevSC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, PrevSC>>,
+    >: ChipBehavior<Val<PrevSC>>,
 {
     machine: CompressMachine<
         SC,
@@ -120,6 +115,8 @@ macro_rules! impl_compress_prover {
                 { $num_internal_rounds - 1 },
             >
         {
+            type Opts = ();
+
             fn new_with_prev(
                 prev_prover: &impl MachineProver<
                     $mod_name::StarkConfig,
@@ -131,6 +128,7 @@ macro_rules! impl_compress_prover {
                         { $num_internal_rounds - 1 },
                     >,
                 >,
+                _opts: Self::Opts,
             ) -> Self {
                 let machine = CompressMachine::new(
                     $mod_name::StarkConfig::compress(),

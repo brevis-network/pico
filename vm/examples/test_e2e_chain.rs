@@ -16,10 +16,10 @@ fn main() {
     setup_logger();
     let (elf, riscv_stdin, _) = parse_args::parse_args();
 
-    let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), elf));
-    let convert = ConvertProver::new_with_prev(&riscv);
-    let combine = CombineProver::new_with_prev(&convert);
-    let compress = CompressProver::new_with_prev(&combine);
+    let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), elf), Default::default());
+    let convert = ConvertProver::new_with_prev(&riscv, Default::default());
+    let combine = CombineProver::new_with_prev(&convert, Default::default());
+    let compress = CompressProver::new_with_prev(&combine, Default::default());
     let embed = EmbedProver::<
         _,
         _,
@@ -28,7 +28,7 @@ fn main() {
         BABYBEAR_NUM_EXTERNAL_ROUNDS,
         BABYBEAR_NUM_INTERNAL_ROUNDS,
         { BABYBEAR_NUM_INTERNAL_ROUNDS - 1 },
-    >::new_with_prev(&compress);
+    >::new_with_prev(&compress, Default::default());
 
     let proof = riscv.prove(riscv_stdin);
     assert!(riscv.verify(&proof));

@@ -6,7 +6,10 @@ use crate::{
         program::Program,
     },
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
-    emulator::riscv::{record::EmulationRecord, stdin::EmulatorStdin},
+    emulator::{
+        opts::EmulatorOpts,
+        riscv::{record::EmulationRecord, stdin::EmulatorStdin},
+    },
     instances::{chiptype::riscv_chiptype::RiscvChipType, machine::riscv::RiscvMachine},
     machine::{
         chip::ChipBehavior,
@@ -32,8 +35,32 @@ where
 {
     program: Arc<P>,
     machine: RiscvMachine<SC, RiscvChips<SC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
+    opts: EmulatorOpts,
     pk: BaseProvingKey<SC>,
     vk: BaseVerifyingKey<SC>,
+}
+
+impl<SC, const H: usize, const N: usize> RiscvProver<SC, Program, H, N>
+where
+    SC: Send + StarkGenericConfig,
+    Com<SC>: Send + Sync,
+    Dom<SC>: Send + Sync,
+    PcsProverData<SC>: Clone + Send + Sync,
+    BaseProof<SC>: Send + Sync,
+    Val<SC>: PrimeField32,
+    Poseidon2PermuteChip<Val<SC>, H, N>:
+        ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
+{
+    pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
+        let witness = ProvingWitness::setup_for_riscv(
+            self.program.clone(),
+            stdin,
+            self.opts,
+            self.pk.clone(),
+            self.vk.clone(),
+        );
+        self.machine.prove_cycles(&witness)
+    }
 }
 
 impl<SC, const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize> InitialProverSetup
@@ -49,8 +76,9 @@ where
         ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
 {
     type Input<'a> = (SC, &'a [u8]);
+    type Opts = EmulatorOpts;
 
-    fn new_initial_prover(input: Self::Input<'_>) -> Self {
+    fn new_initial_prover(input: Self::Input<'_>, opts: Self::Opts) -> Self {
         let (config, elf) = input;
         let program = Compiler::new(SourceType::RiscV, elf).compile();
         let machine = RiscvMachine::new(config, RiscvChipType::all_chips(), RISCV_NUM_PVS);
@@ -58,6 +86,7 @@ where
         Self {
             program,
             machine,
+            opts,
             pk,
             vk,
         }
@@ -84,14 +113,7 @@ where
     }
 
     fn prove(&self, stdin: Self::Witness) -> MetaProof<SC> {
-        let witness = ProvingWitness::setup_for_riscv(
-            self.program.clone(),
-            stdin,
-            Default::default(),
-            self.pk.clone(),
-            self.vk.clone(),
-        );
-        self.machine.prove(&witness)
+        self.prove_cycles(stdin).0
     }
 
     fn verify(&self, proof: &MetaProof<SC>) -> bool {

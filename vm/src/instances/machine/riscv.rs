@@ -19,7 +19,7 @@ use crate::{
 };
 use anyhow::Result;
 use p3_air::Air;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{info, instrument};
@@ -45,11 +45,14 @@ where
 {
     /// Prove with shape config
     #[instrument(name = "riscv_prove_with_shape", level = "debug", skip_all)]
-    pub fn prove_with_shape<const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>(
+    pub fn prove_with_shape_cycles<
+        const HALF_EXTERNAL_ROUNDS: usize,
+        const NUM_INTERNAL_ROUNDS: usize,
+    >(
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
-    ) -> MetaProof<SC>
+    ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
                 DebugConstraintFolder<
@@ -86,7 +89,11 @@ where
             None,
         );
 
+        let start_p2 = Instant::now();
+        let mut batch_num = 1;
+        let mut chunk_num = 0;
         loop {
+            let start_local = Instant::now();
             let (mut batch_records, done) = emulator.next_record_batch();
             self.complement_record(&mut batch_records);
 
@@ -95,6 +102,24 @@ where
                     shape_config
                         .padding_shape(record)
                         .expect("padding_shape failed");
+                }
+            }
+
+            info!(
+                "--- Generate riscv records for batch {}, chunk {}-{} in {:?}",
+                batch_num,
+                chunk_num + 1,
+                chunk_num + batch_records.len() as u32,
+                start_local.elapsed()
+            );
+            chunk_num += batch_records.len() as u32;
+
+            // set index for each record
+            for record in batch_records.iter_mut() {
+                let stats = record.stats();
+                info!("RISCV record stats: chunk {}", record.chunk_index());
+                for (key, value) in &stats {
+                    info!("   |- {:<28}: {}", key, value);
                 }
             }
 
@@ -111,8 +136,9 @@ where
                 global_lookup_debugger.debug_incremental(&self.chips(), &batch_records);
             }
 
-            let batch_proofs = batch_records.par_iter().map(|record| {
-                let main_commitment = self.base_machine.commit(record).unwrap();
+            let batch_proofs = batch_records.into_par_iter().map(|record| {
+                let start_chunk = Instant::now();
+                let main_commitment = self.base_machine.commit(&record).unwrap();
 
                 let proof = self.base_machine.prove_plain(
                     witness.pk(),
@@ -121,16 +147,32 @@ where
                     main_commitment,
                 );
 
+                info!(
+                    "--- Prove riscv batch {} chunk {} in {:?}",
+                    batch_num,
+                    record.chunk_index(),
+                    start_chunk.elapsed()
+                );
                 proof
             });
 
             // extend all_proofs to include batch_proofs
             all_proofs.par_extend(batch_proofs);
 
+            info!(
+                "--- Finish riscv batch {} in {:?}",
+                batch_num,
+                start_local.elapsed()
+            );
+
+            batch_num += 1;
+
             if done {
                 break;
             }
         }
+        let cycles = emulator.cycles();
+        info!("--- Finish riscv phase 2 in {:?}", start_p2.elapsed());
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()];
@@ -140,11 +182,59 @@ where
         #[cfg(feature = "debug-lookups")]
         global_lookup_debugger.print_results();
 
-        // TODO: print some summary numbers
-        info!("RiscV proofs generated with {} chunks.", all_proofs.len());
+        // TODO: print more summary numbers
+        let pv_stream = emulator.get_pv_stream().clone();
+        let riscv_emulator = emulator.emulator.unwrap();
+        info!("RiscV execution report:");
+        info!("|- cycles:           {}", riscv_emulator.state.global_clk);
+        info!("|- chunk_num:        {}", all_proofs.len());
+        info!("|- chunk_size:       {}", riscv_emulator.opts.chunk_size);
+        info!(
+            "|- chunk_batch_size: {}",
+            riscv_emulator.opts.chunk_batch_size
+        );
 
-        let pv_stream = emulator.get_pv_stream();
-        MetaProof::new(all_proofs.into(), vks.into(), Some(pv_stream))
+        (
+            MetaProof::new(all_proofs.into(), vks.into(), Some(pv_stream)),
+            cycles,
+        )
+    }
+
+    pub fn prove_with_shape<const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>(
+        &self,
+        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        shape_config: Option<&RiscvShapeConfig<SC::Val, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
+    ) -> MetaProof<SC>
+    where
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+        Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+            ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
+    {
+        self.prove_with_shape_cycles(witness, shape_config).0
+    }
+
+    pub fn prove_cycles<const HALF_EXTERNAL_ROUNDS: usize, const NUM_INTERNAL_ROUNDS: usize>(
+        &self,
+        witness: &ProvingWitness<SC, C, Vec<u8>>,
+    ) -> (MetaProof<SC>, u64)
+    where
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+        Poseidon2PermuteChip<Val<SC>, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>:
+            ChipBehavior<Val<SC>, Record = EmulationRecord, Program = Program>,
+    {
+        self.prove_with_shape_cycles(witness, None)
     }
 }
 
@@ -157,6 +247,7 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     SC::Domain: Send + Sync,
+    SC::Val: PrimeField,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -168,8 +259,6 @@ where
         &self.base_machine
     }
 
-    /// Get the prover of the machine.
-    #[instrument(name = "riscv_prove", level = "debug", skip_all)]
     fn prove(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> MetaProof<SC>
     where
         C: for<'a> Air<
@@ -244,10 +333,9 @@ where
                 global_lookup_debugger.debug_incremental(&self.chips(), &batch_records);
             }
 
-            let batch_proofs = batch_records.par_iter().map(|record| {
+            let batch_proofs = batch_records.into_par_iter().map(|record| {
                 let start_chunk = Instant::now();
-
-                let main_commitment = self.base_machine.commit(record).unwrap();
+                let main_commitment = self.base_machine.commit(&record).unwrap();
 
                 let proof = self.base_machine.prove_plain(
                     witness.pk(),

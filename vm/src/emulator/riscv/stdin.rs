@@ -106,6 +106,18 @@ impl<P, I> EmulatorStdin<P, I> {
     {
         EmulatorStdinBuilder::default()
     }
+
+    pub fn new_riscv(buf: &[I]) -> Self
+    where
+        I: Clone,
+    {
+        Self {
+            programs: Arc::new([]),
+            inputs: Arc::from(buf),
+            flag_empty: false,
+            pointer: 0,
+        }
+    }
 }
 
 // for riscv machine stdin

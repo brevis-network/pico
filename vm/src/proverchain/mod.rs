@@ -21,13 +21,18 @@ pub trait ProverChain<PrevSC, PrevC, SC>
 where
     PrevSC: StarkGenericConfig,
 {
-    fn new_with_prev(prev_prover: &impl MachineProver<PrevSC, Chips = PrevC>) -> Self;
+    type Opts;
+    fn new_with_prev(
+        prev_prover: &impl MachineProver<PrevSC, Chips = PrevC>,
+        opts: Self::Opts,
+    ) -> Self;
 }
 
 /// Trait to assist with inline proving
 pub trait InitialProverSetup {
     type Input<'a>;
-    fn new_initial_prover(input: Self::Input<'_>) -> Self;
+    type Opts;
+    fn new_initial_prover(input: Self::Input<'_>, opts: Self::Opts) -> Self;
 }
 
 /// Trait to assist with inline proving

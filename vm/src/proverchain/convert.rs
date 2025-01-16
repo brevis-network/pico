@@ -7,7 +7,10 @@ use crate::{
         field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
-    emulator::riscv::{record::EmulationRecord, stdin::EmulatorStdin},
+    emulator::{
+        opts::EmulatorOpts,
+        riscv::{record::EmulationRecord, stdin::EmulatorStdin},
+    },
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType, machine::convert::ConvertMachine,
     },
@@ -76,6 +79,7 @@ pub struct ConvertProver<
         HALF_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
     >,
+    opts: EmulatorOpts,
     prev_machine:
         BaseMachine<RiscvSC, RiscvChips<RiscvSC, HALF_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS>>,
 }
@@ -99,6 +103,8 @@ macro_rules! impl_convert_prover {
                 { $num_internal_rounds - 1 },
             >
         {
+            type Opts = EmulatorOpts;
+
             fn new_with_prev(
                 prev_prover: &impl MachineProver<
                     $riscv_sc,
@@ -108,6 +114,7 @@ macro_rules! impl_convert_prover {
                         $num_internal_rounds,
                     >,
                 >,
+                opts: Self::Opts,
             ) -> Self {
                 let machine = ConvertMachine::new(
                     $recur_sc::new(),
@@ -122,6 +129,7 @@ macro_rules! impl_convert_prover {
                 );
                 Self {
                     machine,
+                    opts,
                     prev_machine: prev_prover.machine().clone(),
                 }
             }
@@ -166,11 +174,8 @@ macro_rules! impl_convert_prover {
                     &proofs.proofs(),
                     None,
                 );
-                let witness = ProvingWitness::setup_for_convert(
-                    stdin,
-                    self.machine.config(),
-                    Default::default(),
-                );
+                let witness =
+                    ProvingWitness::setup_for_convert(stdin, self.machine.config(), self.opts);
                 self.machine.prove(&witness)
             }
 

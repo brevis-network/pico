@@ -6,7 +6,7 @@ use crate::{
         field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
-    emulator::riscv::stdin::EmulatorStdin,
+    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType, machine::combine::CombineMachine,
     },
@@ -93,6 +93,7 @@ pub struct CombineProver<
         HALF_EXTERNAL_ROUNDS,
         NUM_INTERNAL_ROUNDS,
     >,
+    opts: EmulatorOpts,
     prev_machine: BaseMachine<
         PrevSC,
         ConvertChips<
@@ -130,6 +131,8 @@ macro_rules! impl_combine_prover {
                 { $num_internal_rounds - 1 },
             >
         {
+            type Opts = EmulatorOpts;
+
             fn new_with_prev(
                 prev_prover: &impl MachineProver<
                     $recur_sc,
@@ -141,6 +144,7 @@ macro_rules! impl_combine_prover {
                         { $num_internal_rounds - 1 },
                     >,
                 >,
+                opts: Self::Opts,
             ) -> Self {
                 let machine = CombineMachine::new(
                     $recur_sc::new(),
@@ -155,6 +159,7 @@ macro_rules! impl_combine_prover {
                 );
                 Self {
                     machine,
+                    opts,
                     prev_machine: prev_prover.machine().clone(),
                 }
             }
@@ -201,7 +206,7 @@ macro_rules! impl_combine_prover {
                     last_vk,
                     last_proof,
                     self.machine.config(),
-                    Default::default(),
+                    self.opts,
                 );
                 self.machine.prove(&witness)
             }

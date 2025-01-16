@@ -79,6 +79,10 @@ where
         emulator.emulate_batch().unwrap()
     }
 
+    pub fn cycles(&self) -> u64 {
+        self.emulator.as_ref().unwrap().state.global_clk
+    }
+
     pub fn get_pv_stream_with_dryrun(&mut self) -> Vec<u8> {
         loop {
             let (_, done) = self.next_record_batch();

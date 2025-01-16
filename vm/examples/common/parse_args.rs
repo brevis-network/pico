@@ -122,12 +122,13 @@ impl TesterProgram {
 }
 
 pub const TENDERMINT_PROGRAM: TesterProgram = TesterProgram::new(
-    include_bytes!("../../../vm/src/compiler/test_data/tendermint/riscv32im-tendermint-elf"),
-    include_bytes!("../../../vm/src/compiler/test_data/tendermint/input.bin"),
+    include_bytes!("../../../vm/src/compiler/test_data/bench/tendermint"),
+    include_bytes!("../../../vm/src/compiler/test_data/bench/tendermint.in"),
 );
 
 pub fn load_program(program: TesterProgram) -> (&'static [u8], EmulatorStdinBuilder<Vec<u8>>) {
-    let stdin: EmulatorStdinBuilder<Vec<u8>> =
-        bincode::deserialize(program.input).expect("failed to deserialize input");
+    let stdin = EmulatorStdinBuilder {
+        buffer: bincode::deserialize(program.input).expect("failed to deserialize input"),
+    };
     (program.elf, stdin)
 }
