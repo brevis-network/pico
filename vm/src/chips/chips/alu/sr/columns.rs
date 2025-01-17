@@ -12,9 +12,6 @@ pub(crate) const NUM_SLR_COLS: usize = size_of::<ShiftRightCols<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShiftRightCols<T: Copy> {
-    /// The chunk number, used for byte lookup table.
-    pub chunk: T,
-
     /// The output operand.
     pub a: Word<T>,
 

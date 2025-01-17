@@ -36,7 +36,6 @@ use crate::{
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
-        lookup::LookupScope,
         utils::limbs_from_prev_access,
     },
     recursion_v2::stark::utils::pad_rows_fixed,
@@ -94,7 +93,6 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
         record: &mut impl ByteRecordBehavior,
-        chunk: u32,
         cols: &mut EdAddAssignCols<F>,
         p_x: BigUint,
         p_y: BigUint,
@@ -103,35 +101,29 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
     ) {
         let x3_numerator = cols.x3_numerator.populate(
             record,
-            chunk,
             &[p_x.clone(), q_x.clone()],
             &[q_y.clone(), p_y.clone()],
         );
         let y3_numerator = cols.y3_numerator.populate(
             record,
-            chunk,
             &[p_y.clone(), p_x.clone()],
             &[q_y.clone(), q_x.clone()],
         );
         let x1_mul_y1 = cols
             .x1_mul_y1
-            .populate(record, chunk, &p_x, &p_y, FieldOperation::Mul);
+            .populate(record, &p_x, &p_y, FieldOperation::Mul);
         let x2_mul_y2 = cols
             .x2_mul_y2
-            .populate(record, chunk, &q_x, &q_y, FieldOperation::Mul);
+            .populate(record, &q_x, &q_y, FieldOperation::Mul);
         let f = cols
             .f
-            .populate(record, chunk, &x1_mul_y1, &x2_mul_y2, FieldOperation::Mul);
+            .populate(record, &x1_mul_y1, &x2_mul_y2, FieldOperation::Mul);
 
         let d = E::d_biguint();
-        let d_mul_f = cols
-            .d_mul_f
-            .populate(record, chunk, &f, &d, FieldOperation::Mul);
+        let d_mul_f = cols.d_mul_f.populate(record, &f, &d, FieldOperation::Mul);
 
-        cols.x3_ins
-            .populate(record, chunk, &x3_numerator, &d_mul_f, true);
-        cols.y3_ins
-            .populate(record, chunk, &y3_numerator, &d_mul_f, false);
+        cols.x3_ins.populate(record, &x3_numerator, &d_mul_f, true);
+        cols.y3_ins.populate(record, &y3_numerator, &d_mul_f, false);
     }
 }
 
@@ -183,7 +175,6 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> ChipBehavior<F>
                 let zero = BigUint::zero();
                 Self::populate_field_ops(
                     &mut vec![],
-                    0,
                     cols,
                     zero.clone(),
                     zero.clone(),
@@ -268,7 +259,7 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
         cols.p_ptr = F::from_canonical_u32(event.p_ptr);
         cols.q_ptr = F::from_canonical_u32(event.q_ptr);
 
-        Self::populate_field_ops(rlu, event.chunk, cols, p_x, p_y, q_x, q_y);
+        Self::populate_field_ops(rlu, cols, p_x, p_y, q_x, q_y);
 
         // Populate the memory access columns.
         for i in 0..WORDS_CURVE_POINT {
@@ -390,13 +381,11 @@ where
         );
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::ED_ADD.syscall_id()),
             local.p_ptr,
             local.q_ptr,
             local.is_real,
-            LookupScope::Regional,
         );
     }
 }

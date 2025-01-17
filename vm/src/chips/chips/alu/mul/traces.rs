@@ -96,11 +96,10 @@ impl<F: PrimeField> ChipBehavior<F> for MulChip<F> {
                             // Insert the MSB lookup events.
                             {
                                 let words = [b_word, c_word];
-                                let mut blu_events: Vec<ByteLookupEvent> = vec![];
+                                let mut blu_events = vec![];
                                 for word in words.iter() {
                                     let most_significant_byte = word[WORD_SIZE - 1];
                                     blu_events.push(ByteLookupEvent {
-                                        chunk: event.chunk,
                                         opcode: ByteOpcode::MSB,
                                         a1: get_msb(*word) as u16,
                                         a2: 0,
@@ -143,13 +142,11 @@ impl<F: PrimeField> ChipBehavior<F> for MulChip<F> {
                         cols.is_mulh = F::from_bool(event.opcode == Opcode::MULH);
                         cols.is_mulhu = F::from_bool(event.opcode == Opcode::MULHU);
                         cols.is_mulhsu = F::from_bool(event.opcode == Opcode::MULHSU);
-                        cols.chunk = F::from_canonical_u32(event.chunk);
 
                         // Range check.
                         {
-                            let chunk = event.chunk;
-                            record.add_u16_range_checks(&carry.map(|x| x as u16), Some(chunk));
-                            record.add_u8_range_checks(product.map(|x| x as u8), Some(chunk));
+                            record.add_u16_range_checks(&carry.map(|x| x as u16));
+                            record.add_u8_range_checks(product.map(|x| x as u8));
                         }
 
                         row

@@ -67,7 +67,6 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                 cols.a = Word::from(event.a);
                 cols.b = Word::from(event.b);
                 cols.c = Word::from(event.c);
-                cols.chunk = F::from_canonical_u32(event.chunk);
                 cols.is_real = F::ONE;
                 cols.is_divu = F::from_bool(event.opcode == Opcode::DIVU);
                 cols.is_remu = F::from_bool(event.opcode == Opcode::REMU);
@@ -113,7 +112,6 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                     for word in words.iter() {
                         let most_significant_byte = word.to_le_bytes()[WORD_SIZE - 1];
                         blu_events.push(ByteLookupEvent {
-                            chunk: event.chunk,
                             opcode: ByteOpcode::MSB,
                             a1: get_msb(*word) as u16,
                             a2: 0,
@@ -173,7 +171,6 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                         if cols.abs_c_alu_event == F::ONE {
                             add_events.push(AluEvent {
                                 lookup_id: event.sub_lookups[4],
-                                chunk: event.chunk,
                                 clk: event.clk,
                                 opcode: Opcode::ADD,
                                 a: 0,
@@ -185,7 +182,6 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                         if cols.abs_rem_alu_event == F::ONE {
                             add_events.push(AluEvent {
                                 lookup_id: event.sub_lookups[5],
-                                chunk: event.chunk,
                                 clk: event.clk,
                                 opcode: Opcode::ADD,
                                 a: 0,
@@ -211,7 +207,6 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
 
                     let lower_multiplication = AluEvent {
                         lookup_id: event.sub_lookups[0],
-                        chunk: event.chunk,
                         clk: event.clk,
                         opcode: Opcode::MUL,
                         a: lower_word,
@@ -223,7 +218,6 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
 
                     let upper_multiplication = AluEvent {
                         lookup_id: event.sub_lookups[1],
-                        chunk: event.chunk,
                         clk: event.clk,
                         opcode: {
                             if is_signed_operation(event.opcode) {
@@ -241,7 +235,6 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                     let lt_event = if is_signed_operation(event.opcode) {
                         AluEvent {
                             lookup_id: event.sub_lookups[2],
-                            chunk: event.chunk,
                             opcode: Opcode::SLTU,
                             a: 1,
                             b: (remainder as i32).unsigned_abs(),
@@ -252,7 +245,6 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                     } else {
                         AluEvent {
                             lookup_id: event.sub_lookups[3],
-                            chunk: event.chunk,
                             opcode: Opcode::SLTU,
                             a: 1,
                             b: remainder,
@@ -269,10 +261,9 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
 
                 // Range check.
                 {
-                    let chunk = event.chunk;
-                    output.add_u8_range_checks(quotient.to_le_bytes(), Some(chunk));
-                    output.add_u8_range_checks(remainder.to_le_bytes(), Some(chunk));
-                    output.add_u8_range_checks(c_times_quotient, Some(chunk));
+                    output.add_u8_range_checks(quotient.to_le_bytes());
+                    output.add_u8_range_checks(remainder.to_le_bytes());
+                    output.add_u8_range_checks(c_times_quotient);
                 }
             }
 

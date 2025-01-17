@@ -95,7 +95,6 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 };
                 let result = cols.output.populate_with_modulus(
                     &mut new_byte_lookup_events,
-                    event.chunk,
                     &x,
                     &y,
                     &effective_modulus,
@@ -106,7 +105,6 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 if cols.modulus_is_not_zero == F::ONE {
                     cols.output_range_check.populate(
                         &mut new_byte_lookup_events,
-                        event.chunk,
                         &result,
                         &effective_modulus,
                     );
@@ -130,7 +128,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 let x = BigUint::zero();
                 let y = BigUint::zero();
                 cols.output
-                    .populate(&mut vec![], 0, &x, &y, FieldOperation::Mul);
+                    .populate(&mut vec![], &x, &y, FieldOperation::Mul);
 
                 row
             },

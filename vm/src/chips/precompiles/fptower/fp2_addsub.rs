@@ -41,7 +41,6 @@ use crate::{
         gadgets::field::field_op::FieldOpCols,
     },
     emulator::riscv::syscalls::precompiles::PrecompileEvent,
-    machine::lookup::LookupScope,
     recursion_v2::stark::utils::pad_rows_fixed,
 };
 
@@ -91,7 +90,6 @@ where
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
         blu_events: &mut impl ByteRecordBehavior,
-        chunk: u32,
         cols: &mut Fp2AddSubCols<F, P>,
         p_x: BigUint,
         p_y: BigUint,
@@ -102,9 +100,9 @@ where
         let modulus_bytes = P::MODULUS;
         let modulus = BigUint::from_bytes_le(modulus_bytes);
         cols.c0
-            .populate_with_modulus(blu_events, chunk, &p_x, &q_x, &modulus, op);
+            .populate_with_modulus(blu_events, &p_x, &q_x, &modulus, op);
         cols.c1
-            .populate_with_modulus(blu_events, chunk, &p_y, &q_y, &modulus, op);
+            .populate_with_modulus(blu_events, &p_y, &q_y, &modulus, op);
     }
 }
 
@@ -167,7 +165,6 @@ where
 
             Self::populate_field_ops(
                 &mut new_byte_lookup_events,
-                event.chunk,
                 cols,
                 p_x,
                 p_y,
@@ -200,7 +197,6 @@ where
                 let zero = BigUint::zero();
                 Self::populate_field_ops(
                     &mut vec![],
-                    0,
                     cols,
                     zero.clone(),
                     zero.clone(),
@@ -360,13 +356,11 @@ where
             local.is_add * add_syscall_id + (CB::Expr::ONE - local.is_add) * sub_syscall_id;
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             syscall_id_felt,
             local.x_ptr,
             local.y_ptr,
             local.is_real,
-            LookupScope::Regional,
         );
     }
 }

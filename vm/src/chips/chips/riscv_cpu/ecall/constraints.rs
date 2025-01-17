@@ -6,10 +6,7 @@ use crate::{
     },
     compiler::word::Word,
     emulator::riscv::{public_values::PublicValues, syscalls::SyscallCode},
-    machine::{
-        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
-        lookup::LookupScope,
-    },
+    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
     primitives::consts::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
 };
 use p3_air::AirBuilder;
@@ -54,13 +51,11 @@ impl<F: Field> CpuChip<F> {
         );
 
         builder.looking_syscall(
-            local.chunk,
             local.clk,
             syscall_id,
             local.op_b_val().reduce::<CB>(),
             local.op_c_val().reduce::<CB>(),
             local.ecall_mul_send_to_table,
-            LookupScope::Regional,
         );
 
         // Compute whether this ecall is ENTER_UNCONSTRAINED.

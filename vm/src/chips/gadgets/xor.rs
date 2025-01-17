@@ -16,13 +16,7 @@ pub struct XorOperation<T> {
 }
 
 impl<F: Field> XorOperation<F> {
-    pub fn populate(
-        &mut self,
-        record: &mut impl ByteRecordBehavior,
-        chunk: u32,
-        x: u32,
-        y: u32,
-    ) -> u32 {
+    pub fn populate(&mut self, record: &mut impl ByteRecordBehavior, x: u32, y: u32) -> u32 {
         let expected = x ^ y;
         let x_bytes = x.to_le_bytes();
         let y_bytes = y.to_le_bytes();
@@ -31,7 +25,6 @@ impl<F: Field> XorOperation<F> {
             self.value[i] = F::from_canonical_u8(xor);
 
             let byte_event = ByteLookupEvent {
-                chunk,
                 opcode: ByteOpcode::XOR,
                 a1: xor as u16,
                 a2: 0,

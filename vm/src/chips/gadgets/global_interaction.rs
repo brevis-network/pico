@@ -76,21 +76,21 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
     #[allow(clippy::too_many_arguments)]
     pub fn populate_memory_range_check_witness(
         &self,
-        shard: u32,
+        chunk: u32,
         value: u32,
         is_real: bool,
         blu: &mut impl ByteRecordBehavior,
     ) {
         if is_real {
-            blu.add_u8_range_checks(value.to_le_bytes(), Some(shard));
-            blu.add_u16_range_check(shard as u16, Some(shard));
+            blu.add_u8_range_checks(value.to_le_bytes());
+            blu.add_u16_range_check(chunk as u16);
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn populate_memory(
         &mut self,
-        shard: u32,
+        chunk: u32,
         clk: u32,
         addr: u32,
         value: u32,
@@ -99,7 +99,7 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
     ) {
         self.populate(
             SepticBlock([
-                shard,
+                chunk,
                 clk,
                 addr,
                 value & 255,
@@ -116,7 +116,7 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
     #[allow(clippy::too_many_arguments)]
     pub fn populate_syscall_range_check_witness(
         &self,
-        shard: u32,
+        chunk: u32,
         clk_16: u16,
         clk_8: u8,
         syscall_id: u32,
@@ -124,15 +124,15 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
         blu: &mut impl ByteRecordBehavior,
     ) {
         if is_real {
-            blu.add_u16_range_checks(&[shard as u16, clk_16], Some(shard));
-            blu.add_u8_range_checks([clk_8, syscall_id as u8], Some(shard));
+            blu.add_u16_range_checks(&[chunk as u16, clk_16]);
+            blu.add_u8_range_checks([clk_8, syscall_id as u8]);
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn populate_syscall(
         &mut self,
-        shard: u32,
+        chunk: u32,
         clk_16: u16,
         clk_8: u8,
         syscall_id: u32,
@@ -143,7 +143,7 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
     ) {
         self.populate(
             SepticBlock([
-                shard,
+                chunk,
                 clk_16.into(),
                 clk_8.into(),
                 syscall_id,
@@ -253,7 +253,7 @@ impl<F: Field> GlobalInteractionOperation<F> {
     #[allow(clippy::too_many_arguments)]
     pub fn eval_single_digest_memory<AB: ChipBuilder<F>>(
         builder: &mut AB,
-        shard: AB::Expr,
+        chunk: AB::Expr,
         clk: AB::Expr,
         addr: AB::Expr,
         value: [AB::Expr; 4],
@@ -262,7 +262,7 @@ impl<F: Field> GlobalInteractionOperation<F> {
         is_real: AB::Var,
     ) {
         let values = [
-            shard.clone(),
+            chunk.clone(),
             clk.clone(),
             addr.clone(),
             value[0].clone(),
@@ -281,10 +281,10 @@ impl<F: Field> GlobalInteractionOperation<F> {
         );
 
         // Range check for message space.
-        // Range check shard to be a valid u16.
+        // Range check chunk to be a valid u16.
         builder.looking_rangecheck(
             ByteOpcode::U16Range,
-            shard.clone(),
+            chunk.clone(),
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
@@ -297,7 +297,7 @@ impl<F: Field> GlobalInteractionOperation<F> {
     #[allow(clippy::too_many_arguments)]
     pub fn eval_single_digest_syscall<AB: ChipBuilder<F>>(
         builder: &mut AB,
-        shard: AB::Expr,
+        chunk: AB::Expr,
         clk_16: AB::Expr,
         clk_8: AB::Expr,
         syscall_id: AB::Expr,
@@ -308,7 +308,7 @@ impl<F: Field> GlobalInteractionOperation<F> {
         is_real: AB::Var,
     ) {
         let values = [
-            shard.clone(),
+            chunk.clone(),
             clk_16.clone(),
             clk_8.clone(),
             syscall_id.clone(),
@@ -327,10 +327,10 @@ impl<F: Field> GlobalInteractionOperation<F> {
         );
 
         // Range check for message space.
-        // Range check shard to be a valid u16.
+        // Range check chunk to be a valid u16.
         builder.looking_rangecheck(
             ByteOpcode::U16Range,
-            shard.clone(),
+            chunk.clone(),
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,

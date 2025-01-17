@@ -9,12 +9,9 @@ use super::{columns::KeccakMemCols, KeccakPermuteChip, STATE_NUM_WORDS, STATE_SI
 use crate::{
     chips::chips::riscv_memory::read_write::columns::MemoryCols,
     emulator::riscv::syscalls::SyscallCode,
-    machine::{
-        builder::{
-            ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
-            SubAirBuilder,
-        },
-        lookup::LookupScope,
+    machine::builder::{
+        ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+        SubAirBuilder,
     },
 };
 
@@ -62,13 +59,11 @@ where
         builder.assert_eq(local.receive_ecall, first_step * local.is_real);
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::KECCAK_PERMUTE.syscall_id()),
             local.state_addr,
             CB::Expr::ZERO,
             local.receive_ecall,
-            LookupScope::Regional,
         );
 
         // Constrain that the inputs stay the same throughout the 24 rows of each cycle

@@ -38,14 +38,12 @@ impl<F: PrimeField> ChipBehavior<F> for ByteChip<F> {
             NUM_BYTE_MULT_COLS,
         );
 
-        for (_chunk, lookups) in input.byte_lookups.iter() {
-            for (lookup, mult) in lookups.iter() {
-                let row = (((lookup.b as u16) << 8) + lookup.c as u16) as usize;
-                let index = lookup.opcode as usize;
+        for (lookup, mult) in input.byte_lookups.iter() {
+            let row = (((lookup.b as u16) << 8) + lookup.c as u16) as usize;
+            let index = lookup.opcode as usize;
 
-                let cols: &mut ByteMultCols<F> = trace.row_mut(row).borrow_mut();
-                cols.multiplicities[index] += F::from_canonical_usize(*mult);
-            }
+            let cols: &mut ByteMultCols<F> = trace.row_mut(row).borrow_mut();
+            cols.multiplicities[index] += F::from_canonical_usize(*mult);
         }
 
         trace

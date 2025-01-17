@@ -15,8 +15,7 @@ use crate::{
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use core::borrow::BorrowMut;
-use hashbrown::HashMap;
-use itertools::{izip, Itertools};
+use itertools::izip;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -67,11 +66,11 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(input.lt_events.len() / num_cpus::get(), 1);
 
-        let blu_batches = input
+        let blu_events = input
             .lt_events
             .par_chunks(chunk_size)
-            .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu = vec![];
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_LT_COLS];
                     let cols: &mut LtCols<F> = row.as_mut_slice().borrow_mut();
@@ -79,9 +78,9 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
                 });
                 blu
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        extra.add_byte_lookup_events(blu_events);
         debug!("{} chip - extra_record", self.name());
     }
 
@@ -105,7 +104,6 @@ impl<F: PrimeField32> LtChip<F> {
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 
-        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.a = Word(a.map(F::from_canonical_u8));
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
@@ -118,7 +116,6 @@ impl<F: PrimeField32> LtChip<F> {
 
         // Send the masked interaction.
         blu.add_byte_lookup_event(ByteLookupEvent {
-            chunk: event.chunk,
             opcode: ByteOpcode::AND,
             a1: masked_b as u16,
             a2: 0,
@@ -126,7 +123,6 @@ impl<F: PrimeField32> LtChip<F> {
             c: 0x7f,
         });
         blu.add_byte_lookup_event(ByteLookupEvent {
-            chunk: event.chunk,
             opcode: ByteOpcode::AND,
             a1: masked_c as u16,
             a2: 0,
@@ -184,7 +180,6 @@ impl<F: PrimeField32> LtChip<F> {
         );
 
         blu.add_byte_lookup_event(ByteLookupEvent {
-            chunk: event.chunk,
             opcode: ByteOpcode::LTU,
             a1: cols.slt_u.as_canonical_u32() as u16,
             a2: 0,

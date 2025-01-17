@@ -34,7 +34,6 @@ use crate::{
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
-        lookup::LookupScope,
         utils::{limbs_from_access, limbs_from_prev_access},
     },
     recursion_v2::stark::utils::pad_rows_fixed,
@@ -98,7 +97,7 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         }
 
         let y = &BigUint::from_bytes_le(&event.y_bytes);
-        self.populate_field_ops::<E>(&mut new_byte_lookup_events, event.chunk, y);
+        self.populate_field_ops::<E>(&mut new_byte_lookup_events, y);
 
         record.add_byte_lookup_events(new_byte_lookup_events);
     }
@@ -106,32 +105,25 @@ impl<F: PrimeField32> EdDecompressCols<F> {
     fn populate_field_ops<E: EdwardsParameters>(
         &mut self,
         blu_events: &mut impl ByteRecordBehavior,
-        chunk: u32,
         y: &BigUint,
     ) {
         let one = BigUint::one();
         self.y_range
-            .populate(blu_events, chunk, y, &Ed25519BaseField::modulus());
-        let yy = self
-            .yy
-            .populate(blu_events, chunk, y, y, FieldOperation::Mul);
-        let u = self
-            .u
-            .populate(blu_events, chunk, &yy, &one, FieldOperation::Sub);
+            .populate(blu_events, y, &Ed25519BaseField::modulus());
+        let yy = self.yy.populate(blu_events, y, y, FieldOperation::Mul);
+        let u = self.u.populate(blu_events, &yy, &one, FieldOperation::Sub);
         let dyy = self
             .dyy
-            .populate(blu_events, chunk, &E::d_biguint(), &yy, FieldOperation::Mul);
-        let v = self
-            .v
-            .populate(blu_events, chunk, &one, &dyy, FieldOperation::Add);
+            .populate(blu_events, &E::d_biguint(), &yy, FieldOperation::Mul);
+        let v = self.v.populate(blu_events, &one, &dyy, FieldOperation::Add);
         let u_div_v = self
             .u_div_v
-            .populate(blu_events, chunk, &u, &v, FieldOperation::Div);
-        let x = self.x.populate(blu_events, chunk, &u_div_v, |p| {
+            .populate(blu_events, &u, &v, FieldOperation::Div);
+        let x = self.x.populate(blu_events, &u_div_v, |p| {
             ed25519_sqrt(p).expect("ed25519_sqrt failed, syscall invariant violated")
         });
         self.neg_x
-            .populate(blu_events, chunk, &BigUint::zero(), &x, FieldOperation::Sub);
+            .populate(blu_events, &BigUint::zero(), &x, FieldOperation::Sub);
     }
 }
 
@@ -221,13 +213,11 @@ impl<V: Copy> EdDecompressCols<V> {
             .assert_all_eq(self.x.multiplication.result, x_limbs);
 
         builder.looked_syscall(
-            self.chunk,
             self.clk,
             CB::F::from_canonical_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
             self.ptr,
             self.sign,
             self.is_real,
-            LookupScope::Regional,
         );
     }
 }
@@ -297,7 +287,7 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
                 let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
                 let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
                 let zero = BigUint::zero();
-                cols.populate_field_ops::<E>(&mut vec![], 0, &zero);
+                cols.populate_field_ops::<E>(&mut vec![], &zero);
                 row
             },
             log_rows,

@@ -40,7 +40,6 @@ where
             local.pc,
             local.instruction,
             local.opcode_selector,
-            local.chunk,
             local.is_real,
         );
 
@@ -60,7 +59,6 @@ where
             local.op_a_val(),
             local.op_b_val(),
             local.op_c_val(),
-            local.chunk,
             is_memory_instruction,
         );
 
@@ -70,7 +68,6 @@ where
             local.op_a_val(),
             local.op_b_val(),
             local.op_c_val(),
-            local.chunk,
             is_alu_instruction,
         );
 
@@ -231,14 +228,12 @@ impl<F: Field> CpuChip<F> {
         pc: impl Into<CB::Expr>,
         instruction: InstructionCols<impl Into<CB::Expr> + Copy>,
         selectors: OpcodeSelectorCols<impl Into<CB::Expr> + Copy>,
-        chunk: impl Into<CB::Expr> + Copy,
         multiplicity: impl Into<CB::Expr>,
     ) {
         let values = once(pc.into())
             .chain(once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
-            .chain(once(chunk.into()))
             .collect();
 
         builder.looking(SymbolicLookup::new(

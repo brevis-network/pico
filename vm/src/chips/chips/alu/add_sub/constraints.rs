@@ -30,7 +30,6 @@ where
         let local: &AddSubCols<CB::Var> = (*local).borrow();
 
         for AddSubValueCols {
-            chunk,
             add_operation,
             operand_1,
             operand_2,
@@ -57,18 +56,10 @@ where
                 add_operation.value,
                 operand_1,
                 operand_2,
-                chunk,
                 is_add,
             );
             // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
-            builder.looked_alu(
-                opcode,
-                operand_1,
-                add_operation.value,
-                operand_2,
-                chunk,
-                is_sub,
-            );
+            builder.looked_alu(opcode, operand_1, add_operation.value, operand_2, is_sub);
 
             let is_real = is_add + is_sub;
             builder.assert_bool(is_add);

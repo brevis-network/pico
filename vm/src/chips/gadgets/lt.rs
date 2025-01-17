@@ -22,13 +22,7 @@ pub struct AssertLtColsBytes<T, const N: usize> {
 }
 
 impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
-    pub fn populate(
-        &mut self,
-        record: &mut impl ByteRecordBehavior,
-        chunk: u32,
-        a: &[u8],
-        b: &[u8],
-    ) {
+    pub fn populate(&mut self, record: &mut impl ByteRecordBehavior, a: &[u8], b: &[u8]) {
         let mut byte_flags = vec![0u8; N];
 
         for (a_byte, b_byte, flag) in
@@ -41,7 +35,6 @@ impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
                 self.b_comparison_byte = F::from_canonical_u8(*b_byte);
                 record.add_byte_lookup_event(ByteLookupEvent {
                     opcode: ByteOpcode::LTU,
-                    chunk,
                     a1: 1,
                     a2: 0,
                     b: *a_byte,

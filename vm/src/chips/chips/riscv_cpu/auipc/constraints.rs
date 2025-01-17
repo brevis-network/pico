@@ -36,7 +36,6 @@ impl<F: PrimeField32> CpuChip<F> {
             local.op_a_val(),
             auipc_columns.pc,
             local.op_b_val(),
-            local.chunk,
             local.opcode_selector.is_auipc,
         );
     }

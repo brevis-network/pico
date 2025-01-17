@@ -44,7 +44,6 @@ where
             prep_local.pc,
             prep_local.instruction,
             prep_local.selectors,
-            mult_local.chunk,
             mult_local.multiplicity,
         );
     }
@@ -57,14 +56,12 @@ impl<F: Field> ProgramChip<F> {
         pc: impl Into<CB::Expr>,
         instruction: InstructionCols<impl Into<CB::Expr> + Copy>,
         selectors: OpcodeSelectorCols<impl Into<CB::Expr> + Copy>,
-        chunk: impl Into<CB::Expr> + Copy,
         multiplicity: impl Into<CB::Expr>,
     ) {
         let values: Vec<CB::Expr> = once(pc.into())
             .chain(once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
-            .chain(once(chunk.into()))
             .collect();
 
         builder.looked(SymbolicLookup::new(

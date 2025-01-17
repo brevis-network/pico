@@ -25,7 +25,6 @@ impl<F: Field> CpuChip<F> {
         cols.clk_8bit_limb = F::from_canonical_u8(clk_8bit_limb);
 
         blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            chunk,
             ByteOpcode::U16Range,
             0,
             0,
@@ -33,7 +32,6 @@ impl<F: Field> CpuChip<F> {
             (chunk & u8::MAX as u32) as u8,
         ));
         blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            chunk,
             ByteOpcode::U16Range,
             0,
             0,
@@ -41,7 +39,6 @@ impl<F: Field> CpuChip<F> {
             (clk_16bit_limb & u8::MAX as u16) as u8,
         ));
         blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            chunk,
             ByteOpcode::U8Range,
             0,
             0,

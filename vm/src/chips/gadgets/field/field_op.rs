@@ -71,7 +71,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
     pub fn populate_mul_and_carry(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        chunk: u32,
         a: &BigUint,
         b: &BigUint,
         c: &BigUint,
@@ -117,10 +116,10 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
         self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
 
-        record.add_u8_range_checks_field(&self.result.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.carry.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.witness_low.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.witness_high.0, Some(chunk));
+        record.add_u8_range_checks_field(&self.result.0);
+        record.add_u8_range_checks_field(&self.carry.0);
+        record.add_u8_range_checks_field(&self.witness_low.0);
+        record.add_u8_range_checks_field(&self.witness_high.0);
 
         (result, carry)
     }
@@ -192,7 +191,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
     pub fn populate_with_modulus(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        chunk: u32,
         a: &BigUint,
         b: &BigUint,
         modulus: &BigUint,
@@ -240,10 +238,10 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         };
 
         // Range checks
-        record.add_u8_range_checks_field(&self.result.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.carry.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.witness_low.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.witness_high.0, Some(chunk));
+        record.add_u8_range_checks_field(&self.result.0);
+        record.add_u8_range_checks_field(&self.carry.0);
+        record.add_u8_range_checks_field(&self.witness_low.0);
+        record.add_u8_range_checks_field(&self.witness_high.0);
 
         result
     }
@@ -253,12 +251,11 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        chunk: u32,
         a: &BigUint,
         b: &BigUint,
         op: FieldOperation,
     ) -> BigUint {
-        self.populate_with_modulus(record, chunk, a, b, &P::modulus(), op)
+        self.populate_with_modulus(record, a, b, &P::modulus(), op)
     }
 }
 
@@ -373,7 +370,6 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_witness_high = self.witness_high.0.iter().into();
         eval_field_operation::<F, CB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
 
-        // TODO: remove chunk here after recursion v2
         // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());

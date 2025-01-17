@@ -6,8 +6,6 @@ use std::mem::size_of;
 #[derive(AlignedBorrow, Default, Clone, Copy)]
 #[repr(C)]
 pub struct LtCols<T: Copy> {
-    /// The chunk number, used for byte lookup table.
-    pub chunk: T,
     /// If the opcode is SLT.
     pub is_slt: T,
     /// If the opcode is SLTU.

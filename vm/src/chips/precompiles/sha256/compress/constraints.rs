@@ -11,11 +11,8 @@ use crate::{
     },
     compiler::word::Word,
     emulator::riscv::syscalls::SyscallCode,
-    machine::{
-        builder::{
-            ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
-        },
-        lookup::LookupScope,
+    machine::builder::{
+        ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
     },
 };
 use p3_air::{Air, AirBuilder};
@@ -45,13 +42,11 @@ where
             local.is_real * local.octet[0] * local.octet_num[0],
         );
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::SHA_COMPRESS.syscall_id()),
             local.w_ptr,
             local.h_ptr,
             local.start,
-            LookupScope::Regional,
         );
     }
 }
@@ -342,24 +337,16 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.e,
             local.f,
             local.e_and_f,
-            local.chunk,
             local.is_compression,
         );
         // Calculate not e.
-        NotOperation::<CB::F>::eval(
-            builder,
-            local.e,
-            local.e_not,
-            local.chunk,
-            local.is_compression,
-        );
+        NotOperation::<CB::F>::eval(builder, local.e, local.e_not, local.is_compression);
         // Calculate (not e) and g.
         AndOperation::<CB::F>::eval(
             builder,
             local.e_not.value,
             local.g,
             local.e_not_and_g,
-            local.chunk,
             local.is_compression,
         );
         // Calculate ch := (e and f) xor ((not e) and g).
@@ -434,7 +421,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.a,
             local.b,
             local.a_and_b,
-            local.chunk,
             local.is_compression,
         );
         // Calculate a and c.
@@ -443,7 +429,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.a,
             local.c,
             local.a_and_c,
-            local.chunk,
             local.is_compression,
         );
         // Calculate b and c.
@@ -452,7 +437,6 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             local.b,
             local.c,
             local.b_and_c,
-            local.chunk,
             local.is_compression,
         );
         // Calculate (a and b) xor (a and c).

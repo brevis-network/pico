@@ -41,7 +41,6 @@ use crate::{
         gadgets::field::field_op::FieldOpCols,
     },
     emulator::riscv::syscalls::precompiles::PrecompileEvent,
-    machine::lookup::LookupScope,
     recursion_v2::stark::utils::pad_rows_fixed,
 };
 
@@ -93,7 +92,6 @@ where
 
     fn populate_field_ops(
         blu_events: &mut impl ByteRecordBehavior,
-        chunk: u32,
         cols: &mut Fp2MulCols<F, P>,
         p_x: BigUint,
         p_y: BigUint,
@@ -104,7 +102,6 @@ where
         let modulus = BigUint::from_bytes_le(modulus_bytes);
         let a0_mul_b0 = cols.a0_mul_b0.populate_with_modulus(
             blu_events,
-            chunk,
             &p_x,
             &q_x,
             &modulus,
@@ -112,7 +109,6 @@ where
         );
         let a1_mul_b1 = cols.a1_mul_b1.populate_with_modulus(
             blu_events,
-            chunk,
             &p_y,
             &q_y,
             &modulus,
@@ -120,7 +116,6 @@ where
         );
         let a0_mul_b1 = cols.a0_mul_b1.populate_with_modulus(
             blu_events,
-            chunk,
             &p_x,
             &q_y,
             &modulus,
@@ -128,7 +123,6 @@ where
         );
         let a1_mul_b0 = cols.a1_mul_b0.populate_with_modulus(
             blu_events,
-            chunk,
             &p_y,
             &q_x,
             &modulus,
@@ -136,7 +130,6 @@ where
         );
         cols.c0.populate_with_modulus(
             blu_events,
-            chunk,
             &a0_mul_b0,
             &a1_mul_b1,
             &modulus,
@@ -144,7 +137,6 @@ where
         );
         cols.c1.populate_with_modulus(
             blu_events,
-            chunk,
             &a0_mul_b1,
             &a1_mul_b0,
             &modulus,
@@ -201,15 +193,7 @@ where
             cols.x_ptr = F::from_canonical_u32(event.x_ptr);
             cols.y_ptr = F::from_canonical_u32(event.y_ptr);
 
-            Self::populate_field_ops(
-                &mut new_byte_lookup_events,
-                event.chunk,
-                cols,
-                p_x,
-                p_y,
-                q_x,
-                q_y,
-            );
+            Self::populate_field_ops(&mut new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
 
             // Populate the memory access columns.
             for i in 0..cols.y_access.len() {
@@ -234,7 +218,6 @@ where
                 let zero = BigUint::zero();
                 Self::populate_field_ops(
                     &mut vec![],
-                    0,
                     cols,
                     zero.clone(),
                     zero.clone(),
@@ -403,13 +386,11 @@ where
         };
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             syscall_id_felt,
             local.x_ptr,
             local.y_ptr,
             local.is_real,
-            LookupScope::Regional,
         );
     }
 }

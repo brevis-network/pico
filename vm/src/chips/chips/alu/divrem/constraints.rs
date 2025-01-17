@@ -121,7 +121,6 @@ where
                 Word(lower_half),
                 local.quotient,
                 local.c,
-                local.chunk,
                 local.is_real,
             );
 
@@ -145,7 +144,6 @@ where
                 Word(upper_half),
                 local.quotient,
                 local.c,
-                local.chunk,
                 local.is_real,
             );
         }
@@ -312,7 +310,6 @@ where
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.c,
                 local.abs_c,
-                local.chunk,
                 local.abs_c_alu_event,
             );
             builder.looking_alu(
@@ -320,7 +317,6 @@ where
                 Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.remainder,
                 local.abs_remainder,
-                local.chunk,
                 local.abs_rem_alu_event,
             );
 
@@ -365,7 +361,6 @@ where
                 Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
                 local.abs_remainder,
                 local.max_abs_c_or_1,
-                local.chunk,
                 local.remainder_check_multiplicity,
             );
         }
@@ -439,14 +434,7 @@ where
                     + local.is_rem * rem
             };
 
-            builder.looked_alu(
-                opcode,
-                local.a,
-                local.b,
-                local.c,
-                local.chunk,
-                local.is_real,
-            );
+            builder.looked_alu(opcode, local.a, local.b, local.c, local.is_real);
         }
     }
 }

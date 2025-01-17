@@ -2,7 +2,7 @@ use super::syscalls::precompiles::{PrecompileEvent, PrecompileEvents};
 use crate::{
     chips::chips::{
         alu::event::AluEvent,
-        byte::event::{add_chunked_byte_lookup_events, ByteLookupEvent, ByteRecordBehavior},
+        byte::event::{ByteLookupEvent, ByteRecordBehavior},
         riscv_cpu::event::CpuEvent,
         riscv_memory::event::{MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum},
     },
@@ -51,7 +51,7 @@ pub struct EmulationRecord {
     /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
     pub lt_events: Vec<AluEvent>,
     /// A trace of the byte lookups that are needed.
-    pub byte_lookups: HashMap<u32, HashMap<ByteLookupEvent, usize>>,
+    pub byte_lookups: HashMap<ByteLookupEvent, usize>,
     /// A trace of the memory initialize events.
     pub memory_initialize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of the memory finalize events.
@@ -262,13 +262,7 @@ impl RecordBehavior for EmulationRecord {
             self.cpu_local_memory_access.len(),
         );
         if !self.cpu_events.is_empty() {
-            let chunk = self.cpu_events[0].chunk;
-            stats.insert(
-                "byte_lookups".to_string(),
-                self.byte_lookups
-                    .get(&chunk)
-                    .map_or(0, hashbrown::HashMap::len),
-            );
+            stats.insert("byte_lookups".to_string(), self.byte_lookups.len());
             stats.insert(
                 "memory_read_write Events".to_string(),
                 self.cpu_events
@@ -326,7 +320,9 @@ impl RecordBehavior for EmulationRecord {
         if self.byte_lookups.is_empty() {
             self.byte_lookups = std::mem::take(&mut extra.byte_lookups);
         } else {
-            self.add_chunked_byte_lookup_events(vec![&extra.byte_lookups]);
+            for (event, mult) in &extra.byte_lookups {
+                *self.byte_lookups.entry(*event).or_insert(0) += mult;
+            }
         }
     }
 
@@ -357,19 +353,6 @@ pub struct MemoryAccessRecord {
 
 impl ByteRecordBehavior for EmulationRecord {
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
-        *self
-            .byte_lookups
-            .entry(blu_event.chunk)
-            .or_default()
-            .entry(blu_event)
-            .or_insert(0) += 1;
-    }
-
-    #[inline]
-    fn add_chunked_byte_lookup_events(
-        &mut self,
-        new_events: Vec<&HashMap<u32, HashMap<ByteLookupEvent, usize>>>,
-    ) {
-        add_chunked_byte_lookup_events(&mut self.byte_lookups, new_events);
+        *self.byte_lookups.entry(blu_event).or_insert(0) += 1;
     }
 }

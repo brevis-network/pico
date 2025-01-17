@@ -10,9 +10,6 @@ use std::mem::size_of;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct DivRemCols<T> {
-    /// The chunk number, used for byte lookup table.
-    pub chunk: T,
-
     /// The output operand.
     pub a: Word<T>,
 

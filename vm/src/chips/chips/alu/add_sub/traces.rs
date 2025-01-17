@@ -19,7 +19,6 @@ use crate::{
     recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
-use hashbrown::HashMap;
 use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -55,7 +54,7 @@ impl<F: PrimeField> ChipBehavior<F> for AddSubChip<F> {
             .zip_eq(events)
             .for_each(|(row, event)| {
                 let cols: &mut AddSubValueCols<_> = row.borrow_mut();
-                self.event_to_row(event, cols, &mut HashMap::new());
+                self.event_to_row(event, cols, &mut vec![]);
             });
 
         RowMajorMatrix::new(values, NUM_ADD_SUB_COLS)
@@ -107,15 +106,13 @@ impl<F: Field> AddSubChip<F> {
         blu: &mut impl ByteRecordBehavior,
     ) {
         let is_add = event.opcode == Opcode::ADD;
-        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.is_add = F::from_bool(is_add);
         cols.is_sub = F::from_bool(!is_add);
 
         let operand_1 = if is_add { event.b } else { event.a };
         let operand_2 = event.c;
 
-        cols.add_operation
-            .populate(blu, event.chunk, operand_1, operand_2);
+        cols.add_operation.populate(blu, operand_1, operand_2);
         cols.operand_1 = Word::from(operand_1);
         cols.operand_2 = Word::from(operand_2);
     }

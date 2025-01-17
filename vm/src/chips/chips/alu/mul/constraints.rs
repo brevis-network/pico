@@ -187,13 +187,6 @@ where
         }
 
         // Receive the arguments.
-        builder.looked_alu(
-            opcode,
-            local.a,
-            local.b,
-            local.c,
-            local.chunk,
-            local.is_real,
-        );
+        builder.looked_alu(opcode, local.a, local.b, local.c, local.is_real);
     }
 }

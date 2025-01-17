@@ -38,7 +38,6 @@ impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        chunk: u32,
         a: &[BigUint],
         b: &[BigUint],
     ) -> BigUint {
@@ -91,10 +90,10 @@ impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {
         self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
 
         // Range checks
-        record.add_u8_range_checks_field(&self.result.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.carry.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.witness_low.0, Some(chunk));
-        record.add_u8_range_checks_field(&self.witness_high.0, Some(chunk));
+        record.add_u8_range_checks_field(&self.result.0);
+        record.add_u8_range_checks_field(&self.carry.0);
+        record.add_u8_range_checks_field(&self.witness_low.0);
+        record.add_u8_range_checks_field(&self.witness_high.0);
 
         result.clone()
     }

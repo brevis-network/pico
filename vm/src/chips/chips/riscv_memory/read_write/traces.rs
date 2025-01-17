@@ -168,8 +168,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
             "Must be a memory opcode"
         );
 
-        let chunk = event.chunk;
-
         // Populate addr_word and addr_aligned columns.
         let memory_addr = event.b.wrapping_add(event.c);
         let aligned_addr = memory_addr - memory_addr % WORD_SIZE as u32;
@@ -186,7 +184,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // Add event to ALU check to check that addr == b + c
         let add_event = AluEvent {
             lookup_id: event.memory_add_lookup_id,
-            chunk: event.chunk,
             clk: event.clk,
             opcode: Opcode::ADD,
             a: memory_addr,
@@ -253,7 +250,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
                         F::from_bool(event.instruction.op_a != (X0 as u32));
                     let sub_event = AluEvent {
                         lookup_id: event.memory_sub_lookup_id,
-                        chunk: event.chunk,
                         clk: event.clk,
                         opcode: Opcode::SUB,
                         a: event.a,
@@ -285,7 +281,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let addr_bytes = memory_addr.to_le_bytes();
         for byte_pair in addr_bytes.chunks_exact(2) {
             blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-                chunk,
                 ByteOpcode::U8Range,
                 0,
                 0,
@@ -413,11 +408,9 @@ impl<F: Field> MemoryAccessCols<F> {
         let diff_8bit_limb = (diff_minus_one >> 16) & 0xff;
         self.diff_8bit_limb = F::from_canonical_u32(diff_8bit_limb);
 
-        let chunk = current_record.chunk;
-
         // Add a range table lookup with the U16 op.
-        output.add_u16_range_check(diff_16bit_limb, Some(chunk));
+        output.add_u16_range_check(diff_16bit_limb);
         // Add a range table lookup with the U8 op.
-        output.add_u8_range_check(diff_8bit_limb as u8, 0, Some(chunk));
+        output.add_u8_range_check(diff_8bit_limb as u8, 0);
     }
 }

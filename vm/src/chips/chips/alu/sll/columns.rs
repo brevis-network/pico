@@ -10,9 +10,6 @@ pub const NUM_SLL_COLS: usize = size_of::<ShiftLeftCols<u8>>();
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Copy, Clone)]
 pub struct ShiftLeftCols<T: Copy + Sized> {
-    /// The chunk number, used for byte lookup table.
-    pub chunk: T,
-
     /// The output operand, little-endian.
     pub a: Word<T>,
 

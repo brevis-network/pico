@@ -1,6 +1,6 @@
 use crate::{
     chips::{
-        chips::byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        chips::byte::event::ByteRecordBehavior,
         precompiles::sha256::extend::{
             columns::{ShaExtendCols, NUM_SHA_EXTEND_COLS},
             ShaExtendChip,
@@ -16,8 +16,6 @@ use crate::{
     },
     machine::chip::ChipBehavior,
 };
-use hashbrown::HashMap;
-use itertools::Itertools;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -110,10 +108,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
             })
             .collect();
         let chunk_size = std::cmp::max(extend_events.len() / num_cpus::get(), 1);
-        let blu_batches: Vec<HashMap<_, _>> = extend_events
+        let blu_batches = extend_events
             .par_chunks(chunk_size)
-            .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu = vec![];
                 events.iter().for_each(|event| {
                     self.event_to_rows(event, &mut None, &mut blu);
                 });
@@ -121,7 +119,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
             })
             .collect();
 
-        output.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        output.add_byte_lookup_events(blu_batches);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
@@ -142,7 +140,6 @@ impl<F: PrimeField32> ShaExtendChip<F> {
         rows: &mut Option<Vec<[F; NUM_SHA_EXTEND_COLS]>>,
         brb: &mut impl ByteRecordBehavior,
     ) {
-        let chunk = event.chunk;
         for j in 0..48usize {
             let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
@@ -160,36 +157,29 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             // `s0 := (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18) xor (w[i-15] rightshift
             // 3)`.
             let w_i_minus_15 = event.w_i_minus_15_reads[j].value;
-            let w_i_minus_15_rr_7 = cols.w_i_minus_15_rr_7.populate(brb, chunk, w_i_minus_15, 7);
-            let w_i_minus_15_rr_18 = cols
-                .w_i_minus_15_rr_18
-                .populate(brb, chunk, w_i_minus_15, 18);
-            let w_i_minus_15_rs_3 = cols.w_i_minus_15_rs_3.populate(brb, chunk, w_i_minus_15, 3);
+            let w_i_minus_15_rr_7 = cols.w_i_minus_15_rr_7.populate(brb, w_i_minus_15, 7);
+            let w_i_minus_15_rr_18 = cols.w_i_minus_15_rr_18.populate(brb, w_i_minus_15, 18);
+            let w_i_minus_15_rs_3 = cols.w_i_minus_15_rs_3.populate(brb, w_i_minus_15, 3);
             let s0_intermediate =
                 cols.s0_intermediate
-                    .populate(brb, chunk, w_i_minus_15_rr_7, w_i_minus_15_rr_18);
-            let s0 = cols
-                .s0
-                .populate(brb, chunk, s0_intermediate, w_i_minus_15_rs_3);
+                    .populate(brb, w_i_minus_15_rr_7, w_i_minus_15_rr_18);
+            let s0 = cols.s0.populate(brb, s0_intermediate, w_i_minus_15_rs_3);
 
             // `s1 := (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19) xor (w[i-2] rightshift
             // 10)`.
             let w_i_minus_2 = event.w_i_minus_2_reads[j].value;
-            let w_i_minus_2_rr_17 = cols.w_i_minus_2_rr_17.populate(brb, chunk, w_i_minus_2, 17);
-            let w_i_minus_2_rr_19 = cols.w_i_minus_2_rr_19.populate(brb, chunk, w_i_minus_2, 19);
-            let w_i_minus_2_rs_10 = cols.w_i_minus_2_rs_10.populate(brb, chunk, w_i_minus_2, 10);
+            let w_i_minus_2_rr_17 = cols.w_i_minus_2_rr_17.populate(brb, w_i_minus_2, 17);
+            let w_i_minus_2_rr_19 = cols.w_i_minus_2_rr_19.populate(brb, w_i_minus_2, 19);
+            let w_i_minus_2_rs_10 = cols.w_i_minus_2_rs_10.populate(brb, w_i_minus_2, 10);
             let s1_intermediate =
                 cols.s1_intermediate
-                    .populate(brb, chunk, w_i_minus_2_rr_17, w_i_minus_2_rr_19);
-            let s1 = cols
-                .s1
-                .populate(brb, chunk, s1_intermediate, w_i_minus_2_rs_10);
+                    .populate(brb, w_i_minus_2_rr_17, w_i_minus_2_rr_19);
+            let s1 = cols.s1.populate(brb, s1_intermediate, w_i_minus_2_rs_10);
 
             // Compute `s2`.
             let w_i_minus_7 = event.w_i_minus_7_reads[j].value;
             let w_i_minus_16 = event.w_i_minus_16_reads[j].value;
-            cols.s2
-                .populate(brb, chunk, w_i_minus_16, s0, w_i_minus_7, s1);
+            cols.s2.populate(brb, w_i_minus_16, s0, w_i_minus_7, s1);
 
             cols.w_i.populate(event.w_i_writes[j], brb);
 

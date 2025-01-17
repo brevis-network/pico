@@ -25,7 +25,6 @@ use crate::{
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
-        lookup::LookupScope,
     },
     recursion_v2::stark::utils::pad_rows_fixed,
 };
@@ -91,7 +90,6 @@ where
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
         blu_events: &mut impl ByteRecordBehavior,
-        chunk: u32,
         cols: &mut FpOpCols<F, P>,
         p: BigUint,
         q: BigUint,
@@ -100,7 +98,7 @@ where
         let modulus_bytes = P::MODULUS;
         let modulus = BigUint::from_bytes_le(modulus_bytes);
         cols.output
-            .populate_with_modulus(blu_events, chunk, &p, &q, &modulus, op);
+            .populate_with_modulus(blu_events, &p, &q, &modulus, op);
     }
 }
 
@@ -166,14 +164,7 @@ where
             cols.x_ptr = F::from_canonical_u32(event.x_ptr);
             cols.y_ptr = F::from_canonical_u32(event.y_ptr);
 
-            Self::populate_field_ops(
-                &mut new_byte_lookup_events,
-                event.chunk,
-                cols,
-                p,
-                q,
-                event.op,
-            );
+            Self::populate_field_ops(&mut new_byte_lookup_events, cols, p, q, event.op);
 
             // Populate the memory access columns.
             for i in 0..cols.y_access.len() {
@@ -199,7 +190,6 @@ where
                 cols.is_add = F::from_canonical_u8(1);
                 Self::populate_field_ops(
                     &mut vec![],
-                    0,
                     cols,
                     zero.clone(),
                     zero,
@@ -350,13 +340,11 @@ where
             + local.is_mul * mul_syscall_id;
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             syscall_id_felt,
             local.x_ptr,
             local.y_ptr,
             local.is_real,
-            LookupScope::Regional,
         );
     }
 }

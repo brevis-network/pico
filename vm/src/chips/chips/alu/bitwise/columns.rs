@@ -18,9 +18,6 @@ pub const NUM_BITWISE_VALUE_COLS: usize = size_of::<BitwiseValueCols<u8>>();
 #[derive(AlignedBorrow, Clone, Copy, Default)]
 #[repr(C)]
 pub struct BitwiseValueCols<T> {
-    /// The chunk number, used for byte lookup table.
-    pub chunk: T,
-
     /// The output operand.
     pub a: Word<T>,
 

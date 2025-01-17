@@ -233,10 +233,10 @@ macro_rules! run {
             }
 
             let mut expected_stats = HashMap::<String, usize>::new();
-            expected_stats.insert("mem_var_events".to_string(), 9539);
+            expected_stats.insert("mem_var_events".to_string(), 9494);
             expected_stats.insert("select_events".to_string(), 1632);
-            expected_stats.insert("batch_fri_events".to_string(), 4075);
-            expected_stats.insert("poseidon2_events".to_string(), 610);
+            expected_stats.insert("batch_fri_events".to_string(), 4059);
+            expected_stats.insert("poseidon2_events".to_string(), 609);
             expected_stats.insert("exp_reverse_bits_events".to_string(), 55);
             assert_eq!(
                 stats.get("mem_var_events"),

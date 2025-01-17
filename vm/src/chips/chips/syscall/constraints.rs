@@ -6,10 +6,7 @@ use crate::{
             global_interaction::GlobalInteractionOperation,
         },
     },
-    machine::{
-        builder::{ChipBuilder, ChipLookupBuilder},
-        lookup::LookupScope,
-    },
+    machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use p3_air::{Air, BaseAir};
 use p3_field::{Field, FieldAlgebra};
@@ -36,13 +33,11 @@ where
         match self.chunk_kind {
             SyscallChunkKind::Riscv => {
                 builder.looked_syscall(
-                    local.chunk,
                     local.clk_16 + local.clk_8 * CB::Expr::from_canonical_u32(1 << 16),
                     local.syscall_id,
                     local.arg1,
                     local.arg2,
                     local.is_real,
-                    LookupScope::Regional,
                 );
 
                 // Send the call to the global bus to/from the precompile chips.
@@ -61,13 +56,11 @@ where
             }
             SyscallChunkKind::Precompile => {
                 builder.looking_syscall(
-                    local.chunk,
                     local.clk_16 + local.clk_8 * CB::Expr::from_canonical_u32(1 << 16),
                     local.syscall_id,
                     local.arg1,
                     local.arg2,
                     local.is_real,
-                    LookupScope::Regional,
                 );
 
                 GlobalInteractionOperation::<CB::F>::eval_single_digest_syscall(

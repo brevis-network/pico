@@ -40,7 +40,6 @@ where
             local.op_a_val(),
             local.op_b_val(),
             local.op_c_val(),
-            local.chunk,
             is_memory_instruction.clone(),
         );
 
@@ -97,7 +96,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
             local.addr_word,
             local.op_b_val(),
             local.op_c_val(),
-            local.chunk,
             is_memory_instruction.clone(),
         );
 
@@ -206,7 +204,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
             local.op_a_val(),
             local.unsigned_mem_val,
             signed_value,
-            local.chunk,
             local.mem_value_is_neg_not_x0,
         );
 

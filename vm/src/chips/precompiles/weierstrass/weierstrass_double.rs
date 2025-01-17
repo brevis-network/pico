@@ -21,7 +21,6 @@ use crate::{
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
-        lookup::LookupScope,
         utils::limbs_from_prev_access,
     },
     recursion_v2::stark::utils::pad_rows_fixed,
@@ -83,7 +82,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
 
     fn populate_field_ops(
         blu_events: &mut impl ByteRecordBehavior,
-        chunk: u32,
         cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField>,
         p_x: BigUint,
         p_y: BigUint,
@@ -98,17 +96,15 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
             let slope_numerator = {
                 let p_x_squared =
                     cols.p_x_squared
-                        .populate(blu_events, chunk, &p_x, &p_x, FieldOperation::Mul);
+                        .populate(blu_events, &p_x, &p_x, FieldOperation::Mul);
                 let p_x_squared_times_3 = cols.p_x_squared_times_3.populate(
                     blu_events,
-                    chunk,
                     &p_x_squared,
                     &BigUint::from(3u32),
                     FieldOperation::Mul,
                 );
                 cols.slope_numerator.populate(
                     blu_events,
-                    chunk,
                     &a,
                     &p_x_squared_times_3,
                     FieldOperation::Add,
@@ -118,7 +114,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
             // slope_denominator = 2 * y.
             let slope_denominator = cols.slope_denominator.populate(
                 blu_events,
-                chunk,
                 &BigUint::from(2u32),
                 &p_y,
                 FieldOperation::Mul,
@@ -126,7 +121,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
 
             cols.slope.populate(
                 blu_events,
-                chunk,
                 &slope_numerator,
                 &slope_denominator,
                 FieldOperation::Div,
@@ -137,13 +131,12 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
         let x = {
             let slope_squared =
                 cols.slope_squared
-                    .populate(blu_events, chunk, &slope, &slope, FieldOperation::Mul);
+                    .populate(blu_events, &slope, &slope, FieldOperation::Mul);
             let p_x_plus_p_x =
                 cols.p_x_plus_p_x
-                    .populate(blu_events, chunk, &p_x, &p_x, FieldOperation::Add);
+                    .populate(blu_events, &p_x, &p_x, FieldOperation::Add);
             cols.x3_ins.populate(
                 blu_events,
-                chunk,
                 &slope_squared,
                 &p_x_plus_p_x,
                 FieldOperation::Sub,
@@ -152,19 +145,17 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
 
         // y = slope * (p.x - x) - p.y.
         {
-            let p_x_minus_x =
-                cols.p_x_minus_x
-                    .populate(blu_events, chunk, &p_x, &x, FieldOperation::Sub);
+            let p_x_minus_x = cols
+                .p_x_minus_x
+                .populate(blu_events, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
                 blu_events,
-                chunk,
                 &slope,
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
             cols.y3_ins.populate(
                 blu_events,
-                chunk,
                 &slope_times_p_x_minus_x,
                 &p_y,
                 FieldOperation::Sub,
@@ -240,13 +231,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                         cols.clk = F::from_canonical_u32(event.clk);
                         cols.p_ptr = F::from_canonical_u32(event.p_ptr);
 
-                        Self::populate_field_ops(
-                            &mut new_byte_lookup_events,
-                            event.chunk,
-                            cols,
-                            p_x,
-                            p_y,
-                        );
+                        Self::populate_field_ops(&mut new_byte_lookup_events, cols, p_x, p_y);
 
                         // Populate the memory access columns.
                         for i in 0..cols.p_access.len() {
@@ -279,7 +264,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 let cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField> =
                     row.as_mut_slice().borrow_mut();
                 let zero = BigUint::zero();
-                Self::populate_field_ops(&mut vec![], 0, cols, zero.clone(), zero.clone());
+                Self::populate_field_ops(&mut vec![], cols, zero.clone(), zero.clone());
                 row
             },
             log_rows,
@@ -458,13 +443,11 @@ where
         };
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             syscall_id_felt,
             local.p_ptr,
             CB::Expr::ZERO,
             local.is_real,
-            LookupScope::Regional,
         );
     }
 }

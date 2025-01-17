@@ -25,7 +25,6 @@ impl<F: Field> CpuChip<F> {
 
             let add_event = AluEvent {
                 lookup_id: event.auipc_lookup_id,
-                chunk: event.chunk,
                 clk: event.clk,
                 opcode: Opcode::ADD,
                 a: event.a,

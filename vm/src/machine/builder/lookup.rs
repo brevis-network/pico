@@ -45,14 +45,12 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         a: Word<impl Into<Self::Expr>>,
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
-        chunk: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
-            .chain(once(chunk.into()))
             .collect();
 
         self.looking(SymbolicLookup::new(
@@ -71,14 +69,12 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         a: Word<impl Into<Self::Expr>>,
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
-        chunk: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
-            .chain(once(chunk.into()))
             .collect();
 
         self.looked(SymbolicLookup::new(
@@ -97,14 +93,12 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         a: Word<impl Into<Self::Expr>>,
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
-        chunk: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
-            .chain(once(chunk.into()))
             .collect();
 
         self.looking(SymbolicLookup::new(
@@ -123,14 +117,12 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         a: Word<impl Into<Self::Expr>>,
         b: Word<impl Into<Self::Expr>>,
         c: Word<impl Into<Self::Expr>>,
-        chunk: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
         let values = once(opcode.into())
             .chain(a.0.into_iter().map(Into::into))
             .chain(b.0.into_iter().map(Into::into))
             .chain(c.0.into_iter().map(Into::into))
-            .chain(once(chunk.into()))
             .collect();
 
         self.looked(SymbolicLookup::new(
@@ -173,7 +165,6 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         ));
     }
 
-    // TODO: remove all the chunk constraints in range check in a clean way
     /// Sends a new range lookup
     fn looking_rangecheck(
         &mut self,
@@ -238,17 +229,14 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
     #[allow(clippy::too_many_arguments)]
     fn looking_syscall(
         &mut self,
-        chunk: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr> + Clone,
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: impl Into<Self::Expr> + Clone,
         arg2: impl Into<Self::Expr> + Clone,
         multiplicity: impl Into<Self::Expr>,
-        scope: LookupScope,
     ) {
         self.looking(SymbolicLookup::new(
             vec![
-                chunk.clone().into(),
                 clk.clone().into(),
                 syscall_id.clone().into(),
                 arg1.clone().into(),
@@ -256,24 +244,21 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             ],
             multiplicity.into(),
             LookupType::Syscall,
-            scope,
+            LookupScope::Regional,
         ))
     }
 
     #[allow(clippy::too_many_arguments)]
     fn looked_syscall(
         &mut self,
-        chunk: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr> + Clone,
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: impl Into<Self::Expr> + Clone,
         arg2: impl Into<Self::Expr> + Clone,
         multiplicity: impl Into<Self::Expr>,
-        scope: LookupScope,
     ) {
         self.looked(SymbolicLookup::new(
             vec![
-                chunk.clone().into(),
                 clk.clone().into(),
                 syscall_id.clone().into(),
                 arg1.clone().into(),
@@ -281,7 +266,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
             ],
             multiplicity.into(),
             LookupType::Syscall,
-            scope,
+            LookupScope::Regional,
         ))
     }
 }

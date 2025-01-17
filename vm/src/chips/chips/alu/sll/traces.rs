@@ -103,7 +103,6 @@ impl<F: Field> SLLChip<F> {
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
-        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.a = Word(a.map(F::from_canonical_u8));
         cols.b = Word(b.map(F::from_canonical_u8));
         cols.c = Word(c.map(F::from_canonical_u8));
@@ -142,9 +141,8 @@ impl<F: Field> SLLChip<F> {
             cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
         }
 
-        let chunk = event.chunk;
-        blu.add_u8_range_checks(shift_result, Some(chunk));
-        blu.add_u8_range_checks(shift_result_carry, Some(chunk));
+        blu.add_u8_range_checks(shift_result);
+        blu.add_u8_range_checks(shift_result_carry);
 
         // Sanity check.
         for i in num_bytes_to_shift..WORD_SIZE {

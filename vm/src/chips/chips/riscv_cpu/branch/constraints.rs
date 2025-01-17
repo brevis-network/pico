@@ -82,7 +82,6 @@ impl<F: Field> CpuChip<F> {
                 branch_cols.next_pc,
                 branch_cols.pc,
                 local.op_c_val(),
-                local.chunk,
                 local.branching,
             );
 
@@ -192,7 +191,6 @@ impl<F: Field> CpuChip<F> {
             Word::extend_var::<CB>(branch_cols.a_lt_b),
             local.op_a_val(),
             local.op_b_val(),
-            local.chunk,
             is_branch_instruction.clone(),
         );
 
@@ -203,7 +201,6 @@ impl<F: Field> CpuChip<F> {
             Word::extend_var::<CB>(branch_cols.a_gt_b),
             local.op_b_val(),
             local.op_a_val(),
-            local.chunk,
             is_branch_instruction.clone(),
         );
     }

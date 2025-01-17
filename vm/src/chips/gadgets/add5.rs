@@ -39,7 +39,6 @@ impl<F: Field> Add5Operation<F> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        chunk: u32,
         a_u32: u32,
         b_u32: u32,
         c_u32: u32,
@@ -82,7 +81,7 @@ impl<F: Field> Add5Operation<F> {
         {
             [a, b, c, d, e, expected.to_le_bytes()]
                 .into_iter()
-                .for_each(|bytes| record.add_u8_range_checks(bytes, Some(chunk)));
+                .for_each(|bytes| record.add_u8_range_checks(bytes));
         }
 
         expected

@@ -15,10 +15,7 @@ use crate::{
     },
     configs::config::Poseidon2Config,
     emulator::riscv::syscalls::SyscallCode,
-    machine::{
-        builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
-        lookup::LookupScope,
-    },
+    machine::builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
     primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
 };
 
@@ -105,13 +102,11 @@ where
         );
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::POSEIDON2_PERMUTE.syscall_id()),
             local.input_memory_ptr,
             local.output_memory_ptr,
             local.is_real,
-            LookupScope::Regional,
         );
 
         // Assert that is_real is a boolean.

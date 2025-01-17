@@ -50,7 +50,7 @@ pub trait CircuitV2Builder<FC: FieldGenericConfig> {
     ) -> SepticDigest<Felt<FC::F>>;
     fn select_global_cumulative_sum(
         &mut self,
-        is_first_shard: Felt<FC::F>,
+        is_first_chunk: Felt<FC::F>,
         vk_digest: SepticDigest<Felt<FC::F>>,
     ) -> SepticDigest<Felt<FC::F>>;
     fn commit_public_values_v2(&mut self, public_values: RecursionPublicValues<Felt<FC::F>>);
@@ -307,16 +307,16 @@ impl<FC: FieldGenericConfig> CircuitV2Builder<FC> for Builder<FC> {
     /// Returns the zero digest when `flag_first_chunk` is zero, and returns the `digest` when `flag_first_chunk` is one.
     fn select_global_cumulative_sum(
         &mut self,
-        is_first_shard: Felt<FC::F>,
+        is_first_chunk: Felt<FC::F>,
         vk_digest: SepticDigest<Felt<FC::F>>,
     ) -> SepticDigest<Felt<FC::F>> {
         let zero = SepticDigest::<SymbolicFelt<FC::F>>::zero();
         let one: Felt<FC::F> = self.constant(FC::F::ONE);
         let x = SepticExtension(core::array::from_fn(|i| {
-            self.eval(is_first_shard * vk_digest.0.x.0[i] + (one - is_first_shard) * zero.0.x.0[i])
+            self.eval(is_first_chunk * vk_digest.0.x.0[i] + (one - is_first_chunk) * zero.0.x.0[i])
         }));
         let y = SepticExtension(core::array::from_fn(|i| {
-            self.eval(is_first_shard * vk_digest.0.y.0[i] + (one - is_first_shard) * zero.0.y.0[i])
+            self.eval(is_first_chunk * vk_digest.0.y.0[i] + (one - is_first_chunk) * zero.0.y.0[i])
         }));
         SepticDigest(SepticCurve { x, y })
     }

@@ -9,9 +9,6 @@ use super::PRODUCT_SIZE;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MulCols<T> {
-    /// The chunk number, used for byte lookup table.
-    pub chunk: T,
-
     /// The output operand.
     pub a: Word<T>,
 

@@ -55,7 +55,6 @@ where
     pub fn populate(
         &mut self,
         blu: &mut impl ByteRecordBehavior,
-        chunk: u32,
         a: &BigUint,
         sqrt_fn: impl Fn(&BigUint) -> BigUint,
     ) -> BigUint {
@@ -64,9 +63,9 @@ where
         let sqrt = sqrt_fn(a);
 
         // Use FieldOpCols to compute result * result.
-        let sqrt_squared =
-            self.multiplication
-                .populate(blu, chunk, &sqrt, &sqrt, FieldOperation::Mul);
+        let sqrt_squared = self
+            .multiplication
+            .populate(blu, &sqrt, &sqrt, FieldOperation::Mul);
 
         // If the result is indeed the square root of a, then result * result = a.
         assert_eq!(sqrt_squared, a.clone());
@@ -76,13 +75,12 @@ where
         self.multiplication.result = P::to_limbs_field::<F, _>(&sqrt);
 
         // Populate the range columns.
-        self.range.populate(blu, chunk, &sqrt, &modulus);
+        self.range.populate(blu, &sqrt, &modulus);
 
         let sqrt_bytes = P::to_limbs(&sqrt);
         self.lsb = F::from_canonical_u8(sqrt_bytes[0] & 1);
 
         let and_event = ByteLookupEvent {
-            chunk,
             opcode: ByteOpcode::AND,
             a1: self.lsb.as_canonical_u32() as u16,
             a2: 0,
@@ -100,7 +98,6 @@ where
                 .iter()
                 .map(|x| x.as_canonical_u32() as u8)
                 .collect::<Vec<_>>(),
-            Some(chunk),
         );
 
         sqrt

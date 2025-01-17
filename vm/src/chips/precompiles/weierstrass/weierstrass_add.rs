@@ -21,7 +21,6 @@ use crate::{
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
-        lookup::LookupScope,
         utils::limbs_from_prev_access,
     },
     recursion_v2::stark::utils::pad_rows_fixed,
@@ -85,7 +84,6 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
     #[allow(clippy::too_many_arguments)]
     fn populate_field_ops(
         blu_events: &mut impl ByteRecordBehavior,
-        chunk: u32,
         cols: &mut WeierstrassAddAssignCols<F, E::BaseField>,
         p_x: BigUint,
         p_y: BigUint,
@@ -99,15 +97,14 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
         let slope = {
             let slope_numerator =
                 cols.slope_numerator
-                    .populate(blu_events, chunk, &q_y, &p_y, FieldOperation::Sub);
+                    .populate(blu_events, &q_y, &p_y, FieldOperation::Sub);
 
             let slope_denominator =
                 cols.slope_denominator
-                    .populate(blu_events, chunk, &q_x, &p_x, FieldOperation::Sub);
+                    .populate(blu_events, &q_x, &p_x, FieldOperation::Sub);
 
             cols.slope.populate(
                 blu_events,
-                chunk,
                 &slope_numerator,
                 &slope_denominator,
                 FieldOperation::Div,
@@ -118,13 +115,12 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
         let x = {
             let slope_squared =
                 cols.slope_squared
-                    .populate(blu_events, chunk, &slope, &slope, FieldOperation::Mul);
+                    .populate(blu_events, &slope, &slope, FieldOperation::Mul);
             let p_x_plus_q_x =
                 cols.p_x_plus_q_x
-                    .populate(blu_events, chunk, &p_x, &q_x, FieldOperation::Add);
+                    .populate(blu_events, &p_x, &q_x, FieldOperation::Add);
             cols.x3_ins.populate(
                 blu_events,
-                chunk,
                 &slope_squared,
                 &p_x_plus_q_x,
                 FieldOperation::Sub,
@@ -133,19 +129,17 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
 
         // y = slope * (p.x - x_3n) - p.y.
         {
-            let p_x_minus_x =
-                cols.p_x_minus_x
-                    .populate(blu_events, chunk, &p_x, &x, FieldOperation::Sub);
+            let p_x_minus_x = cols
+                .p_x_minus_x
+                .populate(blu_events, &p_x, &x, FieldOperation::Sub);
             let slope_times_p_x_minus_x = cols.slope_times_p_x_minus_x.populate(
                 blu_events,
-                chunk,
                 &slope,
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
             cols.y3_ins.populate(
                 blu_events,
-                chunk,
                 &slope_times_p_x_minus_x,
                 &p_y,
                 FieldOperation::Sub,
@@ -214,15 +208,7 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
             cols.p_ptr = F::from_canonical_u32(event.p_ptr);
             cols.q_ptr = F::from_canonical_u32(event.q_ptr);
 
-            Self::populate_field_ops(
-                &mut new_byte_lookup_events,
-                event.chunk,
-                cols,
-                p_x,
-                p_y,
-                q_x,
-                q_y,
-            );
+            Self::populate_field_ops(&mut new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
 
             // Populate the memory access columns.
             for i in 0..cols.q_access.len() {
@@ -248,7 +234,6 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
                 let zero = BigUint::zero();
                 Self::populate_field_ops(
                     &mut vec![],
-                    0,
                     cols,
                     zero.clone(),
                     zero.clone(),
@@ -426,13 +411,11 @@ where
         };
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             syscall_id_felt,
             local.p_ptr,
             local.q_ptr,
             local.is_real,
-            LookupScope::Regional,
         );
     }
 }

@@ -37,7 +37,6 @@ impl<F: Field> Add4Operation<F> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        chunk: u32,
         a_u32: u32,
         b_u32: u32,
         c_u32: u32,
@@ -72,11 +71,11 @@ impl<F: Field> Add4Operation<F> {
 
         // Range check.
         {
-            record.add_u8_range_checks(a, Some(chunk));
-            record.add_u8_range_checks(b, Some(chunk));
-            record.add_u8_range_checks(c, Some(chunk));
-            record.add_u8_range_checks(d, Some(chunk));
-            record.add_u8_range_checks(expected.to_le_bytes(), Some(chunk));
+            record.add_u8_range_checks(a);
+            record.add_u8_range_checks(b);
+            record.add_u8_range_checks(c);
+            record.add_u8_range_checks(d);
+            record.add_u8_range_checks(expected.to_le_bytes());
         }
         expected
     }

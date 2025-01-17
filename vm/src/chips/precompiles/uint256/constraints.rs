@@ -17,10 +17,7 @@ use crate::{
         },
     },
     emulator::riscv::syscalls::SyscallCode,
-    machine::{
-        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
-        lookup::LookupScope,
-    },
+    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
     recursion_v2::air::IsZeroOperation,
 };
 use p3_air::{Air, BaseAir};
@@ -132,13 +129,11 @@ where
 
         // Receive the arguments.
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::UINT256_MUL.syscall_id()),
             local.x_ptr,
             local.y_ptr,
             local.is_real,
-            LookupScope::Regional,
         );
 
         // Assert that is_real is a boolean.

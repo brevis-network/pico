@@ -597,7 +597,6 @@ impl RiscvEmulator {
     fn emit_alu(&mut self, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32, lookup_id: u128) {
         let event = AluEvent {
             lookup_id,
-            chunk: self.chunk(),
             clk,
             opcode,
             a,

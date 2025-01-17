@@ -28,7 +28,6 @@ where
         let local: &BitwiseCols<CB::Var> = (*local).borrow();
 
         for BitwiseValueCols {
-            chunk,
             a,
             b,
             c,
@@ -53,7 +52,7 @@ where
                 + is_and * Opcode::AND.as_field::<CB::F>();
 
             // Looked the ALU arguments.
-            builder.looked_alu(cpu_opcode, a, b, c, chunk, is_real.clone());
+            builder.looked_alu(cpu_opcode, a, b, c, is_real.clone());
 
             builder.assert_bool(is_xor);
             builder.assert_bool(is_or);

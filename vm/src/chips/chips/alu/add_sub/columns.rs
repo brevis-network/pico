@@ -18,9 +18,6 @@ pub const NUM_ADD_SUB_VALUE_COLS: usize = size_of::<AddSubValueCols<u8>>();
 #[derive(AlignedBorrow, Clone, Copy, Default)]
 #[repr(C)]
 pub struct AddSubValueCols<F> {
-    /// The chunk number, used for byte lookup table.
-    pub chunk: F,
-
     /// Instance of `AddGadget` to handle addition logic in `AddSubChip`'s ALU operations.
     /// It's result will be `a` for the add operation and `b` for the sub operation.
     pub add_operation: AddGadget<F>,

@@ -18,8 +18,6 @@ use crate::{
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
 };
-use hashbrown::HashMap;
-use itertools::Itertools;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -87,11 +85,11 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(input.shift_right_events.len() / num_cpus::get(), 1);
 
-        let blu_batches: Vec<_> = input
+        let blu_events = input
             .shift_right_events
             .par_chunks(chunk_size)
-            .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu = vec![];
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_SLR_COLS];
                     let cols: &mut ShiftRightCols<F> = row.as_mut_slice().borrow_mut();
@@ -101,7 +99,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
             })
             .collect();
 
-        extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        extra.add_byte_lookup_events(blu_events);
         debug!("{} chip - extra_record", self.name());
     }
 
@@ -123,7 +121,6 @@ impl<F: PrimeField32> ShiftRightChip<F> {
     ) {
         // Initialize cols with basic operands and flags derived from the current event.
         {
-            cols.chunk = F::from_canonical_u32(event.chunk);
             cols.a = Word::from(event.a);
             cols.b = Word::from(event.b);
             cols.c = Word::from(event.c);
@@ -142,7 +139,6 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             // Insert the MSB lookup event.
             let most_significant_byte = event.b.to_le_bytes()[WORD_SIZE - 1];
             blu.add_byte_lookup_events(vec![ByteLookupEvent {
-                chunk: event.chunk,
                 opcode: ByteOpcode::MSB,
                 a1: ((most_significant_byte >> 7) & 1) as u16,
                 a2: 0,
@@ -191,7 +187,6 @@ impl<F: PrimeField32> ShiftRightChip<F> {
                 let (shift, carry) = shr_carry(byte_shift_result[i], num_bits_to_shift as u8);
 
                 let byte_event = ByteLookupEvent {
-                    chunk: event.chunk,
                     opcode: ByteOpcode::ShrCarry,
                     a1: shift as u16,
                     a2: carry,
@@ -213,11 +208,10 @@ impl<F: PrimeField32> ShiftRightChip<F> {
                 debug_assert_eq!(cols.a[i], cols.bit_shift_result[i].clone());
             }
 
-            let chunk = event.chunk;
-            blu.add_u8_range_checks(byte_shift_result, Some(chunk));
-            blu.add_u8_range_checks(bit_shift_result, Some(chunk));
-            blu.add_u8_range_checks(shr_carry_output_carry, Some(chunk));
-            blu.add_u8_range_checks(shr_carry_output_shifted_byte, Some(chunk));
+            blu.add_u8_range_checks(byte_shift_result);
+            blu.add_u8_range_checks(bit_shift_result);
+            blu.add_u8_range_checks(shr_carry_output_carry);
+            blu.add_u8_range_checks(shr_carry_output_shifted_byte);
         }
     }
 }

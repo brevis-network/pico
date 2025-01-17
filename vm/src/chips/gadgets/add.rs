@@ -24,7 +24,6 @@ impl<F: Field> AddGadget<F> {
     pub fn populate(
         &mut self,
         record: &mut impl ByteRecordBehavior,
-        chunk: u32,
         a_u32: u32,
         b_u32: u32,
     ) -> u32 {
@@ -55,9 +54,9 @@ impl<F: Field> AddGadget<F> {
 
         // Range check
         {
-            record.add_u8_range_checks(a, Some(chunk));
-            record.add_u8_range_checks(b, Some(chunk));
-            record.add_u8_range_checks(expected.to_le_bytes(), Some(chunk));
+            record.add_u8_range_checks(a);
+            record.add_u8_range_checks(b);
+            record.add_u8_range_checks(expected.to_le_bytes());
         }
         expected
     }

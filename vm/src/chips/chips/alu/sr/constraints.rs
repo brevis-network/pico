@@ -198,7 +198,6 @@ where
             local.a,
             local.b,
             local.c,
-            local.chunk,
             local.is_real,
         );
     }

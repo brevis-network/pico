@@ -20,8 +20,6 @@ use crate::{
     recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
-use hashbrown::HashMap;
-use itertools::Itertools;
 use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
@@ -54,7 +52,7 @@ impl<F: PrimeField> ChipBehavior<F> for BitwiseChip<F> {
             .zip_eq(events)
             .for_each(|(row, event)| {
                 let cols: &mut BitwiseValueCols<_> = row.borrow_mut();
-                self.event_to_row(event, cols, &mut HashMap::new());
+                self.event_to_row(event, cols, &mut vec![]);
             });
 
         RowMajorMatrix::new(values, NUM_BITWISE_COLS)
@@ -63,20 +61,20 @@ impl<F: PrimeField> ChipBehavior<F> for BitwiseChip<F> {
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let chunk_size = std::cmp::max(input.bitwise_events.len() / num_cpus::get(), 1);
 
-        let blu_batches = input
+        let blu_events = input
             .bitwise_events
             .par_chunks(chunk_size)
-            .map(|events| {
-                let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
+            .flat_map(|events| {
+                let mut blu = vec![];
                 events.iter().for_each(|event| {
                     let mut dummy = BitwiseValueCols::default();
                     self.event_to_row(event, &mut dummy, &mut blu);
                 });
                 blu
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        extra.add_chunked_byte_lookup_events(blu_batches.iter().collect_vec());
+        extra.add_byte_lookup_events(blu_events);
 
         debug!("{} chip - extra_record", self.name());
     }
@@ -103,7 +101,6 @@ impl<F: Field> BitwiseChip<F> {
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
 
-        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.a = Word::from(event.a);
         cols.b = Word::from(event.b);
         cols.c = Word::from(event.c);
@@ -114,7 +111,6 @@ impl<F: Field> BitwiseChip<F> {
 
         for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
             let byte_event = ByteLookupEvent {
-                chunk: event.chunk,
                 opcode: ByteOpcode::from(event.opcode),
                 a1: b_a as u16,
                 a2: 0,

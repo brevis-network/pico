@@ -39,7 +39,6 @@ use crate::{
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
-        lookup::LookupScope,
     },
     recursion_v2::stark::utils::pad_rows_fixed,
 };
@@ -147,38 +146,31 @@ impl<F, E> WeierstrassDecompressChip<F, E> {
 impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecompressChip<F, E> {
     fn populate_field_ops(
         blu_events: &mut impl ByteRecordBehavior,
-        chunk: u32,
         cols: &mut WeierstrassDecompressCols<F, E::BaseField>,
         x: BigUint,
     ) {
         // Y = sqrt(x^3 + b)
         cols.range_x
-            .populate(blu_events, chunk, &x, &E::BaseField::modulus());
-        let x_2 = cols.x_2.populate(
-            blu_events,
-            chunk,
-            &x.clone(),
-            &x.clone(),
-            FieldOperation::Mul,
-        );
-        let x_3 = cols
-            .x_3
-            .populate(blu_events, chunk, &x_2, &x, FieldOperation::Mul);
+            .populate(blu_events, &x, &E::BaseField::modulus());
+        let x_2 = cols
+            .x_2
+            .populate(blu_events, &x.clone(), &x.clone(), FieldOperation::Mul);
+        let x_3 = cols.x_3.populate(blu_events, &x_2, &x, FieldOperation::Mul);
         let b = E::b_int();
         let x_3_plus_b = cols
             .x_3_plus_b
-            .populate(blu_events, chunk, &x_3, &b, FieldOperation::Add);
+            .populate(blu_events, &x_3, &b, FieldOperation::Add);
 
         let sqrt_fn = match E::CURVE_TYPE {
             CurveType::Bls12381 => bls12381_sqrt,
             CurveType::Secp256k1 => secp256k1_sqrt,
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
         };
-        let y = cols.y.populate(blu_events, chunk, &x_3_plus_b, sqrt_fn);
+        let y = cols.y.populate(blu_events, &x_3_plus_b, sqrt_fn);
 
         let zero = BigUint::zero();
         cols.neg_y
-            .populate(blu_events, chunk, &zero, &y, FieldOperation::Sub);
+            .populate(blu_events, &zero, &y, FieldOperation::Sub);
     }
 }
 
@@ -239,7 +231,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
             cols.sign_bit = F::from_bool(event.sign_bit);
 
             let x = BigUint::from_bytes_le(&event.x_bytes);
-            Self::populate_field_ops(&mut new_byte_lookup_events, event.chunk, cols, x);
+            Self::populate_field_ops(&mut new_byte_lookup_events, cols, x);
 
             for i in 0..cols.x_access.len() {
                 cols.x_access[i].populate(event.x_memory_records[i], &mut new_byte_lookup_events);
@@ -264,14 +256,12 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 if is_y_eq_sqrt_y_result {
                     choice_cols.neg_y_range_check.populate(
                         &mut new_byte_lookup_events,
-                        event.chunk,
                         &neg_y,
                         &modulus,
                     );
                 } else {
                     choice_cols.neg_y_range_check.populate(
                         &mut new_byte_lookup_events,
-                        event.chunk,
                         &decompressed_y,
                         &modulus,
                     );
@@ -282,7 +272,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                     choice_cols.when_neg_y_res_is_lt = F::from_bool(is_y_eq_sqrt_y_result);
                     choice_cols.comparison_lt_cols.populate(
                         &mut new_byte_lookup_events,
-                        event.chunk,
                         &neg_y,
                         &decompressed_y,
                     );
@@ -292,7 +281,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                     choice_cols.when_neg_y_res_is_lt = F::from_bool(!is_y_eq_sqrt_y_result);
                     choice_cols.comparison_lt_cols.populate(
                         &mut new_byte_lookup_events,
-                        event.chunk,
                         &decompressed_y,
                         &neg_y,
                     );
@@ -319,7 +307,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                     cols.x_access[i].access.value = words[i].into();
                 }
 
-                Self::populate_field_ops(&mut vec![], 0, cols, dummy_value);
+                Self::populate_field_ops(&mut vec![], cols, dummy_value);
                 row
             },
             log_rows,
@@ -572,13 +560,11 @@ where
         };
 
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             syscall_id,
             local.ptr,
             local.sign_bit,
             local.is_real,
-            LookupScope::Regional,
         );
     }
 }

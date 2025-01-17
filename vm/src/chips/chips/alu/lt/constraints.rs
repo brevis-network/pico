@@ -153,6 +153,6 @@ where
         // SLT looked
         let lt_op_code = local.is_slt * CB::F::from_canonical_u32(Opcode::SLT as u32)
             + local.is_slt_u * CB::F::from_canonical_u32(Opcode::SLTU as u32);
-        builder.looked_alu(lt_op_code, local.a, local.b, local.c, local.chunk, is_real)
+        builder.looked_alu(lt_op_code, local.a, local.b, local.c, is_real)
     }
 }

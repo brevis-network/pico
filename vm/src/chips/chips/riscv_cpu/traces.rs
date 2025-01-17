@@ -118,8 +118,6 @@ impl<F: PrimeField32> CpuChip<F> {
         cols: &mut CpuCols<F>,
         blu_events: &mut impl ByteRecordBehavior,
     ) -> HashMap<Opcode, Vec<AluEvent>> {
-        let chunk = event.chunk;
-
         let mut new_alu_events = HashMap::new();
 
         // Populate chunk and clk columns.
@@ -156,7 +154,6 @@ impl<F: PrimeField32> CpuChip<F> {
             .map(|x| x.as_canonical_u32())
             .collect::<Vec<_>>();
         blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            chunk,
             ByteOpcode::U8Range,
             0,
             0,
@@ -164,7 +161,6 @@ impl<F: PrimeField32> CpuChip<F> {
             a_bytes[1] as u8,
         ));
         blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            chunk,
             ByteOpcode::U8Range,
             0,
             0,

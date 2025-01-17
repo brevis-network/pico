@@ -12,11 +12,8 @@ use crate::{
         precompiles::sha256::extend::{columns::ShaExtendCols, ShaExtendChip},
     },
     emulator::riscv::syscalls::SyscallCode,
-    machine::{
-        builder::{
-            ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
-        },
-        lookup::LookupScope,
+    machine::builder::{
+        ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
     },
 };
 use core::borrow::Borrow;
@@ -196,13 +193,11 @@ where
 
         // Receive syscall event in first row of 48-cycle.
         builder.looked_syscall(
-            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::SHA_EXTEND.syscall_id()),
             local.w_ptr,
             CB::Expr::ZERO,
             local.cycle_48_start,
-            LookupScope::Regional,
         );
 
         // Assert that is_real is a bool.
