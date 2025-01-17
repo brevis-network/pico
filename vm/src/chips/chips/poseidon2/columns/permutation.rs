@@ -15,10 +15,6 @@ type Perm<T> = [T; PERMUTATION_WIDTH];
 #[derive(AlignedBorrow, Clone)]
 #[repr(C)]
 pub struct PermutationState<T, Config: Poseidon2Config> {
-    //pub external_rounds_state: [[T; PERMUTATION_WIDTH]; NUM_EXTERNAL_ROUNDS],
-    //pub internal_rounds_state: [T; PERMUTATION_WIDTH],
-    //pub internal_rounds_s0: [T; NUM_INTERNAL_ROUNDS_MINUS_ONE],
-    //pub output_state: [T; PERMUTATION_WIDTH],
     pub external_rounds_state: Array<Perm<T>, Config::ExternalRounds>,
     pub internal_rounds_state: Perm<T>,
     pub internal_rounds_s0: Array<T, Config::InternalRoundsM1>,

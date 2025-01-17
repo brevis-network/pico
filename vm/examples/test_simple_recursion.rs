@@ -227,21 +227,36 @@ macro_rules! run {
             });
 
             let stats = recursion_record.stats();
-            debug!("Simple recursion record stats:");
+            info!("Simple recursion record stats:");
             for (key, value) in &stats {
-                debug!("|- {:<28}: {}", key, value);
+                info!("|- {:<28}: {}", key, value);
             }
 
-            // // TODO: The number of CPU and range_check events keeps changing
             let mut expected_stats = HashMap::<String, usize>::new();
-            expected_stats.insert("poseidon2_events".to_string(), 574);
-            expected_stats.insert("poseidon2_hash_events".to_string(), 8000);
-            expected_stats.insert("poseidon2_compress_events".to_string(), 24598);
-            expected_stats.insert("range_check_events".to_string(), 67000);
-            expected_stats.insert("exp_reverse_bits_len_events".to_string(), 660);
+            expected_stats.insert("mem_var_events".to_string(), 9539);
+            expected_stats.insert("select_events".to_string(), 1632);
+            expected_stats.insert("batch_fri_events".to_string(), 4075);
+            expected_stats.insert("poseidon2_events".to_string(), 610);
+            expected_stats.insert("exp_reverse_bits_events".to_string(), 55);
+            assert_eq!(
+                stats.get("mem_var_events"),
+                expected_stats.get("mem_var_events")
+            );
+            assert_eq!(
+                stats.get("select_events"),
+                expected_stats.get("select_events")
+            );
+            assert_eq!(
+                stats.get("batch_fri_events"),
+                expected_stats.get("batch_fri_events")
+            );
             assert_eq!(
                 stats.get("poseidon2_events"),
                 expected_stats.get("poseidon2_events")
+            );
+            assert_eq!(
+                stats.get("exp_reverse_bits_events"),
+                expected_stats.get("exp_reverse_bits_events")
             );
 
             // Setup field_config machine

@@ -1,10 +1,10 @@
-use super::{
-    columns::{BitwiseCols, NUM_BITWISE_COLS},
-    BitwiseChip,
-};
+use super::{columns::NUM_BITWISE_COLS, BitwiseChip};
 use crate::{
     chips::chips::{
-        alu::event::AluEvent,
+        alu::{
+            bitwise::columns::{BitwiseValueCols, NUM_BITWISE_VALUE_COLS},
+            event::AluEvent,
+        },
         byte::event::{ByteLookupEvent, ByteRecordBehavior},
     },
     compiler::{
@@ -15,18 +15,22 @@ use crate::{
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::chip::ChipBehavior,
+    primitives::consts::BITWISE_DATAPAR,
+    recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
+use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
+use rayon::{iter::IndexedParallelIterator, slice::ParallelSliceMut};
 use tracing::debug;
 
 impl<F: PrimeField> ChipBehavior<F> for BitwiseChip<F> {
     type Record = EmulationRecord;
+
     type Program = Program;
 
     fn name(&self) -> String {
@@ -34,29 +38,26 @@ impl<F: PrimeField> ChipBehavior<F> for BitwiseChip<F> {
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        let rows = input
-            .bitwise_events
-            .par_iter()
-            .map(|event| {
-                let mut row = [F::ZERO; NUM_BITWISE_COLS];
-                let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
-                let mut blu = Vec::new();
-                self.event_to_row(event, cols, &mut blu);
-                row
-            })
-            .collect::<Vec<_>>();
+        let events = input.bitwise_events.iter().collect::<Vec<_>>();
+        let nrows = events.len().div_ceil(BITWISE_DATAPAR);
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = match log2_nrows {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nrows, None),
+        };
 
-        // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_BITWISE_COLS,
-        );
+        let mut values = vec![F::ZERO; padded_nrows * NUM_BITWISE_COLS];
 
-        // Pad the trace based on shape
-        let log_rows = input.shape_chip_size(&self.name());
-        pad_to_power_of_two::<NUM_BITWISE_COLS, F>(&mut trace.values, log_rows);
+        let populate_len = events.len() * NUM_BITWISE_VALUE_COLS;
+        values[..populate_len]
+            .par_chunks_mut(NUM_BITWISE_VALUE_COLS)
+            .zip_eq(events)
+            .for_each(|(row, event)| {
+                let cols: &mut BitwiseValueCols<_> = row.borrow_mut();
+                self.event_to_row(event, cols, &mut HashMap::new());
+            });
 
-        trace
+        RowMajorMatrix::new(values, NUM_BITWISE_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -68,9 +69,8 @@ impl<F: PrimeField> ChipBehavior<F> for BitwiseChip<F> {
             .map(|events| {
                 let mut blu: HashMap<u32, HashMap<ByteLookupEvent, usize>> = HashMap::new();
                 events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_BITWISE_COLS];
-                    let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    let mut dummy = BitwiseValueCols::default();
+                    self.event_to_row(event, &mut dummy, &mut blu);
                 });
                 blu
             })
@@ -96,7 +96,7 @@ impl<F: Field> BitwiseChip<F> {
     fn event_to_row(
         &self,
         event: &AluEvent,
-        cols: &mut BitwiseCols<F>,
+        cols: &mut BitwiseValueCols<F>,
         blu: &mut impl ByteRecordBehavior,
     ) {
         let a = event.a.to_le_bytes();

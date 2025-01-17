@@ -4,11 +4,11 @@ use crate::{
         global_interaction::GlobalInteractionOperation,
     },
     compiler::word::Word,
+    primitives::consts::LOCAL_MEMORY_DATAPAR,
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
-pub const NUM_LOCAL_MEMORY_ENTRIES_PER_ROW: usize = 4;
 pub const NUM_MEMORY_LOCAL_INIT_COLS: usize = size_of::<MemoryLocalCols<u8>>();
 
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
@@ -48,6 +48,6 @@ pub struct SingleMemoryLocal<T> {
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MemoryLocalCols<T> {
-    pub memory_local_entries: [SingleMemoryLocal<T>; NUM_LOCAL_MEMORY_ENTRIES_PER_ROW],
+    pub memory_local_entries: [SingleMemoryLocal<T>; LOCAL_MEMORY_DATAPAR],
     pub global_accumulation_cols: GlobalAccumulationOperation<T, 8>,
 }

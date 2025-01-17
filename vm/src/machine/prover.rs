@@ -493,20 +493,6 @@ where
             .map(|log_degree| 1 << log_degree)
             .collect::<Vec<_>>();
 
-        info!("Chip log degrees:");
-        chips
-            .iter()
-            .zip_eq(log_main_degrees.iter())
-            .zip_eq(log_quotient_degrees.iter())
-            .for_each(|((chip, log_main_degree), log_quotient_degree)| {
-                info!(
-                    "   |- {:<20} main: {:<8} quotient: {:<8}",
-                    chip.name(),
-                    log_main_degree,
-                    log_quotient_degree
-                );
-            });
-
         // Compute quotient values
         let quotient_domains = main_domains
             .iter()

@@ -225,6 +225,22 @@ macro_rules! impl_combine_machine {
                     all_vks.clear();
                 }
 
+                // proof stats
+                info!("COMBINE chip log degrees:");
+                all_proofs
+                    .iter()
+                    .enumerate()
+                    .for_each(|(i, proof)| {
+                        info!("Proof {}", i);
+                        proof.main_chip_ordering.iter().for_each(|(chip_name, idx)| {
+                            info!(
+                                "   |- {:<20} main: {:<8}",
+                                chip_name,
+                                proof.opened_values.chips_opened_values[*idx].log_main_degree,
+                            );
+                        });
+                    });
+
                 // construct meta proof
                 MetaProof::new(all_proofs.into(), all_vks.into(), None)
             }

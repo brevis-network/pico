@@ -21,7 +21,7 @@ use crate::{
                 MemoryChipType::{Finalize, Initialize},
                 MemoryInitializeFinalizeChip,
             },
-            local::{columns::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW, MemoryLocalChip},
+            local::MemoryLocalChip,
             read_write::MemoryReadWriteChip,
         },
         riscv_program::ProgramChip,
@@ -34,6 +34,7 @@ use crate::{
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::chip::ChipBehavior,
+    primitives::consts::LOCAL_MEMORY_DATAPAR,
 };
 use p3_field::PrimeField32;
 use p3_util::log2_ceil_usize;
@@ -466,9 +467,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                             *allowed_log_height,
                         ) {
                             let mem_events_height = shape[2].1;
-                            if mem_events
-                                <= (1 << mem_events_height) * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW
-                            {
+                            if mem_events <= (1 << mem_events_height) * LOCAL_MEMORY_DATAPAR {
                                 info!(
                                     "Chunk Lifted: Precompile={}, AllowedLogHeight={}",
                                     chip_name, allowed_log_height
@@ -477,9 +476,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                                 let old_height_log = log2_ceil_usize(precompile_events);
                                 let new_height_log = allowed_log_height;
 
-                                let old_mem_events_log = log2_ceil_usize(
-                                    mem_events.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW),
-                                );
+                                let old_mem_events_log =
+                                    log2_ceil_usize(mem_events.div_ceil(LOCAL_MEMORY_DATAPAR));
                                 let new_mem_events_log = mem_events_height;
 
                                 info!(
@@ -538,7 +536,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                     (
                         MemoryLocalChip::<F>::default().name(),
                         (((1 << allowed_log_height) * mem_events_per_row)
-                            .div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW * event_rows)
+                            .div_ceil(LOCAL_MEMORY_DATAPAR * event_rows)
                             .next_power_of_two()
                             .ilog2() as usize)
                             .max(4),

@@ -71,6 +71,21 @@ where
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();
+
+        info!("EMBED chip log degrees:");
+        proofs.iter().enumerate().for_each(|(i, proof)| {
+            info!("Proof {}", i);
+            proof
+                .main_chip_ordering
+                .iter()
+                .for_each(|(chip_name, idx)| {
+                    info!(
+                        "   |- {:<20} main: {:<8}",
+                        chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
+                    );
+                });
+        });
+
         MetaProof::new(proofs.into(), vks, None)
     }
 

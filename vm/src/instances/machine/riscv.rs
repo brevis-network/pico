@@ -366,7 +366,19 @@ where
         #[cfg(feature = "debug-lookups")]
         global_lookup_debugger.print_results();
 
-        // TODO: print more summary numbers
+        info!("RISCV chip log degrees:");
+        all_proofs.iter().enumerate().for_each(|(i, proof)| {
+            info!("Proof {}", i);
+            proof
+                .main_chip_ordering
+                .iter()
+                .for_each(|(chip_name, idx)| {
+                    info!(
+                        "   |- {:<20} main: {:<8}",
+                        chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
+                    );
+                });
+        });
 
         let pv_stream = emulator.get_pv_stream();
         let riscv_emulator = emulator.emulator.unwrap();

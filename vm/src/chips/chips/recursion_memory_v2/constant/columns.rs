@@ -1,8 +1,6 @@
 use super::super::MemoryAccessCols;
-use crate::recursion_v2::air::Block;
+use crate::{primitives::consts::CONST_MEM_DATAPAR, recursion_v2::air::Block};
 use pico_derive::AlignedBorrow;
-
-pub const NUM_CONST_MEM_ENTRIES_PER_ROW: usize = 2;
 
 pub const NUM_MEM_INIT_COLS: usize = core::mem::size_of::<MemoryCols<u8>>();
 
@@ -19,5 +17,5 @@ pub const NUM_MEM_PREPROCESSED_INIT_COLS: usize =
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MemoryPreprocessedCols<F: Copy> {
-    pub values_and_accesses: [(Block<F>, MemoryAccessCols<F>); NUM_CONST_MEM_ENTRIES_PER_ROW],
+    pub values_and_accesses: [(Block<F>, MemoryAccessCols<F>); CONST_MEM_DATAPAR],
 }

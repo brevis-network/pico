@@ -1,17 +1,19 @@
-use crate::recursion_v2::types::{Address, BaseAluIo};
+use crate::{
+    primitives::consts::BASE_ALU_DATAPAR,
+    recursion_v2::types::{Address, BaseAluIo},
+};
 use pico_derive::AlignedBorrow;
+use std::mem::size_of;
 
-pub const NUM_BASE_ALU_ENTRIES_PER_ROW: usize = 4;
-
-pub const NUM_BASE_ALU_COLS: usize = core::mem::size_of::<BaseAluCols<u8>>();
+pub const NUM_BASE_ALU_COLS: usize = size_of::<BaseAluCols<u8>>();
 
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct BaseAluCols<F: Copy> {
-    pub values: [BaseAluValueCols<F>; NUM_BASE_ALU_ENTRIES_PER_ROW],
+    pub values: [BaseAluValueCols<F>; BASE_ALU_DATAPAR],
 }
 
-pub const NUM_BASE_ALU_VALUE_COLS: usize = core::mem::size_of::<BaseAluValueCols<u8>>();
+pub const NUM_BASE_ALU_VALUE_COLS: usize = size_of::<BaseAluValueCols<u8>>();
 
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
@@ -25,7 +27,7 @@ pub const NUM_BASE_ALU_PREPROCESSED_COLS: usize =
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct BaseAluPreprocessedCols<F: Copy> {
-    pub accesses: [BaseAluAccessCols<F>; NUM_BASE_ALU_ENTRIES_PER_ROW],
+    pub accesses: [BaseAluAccessCols<F>; BASE_ALU_DATAPAR],
 }
 
 pub const NUM_BASE_ALU_ACCESS_COLS: usize = core::mem::size_of::<BaseAluAccessCols<u8>>();

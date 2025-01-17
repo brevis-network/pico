@@ -296,32 +296,34 @@ impl<F: PrimeField32, const DEGREE: usize, Config: Poseidon2Config>
             }
 
             // Apply the sbox.
-            if F::field_type() == FieldType::TypeBabyBear {
-                // BabyBear version
-                let mut sbox_deg_7: [F; 16] = [F::ZERO; PERMUTATION_WIDTH];
-                let mut sbox_deg_3: [F; 16] = [F::ZERO; PERMUTATION_WIDTH];
-                for i in 0..PERMUTATION_WIDTH {
-                    sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
-                    sbox_deg_7[i] = sbox_deg_3[i] * sbox_deg_3[i] * add_rc[i];
-                }
-                if let Some(sbox) = sbox.as_deref_mut() {
-                    sbox[r] = sbox_deg_3;
-                }
+            match F::field_type() {
+                FieldType::TypeBabyBear => {
+                    // BabyBear version
+                    let mut sbox_deg_7: [F; 16] = [F::ZERO; PERMUTATION_WIDTH];
+                    let mut sbox_deg_3: [F; 16] = [F::ZERO; PERMUTATION_WIDTH];
+                    for i in 0..PERMUTATION_WIDTH {
+                        sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
+                        sbox_deg_7[i] = sbox_deg_3[i] * sbox_deg_3[i] * add_rc[i];
+                    }
+                    if let Some(sbox) = sbox.as_deref_mut() {
+                        sbox[r] = sbox_deg_3;
+                    }
 
-                sbox_deg_7
-            } else if F::field_type() == FieldType::TypeKoalaBear {
-                // KoalaBear version
-                let mut sbox_deg_3: [F; 16] = [F::ZERO; PERMUTATION_WIDTH];
-                for i in 0..PERMUTATION_WIDTH {
-                    sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
+                    sbox_deg_7
                 }
-                if let Some(sbox) = sbox.as_deref_mut() {
-                    sbox[r] = sbox_deg_3;
-                }
+                FieldType::TypeKoalaBear => {
+                    // KoalaBear version
+                    let mut sbox_deg_3: [F; 16] = [F::ZERO; PERMUTATION_WIDTH];
+                    for i in 0..PERMUTATION_WIDTH {
+                        sbox_deg_3[i] = add_rc[i] * add_rc[i] * add_rc[i];
+                    }
+                    if let Some(sbox) = sbox.as_deref_mut() {
+                        sbox[r] = sbox_deg_3;
+                    }
 
-                sbox_deg_3
-            } else {
-                panic!("Unsupported field type: {:?}", F::field_type());
+                    sbox_deg_3
+                }
+                _ => panic!("Unsupported field type: {:?}", F::field_type()),
             }
         };
 
@@ -343,17 +345,19 @@ impl<F: PrimeField32, const DEGREE: usize, Config: Poseidon2Config>
             let add_rc = state[0] + F::from_wrapped_u32(RC_16_30_U32[round][0]);
 
             // Apply the sbox.
-            if F::field_type() == FieldType::TypeBabyBear {
-                // BabyBear version
-                sbox_deg_3[r] = add_rc * add_rc * add_rc;
-                let sbox_deg_7 = sbox_deg_3[r] * sbox_deg_3[r] * add_rc;
-                state[0] = sbox_deg_7;
-            } else if F::field_type() == FieldType::TypeKoalaBear {
-                // KoalaBear version
-                sbox_deg_3[r] = add_rc * add_rc * add_rc;
-                state[0] = sbox_deg_3[r];
-            } else {
-                panic!("Unsupported field type: {:?}", F::field_type());
+            match F::field_type() {
+                FieldType::TypeBabyBear => {
+                    // BabyBear version
+                    sbox_deg_3[r] = add_rc * add_rc * add_rc;
+                    let sbox_deg_7 = sbox_deg_3[r] * sbox_deg_3[r] * add_rc;
+                    state[0] = sbox_deg_7;
+                }
+                FieldType::TypeKoalaBear => {
+                    // KoalaBear version
+                    sbox_deg_3[r] = add_rc * add_rc * add_rc;
+                    state[0] = sbox_deg_3[r];
+                }
+                _ => panic!("Unsupported field type: {:?}", F::field_type()),
             }
 
             internal_linear_layer::<F, _>(&mut state);

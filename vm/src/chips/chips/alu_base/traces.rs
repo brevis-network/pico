@@ -2,6 +2,7 @@ use crate::{
     chips::chips::alu_base::{columns::*, BaseAluChip},
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
     machine::chip::ChipBehavior,
+    primitives::consts::BASE_ALU_DATAPAR,
     recursion_v2::{
         runtime::{BaseAluOpcode, RecursionRecord},
         stark::utils::next_power_of_two,
@@ -33,7 +34,7 @@ impl<F: PrimeField32> ChipBehavior<F> for BaseAluChip<F> {
             })
             .collect::<Vec<_>>();
 
-        let nb_rows = instructions.len().div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW);
+        let nb_rows = instructions.len().div_ceil(BASE_ALU_DATAPAR);
         let fixed_log2_rows = program.fixed_log2_rows(&self.name());
         let padded_nb_rows = match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
@@ -75,8 +76,9 @@ impl<F: PrimeField32> ChipBehavior<F> for BaseAluChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        // todo: nb -> n
         let events = &input.base_alu_events;
-        let nb_rows = events.len().div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW);
+        let nb_rows = events.len().div_ceil(BASE_ALU_DATAPAR);
         let fixed_log2_rows = input.fixed_log2_rows(&self.name());
         let padded_nb_rows = match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,

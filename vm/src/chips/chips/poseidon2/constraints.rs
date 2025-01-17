@@ -25,23 +25,17 @@ use typenum::Unsigned;
 
 impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2Chip<DEGREE, BabyBearConfig, F> {
     fn width(&self) -> usize {
-        if DEGREE == 3 {
-            BABYBEAR_NUM_POSEIDON2_LD_COLS
-        } else if DEGREE == 9 {
-            BABYBEAR_NUM_POSEIDON2_HD_COLS
-        } else {
-            panic!("Unsupported degree: {}", DEGREE);
+        match DEGREE {
+            3 => BABYBEAR_NUM_POSEIDON2_LD_COLS,
+            9 => BABYBEAR_NUM_POSEIDON2_HD_COLS,
+            _ => panic!("Unsupported degree: {}", DEGREE),
         }
     }
 }
 
 impl<F, const DEGREE: usize> BaseAir<F> for Poseidon2Chip<DEGREE, KoalaBearConfig, F> {
     fn width(&self) -> usize {
-        if DEGREE == 3 || DEGREE == 9 {
-            KOALABEAR_NUM_POSEIDON2_COLS
-        } else {
-            panic!("Unsupported degree: {}", DEGREE);
-        }
+        KOALABEAR_NUM_POSEIDON2_COLS
     }
 }
 
@@ -123,33 +117,39 @@ impl<const DEGREE: usize, Config: Poseidon2Config, F: Field> Poseidon2Chip<DEGRE
 
         // Apply the sboxes.
         let mut state;
-        if F::field_type() == FieldType::TypeBabyBear {
-            let mut sbox_deg_7: [CB::Expr; PERMUTATION_WIDTH] = array::from_fn(|_| CB::Expr::ZERO);
-            let mut sbox_deg_3: [CB::Expr; PERMUTATION_WIDTH] = array::from_fn(|_| CB::Expr::ZERO);
-            for i in 0..PERMUTATION_WIDTH {
-                let calculated_sbox_deg_3 =
-                    add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
+        match F::field_type() {
+            FieldType::TypeBabyBear => {
+                let mut sbox_deg_7: [CB::Expr; PERMUTATION_WIDTH] =
+                    array::from_fn(|_| CB::Expr::ZERO);
+                let mut sbox_deg_3: [CB::Expr; PERMUTATION_WIDTH] =
+                    array::from_fn(|_| CB::Expr::ZERO);
+                for i in 0..PERMUTATION_WIDTH {
+                    let calculated_sbox_deg_3 =
+                        add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
 
-                if let Some(external_sbox) = local_row.external_rounds_sbox() {
-                    builder.assert_eq(external_sbox[r][i].into(), calculated_sbox_deg_3);
-                    sbox_deg_3[i] = external_sbox[r][i].into();
-                } else {
-                    sbox_deg_3[i] = calculated_sbox_deg_3;
+                    if let Some(external_sbox) = local_row.external_rounds_sbox() {
+                        builder.assert_eq(external_sbox[r][i].into(), calculated_sbox_deg_3);
+                        sbox_deg_3[i] = external_sbox[r][i].into();
+                    } else {
+                        sbox_deg_3[i] = calculated_sbox_deg_3;
+                    }
+
+                    sbox_deg_7[i] =
+                        sbox_deg_3[i].clone() * sbox_deg_3[i].clone() * add_rc[i].clone();
                 }
-
-                sbox_deg_7[i] = sbox_deg_3[i].clone() * sbox_deg_3[i].clone() * add_rc[i].clone();
+                state = sbox_deg_7;
             }
-            state = sbox_deg_7;
-        } else if F::field_type() == FieldType::TypeKoalaBear {
-            let mut sbox_deg_3: [CB::Expr; PERMUTATION_WIDTH] = array::from_fn(|_| CB::Expr::ZERO);
-            for i in 0..PERMUTATION_WIDTH {
-                sbox_deg_3[i] = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
+            FieldType::TypeKoalaBear => {
+                let mut sbox_deg_3: [CB::Expr; PERMUTATION_WIDTH] =
+                    array::from_fn(|_| CB::Expr::ZERO);
+                for i in 0..PERMUTATION_WIDTH {
+                    sbox_deg_3[i] = add_rc[i].clone() * add_rc[i].clone() * add_rc[i].clone();
 
-                assert!(local_row.external_rounds_sbox().is_none());
+                    assert!(local_row.external_rounds_sbox().is_none());
+                }
+                state = sbox_deg_3;
             }
-            state = sbox_deg_3;
-        } else {
-            panic!("Unsupported field type: {:?}", F::field_type());
+            _ => panic!("Unsupported field type: {:?}", F::field_type()),
         }
 
         // Apply the linear layer.
@@ -193,13 +193,15 @@ impl<const DEGREE: usize, Config: Poseidon2Config, F: Field> Poseidon2Chip<DEGRE
             }
 
             // Apply the sboxes.
-            if F::field_type() == FieldType::TypeBabyBear {
-                let sbox_deg_7 = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc.clone();
-                state[0] = sbox_deg_7.clone();
-            } else if F::field_type() == FieldType::TypeKoalaBear {
-                state[0] = sbox_deg_3.clone();
-            } else {
-                panic!("Unsupported field type: {:?}", F::field_type());
+            match F::field_type() {
+                FieldType::TypeBabyBear => {
+                    let sbox_deg_7 = sbox_deg_3.clone() * sbox_deg_3.clone() * add_rc.clone();
+                    state[0] = sbox_deg_7.clone();
+                }
+                FieldType::TypeKoalaBear => {
+                    state[0] = sbox_deg_3.clone();
+                }
+                _ => panic!("Unsupported field type: {:?}", F::field_type()),
             }
 
             internal_linear_layer::<F, _>(&mut state);

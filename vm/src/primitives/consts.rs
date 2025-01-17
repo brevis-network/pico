@@ -229,3 +229,21 @@ pub const BN254_S_BOX_DEGREE: u64 = 5;
 
 pub const BABYBEAR_W: u32 = 11;
 pub const KOALABEAR_W: u32 = 3;
+
+/*
+Chip Data Parallelism
+ */
+pub const ADD_SUB_DATAPAR: usize = 8; // optimized
+pub const BITWISE_DATAPAR: usize = 2; // optimized
+pub const LT_DATAPAR: usize = 1; // tbd
+pub const SL_DATAPAR: usize = 1; // tbd
+pub const SR_DATAPAR: usize = 1; // tbd
+pub const MEMORY_RW_DATAPAR: usize = 1; // tbd
+pub const LOCAL_MEMORY_DATAPAR: usize = 4; // fixed
+
+pub const BASE_ALU_DATAPAR: usize = 2; // optimized
+pub const EXT_ALU_DATAPAR: usize = 4; // optimized
+pub const VAR_MEM_DATAPAR: usize = 4; // optimized
+pub const CONST_MEM_DATAPAR: usize = 2; // 1 or 2
+pub const SELECT_DATAPAR: usize = 2; // optimized
+pub const POSEIDON2_DATAPAR: usize = 1; // tbd

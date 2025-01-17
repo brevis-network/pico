@@ -1,5 +1,4 @@
 use hashbrown::HashSet;
-use itertools::Itertools;
 use p3_air::{Air, BaseAir};
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -19,7 +18,7 @@ use crate::{
                     MemoryChipType::{Finalize, Initialize},
                     MemoryInitializeFinalizeChip,
                 },
-                local::{columns::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW, MemoryLocalChip},
+                local::MemoryLocalChip,
                 read_write::MemoryReadWriteChip,
             },
             riscv_program::ProgramChip,
@@ -59,6 +58,7 @@ use crate::{
         field::FieldSpecificPoseidon2Config,
         lookup::{LookupScope, LookupType},
     },
+    primitives::consts::{ADD_SUB_DATAPAR, BITWISE_DATAPAR, LOCAL_MEMORY_DATAPAR},
 };
 
 type FpOpBn254<F> = FpOpChip<F, Bn254BaseField>;
@@ -153,11 +153,11 @@ where
             ),
             (
                 Self::AddSub(Default::default()).name(),
-                record.add_events.len() + record.sub_events.len(),
+                (record.add_events.len() + record.sub_events.len()).div_ceil(ADD_SUB_DATAPAR),
             ),
             (
                 Self::Bitwise(Default::default()).name(),
-                record.bitwise_events.len(),
+                record.bitwise_events.len().div_ceil(BITWISE_DATAPAR),
             ),
             (
                 Self::Mul(Default::default()).name(),
@@ -176,9 +176,8 @@ where
                 Self::MemoryLocal(Default::default()).name(),
                 record
                     .get_local_mem_events()
-                    .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
-                    .into_iter()
-                    .count(),
+                    .count()
+                    .div_ceil(LOCAL_MEMORY_DATAPAR),
             ),
             (
                 Self::MemoryReadWrite(Default::default()).name(),

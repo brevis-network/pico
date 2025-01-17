@@ -1,5 +1,5 @@
 use super::{
-    columns::{MemoryLocalCols, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW, NUM_MEMORY_LOCAL_INIT_COLS},
+    columns::{MemoryLocalCols, NUM_MEMORY_LOCAL_INIT_COLS},
     MemoryLocalChip,
 };
 use crate::{
@@ -11,6 +11,7 @@ use crate::{
         lookup::LookupScope,
         septic::{SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
     },
+    primitives::consts::LOCAL_MEMORY_DATAPAR,
     recursion_v2::stark::utils::next_power_of_two,
 };
 use p3_field::PrimeField32;
@@ -49,17 +50,17 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
             .enumerate()
             .map(|(i, rows)| {
                 let mut point_chunks =
-                    Vec::with_capacity(chunk_size * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW * 2 + 1);
+                    Vec::with_capacity(chunk_size * LOCAL_MEMORY_DATAPAR * 2 + 1);
                 if i == 0 {
                     point_chunks.push(SepticCurveComplete::Affine(SepticDigest::<F>::zero().0));
                 }
                 rows.chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS)
                     .enumerate()
                     .for_each(|(j, row)| {
-                        let idx = (i * chunk_size + j) * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW;
+                        let idx = (i * chunk_size + j) * LOCAL_MEMORY_DATAPAR;
 
                         let cols: &mut MemoryLocalCols<F> = row.borrow_mut();
-                        for k in 0..NUM_LOCAL_MEMORY_ENTRIES_PER_ROW {
+                        for k in 0..LOCAL_MEMORY_DATAPAR {
                             let cols = &mut cols.memory_local_entries[k];
                             if idx + k < events.len() {
                                 let event = &events[idx + k];
@@ -149,9 +150,9 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
 
                         let cols: &mut MemoryLocalCols<F> = row.borrow_mut();
                         if idx < nb_rows {
-                            let start = NUM_LOCAL_MEMORY_ENTRIES_PER_ROW * 2 * idx;
+                            let start = LOCAL_MEMORY_DATAPAR * 2 * idx;
                             let end = std::cmp::min(
-                                NUM_LOCAL_MEMORY_ENTRIES_PER_ROW * 2 * (idx + 1) + 1,
+                                LOCAL_MEMORY_DATAPAR * 2 * (idx + 1) + 1,
                                 cumulative_sum.len(),
                             );
                             cols.global_accumulation_cols.populate_real(
@@ -160,7 +161,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
                                 final_sum_checker,
                             );
                         } else {
-                            for k in 0..NUM_LOCAL_MEMORY_ENTRIES_PER_ROW {
+                            for k in 0..LOCAL_MEMORY_DATAPAR {
                                 cols.memory_local_entries[k]
                                     .initial_global_interaction_cols
                                     .populate_dummy();
@@ -184,35 +185,33 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
         let blu_events = events
-            .par_chunks(chunk_size * NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
+            .par_chunks(chunk_size * LOCAL_MEMORY_DATAPAR)
             .flat_map(|events| {
                 let mut blu = vec![];
-                events
-                    .chunks(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
-                    .for_each(|events| {
-                        let mut row = [F::ZERO; NUM_MEMORY_LOCAL_INIT_COLS];
-                        let cols: &mut MemoryLocalCols<F> = row.as_mut_slice().borrow_mut();
-                        for k in 0..NUM_LOCAL_MEMORY_ENTRIES_PER_ROW {
-                            let cols = &mut cols.memory_local_entries[k];
-                            if k < events.len() {
-                                let event = events[k];
-                                cols.initial_global_interaction_cols
-                                    .populate_memory_range_check_witness(
-                                        event.initial_mem_access.chunk,
-                                        event.initial_mem_access.value,
-                                        true,
-                                        &mut blu,
-                                    );
-                                cols.final_global_interaction_cols
-                                    .populate_memory_range_check_witness(
-                                        event.final_mem_access.chunk,
-                                        event.final_mem_access.value,
-                                        true,
-                                        &mut blu,
-                                    );
-                            }
+                events.chunks(LOCAL_MEMORY_DATAPAR).for_each(|events| {
+                    let mut row = [F::ZERO; NUM_MEMORY_LOCAL_INIT_COLS];
+                    let cols: &mut MemoryLocalCols<F> = row.as_mut_slice().borrow_mut();
+                    for k in 0..LOCAL_MEMORY_DATAPAR {
+                        let cols = &mut cols.memory_local_entries[k];
+                        if k < events.len() {
+                            let event = events[k];
+                            cols.initial_global_interaction_cols
+                                .populate_memory_range_check_witness(
+                                    event.initial_mem_access.chunk,
+                                    event.initial_mem_access.value,
+                                    true,
+                                    &mut blu,
+                                );
+                            cols.final_global_interaction_cols
+                                .populate_memory_range_check_witness(
+                                    event.final_mem_access.chunk,
+                                    event.final_mem_access.value,
+                                    true,
+                                    &mut blu,
+                                );
                         }
-                    });
+                    }
+                });
                 blu
             })
             .collect::<Vec<_>>();

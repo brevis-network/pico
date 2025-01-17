@@ -2,13 +2,13 @@ use crate::{
     chips::chips::alu_ext::{
         columns::{
             ExtAluAccessCols, ExtAluValueCols, NUM_EXT_ALU_ACCESS_COLS, NUM_EXT_ALU_COLS,
-            NUM_EXT_ALU_ENTRIES_PER_ROW, NUM_EXT_ALU_PREPROCESSED_COLS, NUM_EXT_ALU_VALUE_COLS,
+            NUM_EXT_ALU_PREPROCESSED_COLS, NUM_EXT_ALU_VALUE_COLS,
         },
         ExtAluChip,
     },
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
     machine::chip::ChipBehavior,
-    primitives::consts::EXTENSION_DEGREE,
+    primitives::consts::{EXTENSION_DEGREE, EXT_ALU_DATAPAR},
     recursion_v2::{
         runtime::{ExtAluOpcode, RecursionRecord},
         stark::utils::next_power_of_two,
@@ -40,7 +40,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
             })
             .collect::<Vec<_>>();
 
-        let nb_rows = instructions.len().div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
+        let nb_rows = instructions.len().div_ceil(EXT_ALU_DATAPAR);
         let fixed_log2_rows = program.fixed_log2_rows(&self.name());
         let padded_nb_rows = match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
@@ -83,7 +83,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         let events = &input.ext_alu_events;
-        let nb_rows = events.len().div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW);
+        let nb_rows = events.len().div_ceil(EXT_ALU_DATAPAR);
         let fixed_log2_rows = input.fixed_log2_rows(&self.name());
         let padded_nb_rows = match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,

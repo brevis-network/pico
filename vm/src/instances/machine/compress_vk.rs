@@ -80,6 +80,20 @@ where
 
         let proofs = self.base_machine.prove_ensemble(witness.pk(), &records);
 
+        info!("COMPRESS_VK chip log degrees:");
+        proofs.iter().enumerate().for_each(|(i, proof)| {
+            info!("Proof {}", i);
+            proof
+                .main_chip_ordering
+                .iter()
+                .for_each(|(chip_name, idx)| {
+                    info!(
+                        "   |- {:<20} main: {:<8}",
+                        chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
+                    );
+                });
+        });
+
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();
         MetaProof::new(proofs.into(), vks, None)

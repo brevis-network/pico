@@ -1,14 +1,23 @@
-use crate::compiler::word::Word;
-use core::mem::size_of;
+use crate::{compiler::word::Word, primitives::consts::BITWISE_DATAPAR};
 use pico_derive::AlignedBorrow;
+use std::mem::size_of;
 
 /// The number of main trace columns for `BitwiseChip`.
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
 
-/// The column layout for the chip.
+/// The column that contains multiple value columns
 #[derive(AlignedBorrow, Clone, Copy, Default)]
 #[repr(C)]
 pub struct BitwiseCols<T> {
+    pub values: [BitwiseValueCols<T>; BITWISE_DATAPAR],
+}
+
+pub const NUM_BITWISE_VALUE_COLS: usize = size_of::<BitwiseValueCols<u8>>();
+
+/// The column layout for the chip.
+#[derive(AlignedBorrow, Clone, Copy, Default)]
+#[repr(C)]
+pub struct BitwiseValueCols<T> {
     /// The chunk number, used for byte lookup table.
     pub chunk: T,
 

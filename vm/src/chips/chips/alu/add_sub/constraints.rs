@@ -1,15 +1,24 @@
 use crate::{
     chips::{
-        chips::alu::add_sub::{columns::AddSubCols, AddSubChip},
+        chips::alu::add_sub::{
+            columns::{AddSubCols, AddSubValueCols, NUM_ADD_SUB_COLS},
+            AddSubChip,
+        },
         gadgets::add::AddGadget,
     },
     compiler::riscv::opcode::Opcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
-use p3_air::Air;
+use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
+
+impl<F: Field> BaseAir<F> for AddSubChip<F> {
+    fn width(&self) -> usize {
+        NUM_ADD_SUB_COLS
+    }
+}
 
 impl<F: Field, CB: ChipBuilder<F>> Air<CB> for AddSubChip<F>
 where
@@ -20,41 +29,51 @@ where
         let local = main.row_slice(0);
         let local: &AddSubCols<CB::Var> = (*local).borrow();
 
-        // Evaluate the addition operation.
-        AddGadget::<CB::F>::eval(
-            builder,
-            local.operand_1,
-            local.operand_2,
-            local.add_operation,
-            local.is_add + local.is_sub,
-        );
+        for AddSubValueCols {
+            chunk,
+            add_operation,
+            operand_1,
+            operand_2,
+            is_add,
+            is_sub,
+        } in local.values
+        {
+            // Evaluate the addition operation.
+            AddGadget::<CB::F>::eval(
+                builder,
+                operand_1,
+                operand_2,
+                add_operation,
+                is_add + is_sub,
+            );
 
-        let opcode = local.is_add * Opcode::ADD.as_field::<CB::F>()
-            + local.is_sub * Opcode::SUB.as_field::<CB::F>();
+            let opcode =
+                is_add * Opcode::ADD.as_field::<CB::F>() + is_sub * Opcode::SUB.as_field::<CB::F>();
 
-        // Receive the arguments.  There are seperate receives for ADD and SUB.
-        // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
-        builder.looked_alu(
-            opcode.clone(),
-            local.add_operation.value,
-            local.operand_1,
-            local.operand_2,
-            local.chunk,
-            local.is_add,
-        );
-        // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
-        builder.looked_alu(
-            opcode,
-            local.operand_1,
-            local.add_operation.value,
-            local.operand_2,
-            local.chunk,
-            local.is_sub,
-        );
+            // Receive the arguments.  There are seperate receives for ADD and SUB.
+            // For add, `add_operation.value` is `a`, `operand_1` is `b`, and `operand_2` is `c`.
+            builder.looked_alu(
+                opcode.clone(),
+                add_operation.value,
+                operand_1,
+                operand_2,
+                chunk,
+                is_add,
+            );
+            // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
+            builder.looked_alu(
+                opcode,
+                operand_1,
+                add_operation.value,
+                operand_2,
+                chunk,
+                is_sub,
+            );
 
-        let is_real = local.is_add + local.is_sub;
-        builder.assert_bool(local.is_add);
-        builder.assert_bool(local.is_sub);
-        builder.assert_bool(is_real);
+            let is_real = is_add + is_sub;
+            builder.assert_bool(is_add);
+            builder.assert_bool(is_sub);
+            builder.assert_bool(is_real);
+        }
     }
 }

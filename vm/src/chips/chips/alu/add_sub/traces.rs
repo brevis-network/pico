@@ -2,7 +2,7 @@ use crate::{
     chips::chips::{
         alu::{
             add_sub::{
-                columns::{AddSubCols, NUM_ADD_SUB_COLS},
+                columns::{AddSubValueCols, NUM_ADD_SUB_COLS, NUM_ADD_SUB_VALUE_COLS},
                 AddSubChip,
             },
             event::AluEvent,
@@ -14,77 +14,51 @@ use crate::{
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::chip::ChipBehavior,
+    primitives::consts::ADD_SUB_DATAPAR,
+    recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
-use p3_air::BaseAir;
+use hashbrown::HashMap;
 use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
+use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
+use rayon::{iter::IndexedParallelIterator, slice::ParallelSliceMut};
 use tracing::debug;
-
-impl<F: Field> BaseAir<F> for AddSubChip<F> {
-    fn width(&self) -> usize {
-        NUM_ADD_SUB_COLS
-    }
-}
 
 impl<F: PrimeField> ChipBehavior<F> for AddSubChip<F> {
     type Record = EmulationRecord;
+
     type Program = Program;
 
     fn name(&self) -> String {
         "AddSub".to_string()
     }
 
-    fn generate_main(
-        &self,
-        input: &EmulationRecord,
-        _output: &mut Self::Record,
-    ) -> RowMajorMatrix<F> {
-        // Generate the rows for the trace.
-        let chunk_size = std::cmp::max(
-            (input.add_events.len() + input.sub_events.len()) / num_cpus::get(),
-            1,
-        );
-        let merged_events = input
+    fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
+        let events = input
             .add_events
             .iter()
             .chain(input.sub_events.iter())
             .collect::<Vec<_>>();
+        let nrows = events.len().div_ceil(ADD_SUB_DATAPAR);
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = match log2_nrows {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nrows, None),
+        };
+        let mut values = vec![F::ZERO; padded_nrows * NUM_ADD_SUB_COLS];
 
-        let row_batches = merged_events
-            .par_chunks(chunk_size)
-            .map(|events| {
-                let rows = events
-                    .iter()
-                    .map(|event| {
-                        let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
-                        let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                        let mut blu = Vec::new();
-                        self.event_to_row(event, cols, &mut blu);
-                        row
-                    })
-                    .collect::<Vec<_>>();
-                rows
-            })
-            .collect::<Vec<_>>();
+        let populate_len = events.len() * NUM_ADD_SUB_VALUE_COLS;
+        values[..populate_len]
+            .par_chunks_mut(NUM_ADD_SUB_VALUE_COLS)
+            .zip_eq(events)
+            .for_each(|(row, event)| {
+                let cols: &mut AddSubValueCols<_> = row.borrow_mut();
+                self.event_to_row(event, cols, &mut HashMap::new());
+            });
 
-        let mut rows: Vec<[F; NUM_ADD_SUB_COLS]> = vec![];
-        for row_batch in row_batches {
-            rows.extend(row_batch);
-        }
-        // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_ADD_SUB_COLS,
-        );
-
-        // Pad the trace based on shape
-        let log_rows = input.shape_chip_size(&self.name());
-        pad_to_power_of_two::<NUM_ADD_SUB_COLS, F>(&mut trace.values, log_rows);
-
-        trace
+        RowMajorMatrix::new(values, NUM_ADD_SUB_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -103,9 +77,8 @@ impl<F: PrimeField> ChipBehavior<F> for AddSubChip<F> {
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
-                    let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    let mut dummy = AddSubValueCols::default();
+                    self.event_to_row(event, &mut dummy, &mut blu);
                 });
                 blu
             })
@@ -130,7 +103,7 @@ impl<F: Field> AddSubChip<F> {
     fn event_to_row(
         &self,
         event: &AluEvent,
-        cols: &mut AddSubCols<F>,
+        cols: &mut AddSubValueCols<F>,
         blu: &mut impl ByteRecordBehavior,
     ) {
         let is_add = event.opcode == Opcode::ADD;

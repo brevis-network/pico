@@ -1,16 +1,13 @@
 use crate::{
     chips::chips::{
-        alu_base::{columns::NUM_BASE_ALU_ENTRIES_PER_ROW, BaseAluChip},
-        alu_ext::{columns::NUM_EXT_ALU_ENTRIES_PER_ROW, ExtAluChip},
+        alu_base::BaseAluChip,
+        alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
         poseidon2::Poseidon2Chip,
         poseidon2_skinny_v2::Poseidon2SkinnyChip,
         public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
-        recursion_memory_v2::{
-            constant::{columns::NUM_CONST_MEM_ENTRIES_PER_ROW, MemoryConstChip},
-            variable::{columns::NUM_VAR_MEM_ENTRIES_PER_ROW, MemoryVarChip},
-        },
+        recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,
     },
     compiler::recursion_v2::{
@@ -26,7 +23,10 @@ use crate::{
         field::{FieldBehavior, FieldSpecificPoseidon2Config, FieldType},
         folder::SymbolicConstraintFolder,
     },
-    primitives::consts::EXTENSION_DEGREE,
+    primitives::consts::{
+        BASE_ALU_DATAPAR, CONST_MEM_DATAPAR, EXTENSION_DEGREE, EXT_ALU_DATAPAR, SELECT_DATAPAR,
+        VAR_MEM_DATAPAR,
+    },
     recursion_v2::{runtime::RecursionRecord, types::ExpReverseBitsInstr},
 };
 use hashbrown::HashMap;
@@ -309,24 +309,20 @@ where
         [
             (
                 Self::MemoryConst(MemoryConstChip::default()),
-                heights
-                    .mem_const_events
-                    .div_ceil(NUM_CONST_MEM_ENTRIES_PER_ROW),
+                heights.mem_const_events.div_ceil(CONST_MEM_DATAPAR),
             ),
             (
                 Self::MemoryVar(MemoryVarChip::default()),
-                heights.mem_var_events.div_ceil(NUM_VAR_MEM_ENTRIES_PER_ROW),
+                heights.mem_var_events.div_ceil(VAR_MEM_DATAPAR),
             ),
             (
                 Self::BaseAlu(BaseAluChip::default()),
-                heights
-                    .base_alu_events
-                    .div_ceil(NUM_BASE_ALU_ENTRIES_PER_ROW),
+                heights.base_alu_events.div_ceil(BASE_ALU_DATAPAR),
             ),
             (
                 Self::ExtAlu(ExtAluChip::default()),
                 if F::field_type() == FieldType::TypeKoalaBear {
-                    heights.ext_alu_events.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW)
+                    heights.ext_alu_events.div_ceil(EXT_ALU_DATAPAR)
                 } else {
                     0
                 },
@@ -346,7 +342,7 @@ where
             (Self::Select(SelectChip::default()), heights.select_events),
             (
                 Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<F>::default()),
-                heights.exp_reverse_bits_len_events,
+                heights.exp_reverse_bits_len_events.div_ceil(SELECT_DATAPAR),
             ),
             (
                 Self::PublicValues(PublicValuesChip::default()),

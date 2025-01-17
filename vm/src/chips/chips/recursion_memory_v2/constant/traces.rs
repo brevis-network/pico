@@ -1,14 +1,12 @@
 use super::{
     super::MemoryAccessCols,
-    columns::{
-        MemoryPreprocessedCols, NUM_CONST_MEM_ENTRIES_PER_ROW, NUM_MEM_INIT_COLS,
-        NUM_MEM_PREPROCESSED_INIT_COLS,
-    },
+    columns::{MemoryPreprocessedCols, NUM_MEM_INIT_COLS, NUM_MEM_PREPROCESSED_INIT_COLS},
     MemoryConstChip,
 };
 use crate::{
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    primitives::consts::CONST_MEM_DATAPAR,
     recursion_v2::{
         runtime::RecursionRecord,
         types::{MemAccessKind, MemInstr},
@@ -58,7 +56,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
                 }
                 _ => None,
             })
-            .chunks(NUM_CONST_MEM_ENTRIES_PER_ROW)
+            .chunks(CONST_MEM_DATAPAR)
             .into_iter()
             .map(|row_vs_as| {
                 let mut row = [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS];
@@ -88,7 +86,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
         let num_rows = input
             .mem_const_count
             .checked_sub(1)
-            .map(|x| x / NUM_CONST_MEM_ENTRIES_PER_ROW + 1)
+            .map(|x| x / CONST_MEM_DATAPAR + 1)
             .unwrap_or_default();
         let rows = std::iter::repeat([F::ZERO; NUM_MEM_INIT_COLS])
             .take(num_rows)

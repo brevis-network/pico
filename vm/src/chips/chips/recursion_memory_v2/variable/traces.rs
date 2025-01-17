@@ -1,8 +1,6 @@
 use super::{
     super::{MemoryAccessCols, NUM_MEM_ACCESS_COLS},
-    columns::{
-        MemoryCols, NUM_MEM_INIT_COLS, NUM_MEM_PREPROCESSED_INIT_COLS, NUM_VAR_MEM_ENTRIES_PER_ROW,
-    },
+    columns::{MemoryCols, NUM_MEM_INIT_COLS, NUM_MEM_PREPROCESSED_INIT_COLS},
     MemoryVarChip,
 };
 use crate::{
@@ -13,6 +11,7 @@ use crate::{
         program::RecursionProgram,
     },
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    primitives::consts::VAR_MEM_DATAPAR,
     recursion_v2::{runtime::RecursionRecord, stark::utils::next_power_of_two},
 };
 use p3_field::PrimeField32;
@@ -63,7 +62,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
             })
             .collect::<Vec<_>>();
 
-        let nb_rows = accesses.len().div_ceil(NUM_VAR_MEM_ENTRIES_PER_ROW);
+        let nb_rows = accesses.len().div_ceil(VAR_MEM_DATAPAR);
         let padded_nb_rows = match program.fixed_log2_rows(&self.name()) {
             Some(log2_rows) => 1 << log2_rows,
             None => next_power_of_two(nb_rows, None),
@@ -90,7 +89,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let rows = input
             .mem_var_events
-            .chunks(NUM_VAR_MEM_ENTRIES_PER_ROW)
+            .chunks(VAR_MEM_DATAPAR)
             .map(|row_events| {
                 let mut row = [F::ZERO; NUM_MEM_INIT_COLS];
                 let cols: &mut MemoryCols<_> = row.as_mut_slice().borrow_mut();
