@@ -49,12 +49,13 @@ impl<F: Field, Config: Poseidon2Config, CB: ChipBuilder<F>, const DEGREE: usize>
     for Poseidon2Chip<DEGREE, Config, F>
 where
     Self: BaseAir<F>,
-    CB::Var: 'static,
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
         let preprocessed = builder.preprocessed();
-        let local_row = Self::convert::<CB::Var>(main.row_slice(0));
+        // the following declaration is needed to bound the lifetime of local_row
+        let main_row0 = main.row_slice(0);
+        let local_row = Self::convert(&main_row0);
         let preprocessed_local = preprocessed.row_slice(0);
         let preprocessed_local: &Poseidon2PreprocessedCols<_> = (*preprocessed_local).borrow();
 
@@ -86,11 +87,11 @@ where
 
         // Apply the external rounds.
         for r in 0..Config::ExternalRounds::USIZE {
-            self.eval_external_round(builder, local_row.as_ref(), r);
+            self.eval_external_round(builder, local_row, r);
         }
 
         // Apply the internal rounds.
-        self.eval_internal_rounds(builder, local_row.as_ref());
+        self.eval_internal_rounds(builder, local_row);
     }
 }
 
@@ -99,7 +100,7 @@ impl<const DEGREE: usize, Config: Poseidon2Config, F: Field> Poseidon2Chip<DEGRE
     fn eval_external_round<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local_row: &dyn Poseidon2<CB::Var, Config>,
+        local_row: &(impl Poseidon2<CB::Var, Config> + ?Sized),
         r: usize,
     ) {
         let mut local_state: [CB::Expr; PERMUTATION_WIDTH] =
@@ -171,7 +172,7 @@ impl<const DEGREE: usize, Config: Poseidon2Config, F: Field> Poseidon2Chip<DEGRE
     fn eval_internal_rounds<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local_row: &dyn Poseidon2<CB::Var, Config>,
+        local_row: &(impl Poseidon2<CB::Var, Config> + ?Sized),
     ) {
         let state = &local_row.internal_rounds_state();
         let s0 = local_row.internal_rounds_s0();

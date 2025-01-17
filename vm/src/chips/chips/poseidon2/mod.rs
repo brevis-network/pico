@@ -30,29 +30,21 @@ impl<const DEGREE: usize, Config, F> Default for Poseidon2Chip<DEGREE, Config, F
 
 impl<const DEGREE: usize, Config: Poseidon2Config, F: Field> Poseidon2Chip<DEGREE, Config, F> {
     /// Transmute a row it to an immutable Poseidon2 instance.
-    pub(crate) fn convert<'a, T>(
-        row: impl Deref<Target = [T]>,
-    ) -> Box<dyn Poseidon2<T, Config> + 'a>
-    where
-        // TODO: figure out why we need T: Copy + 'a
-        T: Copy + 'a,
-        Config: 'a,
-        //PermutationSBox<T, Config>: Copy + 'a,
-        //PermutationNoSbox<T, Config>: Copy + 'a,
-    {
+    pub(crate) fn convert<T>(row: &impl Deref<Target = [T]>) -> &dyn Poseidon2<T, Config> {
+        let row = row.deref();
         if F::field_type() == FieldType::TypeBabyBear {
             if DEGREE == 3 {
-                let convert: &PermutationSBox<T, Config> = (*row).borrow();
-                Box::new(convert.clone())
+                let convert: &PermutationSBox<T, Config> = row.borrow();
+                convert
             } else if DEGREE == 9 {
-                let convert: &PermutationNoSbox<T, Config> = (*row).borrow();
-                Box::new(convert.clone())
+                let convert: &PermutationNoSbox<T, Config> = row.borrow();
+                convert
             } else {
                 panic!("Unsupported degree");
             }
         } else if F::field_type() == FieldType::TypeKoalaBear {
-            let convert: &PermutationNoSbox<T, Config> = (*row).borrow();
-            Box::new(convert.clone())
+            let convert: &PermutationNoSbox<T, Config> = row.borrow();
+            convert
         } else {
             panic!("Unsupported field type");
         }
