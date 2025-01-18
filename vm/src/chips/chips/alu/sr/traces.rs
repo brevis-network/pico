@@ -1,4 +1,4 @@
-use super::columns::{ShiftRightCols, NUM_SLR_COLS};
+use super::columns::{ShiftRightValueCols, NUM_SLR_COLS, NUM_SLR_VALUE_COLS};
 use crate::{
     chips::chips::{
         alu::event::AluEvent,
@@ -15,13 +15,17 @@ use crate::{
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
-    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
+    machine::chip::ChipBehavior,
+    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, SR_DATAPAR, WORD_SIZE},
+    recursion_v2::stark::utils::next_power_of_two,
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use rayon::{iter::ParallelIterator, slice::ParallelSlice};
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::{ParallelSlice, ParallelSliceMut},
+};
 use std::{borrow::BorrowMut, marker::PhantomData};
 use tracing::debug;
 
@@ -43,43 +47,38 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
         "ShiftRight".to_string()
     }
 
-    fn generate_main(
-        &self,
-        input: &EmulationRecord,
-        _: &mut EmulationRecord,
-    ) -> p3_matrix::dense::RowMajorMatrix<F> {
-        let rows = input.shift_right_events.clone().len();
-        let mut trace = RowMajorMatrix::new(vec![F::ZERO; NUM_SLR_COLS * rows], NUM_SLR_COLS);
-        trace
-            .rows_mut()
-            .zip(input.shift_right_events.clone())
+    fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
+        let events = input.shift_right_events.iter().collect::<Vec<_>>();
+        let nrows = events.len().div_ceil(SR_DATAPAR);
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = match log2_nrows {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nrows, None),
+        };
+
+        let mut values = vec![F::ZERO; padded_nrows * NUM_SLR_COLS];
+
+        let populate_len = events.len() * NUM_SLR_VALUE_COLS;
+        values[..populate_len]
+            .par_chunks_mut(NUM_SLR_VALUE_COLS)
+            .zip_eq(events)
             .for_each(|(row, event)| {
-                let cols: &mut ShiftRightCols<F> = row.borrow_mut();
-                self.event_to_row(&event, cols, &mut ());
+                let cols: &mut ShiftRightValueCols<_> = row.borrow_mut();
+                self.event_to_row(event, cols, &mut vec![]);
             });
 
-        // Pad the trace based on shape
-        let log_rows = input.shape_chip_size(&self.name());
-        pad_to_power_of_two::<NUM_SLR_COLS, F>(&mut trace.values, log_rows);
-
-        // Create the template for the padded rows. These are fake rows that don't fail on some
-        // sanity checks.
         let padded_row_template = {
-            let mut row = [F::ZERO; NUM_SLR_COLS];
-            let cols: &mut ShiftRightCols<F> = row.as_mut_slice().borrow_mut();
-            // Shift 0 by 0 bits and 0 bytes.
-            // cols.is_srl = F::ONE;
+            let mut row = [F::ZERO; NUM_SLR_VALUE_COLS];
+            let cols: &mut ShiftRightValueCols<F> = row.as_mut_slice().borrow_mut();
             cols.shift_by_n_bits[0] = F::ONE;
             cols.shift_by_n_bytes[0] = F::ONE;
             row
         };
-
-        debug_assert!(padded_row_template.len() == NUM_SLR_COLS);
-        for i in rows * NUM_SLR_COLS..trace.values.len() {
-            trace.values[i] = padded_row_template[i % NUM_SLR_COLS];
+        for i in populate_len..values.len() {
+            values[i] = padded_row_template[i % NUM_SLR_VALUE_COLS];
         }
 
-        trace
+        RowMajorMatrix::new(values, NUM_SLR_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -91,9 +90,8 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_SLR_COLS];
-                    let cols: &mut ShiftRightCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    let mut dummy = ShiftRightValueCols::default();
+                    self.event_to_row(event, &mut dummy, &mut blu);
                 });
                 blu
             })
@@ -116,7 +114,7 @@ impl<F: PrimeField32> ShiftRightChip<F> {
     fn event_to_row(
         &self,
         event: &AluEvent,
-        cols: &mut ShiftRightCols<F>,
+        cols: &mut ShiftRightValueCols<F>,
         blu: &mut impl ByteRecordBehavior,
     ) {
         // Initialize cols with basic operands and flags derived from the current event.

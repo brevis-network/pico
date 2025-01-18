@@ -58,7 +58,10 @@ use crate::{
         field::FieldSpecificPoseidon2Config,
         lookup::{LookupScope, LookupType},
     },
-    primitives::consts::{ADD_SUB_DATAPAR, BITWISE_DATAPAR, LOCAL_MEMORY_DATAPAR},
+    primitives::consts::{
+        ADD_SUB_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
+        MEMORY_RW_DATAPAR, MUL_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
+    },
 };
 
 type FpOpBn254<F> = FpOpChip<F, Bn254BaseField>;
@@ -149,7 +152,7 @@ where
             ),
             (
                 Self::DivRem(Default::default()).name(),
-                record.divrem_events.len(),
+                record.divrem_events.len().div_ceil(DIVREM_DATAPAR),
             ),
             (
                 Self::AddSub(Default::default()).name(),
@@ -161,17 +164,20 @@ where
             ),
             (
                 Self::Mul(Default::default()).name(),
-                record.mul_events.len(),
+                record.mul_events.len().div_ceil(MUL_DATAPAR),
             ),
             (
                 Self::SR(Default::default()).name(),
-                record.shift_right_events.len(),
+                record.shift_right_events.len().div_ceil(SR_DATAPAR),
             ),
             (
                 Self::SLL(Default::default()).name(),
-                record.shift_left_events.len(),
+                record.shift_left_events.len().div_ceil(SLL_DATAPAR),
             ),
-            (Self::Lt(Default::default()).name(), record.lt_events.len()),
+            (
+                Self::Lt(Default::default()).name(),
+                record.lt_events.len().div_ceil(LT_DATAPAR),
+            ),
             (
                 Self::MemoryLocal(Default::default()).name(),
                 record
@@ -185,7 +191,8 @@ where
                     .cpu_events
                     .iter()
                     .filter(|e| e.instruction.is_memory_instruction())
-                    .count(),
+                    .count()
+                    .div_ceil(MEMORY_RW_DATAPAR),
             ),
             (
                 Self::SyscallRiscv(SyscallChip::riscv()).name(),

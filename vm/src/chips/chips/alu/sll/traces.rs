@@ -1,15 +1,25 @@
-use super::columns::{ShiftLeftCols, NUM_SLL_COLS};
+use super::columns::NUM_SLL_COLS;
 use crate::{
-    chips::chips::{alu::event::AluEvent, byte::event::ByteRecordBehavior},
+    chips::chips::{
+        alu::{
+            event::AluEvent,
+            sll::{ShiftLeftValueCols, NUM_SLL_VALUE_COLS},
+        },
+        byte::event::ByteRecordBehavior,
+    },
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
-    primitives::consts::{BYTE_SIZE, WORD_SIZE},
+    machine::chip::ChipBehavior,
+    primitives::consts::{BYTE_SIZE, SLL_DATAPAR, WORD_SIZE},
+    recursion_v2::stark::utils::next_power_of_two,
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
-use rayon::{iter::ParallelIterator, slice::ParallelSlice};
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::{ParallelSlice, ParallelSliceMut},
+};
 use std::{borrow::BorrowMut, marker::PhantomData};
 use tracing::debug;
 
@@ -31,36 +41,38 @@ impl<F: PrimeField> ChipBehavior<F> for SLLChip<F> {
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        let rows = input.shift_left_events.clone().len();
-        let mut trace = RowMajorMatrix::new(vec![F::ZERO; NUM_SLL_COLS * rows], NUM_SLL_COLS);
-        trace
-            .rows_mut()
-            .zip(input.shift_left_events.clone())
+        let events = input.shift_left_events.iter().collect::<Vec<_>>();
+        let nrows = events.len().div_ceil(SLL_DATAPAR);
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = match log2_nrows {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nrows, None),
+        };
+
+        let mut values = vec![F::ZERO; padded_nrows * NUM_SLL_COLS];
+
+        let populate_len = events.len() * NUM_SLL_VALUE_COLS;
+        values[..populate_len]
+            .par_chunks_mut(NUM_SLL_VALUE_COLS)
+            .zip_eq(events)
             .for_each(|(row, event)| {
-                let cols: &mut ShiftLeftCols<F> = row.borrow_mut();
-                self.event_to_row(&event, cols, &mut ());
+                let cols: &mut ShiftLeftValueCols<_> = row.borrow_mut();
+                self.event_to_row(event, cols, &mut vec![]);
             });
 
-        // Pad the trace based on shape
-        let log_rows = input.shape_chip_size(&self.name());
-        pad_to_power_of_two::<NUM_SLL_COLS, F>(&mut trace.values, log_rows);
-
-        // Create the template for the padded rows. These are fake rows that don't fail on some
-        // sanity checks.
         let padded_row_template = {
-            let mut row = [F::ZERO; NUM_SLL_COLS];
-            let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
+            let mut row = [F::ZERO; NUM_SLL_VALUE_COLS];
+            let cols: &mut ShiftLeftValueCols<F> = row.as_mut_slice().borrow_mut();
             cols.shift_by_n_bits[0] = F::ONE;
             cols.shift_by_n_bytes[0] = F::ONE;
             cols.bit_shift_multiplier = F::ONE;
             row
         };
-        debug_assert!(padded_row_template.len() == NUM_SLL_COLS);
-        for i in rows * NUM_SLL_COLS..trace.values.len() {
-            trace.values[i] = padded_row_template[i % NUM_SLL_COLS];
+        for i in populate_len..values.len() {
+            values[i] = padded_row_template[i % NUM_SLL_VALUE_COLS];
         }
 
-        trace
+        RowMajorMatrix::new(values, NUM_SLL_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -72,9 +84,8 @@ impl<F: PrimeField> ChipBehavior<F> for SLLChip<F> {
             .flat_map(|events| {
                 let mut blu_events = vec![];
                 events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_SLL_COLS];
-                    let cols: &mut ShiftLeftCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu_events);
+                    let mut dummy = ShiftLeftValueCols::default();
+                    self.event_to_row(event, &mut dummy, &mut blu_events);
                 });
                 blu_events
             })
@@ -97,7 +108,7 @@ impl<F: Field> SLLChip<F> {
     fn event_to_row(
         &self,
         event: &AluEvent,
-        cols: &mut ShiftLeftCols<F>,
+        cols: &mut ShiftLeftValueCols<F>,
         blu: &mut impl ByteRecordBehavior,
     ) {
         let a = event.a.to_le_bytes();

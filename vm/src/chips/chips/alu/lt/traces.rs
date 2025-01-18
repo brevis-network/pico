@@ -1,7 +1,10 @@
-use super::columns::{LtCols, NUM_LT_COLS};
+use super::columns::NUM_LT_COLS;
 use crate::{
     chips::chips::{
-        alu::event::AluEvent,
+        alu::{
+            event::AluEvent,
+            lt::{LtValueCols, NUM_LT_VALUE_COLS},
+        },
         byte::event::{ByteLookupEvent, ByteRecordBehavior},
     },
     compiler::{
@@ -12,7 +15,9 @@ use crate::{
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::chip::ChipBehavior,
+    primitives::consts::LT_DATAPAR,
+    recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
 use itertools::izip;
@@ -42,25 +47,26 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        let mut trace = RowMajorMatrix::new(
-            vec![F::ZERO; NUM_LT_COLS * input.clone().lt_events.len()],
-            NUM_LT_COLS,
-        );
+        let events = input.lt_events.iter().collect::<Vec<_>>();
+        let nrows = events.len().div_ceil(LT_DATAPAR);
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = match log2_nrows {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nrows, None),
+        };
 
-        trace
-            .par_rows_mut()
-            .zip_eq(input.lt_events.clone())
+        let mut values = vec![F::ZERO; padded_nrows * NUM_LT_COLS];
+
+        let populate_len = events.len() * NUM_LT_VALUE_COLS;
+        values[..populate_len]
+            .par_chunks_mut(NUM_LT_VALUE_COLS)
+            .zip_eq(events)
             .for_each(|(row, event)| {
-                let mut new_byte_lookup_events: Vec<ByteLookupEvent> = Vec::new();
-                let cols: &mut LtCols<F> = row.borrow_mut();
-                self.event_to_row(&event, cols, &mut new_byte_lookup_events);
+                let cols: &mut LtValueCols<_> = row.borrow_mut();
+                self.event_to_row(event, cols, &mut vec![]);
             });
 
-        // Pad the trace based on shape
-        let log_rows = input.shape_chip_size(&self.name());
-        pad_to_power_of_two::<NUM_LT_COLS, F>(&mut trace.values, log_rows);
-
-        trace
+        RowMajorMatrix::new(values, NUM_LT_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -72,9 +78,8 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_LT_COLS];
-                    let cols: &mut LtCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    let mut dummy = LtValueCols::default();
+                    self.event_to_row(event, &mut dummy, &mut blu);
                 });
                 blu
             })
@@ -97,7 +102,7 @@ impl<F: PrimeField32> LtChip<F> {
     fn event_to_row(
         &self,
         event: &AluEvent,
-        cols: &mut LtCols<F>,
+        cols: &mut LtValueCols<F>,
         blu: &mut impl ByteRecordBehavior,
     ) {
         let a = event.a.to_le_bytes();

@@ -32,6 +32,7 @@ use std::borrow::Borrow;
 
 use super::{columns::MulCols, MulChip, BYTE_MASK, PRODUCT_SIZE};
 use crate::{
+    chips::chips::alu::mul::columns::MulValueCols,
     compiler::riscv::opcode::{ByteOpcode, Opcode},
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
     primitives::consts::WORD_SIZE,
@@ -54,139 +55,157 @@ where
         let one: CB::Expr = CB::F::ONE.into();
         let byte_mask = CB::F::from_canonical_u8(BYTE_MASK);
 
-        // Calculate the MSBs.
-        let (b_msb, c_msb) = {
-            let msb_pairs = [
-                (local.b_msb, local.b[WORD_SIZE - 1]),
-                (local.c_msb, local.c[WORD_SIZE - 1]),
-            ];
-            let opcode = CB::F::from_canonical_u32(ByteOpcode::MSB as u32);
-            for msb_pair in msb_pairs.iter() {
-                let msb = msb_pair.0;
-                let byte = msb_pair.1;
-                builder.looking_byte(opcode, msb, byte, zero.clone(), local.is_real);
-            }
-            (local.b_msb, local.c_msb)
-        };
-
-        // Calculate whether to extend b and c's sign.
-        let (b_sign_extend, c_sign_extend) = {
-            // MULH or MULHSU
-            let is_b_i32 = local.is_mulh + local.is_mulhsu - local.is_mulh * local.is_mulhsu;
-
-            let is_c_i32 = local.is_mulh;
-
-            builder.assert_eq(local.b_sign_extend, is_b_i32 * b_msb);
-            builder.assert_eq(local.c_sign_extend, is_c_i32 * c_msb);
-            (local.b_sign_extend, local.c_sign_extend)
-        };
-
-        // Sign extend local.b and local.c whenever appropriate.
-        let (b, c) = {
-            let mut b: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
-            let mut c: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
-            for i in 0..PRODUCT_SIZE {
-                if i < WORD_SIZE {
-                    b[i] = local.b[i].into();
-                    c[i] = local.c[i].into();
-                } else {
-                    b[i] = b_sign_extend * byte_mask;
-                    c[i] = c_sign_extend * byte_mask;
-                }
-            }
-            (b, c)
-        };
-
-        // Compute the uncarried product b(x) * c(x) = m(x).
-        let mut m: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
-        for i in 0..PRODUCT_SIZE {
-            for j in 0..PRODUCT_SIZE {
-                if i + j < PRODUCT_SIZE {
-                    m[i + j] += b[i].clone() * c[j].clone();
-                }
-            }
-        }
-
-        // Propagate carry.
-        let product = {
-            for i in 0..PRODUCT_SIZE {
-                if i == 0 {
-                    builder.assert_eq(local.product[i], m[i].clone() - local.carry[i] * base);
-                } else {
-                    builder.assert_eq(
-                        local.product[i],
-                        m[i].clone() + local.carry[i - 1] - local.carry[i] * base,
-                    );
-                }
-            }
-            local.product
-        };
-
-        // Compare the product's appropriate bytes with that of the result.
+        for MulValueCols {
+            a: local_a,
+            b: local_b,
+            c: local_c,
+            carry: local_carry,
+            product: local_product,
+            b_msb: local_b_msb,
+            c_msb: local_c_msb,
+            b_sign_extend: local_b_sign_extend,
+            c_sign_extend: local_c_sign_extend,
+            is_mul: local_is_mul,
+            is_mulh: local_is_mulh,
+            is_mulhu: local_is_mulhu,
+            is_mulhsu: local_is_mulhsu,
+            is_real: local_is_real,
+        } in local.values
         {
-            let is_lower = local.is_mul;
-            let is_upper = local.is_mulh + local.is_mulhu + local.is_mulhsu;
-            for i in 0..WORD_SIZE {
-                builder.when(is_lower).assert_eq(product[i], local.a[i]);
-                builder
-                    .when(is_upper.clone())
-                    .assert_eq(product[i + WORD_SIZE], local.a[i]);
+            // Calculate the MSBs.
+            let (b_msb, c_msb) = {
+                let msb_pairs = [
+                    (local_b_msb, local_b[WORD_SIZE - 1]),
+                    (local_c_msb, local_c[WORD_SIZE - 1]),
+                ];
+                let opcode = CB::F::from_canonical_u32(ByteOpcode::MSB as u32);
+                for msb_pair in msb_pairs.iter() {
+                    let msb = msb_pair.0;
+                    let byte = msb_pair.1;
+                    builder.looking_byte(opcode, msb, byte, zero.clone(), local_is_real);
+                }
+                (local_b_msb, local_c_msb)
+            };
+
+            // Calculate whether to extend b and c's sign.
+            let (b_sign_extend, c_sign_extend) = {
+                // MULH or MULHSU
+                let is_b_i32 = local_is_mulh + local_is_mulhsu - local_is_mulh * local_is_mulhsu;
+
+                let is_c_i32 = local_is_mulh;
+
+                builder.assert_eq(local_b_sign_extend, is_b_i32 * b_msb);
+                builder.assert_eq(local_c_sign_extend, is_c_i32 * c_msb);
+                (local_b_sign_extend, local_c_sign_extend)
+            };
+
+            // Sign extend local.b and local.c whenever appropriate.
+            let (b, c) = {
+                let mut b: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
+                let mut c: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
+                for i in 0..PRODUCT_SIZE {
+                    if i < WORD_SIZE {
+                        b[i] = local_b[i].into();
+                        c[i] = local_c[i].into();
+                    } else {
+                        b[i] = b_sign_extend * byte_mask;
+                        c[i] = c_sign_extend * byte_mask;
+                    }
+                }
+                (b, c)
+            };
+
+            // Compute the uncarried product b(x) * c(x) = m(x).
+            let mut m: Vec<CB::Expr> = vec![CB::F::ZERO.into(); PRODUCT_SIZE];
+            for i in 0..PRODUCT_SIZE {
+                for j in 0..PRODUCT_SIZE {
+                    if i + j < PRODUCT_SIZE {
+                        m[i + j] += b[i].clone() * c[j].clone();
+                    }
+                }
             }
-        }
 
-        // Check that the boolean values are indeed boolean values.
-        {
-            [
-                local.b_msb,
-                local.c_msb,
-                local.b_sign_extend,
-                local.c_sign_extend,
-                local.is_mul,
-                local.is_mulh,
-                local.is_mulhu,
-                local.is_mulhsu,
-                local.is_real,
-            ]
-            .iter()
-            .for_each(|flag| builder.assert_bool(*flag));
-        }
+            // Propagate carry.
+            let product = {
+                for i in 0..PRODUCT_SIZE {
+                    if i == 0 {
+                        builder.assert_eq(local_product[i], m[i].clone() - local_carry[i] * base);
+                    } else {
+                        builder.assert_eq(
+                            local_product[i],
+                            m[i].clone() + local_carry[i - 1] - local_carry[i] * base,
+                        );
+                    }
+                }
+                local_product
+            };
 
-        // If signed extended, the MSB better be 1.
-        builder
-            .when(local.b_sign_extend)
-            .assert_eq(local.b_msb, one.clone());
-        builder
-            .when(local.c_sign_extend)
-            .assert_eq(local.c_msb, one.clone());
+            // Compare the product's appropriate bytes with that of the result.
+            {
+                let is_lower = local_is_mul;
+                let is_upper = local_is_mulh + local_is_mulhu + local_is_mulhsu;
+                for i in 0..WORD_SIZE {
+                    builder.when(is_lower).assert_eq(product[i], local_a[i]);
+                    builder
+                        .when(is_upper.clone())
+                        .assert_eq(product[i + WORD_SIZE], local_a[i]);
+                }
+            }
 
-        // Calculate the opcode.
-        let opcode = {
-            // Exactly one of the op codes must be on.
+            // Check that the boolean values are indeed boolean values.
+            {
+                [
+                    local_b_msb,
+                    local_c_msb,
+                    local_b_sign_extend,
+                    local_c_sign_extend,
+                    local_is_mul,
+                    local_is_mulh,
+                    local_is_mulhu,
+                    local_is_mulhsu,
+                    local_is_real,
+                ]
+                .iter()
+                .for_each(|flag| builder.assert_bool(*flag));
+            }
+
+            // If signed extended, the MSB better be 1.
             builder
-                .when(local.is_real)
-                .assert_one(local.is_mul + local.is_mulh + local.is_mulhu + local.is_mulhsu);
+                .when(local_b_sign_extend)
+                .assert_eq(local_b_msb, one.clone());
+            builder
+                .when(local_c_sign_extend)
+                .assert_eq(local_c_msb, one.clone());
 
-            let mul: CB::Expr = CB::F::from_canonical_u32(Opcode::MUL as u32).into();
-            let mulh: CB::Expr = CB::F::from_canonical_u32(Opcode::MULH as u32).into();
-            let mulhu: CB::Expr = CB::F::from_canonical_u32(Opcode::MULHU as u32).into();
-            let mulhsu: CB::Expr = CB::F::from_canonical_u32(Opcode::MULHSU as u32).into();
-            local.is_mul * mul
-                + local.is_mulh * mulh
-                + local.is_mulhu * mulhu
-                + local.is_mulhsu * mulhsu
-        };
+            // Calculate the opcode.
+            let opcode = {
+                // Exactly one of the op codes must be on.
+                builder
+                    .when(local_is_real)
+                    .assert_one(local_is_mul + local_is_mulh + local_is_mulhu + local_is_mulhsu);
 
-        // Range check.
-        {
-            // Ensure that the carry is at most 2^16. This ensures that
-            // product_before_carry_propagation - carry * base + last_carry never overflows or
-            // underflows enough to "wrap" around to create a second solution.
-            builder.slice_range_check_u16(&local.carry, local.is_real);
+                let mul: CB::Expr = CB::F::from_canonical_u32(Opcode::MUL as u32).into();
+                let mulh: CB::Expr = CB::F::from_canonical_u32(Opcode::MULH as u32).into();
+                let mulhu: CB::Expr = CB::F::from_canonical_u32(Opcode::MULHU as u32).into();
+                let mulhsu: CB::Expr = CB::F::from_canonical_u32(Opcode::MULHSU as u32).into();
+                local_is_mul * mul
+                    + local_is_mulh * mulh
+                    + local_is_mulhu * mulhu
+                    + local_is_mulhsu * mulhsu
+            };
 
-            builder.slice_range_check_u8(&local.product, local.is_real);
+            // Range check.
+            {
+                // Ensure that the carry is at most 2^16. This ensures that
+                // product_before_carry_propagation - carry * base + last_carry never overflows or
+                // underflows enough to "wrap" around to create a second solution.
+                builder.slice_range_check_u16(&local_carry, local_is_real);
+
+                builder.slice_range_check_u8(&local_product, local_is_real);
+            }
+
+            // Receive the arguments.
+            builder.looked_alu(opcode, local_a, local_b, local_c, local_is_real);
         }
-
-        // Receive the arguments.
-        builder.looked_alu(opcode, local.a, local.b, local.c, local.is_real);
     }
 }
