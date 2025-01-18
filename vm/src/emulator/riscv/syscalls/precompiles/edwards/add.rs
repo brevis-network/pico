@@ -35,13 +35,9 @@ impl<E: EllipticCurve + EdwardsParameters> Syscall for EdwardsAddAssignSyscall<E
         arg2: u32,
     ) -> Option<u32> {
         let event = create_ec_add_event::<E>(ctx, arg1, arg2);
-        let syscall_event = ctx.rt.syscall_event(
-            event.clk,
-            syscall_code.syscall_id(),
-            arg1,
-            arg2,
-            event.lookup_id,
-        );
+        let syscall_event = ctx
+            .rt
+            .syscall_event(event.clk, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut().add_precompile_event(
             syscall_code,
             syscall_event,

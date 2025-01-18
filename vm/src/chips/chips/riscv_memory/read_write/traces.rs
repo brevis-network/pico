@@ -6,17 +6,14 @@ use super::{
     MemoryReadWriteChip,
 };
 use crate::{
-    chips::{
-        chips::{
-            alu::event::AluEvent,
-            byte::event::ByteRecordBehavior,
-            events::ByteLookupEvent,
-            riscv_cpu::event::CpuEvent,
-            riscv_memory::event::{
-                MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
-            },
+    chips::chips::{
+        alu::event::AluEvent,
+        byte::event::ByteRecordBehavior,
+        events::ByteLookupEvent,
+        riscv_cpu::event::CpuEvent,
+        riscv_memory::event::{
+            MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
         },
-        utils::create_alu_lookups,
     },
     compiler::riscv::{
         opcode::{ByteOpcode, Opcode},
@@ -183,13 +180,11 @@ impl<F: Field> MemoryReadWriteChip<F> {
 
         // Add event to ALU check to check that addr == b + c
         let add_event = AluEvent {
-            lookup_id: event.memory_add_lookup_id,
             clk: event.clk,
             opcode: Opcode::ADD,
             a: memory_addr,
             b: event.b,
             c: event.c,
-            sub_lookups: create_alu_lookups(),
         };
         new_alu_events
             .entry(Opcode::ADD)
@@ -249,13 +244,11 @@ impl<F: Field> MemoryReadWriteChip<F> {
                     cols.mem_value_is_neg_not_x0 =
                         F::from_bool(event.instruction.op_a != (X0 as u32));
                     let sub_event = AluEvent {
-                        lookup_id: event.memory_sub_lookup_id,
                         clk: event.clk,
                         opcode: Opcode::SUB,
                         a: event.a,
                         b: cols.unsigned_mem_val.to_u32(),
                         c: sign_value,
-                        sub_lookups: create_alu_lookups(),
                     };
 
                     new_alu_events

@@ -20,7 +20,6 @@ use crate::{
 /// This event is emitted when an elliptic curve addition operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveAddEvent {
-    pub(crate) lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
@@ -46,8 +45,6 @@ pub struct EllipticCurveAddEvent {
 /// This event is emitted when an edwards decompression operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EdDecompressEvent {
-    /// The lookup identifier.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
@@ -106,7 +103,6 @@ pub fn create_ec_add_event<E: EllipticCurve>(
     let p_memory_records = ctx.mw_slice(p_ptr, &result_words);
 
     EllipticCurveAddEvent {
-        lookup_id: ctx.syscall_lookup_id,
         chunk: ctx.current_chunk(),
         clk: start_clk,
         p_ptr,

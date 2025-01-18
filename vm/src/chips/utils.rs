@@ -1,6 +1,5 @@
 use crate::primitives::consts::{BYTE_SIZE, WORD_SIZE};
 use p3_field::Field;
-use rand::{thread_rng, Rng};
 use std::{
     fmt::Display,
     iter::{Map, Peekable},
@@ -18,18 +17,6 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
 
 pub const fn get_msb(a: [u8; WORD_SIZE]) -> u8 {
     (a[WORD_SIZE - 1] >> (BYTE_SIZE - 1)) & 1
-}
-
-/// Creates a new ALU lookup id.
-#[must_use]
-pub fn create_alu_lookup_id() -> u128 {
-    thread_rng().gen()
-}
-
-/// Creates a new ALU lookup ids.
-#[must_use]
-pub fn create_alu_lookups() -> [u128; 6] {
-    thread_rng().gen()
 }
 
 /// Returns sorted and formatted rows of a table of counts (e.g. `opcode_counts`).

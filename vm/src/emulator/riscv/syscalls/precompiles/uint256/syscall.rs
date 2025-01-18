@@ -69,11 +69,9 @@ impl Syscall for Uint256MulSyscall {
         // Write the result to x and keep track of the memory records.
         let x_memory_records = ctx.mw_slice(x_ptr, &result);
 
-        let lookup_id = ctx.syscall_lookup_id;
         let chunk = ctx.current_chunk();
 
         let event = PrecompileEvent::Uint256Mul(Uint256MulEvent {
-            lookup_id,
             chunk,
             clk,
             x_ptr,
@@ -89,9 +87,9 @@ impl Syscall for Uint256MulSyscall {
 
         // ctx.record_mut().add_uint256_mul_event(event);
 
-        let syscall_event =
-            ctx.rt
-                .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2, lookup_id);
+        let syscall_event = ctx
+            .rt
+            .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut()
             .add_precompile_event(syscall_code, syscall_event, event);
 

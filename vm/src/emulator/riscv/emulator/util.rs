@@ -88,7 +88,6 @@ impl RiscvEmulator {
         syscall_id: u32,
         arg1: u32,
         arg2: u32,
-        lookup_id: u128,
     ) -> SyscallEvent {
         SyscallEvent {
             chunk: self.chunk(),
@@ -96,19 +95,11 @@ impl RiscvEmulator {
             syscall_id,
             arg1,
             arg2,
-            lookup_id,
         }
     }
 
-    pub(crate) fn emit_syscall(
-        &mut self,
-        clk: u32,
-        syscall_id: u32,
-        arg1: u32,
-        arg2: u32,
-        lookup_id: u128,
-    ) {
-        let syscall_event = self.syscall_event(clk, syscall_id, arg1, arg2, lookup_id);
+    pub(crate) fn emit_syscall(&mut self, clk: u32, syscall_id: u32, arg1: u32, arg2: u32) {
+        let syscall_event = self.syscall_event(clk, syscall_id, arg1, arg2);
 
         self.record.syscall_events.push(syscall_event);
     }

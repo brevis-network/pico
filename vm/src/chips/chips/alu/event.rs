@@ -1,4 +1,4 @@
-use crate::{chips::utils::create_alu_lookups, compiler::riscv::opcode::Opcode};
+use crate::compiler::riscv::opcode::Opcode;
 use serde::{Deserialize, Serialize};
 
 /// Arithmetic Logic Unit (ALU) Event.
@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 /// opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct AluEvent {
-    /// The lookup identifier.
-    pub lookup_id: u128,
     /// The clock cycle.
     pub clk: u32,
     /// The opcode.
@@ -19,8 +17,6 @@ pub struct AluEvent {
     pub b: u32,
     /// The third operand.
     pub c: u32,
-    /// The result of the operation.
-    pub sub_lookups: [u128; 6],
 }
 
 impl AluEvent {
@@ -28,13 +24,11 @@ impl AluEvent {
     #[must_use]
     pub fn new(clk: u32, opcode: Opcode, a: u32, b: u32, c: u32) -> Self {
         Self {
-            lookup_id: 0,
             clk,
             opcode,
             a,
             b,
             c,
-            sub_lookups: create_alu_lookups(),
         }
     }
 }

@@ -64,7 +64,6 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
         result.resize(num_words, 0);
         let x_memory_records = rt.mw_slice(x_ptr, &result);
 
-        let lookup_id = rt.syscall_lookup_id;
         let chunk = rt.current_chunk();
         let x = x.into_boxed_slice();
         let y = y.into_boxed_slice();
@@ -72,7 +71,6 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
         let y_memory_records = y_memory_records.into_boxed_slice();
 
         let event = Fp2MulEvent {
-            lookup_id,
             chunk,
             clk,
             x_ptr,
@@ -84,13 +82,9 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
             local_mem_access: rt.postprocess(),
         };
 
-        let syscall_event = rt.rt.syscall_event(
-            clk,
-            syscall_code.syscall_id(),
-            x_ptr,
-            y_ptr,
-            event.lookup_id,
-        );
+        let syscall_event = rt
+            .rt
+            .syscall_event(clk, syscall_code.syscall_id(), x_ptr, y_ptr);
 
         match P::FIELD_TYPE {
             FieldType::Bn254 => rt.record_mut().add_precompile_event(

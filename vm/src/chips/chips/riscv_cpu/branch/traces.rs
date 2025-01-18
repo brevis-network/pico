@@ -1,9 +1,6 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    chips::{
-        chips::{alu::event::AluEvent, riscv_cpu::event::CpuEvent},
-        utils::create_alu_lookups,
-    },
+    chips::chips::{alu::event::AluEvent, riscv_cpu::event::CpuEvent},
     compiler::{riscv::opcode::Opcode, word::Word},
 };
 use hashbrown::HashMap;
@@ -44,13 +41,11 @@ impl<F: Field> CpuChip<F> {
 
             // Add the ALU events for the comparisons
             let lt_comp_event = AluEvent {
-                lookup_id: event.branch_lt_lookup_id,
                 clk: event.clk,
                 opcode: alu_op_code,
                 a: a_lt_b as u32,
                 b: event.a,
                 c: event.b,
-                sub_lookups: create_alu_lookups(),
             };
 
             alu_events
@@ -59,13 +54,11 @@ impl<F: Field> CpuChip<F> {
                 .or_insert(vec![lt_comp_event]);
 
             let gt_comp_event = AluEvent {
-                lookup_id: event.branch_gt_lookup_id,
                 clk: event.clk,
                 opcode: alu_op_code,
                 a: a_gt_b as u32,
                 b: event.b,
                 c: event.a,
-                sub_lookups: create_alu_lookups(),
             };
 
             alu_events
@@ -95,13 +88,11 @@ impl<F: Field> CpuChip<F> {
                 cols.branching = F::ONE;
 
                 let add_event = AluEvent {
-                    lookup_id: event.branch_add_lookup_id,
                     clk: event.clk,
                     opcode: Opcode::ADD,
                     a: next_pc,
                     b: event.pc,
                     c: event.c,
-                    sub_lookups: create_alu_lookups(),
                 };
 
                 alu_events

@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 /// This event is emitted when uint256 multiplication operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Uint256MulEvent {
-    /// The lookup identifier
-    pub lookup_id: u128,
     /// The chunk number
     pub chunk: u32,
     /// The clock cycle

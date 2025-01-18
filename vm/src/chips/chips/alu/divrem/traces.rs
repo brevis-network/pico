@@ -1,17 +1,14 @@
 use super::{columns::NUM_DIVREM_COLS, DivRemChip};
 use crate::{
-    chips::{
-        chips::{
-            alu::{
-                divrem::{
-                    columns::DivRemCols,
-                    utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
-                },
-                event::AluEvent,
+    chips::chips::{
+        alu::{
+            divrem::{
+                columns::DivRemCols,
+                utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
             },
-            byte::event::{ByteLookupEvent, ByteRecordBehavior},
+            event::AluEvent,
         },
-        utils::create_alu_lookups,
+        byte::event::{ByteLookupEvent, ByteRecordBehavior},
     },
     compiler::{
         riscv::{
@@ -170,24 +167,20 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                         let mut add_events: Vec<AluEvent> = vec![];
                         if cols.abs_c_alu_event == F::ONE {
                             add_events.push(AluEvent {
-                                lookup_id: event.sub_lookups[4],
                                 clk: event.clk,
                                 opcode: Opcode::ADD,
                                 a: 0,
                                 b: event.c,
                                 c: (event.c as i32).unsigned_abs(),
-                                sub_lookups: create_alu_lookups(),
                             })
                         }
                         if cols.abs_rem_alu_event == F::ONE {
                             add_events.push(AluEvent {
-                                lookup_id: event.sub_lookups[5],
                                 clk: event.clk,
                                 opcode: Opcode::ADD,
                                 a: 0,
                                 b: remainder,
                                 c: (remainder as i32).unsigned_abs(),
-                                sub_lookups: create_alu_lookups(),
                             })
                         }
                         let mut alu_events = HashMap::new();
@@ -206,18 +199,15 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                     }
 
                     let lower_multiplication = AluEvent {
-                        lookup_id: event.sub_lookups[0],
                         clk: event.clk,
                         opcode: Opcode::MUL,
                         a: lower_word,
                         c: event.c,
                         b: quotient,
-                        sub_lookups: create_alu_lookups(),
                     };
                     output.add_mul_event(lower_multiplication);
 
                     let upper_multiplication = AluEvent {
-                        lookup_id: event.sub_lookups[1],
                         clk: event.clk,
                         opcode: {
                             if is_signed_operation(event.opcode) {
@@ -229,28 +219,23 @@ impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
                         a: upper_word,
                         c: event.c,
                         b: quotient,
-                        sub_lookups: create_alu_lookups(),
                     };
                     output.add_mul_event(upper_multiplication);
                     let lt_event = if is_signed_operation(event.opcode) {
                         AluEvent {
-                            lookup_id: event.sub_lookups[2],
                             opcode: Opcode::SLTU,
                             a: 1,
                             b: (remainder as i32).unsigned_abs(),
                             c: u32::max(1, (event.c as i32).unsigned_abs()),
                             clk: event.clk,
-                            sub_lookups: create_alu_lookups(),
                         }
                     } else {
                         AluEvent {
-                            lookup_id: event.sub_lookups[3],
                             opcode: Opcode::SLTU,
                             a: 1,
                             b: remainder,
                             c: u32::max(1, event.c),
                             clk: event.clk,
-                            sub_lookups: create_alu_lookups(),
                         }
                     };
 

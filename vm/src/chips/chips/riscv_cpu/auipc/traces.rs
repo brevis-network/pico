@@ -1,9 +1,6 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    chips::{
-        chips::{alu::event::AluEvent, riscv_cpu::event::CpuEvent},
-        utils::create_alu_lookups,
-    },
+    chips::chips::{alu::event::AluEvent, riscv_cpu::event::CpuEvent},
     compiler::{riscv::opcode::Opcode, word::Word},
 };
 use hashbrown::HashMap;
@@ -24,13 +21,11 @@ impl<F: Field> CpuChip<F> {
             auipc_columns.pc_range_checker.populate(event.pc);
 
             let add_event = AluEvent {
-                lookup_id: event.auipc_lookup_id,
                 clk: event.clk,
                 opcode: Opcode::ADD,
                 a: event.a,
                 b: event.pc,
                 c: event.b,
-                sub_lookups: create_alu_lookups(),
             };
 
             alu_events

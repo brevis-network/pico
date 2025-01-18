@@ -244,8 +244,6 @@ pub struct SyscallEvent {
     pub chunk: u32,
     /// The clock cycle.
     pub clk: u32,
-    /// The lookup id.
-    pub lookup_id: u128,
     /// The syscall id.
     pub syscall_id: u32,
     /// The first argument.

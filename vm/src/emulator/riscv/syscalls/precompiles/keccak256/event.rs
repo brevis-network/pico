@@ -10,8 +10,6 @@ pub(crate) const STATE_SIZE: usize = 25;
 /// This event is emitted when a keccak-256 permutation operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct KeccakPermuteEvent {
-    /// The lookup identifier.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.

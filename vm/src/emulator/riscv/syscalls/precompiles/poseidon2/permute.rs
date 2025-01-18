@@ -110,10 +110,8 @@ impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSysca
         state_write_records.extend_from_slice(&write_records);
 
         // Push the SHA extend event.
-        let lookup_id = ctx.syscall_lookup_id;
         let chunk = ctx.current_chunk();
         let event = Poseidon2PermuteEvent {
-            lookup_id,
             chunk,
             clk: clk_init,
             state_values,
@@ -124,9 +122,9 @@ impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSysca
             local_mem_access: ctx.postprocess(),
         };
 
-        let syscall_event =
-            ctx.rt
-                .syscall_event(clk_init, syscall_code.syscall_id(), arg1, arg2, lookup_id);
+        let syscall_event = ctx
+            .rt
+            .syscall_event(clk_init, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut().add_precompile_event(
             syscall_code,
             syscall_event,

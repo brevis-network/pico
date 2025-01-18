@@ -1,7 +1,7 @@
 use super::{align, EmulationError, EmulatorMode, RiscvEmulator};
 
 use crate::{
-    chips::{chips::riscv_memory::event::MemoryAccessPosition, utils::create_alu_lookup_id},
+    chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
     emulator::riscv::{
         record::MemoryAccessRecord,
@@ -29,68 +29,58 @@ impl RiscvEmulator {
         if self.emulator_mode != EmulatorMode::Simple {
             self.memory_accesses = MemoryAccessRecord::default();
         }
-        let lookup_id = if self.emulator_mode == EmulatorMode::Trace {
-            create_alu_lookup_id()
-        } else {
-            0
-        };
-        let syscall_lookup_id = if self.emulator_mode == EmulatorMode::Trace {
-            create_alu_lookup_id()
-        } else {
-            0
-        };
 
         match instruction.opcode {
             // Arithmetic instructions.
             Opcode::ADD => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_add(c);
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::SUB => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_sub(c);
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::XOR => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b ^ c;
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::OR => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b | c;
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::AND => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b & c;
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::SLL => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_shl(c);
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::SRL => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_shr(c);
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::SRA => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = (b as i32).wrapping_shr(c) as u32;
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::SLT => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = if (b as i32) < (c as i32) { 1 } else { 0 };
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::SLTU => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = if b < c { 1 } else { 0 };
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
 
             // Load instructions.
@@ -273,27 +263,19 @@ impl RiscvEmulator {
                     .syscall_counts
                     .entry(syscall_for_count)
                     .or_insert(0);
-                let (threshold, multiplier) = match syscall_for_count {
-                    SyscallCode::KECCAK_PERMUTE => (self.opts.split_opts.keccak, 24),
-                    SyscallCode::SHA_EXTEND => (self.opts.split_opts.sha_extend, 48),
-                    SyscallCode::SHA_COMPRESS => (self.opts.split_opts.sha_compress, 80),
-                    _ => (self.opts.split_opts.deferred, 1),
-                };
-                let nonce = (((*syscall_count as usize) % threshold) * multiplier) as u32;
                 if self.log_syscalls {
                     debug!(
-                        ">>syscall_id: {:?}, syscall_count: {:?}, threshold: {:?} nonce: {:?} syscall_lookup_id: {:?}",
-                        syscall_id, syscall_count, threshold, nonce, syscall_lookup_id
+                        ">>syscall_id: {:?}, syscall_count: {:?}",
+                        syscall_id, syscall_count,
                     );
                 }
                 *syscall_count += 1;
 
                 let syscall_impl = self.get_syscall(syscall).cloned();
                 if syscall.should_send() != 0 {
-                    self.emit_syscall(clk, syscall.syscall_id(), b, c, syscall_lookup_id);
+                    self.emit_syscall(clk, syscall.syscall_id(), b, c);
                 }
                 let mut precompile_rt = SyscallContext::new(self);
-                precompile_rt.syscall_lookup_id = syscall_lookup_id;
                 let (precompile_next_pc, precompile_cycles, returned_exit_code) =
                     if let Some(syscall_impl) = syscall_impl {
                         // Executing a syscall optionally returns a value to write to the t0
@@ -326,7 +308,6 @@ impl RiscvEmulator {
                 // we must save the clk here because it is modified by precompile_cycles later which
                 // means emit_cpu cannot read the correct clk and it must be passed as a value
                 clk = self.state.clk;
-                // pc = self.state.pc;
 
                 self.rw(t0, a);
                 next_pc = precompile_next_pc;
@@ -341,22 +322,22 @@ impl RiscvEmulator {
             Opcode::MUL => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_mul(c);
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::MULH => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = (((b as i32) as i64).wrapping_mul((c as i32) as i64) >> 32) as u32;
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::MULHU => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = ((b as u64).wrapping_mul(c as u64) >> 32) as u32;
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::MULHSU => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = (((b as i32) as i64).wrapping_mul(c as i64) >> 32) as u32;
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::DIV => {
                 (rd, b, c) = self.alu_rr(instruction);
@@ -365,7 +346,7 @@ impl RiscvEmulator {
                 } else {
                     a = (b as i32).wrapping_div(c as i32) as u32;
                 }
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::DIVU => {
                 (rd, b, c) = self.alu_rr(instruction);
@@ -374,7 +355,7 @@ impl RiscvEmulator {
                 } else {
                     a = b.wrapping_div(c);
                 }
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::REM => {
                 (rd, b, c) = self.alu_rr(instruction);
@@ -383,7 +364,7 @@ impl RiscvEmulator {
                 } else {
                     a = (b as i32).wrapping_rem(c as i32) as u32;
                 }
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
             Opcode::REMU => {
                 (rd, b, c) = self.alu_rr(instruction);
@@ -392,7 +373,7 @@ impl RiscvEmulator {
                 } else {
                     a = b.wrapping_rem(c);
                 }
-                self.alu_rw(instruction, rd, a, b, c, lookup_id);
+                self.alu_rw(instruction, rd, a, b, c);
             }
 
             // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/master/riscv-asm.md#instruction-aliases
@@ -413,8 +394,6 @@ impl RiscvEmulator {
                 memory_store_value,
                 self.memory_accesses,
                 exit_code,
-                lookup_id,
-                syscall_lookup_id,
             );
         };
 

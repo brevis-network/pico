@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 /// This event is emitted when a SHA-256 extend operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ShaExtendEvent {
-    /// The lookup identifier.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
@@ -35,8 +33,6 @@ pub struct ShaExtendEvent {
 /// This event is emitted when a SHA-256 compress operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ShaCompressEvent {
-    /// The lookup identifier.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.

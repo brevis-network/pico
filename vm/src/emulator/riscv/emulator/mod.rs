@@ -4,12 +4,9 @@ pub mod unconstrained;
 pub mod util;
 
 use crate::{
-    chips::{
-        chips::events::{
-            AluEvent, CpuEvent, MemoryAccessPosition, MemoryInitializeFinalizeEvent,
-            MemoryLocalEvent, MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
-        },
-        utils::create_alu_lookups,
+    chips::chips::events::{
+        AluEvent, CpuEvent, MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
+        MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
     },
     compiler::riscv::{
         instruction::Instruction, opcode::Opcode, program::Program, register::Register,
@@ -571,8 +568,6 @@ impl RiscvEmulator {
         memory_store_value: Option<u32>,
         record: MemoryAccessRecord,
         exit_code: u32,
-        lookup_id: u128,
-        syscall_lookup_id: u128,
     ) {
         let cpu_event = CpuEvent::new(
             self.chunk(),
@@ -586,23 +581,19 @@ impl RiscvEmulator {
             memory_store_value,
             record,
             exit_code,
-            lookup_id,
-            syscall_lookup_id,
         );
 
         self.record.cpu_events.push(cpu_event);
     }
 
     /// Emit an ALU event.
-    fn emit_alu(&mut self, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32, lookup_id: u128) {
+    fn emit_alu(&mut self, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32) {
         let event = AluEvent {
-            lookup_id,
             clk,
             opcode,
             a,
             b,
             c,
-            sub_lookups: create_alu_lookups(),
         };
         match opcode {
             Opcode::ADD => {
@@ -656,18 +647,10 @@ impl RiscvEmulator {
     }
 
     /// Set the destination register with the result and emit an ALU event.
-    fn alu_rw(
-        &mut self,
-        instruction: &Instruction,
-        rd: Register,
-        a: u32,
-        b: u32,
-        c: u32,
-        lookup_id: u128,
-    ) {
+    fn alu_rw(&mut self, instruction: &Instruction, rd: Register, a: u32, b: u32, c: u32) {
         self.rw(rd, a);
         if self.emulator_mode == EmulatorMode::Trace {
-            self.emit_alu(self.state.clk, instruction.opcode, a, b, c, lookup_id);
+            self.emit_alu(self.state.clk, instruction.opcode, a, b, c);
         }
     }
 

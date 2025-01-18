@@ -7,8 +7,6 @@ use serde::{Deserialize, Serialize};
 /// Base field events
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FpEvent {
-    /// The lookup id.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
@@ -36,8 +34,6 @@ pub struct FpEvent {
 /// TODO: maybe unify this with FpEvent?
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Fp2AddSubEvent {
-    /// The lookup id.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
@@ -65,8 +61,6 @@ pub struct Fp2AddSubEvent {
 /// TODO: maybe unify this with FpEvent?
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Fp2MulEvent {
-    /// The lookup id.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.

@@ -22,8 +22,6 @@ use typenum::Unsigned;
 /// This event is emitted when an elliptic curve doubling operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveDoubleEvent {
-    /// The lookup identifer.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
@@ -43,8 +41,6 @@ pub struct EllipticCurveDoubleEvent {
 /// This event is emitted when an elliptic curve point decompression operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveDecompressEvent {
-    /// The lookup identifer.
-    pub lookup_id: u128,
     /// The chunk number.
     pub chunk: u32,
     /// The clock cycle.
@@ -93,7 +89,6 @@ pub fn create_ec_double_event<E: EllipticCurve>(
     let p_memory_records = rt.mw_slice(p_ptr, &result_words);
 
     EllipticCurveDoubleEvent {
-        lookup_id: rt.syscall_lookup_id,
         chunk: rt.current_chunk(),
         clk: start_clk,
         p_ptr,
@@ -141,7 +136,6 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
     let y_memory_records = rt.mw_slice(slice_ptr, &y_words);
 
     EllipticCurveDecompressEvent {
-        lookup_id: rt.syscall_lookup_id,
         chunk: rt.current_chunk(),
         clk: start_clk,
         ptr: slice_ptr,

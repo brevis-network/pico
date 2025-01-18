@@ -75,10 +75,8 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
         let x_memory_records_vec = ctx.mw_slice(slice_ptr, &decompressed_x_words);
         let x_memory_records: [MemoryWriteRecord; 8] = x_memory_records_vec.try_into().unwrap();
 
-        let lookup_id = ctx.syscall_lookup_id;
         let chunk = ctx.current_chunk();
         let event = EdDecompressEvent {
-            lookup_id,
             chunk,
             clk: start_clk,
             ptr: slice_ptr,
@@ -89,13 +87,9 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
             y_memory_records,
             local_mem_access: ctx.postprocess(),
         };
-        let syscall_event = ctx.rt.syscall_event(
-            start_clk,
-            syscall_code.syscall_id(),
-            arg1,
-            sign,
-            event.lookup_id,
-        );
+        let syscall_event = ctx
+            .rt
+            .syscall_event(start_clk, syscall_code.syscall_id(), arg1, sign);
         ctx.record_mut().add_precompile_event(
             syscall_code,
             syscall_event,
