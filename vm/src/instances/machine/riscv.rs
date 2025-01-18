@@ -110,7 +110,7 @@ where
             chunk_num += batch_records.len() as u32;
 
             // set index for each record
-            for record in batch_records.iter_mut() {
+            for record in batch_records.iter() {
                 let stats = record.stats();
                 info!("RISCV record stats: chunk {}", record.chunk_index());
                 for (key, value) in &stats {
@@ -178,8 +178,9 @@ where
         global_lookup_debugger.print_results();
 
         // TODO: print more summary numbers
-        let pv_stream = emulator.get_pv_stream().clone();
+        let pv_stream = emulator.get_pv_stream();
         let riscv_emulator = emulator.emulator.unwrap();
+
         info!("RiscV execution report:");
         info!("|- cycles:           {}", riscv_emulator.state.global_clk);
         info!("|- chunk_num:        {}", all_proofs.len());

@@ -111,6 +111,7 @@ fn time_operation<T, F: FnOnce() -> T>(operation: F) -> (T, Duration) {
     let duration = start.elapsed();
     (result, duration)
 }
+
 fn to_khz(cycles: u64, duration: Duration) -> f64 {
     let duration_secs = duration.as_secs_f64();
     if duration_secs > 0.0 {

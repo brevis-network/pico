@@ -80,7 +80,7 @@ macro_rules! impl_combine_prover {
                         &proofs.proofs(),
                         &self.prev_machine,
                         COMBINE_SIZE,
-                        false,
+                        proofs.proofs.len() <= COMBINE_SIZE,
                     );
                 let witness = ProvingWitness::setup_for_recursion(
                     vk_root,
