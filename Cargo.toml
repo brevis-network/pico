@@ -1,5 +1,5 @@
 [workspace]
-members = ["derive", "vm", "sdk", "babybear-ffi"]
+members = ["derive", "vm", "babybear-ffi", "pico/*"]
 resolver = "2"
 
 [workspace.package]
@@ -22,12 +22,13 @@ inherits = "release"
 debug = true
 debug-assertions = true
 
+
 [workspace.dependencies]
-# pico
 pico-derive = { path = "derive" }
 pico-vm = { path = "vm" }
-pico-sdk = { path = "sdk" }
-
+pico-sdk = { path = "pico/sdk" }
+pico-cli = { path = "pico/cli" }
+pico-patch-libs = { path = "pico/patch-libs" }
 # p3
 
 # NOTE: Pin to known a "good" commit without recent API changes
@@ -91,7 +92,7 @@ arrayref = "0.3.8"
 backtrace = "0.3.71"
 bincode = "1.3.3"
 bytemuck = "1.16.3"
-clap = { version = "4.5.13", features = ["derive"] }
+clap = { version = "4.5.13", features = ["derive", "env"] }
 crossbeam = "0.8"
 csv = "1.3"
 dashmap = "6.1.0"
@@ -104,6 +105,7 @@ hex = "0.4.3"
 itertools = "0.13"
 lazy_static = "1.5.0"
 log = "0.4.21"
+env_logger = "0.11.6"
 nohash-hasher = "0.2.0"
 num = { version = "0.4.3" }
 num_cpus = "1.16"
@@ -116,7 +118,6 @@ rayon-scan = "0.1.1"
 rrs_lib = { package = "rrs-succinct", version = "0.1.0" }
 serde = { version = "1.0.205", features = ["derive", "rc"] }
 serde_with = "3.9.0"
-stacker = "0.1"
 static_assertions = "1.1"
 strum = { version = "0.26.3", features = ["derive"] }
 strum_macros = "0.26.4"
@@ -136,3 +137,4 @@ elliptic-curve = "0.13.8"
 dashu = "0.4.2"
 cfg-if = "1.0.0"
 halo2curves = "0.7.0"
+num-bigint = "0.4.6"

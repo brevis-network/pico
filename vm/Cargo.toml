@@ -63,7 +63,6 @@ rayon-scan.workspace = true
 rrs_lib.workspace = true
 serde.workspace = true
 serde_with.workspace = true
-stacker.workspace = true
 static_assertions.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
@@ -82,6 +81,7 @@ elliptic-curve.workspace = true
 dashu.workspace = true
 cfg-if.workspace = true
 halo2curves.workspace = true
+num-bigint.workspace = true
 
 serde_json = "1.0.121"
 rug = { version = "1.26.1", optional = true }
@@ -90,7 +90,6 @@ amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = fals
 ] }
 sysinfo = "0.30.13"
 hybrid-array = "0.2.1"
-num-bigint = "0.4.6"
 cpu-time = "1.0.0"
 paste = "1.0.15"
 

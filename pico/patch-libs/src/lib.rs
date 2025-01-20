@@ -1,4 +1,11 @@
-pub mod sdk;
+//! Wrapper syscall API for the Pico zkVM patches.
+pub mod bls12381;
+pub mod bn254;
+pub mod ed25519;
+pub mod io;
+pub mod secp256k1;
+pub mod unconstrained;
+pub mod utils;
 
 extern "C" {
     /// Halts the program with the given exit code.
@@ -117,4 +124,5 @@ extern "C" {
 
     /// Executes an poseidon2 permute on the given inputs.
     pub fn syscall_poseidon2_permute(x: *const [u32; 16], y: *mut [u32; 16]);
+
 }

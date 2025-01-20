@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 /// Wrapper for all proof types
 /// The top layer of abstraction (the most abstract layer)
+
+#[derive(Clone)]
 pub struct MetaProof<SC>
 where
     SC: StarkGenericConfig,

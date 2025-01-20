@@ -52,6 +52,10 @@ where
         );
         self.machine.prove_cycles(&witness)
     }
+
+    pub fn get_program(&self) -> Arc<Program> {
+        self.program.clone()
+    }
 }
 
 impl<SC> InitialProverSetup for RiscvProver<SC, Program>

@@ -121,6 +121,11 @@ impl EmulatorStdinBuilder<Vec<u8>> {
         self.buffer.push(tmp);
     }
 
+    /// Write a slice of bytes to the buffer.
+    pub fn write_slice(&mut self, slice: &[u8]) {
+        self.buffer.push(slice.to_vec());
+    }
+
     pub fn finalize<P>(self) -> EmulatorStdin<P, Vec<u8>> {
         EmulatorStdin {
             programs: Arc::new([]),

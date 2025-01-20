@@ -1,5 +1,5 @@
 [package]
-name = "pico-sdk"
+name = "pico-patch-libs"
 version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }
@@ -10,12 +10,3 @@ categories = { workspace = true }
 [dependencies]
 bincode.workspace = true
 serde.workspace = true
-clap.workspace = true
-pico-vm.workspace = true
-p3-baby-bear.workspace = true
-p3-challenger.workspace = true
-p3-field.workspace = true
-
-[features]
-default = []
-verify = []

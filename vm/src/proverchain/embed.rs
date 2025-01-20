@@ -37,7 +37,7 @@ where
     SC: StarkGenericConfig,
     Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
 {
-    machine: EmbedMachine<PrevSC, SC, EmbedChips<SC>, I>,
+    pub machine: EmbedMachine<PrevSC, SC, EmbedChips<SC>, I>,
     prev_machine: BaseMachine<PrevSC, CompressChips<PrevSC>>,
 }
 
