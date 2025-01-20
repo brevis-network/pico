@@ -14,6 +14,7 @@ pub struct PublicValuesChip<F> {
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
+    use crate::compiler::recursion_v2::types::{CommitPublicValuesEvent, MemAccessKind};
     use crate::{
         chips::chips::public_values_v2::PublicValuesChip,
         compiler::recursion_v2::{instruction, program::RecursionProgram},
@@ -23,7 +24,6 @@ mod tests {
             air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
             runtime::RecursionRecord,
             //tests::run_recursion_test_machine,
-            types::{CommitPublicValuesEvent, MemAccessKind},
         },
     };
     use p3_baby_bear::BabyBear;

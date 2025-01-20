@@ -5,8 +5,8 @@ use crate::{
 };
 use hashbrown::HashMap;
 
-/// A runtime for syscalls that is protected so that developers cannot arbitrarily modify the
-/// runtime.
+/// A emulator for syscalls that is protected so that developers cannot arbitrarily modify the
+/// emulator.
 #[allow(dead_code)]
 pub struct SyscallContext<'a: 'a> {
     /// The current chunk.
@@ -17,7 +17,7 @@ pub struct SyscallContext<'a: 'a> {
     pub next_pc: u32,
     /// The exit code.
     pub exit_code: u32,
-    /// The runtime.
+    /// The emulator.
     pub rt: &'a mut RiscvEmulator,
     /// The syscall lookup id.
     pub syscall_lookup_id: u128,

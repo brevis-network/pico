@@ -1,7 +1,10 @@
 use crate::{
     compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
-    emulator::record::RecordBehavior,
+    emulator::{
+        record::RecordBehavior,
+        recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
+    },
     instances::{
         compiler_v2::vk_merkle::stdin::RecursionVkStdin,
         configs::recur_config::StarkConfig as RecursionSC,
@@ -13,7 +16,6 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use p3_air::Air;
 use p3_field::FieldAlgebra;

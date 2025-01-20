@@ -1,13 +1,16 @@
 use crate::{
-    chips::chips::{
-        alu::{
-            add_sub::{
-                columns::{AddSubValueCols, NUM_ADD_SUB_COLS, NUM_ADD_SUB_VALUE_COLS},
-                AddSubChip,
+    chips::{
+        chips::{
+            alu::{
+                add_sub::{
+                    columns::{AddSubValueCols, NUM_ADD_SUB_COLS, NUM_ADD_SUB_VALUE_COLS},
+                    AddSubChip,
+                },
+                event::AluEvent,
             },
-            event::AluEvent,
+            byte::event::ByteRecordBehavior,
         },
-        byte::event::ByteRecordBehavior,
+        utils::next_power_of_two,
     },
     compiler::{
         riscv::{opcode::Opcode, program::Program},
@@ -16,7 +19,6 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
     primitives::consts::ADD_SUB_DATAPAR,
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
 use p3_field::{Field, PrimeField};

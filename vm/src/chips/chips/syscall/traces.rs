@@ -1,12 +1,14 @@
 use crate::{
-    chips::chips::{
-        byte::event::ByteRecordBehavior,
-        syscall::{columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS},
+    chips::{
+        chips::{
+            byte::event::ByteRecordBehavior,
+            syscall::{columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS},
+        },
+        utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
     emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
     machine::{chip::ChipBehavior, lookup::LookupScope, septic::SepticDigest},
-    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};

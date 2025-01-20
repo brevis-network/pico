@@ -16,6 +16,7 @@ use pico_vm::{
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
+        recursion::emulator::Runtime as RecursionRuntime,
         riscv::{riscv_emulator::RiscvEmulator, stdin::EmulatorStdin},
     },
     instances::{
@@ -30,7 +31,6 @@ use pico_vm::{
         BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE, MAX_NUM_PVS, RISCV_NUM_PVS,
         RISCV_SIMPLE_DEGREE,
     },
-    recursion_v2::runtime::Runtime as RecursionRuntime,
 };
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -206,8 +206,8 @@ macro_rules! run {
             info!("Recursion program hash: {}", hash);
             // assert_eq!(hash, 560573883904547356);
 
-            // Execute the runtime.
-            let recursion_record = tracing::debug_span!("execute runtime").in_scope(|| {
+            // Emulation.
+            let recursion_record = tracing::debug_span!("Recursion Emulator").in_scope(|| {
                 let mut witness_stream = Vec::new();
                 Witnessable::<$recur_cc>::write(&recursion_stdin, &mut witness_stream);
 

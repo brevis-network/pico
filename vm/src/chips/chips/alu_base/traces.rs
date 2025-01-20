@@ -1,13 +1,14 @@
 use crate::{
-    chips::chips::alu_base::{columns::*, BaseAluChip},
-    compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
+    chips::{
+        chips::alu_base::{columns::*, BaseAluChip},
+        utils::next_power_of_two,
+    },
+    compiler::recursion_v2::{
+        instruction::Instruction, program::RecursionProgram, types::BaseAluInstr,
+    },
+    emulator::recursion::emulator::{BaseAluOpcode, RecursionRecord},
     machine::chip::ChipBehavior,
     primitives::consts::BASE_ALU_DATAPAR,
-    recursion_v2::{
-        runtime::{BaseAluOpcode, RecursionRecord},
-        stark::utils::next_power_of_two,
-        types::BaseAluInstr,
-    },
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

@@ -13,10 +13,10 @@ use crate::{
         program::RecursionProgram,
     },
     configs::config::{Challenger, Com, PcsProof, Val},
+    emulator::recursion::public_values::RecursionPublicValues,
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::{field::FieldSpecificPoseidon2Config, machine::BaseMachine},
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
-    recursion_v2::air::RecursionPublicValues,
 };
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{PrimeField32, TwoAdicField};

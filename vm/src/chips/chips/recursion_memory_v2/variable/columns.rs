@@ -1,5 +1,5 @@
 use super::super::MemoryAccessCols;
-use crate::{primitives::consts::VAR_MEM_DATAPAR, recursion_v2::air::Block};
+use crate::{compiler::recursion_v2::ir::Block, primitives::consts::VAR_MEM_DATAPAR};
 use pico_derive::AlignedBorrow;
 
 pub const NUM_MEM_INIT_COLS: usize = core::mem::size_of::<MemoryCols<u8>>();

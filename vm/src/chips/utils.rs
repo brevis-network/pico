@@ -63,16 +63,43 @@ pub fn zeroed_f_vec<F: Field>(len: usize) -> Vec<F> {
     unsafe { std::mem::transmute::<Vec<u32>, Vec<F>>(vec) }
 }
 
-// TODO use pad_rows_fixed later
-pub fn pad_rows<T: Clone>(rows: &mut Vec<T>, row_fn: impl Fn() -> T) {
+// padding functionalities
+pub fn pad_rows_fixed<R: Clone>(
+    rows: &mut Vec<R>,
+    row_fn: impl Fn() -> R,
+    size_log2: Option<usize>,
+) {
     let nb_rows = rows.len();
-    let mut padded_nb_rows = nb_rows.next_power_of_two();
-    if padded_nb_rows < 16 {
-        padded_nb_rows = 16;
-    }
-    if padded_nb_rows == nb_rows {
-        return;
-    }
     let dummy_row = row_fn();
-    rows.resize(padded_nb_rows, dummy_row);
+    rows.resize(next_power_of_two(nb_rows, size_log2), dummy_row);
+}
+
+// padding functionalities
+pub fn next_power_of_two(n: usize, fixed_power: Option<usize>) -> usize {
+    match fixed_power {
+        Some(power) => {
+            let padded_nb_rows = 1 << power;
+            if n * 2 < padded_nb_rows {
+                tracing::warn!(
+                    "fixed log2 rows can be potentially reduced: got {}, expected {}",
+                    n,
+                    padded_nb_rows
+                );
+            }
+            if n > padded_nb_rows {
+                panic!(
+                    "fixed log2 rows is too small: got {}, expected {}",
+                    n, padded_nb_rows
+                );
+            }
+            padded_nb_rows
+        }
+        None => {
+            let mut padded_nb_rows = n.next_power_of_two();
+            if padded_nb_rows < 16 {
+                padded_nb_rows = 16;
+            }
+            padded_nb_rows
+        }
+    }
 }

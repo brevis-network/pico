@@ -3,13 +3,16 @@ use super::columns::{
     NUM_PUBLIC_VALUES_PREPROCESSED_COLS,
 };
 use crate::{
-    chips::chips::{
-        public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
-        recursion_memory_v2::MemoryAccessCols,
+    chips::{
+        chips::{
+            public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
+            recursion_memory_v2::MemoryAccessCols,
+        },
+        utils::pad_rows_fixed,
     },
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
+    emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
-    recursion_v2::{runtime::RecursionRecord, stark::utils::pad_rows_fixed},
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

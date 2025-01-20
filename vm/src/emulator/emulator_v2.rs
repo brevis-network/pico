@@ -8,10 +8,13 @@ use crate::{
         field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
-    emulator::riscv::{
-        record::EmulationRecord,
-        riscv_emulator::{EmulatorMode, RiscvEmulator},
-        stdin::EmulatorStdin,
+    emulator::{
+        recursion::emulator::{RecursionRecord, Runtime},
+        riscv::{
+            record::EmulationRecord,
+            riscv_emulator::{EmulatorMode, RiscvEmulator},
+            stdin::EmulatorStdin,
+        },
     },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -27,7 +30,6 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::{BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE},
-    recursion_v2::runtime::{RecursionRecord, Runtime},
 };
 use alloc::sync::Arc;
 use p3_field::PrimeField32;

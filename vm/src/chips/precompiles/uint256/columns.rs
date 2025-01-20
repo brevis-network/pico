@@ -1,13 +1,11 @@
-use crate::{
-    chips::{
-        chips::riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
-        gadgets::{
-            field::{field_lt::FieldLtCols, field_op::FieldOpCols},
-            uint256::U256Field,
-        },
-        precompiles::uint256::Uint256NumWords,
+use crate::chips::{
+    chips::riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
+    gadgets::{
+        field::{field_lt::FieldLtCols, field_op::FieldOpCols},
+        is_zero::IsZeroOperation,
+        uint256::U256Field,
     },
-    recursion_v2::air::IsZeroOperation,
+    precompiles::uint256::Uint256NumWords,
 };
 use hybrid_array::Array;
 use pico_derive::AlignedBorrow;

@@ -7,6 +7,7 @@ use crate::{
             bb_bn254_poseidon2::BabyBearBn254Poseidon2, kb_bn254_poseidon2::KoalaBearBn254Poseidon2,
         },
     },
+    emulator::recursion::emulator::Runtime,
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::recursion_circuit::{
@@ -22,7 +23,6 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::{DIGEST_SIZE, EMBED_DEGREE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
-    recursion_v2::runtime::Runtime,
 };
 use alloc::sync::Arc;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};

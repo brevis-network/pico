@@ -3,8 +3,11 @@
 For word and bytes
  */
 use crate::{
-    compiler::word::Word, configs::config::Poseidon2Config,
-    emulator::riscv::public_values::PublicValues, recursion_v2::air::RecursionPublicValues,
+    compiler::word::Word,
+    configs::config::Poseidon2Config,
+    emulator::{
+        recursion::public_values::RecursionPublicValues, riscv::public_values::PublicValues,
+    },
 };
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
@@ -249,3 +252,6 @@ pub const VAR_MEM_DATAPAR: usize = 4; // optimized
 pub const CONST_MEM_DATAPAR: usize = 1; // optimized
 pub const SELECT_DATAPAR: usize = 2; // optimized
 pub const POSEIDON2_DATAPAR: usize = 1; // tbd
+
+/// The width of the Poseidon2 permutation.
+pub const NUM_BITS: usize = 31;

@@ -11,7 +11,7 @@ use crate::{
 use tracing::{debug, trace};
 
 impl RiscvEmulator {
-    /// Emulate the given instruction over the current state of the runtime.
+    /// Emulate the given instruction over the current state.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn emulate_instruction(
         &mut self,

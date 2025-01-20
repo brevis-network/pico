@@ -1,19 +1,20 @@
 use crate::{
-    chips::chips::alu_ext::{
-        columns::{
-            ExtAluAccessCols, ExtAluValueCols, NUM_EXT_ALU_ACCESS_COLS, NUM_EXT_ALU_COLS,
-            NUM_EXT_ALU_PREPROCESSED_COLS, NUM_EXT_ALU_VALUE_COLS,
+    chips::{
+        chips::alu_ext::{
+            columns::{
+                ExtAluAccessCols, ExtAluValueCols, NUM_EXT_ALU_ACCESS_COLS, NUM_EXT_ALU_COLS,
+                NUM_EXT_ALU_PREPROCESSED_COLS, NUM_EXT_ALU_VALUE_COLS,
+            },
+            ExtAluChip,
         },
-        ExtAluChip,
+        utils::next_power_of_two,
     },
-    compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
+    compiler::recursion_v2::{
+        instruction::Instruction, program::RecursionProgram, types::ExtAluInstr,
+    },
+    emulator::recursion::emulator::{ExtAluOpcode, RecursionRecord},
     machine::chip::ChipBehavior,
     primitives::consts::{EXTENSION_DEGREE, EXT_ALU_DATAPAR},
-    recursion_v2::{
-        runtime::{ExtAluOpcode, RecursionRecord},
-        stark::utils::next_power_of_two,
-        types::ExtAluInstr,
-    },
 };
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;

@@ -4,13 +4,14 @@ use super::{
     MemoryConstChip,
 };
 use crate::{
-    compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
-    primitives::consts::CONST_MEM_DATAPAR,
-    recursion_v2::{
-        runtime::RecursionRecord,
+    compiler::recursion_v2::{
+        instruction::Instruction,
+        program::RecursionProgram,
         types::{MemAccessKind, MemInstr},
     },
+    emulator::recursion::emulator::RecursionRecord,
+    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    primitives::consts::CONST_MEM_DATAPAR,
 };
 use itertools::Itertools;
 use p3_field::PrimeField32;

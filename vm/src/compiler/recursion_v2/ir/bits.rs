@@ -2,7 +2,7 @@ use super::{Array, Builder, DslIr, Felt, Usize, Var};
 use crate::{
     configs::config::FieldGenericConfig,
     machine::field::{FieldBehavior, FieldType},
-    recursion_v2::runtime::NUM_BITS,
+    primitives::consts::NUM_BITS,
 };
 use p3_field::{Field, FieldAlgebra};
 

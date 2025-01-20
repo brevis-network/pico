@@ -4,9 +4,11 @@ use crate::{
         chips::byte::event::ByteRecordBehavior,
         gadgets::{
             field::field_op::FieldOperation,
+            is_zero::IsZeroOperation,
             utils::conversions::{words_to_bytes_le, words_to_bytes_le_vec},
         },
         precompiles::uint256::{Uint256MulChip, UINT256_NUM_WORDS},
+        utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
     emulator::riscv::{
@@ -14,7 +16,6 @@ use crate::{
         syscalls::{precompiles::PrecompileEvent, SyscallCode},
     },
     machine::chip::ChipBehavior,
-    recursion_v2::{air::IsZeroOperation, stark::utils::pad_rows_fixed},
 };
 use num::{BigUint, One, Zero};
 use p3_field::PrimeField32;

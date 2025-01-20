@@ -1,7 +1,10 @@
 use crate::{
     compiler::recursion_v2::program::RecursionProgram,
     configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val},
-    emulator::record::RecordBehavior,
+    emulator::{
+        record::RecordBehavior,
+        recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
+    },
     instances::compiler_v2::recursion_circuit::stdin::RecursionStdin,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -12,7 +15,6 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::EXTENSION_DEGREE,
-    recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;

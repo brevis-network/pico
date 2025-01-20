@@ -1,11 +1,14 @@
 use super::{columns::NUM_BITWISE_COLS, BitwiseChip};
 use crate::{
-    chips::chips::{
-        alu::{
-            bitwise::columns::{BitwiseValueCols, NUM_BITWISE_VALUE_COLS},
-            event::AluEvent,
+    chips::{
+        chips::{
+            alu::{
+                bitwise::columns::{BitwiseValueCols, NUM_BITWISE_VALUE_COLS},
+                event::AluEvent,
+            },
+            byte::event::{ByteLookupEvent, ByteRecordBehavior},
         },
-        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        utils::next_power_of_two,
     },
     compiler::{
         riscv::{
@@ -17,7 +20,6 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
     primitives::consts::BITWISE_DATAPAR,
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
 use p3_field::{Field, PrimeField};

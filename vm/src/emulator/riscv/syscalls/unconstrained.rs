@@ -34,7 +34,7 @@ impl Syscall for ExitUnconstrainedSyscall {
     fn emulate(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
         let state = core::mem::take(&mut ctx.rt.unconstrained);
 
-        // Reset the state of the runtime.
+        // Reset the state of the emulator.
         if let Some(mut state) = state {
             ctx.rt.state.global_clk = state.global_clk;
             ctx.rt.state.clk = state.clk;

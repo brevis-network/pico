@@ -2,8 +2,8 @@
 
 use super::ChipBuilder;
 use crate::{
+    compiler::recursion_v2::{ir::Block, types::Address},
     machine::lookup::{LookupScope, LookupType, SymbolicLookup},
-    recursion_v2::{air::Block, types::Address},
 };
 use p3_field::{Field, FieldAlgebra};
 use std::iter::once;

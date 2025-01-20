@@ -1,6 +1,7 @@
 use crate::{
+    compiler::recursion_v2::{ir::Block, types::*},
+    emulator::recursion::{emulator::*, public_values::RecursionPublicValues},
     primitives::consts::EXTENSION_DEGREE,
-    recursion_v2::{air::*, runtime::*, types::*},
 };
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use serde::{Deserialize, Serialize};

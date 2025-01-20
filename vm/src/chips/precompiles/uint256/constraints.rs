@@ -3,6 +3,7 @@ use crate::{
         chips::riscv_memory::read_write::columns::value_as_limbs,
         gadgets::{
             field::field_op::FieldOperation,
+            is_zero::IsZeroOperation,
             uint256::U256Field,
             utils::{
                 conversions::{limbs_from_access, limbs_from_prev_access},
@@ -18,7 +19,6 @@ use crate::{
     },
     emulator::riscv::syscalls::SyscallCode,
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
-    recursion_v2::air::IsZeroOperation,
 };
 use p3_air::{Air, BaseAir};
 use p3_field::{Field, FieldAlgebra};

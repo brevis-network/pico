@@ -2,6 +2,7 @@ use super::{combine::CombineChips, MachineProver, ProverChain};
 use crate::{
     compiler::recursion_v2::circuit::witness::Witnessable,
     configs::config::{Challenge, StarkGenericConfig, Val},
+    emulator::recursion::emulator::Runtime,
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::recursion_circuit::{
@@ -17,7 +18,6 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::{COMPRESS_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
-    recursion_v2::runtime::Runtime,
 };
 use alloc::sync::Arc;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};

@@ -4,7 +4,10 @@ use p3_field::PrimeField64;
 use pico_derive::AlignedBorrow;
 use serde::{Deserialize, Serialize};
 
-use super::{air::*, runtime::*};
+use crate::{
+    compiler::recursion_v2::ir::Block,
+    emulator::recursion::{emulator::*, public_values::RecursionPublicValues},
+};
 
 pub const WIDTH: usize = 16; // TODO use chips::poseidon2_skinny::WIDTH
 

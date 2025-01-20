@@ -55,6 +55,7 @@ impl<const DEGREE: usize, Config: Poseidon2Config, F: Field> Poseidon2Chip<DEGRE
 #[allow(unused_imports)]
 pub(crate) mod tests {
     use super::Poseidon2Chip;
+    use crate::compiler::recursion_v2::types::Poseidon2Event;
     use crate::{
         machine::chip::ChipBehavior,
         primitives::{
@@ -64,7 +65,6 @@ pub(crate) mod tests {
         recursion_v2::{
             runtime::RecursionRecord,
             //tests::run_recursion_test_machine,
-            types::Poseidon2Event,
         },
     };
     use p3_baby_bear::BabyBear;

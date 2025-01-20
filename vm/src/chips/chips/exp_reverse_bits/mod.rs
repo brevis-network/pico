@@ -21,6 +21,8 @@ mod tests {
     use p3_field::{FieldAlgebra, PrimeField32};
     use p3_matrix::dense::RowMajorMatrix;
 
+    use super::*;
+    use crate::compiler::recursion_v2::types::{ExpReverseBitsEvent, MemAccessKind};
     use crate::{
         compiler::recursion_v2::{
             instruction::{self, Instruction},
@@ -30,11 +32,8 @@ mod tests {
         recursion_v2::{
             runtime::RecursionRecord,
             //tests::run_recursion_test_machine,
-            types::{ExpReverseBitsEvent, MemAccessKind},
         },
     };
-
-    use super::*;
 
     #[test]
     #[allow(unused_variables)]

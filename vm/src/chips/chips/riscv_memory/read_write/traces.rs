@@ -6,15 +6,18 @@ use super::{
     MemoryReadWriteChip,
 };
 use crate::{
-    chips::chips::{
-        alu::event::AluEvent,
-        byte::event::ByteRecordBehavior,
-        events::ByteLookupEvent,
-        riscv_cpu::event::CpuEvent,
-        riscv_memory::{
-            event::{MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord},
-            read_write::columns::{MemoryChipValueCols, NUM_MEMORY_CHIP_VALUE_COLS},
+    chips::{
+        chips::{
+            alu::event::AluEvent,
+            byte::event::ByteRecordBehavior,
+            events::ByteLookupEvent,
+            riscv_cpu::event::CpuEvent,
+            riscv_memory::{
+                event::{MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord},
+                read_write::columns::{MemoryChipValueCols, NUM_MEMORY_CHIP_VALUE_COLS},
+            },
         },
+        utils::next_power_of_two,
     },
     compiler::riscv::{
         opcode::{ByteOpcode, Opcode},
@@ -24,7 +27,6 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
     primitives::consts::{MEMORY_RW_DATAPAR, WORD_SIZE},
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;

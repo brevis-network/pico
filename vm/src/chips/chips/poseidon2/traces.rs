@@ -2,16 +2,22 @@ use std::borrow::BorrowMut;
 
 use super::columns::permutation::{babybear_permutation_mut, koalabear_permutation_mut};
 use crate::{
-    chips::chips::{
-        poseidon2::{
-            columns::preprocessed::{Poseidon2PreprocessedCols, PREPROCESSED_POSEIDON2_WIDTH},
-            utils::{external_linear_layer, external_linear_layer_immut, internal_linear_layer},
-            Poseidon2Chip,
+    chips::{
+        chips::{
+            poseidon2::{
+                columns::preprocessed::{Poseidon2PreprocessedCols, PREPROCESSED_POSEIDON2_WIDTH},
+                utils::{
+                    external_linear_layer, external_linear_layer_immut, internal_linear_layer,
+                },
+                Poseidon2Chip,
+            },
+            recursion_memory_v2::MemoryAccessCols,
         },
-        recursion_memory_v2::MemoryAccessCols,
+        utils::next_power_of_two,
     },
     compiler::recursion_v2::{instruction::Instruction::Poseidon2, program::RecursionProgram},
     configs::config::Poseidon2Config,
+    emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::ChipBehavior,
         field::{FieldBehavior, FieldType},
@@ -20,7 +26,6 @@ use crate::{
         consts::{BabyBearConfig, KoalaBearConfig, PERMUTATION_WIDTH},
         RC_16_30_U32,
     },
-    recursion_v2::{runtime::RecursionRecord, stark::utils::next_power_of_two},
 };
 use hybrid_array::Array;
 use p3_air::BaseAir;

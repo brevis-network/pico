@@ -4,15 +4,16 @@ use super::{
     MemoryVarChip,
 };
 use crate::{
+    chips::utils::next_power_of_two,
     compiler::recursion_v2::{
         instruction::{
             HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
         },
         program::RecursionProgram,
     },
+    emulator::recursion::emulator::RecursionRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::VAR_MEM_DATAPAR,
-    recursion_v2::{runtime::RecursionRecord, stark::utils::next_power_of_two},
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

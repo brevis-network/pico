@@ -30,6 +30,7 @@ use crate::{
                 limbs::Limbs,
             },
         },
+        utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
     emulator::riscv::{
@@ -40,7 +41,6 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
     },
-    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use hybrid_array::Array;
 use num::{BigUint, Zero};

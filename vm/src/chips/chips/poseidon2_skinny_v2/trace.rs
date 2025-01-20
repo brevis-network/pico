@@ -12,12 +12,12 @@ use crate::{
     },
     compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
     configs::config::Poseidon2Config,
+    emulator::recursion::emulator::RecursionRecord,
     machine::{
         chip::ChipBehavior,
         utils::{pad_to_power_of_two, pad_to_power_of_two_noconst},
     },
     primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
-    recursion_v2::runtime::RecursionRecord,
 };
 use hybrid_array::Array;
 use itertools::Itertools;

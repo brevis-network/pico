@@ -14,4 +14,3 @@ pub mod instances;
 pub mod machine;
 pub mod primitives;
 pub mod proverchain;
-pub mod recursion_v2;

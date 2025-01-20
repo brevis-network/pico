@@ -13,6 +13,7 @@ use crate::{
                 polynomial::Polynomial,
             },
         },
+        utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
     emulator::{
@@ -26,7 +27,6 @@ use crate::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
     },
-    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use core::{
     borrow::{Borrow, BorrowMut},

@@ -4,13 +4,13 @@ use crate::{
         recursion_v2::{circuit, prelude::*},
         word::Word,
     },
+    emulator::recursion::public_values::circuit::{
+        config::CircuitConfig, hash::Posedion2FieldHasherVariable,
+    },
     machine::septic::SepticDigest,
     primitives::consts::{
         DIGEST_SIZE, MAX_NUM_PVS, PERMUTATION_RATE, PERMUTATION_WIDTH, PV_DIGEST_NUM_WORDS,
         RECURSION_NUM_PVS,
-    },
-    recursion_v2::air::public_values::circuit::{
-        config::CircuitConfig, hash::Posedion2FieldHasherVariable,
     },
 };
 use core::fmt::Debug;

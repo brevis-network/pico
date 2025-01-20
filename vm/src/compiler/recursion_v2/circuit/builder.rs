@@ -1,14 +1,14 @@
 //! An implementation of Poseidon2 over BN254.
 
 use crate::{
-    compiler::recursion_v2::prelude::*,
+    compiler::recursion_v2::{prelude::*, types::WIDTH},
     configs::config::FieldGenericConfig,
+    emulator::recursion::public_values::RecursionPublicValues,
     machine::{
         field::{FieldBehavior, FieldType},
         septic::{SepticCurve, SepticDigest, SepticExtension},
     },
-    primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE},
-    recursion_v2::{air::RecursionPublicValues, runtime::HASH_RATE, types::WIDTH},
+    primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE, PERMUTATION_RATE},
 };
 use itertools::Itertools;
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
@@ -180,7 +180,7 @@ impl<FC: FieldGenericConfig> CircuitV2Builder<FC> for Builder<FC> {
     fn poseidon2_hash_v2(&mut self, input: &[Felt<FC::F>]) -> [Felt<FC::F>; DIGEST_SIZE] {
         // static_assert(RATE < WIDTH)
         let mut state = core::array::from_fn(|_| self.eval(FC::F::ZERO));
-        for input_chunk in input.chunks(HASH_RATE) {
+        for input_chunk in input.chunks(PERMUTATION_RATE) {
             state[..input_chunk.len()].copy_from_slice(input_chunk);
             state = self.poseidon2_permute_v2(state);
         }

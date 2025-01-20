@@ -1,6 +1,6 @@
 use crate::{
-    chips::chips::recursion_memory_v2::MemoryAccessCols, primitives::consts::PERMUTATION_WIDTH,
-    recursion_v2::types::Address,
+    chips::chips::recursion_memory_v2::MemoryAccessCols, compiler::recursion_v2::types::Address,
+    primitives::consts::PERMUTATION_WIDTH,
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;

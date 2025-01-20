@@ -5,7 +5,7 @@ use super::{
     ShaCompressChip, SHA_COMPRESS_K,
 };
 use crate::{
-    chips::chips::byte::event::ByteRecordBehavior,
+    chips::{chips::byte::event::ByteRecordBehavior, utils::pad_rows_fixed},
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::{
         record::EmulationRecord,
@@ -15,7 +15,6 @@ use crate::{
         },
     },
     machine::chip::ChipBehavior,
-    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use p3_air::BaseAir;
 use p3_field::PrimeField32;

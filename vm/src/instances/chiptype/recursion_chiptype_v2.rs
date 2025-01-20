@@ -15,7 +15,9 @@ use crate::{
             HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
         },
         program::RecursionProgram,
+        types::ExpReverseBitsInstr,
     },
+    emulator::recursion::emulator::RecursionRecord,
     instances::compiler_v2::shapes::compress_shape::RecursionPadShape,
     machine::{
         builder::ChipBuilder,
@@ -27,7 +29,6 @@ use crate::{
         BASE_ALU_DATAPAR, CONST_MEM_DATAPAR, EXTENSION_DEGREE, EXT_ALU_DATAPAR, SELECT_DATAPAR,
         VAR_MEM_DATAPAR,
     },
-    recursion_v2::{runtime::RecursionRecord, types::ExpReverseBitsInstr},
 };
 use hashbrown::HashMap;
 use p3_air::{Air, AirBuilder, BaseAir};

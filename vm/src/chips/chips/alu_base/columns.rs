@@ -1,6 +1,6 @@
 use crate::{
+    compiler::recursion_v2::types::{Address, BaseAluIo},
     primitives::consts::BASE_ALU_DATAPAR,
-    recursion_v2::types::{Address, BaseAluIo},
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;

@@ -6,6 +6,7 @@ use crate::{
     configs::config::{StarkGenericConfig, Val},
     emulator::{
         opts::EmulatorOpts,
+        recursion::emulator::RecursionRecord,
         riscv::{record::EmulationRecord, stdin::EmulatorStdin},
     },
     instances::compiler_v2::{
@@ -18,7 +19,6 @@ use crate::{
         proof::BaseProof,
     },
     primitives::consts::DIGEST_SIZE,
-    recursion_v2::runtime::RecursionRecord,
 };
 use alloc::sync::Arc;
 

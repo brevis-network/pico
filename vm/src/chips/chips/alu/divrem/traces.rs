@@ -1,14 +1,17 @@
 use super::{columns::NUM_DIVREM_COLS, DivRemChip};
 use crate::{
-    chips::chips::{
-        alu::{
-            divrem::{
-                columns::{DivRemValueCols, NUM_DIVREM_VALUE_COLS},
-                utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
+    chips::{
+        chips::{
+            alu::{
+                divrem::{
+                    columns::{DivRemValueCols, NUM_DIVREM_VALUE_COLS},
+                    utils::{get_msb, get_quotient_and_remainder, is_signed_operation},
+                },
+                event::AluEvent,
             },
-            event::AluEvent,
+            byte::event::{ByteLookupEvent, ByteRecordBehavior},
         },
-        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        utils::next_power_of_two,
     },
     compiler::{
         riscv::{
@@ -20,7 +23,6 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
     primitives::consts::{BYTE_SIZE, DIVREM_DATAPAR, LONG_WORD_SIZE, WORD_SIZE},
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
 use hashbrown::HashMap;

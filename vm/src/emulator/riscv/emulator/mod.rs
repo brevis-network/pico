@@ -42,10 +42,10 @@ pub struct RiscvEmulator {
     /// The program.
     pub program: Arc<Program>,
 
-    /// The options for the runtime.
+    /// The options for the emulator.
     pub opts: EmulatorOpts,
 
-    /// Whether the runtime is in constrained mode or not.
+    /// Whether the emulator is in constrained mode or not.
     ///
     /// In unconstrained mode, any events, clock, register, or memory changes are reset after
     /// leaving the unconstrained block. The only thing preserved is writes to the input
@@ -683,7 +683,7 @@ impl RiscvEmulator {
         (a, b, c)
     }
 
-    /// Recover runtime state from a program and existing emulation state.
+    /// Recover emulator state from a program and existing emulation state.
     #[must_use]
     pub fn recover<F: PrimeField32>(
         program: Arc<Program>,

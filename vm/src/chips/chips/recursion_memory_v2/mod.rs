@@ -1,8 +1,8 @@
 pub mod constant;
 pub mod variable;
 
-use crate::recursion_v2::{
-    air::Block,
+use crate::compiler::recursion_v2::{
+    ir::Block,
     types::{Address, MemIo},
 };
 use pico_derive::AlignedBorrow;
@@ -26,15 +26,10 @@ pub type MemEvent<F> = MemIo<Block<F>>;
 #[allow(unused_imports)]
 mod tests {
     use super::{constant::MemoryConstChip, variable::MemoryVarChip, MemEvent};
-    use crate::{
-        compiler::recursion_v2::{instruction::mem, program::RecursionProgram},
-        machine::chip::ChipBehavior,
-        recursion_v2::{runtime::RecursionRecord, types::MemAccessKind},
-    };
+    use crate::{emulator::recursion::emulator::RecursionRecord, machine::chip::ChipBehavior};
     use p3_baby_bear::BabyBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
-
     #[test]
     pub fn recursion_mem_chip_generate_main() {
         let chunk = RecursionRecord::<BabyBear> {

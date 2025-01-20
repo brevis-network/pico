@@ -33,32 +33,23 @@ impl<const DEGREE: usize, Config, F> Default for Poseidon2SkinnyChip<DEGREE, Con
 #[allow(unused_imports)]
 mod tests {
     use super::Poseidon2SkinnyChip;
+    use crate::compiler::recursion_v2::types::Poseidon2Event;
     use crate::{
-        compiler::recursion_v2::{
-            instruction::{mem, poseidon2},
-            program::RecursionProgram,
-        },
         machine::chip::ChipBehavior,
         primitives::{
-            consts::{
-                BabyBearConfig, KoalaBearConfig, BABYBEAR_NUM_EXTERNAL_ROUNDS,
-                BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
-                KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
-            },
+            consts::{BabyBearConfig, KoalaBearConfig, PERMUTATION_WIDTH},
             pico_poseidon2bb_init, pico_poseidon2kb_init,
         },
         recursion_v2::{
             runtime::RecursionRecord,
             //tests::run_recursion_wrap_test_machine,
-            types::{MemAccessKind, Poseidon2Event},
         },
     };
     use p3_baby_bear::BabyBear;
-    use p3_field::{FieldAlgebra, PrimeField32};
+    use p3_field::FieldAlgebra;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::Permutation;
-    use std::{array, iter::once};
     use zkhash::ark_ff::UniformRand;
 
     #[test]

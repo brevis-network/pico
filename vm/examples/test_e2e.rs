@@ -19,7 +19,10 @@ use pico_vm::{
             kb_bn254_poseidon2::KoalaBearBn254Poseidon2, kb_poseidon2::KoalaBearPoseidon2,
         },
     },
-    emulator::{emulator_v2::MetaEmulator, opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{
+        emulator_v2::MetaEmulator, opts::EmulatorOpts, recursion::emulator::Runtime,
+        riscv::stdin::EmulatorStdin,
+    },
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
@@ -42,7 +45,6 @@ use pico_vm::{
         BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
         DIGEST_SIZE, EMBED_DEGREE, KOALABEAR_S_BOX_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
-    recursion_v2::runtime::Runtime,
 };
 
 use std::{

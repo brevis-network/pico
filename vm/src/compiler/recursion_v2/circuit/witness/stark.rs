@@ -8,11 +8,10 @@ use crate::{
                 QueryProofVariable,
             },
         },
-        ir::{Builder, Felt},
+        ir::{Block, Builder, Felt},
     },
     configs::config::FieldGenericConfig,
     instances::configs::{recur_config, recur_kb_config},
-    recursion_v2::air::Block,
 };
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_fri::CommitPhaseProofStep;

@@ -8,7 +8,7 @@ use crate::{
             },
             byte::event::{ByteLookupEvent, ByteRecordBehavior},
         },
-        utils::get_msb,
+        utils::{get_msb, next_power_of_two},
     },
     compiler::{
         riscv::{
@@ -20,7 +20,6 @@ use crate::{
     emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     machine::chip::ChipBehavior,
     primitives::consts::{BYTE_SIZE, MUL_DATAPAR, WORD_SIZE},
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use itertools::Itertools;
 use p3_air::BaseAir;

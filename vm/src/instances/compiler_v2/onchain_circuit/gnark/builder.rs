@@ -13,6 +13,7 @@ use crate::{
         ir::{Builder, Ext, Felt, Var, Witness},
     },
     configs::config::{Com, FieldGenericConfig, PcsProof, PcsProverData, StarkGenericConfig, Val},
+    emulator::recursion::public_values::{assert_embed_public_values_valid, RecursionPublicValues},
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::onchain_circuit::stdin::{OnchainStdin, OnchainStdinVariable},
@@ -25,7 +26,6 @@ use crate::{
         EMBED_DEGREE, EXTENSION_DEGREE, MULTI_FIELD_CHALLENGER_DIGEST_SIZE,
         MULTI_FIELD_CHALLENGER_RATE, MULTI_FIELD_CHALLENGER_WIDTH,
     },
-    recursion_v2::air::{assert_embed_public_values_valid, RecursionPublicValues},
 };
 use p3_air::Air;
 use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};

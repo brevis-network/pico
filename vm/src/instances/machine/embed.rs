@@ -3,7 +3,10 @@ use crate::{
         circuit::utils::assert_embed_public_values_valid, program::RecursionProgram,
     },
     configs::config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},
-    emulator::record::RecordBehavior,
+    emulator::{
+        record::RecordBehavior,
+        recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
+    },
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -11,7 +14,6 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};

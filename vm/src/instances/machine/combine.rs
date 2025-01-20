@@ -10,6 +10,7 @@ use crate::{
     emulator::{
         emulator_v2::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
         record::RecordBehavior,
+        recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
         riscv::stdin::EmulatorStdin,
     },
     instances::compiler_v2::recursion_circuit::stdin::RecursionStdin,
@@ -21,7 +22,6 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::COMBINE_SIZE,
-    recursion_v2::{air::RecursionPublicValues, runtime::RecursionRecord},
 };
 use anyhow::Result;
 use p3_air::Air;

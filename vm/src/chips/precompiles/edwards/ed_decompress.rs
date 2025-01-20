@@ -19,6 +19,7 @@ use crate::{
                 limbs::Limbs,
             },
         },
+        utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
     emulator::{
@@ -36,7 +37,6 @@ use crate::{
         chip::ChipBehavior,
         utils::{limbs_from_access, limbs_from_prev_access},
     },
-    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use core::{
     borrow::{Borrow, BorrowMut},

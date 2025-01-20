@@ -47,7 +47,7 @@
 //         BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, DIGEST_SIZE,
 //         EMBED_DEGREE, PERMUTATION_WIDTH, RECURSION_NUM_PVS, RISCV_COMPRESS_DEGREE, RISCV_NUM_PVS,
 //     },
-//     recursion::runtime::Runtime,
+//     recursion::emulator::Runtime,
 // };
 //
 // use std::sync::Arc;
@@ -387,7 +387,7 @@
 //             let mut witness_stream = Vec::new();
 //             witness_stream.extend(stdin.write());
 //
-//             let mut runtime = Runtime::<
+//             let mut emulator = Runtime::<
 //                 Val<RecursionSC>,
 //                 Challenge<RecursionSC>,
 //                 _,
@@ -398,10 +398,10 @@
 //                 &self.compress_program,
 //                 self.compress_machine.config().perm.clone(),
 //             );
-//             runtime.witness_stream = witness_stream.into();
-//             runtime.run().unwrap();
-//             runtime.print_stats();
-//             runtime.record
+//             emulator.witness_stream = witness_stream.into();
+//             emulator.run().unwrap();
+//             emulator.print_stats();
+//             emulator.record
 //         };
 //         let compress_witness = ProvingWitness::setup_with_records(vec![compress_record]);
 //         let compress_proof = self.compress_machine.prove(&compress_pk, &compress_witness);
@@ -433,7 +433,7 @@
 //             let mut witness_stream = Vec::new();
 //             witness_stream.extend(stdin.write());
 //
-//             let mut runtime = Runtime::<
+//             let mut emulator = Runtime::<
 //                 Val<RecursionSC>,
 //                 Challenge<RecursionSC>,
 //                 _,
@@ -444,11 +444,11 @@
 //                 &self.embed_program,
 //                 self.compress_machine.config().perm.clone(),
 //             );
-//             runtime.witness_stream = witness_stream.into();
-//             runtime.run().unwrap();
-//             runtime.print_stats();
+//             emulator.witness_stream = witness_stream.into();
+//             emulator.run().unwrap();
+//             emulator.print_stats();
 //
-//             runtime.record
+//             emulator.record
 //         };
 //
 //         let embed_witness: ProvingWitness<

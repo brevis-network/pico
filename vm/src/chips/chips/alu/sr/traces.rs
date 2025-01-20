@@ -1,11 +1,14 @@
 use super::columns::{ShiftRightValueCols, NUM_SLR_COLS, NUM_SLR_VALUE_COLS};
 use crate::{
-    chips::chips::{
-        alu::event::AluEvent,
-        byte::{
-            event::{ByteLookupEvent, ByteRecordBehavior},
-            utils::shr_carry,
+    chips::{
+        chips::{
+            alu::event::AluEvent,
+            byte::{
+                event::{ByteLookupEvent, ByteRecordBehavior},
+                utils::shr_carry,
+            },
         },
+        utils::next_power_of_two,
     },
     compiler::{
         riscv::{
@@ -17,7 +20,6 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
     primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, SR_DATAPAR, WORD_SIZE},
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};

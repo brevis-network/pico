@@ -6,8 +6,8 @@ use crate::{
         },
         SelectChip,
     },
+    compiler::recursion_v2::types::SelectIo,
     machine::builder::{ChipBuilder, RecursionBuilder},
-    recursion_v2::types::SelectIo,
 };
 use p3_air::{Air, BaseAir};
 use p3_field::{Field, FieldAlgebra};

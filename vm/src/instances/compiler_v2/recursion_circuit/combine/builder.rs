@@ -18,16 +18,16 @@ use crate::{
         word::Word,
     },
     configs::config::{Challenge, Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
-    machine::{chip::ChipBehavior, machine::BaseMachine},
-    primitives::consts::{
-        ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
-    },
-    recursion_v2::{
-        air::{
+    emulator::recursion::{
+        emulator::RecursionRecord,
+        public_values::{
             assert_recursion_public_values_valid, recursion_public_values_digest,
             RecursionPublicValues,
         },
-        runtime::RecursionRecord,
+    },
+    machine::{chip::ChipBehavior, machine::BaseMachine},
+    primitives::consts::{
+        ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
     },
 };
 use itertools::Itertools;

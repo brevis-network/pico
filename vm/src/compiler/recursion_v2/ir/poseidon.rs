@@ -2,8 +2,7 @@ use super::{Array, Builder, DslIr, Ext, Felt, Usize, Var};
 use crate::{
     configs::config::FieldGenericConfig,
     machine::field::{FieldBehavior, FieldType},
-    primitives::consts::{DIGEST_SIZE, PERMUTATION_WIDTH},
-    recursion_v2::runtime::HASH_RATE,
+    primitives::consts::{DIGEST_SIZE, PERMUTATION_RATE, PERMUTATION_WIDTH},
 };
 use p3_field::FieldAlgebra;
 
@@ -164,13 +163,13 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         let break_flag: Var<_> = self.eval(FC::N::ZERO);
         let last_index: Usize<_> = self.eval(array.len() - 1);
         self.range(0, array.len())
-            .step_by(HASH_RATE)
+            .step_by(PERMUTATION_RATE)
             .for_each(|i, builder| {
                 builder.if_eq(break_flag, FC::N::ONE).then(|builder| {
                     builder.break_loop();
                 });
                 // Insert elements of the chunk.
-                builder.range(0, HASH_RATE).for_each(|j, builder| {
+                builder.range(0, PERMUTATION_RATE).for_each(|j, builder| {
                     let index: Var<_> = builder.eval(i + j);
                     let element = builder.get(array, index);
                     builder.set_value(&mut state, j, element);
@@ -231,7 +230,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
                     builder.set_value(&mut state, idx, felt);
                     builder.assign(idx, idx + FC::N::ONE);
                     builder
-                        .if_eq(idx, FC::N::from_canonical_usize(HASH_RATE))
+                        .if_eq(idx, FC::N::from_canonical_usize(PERMUTATION_RATE))
                         .then(|builder| {
                             builder.poseidon2_permute_mut(&state);
                             builder.assign(idx, FC::N::ZERO);

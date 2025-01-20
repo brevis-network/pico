@@ -4,17 +4,15 @@ use crate::{
             FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr,
             Instruction, PrintInstr,
         },
+        ir::Block,
         prelude::*,
         program::RecursionProgram,
-    },
-    configs::config::FieldGenericConfig,
-    machine::septic::SepticCurve,
-    primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS},
-    recursion_v2::{
-        air::{Block, RecursionPublicValues},
-        runtime::*,
         types::*,
     },
+    configs::config::FieldGenericConfig,
+    emulator::recursion::{emulator::*, public_values::RecursionPublicValues},
+    machine::septic::SepticCurve,
+    primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use core::fmt::Debug;
 use itertools::Itertools;
@@ -214,8 +212,7 @@ where
         FC: FieldGenericConfig<N = F, F = F> + Debug,
     {
         // For readability. Avoids polluting outer scope.
-        use BaseAluOpcode::*;
-        use ExtAluOpcode::*;
+        use crate::emulator::recursion::emulator::{BaseAluOpcode::*, ExtAluOpcode::*};
 
         let mut f = |instr| consumer(Ok(instr));
         match ir_instr {

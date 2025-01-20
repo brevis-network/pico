@@ -2,16 +2,15 @@ use std::{array, sync::Arc};
 
 use crate::{
     chips::chips::recursion_memory_v2::MemEvent,
-    compiler::recursion_v2::program::RecursionProgram,
-    emulator::record::RecordBehavior,
-    primitives::consts::MAX_NUM_PVS,
-    recursion_v2::{
-        air::RecursionPublicValues,
+    compiler::recursion_v2::{
+        program::RecursionProgram,
         types::{
             BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
             Poseidon2Event, SelectEvent,
         },
     },
+    emulator::{record::RecordBehavior, recursion::public_values::RecursionPublicValues},
+    primitives::consts::MAX_NUM_PVS,
 };
 use hashbrown::HashMap;
 use p3_field::{Field, FieldAlgebra, PrimeField32};

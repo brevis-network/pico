@@ -19,14 +19,16 @@ use crate::{
         word::Word,
     },
     configs::config::{Challenger, Com, PcsProof, Val},
-    emulator::riscv::public_values::PublicValues,
+    emulator::{
+        recursion::public_values::{recursion_public_values_digest, RecursionPublicValues},
+        riscv::public_values::PublicValues,
+    },
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::{
         chip::ChipBehavior, field::FieldSpecificPoseidon2Config, lookup::LookupScope,
         machine::BaseMachine,
     },
     primitives::consts::{ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS},
-    recursion_v2::air::{recursion_public_values_digest, RecursionPublicValues},
 };
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;

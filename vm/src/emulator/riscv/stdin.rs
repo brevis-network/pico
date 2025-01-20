@@ -13,6 +13,7 @@ use crate::{
         program::RecursionProgram,
     },
     configs::config::{Challenge, Challenger, Com, PcsProof, StarkGenericConfig, Val},
+    emulator::recursion::emulator::RecursionRecord,
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
@@ -33,7 +34,6 @@ use crate::{
         proof::BaseProof,
     },
     primitives::consts::{COMBINE_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE},
-    recursion_v2::runtime::RecursionRecord,
 };
 use alloc::sync::Arc;
 use p3_air::Air;

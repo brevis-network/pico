@@ -39,9 +39,9 @@ use crate::{
             value_as_limbs, MemoryReadCols, MemoryWriteCols,
         },
         gadgets::field::field_op::FieldOpCols,
+        utils::pad_rows_fixed,
     },
     emulator::riscv::syscalls::precompiles::PrecompileEvent,
-    recursion_v2::stark::utils::pad_rows_fixed,
 };
 
 pub const fn num_fp2_addsub_cols<P>() -> usize

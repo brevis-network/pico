@@ -6,9 +6,11 @@ use crate::{
         },
         BatchFRIChip,
     },
-    compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
+    compiler::recursion_v2::{
+        instruction::Instruction, program::RecursionProgram, types::BatchFRIInstr,
+    },
+    emulator::recursion::emulator::RecursionRecord,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
-    recursion_v2::{runtime::RecursionRecord, types::BatchFRIInstr},
 };
 use p3_air::BaseAir;
 use p3_field::PrimeField32;

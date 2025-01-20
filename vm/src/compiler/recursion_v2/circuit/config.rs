@@ -15,9 +15,9 @@ use crate::{
         prelude::DslIr,
     },
     configs::config::{FieldGenericConfig, SimpleFriConfig, StarkGenericConfig, Val},
+    emulator::recursion::public_values::RecursionPublicValues,
     instances::configs::{embed_config, embed_kb_config, recur_config, recur_kb_config},
     primitives::consts::EXTENSION_DEGREE,
-    recursion_v2::air::RecursionPublicValues,
 };
 use itertools::izip;
 use p3_bn254_fr::Bn254Fr;

@@ -7,6 +7,7 @@ use crate::{
     emulator::{
         emulator_v2::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
         record::RecordBehavior,
+        recursion::emulator::RecursionRecord,
     },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType, compiler_v2::riscv_circuit::stdin::ConvertStdin,
@@ -18,7 +19,6 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    recursion_v2::runtime::RecursionRecord,
 };
 use anyhow::Result;
 use p3_air::Air;

@@ -1,7 +1,7 @@
 use super::{Array, Ext, Felt, MemIndex, Ptr, TracedVec, Usize, Var};
 use crate::{
-    configs::config::FieldGenericConfig, machine::septic::SepticCurve,
-    recursion_v2::air::RecursionPublicValues,
+    configs::config::FieldGenericConfig, emulator::recursion::public_values::RecursionPublicValues,
+    machine::septic::SepticCurve,
 };
 
 /// An intermeddiate instruction set for implementing programs.

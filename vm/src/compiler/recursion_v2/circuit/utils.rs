@@ -4,8 +4,8 @@ use crate::{
         word::Word,
     },
     configs::config::{FieldGenericConfig, StarkGenericConfig, Val},
+    emulator::recursion::public_values::{ChallengerPublicValues, RecursionPublicValues},
     primitives::consts::DIGEST_SIZE,
-    recursion_v2::air::{ChallengerPublicValues, RecursionPublicValues},
 };
 use itertools::Itertools;
 use p3_bn254_fr::Bn254Fr;

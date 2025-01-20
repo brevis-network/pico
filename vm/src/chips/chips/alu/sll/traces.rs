@@ -1,17 +1,19 @@
 use super::columns::NUM_SLL_COLS;
 use crate::{
-    chips::chips::{
-        alu::{
-            event::AluEvent,
-            sll::{ShiftLeftValueCols, NUM_SLL_VALUE_COLS},
+    chips::{
+        chips::{
+            alu::{
+                event::AluEvent,
+                sll::{ShiftLeftValueCols, NUM_SLL_VALUE_COLS},
+            },
+            byte::event::ByteRecordBehavior,
         },
-        byte::event::ByteRecordBehavior,
+        utils::next_power_of_two,
     },
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
     primitives::consts::{BYTE_SIZE, SLL_DATAPAR, WORD_SIZE},
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField};

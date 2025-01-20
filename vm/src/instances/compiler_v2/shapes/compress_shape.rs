@@ -11,6 +11,7 @@ use crate::{
         select::SelectChip,
     },
     compiler::recursion_v2::program::RecursionProgram,
+    emulator::recursion::emulator::RecursionRecord,
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType, compiler_v2::shapes::ProofShape,
     },
@@ -18,7 +19,6 @@ use crate::{
         chip::ChipBehavior, field::FieldSpecificPoseidon2Config, folder::SymbolicConstraintFolder,
     },
     primitives::consts::EXTENSION_DEGREE,
-    recursion_v2::runtime::RecursionRecord,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;

@@ -1,6 +1,6 @@
 mod memory;
 mod opcode;
-mod record;
+mod runtime;
 
 use std::{
     array,
@@ -15,9 +15,9 @@ use std::{
 
 use crate::{
     chips::chips::recursion_memory_v2::MemEvent,
-    compiler::recursion_v2::program::RecursionProgram,
+    compiler::recursion_v2::{ir::Block, program::RecursionProgram},
+    emulator::recursion::emulator::memory::MemVecMap,
     machine::septic::{SepticCurve, SepticExtension},
-    recursion_v2::{air::Block, runtime::memory::MemVecMap},
 };
 use backtrace::Backtrace as Trace;
 use hashbrown::HashMap;
@@ -27,7 +27,7 @@ use p3_poseidon2::{ExternalLayer, InternalLayer, Poseidon2};
 use p3_symmetric::Permutation;
 use p3_util::reverse_bits_len;
 
-use crate::recursion_v2::types::{
+use crate::compiler::recursion_v2::types::{
     BaseAluEvent, BaseAluInstr, BatchFRIBaseVecIo, BatchFRIEvent, BatchFRIExtSingleIo,
     BatchFRIExtVecIo, BatchFRIInstr, CommitPublicValuesEvent, ExpReverseBitsEvent,
     ExpReverseBitsInstr, ExpReverseBitsIo, ExtAluEvent, ExtAluInstr, MemAccessKind, MemInstr,
@@ -35,6 +35,7 @@ use crate::recursion_v2::types::{
 };
 use thiserror::Error;
 
+pub use crate::emulator::recursion::record::*;
 use crate::{
     compiler::recursion_v2::instruction::{
         FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
@@ -44,17 +45,6 @@ use crate::{
 };
 use memory::*;
 pub use opcode::*;
-pub use record::*;
-
-pub const HEAP_PTR: i32 = -4;
-pub const HEAP_START_ADDRESS: usize = STACK_SIZE + 4;
-
-pub const STACK_SIZE: usize = 1 << 24;
-pub const MEMORY_SIZE: usize = 1 << 28;
-
-/// The width of the Poseidon2 permutation.
-pub const HASH_RATE: usize = 8;
-pub const NUM_BITS: usize = 31;
 
 #[derive(Debug, Clone, Default)]
 pub struct CycleTrackerEntry {
@@ -63,7 +53,6 @@ pub struct CycleTrackerEntry {
     pub cumulative_cycles: usize,
 }
 
-/// TODO fully document.
 /// Taken from [`sp1_recursion_core::runtime::Runtime`].
 /// Many missing things (compared to the old `Runtime`) will need to be implemented.
 pub struct Runtime<'a, F, EF, ExternalPerm, InternalPerm, const D: u64>
@@ -111,7 +100,7 @@ where
     /// Memory. From canonical usize of an Address to a MemoryEntry.
     pub memory: MemVecMap<F>,
 
-    /// The execution record.
+    /// The emulation record.
     pub record: RecursionRecord<F>,
 
     pub witness_stream: VecDeque<Block<F>>,

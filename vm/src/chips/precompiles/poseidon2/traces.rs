@@ -3,10 +3,13 @@ use super::{
     Poseidon2PermuteChip,
 };
 use crate::{
-    chips::chips::{
-        byte::event::ByteRecordBehavior,
-        events::ByteLookupEvent,
-        poseidon2::utils::{external_linear_layer, internal_linear_layer},
+    chips::{
+        chips::{
+            byte::event::ByteRecordBehavior,
+            events::ByteLookupEvent,
+            poseidon2::utils::{external_linear_layer, internal_linear_layer},
+        },
+        utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
     configs::config::Poseidon2Config,
@@ -22,7 +25,6 @@ use crate::{
     },
     machine::chip::ChipBehavior,
     primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
-    recursion_v2::stark::utils::pad_rows_fixed,
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};

@@ -1,9 +1,9 @@
 use crate::{
-    primitives::consts::EXT_ALU_DATAPAR,
-    recursion_v2::{
-        air::Block,
+    compiler::recursion_v2::{
+        ir::Block,
         types::{Address, ExtAluIo},
     },
+    primitives::consts::EXT_ALU_DATAPAR,
 };
 use pico_derive::AlignedBorrow;
 

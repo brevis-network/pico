@@ -1,16 +1,21 @@
 use crate::{
-    chips::chips::select::{
-        columns::{
-            SelectPreprocessedValueCols, SelectValueCols, NUM_SELECT_COLS,
-            NUM_SELECT_PREPROCESSED_COLS, NUM_SELECT_PREPROCESSED_VALUE_COLS,
-            NUM_SELECT_VALUE_COLS,
+    chips::{
+        chips::select::{
+            columns::{
+                SelectPreprocessedValueCols, SelectValueCols, NUM_SELECT_COLS,
+                NUM_SELECT_PREPROCESSED_COLS, NUM_SELECT_PREPROCESSED_VALUE_COLS,
+                NUM_SELECT_VALUE_COLS,
+            },
+            SelectChip,
         },
-        SelectChip,
+        utils::next_power_of_two,
     },
-    compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
+    compiler::recursion_v2::{
+        instruction::Instruction, program::RecursionProgram, types::SelectInstr,
+    },
+    emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
     primitives::consts::SELECT_DATAPAR,
-    recursion_v2::{runtime::RecursionRecord, stark::utils::next_power_of_two, types::SelectInstr},
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

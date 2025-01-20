@@ -21,13 +21,13 @@ use rayon::ThreadPoolBuilder;
 use crate::{
     chips::{chips::riscv_memory::read_write::columns::MemoryCols, gadgets::utils::limbs::Limbs},
     configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
+    emulator::recursion::public_values::RecursionPublicValues,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, SymbolicConstraintFolder},
         keys::HashableKey,
         septic::SepticDigest,
     },
-    recursion_v2::air::RecursionPublicValues,
 };
 
 use super::{keys::BaseVerifyingKey, proof::MetaProof};

@@ -13,6 +13,7 @@ use crate::{
         program::RecursionProgram,
     },
     configs::config::{Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
+    emulator::recursion::emulator::RecursionRecord,
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::{
@@ -28,7 +29,6 @@ use crate::{
     },
     machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config, machine::BaseMachine},
     primitives::consts::{COMBINE_DEGREE, COMPRESS_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE},
-    recursion_v2::runtime::RecursionRecord,
 };
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;

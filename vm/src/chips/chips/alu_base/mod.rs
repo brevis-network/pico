@@ -21,7 +21,6 @@ mod tests {
         recursion_v2::{
             runtime::{BaseAluOpcode, RecursionRecord},
             //tests::run_recursion_test_machine,
-            types::{BaseAluIo, MemAccessKind},
         },
     };
     use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -29,6 +28,7 @@ mod tests {
     use crate::compiler::recursion_v2::{
         instruction::{self, Instruction},
         program::RecursionProgram,
+        types::{BaseAluIo, MemAccessKind},
     };
 
     #[test]

@@ -3,7 +3,10 @@ use super::{
     MemoryLocalChip,
 };
 use crate::{
-    chips::{chips::byte::event::ByteRecordBehavior, utils::zeroed_f_vec},
+    chips::{
+        chips::byte::event::ByteRecordBehavior,
+        utils::{next_power_of_two, zeroed_f_vec},
+    },
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
     machine::{
@@ -12,7 +15,6 @@ use crate::{
         septic::{SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
     },
     primitives::consts::LOCAL_MEMORY_DATAPAR,
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;

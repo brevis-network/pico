@@ -2,11 +2,11 @@ use super::builder::CircuitV2Builder;
 use crate::{
     compiler::recursion_v2::ir::{Builder, DslIr, Ext, Felt, Var},
     configs::config::FieldGenericConfig,
+    emulator::recursion::public_values::ChallengerPublicValues,
     primitives::consts::{
         MULTI_FIELD_CHALLENGER_DIGEST_SIZE, MULTI_FIELD_CHALLENGER_RATE,
-        MULTI_FIELD_CHALLENGER_WIDTH, PERMUTATION_RATE, PERMUTATION_WIDTH,
+        MULTI_FIELD_CHALLENGER_WIDTH, NUM_BITS, PERMUTATION_RATE, PERMUTATION_WIDTH,
     },
-    recursion_v2::{air::ChallengerPublicValues, runtime::NUM_BITS},
 };
 use p3_field::{Field, FieldAlgebra};
 

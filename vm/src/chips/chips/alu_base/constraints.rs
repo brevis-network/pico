@@ -6,8 +6,8 @@ use crate::{
         },
         BaseAluChip,
     },
+    compiler::recursion_v2::types::BaseAluIo,
     machine::builder::{ChipBuilder, RecursionBuilder},
-    recursion_v2::types::BaseAluIo,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::Field;

@@ -1,9 +1,9 @@
 use super::columns::{PublicValuesCols, PublicValuesPreprocessedCols, NUM_PUBLIC_VALUES_COLS};
 use crate::{
     chips::chips::public_values_v2::PublicValuesChip,
+    emulator::recursion::public_values::RecursionPublicValues,
     machine::builder::{ChipBuilder, RecursionBuilder},
     primitives::consts::RECURSION_NUM_PVS,
-    recursion_v2::air::RecursionPublicValues,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::Field;

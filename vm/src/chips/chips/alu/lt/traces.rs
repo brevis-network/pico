@@ -1,11 +1,14 @@
 use super::columns::NUM_LT_COLS;
 use crate::{
-    chips::chips::{
-        alu::{
-            event::AluEvent,
-            lt::{LtValueCols, NUM_LT_VALUE_COLS},
+    chips::{
+        chips::{
+            alu::{
+                event::AluEvent,
+                lt::{LtValueCols, NUM_LT_VALUE_COLS},
+            },
+            byte::event::{ByteLookupEvent, ByteRecordBehavior},
         },
-        byte::event::{ByteLookupEvent, ByteRecordBehavior},
+        utils::next_power_of_two,
     },
     compiler::{
         riscv::{
@@ -17,7 +20,6 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     machine::chip::ChipBehavior,
     primitives::consts::LT_DATAPAR,
-    recursion_v2::stark::utils::next_power_of_two,
 };
 use core::borrow::BorrowMut;
 use itertools::izip;

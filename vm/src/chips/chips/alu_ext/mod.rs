@@ -12,6 +12,7 @@ pub struct ExtAluChip<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::recursion_v2::types::{ExtAluIo, MemAccessKind};
     use crate::{
         compiler::recursion_v2::{
             instruction::{self, Instruction},
@@ -22,7 +23,6 @@ mod tests {
         recursion_v2::{
             runtime::{ExtAluOpcode, RecursionRecord},
             //tests::run_recursion_test_machine,
-            types::{ExtAluIo, MemAccessKind},
         },
     };
     use p3_baby_bear::BabyBear;

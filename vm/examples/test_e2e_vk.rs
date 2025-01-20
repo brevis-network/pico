@@ -8,7 +8,7 @@ use pico_vm::{
         config::{Challenge, StarkGenericConfig, Val},
         field_config::bb_simple::BabyBearSimple,
     },
-    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, recursion::emulator::Runtime, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler_v2::{
@@ -40,7 +40,6 @@ use pico_vm::{
         BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
         EMBED_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
-    recursion_v2::runtime::Runtime,
 };
 use std::{sync::Arc, time::Instant};
 use tracing::info;
