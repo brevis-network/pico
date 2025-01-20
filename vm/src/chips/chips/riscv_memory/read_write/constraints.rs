@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     chips::{
-        chips::riscv_memory::read_write::columns::MemoryCols,
+        chips::riscv_memory::read_write::columns::{MemoryChipValueCols, MemoryCols},
         gadgets::field_range_check::word_range::FieldWordRangeChecker,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
@@ -33,19 +33,27 @@ where
         let local = main.row_slice(0);
         let local: &MemoryChipCols<CB::Var> = (*local).borrow();
 
-        let is_memory_instruction: CB::Expr = self.is_memory_instruction::<CB>(&local.instruction);
+        for local_memory_chip_value_cols in local.values {
+            // The clock cycle value for memory offset
+            let is_memory_instruction: CB::Expr =
+                self.is_memory_instruction::<CB>(&local_memory_chip_value_cols.instruction);
 
-        builder.looked_instruction(
-            local.instruction.opcode,
-            local.op_a_val(),
-            local.op_b_val(),
-            local.op_c_val(),
-            is_memory_instruction.clone(),
-        );
+            builder.looked_instruction(
+                local_memory_chip_value_cols.instruction.opcode,
+                local_memory_chip_value_cols.op_a_val(),
+                local_memory_chip_value_cols.op_b_val(),
+                local_memory_chip_value_cols.op_c_val(),
+                is_memory_instruction.clone(),
+            );
 
-        self.eval_memory_address_and_access::<CB>(builder, local, is_memory_instruction.clone());
-        self.eval_memory_load::<CB>(builder, local);
-        self.eval_memory_store::<CB>(builder, local);
+            self.eval_memory_address_and_access::<CB>(
+                builder,
+                &local_memory_chip_value_cols,
+                is_memory_instruction.clone(),
+            );
+            self.eval_memory_load::<CB>(builder, &local_memory_chip_value_cols);
+            self.eval_memory_store::<CB>(builder, &local_memory_chip_value_cols);
+        }
     }
 }
 
@@ -87,7 +95,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
     pub(crate) fn eval_memory_address_and_access<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local: &MemoryChipCols<CB::Var>,
+        local: &MemoryChipValueCols<CB::Var>,
         is_memory_instruction: CB::Expr,
     ) {
         // Send to the ALU table to verify correct calculation of addr_word.
@@ -173,7 +181,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
     pub(crate) fn eval_memory_load<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local: &MemoryChipCols<CB::Var>,
+        local: &MemoryChipValueCols<CB::Var>,
     ) {
         // Verify the unsigned_mem_value column.
         self.eval_unsigned_mem_value(builder, local);
@@ -229,7 +237,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
     pub(crate) fn eval_memory_store<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local: &MemoryChipCols<CB::Var>,
+        local: &MemoryChipValueCols<CB::Var>,
     ) {
         // Get the memory offset flags.
         self.eval_offset_value_flags(builder, local);
@@ -293,7 +301,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
     fn eval_unsigned_mem_value<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local: &MemoryChipCols<CB::Var>,
+        local: &MemoryChipValueCols<CB::Var>,
     ) {
         let mem_val = *local.memory_access.value();
 
@@ -348,7 +356,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
     fn eval_most_sig_byte_bit_decomp<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local: &MemoryChipCols<CB::Var>,
+        local: &MemoryChipValueCols<CB::Var>,
         unsigned_mem_val: &Word<CB::Var>,
     ) {
         let is_mem = self.is_memory_instruction::<CB>(&local.instruction);
@@ -371,7 +379,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
     fn eval_offset_value_flags<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        local: &MemoryChipCols<CB::Var>,
+        local: &MemoryChipValueCols<CB::Var>,
     ) {
         let is_mem_op = self.is_memory_instruction::<CB>(&local.instruction);
         let offset_is_zero =

@@ -1,6 +1,6 @@
 use super::{
     columns::{
-        MemoryAccessCols, MemoryChipCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols,
+        MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols,
         NUM_MEMORY_CHIP_COLS,
     },
     MemoryReadWriteChip,
@@ -11,8 +11,9 @@ use crate::{
         byte::event::ByteRecordBehavior,
         events::ByteLookupEvent,
         riscv_cpu::event::CpuEvent,
-        riscv_memory::event::{
-            MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
+        riscv_memory::{
+            event::{MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord},
+            read_write::columns::{MemoryChipValueCols, NUM_MEMORY_CHIP_VALUE_COLS},
         },
     },
     compiler::riscv::{
@@ -21,14 +22,15 @@ use crate::{
         register::Register::X0,
     },
     emulator::riscv::record::EmulationRecord,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
-    primitives::consts::WORD_SIZE,
+    machine::chip::ChipBehavior,
+    primitives::consts::{MEMORY_RW_DATAPAR, WORD_SIZE},
+    recursion_v2::stark::utils::next_power_of_two,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
+use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use std::{array, borrow::BorrowMut};
 use tracing::debug;
 
@@ -41,38 +43,30 @@ impl<F: PrimeField> ChipBehavior<F> for MemoryReadWriteChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        // We only care about the CPU events of memory instructions.
-        let mem_events = input
+        let events = input
             .cpu_events
             .iter()
             .filter(|e| e.instruction.is_memory_instruction())
             .collect_vec();
-        let mut values = vec![F::ZERO; mem_events.len() * NUM_MEMORY_CHIP_COLS];
+        let nrows = events.len().div_ceil(MEMORY_RW_DATAPAR);
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = match log2_nrows {
+            Some(log2_nrows) => 1 << log2_nrows,
+            None => next_power_of_two(nrows, None),
+        };
 
-        let chunk_size = std::cmp::max(mem_events.len() / num_cpus::get(), 1);
-        values
-            .chunks_mut(chunk_size * NUM_MEMORY_CHIP_COLS)
-            .enumerate()
-            .par_bridge()
-            .for_each(|(i, rows)| {
-                rows.chunks_mut(NUM_MEMORY_CHIP_COLS)
-                    .enumerate()
-                    .for_each(|(j, row)| {
-                        let idx = i * chunk_size + j;
-                        let cols: &mut MemoryChipCols<F> = row.borrow_mut();
-                        let mut byte_lookup_events = Vec::new();
-                        self.event_to_row(mem_events[idx], cols, &mut byte_lookup_events);
-                    });
+        let mut values = vec![F::ZERO; padded_nrows * NUM_MEMORY_CHIP_COLS];
+
+        let populate_len = events.len() * NUM_MEMORY_CHIP_VALUE_COLS;
+        values[..populate_len]
+            .chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
+            .zip_eq(events)
+            .for_each(|(row, event)| {
+                let cols: &mut MemoryChipValueCols<_> = row.borrow_mut();
+                self.event_to_row(event, cols, &mut vec![]);
             });
 
-        // Convert the trace to a row major matrix.
-        let mut trace = RowMajorMatrix::new(values, NUM_MEMORY_CHIP_COLS);
-
-        // Pad the trace based on shape
-        let log_rows = input.shape_chip_size(&self.name());
-        pad_to_power_of_two::<NUM_MEMORY_CHIP_COLS, F>(&mut trace.values, log_rows);
-
-        trace
+        RowMajorMatrix::new(values, NUM_MEMORY_CHIP_COLS)
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -91,8 +85,8 @@ impl<F: PrimeField> ChipBehavior<F> for MemoryReadWriteChip<F> {
                 // The range map stores range (u8) lookup event -> multiplicity.
                 let mut blu = vec![];
                 ops.iter().for_each(|op| {
-                    let mut row = [F::ZERO; NUM_MEMORY_CHIP_COLS];
-                    let cols: &mut MemoryChipCols<F> = row.as_mut_slice().borrow_mut();
+                    let mut row = [F::ZERO; NUM_MEMORY_CHIP_VALUE_COLS];
+                    let cols: &mut MemoryChipValueCols<F> = row.as_mut_slice().borrow_mut();
                     let alu_events = self.event_to_row(op, cols, &mut blu);
                     alu_events.into_iter().for_each(|(key, value)| {
                         alu.entry(key).or_insert(Vec::default()).extend(value);
@@ -123,7 +117,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
     fn event_to_row(
         &self,
         event: &CpuEvent,
-        cols: &mut MemoryChipCols<F>,
+        cols: &mut MemoryChipValueCols<F>,
         blu_events: &mut impl ByteRecordBehavior,
     ) -> HashMap<Opcode, Vec<AluEvent>> {
         let mut alu_events = HashMap::new();
@@ -145,7 +139,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
 
     fn populate_memory(
         &self,
-        cols: &mut MemoryChipCols<F>,
+        cols: &mut MemoryChipValueCols<F>,
         event: &CpuEvent,
         new_alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
         blu_events: &mut impl ByteRecordBehavior,

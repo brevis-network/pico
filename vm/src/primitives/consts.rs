@@ -240,7 +240,7 @@ pub const LT_DATAPAR: usize = 2; // optimized
 pub const SLL_DATAPAR: usize = 4; // optimized
 pub const SR_DATAPAR: usize = 2; // optimized
 pub const BITWISE_DATAPAR: usize = 2; // optimized
-pub const MEMORY_RW_DATAPAR: usize = 1; // tbd
+pub const MEMORY_RW_DATAPAR: usize = 1; // optimized
 pub const LOCAL_MEMORY_DATAPAR: usize = 4; // fixed
 
 pub const BASE_ALU_DATAPAR: usize = 2; // optimized

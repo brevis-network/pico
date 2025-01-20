@@ -4,6 +4,7 @@ use crate::{
         gadgets::field_range_check::word_range::FieldWordRangeChecker,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
+    primitives::consts::MEMORY_RW_DATAPAR,
 };
 use p3_field::Field;
 use pico_derive::AlignedBorrow;
@@ -16,11 +17,19 @@ pub const NUM_MEMORY_CHIP_COLS: usize = size_of::<MemoryChipCols<u8>>();
 
 #[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
 #[repr(C)]
-pub struct MemoryChipCols<T> {
+pub struct MemoryChipCols<F> {
+    pub values: [MemoryChipValueCols<F>; MEMORY_RW_DATAPAR],
+}
+
+pub const NUM_MEMORY_CHIP_VALUE_COLS: usize = size_of::<MemoryChipValueCols<u8>>();
+
+#[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
+#[repr(C)]
+pub struct MemoryChipValueCols<F> {
     /// The current chunk
-    pub chunk: T,
+    pub chunk: F,
     /// The clock cycle value for memory offset
-    pub clk: T,
+    pub clk: F,
 
     // An addr that we are reading from or writing to as a word. We are guaranteed that this does
     // not overflow the field when reduced.
@@ -29,26 +38,26 @@ pub struct MemoryChipCols<T> {
     // addr_aligned = addr_word - addr_offset
     // addr_offset = addr_word % 4
     // Note that this all needs to be verified in the AIR
-    pub addr_word: Word<T>,
-    pub addr_word_range_checker: FieldWordRangeChecker<T>,
-    pub addr_aligned: T,
+    pub addr_word: Word<F>,
+    pub addr_word_range_checker: FieldWordRangeChecker<F>,
+    pub addr_aligned: F,
 
     /// The LE bit decomp of the least significant byte of address aligned.
-    pub aa_least_sig_byte_decomp: [T; 6],
-    pub addr_offset: T,
+    pub aa_least_sig_byte_decomp: [F; 6],
+    pub addr_offset: F,
 
-    pub memory_access: MemoryReadWriteCols<T>,
-    pub offset_is_one: T,
-    pub offset_is_two: T,
-    pub offset_is_three: T,
+    pub memory_access: MemoryReadWriteCols<F>,
+    pub offset_is_one: F,
+    pub offset_is_two: F,
+    pub offset_is_three: F,
 
     // LE bit decomposition for the most significant byte of memory value.  This is used to
     // determine the sign for that value (used for LB and LH).
-    pub most_sig_byte_decomp: [T; 8],
+    pub most_sig_byte_decomp: [F; 8],
 
     /// The unsigned memory value is the value after the offset logic is applied. Used for the load
     /// memory opcodes (i.e. LB, LH, LW, LBU, and LHU).
-    pub unsigned_mem_val: Word<T>,
+    pub unsigned_mem_val: Word<F>,
     /// Flag for load mem instructions where the value is positive and not writing to x0.
     /// More formally, it is
     ///
@@ -57,30 +66,30 @@ pub struct MemoryChipCols<T> {
     ///     is_lbu | is_lhu | is_lw
     /// ) &
     /// (not writing to x0)
-    pub mem_value_is_pos_not_x0: T,
+    pub mem_value_is_pos_not_x0: F,
     /// Flag for load mem instructions where the value is negative and not writing to x0.
     /// More formally, it is
     ///
     /// > (is_lb | is_lh) & (most_sig_byte_decomp[7] == 1) & (not writing to x0)
-    pub mem_value_is_neg_not_x0: T,
+    pub mem_value_is_neg_not_x0: F,
 
     /// Memory instructions
-    pub instruction: MemoryInstructionCols<T>,
+    pub instruction: MemoryInstructionCols<F>,
 }
 
-impl<T: Copy> MemoryChipCols<T> {
+impl<F: Copy> MemoryChipValueCols<F> {
     /// Gets the value of the first operand.
-    pub fn op_a_val(&self) -> Word<T> {
+    pub fn op_a_val(&self) -> Word<F> {
         self.instruction.op_a_val()
     }
 
     /// Gets the value of the second operand.
-    pub fn op_b_val(&self) -> Word<T> {
+    pub fn op_b_val(&self) -> Word<F> {
         self.instruction.op_b_val()
     }
 
     /// Gets the value of the third operand.
-    pub fn op_c_val(&self) -> Word<T> {
+    pub fn op_c_val(&self) -> Word<F> {
         self.instruction.op_c_val()
     }
 }
