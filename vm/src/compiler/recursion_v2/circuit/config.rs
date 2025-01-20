@@ -86,8 +86,6 @@ pub trait CircuitConfig: FieldGenericConfig {
 
     fn assert_bit_zero(builder: &mut Builder<Self>, bit: Self::Bit);
 
-    fn assert_bit_one(builder: &mut Builder<Self>, bit: Self::Bit);
-
     fn ext2felt(
         builder: &mut Builder<Self>,
         ext: Ext<<Self as FieldGenericConfig>::F, <Self as FieldGenericConfig>::EF>,
@@ -160,10 +158,6 @@ macro_rules! impl_circuit_config_and_fri_variable {
 
             fn assert_bit_zero(builder: &mut Builder<Self>, bit: Self::Bit) {
                 builder.assert_felt_eq(bit, Self::F::ZERO);
-            }
-
-            fn assert_bit_one(builder: &mut Builder<Self>, bit: Self::Bit) {
-                builder.assert_felt_eq(bit, Self::F::ONE);
             }
 
             fn read_bit(builder: &mut Builder<Self>) -> Self::Bit {
@@ -391,9 +385,6 @@ macro_rules! impl_embed_circuit_config {
             type Bit = Var<<Self as FieldGenericConfig>::N>;
             fn assert_bit_zero(builder: &mut Builder<Self>, bit: Self::Bit) {
                 builder.assert_var_eq(bit, Self::N::ZERO);
-            }
-            fn assert_bit_one(builder: &mut Builder<Self>, bit: Self::Bit) {
-                builder.assert_var_eq(bit, Self::N::ONE);
             }
             fn read_bit(builder: &mut Builder<Self>) -> Self::Bit {
                 builder.witness_var()

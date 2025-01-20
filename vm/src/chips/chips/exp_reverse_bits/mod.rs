@@ -12,28 +12,23 @@ pub struct ExpReverseBitsLenChip<F> {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-    use p3_util::reverse_bits_len;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
-    use std::iter::once;
-
-    use p3_baby_bear::BabyBear;
-    use p3_field::{FieldAlgebra, PrimeField32};
-    use p3_matrix::dense::RowMajorMatrix;
-
     use super::*;
-    use crate::compiler::recursion_v2::types::{ExpReverseBitsEvent, MemAccessKind};
     use crate::{
         compiler::recursion_v2::{
             instruction::{self, Instruction},
             program::RecursionProgram,
+            types::{ExpReverseBitsEvent, MemAccessKind},
         },
+        emulator::recursion::emulator::RecursionRecord,
         machine::{chip::ChipBehavior, logger::setup_logger},
-        recursion_v2::{
-            runtime::RecursionRecord,
-            //tests::run_recursion_test_machine,
-        },
     };
+    use itertools::Itertools;
+    use p3_baby_bear::BabyBear;
+    use p3_field::{FieldAlgebra, PrimeField32};
+    use p3_matrix::dense::RowMajorMatrix;
+    use p3_util::reverse_bits_len;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use std::iter::once;
 
     #[test]
     #[allow(unused_variables)]

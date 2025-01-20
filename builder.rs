@@ -13,12 +13,12 @@ use crate::{
         program::RecursionProgram,
     },
     configs::config::{Challenge, Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
+    emulator::recursion::public_values::{
+        assert_recursion_public_values_valid, recursion_public_values_digest, RecursionPublicValues,
+    },
     instances::chiptype::recursion_chiptype_v2::RecursionChipType,
     machine::machine::BaseMachine,
     primitives::consts::{COMBINE_DEGREE, EXTENSION_DEGREE},
-    recursion_v2::air::{
-        assert_recursion_public_values_valid, recursion_public_values_digest, RecursionPublicValues,
-    },
 };
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32, TwoAdicField};

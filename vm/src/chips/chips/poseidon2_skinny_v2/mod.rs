@@ -33,16 +33,13 @@ impl<const DEGREE: usize, Config, F> Default for Poseidon2SkinnyChip<DEGREE, Con
 #[allow(unused_imports)]
 mod tests {
     use super::Poseidon2SkinnyChip;
-    use crate::compiler::recursion_v2::types::Poseidon2Event;
     use crate::{
+        compiler::recursion_v2::types::Poseidon2Event,
+        emulator::recursion::emulator::RecursionRecord,
         machine::chip::ChipBehavior,
         primitives::{
             consts::{BabyBearConfig, KoalaBearConfig, PERMUTATION_WIDTH},
             pico_poseidon2bb_init, pico_poseidon2kb_init,
-        },
-        recursion_v2::{
-            runtime::RecursionRecord,
-            //tests::run_recursion_wrap_test_machine,
         },
     };
     use p3_baby_bear::BabyBear;

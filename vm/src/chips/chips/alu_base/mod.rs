@@ -11,25 +11,20 @@ pub struct BaseAluChip<F> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::{
+        compiler::recursion_v2::{
+            instruction::{self, Instruction},
+            program::RecursionProgram,
+            types::{BaseAluIo, MemAccessKind},
+        },
+        emulator::recursion::emulator::{BaseAluOpcode, RecursionRecord},
+        machine::chip::ChipBehavior,
+    };
     use p3_baby_bear::BabyBear;
     use p3_field::FieldAlgebra;
     use p3_matrix::dense::RowMajorMatrix;
-
-    use super::*;
-    use crate::{
-        machine::chip::ChipBehavior,
-        recursion_v2::{
-            runtime::{BaseAluOpcode, RecursionRecord},
-            //tests::run_recursion_test_machine,
-        },
-    };
     use rand::{rngs::StdRng, Rng, SeedableRng};
-
-    use crate::compiler::recursion_v2::{
-        instruction::{self, Instruction},
-        program::RecursionProgram,
-        types::{BaseAluIo, MemAccessKind},
-    };
 
     #[test]
     fn generate_trace() {

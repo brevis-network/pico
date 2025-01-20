@@ -14,17 +14,19 @@ pub struct PublicValuesChip<F> {
 mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
 
-    use crate::compiler::recursion_v2::types::{CommitPublicValuesEvent, MemAccessKind};
     use crate::{
         chips::chips::public_values_v2::PublicValuesChip,
-        compiler::recursion_v2::{instruction, program::RecursionProgram},
+        compiler::recursion_v2::{
+            instruction,
+            program::RecursionProgram,
+            types::{CommitPublicValuesEvent, MemAccessKind},
+        },
+        emulator::recursion::{
+            emulator::RecursionRecord,
+            public_values::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
+        },
         machine::{chip::ChipBehavior, logger::setup_logger},
         primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
-        recursion_v2::{
-            air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
-            runtime::RecursionRecord,
-            //tests::run_recursion_test_machine,
-        },
     };
     use p3_baby_bear::BabyBear;
     use p3_field::FieldAlgebra;
