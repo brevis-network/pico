@@ -24,7 +24,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{any::type_name, time::Instant};
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 pub struct ConvertMachine<SC, C>
 where
@@ -180,7 +180,7 @@ macro_rules! impl_convert_machine {
             where
                 C: for<'a> Air<VerifierConstraintFolder<'a, $recur_sc>>,
             {
-                info!("PERF-machine=recursion");
+                debug!("PERF-machine=recursion");
                 let begin = Instant::now();
 
                 proof
@@ -192,7 +192,7 @@ macro_rules! impl_convert_machine {
                             .verify_ensemble(vk, std::slice::from_ref(p))
                     })?;
 
-                info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
+                debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
                 Ok(())
             }

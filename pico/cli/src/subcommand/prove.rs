@@ -157,7 +157,7 @@ impl ProveCmd {
             let pv_stream_str = hex::encode(pv_stream);
             let pv_file_path = pico_dir.join("pv_file");
             let mut file = File::create(pv_file_path)?;
-            file.write(&pv_stream_str.as_bytes())
+            file.write_all(pv_stream_str.as_bytes())
                 .expect("write pv file failed");
 
             // write proof to proof.json

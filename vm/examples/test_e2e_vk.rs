@@ -42,7 +42,7 @@ use pico_vm::{
     },
 };
 use std::{sync::Arc, time::Instant};
-use tracing::info;
+use tracing::{debug, info};
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
@@ -62,7 +62,7 @@ fn main() {
 
     let (elf, riscv_stdin, args) = parse_args::parse_args();
 
-    info!("PERF-machine=riscv");
+    debug!("PERF-machine=riscv");
     let start = Instant::now();
     let riscv_start = Instant::now();
 
@@ -106,13 +106,13 @@ fn main() {
     // Generate the proof.
     info!("Generating RISCV proof (at {:?})..", start.elapsed());
     let riscv_proof = riscv_machine.prove_with_shape(&riscv_witness, Some(&riscv_shape_config));
-    info!(
+    debug!(
         "PERF-step=prove-user_time={}",
         riscv_start.elapsed().as_millis()
     );
 
     let riscv_proof_size = bincode::serialize(&riscv_proof.proofs()).unwrap().len();
-    info!("PERF-step=proof_size-{}", riscv_proof_size);
+    debug!("PERF-step=proof_size-{}", riscv_proof_size);
 
     // Verify the proof.
     info!("Verifying RISCV proof (at {:?})..", start.elapsed());
@@ -142,7 +142,7 @@ fn main() {
     };
     info!("recursion_opts: {:?}", recursion_opts);
 
-    info!("PERF-machine=convert");
+    debug!("PERF-machine=convert");
     let convert_start = Instant::now();
 
     let vk_root = vk_manager.merkle_root;
@@ -170,13 +170,13 @@ fn main() {
     // Generate the proof.
     info!("Generating CONVERT proof (at {:?})..", start.elapsed());
     let convert_proof = convert_machine.prove(&convert_witness);
-    info!(
+    debug!(
         "PERF-step=prove-user_time={}",
         convert_start.elapsed().as_millis()
     );
 
     let convert_proof_size = bincode::serialize(&convert_proof.proofs()).unwrap().len();
-    info!("PERF-step=proof_size-{}", convert_proof_size);
+    debug!("PERF-step=proof_size-{}", convert_proof_size);
 
     // Verify the proof.
     info!("Verifying CONVERT proof (at {:?})..", start.elapsed());
@@ -199,7 +199,7 @@ fn main() {
     let recursion_shape_config =
         RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
 
-    info!("PERF-machine=combine");
+    debug!("PERF-machine=combine");
     let combine_start = Instant::now();
 
     let vk_root = vk_manager.merkle_root;
@@ -243,13 +243,13 @@ fn main() {
     // Generate the proof.
     info!("Generating COMBINE proof (at {:?})..", start.elapsed());
     let combine_proof = combine_machine.prove(&combine_witness);
-    info!(
+    debug!(
         "PERF-step=prove-user_time={}",
         combine_start.elapsed().as_millis(),
     );
 
     let combine_proof_size = bincode::serialize(&combine_proof.proofs()).unwrap().len();
-    info!("PERF-step=proof_size-{}", combine_proof_size);
+    debug!("PERF-step=proof_size-{}", combine_proof_size);
 
     // Verify the proof.
     info!("Verifying COMBINE proof (at {:?})..", start.elapsed());
@@ -269,7 +269,7 @@ fn main() {
 
     info!("\n Begin COMPRESS..");
 
-    info!("PERF-machine=compress");
+    debug!("PERF-machine=compress");
     let compress_start = Instant::now();
 
     let vk_root = vk_manager.merkle_root;
@@ -319,13 +319,13 @@ fn main() {
 
     info!("Generating COMPRESS proof (at {:?})..", start.elapsed());
     let compress_proof = compress_machine.prove(&compress_witness);
-    info!(
+    debug!(
         "PERF-step=prove-user_time={}",
         compress_start.elapsed().as_millis()
     );
 
     let compress_proof_size = bincode::serialize(&compress_proof.proofs()).unwrap().len();
-    info!("PERF-step=proof_size-{}", compress_proof_size);
+    debug!("PERF-step=proof_size-{}", compress_proof_size);
 
     info!("Verifying COMPRESS proof (at {:?})..", start.elapsed());
     let compress_result = compress_machine.verify(&compress_proof);
@@ -344,7 +344,7 @@ fn main() {
     // -------- Embed Machine --------
 
     info!("\n Begin EMBED..");
-    info!("PERF-machine=embed");
+    debug!("PERF-machine=embed");
     let embed_start = Instant::now();
 
     let vk_root = vk_manager.merkle_root;
@@ -402,13 +402,13 @@ fn main() {
 
     info!("Generating EMBED proof (at {:?})..", start.elapsed());
     let embed_proof = embed_machine.prove(&embed_witness);
-    info!(
+    debug!(
         "PERF-step=prove-user_time={}",
         embed_start.elapsed().as_millis()
     );
 
     let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
-    info!("PERF-step=proof_size-{}", embed_proof_size);
+    debug!("PERF-step=proof_size-{}", embed_proof_size);
 
     info!("Verifying EMBED proof (at {:?})..", start.elapsed());
     let embed_result = embed_machine.verify(&embed_proof);

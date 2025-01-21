@@ -96,6 +96,6 @@ pub fn commit_coprocessor_bytes(coprocessor_sdk: &mut SDK, buf: &mut [u8]) {
         commit_bytes(&concat_buf);
         coprocessor_sdk.set_commited_status(true);
     } else {
-        commit_bytes(&buf);
+        commit_bytes(buf);
     }
 }

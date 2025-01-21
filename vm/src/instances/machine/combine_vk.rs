@@ -34,7 +34,7 @@ use p3_air::Air;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 pub struct CombineVkMachine<SC, C>
 where
@@ -256,7 +256,7 @@ macro_rules! impl_combine_vk_machine {
 
             /// Verify the proof.
             fn verify(&self, proof: &MetaProof<$recur_sc>) -> Result<()> {
-                info!("PERF-machine=combine");
+                debug!("PERF-machine=combine");
                 let begin = Instant::now();
 
                 assert_eq!(proof.proofs().len(), 1);
@@ -274,7 +274,7 @@ macro_rules! impl_combine_vk_machine {
                 self.base_machine
                     .verify_ensemble(proof.vks().first().unwrap(), &proof.proofs())?;
 
-                info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
+                debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
                 Ok(())
             }

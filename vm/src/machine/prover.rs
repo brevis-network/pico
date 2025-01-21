@@ -27,7 +27,7 @@ use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use rayon::ThreadPoolBuilder;
 use std::{array, cmp::Reverse, time::Instant};
-use tracing::{debug, debug_span, info, instrument, Span};
+use tracing::{debug, debug_span, instrument, Span};
 
 pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
@@ -169,7 +169,7 @@ where
                 durations.get(&cp.0).unwrap()
             )
         }
-        info!(
+        debug!(
             "PERF-step=generate_preprocessed-user_time={}",
             begin.elapsed().as_millis(),
         );
@@ -239,7 +239,7 @@ where
         }
 
         let elapsed_time = begin.elapsed();
-        info!(
+        debug!(
             "PERF-step=generate_main-chunk={}-user_time={}",
             record.chunk_index(),
             elapsed_time.as_millis(),
@@ -282,7 +282,7 @@ where
             .map(|(_, trace)| trace)
             .collect::<Arc<[_]>>();
 
-        info!(
+        debug!(
             "PERF-step=commit_main-chunk={}-user_time={}",
             record.chunk_index(),
             begin.elapsed().as_millis(),
@@ -382,7 +382,7 @@ where
                 durations.get(&ordered_chips[i].name()).unwrap().value()
             );
         }
-        info!(
+        debug!(
             "PERF-step=generate_permutation-chunk={}-user_time={}",
             chunk_index,
             begin.elapsed().as_millis(),
@@ -463,7 +463,7 @@ where
 
         let (permutation_commit, permutation_data) = config.pcs().commit(perm_domain);
 
-        info!(
+        debug!(
             "PERF-step=commit_permutation-chunk={}-user_time={}",
             chunk_index,
             begin_commit_permutation.elapsed().as_millis(),
@@ -569,7 +569,7 @@ where
                         .collect::<Vec<_>>()
                 });
 
-            info!(
+            debug!(
                 "PERF-step=compute_quotient_values-chunk={}-user_time={}",
                 chunk_index,
                 begin.elapsed().as_millis(),
@@ -594,7 +594,7 @@ where
             .collect::<Vec<_>>();
 
         let (quotient_commit, quotient_data) = pcs.commit(quotient_domains_and_values);
-        info!(
+        debug!(
             "PERF-step=commit_quotient-chunk={}-user_time={}",
             chunk_index,
             begin_commit_quotient.elapsed().as_millis(),
@@ -742,13 +742,13 @@ where
             )
             .collect::<Arc<[_]>>();
 
-        info!(
+        debug!(
             "PERF-step=open-chunk={}-user_time={}",
             chunk_index,
             begin_open.elapsed().as_millis(),
         );
 
-        info!(
+        debug!(
             "PERF-step=core_prove-chunk={}-user_time={}",
             chunk_index,
             begin.elapsed().as_millis(),

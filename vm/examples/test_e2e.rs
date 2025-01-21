@@ -46,13 +46,12 @@ use pico_vm::{
         DIGEST_SIZE, EMBED_DEGREE, KOALABEAR_S_BOX_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
 };
-
 use std::{
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tracing::info;
+use tracing::{debug, info};
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
@@ -66,7 +65,7 @@ macro_rules! run {
             step_name: String,
             bench: bool,
         ) {
-            info!("PERF-machine=riscv");
+            debug!("PERF-machine=riscv");
             let start = Instant::now();
             let riscv_start = Instant::now();
 
@@ -121,7 +120,7 @@ macro_rules! run {
 
                 riscv_machine.prove(&riscv_witness)
             });
-            info!(
+            debug!(
                 "PERF-step=prove-user_time={}",
                 riscv_start.elapsed().as_millis()
             );
@@ -130,7 +129,7 @@ macro_rules! run {
             assert_eq!(riscv_proof.pv_stream.clone().unwrap(), pv_stream);
 
             let riscv_proof_size = bincode::serialize(&riscv_proof.proofs()).unwrap().len();
-            info!("PERF-step=proof_size-{}", riscv_proof_size);
+            debug!("PERF-step=proof_size-{}", riscv_proof_size);
 
             // Verify the proof.
             info!("Verifying RISCV proof (at {:?})..", start.elapsed());
@@ -168,7 +167,7 @@ macro_rules! run {
             };
             info!("recursion_opts: {:?}", recursion_opts);
 
-            info!("PERF-machine=convert");
+            debug!("PERF-machine=convert");
             let convert_start = Instant::now();
 
             // TODO: Initialize the VK root.
@@ -202,13 +201,13 @@ macro_rules! run {
 
                 convert_machine.prove(&convert_witness)
             });
-            info!(
+            debug!(
                 "PERF-step=prove-user_time={}",
                 convert_start.elapsed().as_millis()
             );
 
             let convert_proof_size = bincode::serialize(&convert_proof.proofs()).unwrap().len();
-            info!("PERF-step=proof_size-{}", convert_proof_size);
+            debug!("PERF-step=proof_size-{}", convert_proof_size);
 
             // Verify the proof.
             info!("Verifying CONVERT proof (at {:?})..", start.elapsed());
@@ -240,7 +239,7 @@ macro_rules! run {
 
             info!("\n Begin COMBINE..");
 
-            info!("PERF-machine=combine");
+            debug!("PERF-machine=combine");
             let combine_start = Instant::now();
 
             // TODO: Initialize the VK root.
@@ -278,13 +277,13 @@ macro_rules! run {
 
                 combine_machine.prove(&combine_witness)
             });
-            info!(
+            debug!(
                 "PERF-step=prove-user_time={}",
                 combine_start.elapsed().as_millis(),
             );
 
             let combine_proof_size = bincode::serialize(&combine_proof.proofs()).unwrap().len();
-            info!("PERF-step=proof_size-{}", combine_proof_size);
+            debug!("PERF-step=proof_size-{}", combine_proof_size);
 
             // Verify the proof.
             info!("Verifying COMBINE proof (at {:?})..", start.elapsed());
@@ -316,7 +315,7 @@ macro_rules! run {
 
             info!("\n Begin COMPRESS..");
 
-            info!("PERF-machine=compress");
+            debug!("PERF-machine=compress");
             let compress_start = Instant::now();
 
             // TODO: Initialize the VK root.
@@ -364,13 +363,13 @@ macro_rules! run {
                 );
                 compress_machine.prove(&compress_witness)
             });
-            info!(
+            debug!(
                 "PERF-step=prove-user_time={}",
                 compress_start.elapsed().as_millis()
             );
 
             let compress_proof_size = bincode::serialize(&compress_proof.proofs()).unwrap().len();
-            info!("PERF-step=proof_size-{}", compress_proof_size);
+            debug!("PERF-step=proof_size-{}", compress_proof_size);
 
             info!("Verifying COMPRESS proof (at {:?})..", start.elapsed());
             let compress_result = compress_machine.verify(&compress_proof);
@@ -401,7 +400,7 @@ macro_rules! run {
             // -------- Embed Machine --------
 
             info!("\n Begin EMBED..");
-            info!("PERF-machine=embed");
+            debug!("PERF-machine=embed");
             let embed_start = Instant::now();
 
             // TODO: Initialize the VK root.
@@ -446,13 +445,13 @@ macro_rules! run {
                     ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
                 embed_machine.prove(&embed_witness)
             });
-            info!(
+            debug!(
                 "PERF-step=prove-user_time={}",
                 embed_start.elapsed().as_millis()
             );
 
             let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
-            info!("PERF-step=proof_size-{}", embed_proof_size);
+            debug!("PERF-step=proof_size-{}", embed_proof_size);
 
             info!("Verifying EMBED proof (at {:?})..", start.elapsed());
             let embed_result = embed_machine.verify(&embed_proof);

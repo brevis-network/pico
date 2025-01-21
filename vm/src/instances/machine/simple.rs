@@ -13,7 +13,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_field::PrimeField32;
 use std::{any::type_name, time::Instant};
-use tracing::info;
+use tracing::debug;
 
 pub struct SimpleMachine<SC, C>
 where
@@ -55,14 +55,14 @@ where
         C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>
             + for<'a> Air<ProverConstraintFolder<'a, SC>>,
     {
-        info!("PERF-machine=simple");
+        debug!("PERF-machine=simple");
         let begin = Instant::now();
 
         let proofs = self
             .base_machine
             .prove_ensemble(witness.pk(), witness.records());
 
-        info!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
+        debug!("PERF-step=prove-user_time={}", begin.elapsed().as_millis());
 
         // Construct the metaproof with proofs and vks where vks is a repetition of the same witness.vk
         let vks = vec![witness.vk.clone().unwrap()].into();
@@ -75,7 +75,7 @@ where
         C: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
     {
         // panic if proofs is empty
-        info!("PERF-machine=simple");
+        debug!("PERF-machine=simple");
         let begin = Instant::now();
         if proof.proofs().is_empty() {
             panic!("proofs is empty");
@@ -86,7 +86,7 @@ where
         self.base_machine
             .verify_ensemble(&(proof.vks()[0]), &proof.proofs())?;
 
-        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
+        debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis(),);
 
         Ok(())
     }
@@ -100,7 +100,7 @@ where
     PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {
-        info!("PERF-machine=simple");
+        debug!("PERF-machine=simple");
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
         }

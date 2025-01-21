@@ -108,7 +108,7 @@ where
     {
         let vk = proof.vks().first().unwrap();
 
-        info!("PERF-machine=convert");
+        debug!("PERF-machine=convert");
         let begin = Instant::now();
 
         assert_eq!(proof.num_proofs(), 1);
@@ -125,7 +125,7 @@ where
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;
 
-        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
+        debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
         Ok(())
     }

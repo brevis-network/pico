@@ -18,7 +18,7 @@ use crate::{
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use std::{any::type_name, borrow::Borrow, marker::PhantomData, time::Instant};
-use tracing::{info, instrument, trace};
+use tracing::{debug, info, instrument, trace};
 
 pub struct EmbedMachine<PrevSC, SC, C, I>
 where
@@ -98,7 +98,7 @@ where
     {
         let vk = proof.vks().first().unwrap();
 
-        info!("PERF-machine=embed");
+        debug!("PERF-machine=embed");
         let begin = Instant::now();
 
         assert_eq!(proof.num_proofs(), 1);
@@ -118,7 +118,7 @@ where
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;
 
-        info!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
+        debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
         Ok(())
     }

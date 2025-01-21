@@ -63,7 +63,7 @@ impl NewCmd {
 
         println!(
             "Using the {} template!",
-            format!("\x1b[1;34m{}\x1b[0m", template_name)
+            format_args!("\x1b[1;34m{}\x1b[0m", template_name)
         );
 
         // Clone the repository with the specified version.
