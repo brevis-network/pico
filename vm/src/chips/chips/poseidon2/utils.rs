@@ -39,13 +39,13 @@ pub(crate) fn external_linear_layer<FA: FieldAlgebra>(state: &mut [FA; PERMUTATI
     }
 }
 
-pub(crate) fn external_linear_layer_immut<FA: FieldAlgebra + Copy>(
-    state: &[FA; PERMUTATION_WIDTH],
-) -> [FA; PERMUTATION_WIDTH] {
-    let mut state = *state;
-    external_linear_layer(&mut state);
-    state
-}
+// pub(crate) fn external_linear_layer_immut<FA: FieldAlgebra + Copy>(
+//     state: &[FA; PERMUTATION_WIDTH],
+// ) -> [FA; PERMUTATION_WIDTH] {
+//     let mut state = *state;
+//     external_linear_layer(&mut state);
+//     state
+// }
 
 pub(crate) fn internal_linear_layer<FB: FieldBehavior, FA: FieldAlgebra>(
     state: &mut [FA; PERMUTATION_WIDTH],

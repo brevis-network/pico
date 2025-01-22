@@ -106,6 +106,7 @@ debug-lookups = []
 single-threaded = []
 babybear = []
 koalabear = []
+mersenne31 = []
 
 # curves
 bigint-rug = ["rug"]

@@ -1,5 +1,5 @@
 use crate::{
-    chips::chips::{poseidon2::Poseidon2Chip, poseidon2_skinny_v2::Poseidon2SkinnyChip},
+    chips::chips::poseidon2_p3::Poseidon2Chip,
     compiler::recursion_v2::{
         circuit::{
             challenger::DuplexChallengerVariable,
@@ -172,9 +172,7 @@ where
         Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
         PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
         Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
-        Poseidon2SkinnyChip<CONVERT_DEGREE, F::Poseidon2Config, F>: Air<SymbolicConstraintFolder<F>>
-            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-        Poseidon2Chip<CONVERT_DEGREE, F::Poseidon2Config, F>: Air<SymbolicConstraintFolder<F>>
+        Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
             + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
     {
         // initialize for base_ and reconstruct_challenger
@@ -356,9 +354,7 @@ where
 
         BaseMachine<SC, C>: Send + Sync,
 
-        Poseidon2SkinnyChip<COMBINE_DEGREE, F::Poseidon2Config, F>: Air<SymbolicConstraintFolder<F>>
-            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-        Poseidon2Chip<COMBINE_DEGREE, F::Poseidon2Config, F>: Air<SymbolicConstraintFolder<F>>
+        Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
             + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
     {
         assert_eq!(vks.len(), proofs.len());

@@ -1,6 +1,21 @@
 //! pico-recursion-primitives contains types and functions that are used in both sp1-core and sp1-zkvm.
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
+#[cfg(feature = "babybear")]
+mod babybear;
+#[cfg(feature = "babybear")]
+pub use babybear::*;
+
+#[cfg(all(feature = "koalabear"))]
+mod koalabear;
+#[cfg(all(feature = "koalabear"))]
+pub use koalabear::*;
+
+#[cfg(all(feature = "mersenne31"))]
+mod mersenne31;
+#[cfg(all(feature = "mersenne31"))]
+pub use mersenne31::*;
+
 use consts::{
     BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
     KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
@@ -16,8 +31,10 @@ use p3_mersenne_31::{Mersenne31, Poseidon2Mersenne31};
 use p3_poseidon2::ExternalLayerConstants;
 
 pub mod consts;
+
 use p3_symmetric::PaddingFreeSponge;
 
+use crate::primitives::consts::{MERSENNE31_NUM_EXTERNAL_ROUNDS, MERSENNE31_NUM_INTERNAL_ROUNDS};
 use zkhash::{
     ark_ff::{BigInteger, PrimeField as ark_PrimeField},
     fields::bn256::FpBN256 as ark_FpBN256,
@@ -2225,7 +2242,7 @@ pub fn pico_poseidon2bb_init() -> PicoPoseidon2BabyBear {
 
     let external_round_constants = ExternalLayerConstants::new(
         round_constants[..(ROUNDS_F / 2)].to_vec(),
-        round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec(), // todo: need to double check this
+        round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec(),
     );
 
     PicoPoseidon2BabyBear::new(external_round_constants, internal_round_constants)
@@ -2248,7 +2265,7 @@ pub fn pico_poseidon2kb_init() -> PicoPoseidon2KoalaBear {
 
     let external_round_constants = ExternalLayerConstants::new(
         round_constants[..(ROUNDS_F / 2)].to_vec(),
-        round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec(), // todo: need to double check this
+        round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec(),
     );
 
     PicoPoseidon2KoalaBear::new(external_round_constants, internal_round_constants)
@@ -2275,8 +2292,8 @@ lazy_static! {
 Poseidon2 on M31
  */
 pub fn pico_poseidon2m31_init() -> PicoPoseidon2Mersenne31 {
-    const ROUNDS_F: usize = 8;
-    const ROUNDS_P: usize = 14;
+    const ROUNDS_F: usize = MERSENNE31_NUM_EXTERNAL_ROUNDS;
+    const ROUNDS_P: usize = MERSENNE31_NUM_INTERNAL_ROUNDS;
 
     let mut round_constants = RC_16_30_M31.to_vec();
     let internal_start = ROUNDS_F / 2;
@@ -2288,7 +2305,7 @@ pub fn pico_poseidon2m31_init() -> PicoPoseidon2Mersenne31 {
 
     let external_round_constants = ExternalLayerConstants::new(
         round_constants[..(ROUNDS_F / 2)].to_vec(),
-        round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec(), // todo: need to double check this
+        round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec(),
     );
 
     PicoPoseidon2Mersenne31::new(external_round_constants, internal_round_constants)

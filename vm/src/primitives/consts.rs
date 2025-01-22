@@ -1,7 +1,3 @@
-// todo: further cleanup since these might be repetitive
-/*
-For word and bytes
- */
 use crate::{
     compiler::word::Word,
     configs::config::Poseidon2Config,
@@ -13,7 +9,6 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use std::mem::size_of;
-
 // todo: further cleanup since these might be repetitive
 /*
 For word and bytes
@@ -254,7 +249,7 @@ pub const EXT_ALU_DATAPAR: usize = 4; // optimized
 pub const VAR_MEM_DATAPAR: usize = 4; // optimized
 pub const CONST_MEM_DATAPAR: usize = 1; // optimized
 pub const SELECT_DATAPAR: usize = 2; // optimized
-pub const POSEIDON2_DATAPAR: usize = 1; // tbd
+pub const POSEIDON2_DATAPAR: usize = 1; // tbo
 
 /// The width of the Poseidon2 permutation.
 pub const NUM_BITS: usize = 31;

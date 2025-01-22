@@ -146,7 +146,6 @@ pub struct ExpReverseBitsIo<V> {
     pub result: V,
 }
 
-pub type Poseidon2WideEvent<F> = Poseidon2Io<F>;
 pub type Poseidon2Instr<F> = Poseidon2SkinnyInstr<F>;
 
 /// An instruction invoking the exp-reverse-bits operation.
