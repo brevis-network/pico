@@ -2,7 +2,7 @@ use crate::chips::{
     chips::riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
     gadgets::{
         field::{field_lt::FieldLtCols, field_op::FieldOpCols},
-        is_zero::IsZeroOperation,
+        is_zero::IsZeroGadget,
         uint256::U256Field,
     },
     precompiles::uint256::Uint256NumWords,
@@ -38,7 +38,7 @@ pub struct Uint256MulCols<T> {
 
     /// Columns for checking if modulus is zero. If it's zero, then use 2^256 as the effective
     /// modulus.
-    pub modulus_is_zero: IsZeroOperation<T>,
+    pub modulus_is_zero: IsZeroGadget<T>,
 
     /// Column that is equal to is_real * (1 - modulus_is_zero.result).
     pub modulus_is_not_zero: T,

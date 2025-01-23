@@ -4,7 +4,7 @@ use crate::{
         chips::byte::event::ByteRecordBehavior,
         gadgets::{
             field::field_op::FieldOperation,
-            is_zero::IsZeroOperation,
+            is_zero::IsZeroGadget,
             utils::conversions::{words_to_bytes_le, words_to_bytes_le_vec},
         },
         precompiles::uint256::{Uint256MulChip, UINT256_NUM_WORDS},
@@ -83,10 +83,7 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
 
                 let modulus_bytes = words_to_bytes_le_vec(&event.modulus);
                 let modulus_byte_sum = modulus_bytes.iter().map(|b| *b as u32).sum::<u32>();
-                IsZeroOperation::populate(
-                    &mut cols.modulus_is_zero,
-                    F::from_canonical_u32(modulus_byte_sum),
-                );
+                IsZeroGadget::populate(&mut cols.modulus_is_zero, modulus_byte_sum);
 
                 // Populate the output column.
                 let effective_modulus = if modulus.is_zero() {
