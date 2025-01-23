@@ -1,11 +1,4 @@
-use crate::{
-    chips::gadgets::{
-        global_accumulation::GlobalAccumulationOperation,
-        global_interaction::GlobalInteractionOperation,
-    },
-    compiler::word::Word,
-    primitives::consts::LOCAL_MEMORY_DATAPAR,
-};
+use crate::{compiler::word::Word, primitives::consts::LOCAL_MEMORY_DATAPAR};
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
@@ -35,12 +28,6 @@ pub struct SingleMemoryLocal<T> {
     /// The final value of the memory access.
     pub final_value: Word<T>,
 
-    /// The global interaction columns for initial access.
-    pub initial_global_interaction_cols: GlobalInteractionOperation<T>,
-
-    /// The global interaction columns for final access.
-    pub final_global_interaction_cols: GlobalInteractionOperation<T>,
-
     /// Whether the memory access is a real access.
     pub is_real: T,
 }
@@ -49,5 +36,4 @@ pub struct SingleMemoryLocal<T> {
 #[repr(C)]
 pub struct MemoryLocalCols<T> {
     pub memory_local_entries: [SingleMemoryLocal<T>; LOCAL_MEMORY_DATAPAR],
-    pub global_accumulation_cols: GlobalAccumulationOperation<T, 8>,
 }

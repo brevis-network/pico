@@ -61,8 +61,11 @@ pub enum LookupType {
     /// Interaction with a syscall.
     Syscall = 8,
 
-    /// Interaction with the new range checker chip
-    RangeUnified = 9,
+    /// Interaction with the Poseidon2.
+    Poseidon2 = 9,
+
+    /// Interaction with the global table.
+    Global = 10,
 }
 
 #[derive(

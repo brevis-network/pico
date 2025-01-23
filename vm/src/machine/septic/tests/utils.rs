@@ -1,5 +1,5 @@
 use super::super::{config::*, SepticCurve, SepticCurveComplete, SepticExtension};
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::*;
 use rayon_scan::ScanParallelIterator;
 use std::time::Instant;
@@ -133,14 +133,14 @@ pub fn test_ext_z_pow_exp<F: Field>() {
     }
 }
 
-pub fn test_curve_double<F: PrimeField>(x: SepticExtension<F>) {
-    let (curve_point, _) = SepticCurve::<F>::lift_x(x);
+pub fn test_curve_double<F: PrimeField32>(x: SepticExtension<F>) {
+    let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
     let double_point = curve_point.double();
     assert!(double_point.check_on_point());
 }
 
-pub fn test_curve_lift_x<F: PrimeField>(x: SepticExtension<F>) {
-    let (curve_point, _) = SepticCurve::<F>::lift_x(x);
+pub fn test_curve_lift_x<F: PrimeField32>(x: SepticExtension<F>) {
+    let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
     assert!(curve_point.check_on_point());
     assert!(curve_point.x.is_receive());
 }
@@ -160,7 +160,7 @@ pub fn test_const_points<F: Field>() {
     });
 }
 
-pub fn test_curve_simple_sum<F: PrimeField>() {
+pub fn test_curve_simple_sum<F: PrimeField32>() {
     const D: u32 = 1 << 16;
     let mut vec = Vec::with_capacity(D as usize);
     let mut sum = Vec::with_capacity(D as usize);
@@ -175,7 +175,7 @@ pub fn test_curve_simple_sum<F: PrimeField>() {
             F::from_canonical_u32(32 * i + 196),
             F::from_canonical_u32(64 * i + 667),
         ]);
-        let (curve_point, _) = SepticCurve::<F>::lift_x(x);
+        let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
         vec.push(curve_point);
     }
     println!("Time elapsed: {:?}", start.elapsed());
@@ -198,7 +198,7 @@ pub fn test_curve_simple_sum<F: PrimeField>() {
     println!("Time elapsed: {:?}", start.elapsed());
 }
 
-pub fn test_curve_parallel_sum<F: PrimeField>() {
+pub fn test_curve_parallel_sum<F: PrimeField32>() {
     const D: u32 = 1 << 20;
     let mut vec = Vec::with_capacity(D as usize);
     let start = Instant::now();
@@ -212,7 +212,7 @@ pub fn test_curve_parallel_sum<F: PrimeField>() {
             F::from_canonical_u32(32 * i + 196),
             F::from_canonical_u32(64 * i + 667),
         ]);
-        let (curve_point, _) = SepticCurve::<F>::lift_x(x);
+        let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
         vec.push(SepticCurveComplete::Affine(curve_point));
     }
     println!("Time elapsed: {:?}", start.elapsed());

@@ -16,7 +16,7 @@ use crate::{
     primitives::consts::{BYTE_SIZE, SLL_DATAPAR, WORD_SIZE},
 };
 use p3_air::BaseAir;
-use p3_field::{Field, PrimeField};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
@@ -34,7 +34,7 @@ impl<F: Field> BaseAir<F> for SLLChip<F> {
     }
 }
 
-impl<F: PrimeField> ChipBehavior<F> for SLLChip<F> {
+impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

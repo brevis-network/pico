@@ -126,7 +126,9 @@ pub fn bytes_to_words_le<const W: usize>(bytes: &[u8]) -> [u32; W] {
 BabyBear consts
  */
 
-pub const MONTY_INVERSE: BabyBear = BabyBear::new(1);
+pub const BABYBEAR_MONTY_INVERSE: BabyBear = BabyBear::new(1);
+
+pub const KOALABEAR_MONTY_INVERSE: KoalaBear = KoalaBear::new(1);
 
 // <https://github.com/Plonky3/Plonky3/blob/e61ed4aed488f8cef5618914042d8eb515b74ebb/baby-bear/src/poseidon2.rs#L66>
 pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([

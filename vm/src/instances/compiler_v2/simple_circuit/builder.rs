@@ -1,9 +1,11 @@
 use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
+    chips::chips::riscv_poseidon2::Poseidon2Chip,
     compiler::recursion_v2::{
         circuit::{
             challenger::{CanObserveVariable, DuplexChallengerVariable},
             config::{CircuitConfig, FieldFriConfig, FieldFriConfigVariable},
+            constraints::RecursiveVerifierConstraintFolder,
             stark::StarkVerifier,
             types::FriProofVariable,
             witness::Witnessable,
@@ -15,9 +17,12 @@ use crate::{
     configs::config::{Challenger, Com, PcsProof, Val},
     emulator::recursion::public_values::RecursionPublicValues,
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{field::FieldSpecificPoseidon2Config, machine::BaseMachine},
+    machine::{
+        field::FieldSpecificPoseidon2Config, folder::SymbolicConstraintFolder, machine::BaseMachine,
+    },
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
 };
+use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{PrimeField32, TwoAdicField};
 use std::{borrow::BorrowMut, fmt::Debug, marker::PhantomData};
@@ -47,6 +52,8 @@ where
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
+    Poseidon2Chip<F>:
+        Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
         machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
@@ -78,6 +85,7 @@ where
         FriChallengerVariable = DuplexChallengerVariable<CC>,
         DigestVariable = [Felt<F>; DIGEST_SIZE],
     >,
+    Poseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,

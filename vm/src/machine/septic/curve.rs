@@ -1,7 +1,11 @@
 //! Elliptic Curve `y^2 = x^3 + 2x + 26z^5` over the `F_{p^7} = F_p[z]/(z^7 - 2z - 5)` extension field.
 
 use super::{config::*, SepticExtension};
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField};
+use crate::machine::field::{FieldBehavior, FieldType};
+use p3_baby_bear::BabyBear;
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_koala_bear::KoalaBear;
+use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 
@@ -14,16 +18,6 @@ pub struct SepticCurve<F> {
     /// The y-coordinate of an elliptic curve point.
     pub y: SepticExtension<F>,
 }
-
-/// Linear coefficient for pairwise independent hash, derived from digits of pi.
-pub const A_EC_LOGUP: [u32; 7] = [
-    0x31415926, 0x53589793, 0x23846264, 0x33832795, 0x02884197, 0x16939937, 0x51058209,
-];
-
-/// Constant coefficient for pairwise independent hash, derived from digits of pi.
-pub const B_EC_LOGUP: [u32; 7] = [
-    0x74944592, 0x30781640, 0x62862089, 0x9862803, 0x48253421, 0x17067982, 0x14808651,
-];
 
 impl<F: Field> SepticCurve<F> {
     /// Returns the dummy point.
@@ -99,15 +93,6 @@ impl<F: Field> SepticCurve<F> {
 }
 
 impl<F: FieldAlgebra> SepticCurve<F> {
-    /// Convert a message into an x-coordinate by a pairwise independent hash `am + b`.
-    pub fn universal_hash(m: SepticExtension<F>) -> SepticExtension<F> {
-        let a_ec_logup =
-            SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(A_EC_LOGUP[i]));
-        let b_ec_logup =
-            SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(B_EC_LOGUP[i]));
-        a_ec_logup * m + b_ec_logup
-    }
-
     /// Evaluates the curve formula x^3 + 2x + 26z^5
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
         x.cube()
@@ -124,25 +109,61 @@ impl<F: FieldAlgebra> SepticCurve<F> {
     }
 }
 
-impl<F: PrimeField> SepticCurve<F> {
+impl<F: PrimeField32 + FieldBehavior> SepticCurve<F> {
     /// Lift an x coordinate into an elliptic curve.
-    /// As an x-coordinate may not be a valid one, we allow additions of [0, 256) * 2^16 to the first entry of the x-coordinate.
-    /// Also, we always return the curve point with y-coordinate within [0, (p-1)/2), where p is the characteristic.
-    /// The returned values are the curve point and the offset used.
-    pub fn lift_x(m: SepticExtension<F>) -> (Self, u8) {
+    /// As an x-coordinate may not be a valid one, we allow an additional value in `[0, 256)` to the hash input.
+    /// Also, we always return the curve point with y-coordinate within `[1, (p-1)/2]`, where p is the characteristic.
+    /// The returned values are the curve point, the offset used, and the hash input and output.
+    pub fn lift_x(m: SepticExtension<F>) -> (Self, u8, [F; 16], [F; 16]) {
         for offset in 0..=255 {
-            let m_trial =
-                m + SepticExtension::from_base(F::from_canonical_u32((offset as u32) << 16));
-            let x_trial = Self::universal_hash(m_trial);
+            let m_trial = [
+                m.0[0],
+                m.0[1],
+                m.0[2],
+                m.0[3],
+                m.0[4],
+                m.0[5],
+                m.0[6],
+                F::from_canonical_u8(offset),
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+                F::ZERO,
+            ];
+
+            let m_hash = match F::field_type() {
+                FieldType::TypeBabyBear => {
+                    let perm = crate::primitives::pico_poseidon2bb_init();
+                    perm.permute(
+                        m_trial.map(|x| BabyBear::from_canonical_u32(x.as_canonical_u32())),
+                    )
+                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
+                }
+                FieldType::TypeKoalaBear => {
+                    let perm = crate::primitives::pico_poseidon2kb_init();
+                    perm.permute(
+                        m_trial.map(|x| KoalaBear::from_canonical_u32(x.as_canonical_u32())),
+                    )
+                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
+                }
+                _ => unimplemented!("Unsupported field type"),
+            };
+
+            let x_trial = SepticExtension(m_hash[..7].try_into().unwrap());
+
             let y_sq = Self::curve_formula(x_trial);
             if let Some(y) = y_sq.sqrt() {
                 if y.is_exception() {
                     continue;
                 }
                 if y.is_send() {
-                    return (Self { x: x_trial, y: -y }, offset);
+                    return (Self { x: x_trial, y: -y }, offset, m_trial, m_hash);
                 }
-                return (Self { x: x_trial, y }, offset);
+                return (Self { x: x_trial, y }, offset, m_trial, m_hash);
             }
         }
         panic!("curve point couldn't be found after 256 attempts");

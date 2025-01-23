@@ -10,7 +10,7 @@ use crate::{
 };
 use core::borrow::Borrow;
 use p3_air::{Air, BaseAir};
-use p3_field::{Field, PrimeField};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{marker::PhantomData, mem::size_of, sync::Arc};
@@ -37,7 +37,7 @@ const ADD_LOOKED_COLS: usize = size_of::<AddLookedCols<u8>>();
 #[derive(Debug, Default)]
 pub struct AddLookingChip<F>(PhantomData<F>);
 
-impl<F: PrimeField> ChipBehavior<F> for AddLookingChip<F> {
+impl<F: PrimeField32> ChipBehavior<F> for AddLookingChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -109,7 +109,7 @@ where
 #[derive(Debug, Default)]
 pub struct AddLookedChip<F>(PhantomData<F>);
 
-impl<F: PrimeField> ChipBehavior<F> for AddLookedChip<F> {
+impl<F: PrimeField32> ChipBehavior<F> for AddLookedChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

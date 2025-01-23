@@ -1,7 +1,6 @@
 use crate::chips::gadgets::{
-    field_range_check::bit_decomposition::FieldBitDecomposition,
-    global_accumulation::GlobalAccumulationOperation,
-    global_interaction::GlobalInteractionOperation, is_zero::IsZeroGadget, lt::AssertLtColsBits,
+    field_range_check::bit_decomposition::FieldBitDecomposition, is_zero::IsZeroGadget,
+    lt::AssertLtColsBits,
 };
 use core::mem::size_of;
 use pico_derive::AlignedBorrow;
@@ -44,10 +43,4 @@ pub struct MemoryInitializeFinalizeCols<T> {
 
     /// A flag to inidicate the last non-padded address. An auxiliary column needed for degree 3.
     pub is_last_addr: T,
-
-    /// The columns for sending a global interaction.
-    pub global_interaction_cols: GlobalInteractionOperation<T>,
-
-    /// The columns for accumulating the elliptic curve digests.
-    pub global_accumulation_cols: GlobalAccumulationOperation<T, 1>,
 }

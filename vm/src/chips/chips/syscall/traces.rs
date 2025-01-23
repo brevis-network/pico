@@ -1,17 +1,21 @@
 use crate::{
     chips::{
         chips::{
-            byte::event::ByteRecordBehavior,
+            riscv_global::event::GlobalInteractionEvent,
             syscall::{columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS},
         },
         utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
     emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
-    machine::{chip::ChipBehavior, lookup::LookupScope, septic::SepticDigest},
+    machine::{
+        chip::ChipBehavior,
+        lookup::{LookupScope, LookupType},
+    },
 };
+use itertools::Itertools;
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use std::borrow::BorrowMut;
 
@@ -29,84 +33,44 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
         input: &EmulationRecord,
         _output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        let mut global_cumulative_sum = SepticDigest::<F>::zero().0;
-
         let mut rows = Vec::new();
 
-        let row_fn = |syscall_event: &SyscallEvent, is_looked: bool| {
+        let row_fn = |syscall_event: &SyscallEvent| {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
-            debug_assert!(syscall_event.clk < (1 << 24));
-            let clk_16 = (syscall_event.clk & 65535) as u16;
-            let clk_8 = (syscall_event.clk >> 16) as u8;
-
             cols.chunk = F::from_canonical_u32(syscall_event.chunk);
-            cols.clk_16 = F::from_canonical_u16(clk_16);
-            cols.clk_8 = F::from_canonical_u8(clk_8);
+            cols.clk = F::from_canonical_u32(syscall_event.clk);
             cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
             cols.arg1 = F::from_canonical_u32(syscall_event.arg1);
             cols.arg2 = F::from_canonical_u32(syscall_event.arg2);
             cols.is_real = F::ONE;
-            cols.global_interaction_cols.populate_syscall(
-                syscall_event.chunk,
-                clk_16,
-                clk_8,
-                syscall_event.syscall_id,
-                syscall_event.arg1,
-                syscall_event.arg2,
-                is_looked,
-                true,
-            );
             row
         };
 
         match self.chunk_kind {
             SyscallChunkKind::Riscv => {
                 for event in input.syscall_events.iter() {
-                    let row = row_fn(event, false);
+                    let row = row_fn(event);
                     rows.push(row);
                 }
             }
             SyscallChunkKind::Precompile => {
                 for event in input.precompile_events.all_events().map(|(event, _)| event) {
-                    let row = row_fn(event, true);
+                    let row = row_fn(event);
                     rows.push(row);
                 }
             }
         };
 
-        let num_events = rows.len();
-        for i in 0..num_events {
-            let cols: &mut SyscallCols<F> = rows[i].as_mut_slice().borrow_mut();
-            cols.global_accumulation_cols.populate(
-                &mut global_cumulative_sum,
-                [cols.global_interaction_cols],
-                [cols.is_real],
-            );
-        }
-
         // Pad the trace to a power of two depending on the proof shape in `input`.
         let log_rows = input.shape_chip_size(&self.name());
         pad_rows_fixed(&mut rows, || [F::ZERO; NUM_SYSCALL_COLS], log_rows);
 
-        let mut trace = RowMajorMatrix::new(
+        RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_SYSCALL_COLS,
-        );
-
-        for i in num_events..trace.height() {
-            let cols: &mut SyscallCols<F> =
-                trace.values[i * NUM_SYSCALL_COLS..(i + 1) * NUM_SYSCALL_COLS].borrow_mut();
-            cols.global_interaction_cols.populate_dummy();
-            cols.global_accumulation_cols.populate(
-                &mut global_cumulative_sum,
-                [cols.global_interaction_cols],
-                [cols.is_real],
-            );
-        }
-
-        trace
+        )
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
@@ -116,32 +80,31 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
                 .precompile_events
                 .all_events()
                 .map(|(event, _)| event.to_owned())
-                .collect::<Vec<_>>(),
+                .collect_vec(),
         };
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
-        let blu_events = events
+        let global_events: Vec<_> = events
             .par_chunks(chunk_size)
             .flat_map(|events| {
-                let mut blu = vec![];
-                events.iter().for_each(|event| {
-                    let mut row = [F::ZERO; NUM_SYSCALL_COLS];
-                    let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
-                    let clk_16 = (event.clk & 65535) as u16;
-                    let clk_8 = (event.clk >> 16) as u8;
-                    cols.global_interaction_cols
-                        .populate_syscall_range_check_witness(
+                events
+                    .iter()
+                    .map(|event| GlobalInteractionEvent {
+                        message: [
                             event.chunk,
-                            clk_16,
-                            clk_8,
+                            event.clk,
                             event.syscall_id,
-                            true,
-                            &mut blu,
-                        );
-                });
-                blu
+                            event.arg1,
+                            event.arg2,
+                            0,
+                            0,
+                        ],
+                        is_receive: self.chunk_kind == SyscallChunkKind::Precompile,
+                        kind: LookupType::Syscall as u8,
+                    })
+                    .collect_vec()
             })
             .collect();
-        extra.add_byte_lookup_events(blu_events);
+        extra.global_lookup_events.extend(global_events);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
@@ -161,6 +124,6 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
     }
 
     fn lookup_scope(&self) -> LookupScope {
-        LookupScope::Global
+        LookupScope::Regional
     }
 }

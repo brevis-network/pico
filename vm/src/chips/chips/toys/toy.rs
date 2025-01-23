@@ -7,7 +7,7 @@ use crate::{
 };
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField};
+use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use std::{marker::PhantomData, mem::size_of};
 
@@ -45,7 +45,7 @@ impl<'a, T: Clone> ToyCols<&'a T> {
     }
 }
 
-impl<F: PrimeField> ChipBehavior<F> for ToyChip<F> {
+impl<F: PrimeField32> ChipBehavior<F> for ToyChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

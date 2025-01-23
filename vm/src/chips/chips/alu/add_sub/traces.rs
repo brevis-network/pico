@@ -21,13 +21,13 @@ use crate::{
     primitives::consts::ADD_SUB_DATAPAR,
 };
 use core::borrow::BorrowMut;
-use p3_field::{Field, PrimeField};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use rayon::{iter::IndexedParallelIterator, slice::ParallelSliceMut};
 use tracing::debug;
 
-impl<F: PrimeField> ChipBehavior<F> for AddSubChip<F> {
+impl<F: PrimeField32> ChipBehavior<F> for AddSubChip<F> {
     type Record = EmulationRecord;
 
     type Program = Program;

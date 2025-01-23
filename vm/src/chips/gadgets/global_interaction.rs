@@ -1,14 +1,16 @@
 use crate::{
-    chips::chips::byte::event::ByteRecordBehavior,
+    chips::chips::riscv_poseidon2::Poseidon2Event,
     compiler::riscv::opcode::ByteOpcode,
     machine::{
-        builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, SepticExtensionBuilder},
-        lookup::LookupType,
+        builder::{ChipBuilder, ChipLookupBuilder, SepticExtensionBuilder},
+        field::FieldBehavior,
+        lookup::{LookupScope, LookupType, SymbolicLookup},
         septic::{
             SepticBlock, SepticCurve, SepticExtension, CURVE_WITNESS_DUMMY_POINT_X,
             CURVE_WITNESS_DUMMY_POINT_Y, TOP_BITS,
         },
     },
+    primitives::consts::PERMUTATION_WIDTH,
 };
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
@@ -23,21 +25,23 @@ pub struct GlobalInteractionOperation<T> {
     pub y_coordinate: SepticBlock<T>,
     pub y6_bit_decomp: [T; 30],
     pub range_check_witness: T,
+    pub poseidon2_input: [T; PERMUTATION_WIDTH],
+    pub poseidon2_output: [T; PERMUTATION_WIDTH],
 }
 
-impl<F: PrimeField32> GlobalInteractionOperation<F> {
+impl<F: PrimeField32 + FieldBehavior> GlobalInteractionOperation<F> {
     pub fn get_digest(
         values: SepticBlock<u32>,
         is_receive: bool,
-        kind: LookupType,
-    ) -> (SepticCurve<F>, u8) {
+        kind: u8,
+    ) -> (SepticCurve<F>, u8, [F; 16], [F; 16]) {
         let x_start = SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values.0[i]))
-            + SepticExtension::from_base(F::from_canonical_u32((kind as u32) << 24));
-        let (point, offset) = SepticCurve::<F>::lift_x(x_start);
+            + SepticExtension::from_base(F::from_canonical_u32((kind as u32) << 16));
+        let (point, offset, m_trial, m_hash) = SepticCurve::<F>::lift_x(x_start);
         if !is_receive {
-            return (point.neg(), offset);
+            return (point.neg(), offset, m_trial, m_hash);
         }
-        (point, offset)
+        (point, offset, m_trial, m_hash)
     }
 
     pub fn populate(
@@ -45,10 +49,10 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
         values: SepticBlock<u32>,
         is_receive: bool,
         is_real: bool,
-        kind: LookupType,
-    ) {
+        kind: u8,
+    ) -> Option<Poseidon2Event> {
         if is_real {
-            let (point, offset) = Self::get_digest(values, is_receive, kind);
+            let (point, offset, m_trial, m_hash) = Self::get_digest(values, is_receive, kind);
             for i in 0..8 {
                 self.offset_bits[i] = F::from_canonical_u8((offset >> i) & 1);
             }
@@ -68,93 +72,19 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
             }
             top_field_bits -= F::from_canonical_usize(TOP_BITS);
             self.range_check_witness = top_field_bits.inverse();
+
+            assert_eq!(self.x_coordinate.0[0], m_hash[0]);
+
+            self.poseidon2_input = m_trial;
+            self.poseidon2_output = m_hash;
+
+            let [input, output] = [self.poseidon2_input, self.poseidon2_output]
+                .map(|values| values.map(|v| v.as_canonical_u32()));
+            Some(Poseidon2Event { input, output })
         } else {
             self.populate_dummy();
+            None
         }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn populate_memory_range_check_witness(
-        &self,
-        chunk: u32,
-        value: u32,
-        is_real: bool,
-        blu: &mut impl ByteRecordBehavior,
-    ) {
-        if is_real {
-            blu.add_u8_range_checks(value.to_le_bytes());
-            blu.add_u16_range_check(chunk as u16);
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn populate_memory(
-        &mut self,
-        chunk: u32,
-        clk: u32,
-        addr: u32,
-        value: u32,
-        is_receive: bool,
-        is_real: bool,
-    ) {
-        self.populate(
-            SepticBlock([
-                chunk,
-                clk,
-                addr,
-                value & 255,
-                (value >> 8) & 255,
-                (value >> 16) & 255,
-                (value >> 24) & 255,
-            ]),
-            is_receive,
-            is_real,
-            LookupType::Memory,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn populate_syscall_range_check_witness(
-        &self,
-        chunk: u32,
-        clk_16: u16,
-        clk_8: u8,
-        syscall_id: u32,
-        is_real: bool,
-        blu: &mut impl ByteRecordBehavior,
-    ) {
-        if is_real {
-            blu.add_u16_range_checks(&[chunk as u16, clk_16]);
-            blu.add_u8_range_checks([clk_8, syscall_id as u8]);
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn populate_syscall(
-        &mut self,
-        chunk: u32,
-        clk_16: u16,
-        clk_8: u8,
-        syscall_id: u32,
-        arg1: u32,
-        arg2: u32,
-        is_receive: bool,
-        is_real: bool,
-    ) {
-        self.populate(
-            SepticBlock([
-                chunk,
-                clk_16.into(),
-                clk_8.into(),
-                syscall_id,
-                arg1,
-                arg2,
-                0,
-            ]),
-            is_receive,
-            is_real,
-            LookupType::Syscall,
-        );
     }
 
     pub fn populate_dummy(&mut self) {
@@ -171,183 +101,126 @@ impl<F: PrimeField32> GlobalInteractionOperation<F> {
             self.y6_bit_decomp[i] = F::ZERO;
         }
         self.range_check_witness = F::ZERO;
+
+        self.poseidon2_input = [F::ZERO; PERMUTATION_WIDTH];
+        self.poseidon2_output = [F::ZERO; PERMUTATION_WIDTH];
     }
 }
 
 impl<F: Field> GlobalInteractionOperation<F> {
-    /// Constrain that the y coordinate is correct decompression, and send the resulting digest coordinate to the permutation trace.
-    /// The first value in `values` must be a value range checked to u16.
-    fn eval_single_digest<AB: ChipBuilder<F>>(
-        builder: &mut AB,
-        values: [AB::Expr; 7],
-        cols: GlobalInteractionOperation<AB::Var>,
-        is_receive: bool,
-        is_real: AB::Var,
-        kind: LookupType,
+    /// Constrain that the elliptic curve point for the global interaction is correctly derived.
+    pub fn eval_single_digest<CB: ChipBuilder<F>>(
+        builder: &mut CB,
+        values: [CB::Expr; 7],
+        cols: GlobalInteractionOperation<CB::Var>,
+        is_receive: CB::Expr,
+        is_send: CB::Expr,
+        is_real: CB::Var,
+        kind: CB::Var,
     ) {
         // Constrain that the `is_real` is boolean.
         builder.assert_bool(is_real);
 
         // Compute the offset and range check each bits, ensuring that the offset is a byte.
-        let mut offset = AB::Expr::ZERO;
+        let mut offset = CB::Expr::ZERO;
         for i in 0..8 {
             builder.assert_bool(cols.offset_bits[i]);
-            offset = offset.clone() + cols.offset_bits[i] * AB::F::from_canonical_u32(1 << i);
+            offset = offset.clone() + cols.offset_bits[i] * CB::F::from_canonical_u32(1 << i);
         }
 
-        // Compute the message.
-        let message = SepticExtension(values)
-            + SepticExtension::<AB::Expr>::from_base(
-                offset * AB::F::from_canonical_u32(1 << 16)
-                    + AB::F::from_canonical_u32(kind as u32) * AB::F::from_canonical_u32(1 << 24),
-            );
+        // Range check the first element in the message to be a u16 so that we can encode the interaction kind in the upper 8 bits.
+        builder.looking_byte(
+            CB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            values[0].clone(),
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            is_real,
+        );
 
-        // Compute a * m + b.
-        let am_plus_b = SepticCurve::<AB::Expr>::universal_hash(message);
+        // Turn the message into a hash input. Only the first 8 elements are non-zero, as the rate of the Poseidon2 hash is 8.
+        // Combining `values[0]` with `kind` is safe, as `values[0]` is range checked to be u16, and `kind` is known to be u8.
+        let m_trial = [
+            values[0].clone() + CB::Expr::from_canonical_u32(1 << 16) * kind,
+            values[1].clone(),
+            values[2].clone(),
+            values[3].clone(),
+            values[4].clone(),
+            values[5].clone(),
+            values[6].clone(),
+            offset.clone(),
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+        ];
 
-        let x = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.x_coordinate[i].into());
+        // Constrain the input of the permutation to be the message.
+        for i in 0..16 {
+            builder
+                .when(is_real)
+                .assert_eq(cols.poseidon2_input[i], m_trial[i].clone());
+        }
 
-        // Constrain that when `is_real` is true, then `x == a * m + b`.
-        builder
-            .when(is_real)
-            .assert_septic_ext_eq(x.clone(), am_plus_b);
+        // Constrain that when `is_real` is true, the x-coordinate is the hash of the message.
+        for i in 0..7 {
+            builder
+                .when(is_real)
+                .assert_eq(cols.x_coordinate[i].into(), cols.poseidon2_output[i]);
+        }
 
-        // Constrain that y is a valid y-coordinate.
-        let y = SepticExtension::<AB::Expr>::from_base_fn(|i| cols.y_coordinate[i].into());
+        let lookup_values = cols
+            .poseidon2_input
+            .iter()
+            .chain(cols.poseidon2_output.iter())
+            .cloned()
+            .map(Into::into)
+            .collect();
+        builder.looking(SymbolicLookup::new(
+            lookup_values,
+            is_real.into(),
+            LookupType::Poseidon2,
+            LookupScope::Regional,
+        ));
+
+        let x = SepticExtension::<CB::Expr>::from_base_fn(|i| cols.x_coordinate[i].into());
+        let y = SepticExtension::<CB::Expr>::from_base_fn(|i| cols.y_coordinate[i].into());
 
         // Constrain that `(x, y)` is a valid point on the curve.
         let y2 = y.square();
-        let x3_2x_26z5 = SepticCurve::<AB::Expr>::curve_formula(x);
-
+        let x3_2x_26z5 = SepticCurve::<CB::Expr>::curve_formula(x);
         builder.assert_septic_ext_eq(y2, x3_2x_26z5);
 
-        let mut y6_value = AB::Expr::ZERO;
-        let mut top_field_bits = AB::Expr::ZERO;
+        // Constrain that `0 <= y6_value < (p - 1) / 2 = 2^30 - 2^(30 - TOP_BITS)`.
+        // Decompose `y6_value` into 30 bits, and then constrain that the top field bits cannot be all 1.
+        // To do this, check that the sum of the top field bits is not equal to TOP_BITS, which can be done by providing an inverse.
+        let mut y6_value = CB::Expr::ZERO;
+        let mut top_field_bits = CB::Expr::ZERO;
         for i in 0..30 {
             builder.assert_bool(cols.y6_bit_decomp[i]);
-            y6_value = y6_value.clone() + cols.y6_bit_decomp[i] * AB::F::from_canonical_u32(1 << i);
+            y6_value = y6_value.clone() + cols.y6_bit_decomp[i] * CB::F::from_canonical_u32(1 << i);
             if i >= 30 - TOP_BITS {
                 top_field_bits = top_field_bits.clone() + cols.y6_bit_decomp[i];
             }
         }
-        top_field_bits = top_field_bits.clone() - AB::Expr::from_canonical_usize(TOP_BITS);
-        builder
-            .when(is_real)
-            .assert_eq(cols.range_check_witness * top_field_bits, AB::Expr::ONE);
+        // If `is_real` is true, check that `top_field_bits - TOP_BITS` is non-zero, by checking `range_check_witness` is an inverse of it.
+        builder.when(is_real).assert_eq(
+            cols.range_check_witness * (top_field_bits - CB::Expr::from_canonical_usize(TOP_BITS)),
+            CB::Expr::ONE,
+        );
 
         // Constrain that y has correct sign.
-        // If it's a receive: 0 <= y_6 - 1 < (p - 1) / 2 = 2^30 - 2^26
-        // If it's a send: 0 <= y_6 - (p + 1) / 2 < (p - 1) / 2 = 2^30 - 2^26
-        if is_receive {
-            builder
-                .when(is_real)
-                .assert_eq(y.0[6].clone(), AB::Expr::ONE + y6_value);
-        } else {
-            builder.when(is_real).assert_eq(
-                y.0[6].clone(),
-                AB::Expr::from_canonical_u32((1 << 30) - (1 << (30 - TOP_BITS)) + 1) + y6_value,
-            );
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn eval_single_digest_memory<AB: ChipBuilder<F>>(
-        builder: &mut AB,
-        chunk: AB::Expr,
-        clk: AB::Expr,
-        addr: AB::Expr,
-        value: [AB::Expr; 4],
-        cols: GlobalInteractionOperation<AB::Var>,
-        is_receive: bool,
-        is_real: AB::Var,
-    ) {
-        let values = [
-            chunk.clone(),
-            clk.clone(),
-            addr.clone(),
-            value[0].clone(),
-            value[1].clone(),
-            value[2].clone(),
-            value[3].clone(),
-        ];
-
-        Self::eval_single_digest(
-            builder,
-            values,
-            cols,
-            is_receive,
-            is_real,
-            LookupType::Memory,
-        );
-
-        // Range check for message space.
-        // Range check chunk to be a valid u16.
-        builder.looking_rangecheck(
-            ByteOpcode::U16Range,
-            chunk.clone(),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            is_real,
-        );
-        // Range check the word value to be valid u8 word.
-        builder.slice_range_check_u8(&value, is_real);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn eval_single_digest_syscall<AB: ChipBuilder<F>>(
-        builder: &mut AB,
-        chunk: AB::Expr,
-        clk_16: AB::Expr,
-        clk_8: AB::Expr,
-        syscall_id: AB::Expr,
-        arg1: AB::Expr,
-        arg2: AB::Expr,
-        cols: GlobalInteractionOperation<AB::Var>,
-        is_receive: bool,
-        is_real: AB::Var,
-    ) {
-        let values = [
-            chunk.clone(),
-            clk_16.clone(),
-            clk_8.clone(),
-            syscall_id.clone(),
-            arg1.clone(),
-            arg2.clone(),
-            AB::Expr::ZERO,
-        ];
-
-        Self::eval_single_digest(
-            builder,
-            values,
-            cols,
-            is_receive,
-            is_real,
-            LookupType::Syscall,
-        );
-
-        // Range check for message space.
-        // Range check chunk to be a valid u16.
-        builder.looking_rangecheck(
-            ByteOpcode::U16Range,
-            chunk.clone(),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            is_real,
-        );
-
-        // Range check clk_8 and syscall_id to be u8.
-        builder.slice_range_check_u8(&[clk_8, syscall_id], is_real);
-
-        // Range check clk_16 to be u16.
-        builder.looking_rangecheck(
-            ByteOpcode::U16Range,
-            clk_16,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            is_real,
+        // If it's a receive: `1 <= y_6 <= (p - 1) / 2`, so `0 <= y_6 - 1 = y6_value < (p - 1) / 2`.
+        // If it's a send: `(p + 1) / 2 <= y_6 <= p - 1`, so `0 <= y_6 - (p + 1) / 2 = y6_value < (p - 1) / 2`.
+        builder
+            .when(is_receive)
+            .assert_eq(y.0[6].clone(), CB::Expr::ONE + y6_value.clone());
+        builder.when(is_send).assert_eq(
+            y.0[6].clone(),
+            CB::Expr::from_canonical_u32((1 << 30) - (1 << (30 - TOP_BITS)) + 1) + y6_value,
         );
     }
 }

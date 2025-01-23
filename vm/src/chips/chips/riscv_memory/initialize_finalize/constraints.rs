@@ -4,13 +4,14 @@ use super::{
 };
 use crate::{
     chips::gadgets::{
-        field_range_check::bit_decomposition::FieldBitDecomposition,
-        global_accumulation::GlobalAccumulationOperation,
-        global_interaction::GlobalInteractionOperation, is_zero::IsZeroGadget,
+        field_range_check::bit_decomposition::FieldBitDecomposition, is_zero::IsZeroGadget,
     },
     compiler::word::Word,
     emulator::riscv::public_values::PublicValues,
-    machine::builder::{ChipBaseBuilder, ChipBuilder},
+    machine::{
+        builder::{ChipBaseBuilder, ChipBuilder},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
+    },
     primitives::consts::MAX_NUM_PVS,
 };
 use core::borrow::Borrow;
@@ -56,16 +57,25 @@ where
         if self.kind == MemoryChipType::Initialize {
             let mut values = vec![CB::Expr::ZERO, CB::Expr::ZERO, local.addr.into()];
             values.extend(value.clone().map(Into::into));
-            GlobalInteractionOperation::<CB::F>::eval_single_digest_memory(
-                builder,
-                CB::Expr::ZERO,
-                CB::Expr::ZERO,
-                local.addr.into(),
-                value,
-                local.global_interaction_cols,
-                false,
-                local.is_real,
-            );
+
+            // Send the "send interaction" to the global table.
+            builder.looking(SymbolicLookup::new(
+                vec![
+                    CB::Expr::ZERO,
+                    CB::Expr::ZERO,
+                    local.addr.into(),
+                    value[0].clone(),
+                    value[1].clone(),
+                    value[2].clone(),
+                    value[3].clone(),
+                    CB::Expr::ONE,
+                    CB::Expr::ZERO,
+                    CB::Expr::from_canonical_u8(LookupType::Memory as u8),
+                ],
+                local.is_real.into(),
+                LookupType::Global,
+                LookupScope::Regional,
+            ));
         } else {
             let mut values = vec![
                 local.chunk.into(),
@@ -73,26 +83,26 @@ where
                 local.addr.into(),
             ];
             values.extend(value.clone());
-            GlobalInteractionOperation::<CB::F>::eval_single_digest_memory(
-                builder,
-                local.chunk.into(),
-                local.timestamp.into(),
-                local.addr.into(),
-                value,
-                local.global_interaction_cols,
-                true,
-                local.is_real,
-            );
-        }
 
-        GlobalAccumulationOperation::<CB::F, 1>::eval_accumulation(
-            builder,
-            [local.global_interaction_cols],
-            [local.is_real],
-            [next.is_real],
-            local.global_accumulation_cols,
-            next.global_accumulation_cols,
-        );
+            // Send the "receive interaction" to the global table.
+            builder.looking(SymbolicLookup::new(
+                vec![
+                    local.chunk.into(),
+                    local.timestamp.into(),
+                    local.addr.into(),
+                    value[0].clone(),
+                    value[1].clone(),
+                    value[2].clone(),
+                    value[3].clone(),
+                    CB::Expr::ZERO,
+                    CB::Expr::ONE,
+                    CB::Expr::from_canonical_u8(LookupType::Memory as u8),
+                ],
+                local.is_real.into(),
+                LookupType::Global,
+                LookupScope::Regional,
+            ));
+        }
 
         // Canonically decompose the address into bits so we can do comparisons.
         FieldBitDecomposition::<CB::F>::range_check(

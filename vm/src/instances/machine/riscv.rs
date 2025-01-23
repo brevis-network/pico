@@ -1,4 +1,5 @@
 use crate::{
+    chips::chips::riscv_poseidon2::Poseidon2Chip,
     compiler::{riscv::program::Program, word::Word},
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{
@@ -10,7 +11,10 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         field::FieldSpecificPoseidon2Config,
-        folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+        folder::{
+            DebugConstraintFolder, ProverConstraintFolder, SymbolicConstraintFolder,
+            VerifierConstraintFolder,
+        },
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
@@ -42,6 +46,7 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     SC::Domain: Send + Sync,
+    Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
 {
     /// Prove with shape config
     #[instrument(name = "riscv_prove_with_shape", level = "debug", skip_all)]

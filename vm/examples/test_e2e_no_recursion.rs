@@ -1,10 +1,12 @@
+use p3_air::Air;
 use p3_field::PrimeField32;
 use pico_vm::{
+    chips::chips::riscv_poseidon2::Poseidon2Chip,
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
-    configs::config::{Com, PcsProverData, StarkGenericConfig},
+    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -15,8 +17,12 @@ use pico_vm::{
         machine::riscv::RiscvMachine,
     },
     machine::{
-        field::FieldSpecificPoseidon2Config, logger::setup_logger, machine::MachineBehavior,
-        proof::BaseProof, witness::ProvingWitness,
+        field::FieldSpecificPoseidon2Config,
+        folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
+        logger::setup_logger,
+        machine::MachineBehavior,
+        proof::BaseProof,
+        witness::ProvingWitness,
     },
     primitives::consts::RISCV_NUM_PVS,
 };
@@ -35,6 +41,9 @@ where
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     BaseProof<SC>: Send + Sync,
     SC::Domain: Send + Sync,
+    Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     info!("\n Begin RiscV..");
     let start = Instant::now();

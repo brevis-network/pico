@@ -4,17 +4,19 @@ use super::{
 };
 use crate::{
     chips::chips::{
-        byte::event::ByteRecordBehavior, riscv_memory::event::MemoryInitializeFinalizeEvent,
+        riscv_global::event::GlobalInteractionEvent,
+        riscv_memory::event::MemoryInitializeFinalizeEvent,
     },
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
     machine::{
-        chip::ChipBehavior, lookup::LookupScope, septic::SepticDigest, utils::pad_to_power_of_two,
+        chip::ChipBehavior,
+        lookup::{LookupScope, LookupType},
+        utils::pad_to_power_of_two,
     },
 };
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::*;
+use p3_matrix::dense::RowMajorMatrix;
 use std::{array, borrow::BorrowMut};
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
@@ -38,13 +40,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
             MemoryChipType::Initialize => input.public_values.previous_initialize_addr_bits,
             MemoryChipType::Finalize => input.public_values.previous_finalize_addr_bits,
         };
-
-        let is_receive = match self.kind {
-            MemoryChipType::Initialize => false,
-            MemoryChipType::Finalize => true,
-        };
-
-        let mut global_cumulative_sum = SepticDigest::<F>::zero().0;
 
         memory_events.sort_by_key(|event| event.addr);
         let rows: Vec<[F; NUM_MEMORY_INITIALIZE_FINALIZE_COLS]> = (0..memory_events.len()) // OPT: change this to par_iter
@@ -96,24 +91,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                     cols.is_last_addr = F::ONE;
                 }
 
-                let interaction_chunk = if is_receive { chunk } else { 0 };
-                let interaction_clk = if is_receive { timestamp } else { 0 };
-
-                cols.global_interaction_cols.populate_memory(
-                    interaction_chunk,
-                    interaction_clk,
-                    addr,
-                    value,
-                    is_receive,
-                    used != 0,
-                );
-
-                cols.global_accumulation_cols.populate(
-                    &mut global_cumulative_sum,
-                    [cols.global_interaction_cols],
-                    [cols.is_real],
-                );
-
                 row
             })
             .collect::<Vec<_>>();
@@ -126,19 +103,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
         // Pad the trace based on shape
         let log_rows = input.shape_chip_size(&self.name());
         pad_to_power_of_two::<NUM_MEMORY_INITIALIZE_FINALIZE_COLS, F>(&mut trace.values, log_rows);
-
-        for i in memory_events.len()..trace.height() {
-            let cols: &mut MemoryInitializeFinalizeCols<F> = trace.values[i
-                * NUM_MEMORY_INITIALIZE_FINALIZE_COLS
-                ..(i + 1) * NUM_MEMORY_INITIALIZE_FINALIZE_COLS]
-                .borrow_mut();
-            cols.global_interaction_cols.populate_dummy();
-            cols.global_accumulation_cols.populate(
-                &mut global_cumulative_sum,
-                [cols.global_interaction_cols],
-                [cols.is_real],
-            );
-        }
 
         trace
     }
@@ -155,36 +119,25 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
         };
 
         memory_events.sort_by_key(|event| event.addr);
-        let chunk_size = std::cmp::max(memory_events.len() / num_cpus::get(), 1);
 
-        let blu_events = memory_events
-            .par_chunks(chunk_size)
-            .flat_map(|events| {
-                let mut blu = vec![];
-                events.iter().for_each(|event| {
-                    let MemoryInitializeFinalizeEvent {
-                        addr: _addr,
-                        value,
-                        chunk,
-                        timestamp: _timestamp,
-                        used,
-                    } = event.to_owned();
-                    let interaction_chunk = if is_receive { chunk } else { 0 };
-                    let mut row = [F::ZERO; NUM_MEMORY_INITIALIZE_FINALIZE_COLS];
-                    let cols: &mut MemoryInitializeFinalizeCols<F> =
-                        row.as_mut_slice().borrow_mut();
-                    cols.global_interaction_cols
-                        .populate_memory_range_check_witness(
-                            interaction_chunk,
-                            value,
-                            used != 0,
-                            &mut blu,
-                        );
-                });
-                blu
-            })
-            .collect();
-        extra.add_byte_lookup_events(blu_events);
+        let events = memory_events.into_iter().map(|event| {
+            let interaction_chunk = if is_receive { event.chunk } else { 0 };
+            let interaction_clk = if is_receive { event.timestamp } else { 0 };
+            GlobalInteractionEvent {
+                message: [
+                    interaction_chunk,
+                    interaction_clk,
+                    event.addr,
+                    event.value & 255,
+                    (event.value >> 8) & 255,
+                    (event.value >> 16) & 255,
+                    (event.value >> 24) & 255,
+                ],
+                is_receive,
+                kind: LookupType::Memory as u8,
+            }
+        });
+        extra.global_lookup_events.extend(events);
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
@@ -195,6 +148,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     }
 
     fn lookup_scope(&self) -> LookupScope {
-        LookupScope::Global
+        LookupScope::Regional
     }
 }

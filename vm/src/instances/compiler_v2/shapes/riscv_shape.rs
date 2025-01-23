@@ -1,10 +1,13 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
-    instances::compiler_v2::shapes::ProofShape, machine::field::FieldSpecificPoseidon2Config,
+    chips::chips::riscv_poseidon2::Poseidon2Chip,
+    instances::compiler_v2::shapes::ProofShape,
+    machine::{field::FieldSpecificPoseidon2Config, folder::SymbolicConstraintFolder},
 };
 use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
+use p3_air::Air;
 use p3_field::PrimeField;
 use serde::{Deserialize, Serialize};
 
@@ -296,7 +299,10 @@ struct RiscvShapeSpec {
     is_potentially_maximal: bool,
 }
 
-impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
+impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F>
+where
+    Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+{
     /// Fix the preprocessed shape of the proof.
     pub fn padding_preprocessed_shape(&self, program: &mut Program) -> Result<(), RiscvShapeError> {
         if program.preprocessed_shape.is_some() {
@@ -664,7 +670,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
     }
 }
 
-impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfig<F> {
+impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfig<F>
+where
+    Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+{
     fn default() -> Self {
         // Preprocessed chip heights.
         let program_heights = vec![Some(19), Some(20), Some(21), Some(22)];

@@ -2,18 +2,12 @@ use super::{
     columns::{MemoryLocalCols, NUM_MEMORY_LOCAL_INIT_COLS},
     MemoryLocalChip,
 };
-use crate::{
-    chips::gadgets::{
-        global_accumulation::GlobalAccumulationOperation,
-        global_interaction::GlobalInteractionOperation,
-    },
-    machine::{
-        builder::ChipBuilder,
-        lookup::{LookupScope, LookupType, SymbolicLookup},
-    },
+use crate::machine::{
+    builder::ChipBuilder,
+    lookup::{LookupScope, LookupType, SymbolicLookup},
 };
 use p3_air::{Air, BaseAir};
-use p3_field::Field;
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
@@ -31,12 +25,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &MemoryLocalCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &MemoryLocalCols<CB::Var> = (*next).borrow();
-
-        let mut global_interaction_cols = Vec::with_capacity(8);
-        let mut local_is_reals = Vec::with_capacity(8);
-        let mut next_is_reals = Vec::with_capacity(8);
 
         for local in local.memory_local_entries.iter() {
             builder.assert_eq(
@@ -58,19 +46,43 @@ where
                 LookupScope::Regional,
             ));
 
-            GlobalInteractionOperation::<CB::F>::eval_single_digest_memory(
-                builder,
-                local.initial_chunk.into(),
-                local.initial_clk.into(),
-                local.addr.into(),
-                local.initial_value.map(Into::into).0,
-                local.initial_global_interaction_cols,
-                true,
-                local.is_real,
-            );
+            // Send the "receive interaction" to the global table.
+            builder.looking(SymbolicLookup::new(
+                vec![
+                    local.initial_chunk.into(),
+                    local.initial_clk.into(),
+                    local.addr.into(),
+                    local.initial_value[0].into(),
+                    local.initial_value[1].into(),
+                    local.initial_value[2].into(),
+                    local.initial_value[3].into(),
+                    CB::Expr::ZERO,
+                    CB::Expr::ONE,
+                    CB::Expr::from_canonical_u8(LookupType::Memory as u8),
+                ],
+                local.is_real.into(),
+                LookupType::Global,
+                LookupScope::Regional,
+            ));
 
-            global_interaction_cols.push(local.initial_global_interaction_cols);
-            local_is_reals.push(local.is_real);
+            // Send the "send interaction" to the global table.
+            builder.looking(SymbolicLookup::new(
+                vec![
+                    local.final_chunk.into(),
+                    local.final_clk.into(),
+                    local.addr.into(),
+                    local.final_value[0].into(),
+                    local.final_value[1].into(),
+                    local.final_value[2].into(),
+                    local.final_value[3].into(),
+                    CB::Expr::ONE,
+                    CB::Expr::ZERO,
+                    CB::Expr::from_canonical_u8(LookupType::Memory as u8),
+                ],
+                local.is_real.into(),
+                LookupType::Global,
+                LookupScope::Regional,
+            ));
 
             let mut values = vec![
                 local.final_chunk.into(),
@@ -84,40 +96,6 @@ where
                 LookupType::Memory,
                 LookupScope::Regional,
             ));
-
-            GlobalInteractionOperation::<CB::F>::eval_single_digest_memory(
-                builder,
-                local.final_chunk.into(),
-                local.final_clk.into(),
-                local.addr.into(),
-                local.final_value.map(Into::into).0,
-                local.final_global_interaction_cols,
-                false,
-                local.is_real,
-            );
-
-            global_interaction_cols.push(local.final_global_interaction_cols);
-            local_is_reals.push(local.is_real);
         }
-
-        for next in next.memory_local_entries.iter() {
-            next_is_reals.push(next.is_real);
-            next_is_reals.push(next.is_real);
-        }
-
-        GlobalAccumulationOperation::<CB::F, 8>::eval_accumulation(
-            builder,
-            global_interaction_cols
-                .try_into()
-                .unwrap_or_else(|_| panic!("There should be 8 interactions")),
-            local_is_reals
-                .try_into()
-                .unwrap_or_else(|_| panic!("There should be 8 interactions")),
-            next_is_reals
-                .try_into()
-                .unwrap_or_else(|_| panic!("There should be 8 interactions")),
-            local.global_accumulation_cols,
-            next.global_accumulation_cols,
-        );
     }
 }

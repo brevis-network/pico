@@ -4,7 +4,9 @@ use crate::{
         alu::event::AluEvent,
         byte::event::{ByteLookupEvent, ByteRecordBehavior},
         riscv_cpu::event::CpuEvent,
+        riscv_global::event::GlobalInteractionEvent,
         riscv_memory::event::{MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum},
+        riscv_poseidon2::Poseidon2Event,
     },
     compiler::riscv::{opcode::Opcode, program::Program},
     emulator::{
@@ -64,6 +66,10 @@ pub struct EmulationRecord {
     pub precompile_events: PrecompileEvents,
     /// A trace of all the syscall events.
     pub syscall_events: Vec<SyscallEvent>,
+    /// A trace of all the global interaction events.
+    pub poseidon2_events: Vec<Poseidon2Event>,
+    /// A trace of all the global interaction events.
+    pub global_lookup_events: Vec<GlobalInteractionEvent>,
     /// The shape of the proof.
     pub shape: Option<RiscvPadShape>,
 }
@@ -324,6 +330,9 @@ impl RecordBehavior for EmulationRecord {
                 *self.byte_lookups.entry(*event).or_insert(0) += mult;
             }
         }
+        self.poseidon2_events.append(&mut extra.poseidon2_events);
+        self.global_lookup_events
+            .append(&mut extra.global_lookup_events);
     }
 
     fn public_values<F: FieldAlgebra>(&self) -> Vec<F> {

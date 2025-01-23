@@ -9,7 +9,7 @@ use crate::{
     },
 };
 use alloc::sync::Arc;
-use p3_field::{FieldExtensionAlgebra, PrimeField};
+use p3_field::{FieldExtensionAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -67,7 +67,7 @@ impl Program {
     }
 }
 
-impl<F: PrimeField> ProgramBehavior<F> for Program {
+impl<F: PrimeField32> ProgramBehavior<F> for Program {
     fn pc_start(&self) -> F {
         F::from_canonical_u32(self.pc_start)
     }
@@ -89,7 +89,7 @@ impl<F: PrimeField> ProgramBehavior<F> for Program {
             .par_bridge()
             .map(|(&addr, &word)| {
                 let values = [
-                    (LookupType::Memory as u32) << 24,
+                    (LookupType::Memory as u32) << 16,
                     0,
                     addr,
                     word & 255,
@@ -99,7 +99,7 @@ impl<F: PrimeField> ProgramBehavior<F> for Program {
                 ];
                 let x_start =
                     SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values[i]));
-                let (point, _) = SepticCurve::<F>::lift_x(x_start);
+                let (point, _, _, _) = SepticCurve::<F>::lift_x(x_start);
                 SepticCurveComplete::Affine(point.neg())
             })
             .collect();

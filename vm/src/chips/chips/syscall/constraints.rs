@@ -1,12 +1,11 @@
 use crate::{
-    chips::{
-        chips::syscall::{columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS},
-        gadgets::{
-            global_accumulation::GlobalAccumulationOperation,
-            global_interaction::GlobalInteractionOperation,
-        },
+    chips::chips::syscall::{
+        columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS,
     },
-    machine::builder::{ChipBuilder, ChipLookupBuilder},
+    machine::{
+        builder::{ChipBuilder, ChipLookupBuilder},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
+    },
 };
 use p3_air::{Air, BaseAir};
 use p3_field::{Field, FieldAlgebra};
@@ -21,8 +20,6 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &SyscallCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
-        let next: &SyscallCols<CB::Var> = (*next).borrow();
 
         // dummy constraints to normalize degree
         builder.assert_eq(
@@ -33,59 +30,61 @@ where
         match self.chunk_kind {
             SyscallChunkKind::Riscv => {
                 builder.looked_syscall(
-                    local.clk_16 + local.clk_8 * CB::Expr::from_canonical_u32(1 << 16),
+                    local.clk,
                     local.syscall_id,
                     local.arg1,
                     local.arg2,
                     local.is_real,
                 );
 
-                // Send the call to the global bus to/from the precompile chips.
-                GlobalInteractionOperation::<CB::F>::eval_single_digest_syscall(
-                    builder,
-                    local.chunk.into(),
-                    local.clk_16.into(),
-                    local.clk_8.into(),
-                    local.syscall_id.into(),
-                    local.arg1.into(),
-                    local.arg2.into(),
-                    local.global_interaction_cols,
-                    false,
-                    local.is_real,
-                );
+                // Send the "send interaction" to the global table.
+                builder.looking(SymbolicLookup::new(
+                    vec![
+                        local.chunk.into(),
+                        local.clk.into(),
+                        local.syscall_id.into(),
+                        local.arg1.into(),
+                        local.arg2.into(),
+                        CB::Expr::ZERO,
+                        CB::Expr::ZERO,
+                        CB::Expr::ONE,
+                        CB::Expr::ZERO,
+                        CB::Expr::from_canonical_u8(LookupType::Syscall as u8),
+                    ],
+                    local.is_real.into(),
+                    LookupType::Global,
+                    LookupScope::Regional,
+                ));
             }
             SyscallChunkKind::Precompile => {
                 builder.looking_syscall(
-                    local.clk_16 + local.clk_8 * CB::Expr::from_canonical_u32(1 << 16),
+                    local.clk,
                     local.syscall_id,
                     local.arg1,
                     local.arg2,
                     local.is_real,
                 );
 
-                GlobalInteractionOperation::<CB::F>::eval_single_digest_syscall(
-                    builder,
-                    local.chunk.into(),
-                    local.clk_16.into(),
-                    local.clk_8.into(),
-                    local.syscall_id.into(),
-                    local.arg1.into(),
-                    local.arg2.into(),
-                    local.global_interaction_cols,
-                    true,
-                    local.is_real,
-                );
+                // Send the "receive interaction" to the global table.
+                builder.looking(SymbolicLookup::new(
+                    vec![
+                        local.chunk.into(),
+                        local.clk.into(),
+                        local.syscall_id.into(),
+                        local.arg1.into(),
+                        local.arg2.into(),
+                        CB::Expr::ZERO,
+                        CB::Expr::ZERO,
+                        CB::Expr::ZERO,
+                        CB::Expr::ONE,
+                        CB::Expr::from_canonical_u8(LookupType::Syscall as u8),
+                    ],
+                    local.is_real.into(),
+                    LookupType::Global,
+                    LookupScope::Regional,
+                ));
             }
         }
-
-        GlobalAccumulationOperation::<CB::F, 1>::eval_accumulation(
-            builder,
-            [local.global_interaction_cols],
-            [local.is_real],
-            [next.is_real],
-            local.global_accumulation_cols,
-            next.global_accumulation_cols,
-        );
     }
 }
 

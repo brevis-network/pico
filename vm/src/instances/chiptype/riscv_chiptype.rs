@@ -12,15 +12,16 @@ use crate::{
             },
             byte::ByteChip,
             riscv_cpu::CpuChip,
+            riscv_global::GlobalChip,
             riscv_memory::{
                 initialize_finalize::{
-                    MemoryChipType,
-                    MemoryChipType::{Finalize, Initialize},
+                    MemoryChipType::{self, Finalize, Initialize},
                     MemoryInitializeFinalizeChip,
                 },
                 local::MemoryLocalChip,
                 read_write::MemoryReadWriteChip,
             },
+            riscv_poseidon2::Poseidon2Chip,
             riscv_program::ProgramChip,
             syscall::SyscallChip,
         },
@@ -56,6 +57,7 @@ use crate::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
         field::FieldSpecificPoseidon2Config,
+        folder::SymbolicConstraintFolder,
         lookup::{LookupScope, LookupType},
     },
     primitives::consts::{
@@ -112,7 +114,6 @@ define_chip_type!(
         (SLL, SLLChip),
         (AddSub, AddSubChip),
         (Bitwise, BitwiseChip),
-        (Byte, ByteChip),
         (KeecakP, KeccakPermuteChip),
         (FpBn254, FpOpBn254),
         (Fp2AddSubBn254, Fp2AddSubBn254),
@@ -123,7 +124,10 @@ define_chip_type!(
         (U256Mul, Uint256MulChip),
         (Poseidon2P, Poseidon2PermuteChip),
         (SyscallRiscv, SyscallChip),
-        (SyscallPrecompile, SyscallChip)
+        (SyscallPrecompile, SyscallChip),
+        (Global, GlobalChip),
+        (Poseidon2, Poseidon2Chip),
+        (Byte, ByteChip)
     ]
 );
 
@@ -131,6 +135,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F>
 where
     Poseidon2PermuteChip<F, F::Poseidon2Config>:
         ChipBehavior<F, Record = EmulationRecord, Program = Program>,
+    Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
 {
     /// Get the heights of the preprocessed chips for a given program.
     pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(String, usize)> {
@@ -195,6 +200,10 @@ where
                     .div_ceil(MEMORY_RW_DATAPAR),
             ),
             (
+                Self::Global(Default::default()).name(),
+                record.global_lookup_events.len(),
+            ),
+            (
                 Self::SyscallRiscv(SyscallChip::riscv()).name(),
                 record.syscall_events.len(),
             ),
@@ -247,6 +256,7 @@ where
             MetaChip::new(Self::Lt(Default::default())),
             MetaChip::new(Self::MemoryLocal(Default::default())),
             MetaChip::new(Self::MemoryReadWrite(Default::default())),
+            MetaChip::new(Self::Global(Default::default())),
             MetaChip::new(Self::SyscallRiscv(SyscallChip::riscv())),
         ]
     }

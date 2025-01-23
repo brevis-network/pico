@@ -1,5 +1,6 @@
 use super::{InitialProverSetup, MachineProver};
 use crate::{
+    chips::chips::riscv_poseidon2::Poseidon2Chip,
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
@@ -9,6 +10,7 @@ use crate::{
     instances::{chiptype::riscv_chiptype::RiscvChipType, machine::riscv::RiscvMachine},
     machine::{
         field::FieldSpecificPoseidon2Config,
+        folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
@@ -17,6 +19,7 @@ use crate::{
     primitives::consts::RISCV_NUM_PVS,
 };
 use alloc::sync::Arc;
+use p3_air::Air;
 use p3_field::PrimeField32;
 
 pub type RiscvChips<SC> = RiscvChipType<Val<SC>>;
@@ -41,6 +44,8 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
+    Poseidon2Chip<Val<SC>>:
+        Air<SymbolicConstraintFolder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
 {
     pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
         let witness = ProvingWitness::setup_for_riscv(
@@ -66,6 +71,7 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
+    Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
 {
     type Input<'a> = (SC, &'a [u8]);
     type Opts = EmulatorOpts;
@@ -93,6 +99,9 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
+    Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     type Witness = EmulatorStdin<Program, Vec<u8>>;
     type Chips = RiscvChips<SC>;

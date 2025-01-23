@@ -28,7 +28,7 @@ use core::borrow::BorrowMut;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::BaseAir;
-use p3_field::{Field, PrimeField};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 
 impl<F: Field> BaseAir<F> for DivRemChip<F> {
@@ -37,7 +37,7 @@ impl<F: Field> BaseAir<F> for DivRemChip<F> {
     }
 }
 
-impl<F: PrimeField> ChipBehavior<F> for DivRemChip<F> {
+impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

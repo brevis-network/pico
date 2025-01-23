@@ -1,6 +1,6 @@
 use p3_air::{Air, BaseAir};
 use p3_baby_bear::BabyBear;
-use p3_field::{Field, PrimeField};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_vm::{
     chips::chips::toys::toy::ToyChip,
@@ -33,7 +33,7 @@ pub enum ToyChipType<F: Field> {
 // NOTE: These trait implementations are used to save this `ToyChipType` to `MetaChip`.
 // Since MetaChip has a generic parameter which is one type (cannot be two chip types).
 // This code is annoyed, we could refactor to use macro later (but less readable).
-impl<F: PrimeField> ChipBehavior<F> for ToyChipType<F> {
+impl<F: PrimeField32> ChipBehavior<F> for ToyChipType<F> {
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -95,7 +95,7 @@ where
     }
 }
 
-impl<F: PrimeField> ToyChipType<F> {
+impl<F: PrimeField32> ToyChipType<F> {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         vec![MetaChip::new(Self::Toy(ToyChip::default()))]
     }

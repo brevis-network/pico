@@ -23,7 +23,7 @@ use crate::{
 };
 use itertools::Itertools;
 use p3_air::BaseAir;
-use p3_field::{Field, PrimeField};
+use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
@@ -33,7 +33,7 @@ impl<F: Field> BaseAir<F> for MulChip<F> {
     }
 }
 
-impl<F: PrimeField> ChipBehavior<F> for MulChip<F> {
+impl<F: PrimeField32> ChipBehavior<F> for MulChip<F> {
     type Record = EmulationRecord;
     type Program = Program;
 

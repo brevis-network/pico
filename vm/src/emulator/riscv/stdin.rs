@@ -1,5 +1,8 @@
 use crate::{
-    chips::chips::poseidon2_p3::Poseidon2Chip,
+    chips::chips::{
+        poseidon2_p3::Poseidon2Chip as RecursionPoseidon2Chip,
+        riscv_poseidon2::Poseidon2Chip as RiscvPoseidon2Chip,
+    },
     compiler::recursion_v2::{
         circuit::{
             challenger::DuplexChallengerVariable,
@@ -172,8 +175,9 @@ where
         Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
         PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
         Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
-        Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
+        RecursionPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
             + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+        RiscvPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     {
         // initialize for base_ and reconstruct_challenger
         let [mut base_challenger, mut reconstruct_challenger] =
@@ -354,7 +358,7 @@ where
 
         BaseMachine<SC, C>: Send + Sync,
 
-        Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
+        RecursionPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
             + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
     {
         assert_eq!(vks.len(), proofs.len());

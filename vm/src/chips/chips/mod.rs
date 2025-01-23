@@ -1,7 +1,9 @@
 pub mod alu;
 pub mod byte;
 pub mod riscv_cpu;
+pub mod riscv_global;
 pub mod riscv_memory;
+pub mod riscv_poseidon2;
 pub mod riscv_program;
 pub mod toys;
 
