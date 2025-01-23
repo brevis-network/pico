@@ -249,6 +249,14 @@ impl RiscvEmulator {
             self.bump_record(&mut batch_records);
         }
 
+        if done {
+            self.postprocess();
+            // Push the remaining emulation record with memory initialize & finalize events.
+            self.bump_record(&mut batch_records);
+        } else {
+            self.state.current_batch += 1;
+        }
+
         info!(
             "batch record len before defer and split: {}",
             batch_records.len()
@@ -263,6 +271,11 @@ impl RiscvEmulator {
         let deferred = deferred.split(true, self.opts.split_opts);
         info!("split-chunks len: {:?}", deferred.len());
 
+        // remove empty memory init/finalize chunk
+        if done {
+            batch_records.pop();
+        }
+
         batch_records.reserve(deferred.len() + done as usize);
         batch_records.extend(deferred);
         info!(
@@ -272,16 +285,8 @@ impl RiscvEmulator {
 
         debug!("batch record capaciy: {}", batch_records.capacity());
 
-        if done {
-            self.postprocess();
-            // Push the remaining emulation record with memory initialize & finalize events.
-            self.bump_record(&mut batch_records);
-        } else {
-            self.state.current_batch += 1;
-        }
-
         info!(
-            "batch record len after postprocess: {}",
+            "batch record len after postprocess and split: {}",
             batch_records.len()
         );
 

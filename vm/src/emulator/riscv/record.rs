@@ -20,7 +20,7 @@ use crate::{
     instances::compiler_v2::shapes::riscv_shape::RiscvPadShape,
 };
 use hashbrown::HashMap;
-use itertools::Itertools;
+use itertools::{EitherOrBoth, Itertools};
 use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{mem::take, sync::Arc};
@@ -179,10 +179,8 @@ impl EmulationRecord {
         let mut emulation_record = EmulationRecord::new(self.program.clone());
         emulation_record.precompile_events = take(&mut self.precompile_events);
         // emulation_record.uint256_mul_events = take(&mut self.uint256_mul_events);
-        // emulation_record.memory_initialize_events =
-        //     std::mem::take(&mut self.memory_initialize_events);
-        // emulation_record.memory_finalize_events =
-        //     std::mem::take(&mut self.memory_finalize_events);
+        emulation_record.memory_initialize_events = take(&mut self.memory_initialize_events);
+        emulation_record.memory_finalize_events = take(&mut self.memory_finalize_events);
         emulation_record
     }
 
@@ -227,7 +225,51 @@ impl EmulationRecord {
             chunk_records.append(&mut records);
         }
 
-        // TODO: should we split last memory initialize / finalize chunk?
+        if last {
+            println!("I am in memory split last");
+            self.memory_initialize_events
+                .sort_by_key(|event| event.addr);
+            self.memory_finalize_events.sort_by_key(|event| event.addr);
+
+            let mut init_addr_bits = [0; 32];
+            let mut finalize_addr_bits = [0; 32];
+            for mem_chunks in self
+                .memory_initialize_events
+                .chunks(opts.memory)
+                .zip_longest(self.memory_finalize_events.chunks(opts.memory))
+            {
+                let (mem_init_chunk, mem_finalize_chunk) = match mem_chunks {
+                    EitherOrBoth::Both(mem_init_chunk, mem_finalize_chunk) => {
+                        (mem_init_chunk, mem_finalize_chunk)
+                    }
+                    EitherOrBoth::Left(mem_init_chunk) => (mem_init_chunk, [].as_slice()),
+                    EitherOrBoth::Right(mem_finalize_chunk) => ([].as_slice(), mem_finalize_chunk),
+                };
+                let mut memory_chunk = EmulationRecord::new(self.program.clone());
+                memory_chunk
+                    .memory_initialize_events
+                    .extend_from_slice(mem_init_chunk);
+                memory_chunk.public_values.previous_initialize_addr_bits = init_addr_bits;
+                if let Some(last_event) = mem_init_chunk.last() {
+                    let last_init_addr_bits = core::array::from_fn(|i| (last_event.addr >> i) & 1);
+                    init_addr_bits = last_init_addr_bits;
+                }
+                memory_chunk.public_values.last_initialize_addr_bits = init_addr_bits;
+
+                memory_chunk
+                    .memory_finalize_events
+                    .extend_from_slice(mem_finalize_chunk);
+                memory_chunk.public_values.previous_finalize_addr_bits = finalize_addr_bits;
+                if let Some(last_event) = mem_finalize_chunk.last() {
+                    let last_finalize_addr_bits =
+                        core::array::from_fn(|i| (last_event.addr >> i) & 1);
+                    finalize_addr_bits = last_finalize_addr_bits;
+                }
+                memory_chunk.public_values.last_finalize_addr_bits = finalize_addr_bits;
+
+                chunk_records.push(memory_chunk);
+            }
+        }
 
         chunk_records
     }
