@@ -14,6 +14,7 @@ pub mod is_zero;
 pub mod is_zero_word;
 pub mod lt;
 pub mod not;
+pub mod poseidon2;
 pub mod uint256;
 pub mod utils;
 pub mod xor;

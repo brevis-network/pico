@@ -75,13 +75,9 @@ type Fp2MulBls381<F> = Fp2MulChip<F, Bls381BaseField>;
 
 type WsBn254Add<F> = WeierstrassAddAssignChip<F, Bn254>;
 type WsBls381Add<F> = WeierstrassAddAssignChip<F, Bls12381>;
-
 type WsSecp256k1Add<F> = WeierstrassAddAssignChip<F, Secp256k1>;
-
 type WsDecompressBls381<F> = WeierstrassDecompressChip<F, Bls12381>;
-
 type WsDecompressSecp256k1<F> = WeierstrassDecompressChip<F, Secp256k1>;
-
 type WsDoubleBn254<F> = WeierstrassDoubleAssignChip<F, Bn254>;
 type WsDoubleBls381<F> = WeierstrassDoubleAssignChip<F, Bls12381>;
 type WsDoubleSecp256k1<F> = WeierstrassDoubleAssignChip<F, Secp256k1>;
@@ -204,6 +200,10 @@ where
                 record.global_lookup_events.len(),
             ),
             (
+                Self::Poseidon2(Default::default()).name(),
+                record.poseidon2_events.len(),
+            ),
+            (
                 Self::SyscallRiscv(SyscallChip::riscv()).name(),
                 record.syscall_events.len(),
             ),
@@ -257,6 +257,7 @@ where
             MetaChip::new(Self::MemoryLocal(Default::default())),
             MetaChip::new(Self::MemoryReadWrite(Default::default())),
             MetaChip::new(Self::Global(Default::default())),
+            MetaChip::new(Self::Poseidon2(Default::default())),
             MetaChip::new(Self::SyscallRiscv(SyscallChip::riscv())),
         ]
     }

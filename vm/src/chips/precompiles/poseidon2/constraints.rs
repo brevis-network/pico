@@ -9,9 +9,9 @@ use super::{
     Poseidon2PermuteChip,
 };
 use crate::{
-    chips::chips::{
-        poseidon2::utils::{external_linear_layer, internal_linear_layer},
-        riscv_memory::read_write::columns::MemoryCols,
+    chips::{
+        chips::riscv_memory::read_write::columns::MemoryCols,
+        gadgets::poseidon2::utils::{external_linear_layer, internal_linear_layer},
     },
     configs::config::Poseidon2Config,
     emulator::riscv::syscalls::SyscallCode,

@@ -4,11 +4,8 @@ use super::{
 };
 use crate::{
     chips::{
-        chips::{
-            byte::event::ByteRecordBehavior,
-            events::ByteLookupEvent,
-            poseidon2::utils::{external_linear_layer, internal_linear_layer},
-        },
+        chips::{byte::event::ByteRecordBehavior, events::ByteLookupEvent},
+        gadgets::poseidon2::utils::{external_linear_layer, internal_linear_layer},
         utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,

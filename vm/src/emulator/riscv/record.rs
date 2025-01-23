@@ -32,6 +32,7 @@ use std::{mem::take, sync::Arc};
 pub struct EmulationRecord {
     /// The program.
     pub program: Arc<Program>,
+
     pub unconstrained: bool,
 
     pub cpu_events: Vec<CpuEvent>,
@@ -283,6 +284,10 @@ impl RecordBehavior for EmulationRecord {
     fn stats(&self) -> HashMap<String, usize> {
         let mut stats = HashMap::new();
         stats.insert("Cpu Events".to_string(), self.cpu_events.len());
+
+        /*
+        Arithmetic-related
+         */
         stats.insert("Add Events".to_string(), self.add_events.len());
         stats.insert("Mul Events".to_string(), self.mul_events.len());
         stats.insert("Sub Events".to_string(), self.sub_events.len());
@@ -298,6 +303,14 @@ impl RecordBehavior for EmulationRecord {
         stats.insert("Divrem Events".to_string(), self.divrem_events.len());
         stats.insert("Lt Events".to_string(), self.lt_events.len());
         stats.insert(
+            "RISCV Poseidon2 Events".to_string(),
+            self.poseidon2_events.len(),
+        );
+
+        /*
+        Memory-related
+         */
+        stats.insert(
             "Memory Initialize Events".to_string(),
             self.memory_initialize_events.len(),
         );
@@ -306,35 +319,30 @@ impl RecordBehavior for EmulationRecord {
             self.memory_finalize_events.len(),
         );
         stats.insert(
-            "local_memory_access_events".to_string(),
+            "Memory Read-Write Events".to_string(),
+            self.cpu_events
+                .iter()
+                .filter(|e| e.instruction.is_memory_instruction())
+                .collect_vec()
+                .len(),
+        );
+        stats.insert(
+            "Local Memory Access Events".to_string(),
             self.cpu_local_memory_access.len(),
         );
-        if !self.cpu_events.is_empty() {
-            stats.insert("byte_lookups".to_string(), self.byte_lookups.len());
-            stats.insert(
-                "memory_read_write Events".to_string(),
-                self.cpu_events
-                    .iter()
-                    .filter(|e| e.instruction.is_memory_instruction())
-                    .collect_vec()
-                    .len(),
-            );
-        }
-        // stats.insert("Range lookups".to_string(), self.range_lookups.len());
 
+        /*
+        Lookup-related
+         */
+        stats.insert("Global Events".to_string(), self.global_lookup_events.len());
+        stats.insert("Byte Lookups".to_string(), self.byte_lookups.len());
+
+        /*
+        Syscall-related
+         */
         for (syscall_code, events) in self.precompile_events.iter() {
             stats.insert(format!("syscall {syscall_code:?}"), events.len());
         }
-
-        // stats.insert(
-        //     "Keccak Permute lookups".to_string(),
-        //     self.keccak_permute_events.len(),
-        // );
-        // stats.insert("ED Add lookups".to_string(), self.ed_add_events.len());
-        // stats.insert(
-        //     "ED Decompress lookups".to_string(),
-        //     self.ed_decompress_events.len(),
-        // );
 
         // Filter out the empty events.
         stats.retain(|_, v| *v != 0);
@@ -358,11 +366,6 @@ impl RecordBehavior for EmulationRecord {
             .append(&mut extra.memory_finalize_events);
         self.cpu_local_memory_access
             .append(&mut extra.cpu_local_memory_access);
-        // self.keccak_permute_events
-        //     .append(&mut extra.keccak_permute_events);
-        // self.ed_add_events.append(&mut extra.ed_add_events);
-        // self.ed_decompress_events
-        //     .append(&mut extra.ed_decompress_events);
         self.syscall_events.append(&mut extra.syscall_events);
         self.precompile_events.append(&mut extra.precompile_events);
         if self.byte_lookups.is_empty() {

@@ -2,14 +2,12 @@
 extern crate alloc;
 
 use crate::{
-    chips::chips::poseidon2_p3::constants::RoundConstants,
+    chips::gadgets::poseidon2::constants::RoundConstants,
     machine::field::FieldSpecificPoseidon2Config,
 };
 use p3_field::Field;
 use std::marker::PhantomData;
 
-pub mod columns;
-pub mod constants;
 pub mod constraints;
 pub mod traces;
 

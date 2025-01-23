@@ -1,13 +1,13 @@
 //! And AIR for the Poseidon2 permutation.
 extern crate alloc;
 
-use crate::machine::field::FieldSpecificPoseidon2Config;
-use constants::RoundConstants;
+use crate::{
+    chips::gadgets::poseidon2::constants::RoundConstants,
+    machine::field::FieldSpecificPoseidon2Config,
+};
 use p3_field::Field;
 use std::marker::PhantomData;
 
-pub mod columns;
-pub mod constants;
 pub mod constraints;
 pub mod event;
 pub mod traces;
@@ -22,8 +22,8 @@ pub struct Poseidon2ChipP3<F: Field, LinearLayers> {
     pub _phantom: PhantomData<fn(LinearLayers) -> LinearLayers>,
 }
 
-impl<F: Field, LinearLayers> Poseidon2ChipP3<F, LinearLayers> {
-    pub fn default() -> Self {
+impl<F: Field, LinearLayers> Default for Poseidon2ChipP3<F, LinearLayers> {
+    fn default() -> Self {
         let constants = RoundConstants::new();
         Self {
             constants,
