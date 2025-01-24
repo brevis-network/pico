@@ -250,8 +250,9 @@ macro_rules! run {
             //     stats.get("batch_fri_events"),
             //     expected_stats.get("batch_fri_events")
             // );
-            // BabyBear is 619, and KoalaBear is 602.
-            assert!([602, 619].contains(stats.get("poseidon2_events").unwrap()));
+            // BabyBear is 733, and KoalaBear is 666.
+            // println!("poseidon2_events: {:?}", stats.get("poseidon2_events"));
+            assert!([733, 666].contains(stats.get("poseidon2_events").unwrap()));
             // assert_eq!(
             //     stats.get("exp_reverse_bits_events"),
             //     expected_stats.get("exp_reverse_bits_events")

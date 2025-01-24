@@ -61,12 +61,13 @@ impl StarkGenericConfig for M31Poseidon2 {
         Self { perm, val_mmcs }
     }
 
+    /// Targeting 100 bits of security.
     fn pcs(&self) -> Self::Pcs {
         SC_Pcs {
             mmcs: self.val_mmcs.clone(),
             fri_config: FriConfig {
                 log_blowup: 1,
-                num_queries: 100,
+                num_queries: 84,
                 proof_of_work_bits: 16,
                 mmcs: SC_ChallengeMmcs::new(self.val_mmcs.clone()),
             },

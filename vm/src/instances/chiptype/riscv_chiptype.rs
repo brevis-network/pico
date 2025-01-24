@@ -62,7 +62,7 @@ use crate::{
     },
     primitives::consts::{
         ADD_SUB_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
-        MEMORY_RW_DATAPAR, MUL_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
+        MEMORY_RW_DATAPAR, MUL_DATAPAR, RISCV_POSEIDON2_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
     },
 };
 
@@ -201,7 +201,10 @@ where
             ),
             (
                 Self::Poseidon2(Default::default()).name(),
-                record.poseidon2_events.len(),
+                record
+                    .poseidon2_events
+                    .len()
+                    .div_ceil(RISCV_POSEIDON2_DATAPAR),
             ),
             (
                 Self::SyscallRiscv(SyscallChip::riscv()).name(),

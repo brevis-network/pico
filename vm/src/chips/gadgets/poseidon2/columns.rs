@@ -2,13 +2,12 @@ use crate::{
     chips::chips::recursion_memory_v2::MemoryAccessCols,
     compiler::recursion_v2::types::Address,
     primitives::{
-        consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR},
+        consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR, RISCV_POSEIDON2_DATAPAR},
         FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS,
     },
 };
 use core::mem::size_of;
 use pico_derive::AlignedBorrow;
-
 /*
 Preprocessed columns
 */
@@ -36,9 +35,15 @@ pub struct Poseidon2PreprocessedValueCols<T: Copy> {
 Main columns
 */
 
-pub const NUM_POSEIDON2_COLS: usize = NUM_POSEIDON2_VALUE_COLS * POSEIDON2_DATAPAR;
+pub const RISCV_NUM_POSEIDON2_COLS: usize = NUM_POSEIDON2_VALUE_COLS * RISCV_POSEIDON2_DATAPAR;
 
-pub const NUM_POSEIDON2_VALUE_COLS: usize = size_of::<Poseidon2ValueCols<u8>>();
+#[derive(AlignedBorrow, Clone, Copy, Debug)]
+#[repr(C)]
+pub struct RiscvPoseidon2Cols<T> {
+    pub(crate) values: [Poseidon2ValueCols<T>; RISCV_POSEIDON2_DATAPAR],
+}
+
+pub const NUM_POSEIDON2_COLS: usize = NUM_POSEIDON2_VALUE_COLS * POSEIDON2_DATAPAR;
 
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
@@ -46,13 +51,8 @@ pub struct Poseidon2Cols<T> {
     pub(crate) values: [Poseidon2ValueCols<T>; POSEIDON2_DATAPAR],
 }
 
-/// Columns for a Poseidon2 AIR which computes one permutation per row.
-///
-/// The columns of the STARK are divided into the three different round sections of the Poseidon2
-/// Permutation: beginning full rounds, partial rounds, and ending full rounds. For the full
-/// rounds we store an [`SBox`] columnset for each state variable, and for the partial rounds we
-/// store only for the first state variable. Because the matrix multiplications are linear
-/// functions, we need only keep auxiliary columns for the S-box computations.
+pub const NUM_POSEIDON2_VALUE_COLS: usize = size_of::<Poseidon2ValueCols<u8>>();
+
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Poseidon2ValueCols<T> {

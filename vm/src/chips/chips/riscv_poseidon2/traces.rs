@@ -2,7 +2,7 @@ use super::Poseidon2ChipP3;
 use crate::{
     chips::{
         gadgets::poseidon2::{
-            columns::{Poseidon2ValueCols, NUM_POSEIDON2_COLS, NUM_POSEIDON2_VALUE_COLS},
+            columns::{Poseidon2ValueCols, NUM_POSEIDON2_VALUE_COLS, RISCV_NUM_POSEIDON2_COLS},
             traces::populate_perm,
         },
         utils::next_power_of_two,
@@ -34,13 +34,14 @@ where
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         let events = &input.poseidon2_events;
-        let nb_rows = events.len().div_ceil(RISCV_POSEIDON2_DATAPAR);
-        let log_rows = input.shape_chip_size(&self.name());
-        let padded_nb_rows = next_power_of_two(nb_rows, log_rows);
+        let nrows = events.len().div_ceil(RISCV_POSEIDON2_DATAPAR);
+        let log_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = next_power_of_two(nrows, log_nrows);
 
-        let mut values = vec![F::ZERO; padded_nb_rows * NUM_POSEIDON2_COLS];
+        let mut values = vec![F::ZERO; padded_nrows * RISCV_NUM_POSEIDON2_COLS];
 
         let populate_len = events.len() * NUM_POSEIDON2_VALUE_COLS;
+
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
         join(
             || {
@@ -75,7 +76,7 @@ where
             },
         );
 
-        RowMajorMatrix::new(values, NUM_POSEIDON2_COLS)
+        RowMajorMatrix::new(values, RISCV_NUM_POSEIDON2_COLS)
     }
 
     fn is_active(&self, _record: &Self::Record) -> bool {

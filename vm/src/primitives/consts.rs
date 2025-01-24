@@ -55,24 +55,17 @@ For chunks
 pub const MAX_LOG_CHUNK_SIZE: usize = 22;
 
 pub const DEFAULT_CHUNK_SIZE: u32 = 1 << MAX_LOG_CHUNK_SIZE;
-
 pub const DEFAULT_CHUNK_BATCH_SIZE: u32 = 16;
-/// The threshold for splitting deferred events.
 pub const DEFERRED_SPLIT_THRESHOLD: usize = 1 << 19;
 
 pub const TEST_CHUNK_SIZE: u32 = 1 << 16;
-
 pub const TEST_CHUNK_BATCH_SIZE: u32 = 2;
-
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 
 // for benchmark
-pub const BENCH_MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 18;
-
-pub const BENCH_MAX_CHUNK_SIZE: u32 = 1 << 21;
-
+pub const BENCH_MAX_CHUNK_SIZE: u32 = 1 << 22;
+pub const BENCH_MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 20;
 pub const BENCH_MAX_CHUNK_BATCH_SIZE: u32 = 8;
-
 pub const BENCH_RECURSION_MAX_CHUNK_SIZE: u32 = 1 << 22;
 
 /*
@@ -245,14 +238,14 @@ pub const SR_DATAPAR: usize = 2; // optimized
 pub const BITWISE_DATAPAR: usize = 2; // optimized
 pub const MEMORY_RW_DATAPAR: usize = 1; // optimized
 pub const LOCAL_MEMORY_DATAPAR: usize = 4; // fixed
-pub const RISCV_POSEIDON2_DATAPAR: usize = 1; // tbo
+pub const RISCV_POSEIDON2_DATAPAR: usize = 4; // optimized
 
 pub const BASE_ALU_DATAPAR: usize = 2; // optimized
 pub const EXT_ALU_DATAPAR: usize = 4; // optimized
 pub const VAR_MEM_DATAPAR: usize = 4; // optimized
 pub const CONST_MEM_DATAPAR: usize = 1; // optimized
 pub const SELECT_DATAPAR: usize = 2; // optimized
-pub const POSEIDON2_DATAPAR: usize = 1; // tbo
+pub const POSEIDON2_DATAPAR: usize = 1; // optimized
 
 /// The width of the Poseidon2 permutation.
 pub const NUM_BITS: usize = 31;

@@ -1,7 +1,7 @@
 use super::Poseidon2ChipP3;
 use crate::{
     chips::gadgets::poseidon2::{
-        columns::{Poseidon2Cols, NUM_POSEIDON2_COLS},
+        columns::{RiscvPoseidon2Cols, RISCV_NUM_POSEIDON2_COLS},
         constraints::eval_poseidon2,
     },
     machine::{
@@ -18,7 +18,7 @@ use std::borrow::Borrow;
 
 impl<F: Field, LinearLayers> BaseAir<F> for Poseidon2ChipP3<F, LinearLayers> {
     fn width(&self) -> usize {
-        NUM_POSEIDON2_COLS
+        RISCV_NUM_POSEIDON2_COLS
     }
 }
 
@@ -33,7 +33,7 @@ where
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
         let local = main.row_slice(0);
-        let local: &Poseidon2Cols<CB::Var> = (*local).borrow();
+        let local: &RiscvPoseidon2Cols<CB::Var> = (*local).borrow();
 
         for local in local.values.iter() {
             let outputs = eval_poseidon2::<F, CB, LinearLayers>(builder, local, &self.constants);

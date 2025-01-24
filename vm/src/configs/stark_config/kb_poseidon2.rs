@@ -61,11 +61,12 @@ impl StarkGenericConfig for KoalaBearPoseidon2 {
     type Challenger = SC_Challenger;
     type Pcs = SC_Pcs;
 
+    /// Targeting 100 bits of security.
     fn new() -> Self {
         let perm = pico_poseidon2kb_init();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 100,
+            Err(_) => 84,
         };
 
         let log_blowup = 1;
@@ -111,11 +112,12 @@ impl StarkGenericConfig for KoalaBearPoseidon2 {
 }
 
 impl KoalaBearPoseidon2 {
+    /// Targeting 100 bits of security.
     pub fn compress() -> Self {
         let perm = pico_poseidon2kb_init();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 33,
+            Err(_) => 28,
         };
 
         let log_blowup = 3;

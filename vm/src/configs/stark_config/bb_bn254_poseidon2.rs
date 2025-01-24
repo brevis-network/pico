@@ -91,12 +91,13 @@ impl StarkGenericConfig for BabyBearBn254Poseidon2 {
     type Challenger = SC_Challenger;
     type Pcs = SC_Pcs;
 
+    /// Targeting 100 bits of security.
     fn new() -> Self {
         let perm = pico_poseidon2bn254_init();
 
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 25,
+            Err(_) => 21,
         };
 
         let simple_fri_config = SimpleFriConfig {

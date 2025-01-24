@@ -86,7 +86,7 @@ impl StarkGenericConfig for KoalaBearBn254Poseidon2 {
 
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 25,
+            Err(_) => 21,
         };
 
         let simple_fri_config = SimpleFriConfig {
