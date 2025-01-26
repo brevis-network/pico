@@ -1,17 +1,21 @@
-use crate::primitives::{
-    consts::PERMUTATION_WIDTH, FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, RC_16_30_U32,
-};
+use crate::primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32};
 use p3_field::Field;
 
 /// Round constants for Poseidon2, in a format that's convenient for the AIR.
 #[derive(Debug, Clone)]
-pub struct RoundConstants<F: Field> {
+pub struct RoundConstants<
+    F: Field,
+    const FIELD_HALF_FULL_ROUNDS: usize,
+    const FIELD_PARTIAL_ROUNDS: usize,
+> {
     pub(crate) beginning_full_round_constants: [[F; PERMUTATION_WIDTH]; FIELD_HALF_FULL_ROUNDS],
     pub(crate) partial_round_constants: [F; FIELD_PARTIAL_ROUNDS],
     pub(crate) ending_full_round_constants: [[F; PERMUTATION_WIDTH]; FIELD_HALF_FULL_ROUNDS],
 }
 
-impl<F: Field> RoundConstants<F> {
+impl<F: Field, const FIELD_HALF_FULL_ROUNDS: usize, const FIELD_PARTIAL_ROUNDS: usize>
+    RoundConstants<F, FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS>
+{
     pub fn new() -> Self {
         let mut beginning_full_round_constants =
             [[F::ZERO; PERMUTATION_WIDTH]; FIELD_HALF_FULL_ROUNDS];

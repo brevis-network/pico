@@ -1,6 +1,6 @@
 use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
-    chips::chips::riscv_poseidon2::Poseidon2Chip,
+    chips::chips::riscv_poseidon2::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
     compiler::recursion_v2::{
         circuit::{
             challenger::{CanObserveVariable, DuplexChallengerVariable},
@@ -52,7 +52,9 @@ where
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
-    Poseidon2Chip<F>:
+    BabyBearPoseidon2Chip<F>:
+        Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    KoalaBearPoseidon2Chip<F>:
         Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
@@ -85,7 +87,8 @@ where
         FriChallengerVariable = DuplexChallengerVariable<CC>,
         DigestVariable = [Felt<F>; DIGEST_SIZE],
     >,
-    Poseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    BabyBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    KoalaBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,

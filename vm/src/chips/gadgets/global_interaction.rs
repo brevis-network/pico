@@ -5,16 +5,14 @@ use crate::{
         builder::{ChipBuilder, ChipLookupBuilder, SepticExtensionBuilder},
         field::FieldBehavior,
         lookup::{LookupScope, LookupType, SymbolicLookup},
-        septic::{
-            SepticBlock, SepticCurve, SepticExtension, CURVE_WITNESS_DUMMY_POINT_X,
-            CURVE_WITNESS_DUMMY_POINT_Y, TOP_BITS,
-        },
+        septic::{FieldSepticCurve, SepticBlock, SepticCurve, SepticExtension},
     },
     primitives::consts::PERMUTATION_WIDTH,
 };
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use pico_derive::AlignedBorrow;
+use std::any::Any;
 
 /// A set of columns needed to compute the global interaction elliptic curve digest.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
@@ -66,11 +64,11 @@ impl<F: PrimeField32 + FieldBehavior> GlobalInteractionOperation<F> {
             let mut top_field_bits = F::ZERO;
             for i in 0..30 {
                 self.y6_bit_decomp[i] = F::from_canonical_u32((range_check_value >> i) & 1);
-                if i >= 30 - TOP_BITS {
+                if i >= 30 - F::TOP_BITS {
                     top_field_bits += self.y6_bit_decomp[i];
                 }
             }
-            top_field_bits -= F::from_canonical_usize(TOP_BITS);
+            top_field_bits -= F::from_canonical_usize(F::TOP_BITS);
             self.range_check_witness = top_field_bits.inverse();
 
             assert_eq!(self.x_coordinate.0[0], m_hash[0]);
@@ -92,10 +90,10 @@ impl<F: PrimeField32 + FieldBehavior> GlobalInteractionOperation<F> {
             self.offset_bits[i] = F::ZERO;
         }
         self.x_coordinate = SepticBlock::<F>::from_base_fn(|i| {
-            F::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
+            F::from_canonical_u32(F::CURVE_WITNESS_DUMMY_POINT_X[i])
         });
         self.y_coordinate = SepticBlock::<F>::from_base_fn(|i| {
-            F::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
+            F::from_canonical_u32(F::CURVE_WITNESS_DUMMY_POINT_Y[i])
         });
         for i in 0..30 {
             self.y6_bit_decomp[i] = F::ZERO;
@@ -117,7 +115,9 @@ impl<F: Field> GlobalInteractionOperation<F> {
         is_send: CB::Expr,
         is_real: CB::Var,
         kind: CB::Var,
-    ) {
+    ) where
+        CB::Expr: Any,
+    {
         // Constrain that the `is_real` is boolean.
         builder.assert_bool(is_real);
 
@@ -202,13 +202,14 @@ impl<F: Field> GlobalInteractionOperation<F> {
         for i in 0..30 {
             builder.assert_bool(cols.y6_bit_decomp[i]);
             y6_value = y6_value.clone() + cols.y6_bit_decomp[i] * CB::F::from_canonical_u32(1 << i);
-            if i >= 30 - TOP_BITS {
+            if i >= 30 - F::TOP_BITS {
                 top_field_bits = top_field_bits.clone() + cols.y6_bit_decomp[i];
             }
         }
         // If `is_real` is true, check that `top_field_bits - TOP_BITS` is non-zero, by checking `range_check_witness` is an inverse of it.
         builder.when(is_real).assert_eq(
-            cols.range_check_witness * (top_field_bits - CB::Expr::from_canonical_usize(TOP_BITS)),
+            cols.range_check_witness
+                * (top_field_bits - CB::Expr::from_canonical_usize(F::TOP_BITS)),
             CB::Expr::ONE,
         );
 
@@ -220,7 +221,7 @@ impl<F: Field> GlobalInteractionOperation<F> {
             .assert_eq(y.0[6].clone(), CB::Expr::ONE + y6_value.clone());
         builder.when(is_send).assert_eq(
             y.0[6].clone(),
-            CB::Expr::from_canonical_u32((1 << 30) - (1 << (30 - TOP_BITS)) + 1) + y6_value,
+            CB::Expr::from_canonical_u32((1 << 30) - (1 << (30 - F::TOP_BITS)) + 1) + y6_value,
         );
     }
 }

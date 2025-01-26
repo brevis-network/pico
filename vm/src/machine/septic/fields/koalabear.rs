@@ -1,16 +1,3 @@
-//! A septic extension with an irreducible polynomial
-//! f = z^7 + z^6 + 2130706421*z^5 + 2130706426*z^4 + 28*z^3 + 14*z^2 + 2130706424*z + 1
-
-use super::super::SepticExtension;
-use p3_field::FieldAlgebra;
-
-impl<F: FieldAlgebra> SepticExtension<F> {
-    pub const EXT_GENERATOR: Self =
-        SepticExtension([F::FOUR, F::ONE, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
-}
-
-pub const F_ORDER: u32 = 2130706433_u32;
-
 pub const TOP_BITS: usize = 7;
 
 // z^7  + z^6 + 2130706421*z^5 + 2130706426*z^4 + 28*z^3 + 14*z^2 + 2130706424*z + 1 = 0
@@ -53,32 +40,26 @@ pub const Z_POW_P2: [[u32; 7]; 7] = [
     [2130705595, 3603, 7737, 2130704788, 2130702725, 269, 315],
 ];
 
-/// The x-coordinate for a curve point used as a witness for padding interactions.
 pub const CURVE_WITNESS_DUMMY_POINT_X: [u32; 7] = [
     580628972, 570994498, 1048581654, 197862729, 1266783553, 1996501878, 1732724354,
 ];
 
-/// The y-coordinate for a curve point used as a witness for padding interactions.
 pub const CURVE_WITNESS_DUMMY_POINT_Y: [u32; 7] = [
     1484927732, 389107134, 19585171, 1663839292, 810692232, 1747846785, 312748698,
 ];
 
-/// The x-coordinate for a curve point used as a starting cumulative sum for global permutation trace generation.
 pub const CURVE_CUMULATIVE_SUM_START_X: [u32; 7] = [
     1999306532, 467785808, 1385486227, 641872107, 871901548, 1171633279, 1975150563,
 ];
 
-/// The y-coordinate for a curve point used as a starting cumulative sum for global permutation trace generation.
 pub const CURVE_CUMULATIVE_SUM_START_Y: [u32; 7] = [
     1882251454, 1822622415, 820669592, 1001895671, 1625010158, 602262774, 462733968,
 ];
 
-/// The x-coordinate for a curve point used as a starting random point for digest accumulation.
 pub const DIGEST_SUM_START_X: [u32; 7] = [
     302351816, 1189065052, 1534134752, 1004694753, 1419555682, 1259920004, 742277792,
 ];
 
-/// The y-coordinate for a curve point used as a starting random point for digest accumulation.
 pub const DIGEST_SUM_START_Y: [u32; 7] = [
     337628382, 1503269464, 1028656526, 427999289, 1539447949, 1957709106, 246949828,
 ];

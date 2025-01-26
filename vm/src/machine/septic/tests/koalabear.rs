@@ -51,8 +51,7 @@ fn test_kb_curve_double() {
 #[test]
 fn test_kb_curve_left_x() {
     let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(
-        &[0x2013, 0x2015, 0x2016, 0x2023, 0x2024, 0x2016, 0x1111]
-            .map(KoalaBear::from_canonical_u32),
+        &[0x2013, 0x2015, 0x2016, 0x2023, 0x2024, 0x2016, 0x1].map(KoalaBear::from_canonical_u32),
     );
     test_curve_lift_x(x);
 }

@@ -15,10 +15,5 @@ macro_rules! define_chip_type {
         $crate::impl_base_air!($enum_name, $F, [ $( ($variant, $chip_type) ),+ ]);
 
         $crate::impl_air!($enum_name, $F, [ $( ($variant, $chip_type) ),+ ]);
-
-        $crate::impl_all_chips!($enum_name, $F, [ $( ($variant, $chip_type) ),+ ]);
-
     };
-
-
 }

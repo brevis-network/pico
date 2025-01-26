@@ -1,5 +1,5 @@
 use crate::{
-    chips::chips::riscv_poseidon2::Poseidon2Chip,
+    chips::chips::riscv_poseidon2::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
     compiler::{riscv::program::Program, word::Word},
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{
@@ -46,7 +46,8 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     SC::Domain: Send + Sync,
-    Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
+    BabyBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
+    KoalaBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
 {
     /// Prove with shape config
     #[instrument(name = "riscv_prove_with_shape", level = "debug", skip_all)]

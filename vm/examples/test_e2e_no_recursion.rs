@@ -1,7 +1,7 @@
 use p3_air::Air;
 use p3_field::PrimeField32;
 use pico_vm::{
-    chips::chips::riscv_poseidon2::Poseidon2Chip,
+    chips::chips::riscv_poseidon2::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
@@ -41,7 +41,10 @@ where
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     BaseProof<SC>: Send + Sync,
     SC::Domain: Send + Sync,
-    Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
+    BabyBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    KoalaBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {

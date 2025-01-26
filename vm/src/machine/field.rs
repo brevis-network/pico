@@ -1,13 +1,19 @@
 use crate::{
+    compiler::recursion_v2::{ir::SymbolicFelt, prelude::SymbolicExt},
     configs::config::Poseidon2Config,
     primitives::consts::{BabyBearConfig, KoalaBearConfig, Mersenne31Config, PERMUTATION_WIDTH},
 };
+use core::intrinsics::type_id;
 use p3_baby_bear::{BabyBear, GenericPoseidon2LinearLayersBabyBear};
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{
+    extension::{BinomialExtensionField, BinomiallyExtendable},
+    Field, FieldAlgebra,
+};
 use p3_koala_bear::{GenericPoseidon2LinearLayersKoalaBear, KoalaBear};
 use p3_mersenne_31::{GenericPoseidon2LinearLayersMersenne31, Mersenne31};
 use p3_poseidon2::GenericPoseidon2LinearLayers;
-use std::any::TypeId;
+use p3_uni_stark::SymbolicExpression;
+use std::any::{Any, TypeId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum FieldType {
@@ -50,4 +56,26 @@ impl FieldSpecificPoseidon2Config for KoalaBear {
 impl FieldSpecificPoseidon2Config for Mersenne31 {
     type Poseidon2Config = Mersenne31Config;
     type LinearLayers = GenericPoseidon2LinearLayersMersenne31;
+}
+
+// Check if the type T is a specified field F.
+// NOTE: This function could not work for trait types with `'static`.
+pub const fn same_field<T: Any, F: Field + BinomiallyExtendable<4>>() -> bool {
+    unsafe {
+        let typ = std::intrinsics::type_id::<T>();
+
+        let field = type_id::<F>();
+        let expr = type_id::<SymbolicExpression<F>>();
+        let packing = type_id::<<F as Field>::Packing>();
+        let binomial = type_id::<BinomialExtensionField<F, 4>>();
+        let ext = type_id::<SymbolicExt<F, BinomialExtensionField<F, 4>>>();
+        let felt = type_id::<SymbolicFelt<F>>();
+
+        typ == field
+            || typ == expr
+            || typ == packing
+            || typ == binomial
+            || typ == ext
+            || typ == felt
+    }
 }

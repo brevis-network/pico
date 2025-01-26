@@ -1,7 +1,13 @@
 #![deny(warnings)]
-#![allow(clippy::needless_range_loop)]
 #![allow(clippy::module_inception)]
+#![allow(clippy::needless_range_loop)]
+#![allow(incomplete_features)]
+#![allow(internal_features)]
+#![allow(unused_unsafe)]
+#![feature(const_type_id)]
+#![feature(core_intrinsics)]
 #![feature(generic_arg_infer)]
+#![feature(generic_const_items)]
 
 extern crate alloc;
 extern crate core;

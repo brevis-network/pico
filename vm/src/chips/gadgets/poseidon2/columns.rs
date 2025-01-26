@@ -1,10 +1,7 @@
 use crate::{
     chips::chips::recursion_memory_v2::MemoryAccessCols,
     compiler::recursion_v2::types::Address,
-    primitives::{
-        consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR, RISCV_POSEIDON2_DATAPAR},
-        FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS,
-    },
+    primitives::consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR, RISCV_POSEIDON2_DATAPAR},
 };
 use core::mem::size_of;
 use pico_derive::AlignedBorrow;
@@ -35,47 +32,78 @@ pub struct Poseidon2PreprocessedValueCols<T: Copy> {
 Main columns
 */
 
-pub const RISCV_NUM_POSEIDON2_COLS: usize = NUM_POSEIDON2_VALUE_COLS * RISCV_POSEIDON2_DATAPAR;
+pub const RISCV_NUM_POSEIDON2_COLS<
+    const FIELD_HALF_FULL_ROUNDS: usize,
+    const FIELD_PARTIAL_ROUNDS: usize,
+    const FIELD_SBOX_REGISTERS: usize,
+>: usize = NUM_POSEIDON2_VALUE_COLS::<FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS> * RISCV_POSEIDON2_DATAPAR;
 
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct RiscvPoseidon2Cols<T> {
-    pub(crate) values: [Poseidon2ValueCols<T>; RISCV_POSEIDON2_DATAPAR],
+pub struct RiscvPoseidon2Cols<
+    T,
+    const FIELD_HALF_FULL_ROUNDS: usize,
+    const FIELD_PARTIAL_ROUNDS: usize,
+    const FIELD_SBOX_REGISTERS: usize,
+> {
+    pub(crate) values:
+        [Poseidon2ValueCols<T, FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS>;
+            RISCV_POSEIDON2_DATAPAR],
 }
 
-pub const NUM_POSEIDON2_COLS: usize = NUM_POSEIDON2_VALUE_COLS * POSEIDON2_DATAPAR;
+pub const NUM_POSEIDON2_COLS<
+    const FIELD_HALF_FULL_ROUNDS: usize,
+    const FIELD_PARTIAL_ROUNDS: usize,
+    const FIELD_SBOX_REGISTERS: usize,
+>: usize = NUM_POSEIDON2_VALUE_COLS::<FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS> * POSEIDON2_DATAPAR;
 
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct Poseidon2Cols<T> {
-    pub(crate) values: [Poseidon2ValueCols<T>; POSEIDON2_DATAPAR],
+pub struct Poseidon2Cols<
+    T,
+    const FIELD_HALF_FULL_ROUNDS: usize,
+    const FIELD_PARTIAL_ROUNDS: usize,
+    const FIELD_SBOX_REGISTERS: usize,
+> {
+    pub(crate) values:
+        [Poseidon2ValueCols<T, FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS>;
+            POSEIDON2_DATAPAR],
 }
 
-pub const NUM_POSEIDON2_VALUE_COLS: usize = size_of::<Poseidon2ValueCols<u8>>();
+pub const NUM_POSEIDON2_VALUE_COLS<
+    const FIELD_HALF_FULL_ROUNDS: usize,
+    const FIELD_PARTIAL_ROUNDS: usize,
+    const FIELD_SBOX_REGISTERS: usize,
+>: usize = size_of::<Poseidon2ValueCols<u8, FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS>>();
 
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct Poseidon2ValueCols<T> {
+pub struct Poseidon2ValueCols<
+    T,
+    const FIELD_HALF_FULL_ROUNDS: usize,
+    const FIELD_PARTIAL_ROUNDS: usize,
+    const FIELD_SBOX_REGISTERS: usize,
+> {
     pub is_real: T,
 
     pub inputs: [T; PERMUTATION_WIDTH],
 
     /// Beginning Full Rounds
-    pub beginning_full_rounds: [FullRound<T>; FIELD_HALF_FULL_ROUNDS],
+    pub beginning_full_rounds: [FullRound<T, FIELD_SBOX_REGISTERS>; FIELD_HALF_FULL_ROUNDS],
 
     /// Partial Rounds
-    pub partial_rounds: [PartialRound<T>; FIELD_PARTIAL_ROUNDS],
+    pub partial_rounds: [PartialRound<T, FIELD_SBOX_REGISTERS>; FIELD_PARTIAL_ROUNDS],
 
     /// Ending Full Rounds
-    pub ending_full_rounds: [FullRound<T>; FIELD_HALF_FULL_ROUNDS],
+    pub ending_full_rounds: [FullRound<T, FIELD_SBOX_REGISTERS>; FIELD_HALF_FULL_ROUNDS],
 }
 
 /// Full round columns.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct FullRound<T> {
+pub struct FullRound<T, const FIELD_SBOX_REGISTERS: usize> {
     /// Possible intermediate results within each S-box.
-    pub sbox: [SBox<T>; PERMUTATION_WIDTH],
+    pub sbox: [SBox<T, FIELD_SBOX_REGISTERS>; PERMUTATION_WIDTH],
     /// The post-state, i.e. the entire layer after this full round.
     pub post: [T; PERMUTATION_WIDTH],
 }
@@ -83,9 +111,9 @@ pub struct FullRound<T> {
 /// Partial round columns.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct PartialRound<T> {
+pub struct PartialRound<T, const FIELD_SBOX_REGISTERS: usize> {
     /// Possible intermediate results within the S-box.
-    pub sbox: SBox<T>,
+    pub sbox: SBox<T, FIELD_SBOX_REGISTERS>,
     /// The output of the S-box.
     pub post_sbox: T,
 }
@@ -98,4 +126,4 @@ pub struct PartialRound<T> {
 /// `3`, `5`, `7`, and `11`. See `eval_sbox` for more information.
 #[derive(AlignedBorrow, Clone, Copy, Debug)]
 #[repr(C)]
-pub struct SBox<T>(pub [T; FIELD_SBOX_REGISTERS]);
+pub struct SBox<T, const FIELD_SBOX_REGISTERS: usize>(pub [T; FIELD_SBOX_REGISTERS]);

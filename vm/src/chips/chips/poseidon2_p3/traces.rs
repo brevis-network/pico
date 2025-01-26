@@ -25,10 +25,28 @@ use p3_poseidon2::GenericPoseidon2LinearLayers;
 use rayon::{iter::IndexedParallelIterator, join, slice::ParallelSliceMut};
 use std::borrow::BorrowMut;
 
-impl<F: PrimeField32, LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>>
-    ChipBehavior<F> for Poseidon2ChipP3<F, LinearLayers>
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+        const FIELD_HALF_FULL_ROUNDS: usize,
+        const FIELD_PARTIAL_ROUNDS: usize,
+        const FIELD_SBOX_REGISTERS: usize,
+    > ChipBehavior<F>
+    for Poseidon2ChipP3<
+        F,
+        LinearLayers,
+        FIELD_HALF_FULL_ROUNDS,
+        FIELD_PARTIAL_ROUNDS,
+        FIELD_SBOX_REGISTERS,
+    >
 where
-    Poseidon2ChipP3<F, LinearLayers>: BaseAir<F>,
+    Poseidon2ChipP3<
+        F,
+        LinearLayers,
+        FIELD_HALF_FULL_ROUNDS,
+        FIELD_PARTIAL_ROUNDS,
+        FIELD_SBOX_REGISTERS,
+    >: BaseAir<F>,
 {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;
@@ -85,18 +103,48 @@ where
             None => next_power_of_two(nrows, None),
         };
 
-        let mut values = vec![F::ZERO; padded_nrows * NUM_POSEIDON2_COLS];
+        let mut values = vec![
+            F::ZERO;
+            padded_nrows
+                * NUM_POSEIDON2_COLS::<
+                    FIELD_HALF_FULL_ROUNDS,
+                    FIELD_PARTIAL_ROUNDS,
+                    FIELD_SBOX_REGISTERS,
+                >
+        ];
 
-        let populate_len = events.len() * NUM_POSEIDON2_VALUE_COLS;
+        let populate_len = events.len()
+            * NUM_POSEIDON2_VALUE_COLS::<
+                FIELD_HALF_FULL_ROUNDS,
+                FIELD_PARTIAL_ROUNDS,
+                FIELD_SBOX_REGISTERS,
+            >;
         let (values_pop, values_dummy) = values.split_at_mut(populate_len);
         join(
             || {
                 values_pop
-                    .par_chunks_mut(NUM_POSEIDON2_VALUE_COLS)
+                    .par_chunks_mut(
+                        NUM_POSEIDON2_VALUE_COLS::<
+                            FIELD_HALF_FULL_ROUNDS,
+                            FIELD_PARTIAL_ROUNDS,
+                            FIELD_SBOX_REGISTERS,
+                        >,
+                    )
                     .zip_eq(events)
                     .for_each(|(row, event)| {
-                        let cols: &mut Poseidon2ValueCols<F> = row.borrow_mut();
-                        populate_perm::<F, LinearLayers>(
+                        let cols: &mut Poseidon2ValueCols<
+                            F,
+                            FIELD_HALF_FULL_ROUNDS,
+                            FIELD_PARTIAL_ROUNDS,
+                            FIELD_SBOX_REGISTERS,
+                        > = row.borrow_mut();
+                        populate_perm::<
+                            F,
+                            LinearLayers,
+                            FIELD_HALF_FULL_ROUNDS,
+                            FIELD_PARTIAL_ROUNDS,
+                            FIELD_SBOX_REGISTERS,
+                        >(
                             F::ONE,
                             cols,
                             event.input,
@@ -106,10 +154,28 @@ where
                     });
             },
             || {
-                let mut dummy = vec![F::ZERO; NUM_POSEIDON2_VALUE_COLS];
+                let mut dummy = vec![
+                    F::ZERO;
+                    NUM_POSEIDON2_VALUE_COLS::<
+                        FIELD_HALF_FULL_ROUNDS,
+                        FIELD_PARTIAL_ROUNDS,
+                        FIELD_SBOX_REGISTERS,
+                    >
+                ];
                 let dummy = dummy.as_mut_slice();
-                let dummy_cols: &mut Poseidon2ValueCols<F> = dummy.borrow_mut();
-                populate_perm::<F, LinearLayers>(
+                let dummy_cols: &mut Poseidon2ValueCols<
+                    F,
+                    FIELD_HALF_FULL_ROUNDS,
+                    FIELD_PARTIAL_ROUNDS,
+                    FIELD_SBOX_REGISTERS,
+                > = dummy.borrow_mut();
+                populate_perm::<
+                    F,
+                    LinearLayers,
+                    FIELD_HALF_FULL_ROUNDS,
+                    FIELD_PARTIAL_ROUNDS,
+                    FIELD_SBOX_REGISTERS,
+                >(
                     F::ZERO,
                     dummy_cols,
                     [F::ZERO; PERMUTATION_WIDTH],
@@ -117,12 +183,21 @@ where
                     &self.constants,
                 );
                 values_dummy
-                    .par_chunks_mut(NUM_POSEIDON2_VALUE_COLS)
+                    .par_chunks_mut(
+                        NUM_POSEIDON2_VALUE_COLS::<
+                            FIELD_HALF_FULL_ROUNDS,
+                            FIELD_PARTIAL_ROUNDS,
+                            FIELD_SBOX_REGISTERS,
+                        >,
+                    )
                     .for_each(|row| row.copy_from_slice(&dummy))
             },
         );
 
-        RowMajorMatrix::new(values, NUM_POSEIDON2_COLS)
+        RowMajorMatrix::new(
+            values,
+            NUM_POSEIDON2_COLS::<FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS>,
+        )
     }
 
     fn preprocessed_width(&self) -> usize {

@@ -1,6 +1,6 @@
 use super::{InitialProverSetup, MachineProver};
 use crate::{
-    chips::chips::riscv_poseidon2::Poseidon2Chip,
+    chips::chips::riscv_poseidon2::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
@@ -44,7 +44,9 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
-    Poseidon2Chip<Val<SC>>:
+    BabyBearPoseidon2Chip<Val<SC>>:
+        Air<SymbolicConstraintFolder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+    KoalaBearPoseidon2Chip<Val<SC>>:
         Air<SymbolicConstraintFolder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
 {
     pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
@@ -71,7 +73,8 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
-    Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
+    BabyBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
+    KoalaBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
 {
     type Input<'a> = (SC, &'a [u8]);
     type Opts = EmulatorOpts;
@@ -99,7 +102,10 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
-    Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
+    BabyBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
+        + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    KoalaBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {

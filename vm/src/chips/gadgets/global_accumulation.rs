@@ -8,6 +8,7 @@ use crate::{
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField};
 use pico_derive::AlignedBorrow;
+use std::any::Any;
 
 /// A set of columns needed to compute the global interaction elliptic curve digest.
 /// It is critical that this struct is at the end of the main trace, as the permutation constraints will be dependent on this fact.
@@ -114,7 +115,9 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
         next_is_real: [AB::Var; N],
         local_accumulation: GlobalAccumulationOperation<AB::Var, N>,
         next_accumulation: GlobalAccumulationOperation<AB::Var, N>,
-    ) {
+    ) where
+        AB::Expr: Any,
+    {
         // First, constrain the control flow regarding `is_real`.
         // Constrain that all `is_real` values are boolean.
         for i in 0..N {

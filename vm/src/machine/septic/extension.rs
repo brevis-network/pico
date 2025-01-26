@@ -1,10 +1,11 @@
-use super::config::*;
+use super::FieldSepticCurve;
 use crate::machine::builder::{ChipBuilder, SepticExtensionBuilder};
 use num_bigint::BigUint;
 use num_traits::One;
 use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra, Packable, PrimeField};
 use serde::{Deserialize, Serialize};
 use std::{
+    any::Any,
     array,
     fmt::Display,
     iter::{Product, Sum},
@@ -18,7 +19,7 @@ pub struct SepticExtension<F>(pub [F; 7]);
 impl<F: Field> Field for SepticExtension<F> {
     type Packing = Self;
 
-    const GENERATOR: Self = Self::EXT_GENERATOR;
+    const GENERATOR: Self = Self(F::EXT_GENERATOR);
 
     fn try_inverse(&self) -> Option<Self> {
         if self.is_zero() {
@@ -32,7 +33,7 @@ impl<F: Field> Field for SepticExtension<F> {
     }
 }
 
-impl<F: FieldAlgebra> FieldAlgebra for SepticExtension<F> {
+impl<F: FieldAlgebra + Any> FieldAlgebra for SepticExtension<F> {
     type F = SepticExtension<F::F>;
 
     const ZERO: Self = SepticExtension([
@@ -180,7 +181,7 @@ impl<F: FieldAlgebra> FieldAlgebra for SepticExtension<F> {
     }
 }
 
-impl<F: FieldAlgebra> FieldExtensionAlgebra<F> for SepticExtension<F> {
+impl<F: FieldAlgebra + Any> FieldExtensionAlgebra<F> for SepticExtension<F> {
     const D: usize = 7;
 
     fn from_base(b: F) -> Self {
@@ -280,21 +281,21 @@ impl<F: FieldAlgebra> Neg for SepticExtension<F> {
     }
 }
 
-impl<F: FieldAlgebra> MulAssign for SepticExtension<F> {
+impl<F: FieldAlgebra + Any> MulAssign for SepticExtension<F> {
     fn mul_assign(&mut self, rhs: Self) {
         let res = self.clone() * rhs;
         *self = res;
     }
 }
 
-impl<F: FieldAlgebra> Product for SepticExtension<F> {
+impl<F: FieldAlgebra + Any> Product for SepticExtension<F> {
     fn product<I: Iterator<Item = Self>>(iter: I) -> Self {
         let one = Self::ONE;
         iter.fold(one, |acc, x| acc * x)
     }
 }
 
-impl<F: FieldAlgebra> Sum for SepticExtension<F> {
+impl<F: FieldAlgebra + Any> Sum for SepticExtension<F> {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         let zero = Self::ZERO;
         iter.fold(zero, |acc, x| acc + x)
@@ -382,10 +383,17 @@ impl<F: FieldAlgebra> Display for SepticExtension<F> {
     }
 }
 
-impl<F: FieldAlgebra> Mul for SepticExtension<F> {
+impl<F: FieldAlgebra + Any> Mul for SepticExtension<F> {
     type Output = Self;
 
     fn mul(self, rhs: Self) -> Self::Output {
+        // We could use below code to check the F type for `same_field` here.
+        //
+        // ``` ignore
+        // let typ = std::any::type_name::<F>();
+        // println!("Found type = {typ:?}");
+        // ```
+
         // 0) Predefine the "reduction coefficients" for z^7
         // 1) Polynomial multiply: we get up to degree-12 polynomial
         // We'll store that in `res[0..13]`.
@@ -406,7 +414,7 @@ impl<F: FieldAlgebra> Mul for SepticExtension<F> {
             // z^power = z^(power-7) * z^7
             // use the relation z^7 = sum(COEFFS) * z^0..z^6
             // fold it back into lower degrees
-            for (offset, &red) in EXT_COEFFS.iter().enumerate() {
+            for (offset, &red) in F::EXT_COEFFS.iter().enumerate() {
                 let idx = (power - 7) + offset; // this is <= 6 + 6 = 12, safe
                 res[idx] = res[idx].clone() + (coeff.clone() * F::from_canonical_u32(red));
             }
@@ -474,15 +482,11 @@ impl<F: Field> SepticExtension<F> {
     }
 
     pub fn z_pow_p(index: usize) -> Self {
-        debug_assert_eq!(F::order(), BigUint::from(F_ORDER));
-
-        Self(Z_POW_P[index].map(F::from_canonical_u32))
+        Self(F::Z_POW_P[index].map(F::from_canonical_u32))
     }
 
     pub fn z_pow_p2(index: usize) -> Self {
-        debug_assert_eq!(F::order(), BigUint::from(F_ORDER));
-
-        Self(Z_POW_P2[index].map(F::from_canonical_u32))
+        Self(F::Z_POW_P2[index].map(F::from_canonical_u32))
     }
 
     /// Computes the square root of the septic field extension element.
@@ -504,7 +508,7 @@ impl<F: Field> SepticExtension<F> {
         let mut n_power = n;
         for i in 1..30 {
             n_iter *= n_iter;
-            if i >= 30 - TOP_BITS {
+            if i >= 30 - F::TOP_BITS {
                 n_power *= n_iter;
             }
         }

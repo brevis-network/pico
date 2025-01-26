@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
-    chips::chips::riscv_poseidon2::Poseidon2Chip,
+    chips::chips::riscv_poseidon2::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
     instances::compiler_v2::shapes::ProofShape,
     machine::{field::FieldSpecificPoseidon2Config, folder::SymbolicConstraintFolder},
 };
@@ -301,7 +301,8 @@ struct RiscvShapeSpec {
 
 impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F>
 where
-    Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+    BabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+    KoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
 {
     /// Fix the preprocessed shape of the proof.
     pub fn padding_preprocessed_shape(&self, program: &mut Program) -> Result<(), RiscvShapeError> {
@@ -672,7 +673,8 @@ where
 
 impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfig<F>
 where
-    Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+    BabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+    KoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
 {
     fn default() -> Self {
         // Preprocessed chip heights.

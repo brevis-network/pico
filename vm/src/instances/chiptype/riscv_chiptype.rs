@@ -1,6 +1,9 @@
 use hashbrown::HashSet;
+use itertools::Itertools;
 use p3_air::{Air, BaseAir};
+use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -21,7 +24,7 @@ use crate::{
                 local::MemoryLocalChip,
                 read_write::MemoryReadWriteChip,
             },
-            riscv_poseidon2::Poseidon2Chip,
+            riscv_poseidon2::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
             riscv_program::ProgramChip,
             syscall::SyscallChip,
         },
@@ -56,7 +59,7 @@ use crate::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
-        field::FieldSpecificPoseidon2Config,
+        field::{same_field, FieldSpecificPoseidon2Config},
         folder::SymbolicConstraintFolder,
         lookup::{LookupScope, LookupType},
     },
@@ -122,7 +125,8 @@ define_chip_type!(
         (SyscallRiscv, SyscallChip),
         (SyscallPrecompile, SyscallChip),
         (Global, GlobalChip),
-        (Poseidon2, Poseidon2Chip),
+        (BabyBearPoseidon2, BabyBearPoseidon2Chip),
+        (KoalaBearPoseidon2, KoalaBearPoseidon2Chip),
         (Byte, ByteChip)
     ]
 );
@@ -131,8 +135,67 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F>
 where
     Poseidon2PermuteChip<F, F::Poseidon2Config>:
         ChipBehavior<F, Record = EmulationRecord, Program = Program>,
-    Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+    BabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+    KoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
 {
+    pub fn all_chips() -> Vec<MetaChip<F, Self>> {
+        let mut chips = [
+            Self::Program(Default::default()),
+            Self::Cpu(Default::default()),
+            Self::ShaCompress(Default::default()),
+            Self::Ed25519Add(Default::default()),
+            Self::Ed25519Decompress(Default::default()),
+            Self::WsBn254Add(Default::default()),
+            Self::WsBls381Add(Default::default()),
+            Self::WsSecp256k1Add(Default::default()),
+            Self::WsDecompressBls381(Default::default()),
+            Self::WsDecompressSecp256k1(Default::default()),
+            Self::WsDoubleBn254(Default::default()),
+            Self::WsDoubleBls381(Default::default()),
+            Self::WsDoubleSecp256k1(Default::default()),
+            Self::ShaExtend(Default::default()),
+            Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
+                MemoryChipType::Initialize,
+            )),
+            Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize)),
+            Self::MemoryLocal(Default::default()),
+            Self::MemoryReadWrite(Default::default()),
+            Self::DivRem(Default::default()),
+            Self::Mul(Default::default()),
+            Self::Lt(Default::default()),
+            Self::SR(Default::default()),
+            Self::SLL(Default::default()),
+            Self::AddSub(Default::default()),
+            Self::Bitwise(Default::default()),
+            Self::KeecakP(Default::default()),
+            Self::FpBn254(Default::default()),
+            Self::Fp2AddSubBn254(Default::default()),
+            Self::Fp2MulBn254(Default::default()),
+            Self::FpBls381(Default::default()),
+            Self::Fp2AddSubBls381(Default::default()),
+            Self::Fp2MulBls381(Default::default()),
+            Self::U256Mul(Default::default()),
+            Self::Poseidon2P(Default::default()),
+            Self::SyscallRiscv(SyscallChip::riscv()),
+            Self::SyscallPrecompile(SyscallChip::precompile()),
+            Self::Global(Default::default()),
+            Self::Byte(Default::default()),
+        ]
+        .into_iter()
+        .map(MetaChip::new)
+        .collect_vec();
+
+        if same_field::<F, BabyBear>() {
+            chips.push(MetaChip::new(Self::BabyBearPoseidon2(Default::default())));
+        } else if same_field::<F, KoalaBear>() {
+            chips.push(MetaChip::new(Self::KoalaBearPoseidon2(Default::default())));
+        } else {
+            panic!("Unsupported field type");
+        }
+
+        chips
+    }
+
     /// Get the heights of the preprocessed chips for a given program.
     pub(crate) fn preprocessed_heights(program: &Program) -> Vec<(String, usize)> {
         vec![
@@ -200,7 +263,14 @@ where
                 record.global_lookup_events.len(),
             ),
             (
-                Self::Poseidon2(Default::default()).name(),
+                Self::BabyBearPoseidon2(Default::default()).name(),
+                record
+                    .poseidon2_events
+                    .len()
+                    .div_ceil(RISCV_POSEIDON2_DATAPAR),
+            ),
+            (
+                Self::KoalaBearPoseidon2(Default::default()).name(),
                 record
                     .poseidon2_events
                     .len()
@@ -248,21 +318,28 @@ where
     }
 
     pub(crate) fn get_all_riscv_chips() -> Vec<MetaChip<F, Self>> {
-        vec![
-            MetaChip::new(Self::Cpu(Default::default())),
-            MetaChip::new(Self::AddSub(Default::default())),
-            MetaChip::new(Self::Bitwise(Default::default())),
-            MetaChip::new(Self::Mul(Default::default())),
-            MetaChip::new(Self::DivRem(Default::default())),
-            MetaChip::new(Self::SLL(Default::default())),
-            MetaChip::new(Self::SR(Default::default())),
-            MetaChip::new(Self::Lt(Default::default())),
-            MetaChip::new(Self::MemoryLocal(Default::default())),
-            MetaChip::new(Self::MemoryReadWrite(Default::default())),
-            MetaChip::new(Self::Global(Default::default())),
-            MetaChip::new(Self::Poseidon2(Default::default())),
-            MetaChip::new(Self::SyscallRiscv(SyscallChip::riscv())),
+        let mut chips = [
+            Self::Cpu(Default::default()),
+            Self::AddSub(Default::default()),
+            Self::Bitwise(Default::default()),
+            Self::MemoryLocal(Default::default()),
+            Self::MemoryReadWrite(Default::default()),
+            Self::Global(Default::default()),
+            Self::SyscallRiscv(SyscallChip::riscv()),
         ]
+        .into_iter()
+        .map(MetaChip::new)
+        .collect_vec();
+
+        if same_field::<F, BabyBear>() {
+            chips.push(MetaChip::new(Self::BabyBearPoseidon2(Default::default())));
+        } else if same_field::<F, KoalaBear>() {
+            chips.push(MetaChip::new(Self::KoalaBearPoseidon2(Default::default())));
+        } else {
+            panic!("Unsupported field type");
+        }
+
+        chips
     }
 
     pub(crate) fn memory_init_final_chips() -> Vec<MetaChip<F, Self>> {

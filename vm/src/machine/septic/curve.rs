@@ -1,13 +1,13 @@
 //! Elliptic Curve `y^2 = x^3 + 2x + 26z^5` over the `F_{p^7} = F_p[z]/(z^7 - 2z - 5)` extension field.
 
-use super::{config::*, SepticExtension};
+use super::{FieldSepticCurve, SepticExtension};
 use crate::machine::field::{FieldBehavior, FieldType};
 use p3_baby_bear::BabyBear;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
-use std::ops::Add;
+use std::{any::Any, ops::Add};
 
 /// A septic elliptic curve point on y^2 = x^3 + 2x + 26z^5 over field `F_{p^7} = F_p[z]/(z^7 - 2z - 5)`.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -25,10 +25,10 @@ impl<F: Field> SepticCurve<F> {
     pub fn dummy() -> Self {
         Self {
             x: SepticExtension::from_base_fn(|i| {
-                F::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_X[i])
+                F::from_canonical_u32(F::CURVE_WITNESS_DUMMY_POINT_X[i])
             }),
             y: SepticExtension::from_base_fn(|i| {
-                F::from_canonical_u32(CURVE_WITNESS_DUMMY_POINT_Y[i])
+                F::from_canonical_u32(F::CURVE_WITNESS_DUMMY_POINT_Y[i])
             }),
         }
     }
@@ -92,7 +92,7 @@ impl<F: Field> SepticCurve<F> {
     }
 }
 
-impl<F: FieldAlgebra> SepticCurve<F> {
+impl<F: FieldAlgebra + Any> SepticCurve<F> {
     /// Evaluates the curve formula x^3 + 2x + 26z^5
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
         x.cube()
@@ -170,7 +170,7 @@ impl<F: PrimeField32 + FieldBehavior> SepticCurve<F> {
     }
 }
 
-impl<F: FieldAlgebra> SepticCurve<F> {
+impl<F: FieldAlgebra + Any> SepticCurve<F> {
     /// Given three points p1, p2, p3, the function is zero if and only if p3.x == (p1 + p2).x assuming that p1 != p2.
     pub fn sum_checker_x(
         p1: SepticCurve<F>,

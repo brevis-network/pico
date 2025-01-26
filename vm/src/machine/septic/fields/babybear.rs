@@ -1,16 +1,3 @@
-//! A septic extension with an irreducible polynomial:
-//! `z^7 - 2z - 5`
-
-use super::super::SepticExtension;
-use p3_field::FieldAlgebra;
-
-impl<F: FieldAlgebra> SepticExtension<F> {
-    pub const EXT_GENERATOR: Self =
-        SepticExtension([F::TWO, F::ONE, F::ZERO, F::ZERO, F::ZERO, F::ZERO, F::ZERO]);
-}
-
-pub const F_ORDER: u32 = 2013265921_u32;
-
 pub const TOP_BITS: usize = 4;
 
 // z^7 - 2^z - 5 = 0
@@ -61,32 +48,26 @@ pub const Z_POW_P2: [[u32; 7]; 7] = [
     ],
 ];
 
-/// The x-coordinate for a curve point used as a witness for padding interactions.
 pub const CURVE_WITNESS_DUMMY_POINT_X: [u32; 7] = [
     0x2738281, 0x8284590, 0x4523536, 0x0287471, 0x3526624, 0x9775724, 0x7093699,
 ];
 
-/// The y-coordinate for a curve point used as a witness for padding interactions.
 pub const CURVE_WITNESS_DUMMY_POINT_Y: [u32; 7] = [
     48041908, 550064556, 415267377, 1726976249, 1253299140, 209439863, 1302309485,
 ];
 
-/// The x-coordinate for a curve point used as a starting cumulative sum for global permutation trace generation.
 pub const CURVE_CUMULATIVE_SUM_START_X: [u32; 7] = [
     0x1434213, 0x5623730, 0x9504880, 0x1688724, 0x2096980, 0x7856967, 0x1875376,
 ];
 
-/// The y-coordinate for a curve point used as a starting cumulative sum for global permutation trace generation.
 pub const CURVE_CUMULATIVE_SUM_START_Y: [u32; 7] = [
     885797405, 1130275556, 567836311, 52700240, 239639200, 442612155, 1839439733,
 ];
 
-/// The x-coordinate for a curve point used as a starting random point for digest accumulation.
 pub const DIGEST_SUM_START_X: [u32; 7] = [
     0x1742050, 0x8075688, 0x7729352, 0x7446341, 0x5058723, 0x6694280, 0x5253810,
 ];
 
-/// The y-coordinate for a curve point used as a starting random point for digest accumulation.
 pub const DIGEST_SUM_START_Y: [u32; 7] = [
     462194069, 1842131493, 281651264, 1684885851, 483907222, 1097389352, 1648978901,
 ];

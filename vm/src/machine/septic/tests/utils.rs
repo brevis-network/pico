@@ -1,10 +1,10 @@
-use super::super::{config::*, SepticCurve, SepticCurveComplete, SepticExtension};
+use super::super::{FieldSepticCurve, SepticCurve, SepticCurveComplete, SepticExtension};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::*;
 use rayon_scan::ScanParallelIterator;
-use std::time::Instant;
+use std::{any::Any, time::Instant};
 
-pub fn test_ext_mul<F: FieldAlgebra>() {
+pub fn test_ext_mul<F: Any + FieldAlgebra>() {
     let a: SepticExtension<F> = SepticExtension::from_canonical_u32(1);
     let b: SepticExtension<F> = SepticExtension::from_canonical_u32(2);
     let c = a * b;
@@ -147,9 +147,15 @@ pub fn test_curve_lift_x<F: PrimeField32>(x: SepticExtension<F>) {
 
 pub fn test_const_points<F: Field>() {
     [
-        [CURVE_WITNESS_DUMMY_POINT_X, CURVE_WITNESS_DUMMY_POINT_Y],
-        [CURVE_CUMULATIVE_SUM_START_X, CURVE_CUMULATIVE_SUM_START_Y],
-        [DIGEST_SUM_START_X, DIGEST_SUM_START_Y],
+        [
+            F::CURVE_WITNESS_DUMMY_POINT_X,
+            F::CURVE_WITNESS_DUMMY_POINT_Y,
+        ],
+        [
+            F::CURVE_CUMULATIVE_SUM_START_X,
+            F::CURVE_CUMULATIVE_SUM_START_Y,
+        ],
+        [F::DIGEST_SUM_START_X, F::DIGEST_SUM_START_Y],
     ]
     .iter()
     .for_each(|[x, y]| {

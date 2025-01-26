@@ -1,9 +1,9 @@
 //! Elliptic Curve digests with a starting point to avoid weierstrass addition exceptions.
 
-use super::{config::*, SepticCurve, SepticExtension};
+use super::{FieldSepticCurve, SepticCurve, SepticExtension};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 use serde::{Deserialize, Serialize};
-use std::iter::Sum;
+use std::{any::Any, iter::Sum};
 
 /// A global cumulative sum digest, a point on the elliptic curve that `SepticCurve<F>` represents.
 /// As these digests start with the `CURVE_CUMULATIVE_SUM_START` point, they require special summing logic.
@@ -11,16 +11,23 @@ use std::iter::Sum;
 #[repr(C)]
 pub struct SepticDigest<F>(pub SepticCurve<F>);
 
-impl<F: FieldAlgebra> SepticDigest<F> {
+impl<F: FieldAlgebra + Any> SepticDigest<F> {
     #[must_use]
     /// The zero digest, the starting point of the accumulation of curve points derived from the scheme.
     pub fn zero() -> Self {
+        // We could use below code to check the F type for `same_field` here.
+        //
+        // ``` ignore
+        // let typ = std::any::type_name::<F>();
+        // println!("Found type = {typ:?}");
+        // ```
+
         SepticDigest(SepticCurve {
             x: SepticExtension::<F>::from_base_fn(|i| {
-                F::from_canonical_u32(CURVE_CUMULATIVE_SUM_START_X[i])
+                F::from_canonical_u32(F::CURVE_CUMULATIVE_SUM_START_X[i])
             }),
             y: SepticExtension::<F>::from_base_fn(|i| {
-                F::from_canonical_u32(CURVE_CUMULATIVE_SUM_START_Y[i])
+                F::from_canonical_u32(F::CURVE_CUMULATIVE_SUM_START_Y[i])
             }),
         })
     }
@@ -29,8 +36,12 @@ impl<F: FieldAlgebra> SepticDigest<F> {
     /// The digest used for starting the accumulation of digests.
     pub fn starting_digest() -> Self {
         SepticDigest(SepticCurve {
-            x: SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(DIGEST_SUM_START_X[i])),
-            y: SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(DIGEST_SUM_START_Y[i])),
+            x: SepticExtension::<F>::from_base_fn(|i| {
+                F::from_canonical_u32(F::DIGEST_SUM_START_X[i])
+            }),
+            y: SepticExtension::<F>::from_base_fn(|i| {
+                F::from_canonical_u32(F::DIGEST_SUM_START_Y[i])
+            }),
         })
     }
 }

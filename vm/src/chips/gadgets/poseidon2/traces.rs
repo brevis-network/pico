@@ -2,19 +2,27 @@ use super::{
     columns::{FullRound, PartialRound, Poseidon2ValueCols, SBox},
     constants::RoundConstants,
 };
-use crate::primitives::{consts::PERMUTATION_WIDTH, FIELD_SBOX_DEGREE, FIELD_SBOX_REGISTERS};
+use crate::primitives::{consts::PERMUTATION_WIDTH, poseidon2::FieldPoseidon2};
 use p3_field::PrimeField;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 
 pub(crate) fn populate_perm<
     F: PrimeField,
     LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+    const FIELD_HALF_FULL_ROUNDS: usize,
+    const FIELD_PARTIAL_ROUNDS: usize,
+    const FIELD_SBOX_REGISTERS: usize,
 >(
     is_real: F,
-    perm: &mut Poseidon2ValueCols<F>,
+    perm: &mut Poseidon2ValueCols<
+        F,
+        FIELD_HALF_FULL_ROUNDS,
+        FIELD_PARTIAL_ROUNDS,
+        FIELD_SBOX_REGISTERS,
+    >,
     mut state: [F; PERMUTATION_WIDTH],
     expected_output: Option<[F; PERMUTATION_WIDTH]>,
-    constants: &RoundConstants<F>,
+    constants: &RoundConstants<F, FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS>,
 ) {
     perm.is_real = is_real;
 
@@ -29,7 +37,9 @@ pub(crate) fn populate_perm<
         .iter_mut()
         .zip(&constants.beginning_full_round_constants)
     {
-        populate_full_round::<F, LinearLayers>(&mut state, full_round, constants);
+        populate_full_round::<F, LinearLayers, FIELD_SBOX_REGISTERS>(
+            &mut state, full_round, constants,
+        );
     }
 
     for (partial_round, constant) in perm
@@ -37,7 +47,11 @@ pub(crate) fn populate_perm<
         .iter_mut()
         .zip(&constants.partial_round_constants)
     {
-        populate_partial_round::<F, LinearLayers>(&mut state, partial_round, *constant);
+        populate_partial_round::<F, LinearLayers, FIELD_SBOX_REGISTERS>(
+            &mut state,
+            partial_round,
+            *constant,
+        );
     }
 
     for (full_round, constants) in perm
@@ -45,7 +59,9 @@ pub(crate) fn populate_perm<
         .iter_mut()
         .zip(&constants.ending_full_round_constants)
     {
-        populate_full_round::<F, LinearLayers>(&mut state, full_round, constants);
+        populate_full_round::<F, LinearLayers, FIELD_SBOX_REGISTERS>(
+            &mut state, full_round, constants,
+        );
     }
 
     if let Some(expected_output) = expected_output {
@@ -59,9 +75,10 @@ pub(crate) fn populate_perm<
 pub(crate) fn populate_full_round<
     F: PrimeField,
     LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+    const FIELD_SBOX_REGISTERS: usize,
 >(
     state: &mut [F; PERMUTATION_WIDTH],
-    full_round: &mut FullRound<F>,
+    full_round: &mut FullRound<F, FIELD_SBOX_REGISTERS>,
     round_constants: &[F; PERMUTATION_WIDTH],
 ) {
     for (state_i, const_i) in state.iter_mut().zip(round_constants) {
@@ -81,9 +98,10 @@ pub(crate) fn populate_full_round<
 pub(crate) fn populate_partial_round<
     F: PrimeField,
     LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+    const FIELD_SBOX_REGISTERS: usize,
 >(
     state: &mut [F; PERMUTATION_WIDTH],
-    partial_round: &mut PartialRound<F>,
+    partial_round: &mut PartialRound<F, FIELD_SBOX_REGISTERS>,
     round_constant: F,
 ) {
     state[0] += round_constant;
@@ -93,8 +111,11 @@ pub(crate) fn populate_partial_round<
 }
 
 #[inline]
-pub(crate) fn populate_sbox<F: PrimeField>(sbox: &mut SBox<F>, x: &mut F) {
-    *x = match (FIELD_SBOX_DEGREE, FIELD_SBOX_REGISTERS) {
+pub(crate) fn populate_sbox<F: PrimeField, const FIELD_SBOX_REGISTERS: usize>(
+    sbox: &mut SBox<F, FIELD_SBOX_REGISTERS>,
+    x: &mut F,
+) {
+    *x = match (F::FIELD_SBOX_DEGREE, FIELD_SBOX_REGISTERS) {
         (3, 0) => x.cube(), // case for koalabear
         (5, 1) => {
             // case for m31
@@ -111,7 +132,8 @@ pub(crate) fn populate_sbox<F: PrimeField>(sbox: &mut SBox<F>, x: &mut F) {
         }
         _ => panic!(
             "Unexpected (SBOX_DEGREE, SBOX_REGISTERS) of ({}, {})",
-            FIELD_SBOX_DEGREE, FIELD_SBOX_REGISTERS
+            F::FIELD_SBOX_DEGREE,
+            FIELD_SBOX_REGISTERS,
         ),
     }
 }

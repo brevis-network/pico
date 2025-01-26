@@ -27,8 +27,8 @@ pub fn read_vec() -> Vec<u8> {
 /// Reads a buffer from the input stream and deserializes it into a type `T`.
 ///
 /// ### Examples
-/// ```
-/// let data: Vec<u8> = pico_sdk::io::read_deserializable();
+/// ``` ignore
+/// let data: Vec<u8> = pico_sdk::io::read_as();
 /// ```
 pub fn read_as<T: DeserializeOwned>() -> T {
     let vec = read_vec();

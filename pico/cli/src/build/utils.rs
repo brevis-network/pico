@@ -100,6 +100,7 @@ mod test {
     use super::build_contract_inputs;
 
     #[test]
+    #[ignore]
     fn test_build_contract_inputs() -> Result<()> {
         let pico_out = PathBuf::from_str("/Users/jie/Downloads/vm-utils-test/pico_out")?;
         let gnark_dir = PathBuf::from_str("/Users/jie/Downloads/vm-utils-test/gnark")?;

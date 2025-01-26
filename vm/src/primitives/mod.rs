@@ -1,21 +1,10 @@
 //! pico-recursion-primitives contains types and functions that are used in both sp1-core and sp1-zkvm.
 //! Because it is imported in the zkvm entrypoint, it should be kept minimal.
 
-#[cfg(feature = "babybear")]
-mod babybear;
-#[cfg(feature = "babybear")]
-pub use babybear::*;
+pub mod consts;
+pub mod poseidon2;
 
-#[cfg(all(feature = "koalabear"))]
-mod koalabear;
-#[cfg(all(feature = "koalabear"))]
-pub use koalabear::*;
-
-#[cfg(all(feature = "mersenne31"))]
-mod mersenne31;
-#[cfg(all(feature = "mersenne31"))]
-pub use mersenne31::*;
-
+use crate::primitives::consts::{MERSENNE31_NUM_EXTERNAL_ROUNDS, MERSENNE31_NUM_INTERNAL_ROUNDS};
 use consts::{
     BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
     KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
@@ -29,12 +18,7 @@ use p3_field::FieldAlgebra;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_mersenne_31::{Mersenne31, Poseidon2Mersenne31};
 use p3_poseidon2::ExternalLayerConstants;
-
-pub mod consts;
-
 use p3_symmetric::PaddingFreeSponge;
-
-use crate::primitives::consts::{MERSENNE31_NUM_EXTERNAL_ROUNDS, MERSENNE31_NUM_INTERNAL_ROUNDS};
 use zkhash::{
     ark_ff::{BigInteger, PrimeField as ark_PrimeField},
     fields::bn256::FpBN256 as ark_FpBN256,

@@ -100,13 +100,10 @@ rand = "0.8.5"
 num = { version = "0.4.3", features = ["rand"] }
 
 [features]
-default = ["babybear"]
+default = []
 debug = []
 debug-lookups = []
 single-threaded = []
-babybear = []
-koalabear = []
-mersenne31 = []
 
 # curves
 bigint-rug = ["rug"]

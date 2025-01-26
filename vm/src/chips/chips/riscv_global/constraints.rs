@@ -15,7 +15,7 @@ use crate::{
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::Matrix;
-use std::borrow::Borrow;
+use std::{any::Any, borrow::Borrow};
 
 impl<F: Field> BaseAir<F> for GlobalChip<F> {
     fn width(&self) -> usize {
@@ -26,6 +26,7 @@ impl<F: Field> BaseAir<F> for GlobalChip<F> {
 impl<F: Field, CB: ChipBuilder<F>> Air<CB> for GlobalChip<F>
 where
     CB::Var: Sized,
+    CB::Expr: Any,
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
