@@ -1,6 +1,7 @@
-use crate::chips::chips::poseidon2_p3::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip};
 use crate::{
-    // chips::chips::{poseidon2_skinny_v2::Poseidon2SkinnyChip},
+    chips::chips::poseidon2_p3::{
+        BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
+    },
     compiler::recursion_v2::{
         circuit::{
             config::{CircuitConfig, FieldFriConfigVariable},
@@ -174,6 +175,9 @@ where
     for<'b> KoalaBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     KoalaBearPoseidon2Chip<CC::F>:
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
+    for<'b> Mersenne31Poseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Mersenne31Poseidon2Chip<CC::F>:
+        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 {
     pub fn build(
         machine: &BaseMachine<SC, RecursionChipType<Val<SC>, COMBINE_DEGREE>>,
@@ -256,6 +260,9 @@ where
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
     for<'b> KoalaBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     KoalaBearPoseidon2Chip<CC::F>:
+        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
+    for<'b> Mersenne31Poseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Mersenne31Poseidon2Chip<CC::F>:
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 {
     pub fn build(

@@ -24,13 +24,13 @@ fn test_kb_ext_sqrt() {
 
 #[test]
 fn test_kb_ext_z_pow_p() {
-    let z = SepticExtension::<KoalaBear>::GENERATOR - SepticExtension::<KoalaBear>::FOUR;
+    let z = SepticExtension::<KoalaBear>::GENERATOR - SepticExtension::<KoalaBear>::FIVE;
     test_ext_z_pow_p(z);
 }
 
 #[test]
 fn test_kb_ext_z_pow_p2() {
-    let z = SepticExtension::<KoalaBear>::GENERATOR - SepticExtension::<KoalaBear>::FOUR;
+    let z = SepticExtension::<KoalaBear>::GENERATOR - SepticExtension::<KoalaBear>::FIVE;
     test_ext_z_pow_p2(z);
 }
 
@@ -49,7 +49,7 @@ fn test_kb_curve_double() {
 }
 
 #[test]
-fn test_kb_curve_left_x() {
+fn test_kb_curve_lift_x() {
     let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(
         &[0x2013, 0x2015, 0x2016, 0x2023, 0x2024, 0x2016, 0x1].map(KoalaBear::from_canonical_u32),
     );

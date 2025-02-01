@@ -18,6 +18,7 @@ use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::ParallelIterator;
+use p3_mersenne_31::Mersenne31;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 use rayon::{iter::IndexedParallelIterator, join, slice::ParallelSliceMut};
 use std::borrow::BorrowMut;
@@ -49,10 +50,12 @@ where
     type Program = Program;
 
     fn name(&self) -> String {
-        if same_field::<F, BabyBear>() {
+        if same_field::<F, BabyBear, 4>() {
             "RiscvBabyBearPoseidon2"
-        } else if same_field::<F, KoalaBear>() {
+        } else if same_field::<F, KoalaBear, 4>() {
             "RiscvKoalaBearPoseidon2"
+        } else if same_field::<F, Mersenne31, 3>() {
+            "RiscvMersenne31Poseidon2"
         } else {
             panic!("Unsupported field type");
         }
@@ -153,7 +156,7 @@ where
                             FIELD_SBOX_REGISTERS,
                         >,
                     )
-                    .for_each(|row| row.copy_from_slice(&dummy))
+                    .for_each(|row| row.copy_from_slice(dummy))
             },
         );
 

@@ -1,7 +1,6 @@
 use std::{
     any::{type_name, TypeId},
     borrow::Borrow,
-    cmp::max,
 };
 
 use core::iter;
@@ -431,10 +430,15 @@ fn compute_degree<F: Field>(expr: &SymbolicExpression<F>) -> usize {
             SymbolicExpression::IsLastRow => 1,
             SymbolicExpression::IsTransition => 1,
             SymbolicExpression::Constant(_) => 0,
-            SymbolicExpression::Add { x, y, .. } | SymbolicExpression::Sub { x, y, .. } => {
-                max(compute_degree(x.as_ref()), compute_degree(y.as_ref()))
+            SymbolicExpression::Add {
+                degree_multiple, ..
             }
-            SymbolicExpression::Neg { x, .. } => compute_degree(x.as_ref()),
+            | SymbolicExpression::Sub {
+                degree_multiple, ..
+            } => *degree_multiple,
+            SymbolicExpression::Neg {
+                degree_multiple, ..
+            } => *degree_multiple,
             SymbolicExpression::Mul { x, y, .. } => {
                 compute_degree(x.as_ref()) + compute_degree(y.as_ref())
             }

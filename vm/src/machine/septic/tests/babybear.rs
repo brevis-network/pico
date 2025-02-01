@@ -48,7 +48,7 @@ fn test_bb_curve_double() {
 }
 
 #[test]
-fn test_bb_curve_left_x() {
+fn test_bb_curve_lift_x() {
     let x: SepticExtension<BabyBear> = SepticExtension::from_base_slice(
         &[0x2013, 0x2015, 0x2016, 0x2023, 0x2024, 0x2016, 0x2017].map(BabyBear::from_canonical_u32),
     );

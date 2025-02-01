@@ -163,6 +163,9 @@ pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] =
         127,
     ]);
 
+pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_MERSENNE31_SHIFTS: [u8; 16] =
+    [0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16];
+
 /*
 Poseidon2
  */

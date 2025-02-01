@@ -23,7 +23,7 @@ use crate::{
         syscall_context::SyscallContext,
     },
     machine::field::{FieldBehavior, FieldType},
-    primitives::consts::{BabyBearConfig, KoalaBearConfig},
+    primitives::consts::{BabyBearConfig, KoalaBearConfig, Mersenne31Config},
 };
 pub use code::*;
 use hashbrown::HashMap;
@@ -226,6 +226,12 @@ pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Sy
             syscall_map.insert(
                 SyscallCode::POSEIDON2_PERMUTE,
                 Arc::new(Poseidon2PermuteSyscall::<F, KoalaBearConfig>(PhantomData)),
+            );
+        }
+        FieldType::TypeMersenne31 => {
+            syscall_map.insert(
+                SyscallCode::POSEIDON2_PERMUTE,
+                Arc::new(Poseidon2PermuteSyscall::<F, Mersenne31Config>(PhantomData)),
             );
         }
         _ => unimplemented!(),

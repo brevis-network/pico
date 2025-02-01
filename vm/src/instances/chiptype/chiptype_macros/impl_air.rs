@@ -5,6 +5,7 @@ macro_rules! impl_air {
         where
             BabyBearPoseidon2Chip<$F>: Air<CB>,
             KoalaBearPoseidon2Chip<$F>: Air<CB>,
+            Mersenne31Poseidon2Chip<$F>: Air<CB>,
             CB::Expr: std::any::Any,
         {
             fn eval(&self, b: &mut CB) {

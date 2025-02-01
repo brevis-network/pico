@@ -4,7 +4,7 @@ extern crate alloc;
 use crate::{
     chips::gadgets::poseidon2::constants::RoundConstants,
     machine::field::FieldSpecificPoseidon2Config,
-    primitives::poseidon2::{babybear, koalabear},
+    primitives::poseidon2::{babybear, koalabear, mersenne31},
 };
 use p3_field::Field;
 use std::marker::PhantomData;
@@ -29,6 +29,14 @@ pub type KoalaBearPoseidon2Chip<F> = Poseidon2ChipP3<
     { koalabear::FIELD_HALF_FULL_ROUNDS },
     { koalabear::FIELD_PARTIAL_ROUNDS },
     { koalabear::FIELD_SBOX_REGISTERS },
+>;
+
+pub type Mersenne31Poseidon2Chip<F> = Poseidon2ChipP3<
+    F,
+    <F as FieldSpecificPoseidon2Config>::LinearLayers,
+    { mersenne31::FIELD_HALF_FULL_ROUNDS },
+    { mersenne31::FIELD_PARTIAL_ROUNDS },
+    { mersenne31::FIELD_SBOX_REGISTERS },
 >;
 
 /// A "vectorized" version of Poseidon2Air, for computing multiple Poseidon2 permutations per row.

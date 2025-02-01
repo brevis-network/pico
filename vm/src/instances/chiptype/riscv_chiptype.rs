@@ -5,6 +5,7 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use p3_mersenne_31::Mersenne31;
 
 use crate::{
     chips::{
@@ -24,7 +25,9 @@ use crate::{
                 local::MemoryLocalChip,
                 read_write::MemoryReadWriteChip,
             },
-            riscv_poseidon2::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
+            riscv_poseidon2::{
+                BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
+            },
             riscv_program::ProgramChip,
             syscall::SyscallChip,
         },
@@ -127,6 +130,7 @@ define_chip_type!(
         (Global, GlobalChip),
         (BabyBearPoseidon2, BabyBearPoseidon2Chip),
         (KoalaBearPoseidon2, KoalaBearPoseidon2Chip),
+        (Mersenne31Poseidon2, Mersenne31Poseidon2Chip),
         (Byte, ByteChip)
     ]
 );
@@ -137,6 +141,7 @@ where
         ChipBehavior<F, Record = EmulationRecord, Program = Program>,
     BabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
     KoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
+    Mersenne31Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>,
 {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
         let mut chips = [
@@ -185,10 +190,14 @@ where
         .map(MetaChip::new)
         .collect_vec();
 
-        if same_field::<F, BabyBear>() {
+        if same_field::<F, BabyBear, 4>() {
             chips.push(MetaChip::new(Self::BabyBearPoseidon2(Default::default())));
-        } else if same_field::<F, KoalaBear>() {
+        } else if same_field::<F, KoalaBear, 4>() {
             chips.push(MetaChip::new(Self::KoalaBearPoseidon2(Default::default())));
+        } else if same_field::<F, Mersenne31, 3>() {
+            let a = MetaChip::new(Self::Mersenne31Poseidon2(Default::default()));
+
+            chips.push(a);
         } else {
             panic!("Unsupported field type");
         }
@@ -277,6 +286,13 @@ where
                     .div_ceil(RISCV_POSEIDON2_DATAPAR),
             ),
             (
+                Self::Mersenne31Poseidon2(Default::default()).name(),
+                record
+                    .poseidon2_events
+                    .len()
+                    .div_ceil(RISCV_POSEIDON2_DATAPAR),
+            ),
+            (
                 Self::SyscallRiscv(SyscallChip::riscv()).name(),
                 record.syscall_events.len(),
             ),
@@ -331,10 +347,12 @@ where
         .map(MetaChip::new)
         .collect_vec();
 
-        if same_field::<F, BabyBear>() {
+        if same_field::<F, BabyBear, 4>() {
             chips.push(MetaChip::new(Self::BabyBearPoseidon2(Default::default())));
-        } else if same_field::<F, KoalaBear>() {
+        } else if same_field::<F, KoalaBear, 4>() {
             chips.push(MetaChip::new(Self::KoalaBearPoseidon2(Default::default())));
+        } else if same_field::<F, Mersenne31, 3>() {
+            chips.push(MetaChip::new(Self::Mersenne31Poseidon2(Default::default())));
         } else {
             panic!("Unsupported field type");
         }

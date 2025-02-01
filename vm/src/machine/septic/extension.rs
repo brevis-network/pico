@@ -62,6 +62,16 @@ impl<F: FieldAlgebra + Any> FieldAlgebra for SepticExtension<F> {
         F::ZERO,
     ]);
 
+    const FIVE: Self = SepticExtension([
+        F::FIVE,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+        F::ZERO,
+    ]);
+
     const NEG_ONE: Self = SepticExtension([
         F::NEG_ONE,
         F::ZERO,
@@ -504,14 +514,7 @@ impl<F: Field> SepticExtension<F> {
             return None;
         }
 
-        let mut n_iter = n;
-        let mut n_power = n;
-        for i in 1..30 {
-            n_iter *= n_iter;
-            if i >= 30 - F::TOP_BITS {
-                n_power *= n_iter;
-            }
-        }
+        let n_power = F::n_power(n);
 
         let mut n_frobenius = n_power.frobenius();
         let mut denominator = n_frobenius;

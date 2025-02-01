@@ -90,6 +90,7 @@ impl<N: Field> FieldAlgebra for SymbolicVar<N> {
     const ONE: Self = SymbolicVar::Const(N::ONE);
     const TWO: Self = SymbolicVar::Const(N::TWO);
     const FOUR: Self = SymbolicVar::Const(N::FOUR);
+    const FIVE: Self = SymbolicVar::Const(N::FIVE);
     const NEG_ONE: Self = SymbolicVar::Const(N::NEG_ONE);
 
     fn from_f(f: Self::F) -> Self {
@@ -129,6 +130,7 @@ impl<F: Field> FieldAlgebra for SymbolicFelt<F> {
     const ONE: Self = SymbolicFelt::Const(F::ONE);
     const TWO: Self = SymbolicFelt::Const(F::TWO);
     const FOUR: Self = SymbolicFelt::Const(F::FOUR);
+    const FIVE: Self = SymbolicFelt::Const(F::FIVE);
     const NEG_ONE: Self = SymbolicFelt::Const(F::NEG_ONE);
 
     fn from_f(f: Self::F) -> Self {
@@ -168,6 +170,7 @@ impl<F: Field, EF: ExtensionField<F>> FieldAlgebra for SymbolicExt<F, EF> {
     const ONE: Self = SymbolicExt::Const(EF::ONE);
     const TWO: Self = SymbolicExt::Const(EF::TWO);
     const FOUR: Self = SymbolicExt::Const(EF::FOUR);
+    const FIVE: Self = SymbolicExt::Const(EF::FIVE);
     const NEG_ONE: Self = SymbolicExt::Const(EF::NEG_ONE);
 
     fn from_f(f: Self::F) -> Self {

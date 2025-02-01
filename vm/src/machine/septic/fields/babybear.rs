@@ -1,7 +1,11 @@
+use super::super::extension::SepticExtension;
+use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use std::any::Any;
+
 pub const TOP_BITS: usize = 4;
 
-// z^7 - 2^z - 5 = 0
-// z^7 = 2^z + 5
+// z^7 - 2*z - 5 = 0
+// z^7 = 2*z + 5
 pub const EXT_COEFFS: [u32; 7] = [5, 2, 0, 0, 0, 0, 0];
 
 pub const Z_POW_P: [[u32; 7]; 7] = [
@@ -71,3 +75,18 @@ pub const DIGEST_SUM_START_X: [u32; 7] = [
 pub const DIGEST_SUM_START_Y: [u32; 7] = [
     462194069, 1842131493, 281651264, 1684885851, 483907222, 1097389352, 1648978901,
 ];
+
+// x^3 + 2x + 26z^5
+pub fn curve_formula<F: Any + FieldAlgebra>(x: SepticExtension<F>) -> SepticExtension<F> {
+    x.cube()
+        + x * F::TWO
+        + SepticExtension::from_base_slice(&[
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::ZERO,
+            F::from_canonical_u32(26),
+            F::ZERO,
+        ])
+}

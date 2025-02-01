@@ -58,9 +58,8 @@ jobs:
       - name: Cargo run examples
         run: |
           # M31 tests
-          # TODO: We will enable M31 after `SepticCurve` update.
-          # RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e_no_recursion -- --field m31
-          # RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e_no_recursion -- --elf poseidon2_precompile --field m31
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e_no_recursion -- --field m31
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e_no_recursion -- --elf poseidon2_precompile --field m31
          
           # KoalaBear tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e_no_recursion -- --field kb

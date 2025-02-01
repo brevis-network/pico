@@ -142,7 +142,8 @@ pub fn test_curve_double<F: PrimeField32>(x: SepticExtension<F>) {
 pub fn test_curve_lift_x<F: PrimeField32>(x: SepticExtension<F>) {
     let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
     assert!(curve_point.check_on_point());
-    assert!(curve_point.x.is_receive());
+    assert!(curve_point.x.is_send() || curve_point.x.is_receive());
+    assert!(!curve_point.x.is_exception());
 }
 
 pub fn test_const_points<F: Field>() {

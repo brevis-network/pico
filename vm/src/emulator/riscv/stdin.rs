@@ -3,10 +3,12 @@ use crate::{
         poseidon2_p3::{
             BabyBearPoseidon2Chip as RecursionBabyBearPoseidon2Chip,
             KoalaBearPoseidon2Chip as RecursionKoalaBearPoseidon2Chip,
+            Mersenne31Poseidon2Chip as RecursionMersenne31Poseidon2Chip,
         },
         riscv_poseidon2::{
             BabyBearPoseidon2Chip as RiscvBabyBearPoseidon2Chip,
             KoalaBearPoseidon2Chip as RiscvKoalaBearPoseidon2Chip,
+            Mersenne31Poseidon2Chip as RiscvMersenne31Poseidon2Chip,
         },
     },
     compiler::recursion_v2::{
@@ -183,9 +185,12 @@ where
         Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
         RiscvBabyBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
         RiscvKoalaBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+        RiscvMersenne31Poseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
         RecursionBabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
             + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
         RecursionKoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
+            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+        RecursionMersenne31Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
             + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
     {
         // initialize for base_ and reconstruct_challenger
@@ -370,6 +375,8 @@ where
         RecursionBabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
             + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
         RecursionKoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
+            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+        RecursionMersenne31Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
             + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
     {
         assert_eq!(vks.len(), proofs.len());

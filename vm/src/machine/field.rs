@@ -60,15 +60,15 @@ impl FieldSpecificPoseidon2Config for Mersenne31 {
 
 // Check if the type T is a specified field F.
 // NOTE: This function could not work for trait types with `'static`.
-pub const fn same_field<T: Any, F: Field + BinomiallyExtendable<4>>() -> bool {
+pub const fn same_field<T: Any, F: Field + BinomiallyExtendable<D>, const D: usize>() -> bool {
     unsafe {
         let typ = std::intrinsics::type_id::<T>();
 
         let field = type_id::<F>();
         let expr = type_id::<SymbolicExpression<F>>();
         let packing = type_id::<<F as Field>::Packing>();
-        let binomial = type_id::<BinomialExtensionField<F, 4>>();
-        let ext = type_id::<SymbolicExt<F, BinomialExtensionField<F, 4>>>();
+        let binomial = type_id::<BinomialExtensionField<F, D>>();
+        let ext = type_id::<SymbolicExt<F, BinomialExtensionField<F, D>>>();
         let felt = type_id::<SymbolicFelt<F>>();
 
         typ == field

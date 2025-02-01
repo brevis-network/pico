@@ -4,7 +4,7 @@ use crate::{
         alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
-        poseidon2_p3::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
+        poseidon2_p3::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip},
         public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,
@@ -96,6 +96,10 @@ where
             KoalaBearPoseidon2Chip::<F>::default(),
         )
         .name();
+        let m31_poseidon2 = RecursionChipType::<F, DEGREE>::Mersenne31Poseidon2(
+            Mersenne31Poseidon2Chip::<F>::default(),
+        )
+        .name();
         let exp_reverse_bits_len =
             RecursionChipType::<F, DEGREE>::ExpReverseBitsLen(ExpReverseBitsLenChip::default())
                 .name();
@@ -113,6 +117,7 @@ where
                 (mem_var.clone(), 19),
                 (babybear_poseidon2.clone(), 17),
                 (koalabear_poseidon2.clone(), 17),
+                (m31_poseidon2.clone(), 17),
                 (mem_const.clone(), 18),
                 (batch_fri.clone(), 18),
                 (exp_reverse_bits_len.clone(), 18),
@@ -125,6 +130,7 @@ where
                 (mem_var.clone(), 19),
                 (babybear_poseidon2.clone(), 17),
                 (koalabear_poseidon2.clone(), 17),
+                (m31_poseidon2.clone(), 17),
                 (mem_const.clone(), 16),
                 (batch_fri.clone(), 20),
                 (exp_reverse_bits_len.clone(), 16),
@@ -137,6 +143,7 @@ where
                 (mem_var.clone(), 18),
                 (babybear_poseidon2.clone(), 16),
                 (koalabear_poseidon2.clone(), 16),
+                (m31_poseidon2.clone(), 16),
                 (mem_const.clone(), 17),
                 (batch_fri.clone(), 19),
                 (exp_reverse_bits_len.clone(), 17),
@@ -149,6 +156,7 @@ where
                 (mem_var.clone(), 19),
                 (babybear_poseidon2.clone(), 17),
                 (koalabear_poseidon2.clone(), 17),
+                (m31_poseidon2.clone(), 17),
                 (mem_const.clone(), 18),
                 (batch_fri.clone(), 19),
                 (exp_reverse_bits_len.clone(), 18),
@@ -161,6 +169,7 @@ where
                 (mem_var.clone(), 20),
                 (babybear_poseidon2.clone(), 18),
                 (koalabear_poseidon2.clone(), 18),
+                (m31_poseidon2.clone(), 18),
                 (mem_const.clone(), 18),
                 (batch_fri.clone(), 21),
                 (exp_reverse_bits_len.clone(), 18),
@@ -197,6 +206,8 @@ where
     BabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
         + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
     KoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
+        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+    Mersenne31Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
         + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
 {
     pub fn get_all_shape_combinations(

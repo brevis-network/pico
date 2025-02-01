@@ -1,6 +1,8 @@
 use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
-    chips::chips::riscv_poseidon2::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip},
+    chips::chips::riscv_poseidon2::{
+        BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
+    },
     compiler::recursion_v2::{
         circuit::{
             challenger::{CanObserveVariable, DuplexChallengerVariable},
@@ -56,6 +58,8 @@ where
         Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     KoalaBearPoseidon2Chip<F>:
         Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Mersenne31Poseidon2Chip<F>:
+        Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
         machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
@@ -89,6 +93,7 @@ where
     >,
     BabyBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     KoalaBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    Mersenne31Poseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,

@@ -1,10 +1,14 @@
 //! Elliptic Curve `y^2 = x^3 + 2x + 26z^5` over the `F_{p^7} = F_p[z]/(z^7 - 2z - 5)` extension field.
 
-use super::{FieldSepticCurve, SepticExtension};
-use crate::machine::field::{FieldBehavior, FieldType};
+use super::{
+    fields::{babybear, koalabear, mersenne31},
+    FieldSepticCurve, SepticExtension,
+};
+use crate::machine::field::{same_field, FieldBehavior, FieldType};
 use p3_baby_bear::BabyBear;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
+use p3_mersenne_31::Mersenne31;
 use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use std::{any::Any, ops::Add};
@@ -69,7 +73,7 @@ impl<F: Field> SepticCurve<F> {
     #[must_use]
     /// Double the elliptic curve point.
     pub fn double(&self) -> Self {
-        let slope = (self.x * self.x * F::from_canonical_u8(3u8) + F::TWO) / (self.y * F::TWO);
+        let slope = F::curve_slope(self);
         let result_x = slope.square() - self.x * F::TWO;
         let result_y = slope * (self.x - result_x) - self.y;
         Self {
@@ -95,17 +99,15 @@ impl<F: Field> SepticCurve<F> {
 impl<F: FieldAlgebra + Any> SepticCurve<F> {
     /// Evaluates the curve formula x^3 + 2x + 26z^5
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
-        x.cube()
-            + x * F::TWO
-            + SepticExtension::from_base_slice(&[
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::ZERO,
-                F::from_canonical_u32(26),
-                F::ZERO,
-            ])
+        if same_field::<F, BabyBear, 4>() {
+            babybear::curve_formula(x)
+        } else if same_field::<F, KoalaBear, 4>() {
+            koalabear::curve_formula(x)
+        } else if same_field::<F, Mersenne31, 3>() {
+            mersenne31::curve_formula(x)
+        } else {
+            panic!("Unsupported field type");
+        }
     }
 }
 
@@ -147,6 +149,13 @@ impl<F: PrimeField32 + FieldBehavior> SepticCurve<F> {
                     let perm = crate::primitives::pico_poseidon2kb_init();
                     perm.permute(
                         m_trial.map(|x| KoalaBear::from_canonical_u32(x.as_canonical_u32())),
+                    )
+                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
+                }
+                FieldType::TypeMersenne31 => {
+                    let perm = crate::primitives::pico_poseidon2m31_init();
+                    perm.permute(
+                        m_trial.map(|x| Mersenne31::from_canonical_u32(x.as_canonical_u32())),
                     )
                     .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
                 }
