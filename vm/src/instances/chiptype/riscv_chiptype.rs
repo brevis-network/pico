@@ -218,6 +218,8 @@ where
 
     /// Get the heights of the chips for a given execution record.
     pub(crate) fn riscv_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
+        let num_global_events =
+            2 * record.get_local_mem_events().count() + record.syscall_events.len();
         vec![
             (
                 Self::Cpu(Default::default()).name(),
@@ -267,30 +269,10 @@ where
                     .count()
                     .div_ceil(MEMORY_RW_DATAPAR),
             ),
+            (Self::Global(Default::default()).name(), num_global_events),
             (
-                Self::Global(Default::default()).name(),
-                record.global_lookup_events.len(),
-            ),
-            (
-                Self::BabyBearPoseidon2(Default::default()).name(),
-                record
-                    .poseidon2_events
-                    .len()
-                    .div_ceil(RISCV_POSEIDON2_DATAPAR),
-            ),
-            (
-                Self::KoalaBearPoseidon2(Default::default()).name(),
-                record
-                    .poseidon2_events
-                    .len()
-                    .div_ceil(RISCV_POSEIDON2_DATAPAR),
-            ),
-            (
-                Self::Mersenne31Poseidon2(Default::default()).name(),
-                record
-                    .poseidon2_events
-                    .len()
-                    .div_ceil(RISCV_POSEIDON2_DATAPAR),
+                <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
+                num_global_events.div_ceil(RISCV_POSEIDON2_DATAPAR),
             ),
             (
                 Self::SyscallRiscv(SyscallChip::riscv()).name(),
@@ -300,6 +282,8 @@ where
     }
 
     pub(crate) fn get_memory_init_final_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
+        let num_global_events =
+            record.memory_finalize_events.len() + record.memory_initialize_events.len();
         vec![
             (
                 Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(Initialize)).name(),
@@ -309,18 +293,27 @@ where
                 Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(Finalize)).name(),
                 record.memory_finalize_events.len(),
             ),
+            (
+                Self::Global(GlobalChip::default()).name(),
+                num_global_events,
+            ),
+            (
+                <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
+                num_global_events / RISCV_POSEIDON2_DATAPAR,
+            ),
         ]
     }
 
     /// Get the height of the corresponding precompile chip.
     ///
     /// If the precompile is not included in the record, returns `None`. Otherwise, returns
-    /// `Some(num_rows, num_local_mem_events)`, where `num_rows` is the number of rows of the
-    /// corresponding chip and `num_local_mem_events` is the number of local memory events.
+    /// `Some(num_rows, num_local_mem_events, num_global_events)`, where `num_rows` is the number of rows of the
+    /// corresponding chip, `num_local_mem_events` is the number of local memory events, and `num_global_events`
+    /// is the number of global lookup events
     pub(crate) fn get_precompile_heights(
         chip_name: &str,
         record: &EmulationRecord,
-    ) -> Option<(usize, usize)> {
+    ) -> Option<(usize, usize, usize)> {
         record
             .precompile_events
             .get_events(precompile_syscall_code(chip_name))
@@ -329,6 +322,7 @@ where
                 (
                     events.len() * precompile_rows_per_event(chip_name),
                     events.get_local_mem_events().into_iter().count(),
+                    record.global_lookup_events.len(),
                 )
             })
     }
@@ -338,6 +332,11 @@ where
             Self::Cpu(Default::default()),
             Self::AddSub(Default::default()),
             Self::Bitwise(Default::default()),
+            Self::Mul(Default::default()),
+            Self::DivRem(Default::default()),
+            Self::SLL(Default::default()),
+            Self::SR(Default::default()),
+            Self::Lt(Default::default()),
             Self::MemoryLocal(Default::default()),
             Self::MemoryReadWrite(Default::default()),
             Self::Global(Default::default()),

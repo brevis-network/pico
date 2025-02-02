@@ -3,7 +3,10 @@ pub mod stdin;
 
 use crate::{
     compiler::recursion_v2::circuit::{hash::FieldHasher, merkle_tree::MerkleTree},
-    configs::config::{StarkGenericConfig, Val},
+    configs::{
+        config::{StarkGenericConfig, Val},
+        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+    },
     instances::compiler_v2::{
         recursion_circuit::stdin::RecursionStdin,
         vk_merkle::stdin::{MerkleProofStdin, RecursionVkStdin},
@@ -14,6 +17,7 @@ use crate::{
     },
     primitives::consts::DIGEST_SIZE,
 };
+use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
 
 pub struct VkMerkleManager<SC: StarkGenericConfig + FieldHasher<Val<SC>>> {
@@ -84,5 +88,39 @@ where
             merkle_proof_stdin,
             recursion_stdin: stdin,
         }
+    }
+}
+
+pub static VK_MANAGER_BB: Lazy<VkMerkleManager<BabyBearPoseidon2>> = Lazy::new(|| {
+    let file_path = "vk_map_bb.bin";
+    println!("Initializing global BabyBear VK_MANAGER from {file_path}");
+    let manager = VkMerkleManager::<BabyBearPoseidon2>::new_from_file(file_path)
+        .expect("Failed to load KoalaBear VkMerkleManager");
+    manager
+});
+
+pub static VK_MANAGER_KB: Lazy<VkMerkleManager<KoalaBearPoseidon2>> = Lazy::new(|| {
+    let file_path = "vk_map_kb.bin";
+    println!("Initializing global KoalaBear VK_MANAGER from {file_path}");
+    let manager = VkMerkleManager::<KoalaBearPoseidon2>::new_from_file(file_path)
+        .expect("Failed to load KoalaBear VkMerkleManager");
+    manager
+});
+
+pub trait HasStaticVkManager:
+    StarkGenericConfig + FieldHasher<Val<Self>, Digest = [Val<Self>; DIGEST_SIZE]>
+{
+    fn static_vk_manager() -> &'static VkMerkleManager<Self>;
+}
+
+impl HasStaticVkManager for BabyBearPoseidon2 {
+    fn static_vk_manager() -> &'static VkMerkleManager<Self> {
+        &VK_MANAGER_BB
+    }
+}
+
+impl HasStaticVkManager for KoalaBearPoseidon2 {
+    fn static_vk_manager() -> &'static VkMerkleManager<Self> {
+        &VK_MANAGER_KB
     }
 }

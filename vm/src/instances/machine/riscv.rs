@@ -223,7 +223,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-    ) -> MetaProof<SC>
+    ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
                 DebugConstraintFolder<
@@ -233,7 +233,7 @@ where
                 >,
             > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
     {
-        self.prove_with_shape_cycles(witness, shape_config).0
+        self.prove_with_shape_cycles(witness, shape_config)
     }
 
     pub fn prove_cycles(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> (MetaProof<SC>, u64)

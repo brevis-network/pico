@@ -7,7 +7,11 @@ use crate::{
     },
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
-        chiptype::recursion_chiptype_v2::RecursionChipType, machine::convert::ConvertMachine,
+        chiptype::recursion_chiptype_v2::RecursionChipType,
+        compiler_v2::{
+            shapes::compress_shape::RecursionShapeConfig, vk_merkle::HasStaticVkManager,
+        },
+        machine::convert::ConvertMachine,
     },
     machine::{
         field::FieldSpecificPoseidon2Config,
@@ -30,6 +34,7 @@ where
 {
     machine: ConvertMachine<SC, RecursionChips<SC>>,
     opts: EmulatorOpts,
+    shape_config: Option<RecursionShapeConfig<Val<SC>, RecursionChips<SC>>>,
     prev_machine: BaseMachine<RiscvSC, RiscvChips<RiscvSC>>,
 }
 
@@ -40,10 +45,12 @@ macro_rules! impl_convert_prover {
             for ConvertProver<$riscv_sc, $recur_sc>
         {
             type Opts = EmulatorOpts;
+            type ShapeConfig = RecursionShapeConfig<Val<$recur_sc>, RecursionChips<$recur_sc>>;
 
             fn new_with_prev(
                 prev_prover: &impl MachineProver<$riscv_sc, Chips = RiscvChips<$riscv_sc>>,
                 opts: Self::Opts,
+                shape_config: Option<Self::ShapeConfig>,
             ) -> Self {
                 let machine = ConvertMachine::new(
                     $recur_sc::new(),
@@ -53,6 +60,7 @@ macro_rules! impl_convert_prover {
                 Self {
                     machine,
                     opts,
+                    shape_config,
                     prev_machine: prev_prover.machine().clone(),
                 }
             }
@@ -68,12 +76,21 @@ macro_rules! impl_convert_prover {
 
             fn prove(&self, proofs: Self::Witness) -> MetaProof<$recur_sc> {
                 assert_eq!(proofs.vks.len(), 1);
+
+                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+
+                let vk_root = if self.shape_config.is_some() {
+                    vk_manager.merkle_root
+                } else {
+                    [Val::<$riscv_sc>::ZERO; DIGEST_SIZE]
+                };
+
                 let stdin = EmulatorStdin::setup_for_convert::<Val<$recur_sc>, $recur_cc>(
                     &proofs.vks[0],
-                    [Val::<$riscv_sc>::ZERO; DIGEST_SIZE],
+                    vk_root,
                     &self.prev_machine,
                     &proofs.proofs(),
-                    None,
+                    &self.shape_config,
                 );
                 let witness =
                     ProvingWitness::setup_for_convert(stdin, self.machine.config(), self.opts);

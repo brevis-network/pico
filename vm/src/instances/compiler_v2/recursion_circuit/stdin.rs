@@ -10,12 +10,13 @@ use crate::{
     },
     configs::{
         config::{Com, PcsProof, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
+        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::{
-            riscv_circuit::stdin::dummy_vk_and_chunk_proof, shapes::compress_shape::RecursionShape,
+            riscv_circuit::stdin::{dummy_vk_and_chunk_proof, dummy_vk_and_chunk_proof_kb},
+            shapes::compress_shape::RecursionShape,
         },
     },
     machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},
@@ -25,6 +26,7 @@ use alloc::sync::Arc;
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
+use p3_koala_bear::KoalaBear;
 
 #[derive(Clone)]
 pub struct RecursionStdin<'a, SC, C>
@@ -51,34 +53,46 @@ where
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
 }
 
-impl<'a> RecursionStdin<'a, BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>> {
-    pub fn dummy(
-        machine: &'a BaseMachine<BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>>,
-        shape: &RecursionShape,
-    ) -> Self {
-        let vks_and_proofs: Vec<_> = shape
-            .proof_shapes
-            .iter()
-            .map(|proof_shape| {
-                let (vk, proof) = dummy_vk_and_chunk_proof(machine, proof_shape);
-                (vk, proof)
-            })
-            .collect();
+macro_rules! impl_recursion_stdin_dummy {
+    ($poseidon_type:ty, $field_type:ty, $dummy_vk_fn:ident) => {
+        impl<'a>
+            RecursionStdin<'a, $poseidon_type, RecursionChipType<$field_type, COMBINE_DEGREE>>
+        {
+            pub fn dummy(
+                machine: &'a BaseMachine<
+                    $poseidon_type,
+                    RecursionChipType<$field_type, COMBINE_DEGREE>,
+                >,
+                shape: &RecursionShape,
+            ) -> Self {
+                let vks_and_proofs: Vec<_> = shape
+                    .proof_shapes
+                    .iter()
+                    .map(|proof_shape| {
+                        let (vk, proof) = $dummy_vk_fn(machine, proof_shape);
+                        (vk, proof)
+                    })
+                    .collect();
 
-        let (vks, proofs): (Vec<_>, Vec<_>) = vks_and_proofs.into_iter().unzip();
+                let (vks, proofs): (Vec<_>, Vec<_>) = vks_and_proofs.into_iter().unzip();
 
-        let vks = Arc::from(vks.into_boxed_slice());
-        let proofs = Arc::from(proofs.into_boxed_slice());
+                let vks = Arc::from(vks.into_boxed_slice());
+                let proofs = Arc::from(proofs.into_boxed_slice());
 
-        Self {
-            machine,
-            vks,
-            proofs,
-            flag_complete: false,
-            vk_root: [BabyBear::ZERO; DIGEST_SIZE],
+                Self {
+                    machine,
+                    vks,
+                    proofs,
+                    flag_complete: false,
+                    vk_root: [<$field_type>::ZERO; DIGEST_SIZE],
+                }
+            }
         }
-    }
+    };
 }
+
+impl_recursion_stdin_dummy!(BabyBearPoseidon2, BabyBear, dummy_vk_and_chunk_proof);
+impl_recursion_stdin_dummy!(KoalaBearPoseidon2, KoalaBear, dummy_vk_and_chunk_proof_kb);
 
 impl<'a, SC, C> RecursionStdin<'a, SC, C>
 where

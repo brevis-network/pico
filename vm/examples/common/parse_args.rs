@@ -99,6 +99,15 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
         info!("Test multiple precompiles in a single elf");
     } else if args.elf == "tendermint" {
         (elf, stdin) = load_program(TENDERMINT_PROGRAM);
+    } else if args.elf == "reth" {
+        (elf, stdin) = load_program(RETH_PROGRAM);
+    } else if args.elf == "reth-194" {
+        (elf, stdin) = load_program(RETH_194_PROGRAM);
+    } else if args.elf == "fibo-bench" {
+        let elf_file = format!("./vm/src/compiler/test_data/bench/fib");
+        let bytes = std::fs::read(elf_file).expect("failed to read elf");
+        elf = bytes.leak();
+        info!("Test fibonacci in bench, fixed n = 300k");
     } else {
         eprintln!("Invalid test elf.\n");
         std::process::exit(1);
@@ -124,6 +133,16 @@ impl TesterProgram {
 pub const TENDERMINT_PROGRAM: TesterProgram = TesterProgram::new(
     include_bytes!("../../../vm/src/compiler/test_data/bench/tendermint"),
     include_bytes!("../../../vm/src/compiler/test_data/bench/tendermint.in"),
+);
+
+pub const RETH_PROGRAM: TesterProgram = TesterProgram::new(
+    include_bytes!("../../../vm/src/compiler/test_data/bench/reth"),
+    include_bytes!("../../../vm/src/compiler/test_data/bench/reth-17106222.in"),
+);
+
+pub const RETH_194_PROGRAM: TesterProgram = TesterProgram::new(
+    include_bytes!("../../../vm/src/compiler/test_data/bench/reth"),
+    include_bytes!("../../../vm/src/compiler/test_data/bench/reth-19409768.in"),
 );
 
 pub fn load_program(program: TesterProgram) -> (&'static [u8], EmulatorStdinBuilder<Vec<u8>>) {

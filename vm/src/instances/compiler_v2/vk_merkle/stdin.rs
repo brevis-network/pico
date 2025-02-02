@@ -13,7 +13,7 @@ use crate::{
     },
     configs::{
         config::{Com, PcsProof, StarkGenericConfig, Val},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
+        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     instances::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
@@ -28,6 +28,7 @@ use crate::{
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, TwoAdicField};
+use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,17 +181,34 @@ where
     }
 }
 
-impl<'a> RecursionVkStdin<'a, BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>> {
-    pub fn dummy(
-        machine: &'a BaseMachine<BabyBearPoseidon2, RecursionChipType<BabyBear, COMBINE_DEGREE>>,
-        shape: &RecursionVkShape,
-    ) -> Self {
-        let recursion_stdin = RecursionStdin::dummy(machine, &shape.recursion_shape);
-        let num_proofs = recursion_stdin.proofs.len();
-        let merkle_proof_stdin = MerkleProofStdin::dummy(num_proofs, shape.merkle_tree_height);
-        Self {
-            merkle_proof_stdin,
-            recursion_stdin,
+macro_rules! impl_recursion_vk_stdin_dummy {
+    ($poseidon_type:ty, $field_type:ty) => {
+        impl<'a>
+            RecursionVkStdin<'a, $poseidon_type, RecursionChipType<$field_type, COMBINE_DEGREE>>
+        {
+            pub fn dummy(
+                machine: &'a BaseMachine<
+                    $poseidon_type,
+                    RecursionChipType<$field_type, COMBINE_DEGREE>,
+                >,
+                shape: &RecursionVkShape,
+            ) -> Self {
+                let recursion_stdin = RecursionStdin::<
+                    'a,
+                    $poseidon_type,
+                    RecursionChipType<$field_type, COMBINE_DEGREE>,
+                >::dummy(machine, &shape.recursion_shape);
+                let num_proofs = recursion_stdin.proofs.len();
+                let merkle_proof_stdin =
+                    MerkleProofStdin::dummy(num_proofs, shape.merkle_tree_height);
+                Self {
+                    merkle_proof_stdin,
+                    recursion_stdin,
+                }
+            }
         }
-    }
+    };
 }
+
+impl_recursion_vk_stdin_dummy!(BabyBearPoseidon2, BabyBear);
+impl_recursion_vk_stdin_dummy!(KoalaBearPoseidon2, KoalaBear);

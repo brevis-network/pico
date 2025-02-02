@@ -9,7 +9,10 @@ use crate::{
     },
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
-    instances::{chiptype::riscv_chiptype::RiscvChipType, machine::riscv::RiscvMachine},
+    instances::{
+        chiptype::riscv_chiptype::RiscvChipType,
+        compiler_v2::shapes::riscv_shape::RiscvShapeConfig, machine::riscv::RiscvMachine,
+    },
     machine::{
         field::FieldSpecificPoseidon2Config,
         folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
@@ -34,6 +37,7 @@ where
     program: Arc<P>,
     machine: RiscvMachine<SC, RiscvChips<SC>>,
     opts: EmulatorOpts,
+    shape_config: Option<RiscvShapeConfig<Val<SC>>>,
     pk: BaseProvingKey<SC>,
     vk: BaseVerifyingKey<SC>,
 }
@@ -61,7 +65,11 @@ where
             self.pk.clone(),
             self.vk.clone(),
         );
-        self.machine.prove_cycles(&witness)
+        if let Some(shape_config) = &self.shape_config {
+            self.machine.prove_with_shape(&witness, Some(shape_config))
+        } else {
+            self.machine.prove_cycles(&witness)
+        }
     }
 
     pub fn get_program(&self) -> Arc<Program> {
@@ -84,15 +92,30 @@ where
     type Input<'a> = (SC, &'a [u8]);
     type Opts = EmulatorOpts;
 
-    fn new_initial_prover(input: Self::Input<'_>, opts: Self::Opts) -> Self {
+    type ShapeConfig = RiscvShapeConfig<Val<SC>>;
+
+    fn new_initial_prover(
+        input: Self::Input<'_>,
+        opts: Self::Opts,
+        shape_config: Option<Self::ShapeConfig>,
+    ) -> Self {
         let (config, elf) = input;
-        let program = Compiler::new(SourceType::RiscV, elf).compile();
+        let mut program = Compiler::new(SourceType::RiscV, elf).compile();
+
+        if let Some(shape_config) = shape_config.clone() {
+            let p = Arc::get_mut(&mut program).expect("cannot get program");
+            shape_config
+                .padding_preprocessed_shape(p)
+                .expect("cannot padding preprocessed shape");
+        }
+
         let machine = RiscvMachine::new(config, RiscvChipType::all_chips(), RISCV_NUM_PVS);
         let (pk, vk) = machine.setup_keys(&program);
         Self {
             program,
             machine,
             opts,
+            shape_config,
             pk,
             vk,
         }

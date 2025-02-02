@@ -45,10 +45,12 @@ macro_rules! impl_combine_prover {
             for CombineProver<$recur_sc, $recur_sc>
         {
             type Opts = EmulatorOpts;
+            type ShapeConfig = ();
 
             fn new_with_prev(
                 prev_prover: &impl MachineProver<$recur_sc, Chips = ConvertChips<$recur_sc>>,
                 opts: Self::Opts,
+                _shape_config: Option<Self::ShapeConfig>,
             ) -> Self {
                 let machine = CombineMachine::new(
                     $recur_sc::new(),

@@ -190,7 +190,7 @@ macro_rules! run {
                     vk_root,
                     riscv_machine.base_machine(),
                     &riscv_proof.proofs(),
-                    None,
+                    &None,
                 );
 
                 let convert_witness = ProvingWitness::setup_for_convert(

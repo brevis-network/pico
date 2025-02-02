@@ -2,7 +2,10 @@ use crate::{
     compiler::recursion_v2::{
         circuit::{
             config::{CircuitConfig, FieldFriConfigVariable},
-            fri::{dummy_hash, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
+            fri::{
+                dummy_hash, dummy_pcs_proof_bb, dummy_pcs_proof_kb, PolynomialBatchShape,
+                PolynomialShape,
+            },
             stark::BaseProofVariable,
             types::{BaseVerifyingKeyVariable, FriProofVariable},
             witness::{witnessable::Witnessable, WitnessWriter},
@@ -11,7 +14,7 @@ use crate::{
     },
     configs::{
         config::{Challenger, Com, PcsProof, StarkGenericConfig},
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
+        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     instances::compiler_v2::shapes::ProofShape,
     machine::{
@@ -30,6 +33,7 @@ use p3_air::BaseAir;
 use p3_baby_bear::BabyBear;
 use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
 use p3_field::{ExtensionField, Field, FieldAlgebra, TwoAdicField};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Dimensions;
 use std::sync::Arc;
 
@@ -136,160 +140,174 @@ where
 }
 
 /// Make a dummy proof for a given proof shape.
-pub fn dummy_vk_and_chunk_proof<CB>(
-    machine: &BaseMachine<BabyBearPoseidon2, CB>,
-    shape: &ProofShape,
-) -> (
-    BaseVerifyingKey<BabyBearPoseidon2>,
-    BaseProof<BabyBearPoseidon2>,
-)
-where
-    CB: ChipBehavior<BabyBear>,
-{
-    // Make a dummy commitment.
-    let commitments = BaseCommitments {
-        main_commit: dummy_hash(),
-        permutation_commit: dummy_hash(),
-        quotient_commit: dummy_hash(),
-    };
-
-    // Get dummy opened values by reading the chip ordering from the shape.
-    let chip_ordering = shape
-        .chip_information
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _))| (name.clone(), i))
-        .collect::<HashMap<_, _>>();
-    let chips = machine.chips();
-    let chunk_chips =
-        order_chips::<BabyBearPoseidon2, CB>(&chips, &chip_ordering).collect::<Vec<_>>();
-    let opened_values = BaseOpenedValues {
-        chips_opened_values: chunk_chips
-            .iter()
-            .zip_eq(shape.chip_information.iter())
-            .map(|(chip, (_, log_main_degree))| {
-                dummy_opened_values::<_, _, _>(chip, *log_main_degree)
-            })
-            .map(Arc::new)
-            .collect(),
-    };
-
-    let mut preprocessed_names_and_dimensions = vec![];
-    let mut preprocessed_batch_shape = vec![];
-    let mut main_batch_shape = vec![];
-    let mut permutation_batch_shape = vec![];
-    let mut quotient_batch_shape = vec![];
-    let mut log_main_degrees = vec![];
-    let mut log_quotient_degrees = vec![];
-
-    for (chip, chip_opening) in chunk_chips
-        .iter()
-        .zip_eq(opened_values.chips_opened_values.iter())
-    {
-        log_main_degrees.push(chip_opening.log_main_degree);
-        // TODO: should we multiple by 4?
-        log_quotient_degrees.push(chip_opening.log_main_degree);
-        if !chip_opening.preprocessed_local.is_empty() {
-            let prep_shape = PolynomialShape {
-                width: chip_opening.preprocessed_local.len(),
-                log_degree: chip_opening.log_main_degree,
+macro_rules! dummy_vk_and_chunk_proof {
+    ($func_name:ident, $poseidon_type:ty, $field:ty, $dummy_pcs:ident) => {
+        pub fn $func_name<CB>(
+            machine: &BaseMachine<$poseidon_type, CB>,
+            shape: &ProofShape,
+        ) -> (BaseVerifyingKey<$poseidon_type>, BaseProof<$poseidon_type>)
+        where
+            CB: ChipBehavior<$field>,
+        {
+            // Make a dummy commitment.
+            let commitments = BaseCommitments {
+                main_commit: dummy_hash::<$field>(),
+                permutation_commit: dummy_hash::<$field>(),
+                quotient_commit: dummy_hash::<$field>(),
             };
-            preprocessed_names_and_dimensions.push((
-                chip.name(),
-                prep_shape.width,
-                prep_shape.log_degree,
-            ));
-            preprocessed_batch_shape.push(prep_shape);
-        }
-        let main_shape = PolynomialShape {
-            width: chip_opening.main_local.len(),
-            log_degree: chip_opening.log_main_degree,
-        };
-        main_batch_shape.push(main_shape);
 
-        let permutation_shape = PolynomialShape {
-            width: chip_opening.permutation_local.len(),
-            log_degree: chip_opening.log_main_degree,
-        };
-        permutation_batch_shape.push(permutation_shape);
-        for quot_chunk in chip_opening.quotient.iter() {
-            assert_eq!(quot_chunk.len(), 4);
-            quotient_batch_shape.push(PolynomialShape {
-                width: quot_chunk.len(),
-                log_degree: chip_opening.log_main_degree,
-            });
-        }
-    }
+            // Get dummy opened values by reading the chip ordering from the shape.
+            let chip_ordering = shape
+                .chip_information
+                .iter()
+                .enumerate()
+                .map(|(i, (name, _))| (name.clone(), i))
+                .collect::<HashMap<_, _>>();
+            let chips = machine.chips();
+            let chunk_chips =
+                order_chips::<$poseidon_type, CB>(&chips, &chip_ordering).collect::<Vec<_>>();
+            let opened_values = BaseOpenedValues {
+                chips_opened_values: chunk_chips
+                    .iter()
+                    .zip_eq(shape.chip_information.iter())
+                    .map(|(chip, (_, log_main_degree))| {
+                        dummy_opened_values::<_, _, _>(chip, *log_main_degree)
+                    })
+                    .map(Arc::new)
+                    .collect(),
+            };
 
-    let batch_shapes = vec![
-        PolynomialBatchShape {
-            shapes: preprocessed_batch_shape,
-        },
-        PolynomialBatchShape {
-            shapes: main_batch_shape,
-        },
-        PolynomialBatchShape {
-            shapes: permutation_batch_shape,
-        },
-        PolynomialBatchShape {
-            shapes: quotient_batch_shape,
-        },
-    ];
+            let mut preprocessed_names_and_dimensions = vec![];
+            let mut preprocessed_batch_shape = vec![];
+            let mut main_batch_shape = vec![];
+            let mut permutation_batch_shape = vec![];
+            let mut quotient_batch_shape = vec![];
+            let mut log_main_degrees = vec![];
+            let mut log_quotient_degrees = vec![];
 
-    let fri_queries = machine.config().fri_config().num_queries;
-    let log_blowup = machine.config().fri_config().log_blowup;
-    let opening_proof = dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
+            for (chip, chip_opening) in chunk_chips
+                .iter()
+                .zip_eq(opened_values.chips_opened_values.iter())
+            {
+                log_main_degrees.push(chip_opening.log_main_degree);
+                log_quotient_degrees.push(chip_opening.log_main_degree);
+                if !chip_opening.preprocessed_local.is_empty() {
+                    let prep_shape = PolynomialShape {
+                        width: chip_opening.preprocessed_local.len(),
+                        log_degree: chip_opening.log_main_degree,
+                    };
+                    preprocessed_names_and_dimensions.push((
+                        chip.name(),
+                        prep_shape.width,
+                        prep_shape.log_degree,
+                    ));
+                    preprocessed_batch_shape.push(prep_shape);
+                }
+                let main_shape = PolynomialShape {
+                    width: chip_opening.main_local.len(),
+                    log_degree: chip_opening.log_main_degree,
+                };
+                main_batch_shape.push(main_shape);
 
-    let public_values = (0..MAX_NUM_PVS).map(|_| BabyBear::ZERO).collect::<Vec<_>>();
+                let permutation_shape = PolynomialShape {
+                    width: chip_opening.permutation_local.len(),
+                    log_degree: chip_opening.log_main_degree,
+                };
+                permutation_batch_shape.push(permutation_shape);
+                for quot_chunk in chip_opening.quotient.iter() {
+                    assert_eq!(quot_chunk.len(), 4);
+                    quotient_batch_shape.push(PolynomialShape {
+                        width: quot_chunk.len(),
+                        log_degree: chip_opening.log_main_degree,
+                    });
+                }
+            }
 
-    // Get the preprocessed chip information.
-    let config = machine.config();
-    let pcs = config.pcs();
-    let preprocessed_chip_information: Vec<_> = preprocessed_names_and_dimensions
-        .iter()
-        .map(|(name, width, log_height)| {
-            let domain = <<BabyBearPoseidon2 as StarkGenericConfig>::Pcs as Pcs<
-                <BabyBearPoseidon2 as StarkGenericConfig>::Challenge,
-                <BabyBearPoseidon2 as StarkGenericConfig>::Challenger,
-            >>::natural_domain_for_degree(&pcs, 1 << log_height);
-            (
-                name.to_owned(),
-                domain,
-                Dimensions {
-                    width: *width,
-                    height: 1 << log_height,
+            let batch_shapes = vec![
+                PolynomialBatchShape {
+                    shapes: preprocessed_batch_shape,
                 },
-            )
-        })
-        .collect();
+                PolynomialBatchShape {
+                    shapes: main_batch_shape,
+                },
+                PolynomialBatchShape {
+                    shapes: permutation_batch_shape,
+                },
+                PolynomialBatchShape {
+                    shapes: quotient_batch_shape,
+                },
+            ];
 
-    // Get the chip ordering.
-    let preprocessed_chip_ordering = preprocessed_names_and_dimensions
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _, _))| (name.to_owned(), i))
-        .collect::<HashMap<_, _>>();
+            let fri_queries = machine.config().fri_config().num_queries;
+            let log_blowup = machine.config().fri_config().log_blowup;
+            let opening_proof = $dummy_pcs(fri_queries, &batch_shapes, log_blowup);
 
-    let vk = BaseVerifyingKey {
-        commit: dummy_hash(),
-        pc_start: BabyBear::ZERO,
-        initial_global_cumulative_sum: SepticDigest::<BabyBear>::zero(),
-        preprocessed_info: preprocessed_chip_information.into(),
-        preprocessed_chip_ordering: preprocessed_chip_ordering.into(),
+            let public_values = (0..MAX_NUM_PVS).map(|_| <$field>::ZERO).collect::<Vec<_>>();
+
+            // Get the preprocessed chip information.
+            let config = machine.config();
+            let pcs = config.pcs();
+            let preprocessed_chip_information: Vec<_> = preprocessed_names_and_dimensions
+                .iter()
+                .map(|(name, width, log_height)| {
+                    let domain = <<$poseidon_type as StarkGenericConfig>::Pcs as Pcs<
+                        <$poseidon_type as StarkGenericConfig>::Challenge,
+                        <$poseidon_type as StarkGenericConfig>::Challenger,
+                    >>::natural_domain_for_degree(&pcs, 1 << log_height);
+                    (
+                        name.to_owned(),
+                        domain,
+                        Dimensions {
+                            width: *width,
+                            height: 1 << log_height,
+                        },
+                    )
+                })
+                .collect();
+
+            // Get the chip ordering.
+            let preprocessed_chip_ordering = preprocessed_names_and_dimensions
+                .iter()
+                .enumerate()
+                .map(|(i, (name, _, _))| (name.to_owned(), i))
+                .collect::<HashMap<_, _>>();
+
+            let vk = BaseVerifyingKey {
+                commit: dummy_hash::<$field>(),
+                pc_start: <$field>::ZERO,
+                initial_global_cumulative_sum: SepticDigest::<$field>::zero(),
+                preprocessed_info: preprocessed_chip_information.into(),
+                preprocessed_chip_ordering: preprocessed_chip_ordering.into(),
+            };
+
+            let chunk_proof = BaseProof {
+                commitments,
+                opened_values,
+                opening_proof,
+                log_main_degrees: Arc::from(log_main_degrees),
+                log_quotient_degrees: Arc::from(log_quotient_degrees),
+                main_chip_ordering: Arc::from(chip_ordering),
+                public_values: public_values.into(),
+            };
+
+            (vk, chunk_proof)
+        }
     };
-
-    let chunk_proof = BaseProof {
-        commitments,
-        opened_values,
-        opening_proof,
-        log_main_degrees: Arc::from(log_main_degrees),
-        log_quotient_degrees: Arc::from(log_quotient_degrees),
-        main_chip_ordering: Arc::from(chip_ordering),
-        public_values: public_values.into(),
-    };
-
-    (vk, chunk_proof)
 }
+
+dummy_vk_and_chunk_proof!(
+    dummy_vk_and_chunk_proof_kb,
+    KoalaBearPoseidon2,
+    KoalaBear,
+    dummy_pcs_proof_kb
+);
+
+dummy_vk_and_chunk_proof!(
+    dummy_vk_and_chunk_proof,
+    BabyBearPoseidon2,
+    BabyBear,
+    dummy_pcs_proof_bb
+);
 
 fn dummy_opened_values<F: Field, EF: ExtensionField<F>, CB: ChipBehavior<F>>(
     chip: &MetaChip<F, CB>,

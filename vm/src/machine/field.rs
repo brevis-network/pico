@@ -41,21 +41,31 @@ impl<F: Field> FieldBehavior for F {
 pub trait FieldSpecificPoseidon2Config: FieldAlgebra {
     type Poseidon2Config: Poseidon2Config;
     type LinearLayers: GenericPoseidon2LinearLayers<Self, PERMUTATION_WIDTH>;
+    fn riscv_poseidon2_name() -> &'static str;
 }
 
 impl FieldSpecificPoseidon2Config for BabyBear {
     type Poseidon2Config = BabyBearConfig;
     type LinearLayers = GenericPoseidon2LinearLayersBabyBear;
+    fn riscv_poseidon2_name() -> &'static str {
+        "RiscvBabyBearPoseidon2"
+    }
 }
 
 impl FieldSpecificPoseidon2Config for KoalaBear {
     type Poseidon2Config = KoalaBearConfig;
     type LinearLayers = GenericPoseidon2LinearLayersKoalaBear;
+    fn riscv_poseidon2_name() -> &'static str {
+        "RiscvKoalaBearPoseidon2"
+    }
 }
 
 impl FieldSpecificPoseidon2Config for Mersenne31 {
     type Poseidon2Config = Mersenne31Config;
     type LinearLayers = GenericPoseidon2LinearLayersMersenne31;
+    fn riscv_poseidon2_name() -> &'static str {
+        "RiscvMersenne31Poseidon2"
+    }
 }
 
 // Check if the type T is a specified field F.

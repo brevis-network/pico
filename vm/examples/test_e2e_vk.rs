@@ -7,6 +7,7 @@ use pico_vm::{
     configs::{
         config::{Challenge, StarkGenericConfig, Val},
         field_config::bb_simple::BabyBearSimple,
+        stark_config::bb_poseidon2::BabyBearPoseidon2,
     },
     emulator::{opts::EmulatorOpts, recursion::emulator::Runtime, riscv::stdin::EmulatorStdin},
     instances::{
@@ -16,7 +17,7 @@ use pico_vm::{
             shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
             vk_merkle::{
                 builder::{CompressVkVerifierCircuit, EmbedVkVerifierCircuit},
-                VkMerkleManager,
+                HasStaticVkManager, VkMerkleManager, VK_MANAGER_BB,
             },
         },
         configs::{
@@ -50,11 +51,12 @@ mod parse_args;
 fn main() {
     setup_logger();
 
+    // TODO: build vk_map_bb.bin
     let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
     // COMBINE_DEGREE == COMPRESS_DEGREE == CONVERT_DEGREE == 3
     let recursion_shape_config =
         RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
-    let vk_manager = VkMerkleManager::new_from_file("vk_map.bin").unwrap();
+    let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
 
     // -------- Riscv Machine --------
 
@@ -105,7 +107,9 @@ fn main() {
 
     // Generate the proof.
     info!("Generating RISCV proof (at {:?})..", start.elapsed());
-    let riscv_proof = riscv_machine.prove_with_shape(&riscv_witness, Some(&riscv_shape_config));
+    let riscv_proof = riscv_machine
+        .prove_with_shape(&riscv_witness, Some(&riscv_shape_config))
+        .0;
     debug!(
         "PERF-step=prove-user_time={}",
         riscv_start.elapsed().as_millis()
@@ -161,7 +165,7 @@ fn main() {
         vk_root,
         riscv_machine.base_machine(),
         &riscv_proof.proofs(),
-        Some(recursion_shape_config),
+        &Some(recursion_shape_config),
     );
 
     let convert_witness =
@@ -350,7 +354,7 @@ fn main() {
     let vk_root = vk_manager.merkle_root;
 
     info!("Setting up EMBED");
-    let embed_machine = EmbedMachine::<BabyBearBn254Poseidon2, _, _, Vec<u8>>::new(
+    let embed_machine = EmbedMachine::<RecursionSC, _, _, Vec<u8>>::new(
         EmbedSC::new(),
         RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
         RECURSION_NUM_PVS,
@@ -369,7 +373,7 @@ fn main() {
     let embed_vk_program = EmbedVkVerifierCircuit::<RecursionFC, RecursionSC>::build(
         compress_machine.base_machine(),
         &embed_vk_stdin,
-        vk_manager,
+        &vk_manager,
     );
 
     embed_vk_program.print_stats();

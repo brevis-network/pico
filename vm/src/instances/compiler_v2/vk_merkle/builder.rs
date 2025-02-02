@@ -268,7 +268,7 @@ where
     pub fn build(
         machine: &BaseMachine<SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>,
         input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>,
-        vk_manager: VkMerkleManager<SC>,
+        vk_manager: &VkMerkleManager<SC>,
     ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
         let mut builder = Builder::<CC>::new();

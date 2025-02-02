@@ -1,6 +1,9 @@
 use crate::{
     chips::{
-        chips::{poseidon2_p3::Poseidon2ChipP3, recursion_memory_v2::MemoryAccessCols},
+        chips::{
+            poseidon2_p3::{Poseidon2ChipP3, POSEIDON2_CHIPNAME},
+            recursion_memory_v2::MemoryAccessCols,
+        },
         gadgets::poseidon2::{
             columns::{
                 Poseidon2PreprocessedValueCols, Poseidon2ValueCols, NUM_POSEIDON2_COLS,
@@ -52,7 +55,7 @@ where
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
-        format!("Poseidon2")
+        POSEIDON2_CHIPNAME.to_string()
     }
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {

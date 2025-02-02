@@ -6,14 +6,15 @@ use super::{
 use crate::{
     compiler::recursion_v2::ir::{Builder, DslIr, Ext, Felt, SymbolicExt},
     configs::config::SimpleFriConfig,
-    instances::configs::recur_config as rcf,
+    instances::configs::{recur_config as rcf, recur_kb_config as rcf_kb},
     primitives::consts::DIGEST_SIZE,
 };
 use itertools::{izip, Itertools};
 use p3_baby_bear::BabyBear;
 use p3_commit::PolynomialSpace;
-use p3_field::{FieldAlgebra, TwoAdicField};
+use p3_field::{Field, FieldAlgebra, TwoAdicField};
 use p3_fri::{BatchOpening, CommitPhaseProofStep, FriProof, QueryProof};
+use p3_koala_bear::KoalaBear;
 use p3_symmetric::Hash;
 use p3_util::log2_strict_usize;
 use std::{
@@ -423,99 +424,95 @@ pub fn verify_batch<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<C
     SC::assert_digest_eq(builder, root, commit);
 }
 
-pub fn dummy_hash() -> Hash<BabyBear, BabyBear, DIGEST_SIZE> {
-    [BabyBear::ZERO; DIGEST_SIZE].into()
+pub fn dummy_hash<F: Field>() -> Hash<F, F, DIGEST_SIZE> {
+    [F::ZERO; DIGEST_SIZE].into()
 }
 
-pub fn dummy_query_proof(
-    height: usize,
-    log_blowup: usize,
-    batch_shapes: &[PolynomialBatchShape],
-) -> QueryProof<rcf::SC_Challenge, rcf::SC_ChallengeMmcs, Vec<rcf::SC_BatchOpening>> {
-    QueryProof {
-        input_proof: batch_shapes
-            .iter()
-            .map(|shapes| {
-                let batch_max_height = shapes
-                    .shapes
+macro_rules! dummy_query_proof_fn {
+    // Accepts the rcf name as the input argument and generates the function
+    ($rcf:ident, $func_name:ident) => {
+        // Generated function for the specific rcf
+        pub fn $func_name(
+            height: usize,
+            log_blowup: usize,
+            batch_shapes: &[PolynomialBatchShape],
+        ) -> QueryProof<$rcf::SC_Challenge, $rcf::SC_ChallengeMmcs, Vec<$rcf::SC_BatchOpening>> {
+            QueryProof {
+                input_proof: batch_shapes
                     .iter()
-                    .map(|shape| shape.log_degree)
-                    .max()
-                    .unwrap();
-                BatchOpening {
-                    opened_values: shapes
+                    .map(|shapes| {
+                        let batch_max_height = shapes
+                            .shapes
+                            .iter()
+                            .map(|shape| shape.log_degree)
+                            .max()
+                            .unwrap();
+
+                        BatchOpening {
+                            opened_values: shapes
+                                .shapes
+                                .iter()
+                                .map(|shape| vec![$rcf::SC_Val::ZERO; shape.width])
+                                .collect(),
+                            opening_proof: vec![
+                                dummy_hash::<$rcf::SC_Val>().into();
+                                batch_max_height + log_blowup
+                            ],
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+                commit_phase_openings: (0..height)
+                    .map(|i| CommitPhaseProofStep {
+                        sibling_value: $rcf::SC_Challenge::ZERO,
+                        opening_proof: vec![
+                            dummy_hash::<$rcf::SC_Val>().into();
+                            height - i + log_blowup - 1
+                        ],
+                    })
+                    .collect(),
+            }
+        }
+    };
+}
+
+// Call the macro to generate the functions for the `rcf` and `rcf_kb` rcfs
+dummy_query_proof_fn!(rcf, dummy_query_proof); // Generates dummy_query_proof_rcf function
+dummy_query_proof_fn!(rcf_kb, dummy_query_proof_kb); // Generates dummy_query_proof_rcf_kb function
+
+/// Macro to generate dummy PCS proof functions for different modules
+macro_rules! dummy_pcs_proof_fn {
+    ($func_name:ident, $module:ident, $field:ty, $query_proof_fn:ident) => {
+        pub fn $func_name(
+            fri_queries: usize,
+            batch_shapes: &[PolynomialBatchShape],
+            log_blowup: usize,
+        ) -> $module::SC_PcsProof {
+            let max_height = batch_shapes
+                .iter()
+                .map(|shape| {
+                    shape
                         .shapes
                         .iter()
-                        .map(|shape| vec![BabyBear::ZERO; shape.width])
-                        .collect(),
-                    opening_proof: vec![dummy_hash().into(); batch_max_height + log_blowup],
-                }
-            })
-            .collect::<Vec<_>>(),
-        commit_phase_openings: (0..height)
-            .map(|i| CommitPhaseProofStep {
-                sibling_value: rcf::SC_Challenge::ZERO,
-                opening_proof: vec![dummy_hash().into(); height - i + log_blowup - 1],
-            })
-            .collect(),
-    }
-}
-
-/// Make a dummy PCS proof for a given proof shape. Used to generate vkey information for fixed proof
-/// shapes.
-///
-/// The parameter `batch_shapes` contains (width, height) data for each matrix in each batch.
-pub fn dummy_pcs_proof(
-    fri_queries: usize,
-    batch_shapes: &[PolynomialBatchShape],
-    log_blowup: usize,
-) -> rcf::SC_PcsProof {
-    let max_height = batch_shapes
-        .iter()
-        .map(|shape| {
-            shape
-                .shapes
-                .iter()
-                .map(|shape| shape.log_degree)
+                        .map(|shape| shape.log_degree)
+                        .max()
+                        .unwrap()
+                })
                 .max()
-                .unwrap()
-        })
-        .max()
-        .unwrap();
-    FriProof {
-        commit_phase_commits: vec![dummy_hash(); max_height],
-        query_proofs: vec![dummy_query_proof(max_height, log_blowup, batch_shapes); fri_queries],
-        final_poly: rcf::SC_Challenge::ZERO,
-        pow_witness: rcf::SC_Val::ZERO,
-    }
+                .unwrap();
 
-    // // For each query, create a dummy batch opening for each matrix in the batch. `batch_shapes`
-    // // determines the sizes of each dummy batch opening.
-    // let query_openings = (0..fri_queries)
-    //     .map(|_| {
-    //         batch_shapes
-    //             .iter()
-    //             .map(|shapes| {
-    //                 let batch_max_height = shapes
-    //                     .shapes
-    //                     .iter()
-    //                     .map(|shape| shape.log_degree)
-    //                     .max()
-    //                     .unwrap();
-    //                 BatchOpening {
-    //                     opened_values: shapes
-    //                         .shapes
-    //                         .iter()
-    //                         .map(|shape| vec![BabyBear::ZERO; shape.width])
-    //                         .collect(),
-    //                     opening_proof: vec![dummy_hash().into(); batch_max_height + log_blowup],
-    //                 }
-    //             })
-    //             .collect::<Vec<_>>()
-    //     })
-    //     .collect::<Vec<_>>();
-    // TwoAdicFriPcsProof {
-    //     fri_proof,
-    //     query_openings,
-    // }
+            FriProof {
+                commit_phase_commits: vec![dummy_hash::<$field>(); max_height],
+                query_proofs: vec![
+                    $query_proof_fn(max_height, log_blowup, batch_shapes);
+                    fri_queries
+                ],
+                final_poly: $module::SC_Challenge::ZERO,
+                pow_witness: $module::SC_Val::ZERO,
+            }
+        }
+    };
 }
+
+// Generate the functions for `rcf` and `rcf_kb` modules
+dummy_pcs_proof_fn!(dummy_pcs_proof_bb, rcf, BabyBear, dummy_query_proof);
+dummy_pcs_proof_fn!(dummy_pcs_proof_kb, rcf_kb, KoalaBear, dummy_query_proof_kb);

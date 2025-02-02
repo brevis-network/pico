@@ -1,24 +1,24 @@
 use crate::{
-    compiler::recursion_v2::program::RecursionProgram,
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    compiler::recursion_v2::{circuit::hash::FieldHasher, program::RecursionProgram},
+    configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val},
     emulator::{
         record::RecordBehavior,
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
     },
-    instances::{
-        compiler_v2::vk_merkle::stdin::RecursionVkStdin,
-        configs::recur_config::StarkConfig as RecursionSC,
-    },
+    instances::compiler_v2::vk_merkle::stdin::RecursionVkStdin,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+        keys::BaseVerifyingKey,
         machine::{BaseMachine, MachineBehavior},
-        proof::MetaProof,
+        proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::Air;
-use p3_field::FieldAlgebra;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument, trace};
 
@@ -34,55 +34,67 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<C> MachineBehavior<RecursionSC, C, RecursionVkStdin<'_, RecursionSC, C>>
-    for CompressVkMachine<RecursionSC, C>
+impl<F, SC, C> MachineBehavior<SC, C, RecursionVkStdin<'_, SC, C>> for CompressVkMachine<SC, C>
 where
+    F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + TwoAdicField,
+    SC: StarkGenericConfig<Val = F, Domain = TwoAdicMultiplicativeCoset<F>>
+        + Send
+        + Sync
+        + FieldHasher<Val<SC>>,
+    Val<SC>: PrimeField32,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+    BaseProof<SC>: Send + Sync,
+    PcsProof<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: Send + Sync,
     C: ChipBehavior<
-        Val<RecursionSC>,
-        Program = RecursionProgram<Val<RecursionSC>>,
-        Record = RecursionRecord<Val<RecursionSC>>,
-    >,
+            Val<SC>,
+            Program = RecursionProgram<Val<SC>>,
+            Record = RecursionRecord<Val<SC>>,
+        > + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
+        + Send
+        + Sync,
+    BaseVerifyingKey<SC>: Send + Sync,
+    BaseProof<SC>: Send + Sync,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!(
-            "CompressVk Recursion Machine <{}>",
-            type_name::<RecursionSC>()
-        )
+        format!("CompressVk Recursion Machine <{}>", type_name::<SC>())
     }
 
     /// Get the base machine
-    fn base_machine(&self) -> &BaseMachine<RecursionSC, C> {
+    fn base_machine(&self) -> &BaseMachine<SC, C> {
         &self.base_machine
     }
 
     /// Get the prover of the machine.
     #[instrument(name = "compress_prove", level = "debug", skip_all)]
-    fn prove(
-        &self,
-        witness: &ProvingWitness<RecursionSC, C, RecursionVkStdin<RecursionSC, C>>,
-    ) -> MetaProof<RecursionSC>
+    fn prove(&self, witness: &ProvingWitness<SC, C, RecursionVkStdin<SC, C>>) -> MetaProof<SC>
     where
-        C: for<'a> Air<
-                DebugConstraintFolder<
-                    'a,
-                    <RecursionSC as StarkGenericConfig>::Val,
-                    <RecursionSC as StarkGenericConfig>::Challenge,
-                >,
-            > + for<'a> Air<ProverConstraintFolder<'a, RecursionSC>>,
+        C: for<'c> Air<
+            DebugConstraintFolder<
+                'c,
+                <SC as StarkGenericConfig>::Val,
+                <SC as StarkGenericConfig>::Challenge,
+            >,
+        >,
     {
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
 
-        debug!("recursion compress record stats");
+        info!("COMPRESS record stats");
         let stats = records[0].stats();
         for (key, value) in &stats {
-            debug!("   |- {:<28}: {}", key, value);
+            info!("   |- {:<28}: {}", key, value);
         }
 
         let proofs = self.base_machine.prove_ensemble(witness.pk(), &records);
 
-        info!("COMPRESS_VK chip log degrees:");
+        // construct meta proof
+        let vks = vec![witness.vk.clone().unwrap()].into();
+
+        info!("COMPRESS chip log degrees:");
         proofs.iter().enumerate().for_each(|(i, proof)| {
             info!("Proof {}", i);
             proof
@@ -96,16 +108,11 @@ where
                 });
         });
 
-        // construct meta proof
-        let vks = vec![witness.vk.clone().unwrap()].into();
         MetaProof::new(proofs.into(), vks, None)
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<RecursionSC>) -> anyhow::Result<()>
-    where
-        C: for<'a> Air<VerifierConstraintFolder<'a, RecursionSC>>,
-    {
+    fn verify(&self, proof: &MetaProof<SC>) -> anyhow::Result<()> {
         let vk = proof.vks().first().unwrap();
 
         debug!("PERF-machine=convert");
@@ -118,9 +125,11 @@ where
         trace!("public values: {:?}", public_values);
 
         // assert completion
-        if public_values.flag_complete != <Val<RecursionSC>>::ONE {
+        if public_values.flag_complete != <Val<SC>>::ONE {
             panic!("flag_complete is not 1");
         }
+
+        // todo: assert public values digest
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;
@@ -139,8 +148,6 @@ where
         Program = RecursionProgram<Val<SC>>,
         Record = RecursionRecord<Val<SC>>,
     >,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {

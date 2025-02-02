@@ -4,7 +4,10 @@ use crate::{
         alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
-        poseidon2_p3::{BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip},
+        poseidon2_p3::{
+            BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
+            POSEIDON2_CHIPNAME,
+        },
         public_values_v2::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory_v2::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,
@@ -410,7 +413,7 @@ where
                 heights + instruction
             });
 
-        [
+        let mut results = [
             (
                 Self::MemoryConst(MemoryConstChip::default()),
                 heights.mem_const_events.div_ceil(CONST_MEM_DATAPAR),
@@ -428,25 +431,16 @@ where
                 heights.ext_alu_events.div_ceil(EXT_ALU_DATAPAR),
             ),
             (
-                Self::BabyBearPoseidon2(BabyBearPoseidon2Chip::<F>::default()),
-                heights.poseidon2_events.div_ceil(POSEIDON2_DATAPAR),
-            ),
-            (
-                Self::KoalaBearPoseidon2(KoalaBearPoseidon2Chip::<F>::default()),
-                heights.poseidon2_events.div_ceil(POSEIDON2_DATAPAR),
-            ),
-            (
-                Self::Mersenne31Poseidon2(Mersenne31Poseidon2Chip::<F>::default()),
-                heights.poseidon2_events.div_ceil(POSEIDON2_DATAPAR),
-            ),
-            (
                 Self::BatchFRI(BatchFRIChip::default()),
                 heights.batch_fri_events,
             ),
-            (Self::Select(SelectChip::default()), heights.select_events),
+            (
+                Self::Select(SelectChip::default()),
+                heights.select_events.div_ceil(SELECT_DATAPAR),
+            ),
             (
                 Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<F>::default()),
-                heights.exp_reverse_bits_len_events.div_ceil(SELECT_DATAPAR),
+                heights.exp_reverse_bits_len_events,
             ),
             (
                 Self::PublicValues(PublicValuesChip::default()),
@@ -454,29 +448,24 @@ where
             ),
         ]
         .map(|(chip, log_height)| (chip.name(), log_height))
-        .to_vec()
+        .to_vec();
+
+        // same chip name for BabyBearPoseidon2, KoalaBearPoseidon2 and Mersenne31Poseidon2
+        results.push((
+            POSEIDON2_CHIPNAME.to_string(),
+            heights.poseidon2_events.div_ceil(POSEIDON2_DATAPAR),
+        ));
+        results
     }
 
     // all the compress proof should be padded to this shape
     pub fn compress_shape() -> RecursionPadShape {
-        let shape = HashMap::from(
+        let mut shape = HashMap::from(
             [
                 (Self::MemoryConst(MemoryConstChip::default()), 17),
                 (Self::MemoryVar(MemoryVarChip::default()), 18),
-                (Self::BaseAlu(BaseAluChip::default()), 15),
-                (Self::ExtAlu(ExtAluChip::default()), 15),
-                (
-                    Self::BabyBearPoseidon2(BabyBearPoseidon2Chip::<F>::default()),
-                    16,
-                ),
-                (
-                    Self::KoalaBearPoseidon2(KoalaBearPoseidon2Chip::<F>::default()),
-                    16,
-                ),
-                (
-                    Self::Mersenne31Poseidon2(Mersenne31Poseidon2Chip::<F>::default()),
-                    16,
-                ),
+                (Self::BaseAlu(BaseAluChip::default()), 17),
+                (Self::ExtAlu(ExtAluChip::default()), 18),
                 (
                     Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<F>::default()),
                     17,
@@ -490,6 +479,8 @@ where
             ]
             .map(|(chip, log_height)| (chip.name(), log_height)),
         );
+
+        shape.insert(POSEIDON2_CHIPNAME.to_string(), 16);
         RecursionPadShape { inner: shape }
     }
 }

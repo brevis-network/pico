@@ -35,6 +35,7 @@ pub(crate) type Mersenne31Poseidon2Chip<F> = Poseidon2ChipP3<
     { mersenne31::FIELD_PARTIAL_ROUNDS },
     { mersenne31::FIELD_SBOX_REGISTERS },
 >;
+pub const POSEIDON2_CHIPNAME: &str = "Poseidon2";
 
 /// A "vectorized" version of Poseidon2Air, for computing multiple Poseidon2 permutations per row.
 pub struct Poseidon2ChipP3<

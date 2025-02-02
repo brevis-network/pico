@@ -15,7 +15,10 @@ use crate::{
         prelude::*,
     },
     configs::config::{Challenger, FieldGenericConfig, StarkGenericConfig, Val},
-    instances::configs::riscv_bb_poseidon2::StarkConfig as RiscvSC,
+    instances::configs::{
+        riscv_bb_poseidon2::StarkConfig as RiscvSC,
+        riscv_kb_poseidon2::StarkConfig as RiscvKBConfig,
+    },
     machine::{
         chip::ChipBehavior,
         lookup::LookupScope,
@@ -23,6 +26,7 @@ use crate::{
         proof::{BaseCommitments, BaseOpenedValues},
         utils::order_chips,
     },
+    primitives::consts::DIGEST_SIZE,
 };
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
@@ -30,6 +34,7 @@ use p3_air::{Air, BaseAir};
 use p3_baby_bear::BabyBear;
 use p3_commit::{Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
+use p3_koala_bear::KoalaBear;
 
 type F<FC> = <FC as FieldGenericConfig>::F;
 type EF<FC> = <FC as FieldGenericConfig>::EF;
@@ -48,15 +53,21 @@ pub struct BaseProofVariable<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigV
     pub public_values: Vec<Felt<CC::F>>,
 }
 
-/// Get a dummy duplex challenger for use in dummy proofs.
-pub fn dummy_challenger(config: &RiscvSC) -> Challenger<RiscvSC> {
-    let mut challenger = config.challenger();
-    challenger.input_buffer = vec![];
-    challenger.output_buffer = vec![BabyBear::ZERO; 8];
-    challenger
+/// Macro to generate dummy challenger functions for different configurations
+macro_rules! dummy_challenger_fn {
+    ($func_name:ident, $config_type:ty, $field:ty) => {
+        pub fn $func_name(config: &$config_type) -> Challenger<$config_type> {
+            let mut challenger = config.challenger();
+            challenger.input_buffer = vec![];
+            challenger.output_buffer = vec![<$field>::ZERO; DIGEST_SIZE];
+            challenger
+        }
+    };
 }
 
-// TODO: other dummy_xxxx
+// Generate the functions for `RiscvSC` and `RiscvKBConfig`
+dummy_challenger_fn!(dummy_challenger_bb, RiscvSC, BabyBear);
+dummy_challenger_fn!(dummy_challenger_kb, RiscvKBConfig, KoalaBear);
 
 #[derive(Clone)]
 pub struct MerkleProofVariable<CC: CircuitConfig, HV: FieldHasherVariable<CC>> {

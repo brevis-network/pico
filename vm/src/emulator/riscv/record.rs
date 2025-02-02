@@ -227,7 +227,6 @@ impl EmulationRecord {
         }
 
         if last {
-            println!("I am in memory split last");
             self.memory_initialize_events
                 .sort_by_key(|event| event.addr);
             self.memory_finalize_events.sort_by_key(|event| event.addr);

@@ -47,6 +47,7 @@ macro_rules! impl_compress_prover {
             > for CompressProver<$mod_name::StarkConfig, $mod_name::StarkConfig>
         {
             type Opts = ();
+            type ShapeConfig = ();
 
             fn new_with_prev(
                 prev_prover: &impl MachineProver<
@@ -54,6 +55,7 @@ macro_rules! impl_compress_prover {
                     Chips = CombineChips<$mod_name::StarkConfig>,
                 >,
                 _opts: Self::Opts,
+                _shape_config: Option<Self::ShapeConfig>,
             ) -> Self {
                 let machine = CompressMachine::new(
                     $mod_name::StarkConfig::compress(),

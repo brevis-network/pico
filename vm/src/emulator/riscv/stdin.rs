@@ -161,7 +161,7 @@ where
         vk_root: [Val<SC>; DIGEST_SIZE],
         machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
         proofs: &[BaseProof<SC>],
-        recursion_config: Option<
+        shape_config: &Option<
             RecursionShapeConfig<Val<SC>, RecursionChipType<Val<SC>, CONVERT_DEGREE>>,
         >,
     ) -> Self
@@ -222,7 +222,7 @@ where
                 };
                 let mut program = ConvertVerifierCircuit::<CC, SC>::build(machine, &input);
 
-                if let Some(config) = &recursion_config {
+                if let Some(config) = shape_config {
                     config.padding_shape(&mut program);
                 }
 

@@ -2893,6 +2893,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico-scripts"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "clap",
+ "hashbrown 0.14.5",
+ "p3-baby-bear 0.1.0",
+ "p3-field 0.1.0",
+ "p3-koala-bear",
+ "pico-vm",
+ "rayon",
+]
+
+[[package]]
 name = "pico-sdk"
 version = "0.1.0"
 dependencies = [
@@ -2949,6 +2963,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-traits",
  "num_cpus",
+ "once_cell",
  "p256",
  "p3-air",
  "p3-baby-bear 0.1.0",

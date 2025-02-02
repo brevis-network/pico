@@ -4,16 +4,25 @@ use clap::{
     Parser,
 };
 use log::info;
+use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use pico_vm::{
     configs::config::StarkGenericConfig,
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
-    instances::configs::{
-        riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
+    instances::{
+        chiptype::recursion_chiptype_v2::RecursionChipType,
+        compiler_v2::shapes::{
+            compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig,
+        },
+        configs::{
+            riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
+        },
+        machine::combine_vk::CombineVkMachine,
     },
     machine::logger::setup_logger,
     proverchain::{
-        CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
-        MachineProver, ProverChain, RiscvProver,
+        CombineProver, CombineVkProver, CompressProver, CompressVkProver, ConvertProver,
+        EmbedProver, EmbedVkProver, InitialProverSetup, MachineProver, ProverChain, RiscvProver,
     },
 };
 use serde::Serialize;
@@ -40,6 +49,11 @@ const PROGRAMS: &[Benchmark] = &[
     Benchmark {
         name: "fibonacci",
         elf: "./vm/src/compiler/test_data/bench/fib",
+        input: None,
+    },
+    Benchmark {
+        name: "f",
+        elf: "./vm/src/compiler/test_data/bench/fibo-small",
         input: None,
     },
     Benchmark {
@@ -126,11 +140,153 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     let core_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
-    let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), &elf), core_opts);
-    let convert = ConvertProver::new_with_prev(&riscv, recursion_opts);
-    let combine = CombineProver::new_with_prev(&convert, recursion_opts);
-    let compress = CompressProver::new_with_prev(&combine, ());
-    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, ());
+    let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), &elf), core_opts, None);
+    let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, None);
+    let combine = CombineProver::new_with_prev(&convert, recursion_opts, None);
+    let compress = CompressProver::new_with_prev(&combine, (), None);
+    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
+
+    info!("Generating RiscV proof");
+    let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    assert!(riscv.verify(&proof));
+
+    info!("Generating convert proof");
+    let (proof, convert_duration) = time_operation(|| convert.prove(proof));
+    assert!(convert.verify(&proof));
+
+    info!("Generating combine proof");
+    let (proof, combine_duration) = time_operation(|| combine.prove(proof));
+    assert!(combine.verify(&proof));
+
+    info!("Generating compress proof");
+    let (proof, compress_duration) = time_operation(|| compress.prove(proof));
+    assert!(compress.verify(&proof));
+
+    info!("Generating embed proof");
+    let (proof, embed_duration) = time_operation(|| embed.prove(proof));
+    assert!(embed.verify(&proof));
+
+    let total_recursion_duration =
+        convert_duration + combine_duration + compress_duration + embed_duration;
+    let total_duration = core_duration + total_recursion_duration;
+
+    info!("core duration: {}", format_duration(core_duration));
+    info!("convert duration: {}", format_duration(convert_duration));
+    info!("combine duration: {}", format_duration(combine_duration));
+    info!("compress duration: {}", format_duration(compress_duration));
+    info!("embed duration: {}", format_duration(embed_duration));
+    info!(
+        "total recursion duration: {}",
+        format_duration(total_recursion_duration)
+    );
+    info!("total duration: {}", format_duration(total_duration));
+
+    Ok(PerformanceReport {
+        program: bench.name.to_string(),
+        cycles,
+        exec_khz: to_khz(cycles, Duration::ZERO),
+        exec_duration: Duration::ZERO,
+        core_khz: to_khz(cycles, core_duration),
+        core_duration,
+        compressed_khz: to_khz(cycles, total_recursion_duration + core_duration),
+        compressed_duration: total_recursion_duration,
+        time: total_duration,
+        success: true,
+    })
+}
+
+fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
+    let (elf, stdin) = load(bench)?;
+    let core_opts = EmulatorOpts::bench_riscv_ops();
+    let recursion_opts = EmulatorOpts::bench_recursion_opts();
+    let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
+    let recursion_shape_config =
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, 3>>::default();
+
+    let riscv = RiscvProver::new_initial_prover(
+        (RiscvBBSC::new(), &elf),
+        core_opts,
+        Some(riscv_shape_config),
+    );
+    let convert =
+        ConvertProver::new_with_prev(&riscv, recursion_opts, Some(recursion_shape_config));
+    let recursion_shape_config =
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, 3>>::default();
+    let combine =
+        CombineVkProver::new_with_prev(&convert, recursion_opts, Some(recursion_shape_config));
+    let compress = CompressVkProver::new_with_prev(&combine, (), None);
+    let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
+
+    info!("Generating RiscV proof");
+    let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    assert!(riscv.verify(&proof));
+
+    info!("Generating convert proof");
+    let (proof, convert_duration) = time_operation(|| convert.prove(proof));
+    assert!(convert.verify(&proof));
+
+    info!("Generating combine proof");
+    let (proof, combine_duration) = time_operation(|| combine.prove(proof));
+    assert!(combine.verify(&proof));
+
+    info!("Generating compress proof");
+    let (proof, compress_duration) = time_operation(|| compress.prove(proof));
+    assert!(compress.verify(&proof));
+
+    info!("Generating embed proof");
+    let (proof, embed_duration) = time_operation(|| embed.prove(proof));
+    assert!(embed.verify(&proof));
+
+    let total_recursion_duration =
+        convert_duration + combine_duration + compress_duration + embed_duration;
+    let total_duration = core_duration + total_recursion_duration;
+
+    info!("core duration: {}", format_duration(core_duration));
+    info!("convert duration: {}", format_duration(convert_duration));
+    info!("combine duration: {}", format_duration(combine_duration));
+    info!("compress duration: {}", format_duration(compress_duration));
+    info!("embed duration: {}", format_duration(embed_duration));
+    info!(
+        "total recursion duration: {}",
+        format_duration(total_recursion_duration)
+    );
+    info!("total duration: {}", format_duration(total_duration));
+
+    Ok(PerformanceReport {
+        program: bench.name.to_string(),
+        cycles,
+        exec_khz: to_khz(cycles, Duration::ZERO),
+        exec_duration: Duration::ZERO,
+        core_khz: to_khz(cycles, core_duration),
+        core_duration,
+        compressed_khz: to_khz(cycles, total_recursion_duration + core_duration),
+        compressed_duration: total_recursion_duration,
+        time: total_duration,
+        success: true,
+    })
+}
+
+fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
+    let (elf, stdin) = load(bench)?;
+    let core_opts = EmulatorOpts::bench_riscv_ops();
+    let recursion_opts = EmulatorOpts::bench_recursion_opts();
+    let riscv_shape_config = RiscvShapeConfig::<KoalaBear>::default();
+    let recursion_shape_config =
+        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear, 3>>::default();
+
+    let riscv = RiscvProver::new_initial_prover(
+        (RiscvKBSC::new(), &elf),
+        core_opts,
+        Some(riscv_shape_config),
+    );
+    let convert =
+        ConvertProver::new_with_prev(&riscv, recursion_opts, Some(recursion_shape_config));
+    let recursion_shape_config =
+        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear, 3>>::default();
+    let combine =
+        CombineVkProver::new_with_prev(&convert, recursion_opts, Some(recursion_shape_config));
+    let compress = CompressVkProver::new_with_prev(&combine, (), None);
+    let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
     info!("Generating RiscV proof");
     let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
@@ -186,11 +342,11 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     let core_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
-    let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), &elf), core_opts);
-    let convert = ConvertProver::new_with_prev(&riscv, recursion_opts);
-    let combine = CombineProver::new_with_prev(&convert, recursion_opts);
-    let compress = CompressProver::new_with_prev(&combine, ());
-    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, ());
+    let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), &elf), core_opts, None);
+    let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, None);
+    let combine = CombineProver::new_with_prev(&convert, recursion_opts, None);
+    let compress = CompressProver::new_with_prev(&combine, (), None);
+    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
     info!("Generating RiscV proof");
     let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
@@ -287,6 +443,8 @@ fn main() -> Result<()> {
     let run_bench: fn(&Benchmark) -> _ = match args.field.as_str() {
         "bb" => bench_bb,
         "kb" => bench_kb,
+        "kb_vk" => bench_kb_vk,
+        "bb_vk" => bench_bb_vk,
         _ => panic!("bad field, use bb or kb"),
     };
 

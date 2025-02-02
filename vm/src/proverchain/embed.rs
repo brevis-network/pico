@@ -49,6 +49,7 @@ macro_rules! impl_embeded_prover {
             for EmbedProver<$mod_name::StarkConfig, $embed_sc, I>
         {
             type Opts = ();
+            type ShapeConfig = ();
 
             fn new_with_prev(
                 prev_prover: &impl MachineProver<
@@ -56,6 +57,7 @@ macro_rules! impl_embeded_prover {
                     Chips = CompressChips<$mod_name::StarkConfig>,
                 >,
                 _opts: Self::Opts,
+                _shape_config: Option<Self::ShapeConfig>,
             ) -> Self {
                 let machine = EmbedMachine::<$mod_name::StarkConfig, _, _, I>::new(
                     $embed_sc::default(),

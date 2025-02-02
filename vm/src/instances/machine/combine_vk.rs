@@ -17,7 +17,7 @@ use crate::{
         chiptype::recursion_chiptype_v2::RecursionChipType,
         compiler_v2::{
             shapes::compress_shape::RecursionShapeConfig,
-            vk_merkle::{stdin::RecursionVkStdin, VkMerkleManager},
+            vk_merkle::{stdin::RecursionVkStdin, HasStaticVkManager},
         },
     },
     machine::{
@@ -105,8 +105,8 @@ macro_rules! impl_combine_vk_machine {
 
                 let mut chunk_index = 1;
                 let mut layer_index = 1;
-                // TODO: vk_manager as a input parameters or static value
-                let vk_manager = VkMerkleManager::new_from_file("vk_map.bin").unwrap();
+                // TODO: move recursion_shape_config creation in higher level functions
+                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
                 let recursion_shape_config = RecursionShapeConfig::<
                     Val<$recur_sc>,
                     RecursionChipType<Val<$recur_sc>, COMBINE_DEGREE>,
