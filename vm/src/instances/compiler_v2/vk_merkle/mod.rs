@@ -94,17 +94,15 @@ where
 pub static VK_MANAGER_BB: Lazy<VkMerkleManager<BabyBearPoseidon2>> = Lazy::new(|| {
     let file_path = "vk_map_bb.bin";
     println!("Initializing global BabyBear VK_MANAGER from {file_path}");
-    let manager = VkMerkleManager::<BabyBearPoseidon2>::new_from_file(file_path)
-        .expect("Failed to load KoalaBear VkMerkleManager");
-    manager
+    VkMerkleManager::<BabyBearPoseidon2>::new_from_file(file_path)
+        .expect("Failed to load BabyBear VkMerkleManager")
 });
 
 pub static VK_MANAGER_KB: Lazy<VkMerkleManager<KoalaBearPoseidon2>> = Lazy::new(|| {
     let file_path = "vk_map_kb.bin";
     println!("Initializing global KoalaBear VK_MANAGER from {file_path}");
-    let manager = VkMerkleManager::<KoalaBearPoseidon2>::new_from_file(file_path)
-        .expect("Failed to load KoalaBear VkMerkleManager");
-    manager
+    VkMerkleManager::<KoalaBearPoseidon2>::new_from_file(file_path)
+        .expect("Failed to load KoalaBear VkMerkleManager")
 });
 
 pub trait HasStaticVkManager:

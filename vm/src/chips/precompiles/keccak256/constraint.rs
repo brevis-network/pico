@@ -104,20 +104,16 @@ where
                     .assert_eq(memory_limbs[i].clone(), a_value_limbs[i]);
             }
 
-            // todo: open this when update plonky3 or tiny-keccak a_prime_prime x, y order.
-            // since the plonky3 keccak implementation has the reversed order of x and y to access permutation state, so the limbs in memory write by tiny-keccak
-            // is not match the plonky3 a_prime_prime.
-
             // On a final step row, verify memory matches with
             // local.p3_keccak_cols.a_prime_prime_prime
-            // for i in 0..U64_LIMBS {
-            //     builder.when(final_step * local.is_real).assert_eq(
-            //         memory_limbs[i].clone(),
-            //         local
-            //             .keccak
-            //             .a_prime_prime_prime(y_idx as usize, x_idx as usize, i),
-            //     )
-            // }
+            for i in 0..U64_LIMBS {
+                builder.when(final_step * local.is_real).assert_eq(
+                    memory_limbs[i].clone(),
+                    local
+                        .keccak
+                        .a_prime_prime_prime(y_idx as usize, x_idx as usize, i),
+                )
+            }
         }
 
         // Range check all the values in `state_mem` to be bytes.

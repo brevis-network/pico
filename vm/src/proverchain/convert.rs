@@ -77,9 +77,8 @@ macro_rules! impl_convert_prover {
             fn prove(&self, proofs: Self::Witness) -> MetaProof<$recur_sc> {
                 assert_eq!(proofs.vks.len(), 1);
 
-                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
-
                 let vk_root = if self.shape_config.is_some() {
+                    let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
                     vk_manager.merkle_root
                 } else {
                     [Val::<$riscv_sc>::ZERO; DIGEST_SIZE]
