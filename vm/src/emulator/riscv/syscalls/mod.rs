@@ -75,7 +75,9 @@ pub trait Syscall: Send + Sync {
 /// Creates the default syscall map.
 #[must_use]
 pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
-    use crate::chips::gadgets::field::{bls381::Bls381BaseField, bn254::Bn254BaseField};
+    use crate::chips::gadgets::field::{
+        bls381::Bls381BaseField, bn254::Bn254BaseField, secp256k1::Secp256k1BaseField,
+    };
 
     let mut syscall_map = HashMap::<SyscallCode, Arc<dyn Syscall>>::default();
 
@@ -166,6 +168,20 @@ pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Sy
     syscall_map.insert(
         SyscallCode::BN254_FP2_MUL,
         Arc::new(Fp2MulSyscall::<Bn254BaseField>::new()),
+    );
+
+    // secp256k1 fp operations
+    syscall_map.insert(
+        SyscallCode::SECP256K1_FP_ADD,
+        Arc::new(FpSyscall::<Secp256k1BaseField>::new(FieldOperation::Add)),
+    );
+    syscall_map.insert(
+        SyscallCode::SECP256K1_FP_SUB,
+        Arc::new(FpSyscall::<Secp256k1BaseField>::new(FieldOperation::Sub)),
+    );
+    syscall_map.insert(
+        SyscallCode::SECP256K1_FP_MUL,
+        Arc::new(FpSyscall::<Secp256k1BaseField>::new(FieldOperation::Mul)),
     );
 
     // edwards

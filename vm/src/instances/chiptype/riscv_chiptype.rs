@@ -31,13 +31,16 @@ use crate::{
             riscv_program::ProgramChip,
             syscall::SyscallChip,
         },
-        gadgets::curves::{
-            edwards::ed25519::{Ed25519, Ed25519Parameters},
-            weierstrass::{
-                bls381::{Bls12381, Bls381BaseField},
-                bn254::{Bn254, Bn254BaseField},
-                secp256k1::Secp256k1,
+        gadgets::{
+            curves::{
+                edwards::ed25519::{Ed25519, Ed25519Parameters},
+                weierstrass::{
+                    bls381::{Bls12381, Bls381BaseField},
+                    bn254::{Bn254, Bn254BaseField},
+                    secp256k1::Secp256k1,
+                },
             },
+            field::secp256k1::Secp256k1BaseField,
         },
         precompiles::{
             edwards::{EdAddAssignChip, EdDecompressChip},
@@ -78,6 +81,7 @@ type Fp2MulBn254<F> = Fp2MulChip<F, Bn254BaseField>;
 type FpOpBls381<F> = FpOpChip<F, Bls381BaseField>;
 type Fp2AddSubBls381<F> = Fp2AddSubChip<F, Bls381BaseField>;
 type Fp2MulBls381<F> = Fp2MulChip<F, Bls381BaseField>;
+type FpOpSecp256k1<F> = FpOpChip<F, Secp256k1BaseField>;
 
 type WsBn254Add<F> = WeierstrassAddAssignChip<F, Bn254>;
 type WsBls381Add<F> = WeierstrassAddAssignChip<F, Bls12381>;
@@ -123,6 +127,7 @@ define_chip_type!(
         (FpBls381, FpOpBls381),
         (Fp2AddSubBls381, Fp2AddSubBls381),
         (Fp2MulBls381, Fp2MulBls381),
+        (FpSecp256k1, FpOpSecp256k1),
         (U256Mul, Uint256MulChip),
         (Poseidon2P, Poseidon2PermuteChip),
         (SyscallRiscv, SyscallChip),
@@ -179,6 +184,7 @@ where
             Self::FpBls381(Default::default()),
             Self::Fp2AddSubBls381(Default::default()),
             Self::Fp2MulBls381(Default::default()),
+            Self::FpSecp256k1(Default::default()),
             Self::U256Mul(Default::default()),
             Self::Poseidon2P(Default::default()),
             Self::SyscallRiscv(SyscallChip::riscv()),

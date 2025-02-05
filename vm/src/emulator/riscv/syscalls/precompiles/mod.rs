@@ -66,6 +66,8 @@ pub enum PrecompileEvent {
     Bls12381Fp2AddSub(Fp2AddSubEvent),
     /// Bls12-381 quadratic field mul precompile event.
     Bls12381Fp2Mul(Fp2MulEvent),
+    /// Secp256k1 base field operation precompile event.
+    Secp256k1Fp(FpEvent),
     /// Uint256 mul precompile event.
     Uint256Mul(Uint256MulEvent),
     /// Poseidon2 Permute precompile event
@@ -118,7 +120,9 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
                 PrecompileEvent::Uint256Mul(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
-                PrecompileEvent::Bls12381Fp(e) | PrecompileEvent::Bn254Fp(e) => {
+                PrecompileEvent::Bls12381Fp(e)
+                | PrecompileEvent::Bn254Fp(e)
+                | PrecompileEvent::Secp256k1Fp(e) => {
                     iterators.push(e.local_mem_access.iter());
                 }
                 PrecompileEvent::Bls12381Fp2AddSub(e) | PrecompileEvent::Bn254Fp2AddSub(e) => {

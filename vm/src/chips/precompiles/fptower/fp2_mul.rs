@@ -158,6 +158,7 @@ where
         match P::FIELD_TYPE {
             FieldType::Bn254 => "Bn254Fp2Mul".to_string(),
             FieldType::Bls381 => "Bls381Fp2Mul".to_string(),
+            _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         }
     }
 
@@ -165,6 +166,7 @@ where
         let events = match P::FIELD_TYPE {
             FieldType::Bn254 => input.get_precompile_events(SyscallCode::BN254_FP2_MUL),
             FieldType::Bls381 => input.get_precompile_events(SyscallCode::BLS12381_FP2_MUL),
+            _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         };
 
         let mut rows = Vec::new();
@@ -251,6 +253,7 @@ where
                 FieldType::Bls381 => !input
                     .get_precompile_events(SyscallCode::BLS12381_FP2_MUL)
                     .is_empty(),
+                _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
             }
         }
     }
@@ -383,6 +386,7 @@ where
             FieldType::Bls381 => {
                 CB::F::from_canonical_u32(SyscallCode::BLS12381_FP2_MUL.syscall_id())
             }
+            _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         };
 
         builder.looked_syscall(

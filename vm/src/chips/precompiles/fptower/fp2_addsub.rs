@@ -119,6 +119,7 @@ where
         match P::FIELD_TYPE {
             FieldType::Bn254 => "Bn254Fp2AddSub".to_string(),
             FieldType::Bls381 => "Bls381Fp2AddSub".to_string(),
+            _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         }
     }
 
@@ -134,6 +135,7 @@ where
             FieldType::Bls381 => input
                 .get_precompile_events(SyscallCode::BLS12381_FP2_ADD)
                 .iter(),
+            _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         };
 
         let mut rows = Vec::new();
@@ -244,6 +246,7 @@ where
                 FieldType::Bls381 => !input
                     .get_precompile_events(SyscallCode::BLS12381_FP2_ADD)
                     .is_empty(),
+                _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
             }
         }
     }
@@ -350,6 +353,7 @@ where
                 CB::F::from_canonical_u32(SyscallCode::BLS12381_FP2_ADD.syscall_id()),
                 CB::F::from_canonical_u32(SyscallCode::BLS12381_FP2_SUB.syscall_id()),
             ),
+            _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         };
 
         let syscall_id_felt =

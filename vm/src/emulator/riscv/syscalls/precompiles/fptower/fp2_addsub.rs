@@ -128,6 +128,7 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
                     PrecompileEvent::Bls12381Fp2AddSub(event),
                 );
             }
+            _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         }
 
         None

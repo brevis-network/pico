@@ -122,6 +122,15 @@ extern "C" {
     /// Executes a BN254 Fp2 multiplication on the given inputs.
     pub fn syscall_bn254_fp2_mulmod(p: *mut u32, q: *const u32);
 
+    /// Executes a Secp256k1 field addition on the given inputs.
+    pub fn syscall_secp256k1_fp_addmod(p: *mut u32, q: *const u32);
+
+    /// Executes a Secp256k1 field subtraction on the given inputs.
+    pub fn syscall_secp256k1_fp_submod(p: *mut u32, q: *const u32);
+
+    /// Executes a Secp256k1 field multiplication on the given inputs.
+    pub fn syscall_secp256k1_fp_mulmod(p: *mut u32, q: *const u32);
+
     /// Executes an poseidon2 permute on the given inputs.
     pub fn syscall_poseidon2_permute(x: *const [u32; 16], y: *mut [u32; 16]);
 

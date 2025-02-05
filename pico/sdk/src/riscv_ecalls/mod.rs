@@ -125,5 +125,14 @@ pub const BN254_FP2_SUB: u32 = 0x00_01_01_2A;
 /// Executes the `BN254_FP2_MUL` precompile.
 pub const BN254_FP2_MUL: u32 = 0x00_01_01_2B;
 
+/// Executes the `BLS12381_FP_ADD` precompile.
+pub const SECP256K1_FP_ADD: u32 = 0x00_01_01_2C;
+
+/// Executes the `BLS12381_FP_SUB` precompile.
+pub const SECP256K1_FP_SUB: u32 = 0x00_01_01_2D;
+
+/// Executes the `BLS12381_FP_MUL` precompile.
+pub const SECP256K1_FP_MUL: u32 = 0x00_01_01_2E;
+
 /// Executes the `POSEIDON2_PERMUTE` precompile.
 pub const POSEIDON2_PERMUTE: u32 = 0x00_01_01_2F;

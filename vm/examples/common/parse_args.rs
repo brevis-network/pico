@@ -82,6 +82,9 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
     } else if args.elf == "bls-simpler" {
         elf = load_elf("bls381-simpler");
         info!("Test precompile fptower for BLS381 without pairings and G1/G2");
+    } else if args.elf == "secp-basefield" {
+        elf = load_elf("secp-basefield");
+        info!("Test secp256k1 base field operations via precompiles");
     } else if args.elf == "ed_precompile" {
         elf = load_elf("ed25519-example");
         info!("Test precompile ed25519");

@@ -115,6 +115,7 @@ where
         match P::FIELD_TYPE {
             FieldType::Bn254 => "Bn254FpOp".to_string(),
             FieldType::Bls381 => "Bls381FpOp".to_string(),
+            FieldType::Secp256k1 => "Secp256k1FpOp".to_string(),
         }
     }
 
@@ -129,6 +130,9 @@ where
                 .iter(),
             FieldType::Bls381 => input
                 .get_precompile_events(SyscallCode::BLS12381_FP_ADD)
+                .iter(),
+            FieldType::Secp256k1 => input
+                .get_precompile_events(SyscallCode::SECP256K1_FP_ADD)
                 .iter(),
         };
 
@@ -145,6 +149,7 @@ where
             let event = match (P::FIELD_TYPE, event) {
                 (FieldType::Bn254, PrecompileEvent::Bn254Fp(event)) => event,
                 (FieldType::Bls381, PrecompileEvent::Bls12381Fp(event)) => event,
+                (FieldType::Secp256k1, PrecompileEvent::Secp256k1Fp(event)) => event,
                 _ => unreachable!(),
             };
 
@@ -240,6 +245,9 @@ where
                 FieldType::Bls381 => !input
                     .get_precompile_events(SyscallCode::BLS12381_FP_ADD)
                     .is_empty(),
+                FieldType::Secp256k1 => !input
+                    .get_precompile_events(SyscallCode::SECP256K1_FP_ADD)
+                    .is_empty(),
             }
         }
     }
@@ -333,6 +341,11 @@ where
                 CB::F::from_canonical_u32(SyscallCode::BLS12381_FP_ADD.syscall_id()),
                 CB::F::from_canonical_u32(SyscallCode::BLS12381_FP_SUB.syscall_id()),
                 CB::F::from_canonical_u32(SyscallCode::BLS12381_FP_MUL.syscall_id()),
+            ),
+            FieldType::Secp256k1 => (
+                CB::F::from_canonical_u32(SyscallCode::SECP256K1_FP_ADD.syscall_id()),
+                CB::F::from_canonical_u32(SyscallCode::SECP256K1_FP_SUB.syscall_id()),
+                CB::F::from_canonical_u32(SyscallCode::SECP256K1_FP_MUL.syscall_id()),
             ),
         };
         let syscall_id_felt = local.is_add * add_syscall_id

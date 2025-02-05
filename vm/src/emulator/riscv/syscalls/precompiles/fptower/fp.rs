@@ -115,6 +115,24 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
                     PrecompileEvent::Bls12381Fp(event),
                 );
             }
+
+            FieldType::Secp256k1 => {
+                let syscall_code_key = match syscall_code {
+                    SyscallCode::SECP256K1_FP_ADD
+                    | SyscallCode::SECP256K1_FP_SUB
+                    | SyscallCode::SECP256K1_FP_MUL => SyscallCode::SECP256K1_FP_ADD,
+                    _ => unreachable!(),
+                };
+
+                let syscall_event =
+                    rt.rt
+                        .syscall_event(clk, syscall_code.syscall_id(), x_ptr, y_ptr);
+                rt.record_mut().add_precompile_event(
+                    syscall_code_key,
+                    syscall_event,
+                    PrecompileEvent::Secp256k1Fp(event),
+                );
+            }
         }
 
         None

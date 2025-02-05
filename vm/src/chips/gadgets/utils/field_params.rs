@@ -85,6 +85,7 @@ pub trait NumWords: Clone {
 pub enum FieldType {
     Bls381,
     Bn254,
+    Secp256k1,
 }
 
 pub trait FpOpField: FieldParameters + NumWords {
