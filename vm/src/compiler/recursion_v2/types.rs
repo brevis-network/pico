@@ -9,7 +9,7 @@ use crate::{
     emulator::recursion::{emulator::*, public_values::RecursionPublicValues},
 };
 
-pub const WIDTH: usize = 16; // TODO use chips::poseidon2_skinny::WIDTH
+pub const WIDTH: usize = 16;
 
 #[derive(
     AlignedBorrow, Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default,

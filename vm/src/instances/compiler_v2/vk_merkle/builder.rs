@@ -158,17 +158,6 @@ where
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>:
         Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
-
-    // for<'b> Poseidon2SkinnyChip<
-    //     COMBINE_DEGREE,
-    //     <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config,
-    //     CC::F,
-    // >: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    // Poseidon2SkinnyChip<
-    //     COMBINE_DEGREE,
-    //     <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config,
-    //     CC::F,
-    // >: ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
     for<'b> BabyBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     BabyBearPoseidon2Chip<CC::F>:
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
@@ -244,17 +233,6 @@ where
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>:
         Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
-
-    // for<'b> Poseidon2SkinnyChip<
-    //     COMBINE_DEGREE,
-    //     <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config,
-    //     CC::F,
-    // >: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    // Poseidon2SkinnyChip<
-    //     COMBINE_DEGREE,
-    //     <CC::F as FieldSpecificPoseidon2Config>::Poseidon2Config,
-    //     CC::F,
-    // >: ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
     for<'b> BabyBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     BabyBearPoseidon2Chip<CC::F>:
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,

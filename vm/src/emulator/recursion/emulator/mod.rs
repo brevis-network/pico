@@ -53,8 +53,6 @@ pub struct CycleTrackerEntry {
     pub cumulative_cycles: usize,
 }
 
-/// Taken from [`sp1_recursion_core::runtime::Runtime`].
-/// Many missing things (compared to the old `Runtime`) will need to be implemented.
 pub struct Runtime<'a, F, EF, ExternalPerm, InternalPerm, const D: u64>
 where
     F: PrimeField32 + Field,
@@ -237,7 +235,6 @@ where
         }
     }
 
-    /// Compare to [sp1_recursion_core::runtime::Runtime::run].
     pub fn run(&mut self) -> Result<(), RuntimeError<F, EF>> {
         let early_exit_ts = std::env::var("RECURSION_EARLY_EXIT_TS")
             .map_or(usize::MAX, |ts: String| ts.parse().unwrap());

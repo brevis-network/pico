@@ -1,6 +1,3 @@
-//! pico-recursion-primitives contains types and functions that are used in both sp1-core and sp1-zkvm.
-//! Because it is imported in the zkvm entrypoint, it should be kept minimal.
-
 pub mod consts;
 pub mod poseidon2;
 

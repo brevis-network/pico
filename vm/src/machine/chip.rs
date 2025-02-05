@@ -72,7 +72,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         chip.eval(&mut builder);
         let (looking, looked) = builder.lookups();
 
-        // need to dive deeper, currently following p3 and some constants aren't included in chip.rs of sp1
+        // need to dive deeper, currently following p3.
         let log_quotient_degree = get_log_quotient_degree::<F, C>(
             &chip,
             chip.preprocessed_width(),

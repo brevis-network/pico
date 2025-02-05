@@ -31,7 +31,6 @@ pub trait WitnessWriter<CC: CircuitConfig>: Sized {
     fn write_ext(&mut self, value: CC::EF);
 }
 
-/// TODO (from sp1) change the name. For now, the name is unique to prevent confusion.
 pub trait Witnessable<CC: CircuitConfig> {
     type WitnessVariable;
 

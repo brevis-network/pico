@@ -167,7 +167,6 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         self.inner.get_mut().operations.extend(ops);
     }
 
-    /// Pushes an operation to the builder and records a trace if SP1_DEBUG.
     pub fn trace_push(&mut self, op: DslIr<FC>) {
         self.inner.get_mut().operations.trace_push(op);
     }
