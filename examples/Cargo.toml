@@ -1,0 +1,13 @@
+[workspace]
+members = ["tendermint/*", "fibonacci/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+keywords = ["zkvm", "plonky3", "stark", "FRI"]
+categories = ["cryptography"]
+repository = "https://github.com/brevis-network/brevis-vm"
+
+# [workspace.dependencies]

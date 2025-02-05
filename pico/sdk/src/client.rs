@@ -1,4 +1,4 @@
-use std::{path::PathBuf, u8};
+use std::{cell::RefCell, path::PathBuf, rc::Rc, u8};
 
 use anyhow::{Error, Ok};
 use log::info;
@@ -11,7 +11,7 @@ use pico_vm::{
             bb_bn254_poseidon2::BabyBearBn254Poseidon2, bb_poseidon2::BabyBearPoseidon2,
         },
     },
-    emulator::riscv::stdin::EmulatorStdin,
+    emulator::riscv::stdin::{EmulatorStdin, EmulatorStdinBuilder},
     instances::{
         compiler_v2::onchain_circuit::{
             gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin, utils::build_gnark_config,
@@ -26,12 +26,12 @@ use pico_vm::{
 };
 
 pub struct SDKProverClient {
-    inputs: Vec<u8>,
     riscv: RiscvProver<BabyBearPoseidon2, Program>,
     convert: ConvertProver<BabyBearPoseidon2, BabyBearPoseidon2>,
     combine: CombineProver<BabyBearPoseidon2, BabyBearPoseidon2>,
     compress: CompressProver<BabyBearPoseidon2, BabyBearPoseidon2>,
     embed: EmbedProver<BabyBearPoseidon2, BabyBearBn254Poseidon2, Vec<u8>>,
+    stdin_builder: Rc<RefCell<EmulatorStdinBuilder<Vec<u8>>>>,
 }
 
 impl SDKProverClient {
@@ -43,21 +43,22 @@ impl SDKProverClient {
         let compress = CompressProver::new_with_prev(&combine, Default::default(), None);
         let embed =
             EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, Default::default(), None);
+        let stdin_builder = Rc::new(RefCell::new(
+            EmulatorStdin::<Program, Vec<u8>>::new_builder(),
+        ));
 
         Self {
-            inputs: inputs.to_vec(),
             riscv,
             convert,
             combine,
             compress,
             embed,
+            stdin_builder,
         }
     }
 
-    fn get_stdin(inputs: &[u8]) -> EmulatorStdin<Program, Vec<u8>> {
-        let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder();
-        stdin_builder.write_slice(inputs);
-        stdin_builder.finalize()
+    pub fn get_stdin_builder(&self) -> Rc<RefCell<EmulatorStdinBuilder<Vec<u8>>>> {
+        Rc::clone(&self.stdin_builder)
     }
 
     /// prove and serialize embed proof, which provided to next step gnark verifier.
@@ -72,7 +73,7 @@ impl SDKProverClient {
         ),
         Error,
     > {
-        let stdin: EmulatorStdin<Program, Vec<u8>> = Self::get_stdin(&self.inputs);
+        let stdin = self.stdin_builder.borrow().clone().finalize();
         let riscv_proof = self.riscv.prove(stdin);
         if !self.riscv.verify(&riscv_proof.clone()) {
             return Err(Error::msg("verify riscv proof failed"));
@@ -109,8 +110,9 @@ impl SDKProverClient {
 
     /// prove and verify riscv program. default not include convert, combine, compress, embed
     pub fn prove_fast(&self) -> Result<MetaProof<BabyBearPoseidon2>, Error> {
-        let stdin: EmulatorStdin<Program, Vec<u8>> = Self::get_stdin(&self.inputs);
-        let proof = self.riscv.prove(stdin.clone());
+        let stdin = self.stdin_builder.borrow().clone().finalize();
+        println!("stdin length: {}", stdin.inputs.len());
+        let proof = self.riscv.prove(stdin);
         info!("riscv_prover prove success");
         if !self.riscv.verify(&proof) {
             return Err(Error::msg("riscv_prover verify failed"));

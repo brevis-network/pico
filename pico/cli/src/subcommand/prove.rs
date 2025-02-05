@@ -104,11 +104,15 @@ impl ProveCmd {
         let bytes = Self::get_input_bytes(&self.input)?;
         debug!("input data: {:0x?}", bytes);
 
+        let prover_client = SDKProverClient::new(&elf);
+
         if self.fast {
             env::set_var("FRI_QUERIES", "1");
             info!("proving in fast mode.");
-            let prover_client = SDKProverClient::new(&elf, &bytes);
-
+            prover_client
+                .get_stdin_builder()
+                .borrow_mut()
+                .write_slice(&bytes);
             prover_client.prove_fast()?;
             return Ok(());
         }
@@ -148,8 +152,12 @@ impl ProveCmd {
             }
         };
 
-        let (riscv_proof, embed_proof) =
-            SDKProverClient::new(&elf, &bytes).prove(gnark_dir.clone())?;
+        prover_client
+            .get_stdin_builder()
+            .borrow_mut()
+            .write_slice(&bytes);
+        let (riscv_proof, embed_proof) = prover_client.prove(gnark_dir.clone())?;
+
         let pv_stream = riscv_proof.pv_stream;
 
         if let Some(pv_stream) = pv_stream {
