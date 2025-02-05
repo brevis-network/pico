@@ -136,12 +136,10 @@ impl<E: EdwardsParameters> AffinePoint<EdwardsCurve<E>> {
 
 #[cfg(test)]
 mod tests {
-
-    use num::bigint::RandBigInt;
-    use rand::thread_rng;
-
     use super::*;
     use crate::chips::gadgets::curves::edwards::ed25519::{Ed25519, Ed25519Parameters};
+    use num::bigint::RandBigInt;
+    use rand::thread_rng;
 
     #[test]
     fn test_bigint_ed_add() {

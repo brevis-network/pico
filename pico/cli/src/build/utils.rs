@@ -92,18 +92,16 @@ pub fn build_contract_inputs<EmbedFC: FieldGenericConfig>(
 
 #[cfg(test)]
 mod test {
-    use std::{path::PathBuf, str::FromStr};
-
+    use super::build_contract_inputs;
     use anyhow::{Ok, Result};
     use pico_vm::configs::field_config::bb_bn254::BabyBearBn254;
-
-    use super::build_contract_inputs;
+    use std::{path::PathBuf, str::FromStr};
 
     #[test]
     #[ignore]
     fn test_build_contract_inputs() -> Result<()> {
-        let pico_out = PathBuf::from_str("/Users/jie/Downloads/vm-utils-test/pico_out")?;
-        let gnark_dir = PathBuf::from_str("/Users/jie/Downloads/vm-utils-test/gnark")?;
+        let pico_out = PathBuf::from_str("vm-utils-test/pico_out")?;
+        let gnark_dir = PathBuf::from_str("vm-utils-test/gnark")?;
         let path = build_contract_inputs::<BabyBearBn254>(gnark_dir, pico_out)?;
         println!("path: {:?}", path);
         Ok(())

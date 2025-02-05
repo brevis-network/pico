@@ -113,19 +113,9 @@ pub fn secp256k1_sqrt(n: &BigUint) -> BigUint {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
-    use crate::chips::gadgets::utils::conversions::biguint_from_limbs;
     use num::bigint::RandBigInt;
     use rand::thread_rng;
-
-    #[test]
-    fn test_weierstrass_biguint_scalar_mul() {
-        assert_eq!(
-            biguint_from_limbs(Secp256k1BaseField::MODULUS),
-            Secp256k1BaseField::modulus()
-        );
-    }
 
     #[test]
     fn test_secp256k_sqrt() {

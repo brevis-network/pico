@@ -1,4 +1,3 @@
-use p3_baby_bear::BabyBear;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
     compiler::{
@@ -7,7 +6,7 @@ use pico_vm::{
     },
     configs::{
         config::{Challenge, StarkGenericConfig, Val},
-        field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
+        field_config::kb_simple::KoalaBearSimple,
         stark_config::kb_poseidon2::KoalaBearPoseidon2,
     },
     emulator::{opts::EmulatorOpts, recursion::emulator::Runtime, riscv::stdin::EmulatorStdin},
@@ -18,15 +17,13 @@ use pico_vm::{
             shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
             vk_merkle::{
                 builder::{CompressVkVerifierCircuit, EmbedVkVerifierCircuit},
-                HasStaticVkManager, VkMerkleManager,
+                HasStaticVkManager,
             },
         },
         configs::{
-            embed_bb_bn254_poseidon2::StarkConfig as EmbedBBBN254PoseidonConfig,
             embed_kb_bn254_poseidon2::StarkConfig as EmbedKBBN254PoseidonConfig,
-            embed_kb_config::{KoalaBearBn254Poseidon2, StarkConfig as EmbedKBSC},
+            embed_kb_config::StarkConfig as EmbedKBSC,
             recur_kb_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
-            riscv_config::StarkConfig as RiscvBBSC,
             riscv_kb_poseidon2::StarkConfig as RiscvKBSC,
         },
         machine::{

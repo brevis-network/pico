@@ -9,14 +9,3 @@ pub const fn shr_carry(input: u8, rotation: u8) -> (u8, u8) {
         (input, 0u8)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Tests the `shr_carry` function.
-    #[test]
-    fn test_shr_carry() {
-        println!("{:?}", shr_carry(0, 2));
-    }
-}

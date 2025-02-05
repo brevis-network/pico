@@ -858,7 +858,7 @@ impl RiscvEmulator {
     }
 }
 
-#[allow(unused_imports)]
+#[cfg(test)]
 mod tests {
     use super::{Program, RiscvEmulator};
     use crate::{
@@ -876,18 +876,12 @@ mod tests {
     const KECCAK_ELF: &[u8] =
         include_bytes!("../../../compiler/test_data/riscv32im-pico-keccak-elf");
 
-    #[must_use]
-    #[allow(clippy::unreadable_literal)]
-    #[allow(dead_code)]
     pub fn simple_fibo_program() -> Arc<Program> {
         let compiler = Compiler::new(SourceType::RiscV, FIBONACCI_ELF);
 
         compiler.compile()
     }
 
-    #[must_use]
-    #[allow(clippy::unreadable_literal)]
-    #[allow(dead_code)]
     pub fn simple_keccak_program() -> Arc<Program> {
         let compiler = Compiler::new(SourceType::RiscV, KECCAK_ELF);
 
@@ -901,11 +895,9 @@ mod tests {
         _assert_send::<RiscvEmulator>();
     }
 
-    #[allow(dead_code)]
     const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 836789u32;
 
     #[test]
-    #[allow(clippy::unreadable_literal)]
     fn test_simple_fib() {
         // just run a simple elf file in the compiler folder(test_data)
         let program = simple_fibo_program();
@@ -917,7 +909,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::unreadable_literal)]
     fn test_simple_keccak() {
         let program = simple_keccak_program();
         let n = "a"; // do keccak(b"abcdefg")

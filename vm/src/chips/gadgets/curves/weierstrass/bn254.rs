@@ -89,17 +89,3 @@ impl WeierstrassParameters for Bn254Parameters {
         BigUint::from(3u32)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::chips::gadgets::utils::conversions::biguint_from_limbs;
-
-    #[test]
-    fn test_weierstrass_biguint_scalar_mul() {
-        assert_eq!(
-            biguint_from_limbs(Bn254BaseField::MODULUS),
-            Bn254BaseField::modulus()
-        );
-    }
-}

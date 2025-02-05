@@ -149,7 +149,6 @@ pub fn decompress(compressed_point: &CompressedEdwardsY) -> Option<AffinePoint<E
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use anyhow::Ok;
     use num::traits::ToBytes;

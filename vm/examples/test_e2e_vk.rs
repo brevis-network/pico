@@ -17,12 +17,12 @@ use pico_vm::{
             shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
             vk_merkle::{
                 builder::{CompressVkVerifierCircuit, EmbedVkVerifierCircuit},
-                HasStaticVkManager, VkMerkleManager, VK_MANAGER_BB,
+                HasStaticVkManager,
             },
         },
         configs::{
             embed_bb_bn254_poseidon2::StarkConfig as EmbedBBBN254PoseidonConfig,
-            embed_config::{BabyBearBn254Poseidon2, StarkConfig as EmbedSC},
+            embed_config::StarkConfig as EmbedSC,
             recur_config::{FieldConfig as RecursionFC, StarkConfig as RecursionSC},
             riscv_config::StarkConfig as RiscvBBSC,
         },
