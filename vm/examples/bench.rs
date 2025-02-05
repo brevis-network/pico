@@ -17,7 +17,6 @@ use pico_vm::{
         configs::{
             riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
         },
-        machine::combine_vk::CombineVkMachine,
     },
     machine::logger::setup_logger,
     proverchain::{
