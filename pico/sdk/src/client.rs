@@ -35,7 +35,7 @@ pub struct SDKProverClient {
 }
 
 impl SDKProverClient {
-    pub fn new(elf: &[u8], inputs: &[u8]) -> SDKProverClient {
+    pub fn new(elf: &[u8]) -> SDKProverClient {
         let riscv =
             RiscvProver::new_initial_prover((RiscvBBSC::new(), elf), Default::default(), None);
         let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);

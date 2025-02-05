@@ -140,6 +140,11 @@ impl NewCmd {
             .output()
             .context("Failed to rename branch to main")?;
 
+        // Add submodule only if the template is EVM.
+        if matches!(self.template, TemplateVariant::Evm) {
+            self.add_submodule(root)?;
+        }
+
         // Add all files to the new repository.
         Command::new("git")
             .arg("add")
@@ -188,6 +193,55 @@ impl NewCmd {
         // Write the modified content back to the file.
         fs::write(file_path, new_content)
             .with_context(|| format!("Failed to write to file: {}", file_path.display()))?;
+
+        Ok(())
+    }
+
+    /// Adds the Git submodule for `forge-std` at the specified path if the template is EVM.
+    fn add_submodule(&self, root: &Path) -> Result<()> {
+        println!(
+            "     \x1b[1m{}\x1b[0m Adding Git submodule",
+            Paint::blue("Git Submodule")
+        );
+
+        // Add the submodule for `forge-std`.
+        Command::new("git")
+            .arg("submodule")
+            .arg("add")
+            .arg("https://github.com/foundry-rs/forge-std")
+            .arg("contracts/lib/forge-std")
+            .current_dir(root)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .output()
+            .context("Failed to add submodule")?;
+
+        println!(
+            "     \x1b[1m{}\x1b[0m Checking out v1.9.6 for submodule",
+            Paint::blue("Git Submodule")
+        );
+
+        // Checkout the specific version (v1.9.6) for the submodule.
+        Command::new("git")
+            .arg("checkout")
+            .arg("v1.9.6")
+            .current_dir(root.join("contracts/lib/forge-std"))
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .output()
+            .context("Failed to checkout v1.9.6 for submodule")?;
+
+        // // Initialize and update the submodule.
+        // Command::new("git")
+        //     .arg("submodule")
+        //     .arg("update")
+        //     .arg("--init")
+        //     .arg("--recursive")
+        //     .current_dir(root)
+        //     .stdout(Stdio::inherit())
+        //     .stderr(Stdio::inherit())
+        //     .output()
+        //     .context("Failed to update submodule")?;
 
         Ok(())
     }
