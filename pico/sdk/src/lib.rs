@@ -13,7 +13,7 @@ pub mod heap;
 pub mod io;
 #[cfg(all(target_os = "zkvm", feature = "libm"))]
 mod libm;
-pub mod poseidon_hash;
+pub mod poseidon2_hash;
 pub mod riscv_ecalls;
 
 #[cfg(all(target_os = "zkvm", feature = "libm"))]
@@ -31,10 +31,15 @@ mod zkvm {
     #[allow(static_mut_refs)]
     pub static mut PUBLIC_VALUES_HASHER: Option<Sha256> = None;
 
+    #[allow(static_mut_refs)]
+    pub static mut COPROCESSOR_OUTPUT_VALUES_HASHER: Option<Sha256> = None;
+
     #[no_mangle]
     unsafe extern "C" fn __start() {
         {
             PUBLIC_VALUES_HASHER = Some(Sha256::new());
+
+            COPROCESSOR_OUTPUT_VALUES_HASHER = Some(Sha256::new());
 
             extern "C" {
                 fn main();

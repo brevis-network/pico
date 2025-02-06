@@ -13,6 +13,7 @@ pub extern "C" fn syscall_write(fd: u32, write_buf: *const u8, nbytes: usize) {
     cfg_if::cfg_if! {
         if #[cfg(target_os = "zkvm")] {
             const FD_PUBLIC_VALUES: u32 = 3;
+            const FD_COPROCESSOR_OUTPUTS: u32 = 9;
             unsafe {
                 asm!(
                     "ecall",
@@ -30,6 +31,13 @@ pub extern "C" fn syscall_write(fd: u32, write_buf: *const u8, nbytes: usize) {
                 let pi_slice: &[u8] = unsafe { core::slice::from_raw_parts(write_buf, nbytes) };
                 #[allow(static_mut_refs)]
                 unsafe { zkvm::PUBLIC_VALUES_HASHER.as_mut().unwrap().update(pi_slice) };
+            }
+
+            #[cfg(feature = "coprocessor")]
+            if fd == FD_COPROCESSOR_OUTPUTS  { // outputs to coprocessor
+                let output_slice: &[u8] = unsafe { core::slice::from_raw_parts(write_buf, nbytes) };
+                #[allow(static_mut_refs)]
+                unsafe { zkvm::COPROCESSOR_OUTPUT_VALUES_HASHER.as_mut().unwrap().update(output_slice) };
             }
         } else {
             unreachable!()

@@ -14,6 +14,37 @@ cfg_if::cfg_if! {
 pub extern "C" fn syscall_halt(exit_code: u8) -> ! {
     #[cfg(target_os = "zkvm")]
     unsafe {
+        #[cfg(feature = "coprocessor")]
+        {
+            // Commit the coprocessor output values to the public values stream.
+            let coprocessor_output_digest_bytes = core::mem::take(&mut *core::ptr::addr_of_mut!(
+                zkvm::COPROCESSOR_OUTPUT_VALUES_HASHER
+            ))
+            .unwrap()
+            .finalize();
+            println!(
+                "coprocessor_output_digest_bytes: {:?}",
+                coprocessor_output_digest_bytes
+            );
+
+            // write the coprocessor output digest to the public values stream fd
+            for chunk in coprocessor_output_digest_bytes.chunks_exact(4) {
+                let word = chunk.to_vec();
+                asm!(
+                    "ecall",
+                    in("t0") crate::riscv_ecalls::WRITE,
+                    in("a0") 3,
+                    in("a1") word.as_ptr(),
+                    in("a2") 4,
+                );
+            }
+
+            // append the coprocessor output digest to the public values hasher
+            zkvm::PUBLIC_VALUES_HASHER
+                .as_mut()
+                .unwrap()
+                .update(&coprocessor_output_digest_bytes);
+        }
         // When we halt, we retrieve the public values finalized digest.  This is the hash of all
         // the bytes written to the public values fd.
         let pv_digest_bytes =

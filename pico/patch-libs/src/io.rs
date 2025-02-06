@@ -21,6 +21,9 @@ pub const FD_ECRECOVER_HOOK_2: u32 = 7;
 /// The file descriptor through which to access `hook_ed_decompress`.
 pub const FD_EDDECOMPRESS: u32 = 8;
 
+/// The file descriptor for brevis coprocessor outputs.
+pub const FD_COPROCESSOR_OUTPUTS: u32 = 9;
+
 /// A writer that writes to a file descriptor inside the zkVM.
 pub struct SyscallWriter {
     pub fd: u32,
