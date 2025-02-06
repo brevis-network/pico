@@ -846,22 +846,38 @@ where
                 riscv_poseidon2_height: vec![Some(15)],
                 is_potentially_maximal: true,
             },
-            // TODO: divide DATAPAR
-            // maximal riscv shape
+            // coprocessor integration
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
-                lt_height: vec![Some(22)],
+                add_sub_height: vec![Some(19)],
+                lt_height: vec![Some(19), Some(20)],
+                bitwise_height: vec![Some(17)],
+                shift_right_height: vec![Some(16)],
+                shift_left_height: vec![Some(16)],
+                syscall_riscv_height: vec![Some(14)],
+                memory_local_height: vec![Some(19)],
+                mul_height: vec![Some(14)],
+                divrem_height: vec![Some(10)],
+                memory_read_write_height: vec![Some(22)],
+                global_height: vec![Some(21), Some(22)],
+                riscv_poseidon2_height: vec![Some(19), Some(20)],
+                is_potentially_maximal: true,
+            },
+            // maximal riscv shape (22 divide by DATAPAR)
+            RiscvShapeSpec {
+                cpu_height: vec![Some(22)],
+                add_sub_height: vec![Some(19)],
+                lt_height: vec![Some(21)],
                 bitwise_height: vec![Some(22)],
-                shift_right_height: vec![Some(22)],
-                shift_left_height: vec![Some(22)],
+                shift_right_height: vec![Some(21)],
+                shift_left_height: vec![Some(20)],
                 syscall_riscv_height: vec![Some(20)],
-                memory_local_height: vec![Some(22)],
-                mul_height: vec![Some(22)],
-                divrem_height: vec![Some(22)],
+                memory_local_height: vec![Some(20)],
+                mul_height: vec![Some(21)],
+                divrem_height: vec![Some(21)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
-                riscv_poseidon2_height: vec![Some(21)],
+                riscv_poseidon2_height: vec![Some(20)],
                 is_potentially_maximal: true,
             },
             // RiscvShapeSpec {
@@ -1206,22 +1222,21 @@ where
         ]);
 
         let mut riscv_shapes = [
-            // TODO: divide DATAPAR
-            // maximal riscv shape
+            // maximal riscv shape (22 divide by DATAPAR)
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
-                lt_height: vec![Some(22)],
+                add_sub_height: vec![Some(19)],
+                lt_height: vec![Some(21)],
                 bitwise_height: vec![Some(22)],
-                shift_right_height: vec![Some(22)],
-                shift_left_height: vec![Some(22)],
+                shift_right_height: vec![Some(21)],
+                shift_left_height: vec![Some(20)],
                 syscall_riscv_height: vec![Some(20)],
-                memory_local_height: vec![Some(22)],
-                mul_height: vec![Some(22)],
-                divrem_height: vec![Some(22)],
+                memory_local_height: vec![Some(20)],
+                mul_height: vec![Some(21)],
+                divrem_height: vec![Some(21)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
-                riscv_poseidon2_height: vec![Some(21)],
+                riscv_poseidon2_height: vec![Some(20)],
                 is_potentially_maximal: true,
             },
         ];
@@ -1354,8 +1369,7 @@ where
         ]);
 
         let mut riscv_shapes = [
-            // TODO: divide DATAPAR
-            // maximal riscv shape
+            // test riscv shape
             RiscvShapeSpec {
                 cpu_height: vec![Some(16)],
                 add_sub_height: vec![Some(16)],

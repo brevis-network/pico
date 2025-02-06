@@ -31,6 +31,23 @@ where
     SC: StarkGenericConfig + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZE]>,
     Val<SC>: Ord,
 {
+    /// Initialize the VkMerkleManager
+    pub fn new_from_bytes(file_content: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        // Deserialize the vk_map from the byte slice
+        let allowed_vk_map: BTreeMap<[Val<SC>; DIGEST_SIZE], usize> =
+            bincode::deserialize(file_content)?;
+
+        // Generate Merkle root and tree from the allowed_vk_map
+        let (merkle_root, merkle_tree) =
+            MerkleTree::commit(allowed_vk_map.keys().copied().collect());
+
+        Ok(Self {
+            allowed_vk_map,
+            merkle_root,
+            merkle_tree,
+        })
+    }
+
     /// Initialize the VkMerkleManager from a file
     pub fn new_from_file(file_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         // Deserialize the vk_map from the file
@@ -92,16 +109,16 @@ where
 }
 
 pub static VK_MANAGER_BB: Lazy<VkMerkleManager<BabyBearPoseidon2>> = Lazy::new(|| {
-    let file_path = "vk_map_bb.bin";
-    println!("Initializing global BabyBear VK_MANAGER from {file_path}");
-    VkMerkleManager::<BabyBearPoseidon2>::new_from_file(file_path)
+    let file_content = include_bytes!("../../../../../vk_map_bb.bin");
+    println!("Initializing global BabyBear VK_MANAGER");
+    VkMerkleManager::<BabyBearPoseidon2>::new_from_bytes(file_content)
         .expect("Failed to load BabyBear VkMerkleManager")
 });
 
 pub static VK_MANAGER_KB: Lazy<VkMerkleManager<KoalaBearPoseidon2>> = Lazy::new(|| {
-    let file_path = "vk_map_kb.bin";
-    println!("Initializing global KoalaBear VK_MANAGER from {file_path}");
-    VkMerkleManager::<KoalaBearPoseidon2>::new_from_file(file_path)
+    let file_content = include_bytes!("../../../../../vk_map_kb.bin");
+    println!("Initializing global KoalaBear VK_MANAGER");
+    VkMerkleManager::<KoalaBearPoseidon2>::new_from_bytes(file_content)
         .expect("Failed to load KoalaBear VkMerkleManager")
 });
 

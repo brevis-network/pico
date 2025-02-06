@@ -1,5 +1,6 @@
 use std::{cell::RefCell, path::PathBuf, rc::Rc, u8};
 
+use crate::client_vk::ProverVkClient;
 use anyhow::{Error, Ok};
 use log::info;
 use pico_vm::{
@@ -25,7 +26,52 @@ use pico_vm::{
     },
 };
 
-pub struct SDKProverClient {
+pub enum SDKProverClient {
+    Fast(ProverClient),
+    ShapeConfig(ProverVkClient),
+}
+
+impl SDKProverClient {
+    pub fn new(elf: &[u8], vk_verification: bool) -> Self {
+        if vk_verification {
+            SDKProverClient::ShapeConfig(ProverVkClient::new(elf))
+        } else {
+            SDKProverClient::Fast(ProverClient::new(elf))
+        }
+    }
+
+    pub fn prove(
+        &self,
+        output: PathBuf,
+    ) -> Result<
+        (
+            MetaProof<BabyBearPoseidon2>,
+            MetaProof<BabyBearBn254Poseidon2>,
+        ),
+        Error,
+    > {
+        match self {
+            SDKProverClient::Fast(client) => client.prove(output),
+            SDKProverClient::ShapeConfig(client) => client.prove(output),
+        }
+    }
+
+    pub fn prove_fast(&self) -> Result<MetaProof<BabyBearPoseidon2>, Error> {
+        match self {
+            SDKProverClient::Fast(client) => client.prove_fast(),
+            SDKProverClient::ShapeConfig(client) => client.prove_fast(),
+        }
+    }
+
+    pub fn get_stdin_builder(&self) -> Rc<RefCell<EmulatorStdinBuilder<Vec<u8>>>> {
+        match self {
+            SDKProverClient::Fast(client) => client.get_stdin_builder(),
+            SDKProverClient::ShapeConfig(client) => client.get_stdin_builder(),
+        }
+    }
+}
+
+pub struct ProverClient {
     riscv: RiscvProver<BabyBearPoseidon2, Program>,
     convert: ConvertProver<BabyBearPoseidon2, BabyBearPoseidon2>,
     combine: CombineProver<BabyBearPoseidon2, BabyBearPoseidon2>,
@@ -34,8 +80,8 @@ pub struct SDKProverClient {
     stdin_builder: Rc<RefCell<EmulatorStdinBuilder<Vec<u8>>>>,
 }
 
-impl SDKProverClient {
-    pub fn new(elf: &[u8]) -> SDKProverClient {
+impl ProverClient {
+    pub fn new(elf: &[u8]) -> ProverClient {
         let riscv =
             RiscvProver::new_initial_prover((RiscvBBSC::new(), elf), Default::default(), None);
         let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
