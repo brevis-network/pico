@@ -229,6 +229,7 @@ pub(crate) fn precompile_syscall_code(chip_name: &str) -> SyscallCode {
         "Bls381FpOp" => SyscallCode::BLS12381_FP_ADD,
         "Bls381Fp2Mul" => SyscallCode::BLS12381_FP2_MUL,
         "Bls381Fp2AddSub" => SyscallCode::BLS12381_FP2_ADD,
+        "Secp256k1FpOp" => SyscallCode::SECP256K1_FP_ADD,
         "Poseidon2Permute" => SyscallCode::POSEIDON2_PERMUTE,
         _ => {
             unreachable!("precompile {} not supported yet", chip_name);
