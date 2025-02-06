@@ -29,7 +29,7 @@ fn main() {
     let elf = load_elf("./elf/riscv32im-pico-zkvm-elf");
     println!("elf length: {}", elf.len());
 
-    let client = SDKProverClient::new(&elf);
+    let client = SDKProverClient::new(&elf, false);
     let stdin_builder = client.get_stdin_builder(); // Shared instance
 
     // Load light blocks from the `files` subdirectory
