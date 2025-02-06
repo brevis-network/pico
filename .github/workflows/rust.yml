@@ -17,7 +17,6 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - run: sudo apt-get update && sudo apt-get install -yq pkg-config libssl-dev
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
@@ -29,6 +28,37 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+
+  lint:
+    if: true
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure git for private repo
+        run: |
+          git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly-2024-11-27
+          override: true
+      - run: rustup component add clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --workspace --lib --examples --tests --benches --all-features --locked
 
   test:
     if: true

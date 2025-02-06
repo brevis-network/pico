@@ -1,4 +1,4 @@
-use std::{cell::RefCell, path::PathBuf, rc::Rc, u8};
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use crate::client_vk::ProverVkClient;
 use anyhow::{Error, Ok};
@@ -86,9 +86,8 @@ impl ProverClient {
             RiscvProver::new_initial_prover((RiscvBBSC::new(), elf), Default::default(), None);
         let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
         let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
-        let compress = CompressProver::new_with_prev(&combine, Default::default(), None);
-        let embed =
-            EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, Default::default(), None);
+        let compress = CompressProver::new_with_prev(&combine, (), None);
+        let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
         let stdin_builder = Rc::new(RefCell::new(
             EmulatorStdin::<Program, Vec<u8>>::new_builder(),
         ));

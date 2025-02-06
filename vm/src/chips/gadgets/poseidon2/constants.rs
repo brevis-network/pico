@@ -13,10 +13,10 @@ pub struct RoundConstants<
     pub(crate) ending_full_round_constants: [[F; PERMUTATION_WIDTH]; FIELD_HALF_FULL_ROUNDS],
 }
 
-impl<F: Field, const FIELD_HALF_FULL_ROUNDS: usize, const FIELD_PARTIAL_ROUNDS: usize>
-    RoundConstants<F, FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS>
+impl<F: Field, const FIELD_HALF_FULL_ROUNDS: usize, const FIELD_PARTIAL_ROUNDS: usize> Default
+    for RoundConstants<F, FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS>
 {
-    pub fn new() -> Self {
+    fn default() -> Self {
         let mut beginning_full_round_constants =
             [[F::ZERO; PERMUTATION_WIDTH]; FIELD_HALF_FULL_ROUNDS];
         let mut partial_round_constants = [F::ZERO; FIELD_PARTIAL_ROUNDS];

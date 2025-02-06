@@ -67,7 +67,7 @@ impl<
     >
 {
     fn default() -> Self {
-        let constants = RoundConstants::new();
+        let constants = RoundConstants::default();
         Self {
             constants,
             _phantom: PhantomData,

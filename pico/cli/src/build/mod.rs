@@ -7,6 +7,7 @@ use std::{
     thread,
 };
 
+#[allow(clippy::module_inception)]
 pub mod build;
 pub mod utils;
 

@@ -23,6 +23,7 @@ use crate::{
 
 fn parse_input(s: &str) -> Result<Input, String> {
     // First try to parse as hex if it starts with 0x
+    #[allow(clippy::manual_strip)]
     if s.starts_with("0x") {
         debug!("Parsing input as hex: {}", s);
         return hex::decode(&s[2..])
@@ -234,4 +235,6 @@ fn execute_command(mut command: Command) {
         eprintln!("{} {}", msg, line.unwrap());
     });
     stdout_handle.join().unwrap();
+
+    let _ = child.wait().expect("failed to wait for child process");
 }

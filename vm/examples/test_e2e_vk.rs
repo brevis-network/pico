@@ -231,7 +231,7 @@ fn main() {
             convert_machine.base_machine(),
             COMBINE_SIZE,
             convert_proof.proofs().len() <= COMBINE_SIZE,
-            &vk_manager,
+            vk_manager,
             &recursion_shape_config,
         );
 
@@ -373,7 +373,7 @@ fn main() {
     let embed_vk_program = EmbedVkVerifierCircuit::<RecursionFC, RecursionSC>::build(
         compress_machine.base_machine(),
         &embed_vk_stdin,
-        &vk_manager,
+        vk_manager,
     );
 
     embed_vk_program.print_stats();

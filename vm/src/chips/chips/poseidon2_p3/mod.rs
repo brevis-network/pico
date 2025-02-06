@@ -55,8 +55,8 @@ impl<
         const FIELD_HALF_FULL_ROUNDS: usize,
         const FIELD_PARTIAL_ROUNDS: usize,
         const FIELD_SBOX_REGISTERS: usize,
-    >
-    Poseidon2ChipP3<
+    > Default
+    for Poseidon2ChipP3<
         F,
         LinearLayers,
         FIELD_HALF_FULL_ROUNDS,
@@ -64,8 +64,8 @@ impl<
         FIELD_SBOX_REGISTERS,
     >
 {
-    pub fn default() -> Self {
-        let constants = RoundConstants::new();
+    fn default() -> Self {
+        let constants = RoundConstants::default();
         Self {
             constants,
             _phantom: PhantomData,

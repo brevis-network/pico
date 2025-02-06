@@ -57,7 +57,7 @@ pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<P
             let output_dir = target_dir.parent().unwrap().join(&args.output_directory);
             println!("Copying binary file to {:?}", output_dir);
 
-            copy_elf_file(&args, binary_file, output_dir)
+            copy_elf_file(args, binary_file, output_dir)
         }
         Err(Some(code)) => Err(Error::msg(format!(
             "Cargo build failed with code: {}",

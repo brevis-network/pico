@@ -107,7 +107,7 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
     } else if args.elf == "reth-194" {
         (elf, stdin) = load_program(RETH_194_PROGRAM);
     } else if args.elf == "fibo-bench" {
-        let elf_file = format!("./vm/src/compiler/test_data/bench/fib");
+        let elf_file = "./vm/src/compiler/test_data/bench/fib";
         let bytes = std::fs::read(elf_file).expect("failed to read elf");
         elf = bytes.leak();
         info!("Test fibonacci in bench, fixed n = 300k");

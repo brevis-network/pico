@@ -193,7 +193,7 @@ where
                             FIELD_SBOX_REGISTERS,
                         >,
                     )
-                    .for_each(|row| row.copy_from_slice(&dummy))
+                    .for_each(|row| row.copy_from_slice(dummy))
             },
         );
 

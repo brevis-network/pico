@@ -184,6 +184,7 @@ define_vk_digest_from_shape!(
     KoalaBearPoseidon2
 );
 
+#[allow(dead_code)]
 fn load_vk_map_bb(filename: &str) -> BTreeMap<[BabyBear; DIGEST_SIZE], usize> {
     if let Ok(mut file) = File::open(filename) {
         if let Ok(vk_map) =
@@ -204,6 +205,7 @@ fn save_vk_map_bb(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
 }
 
+#[allow(dead_code)]
 fn load_vk_map_kb(filename: &str) -> BTreeMap<[KoalaBear; DIGEST_SIZE], usize> {
     if let Ok(mut file) = File::open(filename) {
         if let Ok(vk_map) =

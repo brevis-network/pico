@@ -251,9 +251,7 @@ fn filter_shapes<F: FieldSpecificPoseidon2Config>(
         let poseidon2_height = shape
             .chip_information
             .iter()
-            .find(|(name, _)| {
-                *name == <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string()
-            })
+            .find(|(name, _)| name == <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name())
             .map(|(_, height)| *height);
 
         match (global_height, poseidon2_height) {
@@ -460,15 +458,13 @@ where
                                 shape.inner[chip_name],
                                 height
                             );
-                        } else {
-                            if *height != 0 {
-                                warn!(
-                                    "Unexpected: Chip {} not found in shape, height: {}, log size: {}",
-                                    chip_name,
-                                    height,
-                                    log2_ceil_usize(*height)
-                                );
-                            }
+                        } else if *height != 0 {
+                            warn!(
+                                "Unexpected: Chip {} not found in shape, height: {}, log size: {}",
+                                chip_name,
+                                height,
+                                log2_ceil_usize(*height)
+                            );
                         }
                     }
 
@@ -592,7 +588,7 @@ where
             .rev()
             .map(|event_rows| {
                 let num_local_mem_events =
-                    ((1 << allowed_log_height) * mem_events_per_row).div_ceil(event_rows) as usize;
+                    ((1 << allowed_log_height) * mem_events_per_row).div_ceil(event_rows);
                 let num_global_events = 2 * num_local_mem_events
                     + ((1 << allowed_log_height) as usize)
                         .div_ceil(precompile_rows_per_event(&chip_name));
@@ -605,8 +601,7 @@ where
                             .div_ceil(precompile_rows_per_event(&chip_name))
                             .next_power_of_two()
                             .ilog2() as usize)
-                            .max(4)
-                            .min(23),
+                            .clamp(4, 23),
                     ),
                     (
                         MemoryLocalChip::<F>::default().name(),
@@ -614,14 +609,11 @@ where
                             .div_ceil(LOCAL_MEMORY_DATAPAR)
                             .next_power_of_two()
                             .ilog2() as usize)
-                            .max(4)
-                            .min(23),
+                            .clamp(4, 23),
                     ),
                     (
                         RiscvChipType::<F>::Global(GlobalChip::default()).name(),
-                        (num_global_events.next_power_of_two().ilog2() as usize)
-                            .max(4)
-                            .min(23),
+                        (num_global_events.next_power_of_two().ilog2() as usize).clamp(4, 23),
                     ),
                     (
                         <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
@@ -629,8 +621,7 @@ where
                             .div_ceil(RISCV_POSEIDON2_DATAPAR)
                             .next_power_of_two()
                             .ilog2() as usize)
-                            .max(4)
-                            .min(21),
+                            .clamp(4, 21),
                     ),
                 ]
             })
