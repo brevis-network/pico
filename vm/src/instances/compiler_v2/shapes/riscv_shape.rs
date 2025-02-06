@@ -754,8 +754,8 @@ where
 {
     fn default() -> Self {
         // Preprocessed chip heights.
-        // let program_heights = vec![Some(19)];
-        let program_heights = vec![Some(19), Some(20), Some(21), Some(22)];
+        let program_heights = vec![Some(19), Some(20)];
+        // let program_heights = vec![Some(19), Some(20), Some(21), Some(22)];
 
         let allowed_preprocessed_log_heights = HashMap::from([
             (
@@ -805,16 +805,16 @@ where
             },
             // reth
             RiscvShapeSpec {
-                cpu_height: vec![Some(22)],
+                cpu_height: vec![Some(21), Some(22)],
                 add_sub_height: vec![Some(19)],
                 lt_height: vec![Some(19), Some(20)],
                 bitwise_height: vec![Some(18), Some(19)],
                 shift_right_height: vec![Some(17), Some(18)],
-                shift_left_height: vec![Some(17)],
-                syscall_riscv_height: vec![Some(14), Some(16)],
+                shift_left_height: vec![Some(16), Some(17)],
+                syscall_riscv_height: vec![Some(16)],
                 memory_local_height: vec![Some(16), Some(18), Some(20)],
-                mul_height: vec![Some(15)],
-                divrem_height: vec![Some(6)],
+                mul_height: vec![Some(16)],
+                divrem_height: vec![Some(10)],
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(19), Some(21)],
                 riscv_poseidon2_height: vec![Some(17), Some(19)],
@@ -868,7 +868,7 @@ where
                 divrem_height: vec![Some(21)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
-                riscv_poseidon2_height: vec![Some(20)],
+                riscv_poseidon2_height: vec![Some(21)],
                 is_potentially_maximal: true,
             },
             // RiscvShapeSpec {
@@ -1227,7 +1227,7 @@ where
                 divrem_height: vec![Some(21)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
-                riscv_poseidon2_height: vec![Some(20)],
+                riscv_poseidon2_height: vec![Some(21)],
                 is_potentially_maximal: true,
             },
         ];
