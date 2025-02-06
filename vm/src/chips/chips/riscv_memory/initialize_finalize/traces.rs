@@ -17,6 +17,7 @@ use crate::{
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+use rayon::prelude::*;
 use std::{array, borrow::BorrowMut};
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
@@ -42,7 +43,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
         };
 
         memory_events.sort_by_key(|event| event.addr);
-        let rows: Vec<[F; NUM_MEMORY_INITIALIZE_FINALIZE_COLS]> = (0..memory_events.len()) // OPT: change this to par_iter
+        let rows: Vec<[F; NUM_MEMORY_INITIALIZE_FINALIZE_COLS]> = (0..memory_events.len())
+            .into_par_iter()
             .map(|i| {
                 let MemoryInitializeFinalizeEvent {
                     addr,
@@ -120,23 +122,28 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
 
         memory_events.sort_by_key(|event| event.addr);
 
-        let events = memory_events.into_iter().map(|event| {
-            let interaction_chunk = if is_receive { event.chunk } else { 0 };
-            let interaction_clk = if is_receive { event.timestamp } else { 0 };
-            GlobalInteractionEvent {
-                message: [
-                    interaction_chunk,
-                    interaction_clk,
-                    event.addr,
-                    event.value & 255,
-                    (event.value >> 8) & 255,
-                    (event.value >> 16) & 255,
-                    (event.value >> 24) & 255,
-                ],
-                is_receive,
-                kind: LookupType::Memory as u8,
-            }
-        });
+        // Convert events in parallel and collect into a Vec
+        let events: Vec<GlobalInteractionEvent> = memory_events
+            .into_par_iter()
+            .map(|event| {
+                let interaction_chunk = if is_receive { event.chunk } else { 0 };
+                let interaction_clk = if is_receive { event.timestamp } else { 0 };
+                GlobalInteractionEvent {
+                    message: [
+                        interaction_chunk,
+                        interaction_clk,
+                        event.addr,
+                        event.value & 255,
+                        (event.value >> 8) & 255,
+                        (event.value >> 16) & 255,
+                        (event.value >> 24) & 255,
+                    ],
+                    is_receive,
+                    kind: LookupType::Memory as u8,
+                }
+            })
+            .collect();
+
         extra.global_lookup_events.extend(events);
     }
 

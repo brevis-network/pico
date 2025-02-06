@@ -16,6 +16,8 @@ use crate::{
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+use p3_maybe_rayon::prelude::ParallelIterator;
+use rayon::iter::IntoParallelRefIterator;
 use std::{borrow::BorrowMut, iter::zip};
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
@@ -31,9 +33,10 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
     }
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        let rows = program
+        // First collect the filtered and mapped items
+        let filtered_items: Vec<_> = program
             .instructions
-            .iter()
+            .par_iter()
             .filter_map(|instruction| match instruction {
                 Instruction::Mem(MemInstr {
                     addrs,
@@ -57,13 +60,16 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
                 }
                 _ => None,
             })
+            .collect();
+
+        // Then process in chunks
+        let rows = filtered_items
             .chunks(CONST_MEM_DATAPAR)
-            .into_iter()
             .map(|row_vs_as| {
                 let mut row = [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS];
                 let cols: &mut MemoryPreprocessedCols<_> = row.as_mut_slice().borrow_mut();
                 for (cell, access) in zip(&mut cols.values_and_accesses, row_vs_as) {
-                    *cell = access;
+                    *cell = *access;
                 }
                 row
             })

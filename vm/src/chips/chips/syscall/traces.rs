@@ -33,8 +33,6 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
         input: &EmulationRecord,
         _output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        let mut rows = Vec::new();
-
         let row_fn = |syscall_event: &SyscallEvent| {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
@@ -48,27 +46,27 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
             row
         };
 
-        match self.chunk_kind {
-            SyscallChunkKind::Riscv => {
-                for event in input.syscall_events.iter() {
-                    let row = row_fn(event);
-                    rows.push(row);
-                }
-            }
-            SyscallChunkKind::Precompile => {
-                for event in input.precompile_events.all_events().map(|(event, _)| event) {
-                    let row = row_fn(event);
-                    rows.push(row);
-                }
-            }
+        let events = match self.chunk_kind {
+            SyscallChunkKind::Riscv => input
+                .syscall_events
+                .par_iter()
+                .map(row_fn)
+                .collect::<Vec<_>>(),
+            SyscallChunkKind::Precompile => input
+                .precompile_events
+                .all_events()
+                .par_bridge()
+                .map(|(event, _)| row_fn(event))
+                .collect::<Vec<_>>(),
         };
 
         // Pad the trace to a power of two depending on the proof shape in `input`.
         let log_rows = input.shape_chip_size(&self.name());
+        let mut rows = events;
         pad_rows_fixed(&mut rows, || [F::ZERO; NUM_SYSCALL_COLS], log_rows);
 
         RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
+            rows.into_par_iter().flatten().collect::<Vec<_>>(),
             NUM_SYSCALL_COLS,
         )
     }

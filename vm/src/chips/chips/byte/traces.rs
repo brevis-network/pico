@@ -11,6 +11,7 @@ use crate::{
 use itertools::Itertools;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 use std::borrow::BorrowMut;
 
 pub const NUM_ROWS: usize = 1 << 16;
@@ -33,20 +34,25 @@ impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
     }
 
     fn generate_main(&self, input: &EmulationRecord, _: &mut EmulationRecord) -> RowMajorMatrix<F> {
-        let mut trace = RowMajorMatrix::new(
-            vec![F::ZERO; NUM_BYTE_MULT_COLS * NUM_ROWS],
-            NUM_BYTE_MULT_COLS,
-        );
+        let mut values = vec![F::ZERO; NUM_BYTE_MULT_COLS * NUM_ROWS];
 
-        for (lookup, mult) in input.byte_lookups.iter() {
-            let row = (((lookup.b as u16) << 8) + lookup.c as u16) as usize;
-            let index = lookup.opcode as usize;
+        // Convert HashMap entries to Vec for parallel iteration
+        let lookups: Vec<_> = input.byte_lookups.iter().collect();
 
-            let cols: &mut ByteMultCols<F> = trace.row_mut(row).borrow_mut();
-            cols.multiplicities[index] += F::from_canonical_usize(*mult);
-        }
+        values
+            .par_chunks_mut(NUM_BYTE_MULT_COLS)
+            .enumerate()
+            .for_each(|(row_idx, row)| {
+                for (lookup, mult) in lookups.iter() {
+                    if row_idx == (((lookup.b as u16) << 8) + lookup.c as u16) as usize {
+                        let cols: &mut ByteMultCols<F> = row.borrow_mut();
+                        let index = lookup.opcode as usize;
+                        cols.multiplicities[index] += F::from_canonical_usize(**mult);
+                    }
+                }
+            });
 
-        trace
+        RowMajorMatrix::new(values, NUM_BYTE_MULT_COLS)
     }
 
     fn is_active(&self, _record: &Self::Record) -> bool {

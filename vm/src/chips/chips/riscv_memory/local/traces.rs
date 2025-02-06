@@ -33,44 +33,36 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         input: &EmulationRecord,
         _output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        // Generate the trace rows for each event.
         let events = input.get_local_mem_events().collect::<Vec<_>>();
         let nb_rows = (events.len() + 3) / 4;
         let log_rows = input.shape_chip_size(&self.name());
         let padded_nb_rows = next_power_of_two(nb_rows, log_rows);
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MEMORY_LOCAL_INIT_COLS);
-        let chunk_size = std::cmp::max(nb_rows / num_cpus::get(), 0) + 1;
 
-        let mut chunks = values[..nb_rows * NUM_MEMORY_LOCAL_INIT_COLS]
-            .chunks_mut(chunk_size * NUM_MEMORY_LOCAL_INIT_COLS)
-            .collect::<Vec<_>>();
+        // Parallelize the main computation using par_chunks_mut
+        values[..nb_rows * NUM_MEMORY_LOCAL_INIT_COLS]
+            .par_chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS)
+            .enumerate()
+            .for_each(|(row_idx, row)| {
+                let base_event_idx = row_idx * LOCAL_MEMORY_DATAPAR;
+                let cols: &mut MemoryLocalCols<F> = row.borrow_mut();
 
-        chunks.par_iter_mut().enumerate().for_each(|(i, rows)| {
-            rows.chunks_mut(NUM_MEMORY_LOCAL_INIT_COLS)
-                .enumerate()
-                .for_each(|(j, row)| {
-                    let idx = (i * chunk_size + j) * LOCAL_MEMORY_DATAPAR;
-
-                    let cols: &mut MemoryLocalCols<F> = row.borrow_mut();
-                    for k in 0..LOCAL_MEMORY_DATAPAR {
-                        let cols = &mut cols.memory_local_entries[k];
-                        if idx + k < events.len() {
-                            let event = &events[idx + k];
-                            cols.addr = F::from_canonical_u32(event.addr);
-                            cols.initial_chunk =
-                                F::from_canonical_u32(event.initial_mem_access.chunk);
-                            cols.final_chunk = F::from_canonical_u32(event.final_mem_access.chunk);
-                            cols.initial_clk =
-                                F::from_canonical_u32(event.initial_mem_access.timestamp);
-                            cols.final_clk =
-                                F::from_canonical_u32(event.final_mem_access.timestamp);
-                            cols.initial_value = event.initial_mem_access.value.into();
-                            cols.final_value = event.final_mem_access.value.into();
-                            cols.is_real = F::ONE;
-                        }
+                for k in 0..LOCAL_MEMORY_DATAPAR {
+                    let cols = &mut cols.memory_local_entries[k];
+                    if base_event_idx + k < events.len() {
+                        let event = &events[base_event_idx + k];
+                        cols.addr = F::from_canonical_u32(event.addr);
+                        cols.initial_chunk = F::from_canonical_u32(event.initial_mem_access.chunk);
+                        cols.final_chunk = F::from_canonical_u32(event.final_mem_access.chunk);
+                        cols.initial_clk =
+                            F::from_canonical_u32(event.initial_mem_access.timestamp);
+                        cols.final_clk = F::from_canonical_u32(event.final_mem_access.timestamp);
+                        cols.initial_value = event.initial_mem_access.value.into();
+                        cols.final_value = event.final_mem_access.value.into();
+                        cols.is_real = F::ONE;
                     }
-                });
-        });
+                }
+            });
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, NUM_MEMORY_LOCAL_INIT_COLS)

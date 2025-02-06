@@ -13,6 +13,7 @@ use crate::{
 use hashbrown::HashMap;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
+use rayon::prelude::*;
 use std::borrow::BorrowMut;
 
 impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
@@ -60,24 +61,27 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        // Generate the trace rows for each event.
+        // Collect instruction counts in parallel using a thread-safe HashMap
+        let instruction_counts: HashMap<u32, usize> = input
+            .cpu_events
+            .par_iter()
+            .fold(HashMap::new, |mut acc, event| {
+                let pc = event.pc;
+                *acc.entry(pc).or_insert(0) += 1;
+                acc
+            })
+            .reduce(HashMap::new, |mut a, b| {
+                b.into_iter().for_each(|(pc, count)| {
+                    *a.entry(pc).or_insert(0) += count;
+                });
+                a
+            });
 
-        // Collect the number of times each instruction is called from the cpu events.
-        // Store it as a map of PC -> count.
-        let mut instruction_counts = HashMap::new();
-        input.cpu_events.iter().for_each(|event| {
-            let pc = event.pc;
-            instruction_counts
-                .entry(pc)
-                .and_modify(|count| *count += 1)
-                .or_insert(1);
-        });
-
-        let rows = input
+        // Generate rows in parallel
+        let rows: Vec<[F; NUM_PROGRAM_MULT_COLS]> = input
             .program
             .instructions
-            .clone()
-            .iter()
+            .par_iter()
             .enumerate()
             .map(|(i, _)| {
                 let pc = input.program.pc_base + (i as u32 * 4);
@@ -87,15 +91,15 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
                     F::from_canonical_usize(*instruction_counts.get(&pc).unwrap_or(&0));
                 row
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        // Convert the trace to a row major matrix.
+        // Convert the trace to a row major matrix
         let mut trace = RowMajorMatrix::new(
             rows.into_iter().flatten().collect::<Vec<_>>(),
             NUM_PROGRAM_MULT_COLS,
         );
 
-        // Pad the trace to a power of two.
+        // Pad the trace to a power of two
         let log_rows = input.shape_chip_size(&self.name());
         pad_to_power_of_two::<NUM_PROGRAM_MULT_COLS, F>(&mut trace.values, log_rows);
 

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, path::PathBuf, rc::Rc, u8};
+use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
 use anyhow::{Error, Ok};
 use log::info;
@@ -26,8 +26,8 @@ use pico_vm::{
     },
     machine::{machine::MachineBehavior, proof::MetaProof},
     proverchain::{
-        CombineProver, CombineVkProver, CompressProver, CompressVkProver, ConvertProver,
-        EmbedProver, EmbedVkProver, InitialProverSetup, MachineProver, ProverChain, RiscvProver,
+        CombineVkProver, CompressVkProver, ConvertProver, EmbedVkProver, InitialProverSetup,
+        MachineProver, ProverChain, RiscvProver,
     },
 };
 
@@ -46,7 +46,7 @@ impl ProverVkClient {
         let recursion_shape_config =
             RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, 3>>::default();
         let riscv = RiscvProver::new_initial_prover(
-            (RiscvBBSC::new(), &elf),
+            (RiscvBBSC::new(), elf),
             Default::default(),
             Some(riscv_shape_config),
         );
@@ -59,9 +59,8 @@ impl ProverVkClient {
             Default::default(),
             Some(recursion_shape_config),
         );
-        let compress = CompressVkProver::new_with_prev(&combine, Default::default(), None);
-        let embed =
-            EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, Default::default(), None);
+        let compress = CompressVkProver::new_with_prev(&combine, (), None);
+        let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
         let stdin_builder = Rc::new(RefCell::new(
             EmulatorStdin::<Program, Vec<u8>>::new_builder(),
         ));

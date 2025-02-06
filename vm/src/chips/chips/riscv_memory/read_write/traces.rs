@@ -32,7 +32,10 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
+use p3_maybe_rayon::prelude::{
+    IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSlice,
+};
+use rayon::slice::ParallelSliceMut;
 use std::{array, borrow::BorrowMut};
 use tracing::debug;
 
@@ -45,11 +48,13 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        let events = input
+        // Parallelize the initial filtering and collection
+        let events: Vec<_> = input
             .cpu_events
-            .iter()
+            .par_iter()
             .filter(|e| e.instruction.is_memory_instruction())
-            .collect_vec();
+            .collect();
+
         let nrows = events.len().div_ceil(MEMORY_RW_DATAPAR);
         let log2_nrows = input.shape_chip_size(&self.name());
         let padded_nrows = match log2_nrows {
@@ -57,12 +62,16 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
             None => next_power_of_two(nrows, None),
         };
 
+        // Pre-allocate with parallel initialization
         let mut values = vec![F::ZERO; padded_nrows * NUM_MEMORY_CHIP_COLS];
 
+        // Calculate actual population length and handle type conversion
         let populate_len = events.len() * NUM_MEMORY_CHIP_VALUE_COLS;
+
+        // Use rayon's parallel slice operations for better chunk handling
         values[..populate_len]
-            .chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
-            .zip_eq(events)
+            .par_chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
+            .zip_eq(events.par_iter())
             .for_each(|(row, event)| {
                 let cols: &mut MemoryChipValueCols<_> = row.borrow_mut();
                 self.event_to_row(event, cols, &mut vec![]);

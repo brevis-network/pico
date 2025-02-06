@@ -105,7 +105,7 @@ impl ProveCmd {
         let bytes = Self::get_input_bytes(&self.input)?;
         debug!("input data: {:0x?}", bytes);
 
-        let vk_verification = if self.fast { false } else { true };
+        let vk_verification = !self.fast;
 
         let prover_client = SDKProverClient::new(&elf, vk_verification);
 

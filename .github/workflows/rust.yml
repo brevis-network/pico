@@ -58,7 +58,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --workspace --lib --examples --tests --benches --all-features --locked
+          args: --workspace --lib --examples --tests --benches --all-features --locked -- -D warnings
 
   test:
     if: true

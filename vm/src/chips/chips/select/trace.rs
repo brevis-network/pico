@@ -36,14 +36,14 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
     }
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        let instructions = program
+        let instructions: Vec<_> = program
             .instructions
-            .iter()
+            .par_iter()
             .filter_map(|instruction| match instruction {
                 Instruction::Select(x) => Some(x),
                 _ => None,
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         let nrows = instructions.len().div_ceil(SELECT_DATAPAR);
         let fixed_log2_nrows = program.fixed_log2_rows(&self.name());
@@ -51,13 +51,16 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
             Some(log2_nrows) => 1 << log2_nrows,
             None => next_power_of_two(nrows, None),
         };
-        let mut values = vec![F::ZERO; padded_nrows * NUM_SELECT_PREPROCESSED_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let mut values: Vec<F> = vec![F::ZERO; padded_nrows * NUM_SELECT_PREPROCESSED_COLS];
+
+        let chunk_size = (instructions.len() / rayon::current_num_threads()).max(1);
         let populate_len = instructions.len() * NUM_SELECT_PREPROCESSED_VALUE_COLS;
+
         values[..populate_len]
             .par_chunks_mut(NUM_SELECT_PREPROCESSED_VALUE_COLS)
             .zip_eq(instructions)
+            .with_min_len(chunk_size)
             .for_each(|(row, instr)| {
                 let SelectInstr {
                     addrs,
@@ -73,7 +76,6 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
                 };
             });
 
-        // Convert the trace to a row major matrix.
         Some(RowMajorMatrix::new(values, NUM_SELECT_PREPROCESSED_COLS))
     }
 
@@ -85,19 +87,21 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
             Some(log2_nrows) => 1 << log2_nrows,
             None => next_power_of_two(nrows, None),
         };
-        let mut values = vec![F::ZERO; padded_nrows * NUM_SELECT_COLS];
 
-        // Generate the trace rows & corresponding records for each chunk of events in parallel.
+        let mut values: Vec<F> = vec![F::ZERO; padded_nrows * NUM_SELECT_COLS];
+
+        let chunk_size = (events.len() / rayon::current_num_threads()).max(1);
         let populate_len = events.len() * NUM_SELECT_VALUE_COLS;
+
         values[..populate_len]
             .par_chunks_mut(NUM_SELECT_VALUE_COLS)
             .zip_eq(events)
+            .with_min_len(chunk_size)
             .for_each(|(row, &vals)| {
                 let cols: &mut SelectValueCols<_> = row.borrow_mut();
                 *cols = SelectValueCols { vals };
             });
 
-        // Convert the trace to a row major matrix.
         RowMajorMatrix::new(values, NUM_SELECT_COLS)
     }
 

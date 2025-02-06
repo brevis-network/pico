@@ -19,7 +19,6 @@ use crate::{
     machine::chip::ChipBehavior,
     primitives::consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR},
 };
-use itertools::Itertools;
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -79,7 +78,7 @@ where
 
         let populate_len = instructions.len() * NUM_PREPROCESSED_POSEIDON2_VALUE_COLS;
         values[..populate_len]
-            .chunks_mut(NUM_PREPROCESSED_POSEIDON2_VALUE_COLS)
+            .par_chunks_mut(NUM_PREPROCESSED_POSEIDON2_VALUE_COLS)
             .zip_eq(instructions)
             .for_each(|(row, instruction)| {
                 // Set the memory columns.
