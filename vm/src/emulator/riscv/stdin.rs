@@ -11,7 +11,7 @@ use crate::{
             Mersenne31Poseidon2Chip as RiscvMersenne31Poseidon2Chip,
         },
     },
-    compiler::recursion_v2::{
+    compiler::recursion::{
         circuit::{
             challenger::DuplexChallengerVariable,
             config::{CircuitConfig, FieldFriConfigVariable},
@@ -26,8 +26,8 @@ use crate::{
     configs::config::{Challenge, Challenger, Com, PcsProof, StarkGenericConfig, Val},
     emulator::recursion::emulator::RecursionRecord,
     instances::{
-        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler_v2::{
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler::{
             recursion_circuit::{combine::builder::CombineVerifierCircuit, stdin::RecursionStdin},
             riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
             shapes::compress_shape::RecursionShapeConfig,

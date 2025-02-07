@@ -14,7 +14,7 @@ use pico_vm::{
     },
     emulator::riscv::stdin::{EmulatorStdin, EmulatorStdinBuilder},
     instances::{
-        compiler_v2::onchain_circuit::{
+        compiler::onchain_circuit::{
             gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin, utils::build_gnark_config,
         },
         configs::riscv_config::StarkConfig as RiscvBBSC,

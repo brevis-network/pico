@@ -3,7 +3,7 @@ use crate::{
         chips::alu_base::{columns::*, BaseAluChip},
         utils::next_power_of_two,
     },
-    compiler::recursion_v2::{
+    compiler::recursion::{
         instruction::Instruction, program::RecursionProgram, types::BaseAluInstr,
     },
     emulator::recursion::emulator::{BaseAluOpcode, RecursionRecord},

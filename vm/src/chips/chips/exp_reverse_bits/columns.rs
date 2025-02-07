@@ -1,6 +1,6 @@
 use pico_derive::AlignedBorrow;
 
-use crate::chips::chips::recursion_memory_v2::MemoryAccessCols;
+use crate::chips::chips::recursion_memory::MemoryAccessCols;
 
 pub const NUM_EXP_REVERSE_BITS_LEN_COLS: usize = core::mem::size_of::<ExpReverseBitsLenCols<u8>>();
 pub const NUM_EXP_REVERSE_BITS_LEN_PREPROCESSED_COLS: usize =

@@ -6,7 +6,7 @@ use crate::{
         },
         BaseAluChip,
     },
-    compiler::recursion_v2::types::BaseAluIo,
+    compiler::recursion::types::BaseAluIo,
     machine::builder::{ChipBuilder, RecursionBuilder},
 };
 use p3_air::{Air, AirBuilder, BaseAir};

@@ -1,8 +1,8 @@
 use std::{array, sync::Arc};
 
 use crate::{
-    chips::chips::recursion_memory_v2::MemEvent,
-    compiler::recursion_v2::{
+    chips::chips::recursion_memory::MemEvent,
+    compiler::recursion::{
         program::RecursionProgram,
         types::{
             BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,

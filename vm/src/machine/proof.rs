@@ -1,6 +1,6 @@
 use crate::{
     configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig},
-    instances::compiler_v2::shapes::ProofShape,
+    instances::compiler::shapes::ProofShape,
     machine::{keys::BaseVerifyingKey, septic::SepticDigest},
 };
 use alloc::{sync::Arc, vec::Vec};

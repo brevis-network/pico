@@ -1,11 +1,11 @@
 use crate::{
-    compiler::recursion_v2::{circuit::hash::FieldHasher, program::RecursionProgram},
+    compiler::recursion::{circuit::hash::FieldHasher, program::RecursionProgram},
     configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val},
     emulator::{
         record::RecordBehavior,
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
     },
-    instances::compiler_v2::vk_merkle::stdin::RecursionVkStdin,
+    instances::compiler::vk_merkle::stdin::RecursionVkStdin,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},

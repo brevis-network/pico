@@ -6,7 +6,7 @@ use crate::{
         },
         BatchFRIChip,
     },
-    compiler::recursion_v2::{
+    compiler::recursion::{
         instruction::Instruction, program::RecursionProgram, types::BatchFRIInstr,
     },
     emulator::recursion::emulator::RecursionRecord,

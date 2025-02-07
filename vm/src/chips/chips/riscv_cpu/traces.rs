@@ -15,7 +15,7 @@ use crate::{
         program::Program,
     },
     emulator::riscv::record::EmulationRecord,
-    instances::compiler_v2::shapes::riscv_shape::RiscvPadShape,
+    instances::compiler::shapes::riscv_shape::RiscvPadShape,
     machine::chip::ChipBehavior,
 };
 use hashbrown::HashMap;

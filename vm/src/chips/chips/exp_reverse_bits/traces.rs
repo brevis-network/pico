@@ -7,9 +7,9 @@ use crate::{
             },
             ExpReverseBitsLenChip,
         },
-        recursion_memory_v2::MemoryAccessCols,
+        recursion_memory::MemoryAccessCols,
     },
-    compiler::recursion_v2::{instruction::Instruction, program::RecursionProgram},
+    compiler::recursion::{instruction::Instruction, program::RecursionProgram},
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
 };
@@ -17,7 +17,7 @@ use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
-use crate::{chips::utils::pad_rows_fixed, compiler::recursion_v2::types::ExpReverseBitsInstr};
+use crate::{chips::utils::pad_rows_fixed, compiler::recursion::types::ExpReverseBitsInstr};
 #[cfg(debug_assertions)]
 use p3_matrix::Matrix;
 

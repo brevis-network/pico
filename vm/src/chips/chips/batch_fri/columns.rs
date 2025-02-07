@@ -1,4 +1,4 @@
-use crate::compiler::recursion_v2::{ir::Block, types::Address};
+use crate::compiler::recursion::{ir::Block, types::Address};
 use pico_derive::AlignedBorrow;
 
 pub const NUM_BATCH_FRI_COLS: usize = core::mem::size_of::<BatchFRICols<u8>>();

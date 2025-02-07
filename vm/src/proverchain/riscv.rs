@@ -10,8 +10,8 @@ use crate::{
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType,
-        compiler_v2::shapes::riscv_shape::RiscvShapeConfig, machine::riscv::RiscvMachine,
+        chiptype::riscv_chiptype::RiscvChipType, compiler::shapes::riscv_shape::RiscvShapeConfig,
+        machine::riscv::RiscvMachine,
     },
     machine::{
         field::FieldSpecificPoseidon2Config,

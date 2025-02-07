@@ -9,7 +9,7 @@ use crate::{
         },
         utils::next_power_of_two,
     },
-    compiler::recursion_v2::{
+    compiler::recursion::{
         instruction::Instruction, program::RecursionProgram, types::ExtAluInstr,
     },
     emulator::recursion::emulator::{ExtAluOpcode, RecursionRecord},

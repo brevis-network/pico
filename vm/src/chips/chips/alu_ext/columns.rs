@@ -1,5 +1,5 @@
 use crate::{
-    compiler::recursion_v2::{
+    compiler::recursion::{
         ir::Block,
         types::{Address, ExtAluIo},
     },

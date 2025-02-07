@@ -1,7 +1,7 @@
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
     compiler::{
-        recursion_v2::circuit::witness::Witnessable,
+        recursion::circuit::witness::Witnessable,
         riscv::compiler::{Compiler, SourceType},
     },
     configs::{
@@ -11,8 +11,8 @@ use pico_vm::{
     },
     emulator::{opts::EmulatorOpts, recursion::emulator::Runtime, riscv::stdin::EmulatorStdin},
     instances::{
-        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler_v2::{
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler::{
             recursion_circuit::stdin::RecursionStdin,
             shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
             vk_merkle::{

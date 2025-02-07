@@ -14,8 +14,8 @@ use std::{
 };
 
 use crate::{
-    chips::chips::recursion_memory_v2::MemEvent,
-    compiler::recursion_v2::{ir::Block, program::RecursionProgram},
+    chips::chips::recursion_memory::MemEvent,
+    compiler::recursion::{ir::Block, program::RecursionProgram},
     emulator::recursion::emulator::memory::MemVecMap,
     machine::septic::{SepticCurve, SepticExtension},
 };
@@ -27,7 +27,7 @@ use p3_poseidon2::{ExternalLayer, InternalLayer, Poseidon2};
 use p3_symmetric::Permutation;
 use p3_util::reverse_bits_len;
 
-use crate::compiler::recursion_v2::types::{
+use crate::compiler::recursion::types::{
     BaseAluEvent, BaseAluInstr, BatchFRIBaseVecIo, BatchFRIEvent, BatchFRIExtSingleIo,
     BatchFRIExtVecIo, BatchFRIInstr, CommitPublicValuesEvent, ExpReverseBitsEvent,
     ExpReverseBitsInstr, ExpReverseBitsIo, ExtAluEvent, ExtAluInstr, MemAccessKind, MemInstr,
@@ -37,7 +37,7 @@ use thiserror::Error;
 
 pub use crate::emulator::recursion::record::*;
 use crate::{
-    compiler::recursion_v2::instruction::{
+    compiler::recursion::instruction::{
         FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
         PrintInstr,
     },

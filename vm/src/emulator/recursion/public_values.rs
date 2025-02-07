@@ -1,7 +1,7 @@
 use crate::{
     chips::utils::indices_arr,
     compiler::{
-        recursion_v2::{circuit, prelude::*},
+        recursion::{circuit, prelude::*},
         word::Word,
     },
     emulator::recursion::public_values::circuit::{

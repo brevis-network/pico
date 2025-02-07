@@ -1,5 +1,5 @@
 use crate::{
-    compiler::recursion_v2::{
+    compiler::recursion::{
         circuit::utils::assert_embed_public_values_valid, program::RecursionProgram,
     },
     configs::config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},

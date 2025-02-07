@@ -4,14 +4,14 @@ use p3_baby_bear::BabyBear;
 use p3_field::FieldAlgebra;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
-    compiler::recursion_v2::circuit::stark::{dummy_challenger_bb, dummy_challenger_kb},
+    compiler::recursion::circuit::stark::{dummy_challenger_bb, dummy_challenger_kb},
     configs::{
         config::StarkGenericConfig,
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     instances::{
-        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler_v2::{
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler::{
             riscv_circuit::{
                 convert::builder::ConvertVerifierCircuit,
                 stdin::{dummy_vk_and_chunk_proof, dummy_vk_and_chunk_proof_kb, ConvertStdin},

@@ -1,5 +1,5 @@
 use crate::{
-    compiler::recursion_v2::{ir::SymbolicFelt, prelude::SymbolicExt},
+    compiler::recursion::{ir::SymbolicFelt, prelude::SymbolicExt},
     configs::config::Poseidon2Config,
     primitives::consts::{BabyBearConfig, KoalaBearConfig, Mersenne31Config, PERMUTATION_WIDTH},
 };

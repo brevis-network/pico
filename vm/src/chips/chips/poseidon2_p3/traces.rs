@@ -2,7 +2,7 @@ use crate::{
     chips::{
         chips::{
             poseidon2_p3::{Poseidon2ChipP3, POSEIDON2_CHIPNAME},
-            recursion_memory_v2::MemoryAccessCols,
+            recursion_memory::MemoryAccessCols,
         },
         gadgets::poseidon2::{
             columns::{
@@ -14,7 +14,7 @@ use crate::{
         },
         utils::next_power_of_two,
     },
-    compiler::recursion_v2::{instruction::Instruction::Poseidon2, program::RecursionProgram},
+    compiler::recursion::{instruction::Instruction::Poseidon2, program::RecursionProgram},
     emulator::recursion::emulator::RecursionRecord,
     machine::chip::ChipBehavior,
     primitives::consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR},

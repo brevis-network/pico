@@ -1,5 +1,5 @@
 use crate::{
-    compiler::recursion_v2::ir::{
+    compiler::recursion::ir::{
         Ext as RecursionExt, Felt as RecursionFelt, SymbolicExt as RecursionSymbolicExt,
     },
     configs::config::{FieldGenericConfig, PackedChallenge, PackedVal, StarkGenericConfig},

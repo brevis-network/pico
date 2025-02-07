@@ -1,6 +1,6 @@
 use crate::{
     compiler::{
-        recursion_v2::{circuit::hash::FieldHasher, program::RecursionProgram},
+        recursion::{circuit::hash::FieldHasher, program::RecursionProgram},
         riscv::program::Program,
     },
     configs::config::{StarkGenericConfig, Val},
@@ -9,7 +9,7 @@ use crate::{
         recursion::emulator::RecursionRecord,
         riscv::{record::EmulationRecord, stdin::EmulatorStdin},
     },
-    instances::compiler_v2::{
+    instances::compiler::{
         recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,
         vk_merkle::stdin::RecursionVkStdin,
     },

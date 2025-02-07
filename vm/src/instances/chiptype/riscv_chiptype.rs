@@ -59,7 +59,7 @@ use crate::{
     compiler::riscv::program::Program,
     define_chip_type,
     emulator::riscv::{record::EmulationRecord, syscalls::precompiles::PrecompileLocalMemory},
-    instances::compiler_v2::shapes::riscv_shape::{
+    instances::compiler::shapes::riscv_shape::{
         precompile_rows_per_event, precompile_syscall_code,
     },
     machine::{

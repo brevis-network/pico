@@ -1,11 +1,11 @@
 use super::{combine::CombineChips, MachineProver, ProverChain};
 use crate::{
-    compiler::recursion_v2::circuit::witness::Witnessable,
+    compiler::recursion::circuit::witness::Witnessable,
     configs::config::{Challenge, StarkGenericConfig, Val},
     emulator::recursion::emulator::Runtime,
     instances::{
-        chiptype::recursion_chiptype_v2::RecursionChipType,
-        compiler_v2::recursion_circuit::{
+        chiptype::recursion_chiptype::RecursionChipType,
+        compiler::recursion_circuit::{
             compress::builder::CompressVerifierCircuit, stdin::RecursionStdin,
         },
         configs::{recur_config, recur_kb_config},

@@ -7,7 +7,7 @@ use crate::{
     },
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
-        chiptype::recursion_chiptype_v2::RecursionChipType, machine::combine::CombineMachine,
+        chiptype::recursion_chiptype::RecursionChipType, machine::combine::CombineMachine,
     },
     machine::{
         field::FieldSpecificPoseidon2Config,

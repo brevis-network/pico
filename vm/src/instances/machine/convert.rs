@@ -1,16 +1,16 @@
 use crate::{
-    compiler::recursion_v2::program::RecursionProgram,
+    compiler::recursion::program::RecursionProgram,
     configs::{
         config::{StarkGenericConfig, Val},
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     emulator::{
-        emulator_v2::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
+        emulator::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
         record::RecordBehavior,
         recursion::emulator::RecursionRecord,
     },
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType, compiler_v2::riscv_circuit::stdin::ConvertStdin,
+        chiptype::riscv_chiptype::RiscvChipType, compiler::riscv_circuit::stdin::ConvertStdin,
     },
     machine::{
         chip::{ChipBehavior, MetaChip},

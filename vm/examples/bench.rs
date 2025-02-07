@@ -10,10 +10,8 @@ use pico_vm::{
     configs::config::StarkGenericConfig,
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
-        chiptype::recursion_chiptype_v2::RecursionChipType,
-        compiler_v2::shapes::{
-            compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig,
-        },
+        chiptype::recursion_chiptype::RecursionChipType,
+        compiler::shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
         configs::{
             riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
         },

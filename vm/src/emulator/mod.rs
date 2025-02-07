@@ -1,4 +1,4 @@
-pub mod emulator_v2;
+pub mod emulator;
 pub mod opts;
 pub mod record;
 pub mod recursion;

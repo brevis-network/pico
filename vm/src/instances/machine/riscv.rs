@@ -5,11 +5,11 @@ use crate::{
     compiler::{riscv::program::Program, word::Word},
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     emulator::{
-        emulator_v2::MetaEmulator,
+        emulator::MetaEmulator,
         record::RecordBehavior,
         riscv::{public_values::PublicValues, record::EmulationRecord},
     },
-    instances::compiler_v2::shapes::riscv_shape::RiscvShapeConfig,
+    instances::compiler::shapes::riscv_shape::RiscvShapeConfig,
     machine::{
         chip::{ChipBehavior, MetaChip},
         field::FieldSpecificPoseidon2Config,

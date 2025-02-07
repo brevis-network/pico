@@ -2,7 +2,7 @@ use cpu_time::ProcessTime;
 use p3_field::FieldAlgebra;
 use pico_vm::{
     compiler::{
-        recursion_v2::circuit::witness::Witnessable,
+        recursion::circuit::witness::Witnessable,
         riscv::{
             compiler::{Compiler, SourceType},
             program::Program,
@@ -20,12 +20,12 @@ use pico_vm::{
         },
     },
     emulator::{
-        emulator_v2::MetaEmulator, opts::EmulatorOpts, recursion::emulator::Runtime,
+        emulator::MetaEmulator, opts::EmulatorOpts, recursion::emulator::Runtime,
         riscv::stdin::EmulatorStdin,
     },
     instances::{
-        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler_v2::{
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler::{
             onchain_circuit::{
                 gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin,
                 utils::build_gnark_config,

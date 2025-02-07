@@ -1,5 +1,5 @@
 use crate::{
-    compiler::recursion_v2::{
+    compiler::recursion::{
         circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
     },
     configs::{
@@ -8,14 +8,14 @@ use crate::{
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     emulator::{
-        emulator_v2::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
+        emulator::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
         record::RecordBehavior,
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
         riscv::stdin::EmulatorStdin,
     },
     instances::{
-        chiptype::recursion_chiptype_v2::RecursionChipType,
-        compiler_v2::{
+        chiptype::recursion_chiptype::RecursionChipType,
+        compiler::{
             shapes::compress_shape::RecursionShapeConfig,
             vk_merkle::{stdin::RecursionVkStdin, HasStaticVkManager},
         },

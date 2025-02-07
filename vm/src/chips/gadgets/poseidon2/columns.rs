@@ -1,6 +1,6 @@
 use crate::{
-    chips::chips::recursion_memory_v2::MemoryAccessCols,
-    compiler::recursion_v2::types::Address,
+    chips::chips::recursion_memory::MemoryAccessCols,
+    compiler::recursion::types::Address,
     primitives::consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR, RISCV_POSEIDON2_DATAPAR},
 };
 use core::mem::size_of;

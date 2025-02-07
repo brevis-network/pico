@@ -7,10 +7,8 @@ use crate::{
     },
     emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
     instances::{
-        chiptype::recursion_chiptype_v2::RecursionChipType,
-        compiler_v2::{
-            shapes::compress_shape::RecursionShapeConfig, vk_merkle::HasStaticVkManager,
-        },
+        chiptype::recursion_chiptype::RecursionChipType,
+        compiler::{shapes::compress_shape::RecursionShapeConfig, vk_merkle::HasStaticVkManager},
         machine::combine_vk::CombineVkMachine,
     },
     machine::{

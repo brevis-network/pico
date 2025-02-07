@@ -1,6 +1,6 @@
 use std::iter::repeat;
 
-use crate::compiler::recursion_v2::{ir::Block, types::Address};
+use crate::compiler::recursion::{ir::Block, types::Address};
 use p3_field::PrimeField64;
 use vec_map::{Entry, VecMap};
 

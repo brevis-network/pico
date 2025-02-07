@@ -6,7 +6,7 @@ use crate::{
         },
         SelectChip,
     },
-    compiler::recursion_v2::types::SelectIo,
+    compiler::recursion::types::SelectIo,
     machine::builder::{ChipBuilder, RecursionBuilder},
 };
 use p3_air::{Air, BaseAir};

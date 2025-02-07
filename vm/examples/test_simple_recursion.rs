@@ -2,7 +2,7 @@ use hashbrown::HashMap;
 use p3_challenger::DuplexChallenger;
 use pico_vm::{
     compiler::{
-        recursion_v2::circuit::witness::Witnessable,
+        recursion::circuit::witness::Witnessable,
         riscv::{
             compiler::{Compiler, SourceType},
             program::Program,
@@ -20,10 +20,8 @@ use pico_vm::{
         riscv::{riscv_emulator::RiscvEmulator, stdin::EmulatorStdin},
     },
     instances::{
-        chiptype::{recursion_chiptype_v2::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler_v2::simple_circuit::{
-            builder::SimpleVerifierCircuit, stdin::SimpleRecursionStdin,
-        },
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler::simple_circuit::{builder::SimpleVerifierCircuit, stdin::SimpleRecursionStdin},
         machine::simple::SimpleMachine,
     },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},

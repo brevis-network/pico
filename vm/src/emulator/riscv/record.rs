@@ -17,7 +17,7 @@ use crate::{
             syscalls::{SyscallCode, SyscallEvent},
         },
     },
-    instances::compiler_v2::shapes::riscv_shape::RiscvPadShape,
+    instances::compiler::shapes::riscv_shape::RiscvPadShape,
 };
 use hashbrown::HashMap;
 use itertools::{EitherOrBoth, Itertools};

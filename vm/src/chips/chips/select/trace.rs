@@ -10,7 +10,7 @@ use crate::{
         },
         utils::next_power_of_two,
     },
-    compiler::recursion_v2::{
+    compiler::recursion::{
         instruction::Instruction, program::RecursionProgram, types::SelectInstr,
     },
     emulator::recursion::emulator::RecursionRecord,

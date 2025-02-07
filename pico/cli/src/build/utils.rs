@@ -3,7 +3,7 @@ use num_bigint::BigInt;
 use num_traits::Num;
 use pico_vm::{
     configs::config::FieldGenericConfig,
-    instances::compiler_v2::onchain_circuit::gnark::witness::GnarkWitness,
+    instances::compiler::onchain_circuit::gnark::witness::GnarkWitness,
 };
 use serde_json::json;
 

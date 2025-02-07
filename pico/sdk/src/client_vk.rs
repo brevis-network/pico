@@ -14,8 +14,8 @@ use pico_vm::{
     },
     emulator::riscv::stdin::{EmulatorStdin, EmulatorStdinBuilder},
     instances::{
-        chiptype::recursion_chiptype_v2::RecursionChipType,
-        compiler_v2::{
+        chiptype::recursion_chiptype::RecursionChipType,
+        compiler::{
             onchain_circuit::{
                 gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin,
                 utils::build_gnark_config,

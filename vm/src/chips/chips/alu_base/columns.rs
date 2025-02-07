@@ -1,5 +1,5 @@
 use crate::{
-    compiler::recursion_v2::types::{Address, BaseAluIo},
+    compiler::recursion::types::{Address, BaseAluIo},
     primitives::consts::BASE_ALU_DATAPAR,
 };
 use pico_derive::AlignedBorrow;

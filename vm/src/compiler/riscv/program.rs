@@ -2,7 +2,7 @@
 
 use crate::{
     compiler::{program::ProgramBehavior, riscv::instruction::Instruction},
-    instances::compiler_v2::shapes::riscv_shape::RiscvPadShape,
+    instances::compiler::shapes::riscv_shape::RiscvPadShape,
     machine::{
         lookup::LookupType,
         septic::{SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
