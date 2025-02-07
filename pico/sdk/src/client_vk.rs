@@ -1,4 +1,4 @@
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, path::PathBuf, process::Command, rc::Rc};
 
 use anyhow::{Error, Ok};
 use log::info;
@@ -17,8 +17,9 @@ use pico_vm::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
             onchain_circuit::{
-                gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin,
-                utils::build_gnark_config,
+                gnark::builder::OnchainVerifierCircuit,
+                stdin::OnchainStdin,
+                utils::{build_gnark_config, generate_contract_inputs},
             },
             shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
         },
@@ -30,6 +31,8 @@ use pico_vm::{
         MachineProver, ProverChain, RiscvProver,
     },
 };
+
+use crate::command::execute_command;
 
 pub struct ProverVkClient {
     riscv: RiscvProver<BabyBearPoseidon2, Program>,
@@ -121,8 +124,7 @@ impl ProverVkClient {
         };
         let (constraints, witness) =
             OnchainVerifierCircuit::<BabyBearBn254, BabyBearBn254Poseidon2>::build(&onchain_stdin);
-        build_gnark_config(constraints, witness, output);
-
+        build_gnark_config(constraints, witness, output.clone());
         Ok((riscv_proof, proof))
     }
 
@@ -137,5 +139,24 @@ impl ProverVkClient {
         }
         println!("riscv_prover proof verify success");
         Ok(proof)
+    }
+
+    /// prove and generate gnark proof and contract inputs. must install docker first
+    pub fn prove_evm(&self, need_setup: bool, output: PathBuf) -> Result<(), Error> {
+        self.prove(output.clone())?;
+        if need_setup {
+            let mut setup_cmd = Command::new("sh");
+            setup_cmd.arg("-c")
+                .arg(format!("docker run --rm -v {}:/data liuxiaobleach657/test_vm:0.04 /pico_vm_gnark_cli -cmd setup", output.clone().display()));
+            execute_command(setup_cmd);
+        }
+
+        let mut prove_cmd = Command::new("sh");
+        prove_cmd.arg("-c")
+            .arg(format!("docker run --rm -v {}:/data liuxiaobleach657/test_vm:0.04 /pico_vm_gnark_cli -cmd prove", output.clone().display()));
+
+        execute_command(prove_cmd);
+        generate_contract_inputs::<BabyBearBn254>(output.clone())?;
+        Ok(())
     }
 }

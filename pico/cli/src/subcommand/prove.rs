@@ -1,24 +1,18 @@
-use anyhow::{Context, Error, Result};
+use anyhow::{Error, Result};
 use clap::{ArgAction, Parser};
 use hex;
 use log::{debug, info};
 use pico_sdk::client::SDKProverClient;
-use pico_vm::configs::field_config::bb_bn254::BabyBearBn254;
 use std::{
     env,
     fs::File,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     path::PathBuf,
-    process::{Command, Stdio},
-    thread,
 };
 
 use crate::{
-    build::{
-        build::{get_package, is_docker_installed},
-        utils::build_contract_inputs,
-    },
-    get_target_directory, log_command, DEFAULT_ELF_DIR,
+    build::build::{get_package, is_docker_installed},
+    get_target_directory, DEFAULT_ELF_DIR,
 };
 
 fn parse_input(s: &str) -> Result<Input, String> {
@@ -142,24 +136,11 @@ impl ProveCmd {
             }
         };
 
-        let gnark_dir = match self.output {
-            Some(ref output) => PathBuf::from(output),
-            None => {
-                info!("start to genenerate groth16 proof");
-                let gnark_dir = target_dir.join("gnark");
-                if !gnark_dir.exists() {
-                    std::fs::create_dir_all(gnark_dir.clone())?;
-                    debug!("create dir: {:?}", gnark_dir.clone().display());
-                }
-                gnark_dir
-            }
-        };
-
         prover_client
             .get_stdin_builder()
             .borrow_mut()
             .write_slice(&bytes);
-        let (riscv_proof, embed_proof) = prover_client.prove(gnark_dir.clone())?;
+        let (riscv_proof, embed_proof) = prover_client.prove(pico_dir.clone())?;
 
         let pv_stream = riscv_proof.pv_stream;
 
@@ -185,56 +166,8 @@ impl ProveCmd {
                     "Docker is not available on this system. please install docker fisrt.",
                 ));
             }
-
-            if self.setup {
-                let mut setup_cmd = Command::new("sh");
-                setup_cmd.arg("-c")
-                    .arg(format!("docker run --rm -v {}:/data liuxiaobleach657/test_vm:0.04 /pico_vm_gnark_cli -cmd setup", gnark_dir.clone().display()));
-                execute_command(setup_cmd);
-            }
-
-            let mut prove_cmd = Command::new("sh");
-            prove_cmd.arg("-c")
-                .arg(format!("docker run --rm -v {}:/data liuxiaobleach657/test_vm:0.04 /pico_vm_gnark_cli -cmd prove", gnark_dir.clone().display()));
-
-            execute_command(prove_cmd);
-
-            let contract_input_path = build_contract_inputs::<BabyBearBn254>(gnark_dir, pico_dir)?;
-            println!(
-                "generate contract input json in: {}",
-                contract_input_path.display()
-            );
+            prover_client.prove_evm(self.setup, pico_dir)?;
         }
         Ok(())
     }
-}
-
-fn execute_command(mut command: Command) {
-    println!("Start to execute command...");
-    log_command(&command);
-    // Add necessary tags for stdout and stderr from the command.
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to spawn command")
-        .expect("cargo build failed");
-    let stdout = BufReader::new(child.stdout.take().unwrap());
-    let stderr = BufReader::new(child.stderr.take().unwrap());
-
-    // Add prefix to the output of the process depending on the context.
-    let msg = "[pico]";
-
-    // Pipe stdout and stderr to the parent process with [docker] prefix
-    let stdout_handle = thread::spawn(move || {
-        stdout.lines().for_each(|line| {
-            println!("{} {}", msg, line.unwrap());
-        });
-    });
-    stderr.lines().for_each(|line| {
-        eprintln!("{} {}", msg, line.unwrap());
-    });
-    stdout_handle.join().unwrap();
-
-    let _ = child.wait().expect("failed to wait for child process");
 }

@@ -15,7 +15,9 @@ use pico_vm::{
     emulator::riscv::stdin::{EmulatorStdin, EmulatorStdinBuilder},
     instances::{
         compiler::onchain_circuit::{
-            gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin, utils::build_gnark_config,
+            gnark::builder::OnchainVerifierCircuit,
+            stdin::OnchainStdin,
+            utils::{build_gnark_config, generate_contract_inputs},
         },
         configs::riscv_config::StarkConfig as RiscvBBSC,
     },
@@ -60,6 +62,13 @@ impl SDKProverClient {
         match self {
             SDKProverClient::Fast(client) => client.prove_fast(),
             SDKProverClient::ShapeConfig(client) => client.prove_fast(),
+        }
+    }
+
+    pub fn prove_evm(&self, need_setup: bool, output: PathBuf) -> Result<(), Error> {
+        match self {
+            SDKProverClient::ShapeConfig(client) => client.prove_evm(need_setup, output),
+            _ => Err(Error::msg("prove evm only support vk verification")),
         }
     }
 
@@ -148,7 +157,8 @@ impl ProverClient {
         };
         let (constraints, witness) =
             OnchainVerifierCircuit::<BabyBearBn254, BabyBearBn254Poseidon2>::build(&onchain_stdin);
-        build_gnark_config(constraints, witness, output);
+        build_gnark_config(constraints, witness, output.clone());
+        generate_contract_inputs::<BabyBearBn254>(output)?;
 
         Ok((riscv_proof, proof))
     }

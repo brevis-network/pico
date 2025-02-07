@@ -9,6 +9,7 @@ extern crate alloc;
 
 pub mod client;
 pub mod client_vk;
+pub mod command;
 pub mod heap;
 pub mod io;
 #[cfg(all(target_os = "zkvm", feature = "libm"))]

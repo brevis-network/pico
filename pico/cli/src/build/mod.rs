@@ -9,7 +9,6 @@ use std::{
 
 #[allow(clippy::module_inception)]
 pub mod build;
-pub mod utils;
 
 // Execute the command and handle the output depending on the context.
 pub(crate) fn execute_command(
