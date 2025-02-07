@@ -61,6 +61,9 @@ pub struct ProveCmd {
 
     #[clap(long, action = ArgAction::SetTrue, help = "groth16 circuit setup, it must be used with --evm")]
     setup: bool,
+
+    #[clap(long, action = ArgAction::SetTrue, help = "enable vk verification in recursion circuit")]
+    vk: bool,
 }
 
 impl ProveCmd {
@@ -99,7 +102,7 @@ impl ProveCmd {
         let bytes = Self::get_input_bytes(&self.input)?;
         debug!("input data: {:0x?}", bytes);
 
-        let vk_verification = !self.fast;
+        let vk_verification = self.evm || self.vk;
 
         let prover_client = SDKProverClient::new(&elf, vk_verification);
 
