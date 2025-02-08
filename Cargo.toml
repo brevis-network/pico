@@ -1,5 +1,5 @@
 [workspace]
-members = ["derive", "vm", "babybear-ffi", "pico/*",  "tools/scripts"]
+members = ["derive", "vm", "babybear-ffi", "pico/*",  "tools/scripts", "koalabear-ffi"]
 resolver = "2"
 
 [workspace.package]

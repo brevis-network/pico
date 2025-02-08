@@ -98,6 +98,10 @@ jobs:
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e -- --field kb
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e -- --elf multiple-precompile --step riscv --field kb
           
+           # copy koalabear embed proof for later test
+          cp constraints.json gnark/koalabear_verifier/
+          cp groth16_witness.json gnark/koalabear_verifier/
+          
           # BabyBear tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_base_machine
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_simple_machine
@@ -108,16 +112,24 @@ jobs:
 
           # We must run this test at the end, since it's related with the below gnark test.
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e
+          
+          # copy babybear embed proof for later test
+          cp constraints.json gnark/babybear_verifier/
+          cp groth16_witness.json gnark/babybear_verifier/
       - name: compile babybear so
         run: |
           cargo build --release --package babybear-ffi
           sudo mv ./target/release/libbabybear_ffi.so /usr/lib/
+      - name: compile koalabear so
+        run: |
+          cargo build --release --package koalabear-ffi
+          sudo mv ./target/release/libkoalabear_ffi.so /usr/lib/
       - uses: actions/setup-go@v2
         with:
           go-version: '1.22'
       - name: gnark_verifier
         run: |
-          cp constraints.json gnark/vm_verifier/
-          cp groth16_witness.json gnark/vm_verifier/
-          cd gnark/vm_verifier/
+          cd gnark/babybear_verifier/
+          go test -timeout 70s -run TestSolveVerifierCircuit
+          cd ../../gnark/koalabear_verifier/
           go test -timeout 70s -run TestSolveVerifierCircuit

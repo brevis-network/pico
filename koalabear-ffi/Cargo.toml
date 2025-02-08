@@ -1,0 +1,17 @@
+[package]
+name = "koalabear-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+
+build = "build.rs"
+
+[dependencies]
+p3-field = { workspace = true }
+p3-koala-bear = { workspace = true }
+
+[lib]
+crate-type = ["cdylib"]

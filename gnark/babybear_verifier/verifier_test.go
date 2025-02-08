@@ -1,4 +1,4 @@
-package vm_verifier
+package babybear_verifier
 
 import (
 	"encoding/json"

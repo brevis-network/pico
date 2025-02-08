@@ -1956,6 +1956,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "koalabear-ffi"
+version = "0.1.0"
+dependencies = [
+ "p3-field 0.1.0",
+ "p3-koala-bear",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

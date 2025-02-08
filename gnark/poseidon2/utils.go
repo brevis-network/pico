@@ -1,6 +1,7 @@
 package poseidon2
 
 import (
+	"github.com/brevis-network/brevis-vm/gnark/koalabear"
 	"github.com/consensys/gnark/frontend"
 )
 
@@ -22,4 +23,13 @@ func (p *Poseidon2Chip) matrixPermuteMut(state *[width]frontend.Variable) {
 	state[0] = p.api.Add(state[0], sum)
 	state[1] = p.api.Add(state[1], sum)
 	state[2] = p.api.Add(state[2], sum)
+}
+
+func ConvertKoalaBear(api frontend.API, state *[16]koalabear.Variable) [16]frontend.Variable {
+	var res [16]frontend.Variable
+	chip := koalabear.NewChip(api)
+	for i := 0; i < 16; i++ {
+		res[i] = chip.ReduceSlow(state[i]).Value
+	}
+	return res
 }

@@ -3,8 +3,8 @@ package sdk
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/brevis-network/brevis-vm/gnark/babybear_verifier"
 	"github.com/brevis-network/brevis-vm/gnark/utils"
-	"github.com/brevis-network/brevis-vm/gnark/vm_verifier"
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/backend/groth16"
@@ -33,7 +33,7 @@ type PicoGroth16Proof struct {
 	Proof                 string // hex
 }
 
-func DoSolve() (circuit *vm_verifier.Circuit, assigment *vm_verifier.Circuit, err error) {
+func DoSolve() (circuit *babybear_verifier.Circuit, assigment *babybear_verifier.Circuit, err error) {
 	witnessFile := os.Getenv("WITNESS_JSON")
 
 	data, err := os.ReadFile(witnessFile)
@@ -41,13 +41,13 @@ func DoSolve() (circuit *vm_verifier.Circuit, assigment *vm_verifier.Circuit, er
 		return nil, nil, fmt.Errorf("fail to read witness file: %v\n", err)
 	}
 
-	var inputs vm_verifier.WitnessInput
+	var inputs babybear_verifier.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse witness json: %v\n", err)
 	}
-	assigment = vm_verifier.NewCircuit(inputs)
-	circuit = vm_verifier.NewCircuit(inputs)
+	assigment = babybear_verifier.NewCircuit(inputs)
+	circuit = babybear_verifier.NewCircuit(inputs)
 
 	err = test.IsSolved(circuit, assigment, ecc.BN254.ScalarField())
 	if err != nil {
@@ -128,13 +128,13 @@ func Prove() error {
 		return fmt.Errorf("fail to read witness file: %v\n", err)
 	}
 
-	var inputs vm_verifier.WitnessInput
+	var inputs babybear_verifier.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return fmt.Errorf("failed to parse witness json: %v", err)
 	}
-	assigment := vm_verifier.NewCircuit(inputs)
-	circuit := vm_verifier.NewCircuit(inputs)
+	assigment := babybear_verifier.NewCircuit(inputs)
+	circuit := babybear_verifier.NewCircuit(inputs)
 
 	err = test.IsSolved(circuit, assigment, ecc.BN254.ScalarField())
 	if err != nil {
