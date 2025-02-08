@@ -27,7 +27,7 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{COMBINE_DEGREE, COMBINE_SIZE},
+    primitives::consts::COMBINE_SIZE,
 };
 use anyhow::Result;
 use p3_air::Air;
@@ -109,7 +109,7 @@ macro_rules! impl_combine_vk_machine {
                 let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
                 let recursion_shape_config = RecursionShapeConfig::<
                     Val<$recur_sc>,
-                    RecursionChipType<Val<$recur_sc>, COMBINE_DEGREE>,
+                    RecursionChipType<Val<$recur_sc>>,
                 >::default();
 
                 loop {

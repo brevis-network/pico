@@ -23,8 +23,8 @@ use crate::{
         machine::BaseMachine, proof::BaseProof,
     },
     primitives::consts::{
-        EMBED_DEGREE, EXTENSION_DEGREE, MULTI_FIELD_CHALLENGER_DIGEST_SIZE,
-        MULTI_FIELD_CHALLENGER_RATE, MULTI_FIELD_CHALLENGER_WIDTH,
+        EXTENSION_DEGREE, MULTI_FIELD_CHALLENGER_DIGEST_SIZE, MULTI_FIELD_CHALLENGER_RATE,
+        MULTI_FIELD_CHALLENGER_WIDTH,
     },
 };
 use p3_air::Air;
@@ -67,14 +67,14 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Witnessable<CC, WitnessVariable = BaseProofVariable<CC, SC>>,
     BaseVerifyingKey<SC>: Witnessable<CC, WitnessVariable = BaseVerifyingKeyVariable<CC, SC>>,
-    OnchainStdin<SC, RecursionChipType<Val<SC>, EMBED_DEGREE>>:
+    OnchainStdin<SC, RecursionChipType<Val<SC>>>:
         Witnessable<CC, WitnessVariable = OnchainStdinVariable<CC, SC>>,
 
-    RecursionChipType<Val<SC>, EMBED_DEGREE>:
+    RecursionChipType<Val<SC>>:
         ChipBehavior<Val<SC>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
-        input: &OnchainStdin<SC, RecursionChipType<Val<SC>, EMBED_DEGREE>>,
+        input: &OnchainStdin<SC, RecursionChipType<Val<SC>>>,
     ) -> (Vec<Constraint>, Witness<CC>) {
         tracing::info!("building gnark constraints");
         let constraints = {
@@ -114,7 +114,7 @@ where
 
     pub fn build_verifier(
         builder: &mut Builder<CC>,
-        machine: &BaseMachine<SC, RecursionChipType<Val<SC>, EMBED_DEGREE>>,
+        machine: &BaseMachine<SC, RecursionChipType<Val<SC>>>,
         input: &OnchainStdinVariable<CC, SC>,
     ) {
         let OnchainStdinVariable { vk, proof, .. } = input;

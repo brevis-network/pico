@@ -20,7 +20,7 @@ use crate::{
         },
     },
     machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},
-    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
+    primitives::consts::DIGEST_SIZE,
 };
 use alloc::sync::Arc;
 use p3_baby_bear::BabyBear;
@@ -55,14 +55,9 @@ where
 
 macro_rules! impl_recursion_stdin_dummy {
     ($poseidon_type:ty, $field_type:ty, $dummy_vk_fn:ident) => {
-        impl<'a>
-            RecursionStdin<'a, $poseidon_type, RecursionChipType<$field_type, COMBINE_DEGREE>>
-        {
+        impl<'a> RecursionStdin<'a, $poseidon_type, RecursionChipType<$field_type>> {
             pub fn dummy(
-                machine: &'a BaseMachine<
-                    $poseidon_type,
-                    RecursionChipType<$field_type, COMBINE_DEGREE>,
-                >,
+                machine: &'a BaseMachine<$poseidon_type, RecursionChipType<$field_type>>,
                 shape: &RecursionShape,
             ) -> Self {
                 let vks_and_proofs: Vec<_> = shape

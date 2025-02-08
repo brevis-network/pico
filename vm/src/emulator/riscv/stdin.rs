@@ -44,7 +44,7 @@ use crate::{
         machine::BaseMachine,
         proof::BaseProof,
     },
-    primitives::consts::{COMBINE_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE},
+    primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE},
 };
 use alloc::sync::Arc;
 use p3_air::Air;
@@ -161,9 +161,7 @@ where
         vk_root: [Val<SC>; DIGEST_SIZE],
         machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
         proofs: &[BaseProof<SC>],
-        shape_config: &Option<
-            RecursionShapeConfig<Val<SC>, RecursionChipType<Val<SC>, CONVERT_DEGREE>>,
-        >,
+        shape_config: &Option<RecursionShapeConfig<Val<SC>, RecursionChipType<Val<SC>>>>,
     ) -> Self
     where
         F: TwoAdicField
@@ -346,7 +344,7 @@ where
         combine_size: usize,
         flag_complete: bool,
         vk_manager: &VkMerkleManager<SC>,
-        recursion_shape_config: &RecursionShapeConfig<F, RecursionChipType<F, COMBINE_DEGREE>>,
+        recursion_shape_config: &RecursionShapeConfig<F, RecursionChipType<F>>,
     ) -> (Self, Option<BaseVerifyingKey<SC>>, Option<BaseProof<SC>>)
     where
         F: TwoAdicField

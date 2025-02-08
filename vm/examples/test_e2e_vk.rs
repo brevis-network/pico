@@ -37,10 +37,7 @@ use pico_vm::{
         machine::MachineBehavior,
         witness::ProvingWitness,
     },
-    primitives::consts::{
-        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
-        EMBED_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
-    },
+    primitives::consts::{BABYBEAR_S_BOX_DEGREE, COMBINE_SIZE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, info};
@@ -55,7 +52,7 @@ fn main() {
     let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
     // COMBINE_DEGREE == COMPRESS_DEGREE == CONVERT_DEGREE == 3
     let recursion_shape_config =
-        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
     let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
 
     // -------- Riscv Machine --------
@@ -155,7 +152,7 @@ fn main() {
     info!("Setting up CONVERT..");
     let convert_machine = ConvertMachine::new(
         RecursionSC::new(),
-        RecursionChipType::<BabyBear, CONVERT_DEGREE>::all_chips(),
+        RecursionChipType::<BabyBear>::all_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -201,7 +198,7 @@ fn main() {
     info!("\n Begin COMBINE..");
 
     let recursion_shape_config =
-        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, COMBINE_DEGREE>>::default();
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
 
     debug!("PERF-machine=combine");
     let combine_start = Instant::now();
@@ -211,7 +208,7 @@ fn main() {
     info!("Setting up COMBINE");
     let combine_machine = CombineVkMachine::new(
         RecursionSC::new(),
-        RecursionChipType::<BabyBear, COMBINE_DEGREE>::all_chips(),
+        RecursionChipType::<BabyBear>::all_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -281,7 +278,7 @@ fn main() {
     info!("Setting up COMPRESS");
     let compress_machine = CompressVkMachine::new(
         RecursionSC::compress(),
-        RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_chips(),
+        RecursionChipType::<BabyBear>::compress_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -300,7 +297,7 @@ fn main() {
         &compress_vk_stdin,
     );
 
-    let compress_pad_shape = RecursionChipType::<BabyBear, COMPRESS_DEGREE>::compress_shape();
+    let compress_pad_shape = RecursionChipType::<BabyBear>::compress_shape();
 
     compress_program.shape = Some(compress_pad_shape);
 
@@ -356,7 +353,7 @@ fn main() {
     info!("Setting up EMBED");
     let embed_machine = EmbedMachine::<RecursionSC, _, _, Vec<u8>>::new(
         EmbedSC::new(),
-        RecursionChipType::<BabyBear, EMBED_DEGREE>::embed_chips(),
+        RecursionChipType::<BabyBear>::embed_chips(),
         RECURSION_NUM_PVS,
     );
 

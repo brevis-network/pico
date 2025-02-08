@@ -23,12 +23,12 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{EMBED_DEGREE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use alloc::sync::Arc;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 
-pub type EmbedChips<SC> = RecursionChipType<Val<SC>, EMBED_DEGREE>;
+pub type EmbedChips<SC> = RecursionChipType<Val<SC>>;
 
 pub struct EmbedVkProver<PrevSC, SC, I>
 where

@@ -30,7 +30,7 @@ use crate::{
         },
     },
     machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config, machine::BaseMachine},
-    primitives::consts::{COMBINE_DEGREE, COMPRESS_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE},
+    primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE},
 };
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
@@ -156,7 +156,7 @@ where
     >,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-    for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>:
+    for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>>>:
         Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
     for<'b> BabyBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     BabyBearPoseidon2Chip<CC::F>:
@@ -169,8 +169,8 @@ where
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 {
     pub fn build(
-        machine: &BaseMachine<SC, RecursionChipType<Val<SC>, COMBINE_DEGREE>>,
-        input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>, COMBINE_DEGREE>>,
+        machine: &BaseMachine<SC, RecursionChipType<Val<SC>>>,
+        input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>>>,
     ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
         let mut builder = Builder::<CC>::new();
@@ -231,7 +231,7 @@ where
     SC::DigestVariable: IntoIterator<Item = Felt<CC::F>>,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-    for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>:
+    for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>>>:
         Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
     for<'b> BabyBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     BabyBearPoseidon2Chip<CC::F>:
@@ -244,8 +244,8 @@ where
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 {
     pub fn build(
-        machine: &BaseMachine<SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>,
-        input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>,
+        machine: &BaseMachine<SC, RecursionChipType<Val<SC>>>,
+        input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>>>,
         vk_manager: &VkMerkleManager<SC>,
     ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.

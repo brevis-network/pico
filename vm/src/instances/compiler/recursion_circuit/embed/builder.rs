@@ -19,7 +19,7 @@ use crate::{
     },
     instances::chiptype::recursion_chiptype::RecursionChipType,
     machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config, machine::BaseMachine},
-    primitives::consts::{COMPRESS_DEGREE, EXTENSION_DEGREE},
+    primitives::consts::EXTENSION_DEGREE,
 };
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
@@ -44,12 +44,12 @@ where
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
 
-    RecursionChipType<Val<SC>, COMPRESS_DEGREE>:
+    RecursionChipType<Val<SC>>:
         ChipBehavior<Val<SC>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
-        machine: &BaseMachine<SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>,
-        input: &RecursionStdin<SC, RecursionChipType<Val<SC>, COMPRESS_DEGREE>>,
+        machine: &BaseMachine<SC, RecursionChipType<Val<SC>>>,
+        input: &RecursionStdin<SC, RecursionChipType<Val<SC>>>,
     ) -> RecursionProgram<Val<SC>> {
         // Construct the builder.
         let mut builder = Builder::<CC>::new();
@@ -73,12 +73,12 @@ where
         + FieldSpecificPoseidon2Config,
     SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
 
-    RecursionChipType<Val<SC>, COMPRESS_DEGREE>:
+    RecursionChipType<Val<SC>>:
         ChipBehavior<Val<SC>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,
-        machine: &BaseMachine<SC, RecursionChipType<SC::Val, COMPRESS_DEGREE>>,
+        machine: &BaseMachine<SC, RecursionChipType<SC::Val>>,
         input: RecursionStdinVariable<CC, SC>,
     ) {
         // Read input.

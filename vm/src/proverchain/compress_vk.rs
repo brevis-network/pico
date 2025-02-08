@@ -18,12 +18,12 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{COMPRESS_DEGREE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use alloc::sync::Arc;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 
-pub type CompressChips<SC> = RecursionChipType<Val<SC>, COMPRESS_DEGREE>;
+pub type CompressChips<SC> = RecursionChipType<Val<SC>>;
 
 pub struct CompressVkProver<PrevSC, SC>
 where
@@ -99,8 +99,7 @@ macro_rules! impl_compress_prover {
                     $mod_name::StarkConfig,
                 >::build(&self.prev_machine, &stdin);
 
-                let compress_pad_shape =
-                    RecursionChipType::<$mod_name::SC_Val, COMPRESS_DEGREE>::compress_shape();
+                let compress_pad_shape = RecursionChipType::<$mod_name::SC_Val>::compress_shape();
 
                 program.shape = Some(compress_pad_shape);
 

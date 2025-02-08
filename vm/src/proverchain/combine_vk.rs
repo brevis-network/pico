@@ -17,14 +17,12 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{
-        COMBINE_DEGREE, COMBINE_SIZE, CONVERT_DEGREE, EXTENSION_DEGREE, RECURSION_NUM_PVS,
-    },
+    primitives::consts::{COMBINE_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 
-type ConvertChips<SC> = RecursionChipType<Val<SC>, CONVERT_DEGREE>;
-pub type CombineChips<SC> = RecursionChipType<Val<SC>, COMBINE_DEGREE>;
+type ConvertChips<SC> = RecursionChipType<Val<SC>>;
+pub type CombineChips<SC> = RecursionChipType<Val<SC>>;
 
 pub struct CombineVkProver<PrevSC, SC>
 where

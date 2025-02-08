@@ -38,10 +38,7 @@ use pico_vm::{
         },
     },
     machine::{keys::HashableKey, machine::MachineBehavior},
-    primitives::consts::{
-        COMBINE_DEGREE, COMPRESS_DEGREE, CONVERT_DEGREE, DIGEST_SIZE, RECURSION_NUM_PVS,
-        RISCV_NUM_PVS,
-    },
+    primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 use rayon::{iter::ParallelIterator, prelude::IntoParallelRefIterator};
 use std::{
@@ -54,9 +51,8 @@ use std::{
 macro_rules! define_vk_digest_from_shape {
     ($func_name:ident, $F:ty, $RiscvSC:ty, $dummy_fn:expr, $dummy_challenger:expr, $RecursionFC:ty, $RecursionSC:ty, $poseidon_type:ty) => {
         pub fn $func_name(shape: PicoRecursionProgramShape) -> [$F; DIGEST_SIZE] {
-            // COMBINE_DEGREE == CONVERT_DEGREE == COMPRESS_DEGREE == 3
             let recursion_shape_config =
-                RecursionShapeConfig::<$F, RecursionChipType<$F, COMBINE_DEGREE>>::default();
+                RecursionShapeConfig::<$F, RecursionChipType<$F>>::default();
 
             match shape {
                 PicoRecursionProgramShape::Convert(shape) => {
@@ -95,7 +91,7 @@ macro_rules! define_vk_digest_from_shape {
 
                     let machine = ConvertMachine::new(
                         <$RecursionSC>::new(),
-                        RecursionChipType::<$F, CONVERT_DEGREE>::convert_chips(),
+                        RecursionChipType::<$F>::convert_chips(),
                         RECURSION_NUM_PVS,
                     );
 
@@ -105,7 +101,7 @@ macro_rules! define_vk_digest_from_shape {
                 PicoRecursionProgramShape::Combine(shape) => {
                     let machine = CombineVkMachine::new(
                         <$RecursionSC>::new(),
-                        RecursionChipType::<$F, COMBINE_DEGREE>::combine_chips(),
+                        RecursionChipType::<$F>::combine_chips(),
                         RECURSION_NUM_PVS,
                     );
 
@@ -116,14 +112,15 @@ macro_rules! define_vk_digest_from_shape {
                     // );
                     // println!("combine shape: {:?}", shape);
                     let base_machine = machine.base_machine();
-                    let stdin_with_vk = RecursionVkStdin::<
-                        $poseidon_type,
-                        RecursionChipType<$F, COMBINE_DEGREE>,
-                    >::dummy(base_machine, &shape);
+                    let stdin_with_vk =
+                        RecursionVkStdin::<$poseidon_type, RecursionChipType<$F>>::dummy(
+                            base_machine,
+                            &shape,
+                        );
                     let mut program_with_vk = CombineVkVerifierCircuit::<
                         $RecursionFC,
                         $RecursionSC,
-                        RecursionChipType<$F, COMBINE_DEGREE>,
+                        RecursionChipType<$F>,
                     >::build(base_machine, &stdin_with_vk);
 
                     recursion_shape_config.padding_shape(&mut program_with_vk);
@@ -134,26 +131,26 @@ macro_rules! define_vk_digest_from_shape {
                 PicoRecursionProgramShape::Compress(shape) => {
                     let combine_machine = CombineVkMachine::new(
                         <$RecursionSC>::new(),
-                        RecursionChipType::<$F, COMBINE_DEGREE>::combine_chips(),
+                        RecursionChipType::<$F>::combine_chips(),
                         RECURSION_NUM_PVS,
                     );
                     let machine = CompressVkMachine::new(
                         <$RecursionSC>::compress(),
-                        RecursionChipType::<$F, COMPRESS_DEGREE>::compress_chips(),
+                        RecursionChipType::<$F>::compress_chips(),
                         RECURSION_NUM_PVS,
                     );
                     let combine_base_machine = combine_machine.base_machine();
-                    let stdin_with_vk = RecursionVkStdin::<
-                        $poseidon_type,
-                        RecursionChipType<$F, COMBINE_DEGREE>,
-                    >::dummy(combine_base_machine, &shape);
+                    let stdin_with_vk =
+                        RecursionVkStdin::<$poseidon_type, RecursionChipType<$F>>::dummy(
+                            combine_base_machine,
+                            &shape,
+                        );
                     let mut program_with_vk =
                         CompressVkVerifierCircuit::<$RecursionFC, $RecursionSC>::build(
                             combine_base_machine,
                             &stdin_with_vk,
                         );
-                    let compress_pad_shape =
-                        RecursionChipType::<$F, COMPRESS_DEGREE>::compress_shape();
+                    let compress_pad_shape = RecursionChipType::<$F>::compress_shape();
                     program_with_vk.shape = Some(compress_pad_shape);
                     let (_pk, vk) = machine.setup_keys(&program_with_vk);
                     vk.hash_field()
@@ -278,10 +275,7 @@ macro_rules! define_generate_all_shapes {
     ($func_name:ident, $F:ty) => {
         fn $func_name(
             riscv_shape_config: &RiscvShapeConfig<$F>,
-            recursion_shape_config: &RecursionShapeConfig<
-                $F,
-                RecursionChipType<$F, COMBINE_DEGREE>,
-            >,
+            recursion_shape_config: &RecursionShapeConfig<$F, RecursionChipType<$F>>,
             merkle_tree_height: usize,
         ) -> Vec<PicoRecursionProgramShape> {
             let riscv_recursion_shapes = riscv_shape_config
@@ -350,8 +344,7 @@ macro_rules! generate_vk_map {
     ($F:ty, $generate_all:expr, $load_riscv_proofshape_map:expr, $save_riscv_proofshape_map:expr, $vk_digest_from_shape:expr, $save_vk_map:expr, $proofshape_map_path:expr, $vk_map_path:expr) => {{
         // let riscv_shape_config = RiscvShapeConfig::<$F>::maximal_only();
         let riscv_shape_config = RiscvShapeConfig::<$F>::default();
-        let recursion_shape_config =
-            RecursionShapeConfig::<$F, RecursionChipType<$F, COMBINE_DEGREE>>::default();
+        let recursion_shape_config = RecursionShapeConfig::<$F, RecursionChipType<$F>>::default();
 
         let shapes_without_height = $generate_all(&riscv_shape_config, &recursion_shape_config, 0);
         let total_num = shapes_without_height.len();
@@ -435,7 +428,6 @@ fn main() {
     // TODO: remove redundant count (merkle tree height set to 0 for dummy shape count)
     let start_time = std::time::Instant::now();
 
-    // COMBINE_DEGREE == COMPRESS_DEGREE == 3
     match field {
         FieldEnum::BabyBear => {
             generate_vk_map!(

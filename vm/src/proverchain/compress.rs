@@ -17,12 +17,12 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{COMPRESS_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use alloc::sync::Arc;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
-pub type CompressChips<SC> = RecursionChipType<Val<SC>, COMPRESS_DEGREE>;
+pub type CompressChips<SC> = RecursionChipType<Val<SC>>;
 
 pub struct CompressProver<PrevSC, SC>
 where

@@ -41,7 +41,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_mersenne_31::Mersenne31;
 use std::ops::{Add, AddAssign};
 
-pub enum RecursionChipType<F: FieldSpecificPoseidon2Config + Field, const DEGREE: usize> {
+pub enum RecursionChipType<F: FieldSpecificPoseidon2Config + Field> {
     MemoryConst(MemoryConstChip<F>),
     MemoryVar(MemoryVarChip<F>),
     ExpReverseBitsLen(ExpReverseBitsLenChip<F>),
@@ -55,10 +55,8 @@ pub enum RecursionChipType<F: FieldSpecificPoseidon2Config + Field, const DEGREE
     PublicValues(PublicValuesChip<F>),
 }
 
-impl<
-        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
-        const DEGREE: usize,
-    > ChipBehavior<F> for RecursionChipType<F, DEGREE>
+impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
+    ChipBehavior<F> for RecursionChipType<F>
 where
     BabyBearPoseidon2Chip<F>:
         ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
@@ -167,10 +165,8 @@ where
     }
 }
 
-impl<
-        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
-        const DEGREE: usize,
-    > BaseAir<F> for RecursionChipType<F, DEGREE>
+impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
+    BaseAir<F> for RecursionChipType<F>
 where
     BabyBearPoseidon2Chip<F>: BaseAir<F>,
     KoalaBearPoseidon2Chip<F>: BaseAir<F>,
@@ -212,10 +208,9 @@ where
 impl<
         F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
         AB: ChipBuilder<F>,
-        const DEGREE: usize,
-    > Air<AB> for RecursionChipType<F, DEGREE>
+    > Air<AB> for RecursionChipType<F>
 where
-    RecursionChipType<F, DEGREE>: BaseAir<<AB as AirBuilder>::F>,
+    RecursionChipType<F>: BaseAir<<AB as AirBuilder>::F>,
     BabyBearPoseidon2Chip<F>: Air<AB>,
     KoalaBearPoseidon2Chip<F>: Air<AB>,
     Mersenne31Poseidon2Chip<F>: Air<AB>,
@@ -238,10 +233,8 @@ where
     }
 }
 
-impl<
-        F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
-        const DEGREE: usize,
-    > RecursionChipType<F, DEGREE>
+impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
+    RecursionChipType<F>
 where
     BabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
         + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,

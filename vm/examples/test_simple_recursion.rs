@@ -27,7 +27,6 @@ use pico_vm::{
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{
         BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE, MAX_NUM_PVS, RISCV_NUM_PVS,
-        RISCV_SIMPLE_DEGREE,
     },
 };
 use std::{
@@ -265,7 +264,7 @@ macro_rules! run {
             // Note that it should only accept witnesses initialized from records
             let recursion_machine = SimpleMachine::new(
                 $recur_sc::new(),
-                RecursionChipType::<Val<$recur_sc>, RISCV_SIMPLE_DEGREE>::all_chips(),
+                RecursionChipType::<Val<$recur_sc>>::all_chips(),
                 MAX_NUM_PVS,
             );
             let (recursion_pk, recursion_vk) = recursion_machine.setup_keys(&recursion_program);

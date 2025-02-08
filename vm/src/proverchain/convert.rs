@@ -17,11 +17,11 @@ use crate::{
         proof::MetaProof,
         witness::ProvingWitness,
     },
-    primitives::consts::{CONVERT_DEGREE, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
-type RecursionChips<SC> = RecursionChipType<Val<SC>, CONVERT_DEGREE>;
+type RecursionChips<SC> = RecursionChipType<Val<SC>>;
 
 pub struct ConvertProver<RiscvSC, SC>
 where

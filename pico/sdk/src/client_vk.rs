@@ -47,7 +47,7 @@ impl ProverVkClient {
     pub fn new(elf: &[u8]) -> ProverVkClient {
         let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
         let recursion_shape_config =
-            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, 3>>::default();
+            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
         let riscv = RiscvProver::new_initial_prover(
             (RiscvBBSC::new(), elf),
             Default::default(),
@@ -56,7 +56,7 @@ impl ProverVkClient {
         let convert =
             ConvertProver::new_with_prev(&riscv, Default::default(), Some(recursion_shape_config));
         let recursion_shape_config =
-            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, 3>>::default();
+            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
         let combine = CombineVkProver::new_with_prev(
             &convert,
             Default::default(),

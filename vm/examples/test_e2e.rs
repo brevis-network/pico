@@ -42,8 +42,8 @@ use pico_vm::{
     },
     machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
     primitives::consts::{
-        BABYBEAR_S_BOX_DEGREE, COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE,
-        DIGEST_SIZE, EMBED_DEGREE, KOALABEAR_S_BOX_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
+        BABYBEAR_S_BOX_DEGREE, COMBINE_SIZE, DIGEST_SIZE, KOALABEAR_S_BOX_DEGREE,
+        RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
 };
 use std::{
@@ -176,7 +176,7 @@ macro_rules! run {
             info!("Setting up CONVERT..");
             let convert_machine = ConvertMachine::new(
                 $recur_sc::new(),
-                RecursionChipType::<Val<$recur_sc>, CONVERT_DEGREE>::all_chips(),
+                RecursionChipType::<Val<$recur_sc>>::all_chips(),
                 RECURSION_NUM_PVS,
             );
 
@@ -248,7 +248,7 @@ macro_rules! run {
             info!("Setting up COMBINE");
             let combine_machine = CombineMachine::<_, _>::new(
                 $recur_sc::new(),
-                RecursionChipType::<Val<$recur_sc>, COMBINE_DEGREE>::all_chips(),
+                RecursionChipType::<Val<$recur_sc>>::all_chips(),
                 RECURSION_NUM_PVS,
             );
 
@@ -324,7 +324,7 @@ macro_rules! run {
             info!("Setting up COMPRESS");
             let compress_machine = CompressMachine::new(
                 $recur_sc::compress(),
-                RecursionChipType::<Val<$recur_sc>, COMPRESS_DEGREE>::compress_chips(),
+                RecursionChipType::<Val<$recur_sc>>::compress_chips(),
                 RECURSION_NUM_PVS,
             );
 
@@ -409,7 +409,7 @@ macro_rules! run {
             info!("Setting up EMBED");
             let embed_machine = EmbedMachine::<$recur_sc, _, _, Vec<u8>>::new(
                 $embed_sc::new(),
-                RecursionChipType::<Val<$embed_sc>, EMBED_DEGREE>::embed_chips(),
+                RecursionChipType::<Val<$embed_sc>>::embed_chips(),
                 RECURSION_NUM_PVS,
             );
 

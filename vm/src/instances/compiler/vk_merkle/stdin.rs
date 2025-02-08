@@ -23,7 +23,7 @@ use crate::{
         },
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
-    primitives::consts::{COMBINE_DEGREE, DIGEST_SIZE},
+    primitives::consts::DIGEST_SIZE,
 };
 use p3_baby_bear::BabyBear;
 use p3_commit::TwoAdicMultiplicativeCoset;
@@ -183,20 +183,15 @@ where
 
 macro_rules! impl_recursion_vk_stdin_dummy {
     ($poseidon_type:ty, $field_type:ty) => {
-        impl<'a>
-            RecursionVkStdin<'a, $poseidon_type, RecursionChipType<$field_type, COMBINE_DEGREE>>
-        {
+        impl<'a> RecursionVkStdin<'a, $poseidon_type, RecursionChipType<$field_type>> {
             pub fn dummy(
-                machine: &'a BaseMachine<
-                    $poseidon_type,
-                    RecursionChipType<$field_type, COMBINE_DEGREE>,
-                >,
+                machine: &'a BaseMachine<$poseidon_type, RecursionChipType<$field_type>>,
                 shape: &RecursionVkShape,
             ) -> Self {
                 let recursion_stdin = RecursionStdin::<
                     'a,
                     $poseidon_type,
-                    RecursionChipType<$field_type, COMBINE_DEGREE>,
+                    RecursionChipType<$field_type>,
                 >::dummy(machine, &shape.recursion_shape);
                 let num_proofs = recursion_stdin.proofs.len();
                 let merkle_proof_stdin =

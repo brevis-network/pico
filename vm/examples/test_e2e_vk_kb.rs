@@ -37,10 +37,7 @@ use pico_vm::{
         machine::MachineBehavior,
         witness::ProvingWitness,
     },
-    primitives::consts::{
-        COMBINE_DEGREE, COMBINE_SIZE, COMPRESS_DEGREE, CONVERT_DEGREE, EMBED_DEGREE,
-        KOALABEAR_S_BOX_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS,
-    },
+    primitives::consts::{COMBINE_SIZE, KOALABEAR_S_BOX_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
 };
 use std::{sync::Arc, time::Instant};
 use tracing::info;
@@ -52,9 +49,8 @@ fn main() {
     setup_logger();
 
     let riscv_shape_config = RiscvShapeConfig::<KoalaBear>::default();
-    // COMBINE_DEGREE == COMPRESS_DEGREE == CONVERT_DEGREE == 3
     let recursion_shape_config =
-        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear, COMBINE_DEGREE>>::default();
+        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default();
     let vk_manager = <KoalaBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
 
     // -------- Riscv Machine --------
@@ -155,7 +151,7 @@ fn main() {
     info!("Setting up CONVERT..");
     let convert_machine = ConvertMachine::new(
         RecursionSC::new(),
-        RecursionChipType::<KoalaBear, CONVERT_DEGREE>::all_chips(),
+        RecursionChipType::<KoalaBear>::all_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -201,7 +197,7 @@ fn main() {
     info!("\n Begin COMBINE..");
 
     let recursion_shape_config =
-        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear, COMBINE_DEGREE>>::default();
+        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default();
 
     info!("PERF-machine=combine");
     let combine_start = Instant::now();
@@ -211,7 +207,7 @@ fn main() {
     info!("Setting up COMBINE");
     let combine_machine = CombineVkMachine::new(
         RecursionSC::new(),
-        RecursionChipType::<KoalaBear, COMBINE_DEGREE>::all_chips(),
+        RecursionChipType::<KoalaBear>::all_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -281,7 +277,7 @@ fn main() {
     info!("Setting up COMPRESS");
     let compress_machine = CompressVkMachine::new(
         RecursionSC::compress(),
-        RecursionChipType::<KoalaBear, COMPRESS_DEGREE>::compress_chips(),
+        RecursionChipType::<KoalaBear>::compress_chips(),
         RECURSION_NUM_PVS,
     );
 
@@ -300,7 +296,7 @@ fn main() {
         &compress_vk_stdin,
     );
 
-    let compress_pad_shape = RecursionChipType::<KoalaBear, COMPRESS_DEGREE>::compress_shape();
+    let compress_pad_shape = RecursionChipType::<KoalaBear>::compress_shape();
 
     compress_program.shape = Some(compress_pad_shape);
 
@@ -356,7 +352,7 @@ fn main() {
     info!("Setting up EMBED");
     let embed_machine = EmbedMachine::<RecursionSC, _, _, Vec<u8>>::new(
         EmbedKBSC::new(),
-        RecursionChipType::<KoalaBear, EMBED_DEGREE>::embed_chips(),
+        RecursionChipType::<KoalaBear>::embed_chips(),
         RECURSION_NUM_PVS,
     );
 

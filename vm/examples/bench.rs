@@ -198,7 +198,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
     let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
     let recursion_shape_config =
-        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, 3>>::default();
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
 
     let riscv = RiscvProver::new_initial_prover(
         (RiscvBBSC::new(), &elf),
@@ -208,7 +208,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let convert =
         ConvertProver::new_with_prev(&riscv, recursion_opts, Some(recursion_shape_config));
     let recursion_shape_config =
-        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear, 3>>::default();
+        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
     let combine =
         CombineVkProver::new_with_prev(&convert, recursion_opts, Some(recursion_shape_config));
     let compress = CompressVkProver::new_with_prev(&combine, (), None);
@@ -269,7 +269,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
     let riscv_shape_config = RiscvShapeConfig::<KoalaBear>::default();
     let recursion_shape_config =
-        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear, 3>>::default();
+        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default();
 
     let riscv = RiscvProver::new_initial_prover(
         (RiscvKBSC::new(), &elf),
@@ -279,7 +279,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let convert =
         ConvertProver::new_with_prev(&riscv, recursion_opts, Some(recursion_shape_config));
     let recursion_shape_config =
-        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear, 3>>::default();
+        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default();
     let combine =
         CombineVkProver::new_with_prev(&convert, recursion_opts, Some(recursion_shape_config));
     let compress = CompressVkProver::new_with_prev(&combine, (), None);

@@ -84,15 +84,6 @@ pub const EMPTY: usize = 0x_1111_1111;
 
 pub const ADDR_NUM_BITS: usize = 32;
 
-/*
-For recursion chip degrees
- */
-pub const RISCV_SIMPLE_DEGREE: usize = 3;
-pub const CONVERT_DEGREE: usize = 3;
-pub const COMBINE_DEGREE: usize = 3;
-pub const COMPRESS_DEGREE: usize = 3;
-pub const EMBED_DEGREE: usize = 9;
-
 /// Converts a slice of words to a slice of bytes in little endian.
 pub fn words_to_bytes_le<const B: usize>(words: &[u32]) -> [u8; B] {
     debug_assert_eq!(words.len() * 4, B);
