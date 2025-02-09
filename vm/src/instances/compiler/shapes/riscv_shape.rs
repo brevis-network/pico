@@ -754,8 +754,7 @@ where
 {
     fn default() -> Self {
         // Preprocessed chip heights.
-        let program_heights = vec![Some(19), Some(20)];
-        // let program_heights = vec![Some(19), Some(20), Some(21), Some(22)];
+        let program_heights = vec![Some(19), Some(20), Some(22)];
 
         let allowed_preprocessed_log_heights = HashMap::from([
             (
@@ -784,6 +783,22 @@ where
                 memory_read_write_height: vec![Some(14)],
                 global_height: vec![Some(12)],
                 riscv_poseidon2_height: vec![Some(10)],
+                is_potentially_maximal: true,
+            },
+            RiscvShapeSpec {
+                cpu_height: vec![Some(19)],
+                add_sub_height: vec![Some(16)],
+                lt_height: vec![Some(17)],
+                bitwise_height: vec![Some(18)],
+                shift_right_height: vec![Some(18)],
+                shift_left_height: vec![Some(18)],
+                syscall_riscv_height: vec![Some(18)],
+                memory_local_height: vec![Some(18)],
+                mul_height: vec![Some(18)],
+                divrem_height: vec![Some(18)],
+                memory_read_write_height: vec![Some(18)],
+                global_height: vec![Some(19)],
+                riscv_poseidon2_height: vec![Some(17)],
                 is_potentially_maximal: true,
             },
             // fibonacci
@@ -871,175 +886,6 @@ where
                 riscv_poseidon2_height: vec![Some(21)],
                 is_potentially_maximal: true,
             },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(15)],
-            //     add_sub_height: vec![Some(14)],
-            //     lt_height: vec![Some(11)],
-            //     bitwise_height: vec![Some(12)],
-            //     shift_right_height: vec![Some(11)],
-            //     shift_left_height: vec![Some(10)],
-            //     syscall_riscv_height: vec![Some(17)],
-            //     memory_local_height: vec![Some(8)],
-            //     mul_height: vec![Some(11)],
-            //     divrem_height: vec![Some(4)],
-            //     memory_read_write_height: vec![Some(13)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(21)],
-            //     add_sub_height: vec![Some(21)],
-            //     lt_height: vec![Some(18)],
-            //     bitwise_height: vec![Some(19)],
-            //     shift_right_height: vec![Some(18)],
-            //     shift_left_height: vec![Some(18)],
-            //     syscall_riscv_height: vec![Some(14)],
-            //     memory_local_height: vec![Some(11)],
-            //     mul_height: vec![Some(17)],
-            //     divrem_height: vec![Some(4)],
-            //     memory_read_write_height: vec![Some(19)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(21)],
-            //     add_sub_height: vec![Some(21)],
-            //     lt_height: vec![Some(19)],
-            //     bitwise_height: vec![Some(19)],
-            //     shift_right_height: vec![Some(18)],
-            //     shift_left_height: vec![Some(17)],
-            //     syscall_riscv_height: vec![Some(13)],
-            //     memory_local_height: vec![Some(13)],
-            //     mul_height: vec![Some(13)],
-            //     divrem_height: vec![Some(4)],
-            //     memory_read_write_height: vec![Some(20)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(21)],
-            //     add_sub_height: vec![Some(21)],
-            //     lt_height: vec![Some(19)],
-            //     bitwise_height: vec![Some(18)],
-            //     shift_right_height: vec![Some(17)],
-            //     shift_left_height: vec![Some(16)],
-            //     syscall_riscv_height: vec![Some(14)],
-            //     memory_local_height: vec![Some(14)],
-            //     mul_height: vec![Some(14)],
-            //     divrem_height: vec![Some(7)],
-            //     memory_read_write_height: vec![Some(20)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(21)],
-            //     add_sub_height: vec![Some(21)],
-            //     lt_height: vec![Some(19)],
-            //     bitwise_height: vec![Some(19)],
-            //     shift_right_height: vec![Some(17)],
-            //     shift_left_height: vec![Some(16)],
-            //     syscall_riscv_height: vec![Some(14)],
-            //     memory_local_height: vec![Some(13)],
-            //     mul_height: vec![Some(14)],
-            //     divrem_height: vec![Some(8)],
-            //     memory_read_write_height: vec![Some(19)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(21)],
-            //     add_sub_height: vec![Some(21)],
-            //     lt_height: vec![Some(18)],
-            //     bitwise_height: vec![Some(19)],
-            //     shift_right_height: vec![Some(18)],
-            //     shift_left_height: vec![Some(17)],
-            //     syscall_riscv_height: vec![Some(14)],
-            //     memory_local_height: vec![Some(11)],
-            //     mul_height: vec![Some(18)],
-            //     divrem_height: vec![Some(8)],
-            //     memory_read_write_height: vec![Some(20)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(21)],
-            //     add_sub_height: vec![Some(20)],
-            //     lt_height: vec![Some(16)],
-            //     bitwise_height: vec![Some(20)],
-            //     shift_right_height: vec![Some(19)],
-            //     shift_left_height: vec![Some(19)],
-            //     syscall_riscv_height: vec![Some(14)],
-            //     memory_local_height: vec![Some(11)],
-            //     mul_height: vec![Some(10)],
-            //     divrem_height: vec![Some(8)],
-            //     memory_read_write_height: vec![Some(19)],
-            //     is_potentially_maximal: true,
-            // },
-            // // tendermint log 22
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(15)],
-            //     add_sub_height: vec![Some(14)],
-            //     lt_height: vec![Some(11)],
-            //     bitwise_height: vec![Some(12)],
-            //     shift_right_height: vec![Some(11)],
-            //     shift_left_height: vec![Some(10)],
-            //     syscall_riscv_height: vec![Some(14)],
-            //     memory_local_height: vec![Some(8)],
-            //     mul_height: vec![Some(11)],
-            //     divrem_height: vec![Some(4)],
-            //     memory_read_write_height: vec![Some(13)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(22)],
-            //     add_sub_height: vec![Some(22)],
-            //     lt_height: vec![Some(20)],
-            //     bitwise_height: vec![Some(20)],
-            //     shift_right_height: vec![Some(18)],
-            //     shift_left_height: vec![Some(17)],
-            //     syscall_riscv_height: vec![Some(14)],
-            //     memory_local_height: vec![Some(14)],
-            //     mul_height: vec![Some(15)],
-            //     divrem_height: vec![Some(9)],
-            //     memory_read_write_height: vec![Some(20)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(22)],
-            //     add_sub_height: vec![Some(22)],
-            //     lt_height: vec![Some(19)],
-            //     bitwise_height: vec![Some(21)],
-            //     shift_right_height: vec![Some(19)],
-            //     shift_left_height: vec![Some(19)],
-            //     syscall_riscv_height: vec![Some(14)],
-            //     memory_local_height: vec![Some(13)],
-            //     mul_height: vec![Some(13)],
-            //     divrem_height: vec![Some(4)],
-            //     memory_read_write_height: vec![Some(20)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(22)],
-            //     add_sub_height: vec![Some(22)],
-            //     lt_height: vec![Some(19)],
-            //     bitwise_height: vec![Some(20)],
-            //     shift_right_height: vec![Some(19)],
-            //     shift_left_height: vec![Some(19)],
-            //     syscall_riscv_height: vec![Some(15)],
-            //     memory_local_height: vec![Some(12)],
-            //     mul_height: vec![Some(18)],
-            //     divrem_height: vec![Some(4)],
-            //     memory_read_write_height: vec![Some(20)],
-            //     is_potentially_maximal: true,
-            // },
-            // RiscvShapeSpec {
-            //     cpu_height: vec![Some(22)],
-            //     add_sub_height: vec![Some(22)],
-            //     lt_height: vec![Some(22)],
-            //     bitwise_height: vec![Some(22)],
-            //     shift_right_height: vec![Some(22)],
-            //     shift_left_height: vec![Some(22)],
-            //     syscall_riscv_height: vec![None, Some(22)],
-            //     memory_local_height: vec![Some(22)],
-            //     mul_height: vec![Some(22)],
-            //     divrem_height: vec![Some(22)],
-            //     memory_read_write_height: vec![Some(22)],
-            //     is_potentially_maximal: true,
-            // },
         ];
 
         add_none_if_missing(&mut riscv_shapes);
@@ -1168,15 +1014,10 @@ where
 
         let mut precompile_allowed_log_heights = HashMap::new();
         let precompile_heights = (4..21).collect::<Vec<_>>();
-        // let precompile_heights = vec![19];
         for (chip_name, mem_events_per_row) in RiscvChipType::<F>::get_all_precompile_chips() {
             precompile_allowed_log_heights
                 .insert(chip_name, (mem_events_per_row, precompile_heights.clone()));
         }
-        println!(
-            "precompile_allowed_log_heights: {:?}",
-            precompile_allowed_log_heights
-        );
 
         Self {
             included_shapes: vec![],
@@ -1321,8 +1162,8 @@ where
         ]);
 
         let mut precompile_allowed_log_heights = HashMap::new();
-        let precompile_heights = (4..21).collect::<Vec<_>>();
-        // let precompile_heights = vec![19];
+        // let precompile_heights = (4..21).collect::<Vec<_>>();
+        let precompile_heights = vec![20];
         for (chip_name, mem_events_per_row) in RiscvChipType::<F>::get_all_precompile_chips() {
             precompile_allowed_log_heights
                 .insert(chip_name, (mem_events_per_row, precompile_heights.clone()));

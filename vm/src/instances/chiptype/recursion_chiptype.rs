@@ -456,9 +456,9 @@ where
         let mut shape = HashMap::from(
             [
                 (Self::MemoryConst(MemoryConstChip::default()), 17),
-                (Self::MemoryVar(MemoryVarChip::default()), 18),
-                (Self::BaseAlu(BaseAluChip::default()), 17),
-                (Self::ExtAlu(ExtAluChip::default()), 18),
+                (Self::MemoryVar(MemoryVarChip::default()), 17),
+                (Self::BaseAlu(BaseAluChip::default()), 16),
+                (Self::ExtAlu(ExtAluChip::default()), 15),
                 (
                     Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<F>::default()),
                     17,
@@ -467,8 +467,8 @@ where
                     Self::PublicValues(PublicValuesChip::default()),
                     PUB_VALUES_LOG_HEIGHT,
                 ),
-                (Self::BatchFRI(BatchFRIChip::default()), 18),
-                (Self::Select(SelectChip::default()), 18),
+                (Self::BatchFRI(BatchFRIChip::default()), 17),
+                (Self::Select(SelectChip::default()), 17),
             ]
             .map(|(chip, log_height)| (chip.name(), log_height)),
         );
