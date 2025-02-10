@@ -15,10 +15,7 @@ use crate::{
     },
 };
 
-impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F>
-where
-    CB::Var: Sized,
-{
+impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
 

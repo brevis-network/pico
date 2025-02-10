@@ -18,8 +18,8 @@ pub(crate) struct Poseidon2PermuteSyscall<F, Config>(
 );
 
 impl<F: PrimeField32, Config: Poseidon2Config> Poseidon2PermuteSyscall<F, Config> {
-    const NUM_INTERNAL_ROUNDS: usize = Config::InternalRounds::USIZE;
-    const HALF_EXTERNAL_ROUNDS: usize = Config::HalfExternalRounds::USIZE;
+    const NUM_INTERNAL_ROUNDS: usize = Config::PartialRounds::USIZE;
+    const HALF_EXTERNAL_ROUNDS: usize = Config::HalfFullRounds::USIZE;
 
     pub fn full_round(
         state: &mut [F; PERMUTATION_WIDTH],

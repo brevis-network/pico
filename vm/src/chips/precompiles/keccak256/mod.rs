@@ -14,7 +14,7 @@ pub const STATE_NUM_WORDS: usize = STATE_SIZE * 2;
 #[derive(Debug)]
 pub struct KeccakPermuteChip<F> {
     p3_keccak: KeccakAir,
-    _marker: PhantomData<F>,
+    _marker: PhantomData<fn(F) -> F>,
 }
 
 impl<T: Default> Default for KeccakPermuteChip<T> {

@@ -58,7 +58,7 @@ macro_rules! impl_combine_vk_machine {
                     Val<$recur_sc>,
                     Program = RecursionProgram<Val<$recur_sc>>,
                     Record = RecursionRecord<Val<$recur_sc>>,
-                > + for<'b> Air<ProverConstraintFolder<'b, $recur_sc>>
+                > + Air<ProverConstraintFolder<$recur_sc>>
                 + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>
                 + for<'b> Air<RecursiveVerifierConstraintFolder<'b, $recur_cc>>,
         {

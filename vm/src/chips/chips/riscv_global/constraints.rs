@@ -25,7 +25,6 @@ impl<F: Field> BaseAir<F> for GlobalChip<F> {
 
 impl<F: Field, CB: ChipBuilder<F>> Air<CB> for GlobalChip<F>
 where
-    CB::Var: Sized,
     CB::Expr: Any,
 {
     fn eval(&self, builder: &mut CB) {

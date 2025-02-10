@@ -1,6 +1,6 @@
 use crate::{
     compiler::program::ProgramBehavior,
-    configs::config::{Com, PackedChallenge, PcsProverData, StarkGenericConfig},
+    configs::config::{PackedChallenge, StarkGenericConfig},
     emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -57,12 +57,7 @@ impl<SC, C> BaseProver<SC, C> {
     }
 }
 
-impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C>
-where
-    C: ChipBehavior<SC::Val>,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
-{
+impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
     pub fn setup_keys(
         &self,
         config: &SC,
@@ -406,7 +401,7 @@ where
         num_public_values: usize,
     ) -> BaseProof<SC>
     where
-        C: for<'a> Air<ProverConstraintFolder<'a, SC>>,
+        C: Air<ProverConstraintFolder<SC>>,
     {
         let begin = Instant::now();
 
@@ -434,10 +429,8 @@ where
         let regional_permutation_challenges: [SC::Challenge; 2] =
             array::from_fn(|_| challenger.sample_ext_element());
 
-        let packed_perm_challenges = regional_permutation_challenges
-            .iter()
-            .map(|c| PackedChallenge::<SC>::from_f(*c))
-            .collect_vec();
+        let packed_perm_challenges =
+            regional_permutation_challenges.map(PackedChallenge::<SC>::from_f);
 
         // Generate the permutation traces.
         let (permutation_traces, global_cumulative_sums, regional_cumulative_sums) = self
@@ -503,6 +496,13 @@ where
             })
             .collect::<Vec<_>>();
 
+        // pull out subreferences within pk, so that Pcs::Commitment from BaseProvingKey does not
+        // have to be thread-safe
+        let preprocessed_chip_ordering = &pk.preprocessed_chip_ordering;
+        let preprocessed_prover_data = &pk.preprocessed_prover_data;
+        let data_data = &data.data;
+        let perm_data = &permutation_data;
+
         let quotient_values = {
             let begin = Instant::now();
             let quotient_values = debug_span!(parent: Span::current(), "compute_quotient_values")
@@ -513,14 +513,13 @@ where
                         .map(|(i, quotient_domain)| {
                             let begin_compute_quotient = Instant::now();
 
-                            let pre_trace_on_quotient_domains = pk
-                                .preprocessed_chip_ordering
+                            let pre_trace_on_quotient_domains = preprocessed_chip_ordering
                                 .get(&chips[i].name())
                                 .map(|index| {
                                     config
                                         .pcs()
                                         .get_evaluations_on_domain(
-                                            &pk.preprocessed_prover_data,
+                                            preprocessed_prover_data,
                                             *index,
                                             *quotient_domain,
                                         )
@@ -534,24 +533,24 @@ where
                                 });
                             let main_trace_on_quotient_domain = config
                                 .pcs()
-                                .get_evaluations_on_domain(&data.data, i, *quotient_domain)
+                                .get_evaluations_on_domain(data_data, i, *quotient_domain)
                                 .to_row_major_matrix();
 
                             let permutation_trace_on_quotient_domains = config
                                 .pcs()
-                                .get_evaluations_on_domain(&permutation_data, i, *quotient_domain)
+                                .get_evaluations_on_domain(perm_data, i, *quotient_domain)
                                 .to_row_major_matrix();
 
                             // todo: consider optimize quotient domain
                             let qv = compute_quotient_values(
                                 chips[i],
-                                &data.public_values,
+                                data.public_values.clone(),
                                 main_domains[i],
                                 *quotient_domain,
                                 pre_trace_on_quotient_domains,
                                 main_trace_on_quotient_domain,
                                 permutation_trace_on_quotient_domains,
-                                packed_perm_challenges.as_slice(),
+                                packed_perm_challenges.into(),
                                 &regional_cumulative_sums[i],
                                 &global_cumulative_sums[i],
                                 alpha,

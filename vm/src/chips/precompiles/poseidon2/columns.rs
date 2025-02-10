@@ -28,13 +28,13 @@ pub struct Poseidon2Cols<T, Config: Poseidon2Config> {
     pub state_linear_layer: [T; PERMUTATION_WIDTH],
 
     /// Beginning Full Rounds
-    pub beginning_full_rounds: Array<FullRound<T>, Config::HalfExternalRounds>,
+    pub beginning_full_rounds: Array<FullRound<T>, Config::HalfFullRounds>,
 
     /// Partial Rounds
-    pub partial_rounds: Array<PartialRound<T>, Config::InternalRounds>,
+    pub partial_rounds: Array<PartialRound<T>, Config::PartialRounds>,
 
     /// Ending Full Rounds
-    pub ending_full_rounds: Array<FullRound<T>, Config::HalfExternalRounds>,
+    pub ending_full_rounds: Array<FullRound<T>, Config::HalfFullRounds>,
 
     pub is_real: T,
 }

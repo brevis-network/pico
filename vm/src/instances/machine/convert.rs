@@ -89,7 +89,7 @@ macro_rules! impl_convert_machine {
                             <$recur_sc as StarkGenericConfig>::Val,
                             <$recur_sc as StarkGenericConfig>::Challenge,
                         >,
-                    > + for<'a> Air<ProverConstraintFolder<'a, $recur_sc>>,
+                    > + Air<ProverConstraintFolder<$recur_sc>>,
             {
                 // setup
                 let mut emulator = $emul_name::setup_convert(proving_witness, self.base_machine());

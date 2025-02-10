@@ -4,10 +4,7 @@ use crate::{
         alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
-        poseidon2_p3::{
-            BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
-            POSEIDON2_CHIPNAME,
-        },
+        poseidon2_p3::{FieldSpecificPoseidon2Chip, POSEIDON2_CHIPNAME},
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,
@@ -24,8 +21,7 @@ use crate::{
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
-        field::{same_field, FieldSpecificPoseidon2Config},
-        folder::SymbolicConstraintFolder,
+        field::FieldSpecificPoseidon2Config,
     },
     primitives::consts::{
         BASE_ALU_DATAPAR, CONST_MEM_DATAPAR, EXTENSION_DEGREE, EXT_ALU_DATAPAR, POSEIDON2_DATAPAR,
@@ -33,12 +29,9 @@ use crate::{
     },
 };
 use hashbrown::HashMap;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_baby_bear::BabyBear;
+use p3_air::{Air, BaseAir};
 use p3_field::{extension::BinomiallyExtendable, Field, PrimeField32};
-use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_mersenne_31::Mersenne31;
 use std::ops::{Add, AddAssign};
 
 pub enum RecursionChipType<F: FieldSpecificPoseidon2Config + Field> {
@@ -48,22 +41,13 @@ pub enum RecursionChipType<F: FieldSpecificPoseidon2Config + Field> {
     BaseAlu(BaseAluChip<F>),
     ExtAlu(ExtAluChip<F>),
     Select(SelectChip<F>),
-    BabyBearPoseidon2(BabyBearPoseidon2Chip<F>),
-    KoalaBearPoseidon2(KoalaBearPoseidon2Chip<F>),
-    Mersenne31Poseidon2(Mersenne31Poseidon2Chip<F>),
+    Poseidon2(FieldSpecificPoseidon2Chip<F>),
     BatchFRI(BatchFRIChip<F>),
     PublicValues(PublicValuesChip<F>),
 }
 
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
     ChipBehavior<F> for RecursionChipType<F>
-where
-    BabyBearPoseidon2Chip<F>:
-        ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    KoalaBearPoseidon2Chip<F>:
-        ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    Mersenne31Poseidon2Chip<F>:
-        ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
 {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;
@@ -76,9 +60,7 @@ where
             Self::ExpReverseBitsLen(chip) => chip.name(),
             Self::BaseAlu(chip) => chip.name(),
             Self::ExtAlu(chip) => chip.name(),
-            Self::BabyBearPoseidon2(chip) => chip.name(),
-            Self::KoalaBearPoseidon2(chip) => chip.name(),
-            Self::Mersenne31Poseidon2(chip) => chip.name(),
+            Self::Poseidon2(chip) => chip.name(),
             Self::BatchFRI(chip) => chip.name(),
             Self::PublicValues(chip) => chip.name(),
         }
@@ -92,9 +74,7 @@ where
             Self::ExpReverseBitsLen(chip) => chip.generate_preprocessed(program),
             Self::BaseAlu(chip) => chip.generate_preprocessed(program),
             Self::ExtAlu(chip) => chip.generate_preprocessed(program),
-            Self::BabyBearPoseidon2(chip) => chip.generate_preprocessed(program),
-            Self::KoalaBearPoseidon2(chip) => chip.generate_preprocessed(program),
-            Self::Mersenne31Poseidon2(chip) => chip.generate_preprocessed(program),
+            Self::Poseidon2(chip) => chip.generate_preprocessed(program),
             Self::BatchFRI(chip) => chip.generate_preprocessed(program),
             Self::PublicValues(chip) => chip.generate_preprocessed(program),
         }
@@ -108,9 +88,7 @@ where
             Self::ExpReverseBitsLen(chip) => chip.generate_main(input, output),
             Self::BaseAlu(chip) => chip.generate_main(input, output),
             Self::ExtAlu(chip) => chip.generate_main(input, output),
-            Self::BabyBearPoseidon2(chip) => chip.generate_main(input, output),
-            Self::KoalaBearPoseidon2(chip) => chip.generate_main(input, output),
-            Self::Mersenne31Poseidon2(chip) => chip.generate_main(input, output),
+            Self::Poseidon2(chip) => chip.generate_main(input, output),
             Self::BatchFRI(chip) => chip.generate_main(input, output),
             Self::PublicValues(chip) => chip.generate_main(input, output),
         }
@@ -124,9 +102,7 @@ where
             Self::ExpReverseBitsLen(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::BaseAlu(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::ExtAlu(chip) => ChipBehavior::<F>::preprocessed_width(chip),
-            Self::BabyBearPoseidon2(chip) => ChipBehavior::<F>::preprocessed_width(chip),
-            Self::KoalaBearPoseidon2(chip) => ChipBehavior::<F>::preprocessed_width(chip),
-            Self::Mersenne31Poseidon2(chip) => ChipBehavior::<F>::preprocessed_width(chip),
+            Self::Poseidon2(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::BatchFRI(chip) => ChipBehavior::<F>::preprocessed_width(chip),
             Self::PublicValues(chip) => ChipBehavior::<F>::preprocessed_width(chip),
         }
@@ -140,9 +116,7 @@ where
             Self::ExpReverseBitsLen(chip) => chip.extra_record(input, extra),
             Self::BaseAlu(chip) => chip.extra_record(input, extra),
             Self::ExtAlu(chip) => chip.extra_record(input, extra),
-            Self::BabyBearPoseidon2(chip) => chip.extra_record(input, extra),
-            Self::KoalaBearPoseidon2(chip) => chip.extra_record(input, extra),
-            Self::Mersenne31Poseidon2(chip) => chip.extra_record(input, extra),
+            Self::Poseidon2(chip) => chip.extra_record(input, extra),
             Self::BatchFRI(chip) => chip.extra_record(input, extra),
             Self::PublicValues(chip) => chip.extra_record(input, extra),
         }
@@ -156,9 +130,7 @@ where
             Self::ExpReverseBitsLen(chip) => chip.is_active(record),
             Self::BaseAlu(chip) => chip.is_active(record),
             Self::ExtAlu(chip) => chip.is_active(record),
-            Self::BabyBearPoseidon2(chip) => chip.is_active(record),
-            Self::KoalaBearPoseidon2(chip) => chip.is_active(record),
-            Self::Mersenne31Poseidon2(chip) => chip.is_active(record),
+            Self::Poseidon2(chip) => chip.is_active(record),
             Self::BatchFRI(chip) => chip.is_active(record),
             Self::PublicValues(chip) => chip.is_active(record),
         }
@@ -167,10 +139,6 @@ where
 
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
     BaseAir<F> for RecursionChipType<F>
-where
-    BabyBearPoseidon2Chip<F>: BaseAir<F>,
-    KoalaBearPoseidon2Chip<F>: BaseAir<F>,
-    Mersenne31Poseidon2Chip<F>: BaseAir<F>,
 {
     fn width(&self) -> usize {
         match self {
@@ -180,9 +148,7 @@ where
             Self::ExpReverseBitsLen(chip) => chip.width(),
             Self::BaseAlu(chip) => chip.width(),
             Self::ExtAlu(chip) => chip.width(),
-            Self::BabyBearPoseidon2(chip) => chip.width(),
-            Self::KoalaBearPoseidon2(chip) => chip.width(),
-            Self::Mersenne31Poseidon2(chip) => chip.width(),
+            Self::Poseidon2(chip) => chip.width(),
             Self::BatchFRI(chip) => chip.width(),
             Self::PublicValues(chip) => chip.width(),
         }
@@ -196,9 +162,7 @@ where
             Self::ExpReverseBitsLen(chip) => chip.preprocessed_trace(),
             Self::BaseAlu(chip) => chip.preprocessed_trace(),
             Self::ExtAlu(chip) => chip.preprocessed_trace(),
-            Self::BabyBearPoseidon2(chip) => chip.preprocessed_trace(),
-            Self::KoalaBearPoseidon2(chip) => chip.preprocessed_trace(),
-            Self::Mersenne31Poseidon2(chip) => chip.preprocessed_trace(),
+            Self::Poseidon2(chip) => chip.preprocessed_trace(),
             Self::BatchFRI(chip) => chip.preprocessed_trace(),
             Self::PublicValues(chip) => chip.preprocessed_trace(),
         }
@@ -210,10 +174,7 @@ impl<
         AB: ChipBuilder<F>,
     > Air<AB> for RecursionChipType<F>
 where
-    RecursionChipType<F>: BaseAir<<AB as AirBuilder>::F>,
-    BabyBearPoseidon2Chip<F>: Air<AB>,
-    KoalaBearPoseidon2Chip<F>: Air<AB>,
-    Mersenne31Poseidon2Chip<F>: Air<AB>,
+    FieldSpecificPoseidon2Chip<F>: Air<AB>,
 {
     fn eval(&self, b: &mut AB) {
         //assert_eq!(F::W, F::from_canonical_u32(F::W::U32));
@@ -224,9 +185,7 @@ where
             Self::ExpReverseBitsLen(chip) => chip.eval(b),
             Self::BaseAlu(chip) => chip.eval(b),
             Self::ExtAlu(chip) => chip.eval(b),
-            Self::BabyBearPoseidon2(chip) => chip.eval(b),
-            Self::KoalaBearPoseidon2(chip) => chip.eval(b),
-            Self::Mersenne31Poseidon2(chip) => chip.eval(b),
+            Self::Poseidon2(chip) => chip.eval(b),
             Self::BatchFRI(chip) => chip.eval(b),
             Self::PublicValues(chip) => chip.eval(b),
         }
@@ -235,16 +194,9 @@ where
 
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
     RecursionChipType<F>
-where
-    BabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    KoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    Mersenne31Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
 {
     pub fn all_chips() -> Vec<MetaChip<F, Self>> {
-        let mut chips = vec![
+        vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
             MetaChip::new(Self::Select(SelectChip::default())),
@@ -253,29 +205,12 @@ where
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
-        ];
-
-        if same_field::<F, BabyBear, 4>() {
-            chips.push(MetaChip::new(Self::BabyBearPoseidon2(
-                BabyBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, KoalaBear, 4>() {
-            chips.push(MetaChip::new(Self::KoalaBearPoseidon2(
-                KoalaBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, Mersenne31, 3>() {
-            chips.push(MetaChip::new(Self::Mersenne31Poseidon2(
-                Mersenne31Poseidon2Chip::default(),
-            )));
-        } else {
-            panic!("Unsupported field type");
-        }
-
-        chips
+            MetaChip::new(Self::Poseidon2(FieldSpecificPoseidon2Chip::default())),
+        ]
     }
 
     pub fn convert_chips() -> Vec<MetaChip<F, Self>> {
-        let mut chips = vec![
+        vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
             MetaChip::new(Self::Select(SelectChip::default())),
@@ -284,29 +219,12 @@ where
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
-        ];
-
-        if same_field::<F, BabyBear, 4>() {
-            chips.push(MetaChip::new(Self::BabyBearPoseidon2(
-                BabyBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, KoalaBear, 4>() {
-            chips.push(MetaChip::new(Self::KoalaBearPoseidon2(
-                KoalaBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, Mersenne31, 3>() {
-            chips.push(MetaChip::new(Self::Mersenne31Poseidon2(
-                Mersenne31Poseidon2Chip::default(),
-            )));
-        } else {
-            panic!("Unsupported field type");
-        }
-
-        chips
+            MetaChip::new(Self::Poseidon2(FieldSpecificPoseidon2Chip::default())),
+        ]
     }
 
     pub fn combine_chips() -> Vec<MetaChip<F, Self>> {
-        let mut chips = vec![
+        vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
             MetaChip::new(Self::Select(SelectChip::default())),
@@ -315,29 +233,12 @@ where
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
-        ];
-
-        if same_field::<F, BabyBear, 4>() {
-            chips.push(MetaChip::new(Self::BabyBearPoseidon2(
-                BabyBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, KoalaBear, 4>() {
-            chips.push(MetaChip::new(Self::KoalaBearPoseidon2(
-                KoalaBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, Mersenne31, 3>() {
-            chips.push(MetaChip::new(Self::Mersenne31Poseidon2(
-                Mersenne31Poseidon2Chip::default(),
-            )));
-        } else {
-            panic!("Unsupported field type");
-        }
-
-        chips
+            MetaChip::new(Self::Poseidon2(FieldSpecificPoseidon2Chip::default())),
+        ]
     }
 
     pub fn compress_chips() -> Vec<MetaChip<F, Self>> {
-        let mut chips = vec![
+        vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
             MetaChip::new(Self::Select(SelectChip::default())),
@@ -346,29 +247,12 @@ where
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
-        ];
-
-        if same_field::<F, BabyBear, 4>() {
-            chips.push(MetaChip::new(Self::BabyBearPoseidon2(
-                BabyBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, KoalaBear, 4>() {
-            chips.push(MetaChip::new(Self::KoalaBearPoseidon2(
-                KoalaBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, Mersenne31, 3>() {
-            chips.push(MetaChip::new(Self::Mersenne31Poseidon2(
-                Mersenne31Poseidon2Chip::default(),
-            )));
-        } else {
-            panic!("Unsupported field type");
-        }
-
-        chips
+            MetaChip::new(Self::Poseidon2(FieldSpecificPoseidon2Chip::default())),
+        ]
     }
 
     pub fn embed_chips() -> Vec<MetaChip<F, Self>> {
-        let mut chips = vec![
+        vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),
             MetaChip::new(Self::MemoryVar(MemoryVarChip::default())),
             MetaChip::new(Self::Select(SelectChip::default())),
@@ -377,25 +261,8 @@ where
             MetaChip::new(Self::ExtAlu(ExtAluChip::default())),
             MetaChip::new(Self::BatchFRI(BatchFRIChip::default())),
             MetaChip::new(Self::PublicValues(PublicValuesChip::default())),
-        ];
-
-        if same_field::<F, BabyBear, 4>() {
-            chips.push(MetaChip::new(Self::BabyBearPoseidon2(
-                BabyBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, KoalaBear, 4>() {
-            chips.push(MetaChip::new(Self::KoalaBearPoseidon2(
-                KoalaBearPoseidon2Chip::default(),
-            )));
-        } else if same_field::<F, Mersenne31, 3>() {
-            chips.push(MetaChip::new(Self::Mersenne31Poseidon2(
-                Mersenne31Poseidon2Chip::default(),
-            )));
-        } else {
-            panic!("Unsupported field type");
-        }
-
-        chips
+            MetaChip::new(Self::Poseidon2(FieldSpecificPoseidon2Chip::default())),
+        ]
     }
 
     pub fn chip_heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {

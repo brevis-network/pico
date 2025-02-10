@@ -12,6 +12,7 @@ use crate::{
     },
     primitives::consts::MAX_NUM_PVS,
 };
+use alloc::sync::Arc;
 use p3_air::{AirBuilder, ExtensionBuilder, PairBuilder};
 use p3_field::{ExtensionField, Field, FieldAlgebra};
 use p3_matrix::{
@@ -172,14 +173,14 @@ impl<F: Field> PairBuilder for SymbolicConstraintFolder<F> {
 
 /// Prover Constraint Folder
 #[derive(Debug)]
-pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
+pub struct ProverConstraintFolder<SC: StarkGenericConfig> {
     pub preprocessed: RowMajorMatrix<PackedVal<SC>>,
     pub main: RowMajorMatrix<PackedVal<SC>>,
     pub perm: RowMajorMatrix<PackedChallenge<SC>>,
-    pub public_values: &'a [SC::Val],
-    pub perm_challenges: &'a [PackedChallenge<SC>],
-    pub regional_cumulative_sum: &'a PackedChallenge<SC>,
-    pub global_cumulative_sum: &'a SepticDigest<SC::Val>,
+    pub public_values: Arc<[SC::Val]>,
+    pub perm_challenges: Arc<[PackedChallenge<SC>]>,
+    pub regional_cumulative_sum: PackedChallenge<SC>,
+    pub global_cumulative_sum: SepticDigest<SC::Val>,
     pub is_first_row: PackedVal<SC>,
     pub is_last_row: PackedVal<SC>,
     pub is_transition: PackedVal<SC>,
@@ -187,7 +188,7 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub accumulator: PackedChallenge<SC>,
 }
 
-impl<SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'_, SC> {
+impl<SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<SC> {
     type F = SC::Val;
     type Expr = PackedVal<SC>;
     type Var = PackedVal<SC>;
@@ -220,15 +221,15 @@ impl<SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'_, SC> {
     }
 }
 
-impl<SC: StarkGenericConfig> PublicValuesBuilder for ProverConstraintFolder<'_, SC> {
+impl<SC: StarkGenericConfig> PublicValuesBuilder for ProverConstraintFolder<SC> {
     type PublicVar = Self::F;
 
     fn public_values(&self) -> &[Self::F] {
-        self.public_values
+        &self.public_values
     }
 }
 
-impl<'a, SC: StarkGenericConfig> PermutationBuilder for ProverConstraintFolder<'a, SC> {
+impl<SC: StarkGenericConfig> PermutationBuilder for ProverConstraintFolder<SC> {
     type MP = RowMajorMatrix<PackedChallenge<SC>>;
     type RandomVar = PackedChallenge<SC>;
 
@@ -237,22 +238,22 @@ impl<'a, SC: StarkGenericConfig> PermutationBuilder for ProverConstraintFolder<'
     }
 
     fn permutation_randomness(&self) -> &[Self::RandomVar] {
-        self.perm_challenges
+        &self.perm_challenges
     }
 
     type RegionalSum = PackedChallenge<SC>;
     type GlobalSum = SC::Val;
 
-    fn regional_cumulative_sum(&self) -> &'a Self::RegionalSum {
-        self.regional_cumulative_sum
+    fn regional_cumulative_sum(&self) -> &Self::RegionalSum {
+        &self.regional_cumulative_sum
     }
 
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
-        self.global_cumulative_sum
+    fn global_cumulative_sum(&self) -> &SepticDigest<Self::GlobalSum> {
+        &self.global_cumulative_sum
     }
 }
 
-impl<SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<'_, SC> {
+impl<SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<SC> {
     type EF = SC::Challenge;
     type ExprEF = PackedChallenge<SC>;
     type VarEF = PackedChallenge<SC>;
@@ -267,13 +268,13 @@ impl<SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<'_, SC>
     }
 }
 
-impl<SC: StarkGenericConfig> ChipBuilder<SC::Val> for ProverConstraintFolder<'_, SC> {
+impl<SC: StarkGenericConfig> ChipBuilder<SC::Val> for ProverConstraintFolder<SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }
 }
 
-impl<SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<'_, SC> {
+impl<SC: StarkGenericConfig> PairBuilder for ProverConstraintFolder<SC> {
     fn preprocessed(&self) -> Self::M {
         self.preprocessed.clone()
     }

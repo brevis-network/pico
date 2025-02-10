@@ -7,7 +7,7 @@ use core::intrinsics::type_id;
 use p3_baby_bear::{BabyBear, GenericPoseidon2LinearLayersBabyBear};
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
-    Field, FieldAlgebra,
+    Field,
 };
 use p3_koala_bear::{GenericPoseidon2LinearLayersKoalaBear, KoalaBear};
 use p3_mersenne_31::{GenericPoseidon2LinearLayersMersenne31, Mersenne31};
@@ -38,9 +38,11 @@ impl<F: Field> FieldBehavior for F {
     }
 }
 
-pub trait FieldSpecificPoseidon2Config: FieldAlgebra {
+pub trait FieldSpecificPoseidon2Config: Field {
     type Poseidon2Config: Poseidon2Config;
-    type LinearLayers: GenericPoseidon2LinearLayers<Self, PERMUTATION_WIDTH>;
+    type LinearLayers: GenericPoseidon2LinearLayers<Self, PERMUTATION_WIDTH>
+        // required to automatically derive Air<SymbolicConstraintFolder<F>>
+        + GenericPoseidon2LinearLayers<SymbolicExpression<Self>, PERMUTATION_WIDTH>;
     fn riscv_poseidon2_name() -> &'static str;
 }
 

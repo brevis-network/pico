@@ -1,7 +1,5 @@
 use crate::{
-    chips::chips::poseidon2_p3::{
-        BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
-    },
+    chips::chips::poseidon2_p3::FieldSpecificPoseidon2Chip,
     compiler::recursion::{
         circuit::{
             config::{CircuitConfig, FieldFriConfigVariable},
@@ -158,14 +156,8 @@ where
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>>>:
         Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
-    for<'b> BabyBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    BabyBearPoseidon2Chip<CC::F>:
-        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
-    for<'b> KoalaBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    KoalaBearPoseidon2Chip<CC::F>:
-        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
-    for<'b> Mersenne31Poseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Mersenne31Poseidon2Chip<CC::F>:
+    for<'b> FieldSpecificPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    FieldSpecificPoseidon2Chip<CC::F>:
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 {
     pub fn build(
@@ -233,14 +225,8 @@ where
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     for<'a> RecursionVkStdin<'a, SC, RecursionChipType<Val<SC>>>:
         Witnessable<CC, WitnessVariable = RecursionVkStdinVariable<CC, SC>>,
-    for<'b> BabyBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    BabyBearPoseidon2Chip<CC::F>:
-        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
-    for<'b> KoalaBearPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    KoalaBearPoseidon2Chip<CC::F>:
-        ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
-    for<'b> Mersenne31Poseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Mersenne31Poseidon2Chip<CC::F>:
+    for<'b> FieldSpecificPoseidon2Chip<CC::F>: Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    FieldSpecificPoseidon2Chip<CC::F>:
         ChipBehavior<CC::F, Record = RecursionRecord<CC::F>, Program = RecursionProgram<CC::F>>,
 {
     pub fn build(

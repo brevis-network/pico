@@ -1,6 +1,6 @@
 use super::{folder::DebugConstraintFolder, lookup::LookupScope};
 use crate::{
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    configs::config::{StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -28,8 +28,6 @@ pub trait MachineBehavior<SC, C, I>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
     /// Get the name of the machine.
     fn name(&self) -> String;
@@ -81,7 +79,7 @@ where
     fn prove(&self, witness: &ProvingWitness<SC, C, I>) -> MetaProof<SC>
     where
         C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>
-            + for<'a> Air<ProverConstraintFolder<'a, SC>>;
+            + Air<ProverConstraintFolder<SC>>;
 
     /// Verify the proof.
     fn verify(&self, proof: &MetaProof<SC>) -> Result<()>
@@ -133,7 +131,6 @@ where
 impl<SC, C> BaseMachine<SC, C>
 where
     SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>,
 {
     /// Name of BaseMachine.
     pub fn name(&self) -> String {
@@ -145,11 +142,6 @@ where
         self.config.clone()
     }
 
-    /// Get the chips of the machine.
-    pub fn chips(&self) -> Arc<[MetaChip<Val<SC>, C>]> {
-        self.chips.clone()
-    }
-
     /// Get the number of public values.
     pub fn num_public_values(&self) -> usize {
         self.num_public_values
@@ -159,20 +151,6 @@ where
     pub fn has_global(&self) -> bool {
         self.has_global
     }
-
-    /// Returns an iterator over the chips in the machine that are included in the given chunk.
-    pub fn chunk_ordered_chips<'a, 'b>(
-        &'a self,
-        chip_ordering: &'b HashMap<String, usize>,
-    ) -> impl Iterator<Item = &'b MetaChip<Val<SC>, C>>
-    where
-        'a: 'b,
-    {
-        self.chips
-            .iter()
-            .filter(|chip| chip_ordering.contains_key(&chip.name()))
-            .sorted_by_key(|chip| chip_ordering.get(&chip.name()))
-    }
 }
 
 impl<SC, C> BaseMachine<SC, C>
@@ -180,17 +158,38 @@ where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
 {
+    /// Get the chips of the machine.
+    pub fn chips(&self) -> Arc<[MetaChip<Val<SC>, C>]> {
+        self.chips.clone()
+    }
+
+    /// Returns an iterator over the chips in the machine that are included in the given chunk.
+    pub fn chunk_ordered_chips(
+        &self,
+        chip_ordering: &HashMap<String, usize>,
+    ) -> impl Iterator<Item = &MetaChip<Val<SC>, C>> {
+        self.chips
+            .iter()
+            .filter(|chip| chip_ordering.contains_key(&chip.name()))
+            .sorted_by_key(|chip| chip_ordering.get(&chip.name()))
+    }
+
     /// Create BaseMachine based on config and chip behavior.
-    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
+    pub fn new(
+        config: SC,
+        chips: impl Into<Arc<[MetaChip<Val<SC>, C>]>>,
+        num_public_values: usize,
+    ) -> Self {
+        let chips = chips.into();
         let has_global = chips
             .iter()
             .any(|chip| chip.lookup_scope() == LookupScope::Global);
 
         Self {
             config: config.into(),
-            chips: chips.into(),
-            prover: BaseProver::<SC, C>::new(),
-            verifier: BaseVerifier::<SC, C>::new(),
+            chips,
+            prover: BaseProver::new(),
+            verifier: BaseVerifier::new(),
             num_public_values,
             has_global,
         }
@@ -204,15 +203,7 @@ where
             .map(|(i, _)| i)
             .collect()
     }
-}
 
-impl<SC, C> BaseMachine<SC, C>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<Val<SC>>,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
-{
     /// setup proving and verifying keys.
     pub fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let (pk, vk) = self
@@ -236,7 +227,7 @@ where
     ) -> Vec<BaseProof<SC>>
     where
         C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>
-            + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+            + Air<ProverConstraintFolder<SC>>,
         SC::Val: PrimeField64,
     {
         let mut challenger = self.config().challenger();
@@ -282,7 +273,7 @@ where
         main_commitment: MainTraceCommitments<SC>,
     ) -> BaseProof<SC>
     where
-        C: for<'a> Air<ProverConstraintFolder<'a, SC>>,
+        C: Air<ProverConstraintFolder<SC>>,
     {
         self.prover.prove(
             &self.config(),

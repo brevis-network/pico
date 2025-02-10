@@ -1,9 +1,6 @@
 use crate::{
-    chips::chips::riscv_poseidon2::{
-        BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
-    },
     compiler::{riscv::program::Program, word::Word},
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    configs::config::{Com, StarkGenericConfig, Val},
     emulator::{
         emulator::MetaEmulator,
         record::RecordBehavior,
@@ -13,10 +10,7 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         field::FieldSpecificPoseidon2Config,
-        folder::{
-            DebugConstraintFolder, ProverConstraintFolder, SymbolicConstraintFolder,
-            VerifierConstraintFolder,
-        },
+        folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
@@ -25,7 +19,7 @@ use crate::{
 };
 use anyhow::Result;
 use p3_air::Air;
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32};
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{info, instrument};
@@ -45,12 +39,7 @@ where
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
     C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
-    SC::Domain: Send + Sync,
-    BabyBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
-    KoalaBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
-    Mersenne31Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
 {
     /// Prove with shape config
     #[instrument(name = "riscv_prove_with_shape", level = "debug", skip_all)]
@@ -66,7 +55,7 @@ where
                     <SC as StarkGenericConfig>::Val,
                     <SC as StarkGenericConfig>::Challenge,
                 >,
-            > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+            > + Air<ProverConstraintFolder<SC>>,
     {
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
@@ -145,7 +134,7 @@ where
                 let main_commitment = self.base_machine.commit(&record).unwrap();
 
                 let proof = self.base_machine.prove_plain(
-                    witness.pk(),
+                    pk,
                     &mut challenger.clone(),
                     record.chunk_index(),
                     main_commitment,
@@ -231,7 +220,7 @@ where
                     <SC as StarkGenericConfig>::Val,
                     <SC as StarkGenericConfig>::Challenge,
                 >,
-            > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+            > + Air<ProverConstraintFolder<SC>>,
     {
         self.prove_with_shape_cycles(witness, shape_config)
     }
@@ -244,7 +233,7 @@ where
                     <SC as StarkGenericConfig>::Val,
                     <SC as StarkGenericConfig>::Challenge,
                 >,
-            > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+            > + Air<ProverConstraintFolder<SC>>,
     {
         self.prove_with_shape_cycles(witness, None)
     }
@@ -256,10 +245,7 @@ where
     Val<SC>: PrimeField32,
     C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
-    SC::Domain: Send + Sync,
-    SC::Val: PrimeField,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -279,7 +265,7 @@ where
                     <SC as StarkGenericConfig>::Val,
                     <SC as StarkGenericConfig>::Challenge,
                 >,
-            > + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+            > + Air<ProverConstraintFolder<SC>>,
     {
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
@@ -350,7 +336,7 @@ where
                 let main_commitment = self.base_machine.commit(&record).unwrap();
 
                 let proof = self.base_machine.prove_plain(
-                    witness.pk(),
+                    pk,
                     &mut challenger.clone(),
                     record.chunk_index(),
                     main_commitment,

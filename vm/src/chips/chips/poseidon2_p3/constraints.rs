@@ -6,6 +6,7 @@ use crate::{
             constraints::eval_poseidon2,
         },
     },
+    configs::config::Poseidon2Config,
     machine::builder::{ChipBuilder, RecursionBuilder},
     primitives::consts::PERMUTATION_WIDTH,
 };
@@ -15,53 +16,27 @@ use p3_matrix::Matrix;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 use std::borrow::Borrow;
 
-impl<
-        F: Field,
-        LinearLayers: Sync,
-        const FIELD_HALF_FULL_ROUNDS: usize,
-        const FIELD_PARTIAL_ROUNDS: usize,
-        const FIELD_SBOX_REGISTERS: usize,
-    > BaseAir<F>
-    for Poseidon2ChipP3<
-        F,
-        LinearLayers,
-        FIELD_HALF_FULL_ROUNDS,
-        FIELD_PARTIAL_ROUNDS,
-        FIELD_SBOX_REGISTERS,
-    >
+impl<F, LinearLayers, Config> BaseAir<F> for Poseidon2ChipP3<F, LinearLayers, Config>
+where
+    F: Sync,
+    Config: Poseidon2Config,
 {
     fn width(&self) -> usize {
-        NUM_POSEIDON2_COLS::<FIELD_HALF_FULL_ROUNDS, FIELD_PARTIAL_ROUNDS, FIELD_SBOX_REGISTERS>
+        NUM_POSEIDON2_COLS::<Config>
     }
 }
 
-impl<
-        F: Field,
-        LinearLayers: GenericPoseidon2LinearLayers<CB::Expr, PERMUTATION_WIDTH>,
-        CB: ChipBuilder<F>,
-        const FIELD_HALF_FULL_ROUNDS: usize,
-        const FIELD_PARTIAL_ROUNDS: usize,
-        const FIELD_SBOX_REGISTERS: usize,
-    > Air<CB>
-    for Poseidon2ChipP3<
-        F,
-        LinearLayers,
-        FIELD_HALF_FULL_ROUNDS,
-        FIELD_PARTIAL_ROUNDS,
-        FIELD_SBOX_REGISTERS,
-    >
+impl<F, LinearLayers, CB, Config> Air<CB> for Poseidon2ChipP3<F, LinearLayers, Config>
 where
-    Self: BaseAir<F>,
+    F: Field,
+    LinearLayers: GenericPoseidon2LinearLayers<CB::Expr, PERMUTATION_WIDTH>,
+    CB: ChipBuilder<F>,
+    Config: Poseidon2Config,
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
         let local = main.row_slice(0);
-        let local: &Poseidon2Cols<
-            CB::Var,
-            FIELD_HALF_FULL_ROUNDS,
-            FIELD_PARTIAL_ROUNDS,
-            FIELD_SBOX_REGISTERS,
-        > = (*local).borrow();
+        let local: &Poseidon2Cols<CB::Var, Config> = (*local).borrow();
         let prep = builder.preprocessed();
         let prep_local = prep.row_slice(0);
         let prep_local: &Poseidon2PreprocessedCols<CB::Var> = (*prep_local).borrow();
@@ -75,19 +50,12 @@ where
             (0..PERMUTATION_WIDTH).for_each(|i| {
                 builder.looking_single(
                     prep_local.output[i].addr,
-                    local.ending_full_rounds[FIELD_HALF_FULL_ROUNDS - 1].post[i],
+                    local.ending_full_rounds[Self::HALF_FULL_ROUNDS - 1].post[i],
                     prep_local.output[i].mult,
                 )
             });
 
-            eval_poseidon2::<
-                F,
-                CB,
-                LinearLayers,
-                FIELD_HALF_FULL_ROUNDS,
-                FIELD_PARTIAL_ROUNDS,
-                FIELD_SBOX_REGISTERS,
-            >(builder, local, &self.constants);
+            eval_poseidon2::<F, CB, LinearLayers, Config>(builder, local, &self.constants);
         }
     }
 }

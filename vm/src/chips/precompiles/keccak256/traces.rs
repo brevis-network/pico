@@ -1,6 +1,6 @@
 use crate::emulator::record::RecordBehavior;
 use p3_air::BaseAir;
-use p3_field::{Field, PrimeField32};
+use p3_field::PrimeField32;
 use p3_keccak_air::{generate_trace_rows, NUM_KECCAK_COLS, NUM_ROUNDS};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
@@ -27,7 +27,7 @@ use crate::{
     machine::chip::ChipBehavior,
 };
 
-impl<F: Field> BaseAir<F> for KeccakPermuteChip<F> {
+impl<F> BaseAir<F> for KeccakPermuteChip<F> {
     fn width(&self) -> usize {
         NUM_KECCAK_MEM_COLS
     }

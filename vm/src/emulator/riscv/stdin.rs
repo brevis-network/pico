@@ -1,16 +1,5 @@
 use crate::{
-    chips::chips::{
-        poseidon2_p3::{
-            BabyBearPoseidon2Chip as RecursionBabyBearPoseidon2Chip,
-            KoalaBearPoseidon2Chip as RecursionKoalaBearPoseidon2Chip,
-            Mersenne31Poseidon2Chip as RecursionMersenne31Poseidon2Chip,
-        },
-        riscv_poseidon2::{
-            BabyBearPoseidon2Chip as RiscvBabyBearPoseidon2Chip,
-            KoalaBearPoseidon2Chip as RiscvKoalaBearPoseidon2Chip,
-            Mersenne31Poseidon2Chip as RiscvMersenne31Poseidon2Chip,
-        },
-    },
+    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip as RiscvPoseidon2Chip,
     compiler::recursion::{
         circuit::{
             challenger::DuplexChallengerVariable,
@@ -39,7 +28,6 @@ use crate::{
     machine::{
         chip::ChipBehavior,
         field::FieldSpecificPoseidon2Config,
-        folder::SymbolicConstraintFolder,
         keys::{BaseVerifyingKey, HashableKey},
         machine::BaseMachine,
         proof::BaseProof,
@@ -181,15 +169,7 @@ where
         Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
         PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
         Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
-        RiscvBabyBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-        RiscvKoalaBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-        RiscvMersenne31Poseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-        RecursionBabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-        RecursionKoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-        RecursionMersenne31Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
+        RiscvPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     {
         // initialize for base_ and reconstruct_challenger
         let [mut base_challenger, mut reconstruct_challenger] =
@@ -369,13 +349,6 @@ where
         C: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 
         BaseMachine<SC, C>: Send + Sync,
-
-        RecursionBabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-        RecursionKoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-        RecursionMersenne31Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-            + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
     {
         assert_eq!(vks.len(), proofs.len());
 

@@ -58,7 +58,7 @@ where
     fn prove(&self, witness: &ProvingWitness<EmbedSC, C, I>) -> MetaProof<EmbedSC>
     where
         C: for<'a> Air<DebugConstraintFolder<'a, Val<EmbedSC>, Challenge<EmbedSC>>>
-            + for<'a> Air<ProverConstraintFolder<'a, EmbedSC>>,
+            + Air<ProverConstraintFolder<EmbedSC>>,
     {
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);

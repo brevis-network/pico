@@ -51,7 +51,7 @@ where
             Val<SC>,
             Program = RecursionProgram<Val<SC>>,
             Record = RecursionRecord<Val<SC>>,
-        > + for<'a> Air<ProverConstraintFolder<'a, SC>>
+        > + Air<ProverConstraintFolder<SC>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + Send
         + Sync,

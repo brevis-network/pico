@@ -1,8 +1,6 @@
 use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
-    chips::chips::riscv_poseidon2::{
-        BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
-    },
+    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
     compiler::recursion::{
         circuit::{
             challenger::{CanObserveVariable, DuplexChallengerVariable},
@@ -19,9 +17,7 @@ use crate::{
     configs::config::{Challenger, Com, PcsProof, Val},
     emulator::recursion::public_values::RecursionPublicValues,
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{
-        field::FieldSpecificPoseidon2Config, folder::SymbolicConstraintFolder, machine::BaseMachine,
-    },
+    machine::{field::FieldSpecificPoseidon2Config, machine::BaseMachine},
     primitives::consts::{DIGEST_SIZE, RECURSION_NUM_PVS},
 };
 use p3_air::Air;
@@ -54,12 +50,7 @@ where
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
-    BabyBearPoseidon2Chip<F>:
-        Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    KoalaBearPoseidon2Chip<F>:
-        Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Mersenne31Poseidon2Chip<F>:
-        Air<SymbolicConstraintFolder<F>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    FieldSpecificPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
         machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
@@ -91,9 +82,7 @@ where
         FriChallengerVariable = DuplexChallengerVariable<CC>,
         DigestVariable = [Felt<F>; DIGEST_SIZE],
     >,
-    BabyBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    KoalaBearPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
-    Mersenne31Poseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    FieldSpecificPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,

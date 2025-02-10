@@ -1,11 +1,10 @@
 use crate::{
-    configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val},
+    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
         machine::{BaseMachine, MachineBehavior},
-        proof::{BaseProof, MetaProof},
+        proof::MetaProof,
         witness::ProvingWitness,
     },
 };
@@ -27,15 +26,8 @@ where
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for SimpleMachine<SC, C>
 where
     SC: StarkGenericConfig + Send + Sync,
+    C: ChipBehavior<Val<SC>>,
     Val<SC>: PrimeField32,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
-    BaseProof<SC>: Send + Sync,
-    PcsProof<SC>: Send + Sync,
-    BaseVerifyingKey<SC>: Send + Sync,
-    C: ChipBehavior<SC::Val>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
 {
@@ -53,7 +45,7 @@ where
     fn prove(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> MetaProof<SC>
     where
         C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>
-            + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+            + Air<ProverConstraintFolder<SC>>,
     {
         debug!("PERF-machine=simple");
         let begin = Instant::now();
@@ -96,8 +88,6 @@ impl<SC, C> SimpleMachine<SC, C>
 where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {
         debug!("PERF-machine=simple");

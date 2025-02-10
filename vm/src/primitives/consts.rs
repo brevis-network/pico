@@ -174,10 +174,13 @@ pub const MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 #[derive(Clone, Copy, Default)]
 pub struct BabyBearConfig;
 impl Poseidon2Config for BabyBearConfig {
-    type ExternalRounds = typenum::U8;
-    type HalfExternalRounds = typenum::U4;
-    type InternalRounds = typenum::U13;
-    type InternalRoundsM1 = typenum::U12;
+    type FullRounds = typenum::U8;
+    type HalfFullRounds = typenum::U4;
+    type PartialRounds = typenum::U13;
+    type PartialRoundsM1 = typenum::U12;
+    type SBoxRegisters = typenum::U1;
+    //type RiscvParallelism = typenum::U1;
+    //type Parallelism = typenum::U1;
 }
 pub const BABYBEAR_S_BOX_DEGREE: u64 = 7;
 pub const BABYBEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
@@ -190,10 +193,13 @@ pub const BABYBEAR_NUM_ROUNDS: usize = BABYBEAR_NUM_EXTERNAL_ROUNDS + BABYBEAR_N
 #[derive(Clone, Copy, Default)]
 pub struct KoalaBearConfig;
 impl Poseidon2Config for KoalaBearConfig {
-    type ExternalRounds = typenum::U8;
-    type HalfExternalRounds = typenum::U4;
-    type InternalRounds = typenum::U20;
-    type InternalRoundsM1 = typenum::U19;
+    type FullRounds = typenum::U8;
+    type HalfFullRounds = typenum::U4;
+    type PartialRounds = typenum::U20;
+    type PartialRoundsM1 = typenum::U19;
+    type SBoxRegisters = typenum::U0;
+    //type RiscvParallelism = typenum::U1;
+    //type Parallelism = typenum::U1;
 }
 pub const KOALABEAR_S_BOX_DEGREE: u64 = 3;
 pub const KOALABEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
@@ -204,10 +210,13 @@ pub const KOALABEAR_NUM_ROUNDS: usize =
 #[derive(Clone, Copy, Default)]
 pub struct Mersenne31Config;
 impl Poseidon2Config for Mersenne31Config {
-    type ExternalRounds = typenum::U8;
-    type HalfExternalRounds = typenum::U4;
-    type InternalRounds = typenum::U14;
-    type InternalRoundsM1 = typenum::U13;
+    type FullRounds = typenum::U8;
+    type HalfFullRounds = typenum::U4;
+    type PartialRounds = typenum::U14;
+    type PartialRoundsM1 = typenum::U13;
+    type SBoxRegisters = typenum::U1;
+    //type RiscvParallelism = typenum::U1;
+    //type Parallelism = typenum::U1;
 }
 pub const MERSENNE31_S_BOX_DEGREE: u64 = 5;
 pub const MERSENNE31_NUM_EXTERNAL_ROUNDS: usize = 8;

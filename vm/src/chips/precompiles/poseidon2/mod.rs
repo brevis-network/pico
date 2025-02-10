@@ -17,7 +17,7 @@ impl<F, Config> Default for Poseidon2PermuteChip<F, Config> {
 }
 
 impl<F, Config: Poseidon2Config> Poseidon2PermuteChip<F, Config> {
-    const NUM_EXTERNAL_ROUNDS: usize = Config::ExternalRounds::USIZE;
-    const NUM_INTERNAL_ROUNDS: usize = Config::InternalRounds::USIZE;
-    const HALF_EXTERNAL_ROUNDS: usize = Config::HalfExternalRounds::USIZE;
+    const NUM_EXTERNAL_ROUNDS: usize = Config::FullRounds::USIZE;
+    const NUM_INTERNAL_ROUNDS: usize = Config::PartialRounds::USIZE;
+    const HALF_EXTERNAL_ROUNDS: usize = Config::HalfFullRounds::USIZE;
 }

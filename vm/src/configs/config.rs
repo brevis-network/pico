@@ -50,7 +50,9 @@ pub trait StarkGenericConfig: Clone + Serialize + Sync {
         + Clone;
 
     /// The PCS used to commit to trace polynomials.
-    type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain> + ZeroCommitment<Self>;
+    // TODO: figure out how to fix the ProverData: Sync bound within the context of prove
+    type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain, ProverData: Sync>
+        + ZeroCommitment<Self>;
 
     fn new() -> Self;
 
@@ -82,14 +84,17 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 /// We also slap on a bunch of typenum math bounds here because every
 /// instantiation should satisfy them here rather than at chip instantiation.
 pub trait Poseidon2Config: Copy {
-    type ExternalRounds: ArraySize + Add<typenum::U3, Output: ArraySize>;
+    type FullRounds: ArraySize + Add<typenum::U3, Output: ArraySize> + core::fmt::Debug;
     // the add constraint enforces external rounds is even
-    type HalfExternalRounds: ArraySize
-        + Add<Self::HalfExternalRounds, Output: Same<Self::ExternalRounds>>;
-    type InternalRounds: ArraySize;
-    type InternalRoundsM1: ArraySize
+    type HalfFullRounds: ArraySize
+        + Add<Self::HalfFullRounds, Output: Same<Self::FullRounds>>
+        + core::fmt::Debug;
+    type PartialRounds: ArraySize + core::fmt::Debug;
+    type PartialRoundsM1: ArraySize
         + Add<typenum::U16, Output: ArraySize>
-        + Add<typenum::U1, Output: Same<Self::InternalRounds>>;
+        + Add<typenum::U1, Output: Same<Self::PartialRounds>>
+        + core::fmt::Debug;
+    type SBoxRegisters: ArraySize + core::fmt::Debug;
 }
 
 pub struct SimpleFriConfig {

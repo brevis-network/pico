@@ -4,25 +4,18 @@ use crate::{
         alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
-        poseidon2_p3::{
-            BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
-            POSEIDON2_CHIPNAME,
-        },
+        poseidon2_p3::POSEIDON2_CHIPNAME,
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,
     },
     compiler::recursion::program::RecursionProgram,
-    emulator::recursion::emulator::RecursionRecord,
     instances::{chiptype::recursion_chiptype::RecursionChipType, compiler::shapes::ProofShape},
-    machine::{
-        chip::ChipBehavior, field::FieldSpecificPoseidon2Config, folder::SymbolicConstraintFolder,
-    },
+    machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config},
     primitives::consts::EXTENSION_DEGREE,
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::Air;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_util::log2_ceil_usize;
 use serde::{Deserialize, Serialize};
@@ -213,13 +206,6 @@ where
 
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
     RecursionShapeConfig<F, RecursionChipType<F>>
-where
-    BabyBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    KoalaBearPoseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
-    Mersenne31Poseidon2Chip<F>: Air<SymbolicConstraintFolder<F>>
-        + ChipBehavior<F, Record = RecursionRecord<F>, Program = RecursionProgram<F>>,
 {
     pub fn get_all_shape_combinations(
         &self,

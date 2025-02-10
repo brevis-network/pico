@@ -1,8 +1,6 @@
 use super::{InitialProverSetup, MachineProver};
 use crate::{
-    chips::chips::riscv_poseidon2::{
-        BabyBearPoseidon2Chip, KoalaBearPoseidon2Chip, Mersenne31Poseidon2Chip,
-    },
+    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
@@ -15,7 +13,7 @@ use crate::{
     },
     machine::{
         field::FieldSpecificPoseidon2Config,
-        folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
+        folder::{ProverConstraintFolder, VerifierConstraintFolder},
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
@@ -50,12 +48,7 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
-    BabyBearPoseidon2Chip<Val<SC>>:
-        Air<SymbolicConstraintFolder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-    KoalaBearPoseidon2Chip<Val<SC>>:
-        Air<SymbolicConstraintFolder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
-    Mersenne31Poseidon2Chip<Val<SC>>:
-        Air<SymbolicConstraintFolder<Val<SC>>> + for<'a> Air<ProverConstraintFolder<'a, SC>>,
+    FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
     pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
         let witness = ProvingWitness::setup_for_riscv(
@@ -85,9 +78,6 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
-    BabyBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
-    KoalaBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
-    Mersenne31Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>,
 {
     type Input<'a> = (SC, &'a [u8]);
     type Opts = EmulatorOpts;
@@ -130,15 +120,8 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
-    BabyBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
-    KoalaBearPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
-    Mersenne31Poseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    FieldSpecificPoseidon2Chip<Val<SC>>:
+        Air<ProverConstraintFolder<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     type Witness = EmulatorStdin<Program, Vec<u8>>;
     type Chips = RiscvChips<SC>;

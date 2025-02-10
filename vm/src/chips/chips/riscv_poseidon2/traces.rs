@@ -8,11 +8,11 @@ use crate::{
         utils::next_power_of_two,
     },
     compiler::riscv::program::Program,
+    configs::config::Poseidon2Config,
     emulator::riscv::record::EmulationRecord,
     machine::{chip::ChipBehavior, field::same_field},
     primitives::consts::{PERMUTATION_WIDTH, RISCV_POSEIDON2_DATAPAR},
 };
-use p3_air::BaseAir;
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
@@ -26,25 +26,8 @@ use std::borrow::BorrowMut;
 impl<
         F: PrimeField32,
         LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
-        const FIELD_HALF_FULL_ROUNDS: usize,
-        const FIELD_PARTIAL_ROUNDS: usize,
-        const FIELD_SBOX_REGISTERS: usize,
-    > ChipBehavior<F>
-    for Poseidon2ChipP3<
-        F,
-        LinearLayers,
-        FIELD_HALF_FULL_ROUNDS,
-        FIELD_PARTIAL_ROUNDS,
-        FIELD_SBOX_REGISTERS,
-    >
-where
-    Poseidon2ChipP3<
-        F,
-        LinearLayers,
-        FIELD_HALF_FULL_ROUNDS,
-        FIELD_PARTIAL_ROUNDS,
-        FIELD_SBOX_REGISTERS,
-    >: BaseAir<F>,
+        Config: Poseidon2Config,
+    > ChipBehavior<F> for Poseidon2ChipP3<F, LinearLayers, Config>
 {
     type Record = EmulationRecord;
     type Program = Program;
@@ -69,16 +52,8 @@ where
         let padded_nrows = next_power_of_two(nrows, log_nrows);
 
         // Calculate total size once
-        let total_cols = RISCV_NUM_POSEIDON2_COLS::<
-            FIELD_HALF_FULL_ROUNDS,
-            FIELD_PARTIAL_ROUNDS,
-            FIELD_SBOX_REGISTERS,
-        >;
-        let value_cols = NUM_POSEIDON2_VALUE_COLS::<
-            FIELD_HALF_FULL_ROUNDS,
-            FIELD_PARTIAL_ROUNDS,
-            FIELD_SBOX_REGISTERS,
-        >;
+        let total_cols = RISCV_NUM_POSEIDON2_COLS::<Config>;
+        let value_cols = NUM_POSEIDON2_VALUE_COLS::<Config>;
 
         // Initialize values in parallel
         let mut values: Vec<F> = (0..padded_nrows * total_cols)
@@ -92,20 +67,9 @@ where
         // Create a shared dummy row that can be reused
         let dummy_row = {
             let mut dummy = vec![F::ZERO; value_cols];
-            let dummy_cols: &mut Poseidon2ValueCols<
-                F,
-                FIELD_HALF_FULL_ROUNDS,
-                FIELD_PARTIAL_ROUNDS,
-                FIELD_SBOX_REGISTERS,
-            > = dummy.as_mut_slice().borrow_mut();
+            let dummy_cols: &mut Poseidon2ValueCols<F, Config> = dummy.as_mut_slice().borrow_mut();
 
-            populate_perm::<
-                F,
-                LinearLayers,
-                FIELD_HALF_FULL_ROUNDS,
-                FIELD_PARTIAL_ROUNDS,
-                FIELD_SBOX_REGISTERS,
-            >(
+            populate_perm::<F, LinearLayers, Config>(
                 F::ZERO,
                 dummy_cols,
                 [F::ZERO; PERMUTATION_WIDTH],
@@ -123,19 +87,8 @@ where
                     .par_chunks_mut(value_cols)
                     .zip_eq(events)
                     .for_each(|(row, event)| {
-                        let cols: &mut Poseidon2ValueCols<
-                            F,
-                            FIELD_HALF_FULL_ROUNDS,
-                            FIELD_PARTIAL_ROUNDS,
-                            FIELD_SBOX_REGISTERS,
-                        > = row.borrow_mut();
-                        populate_perm::<
-                            F,
-                            LinearLayers,
-                            FIELD_HALF_FULL_ROUNDS,
-                            FIELD_PARTIAL_ROUNDS,
-                            FIELD_SBOX_REGISTERS,
-                        >(
+                        let cols: &mut Poseidon2ValueCols<F, Config> = row.borrow_mut();
+                        populate_perm::<F, LinearLayers, Config>(
                             F::ONE,
                             cols,
                             event.input.map(F::from_canonical_u32),

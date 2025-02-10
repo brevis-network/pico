@@ -3,6 +3,7 @@ use std::{
     borrow::Borrow,
 };
 
+use alloc::sync::Arc;
 use core::iter;
 use hashbrown::HashMap;
 use hybrid_array::ArraySize;
@@ -199,20 +200,20 @@ pub fn eval_symbolic_to_virtual_pair<F: Field>(
 #[allow(clippy::let_and_return)]
 pub fn compute_quotient_values<SC, C, Mat>(
     chip: &MetaChip<SC::Val, C>,
-    public_values: &[SC::Val],
+    public_values: Arc<[SC::Val]>,
     trace_domain: SC::Domain,
     quotient_domain: SC::Domain,
     preprocessed_on_quotient_domain: Mat,
     main_trace_on_quotient_domain: Mat,
     permutation_trace_on_quotient_domain: Mat,
-    perm_challenges: &[PackedChallenge<SC>],
+    perm_challenges: Arc<[PackedChallenge<SC>]>,
     regional_cumulative_sum: &SC::Challenge,
     global_cumulative_sum: &SepticDigest<SC::Val>,
     alpha: SC::Challenge,
 ) -> Vec<SC::Challenge>
 where
     SC: StarkGenericConfig,
-    C: for<'a> Air<ProverConstraintFolder<'a, SC>> + ChipBehavior<SC::Val>,
+    C: Air<ProverConstraintFolder<SC>> + ChipBehavior<SC::Val>,
     Mat: Matrix<SC::Val> + Sync,
 {
     let quotient_size = quotient_domain.size();
@@ -311,10 +312,10 @@ where
                     preprocessed: preprocessed_trace_on_quotient_domain,
                     main: main_on_quotient_domain,
                     perm: permutation_on_quotient_domain,
-                    public_values,
-                    perm_challenges,
-                    regional_cumulative_sum: &packed_regional_cumulative_sum,
-                    global_cumulative_sum,
+                    public_values: public_values.clone(),
+                    perm_challenges: perm_challenges.clone(),
+                    regional_cumulative_sum: packed_regional_cumulative_sum,
+                    global_cumulative_sum: *global_cumulative_sum,
                     is_first_row,
                     is_last_row,
                     is_transition,

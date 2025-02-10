@@ -29,7 +29,7 @@ impl<AB: EmptyLookupBuilder, M> LookupBuilder<M> for AB {
     fn looked(&mut self, _message: M) {}
 }
 
-impl<SC: StarkGenericConfig> EmptyLookupBuilder for ProverConstraintFolder<'_, SC> {}
+impl<SC: StarkGenericConfig> EmptyLookupBuilder for ProverConstraintFolder<SC> {}
 impl<SC: StarkGenericConfig> EmptyLookupBuilder for VerifierConstraintFolder<'_, SC> {}
 impl<F: Field, AB: AirBuilder<F = F>> EmptyLookupBuilder for FilteredAirBuilder<'_, AB> {}
 

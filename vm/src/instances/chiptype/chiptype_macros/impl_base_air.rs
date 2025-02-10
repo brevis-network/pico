@@ -1,7 +1,10 @@
 #[macro_export]
 macro_rules! impl_base_air {
     ($enum_name:ident, $F:ident, [ $( ($variant:ident, $chip_type:ident) ),+ ]) => {
-        impl<$F: PrimeField32 + $crate::machine::field::FieldSpecificPoseidon2Config> BaseAir<$F> for $enum_name<$F> {
+        impl<$F> BaseAir<$F> for $enum_name<$F>
+        where
+            $F: PrimeField32 + $crate::machine::field::FieldSpecificPoseidon2Config,
+        {
             fn width(&self) -> usize {
                 match self {
                     $( Self::$variant(chip) => chip.width(), )+
