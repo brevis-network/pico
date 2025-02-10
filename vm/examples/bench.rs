@@ -142,13 +142,15 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     let compress = CompressProver::new_with_prev(&combine, (), None);
     let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
+    let riscv_vk = riscv.vk();
+
     info!("╔═══════════════════════╗");
     info!("║      RISCV PHASE      ║");
     info!("╚═══════════════════════╝");
     info!("Generating RISCV proof");
     let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
     info!("Verifying RISCV proof..");
-    assert!(riscv.verify(&proof));
+    assert!(riscv.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║     CONVERT PHASE     ║");
@@ -156,7 +158,7 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating CONVERT proof");
     let (proof, convert_duration) = time_operation(|| convert.prove(proof));
     info!("Verifying CONVERT proof..");
-    assert!(convert.verify(&proof));
+    assert!(convert.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║     COMBINE PHASE     ║");
@@ -164,7 +166,7 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating COMBINE proof");
     let (proof, combine_duration) = time_operation(|| combine.prove(proof));
     info!("Verifying COMBINE proof..");
-    assert!(combine.verify(&proof));
+    assert!(combine.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║    COMPRESS PHASE     ║");
@@ -172,7 +174,7 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating COMPRESS proof");
     let (proof, compress_duration) = time_operation(|| compress.prove(proof));
     info!("Verifying COMPRESS proof..");
-    assert!(compress.verify(&proof));
+    assert!(compress.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║      EMBED PHASE      ║");
@@ -180,7 +182,7 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating EMBED proof");
     let (proof, embed_duration) = time_operation(|| embed.prove(proof));
     info!("Verifying EMBED proof..");
-    assert!(embed.verify(&proof));
+    assert!(embed.verify(&proof, riscv_vk));
 
     let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
@@ -247,13 +249,15 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let compress = CompressVkProver::new_with_prev(&combine, (), None);
     let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
+    let riscv_vk = riscv.vk();
+
     info!("╔═══════════════════════╗");
     info!("║      RISCV PHASE      ║");
     info!("╚═══════════════════════╝");
     info!("Generating RISCV proof");
     let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
     info!("Verifying RISCV proof..");
-    assert!(riscv.verify(&proof));
+    assert!(riscv.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║     CONVERT PHASE     ║");
@@ -261,7 +265,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating CONVERT proof");
     let (proof, convert_duration) = time_operation(|| convert.prove(proof));
     info!("Verifying CONVERT proof..");
-    assert!(convert.verify(&proof));
+    assert!(convert.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║     COMBINE PHASE     ║");
@@ -269,7 +273,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating COMBINE proof");
     let (proof, combine_duration) = time_operation(|| combine.prove(proof));
     info!("Verifying COMBINE proof..");
-    assert!(combine.verify(&proof));
+    assert!(combine.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║    COMPRESS PHASE     ║");
@@ -277,7 +281,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating COMPRESS proof");
     let (proof, compress_duration) = time_operation(|| compress.prove(proof));
     info!("Verifying COMPRESS proof..");
-    assert!(compress.verify(&proof));
+    assert!(compress.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║      EMBED PHASE      ║");
@@ -285,7 +289,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating EMBED proof");
     let (proof, embed_duration) = time_operation(|| embed.prove(proof));
     info!("Verifying EMBED proof..");
-    assert!(embed.verify(&proof));
+    assert!(embed.verify(&proof, riscv_vk));
 
     let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
@@ -352,13 +356,15 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let compress = CompressVkProver::new_with_prev(&combine, (), None);
     let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
+    let riscv_vk = riscv.vk();
+
     info!("╔═══════════════════════╗");
     info!("║      RISCV PHASE      ║");
     info!("╚═══════════════════════╝");
     info!("Generating RISCV proof");
     let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
     info!("Verifying RISCV proof..");
-    assert!(riscv.verify(&proof));
+    assert!(riscv.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║     CONVERT PHASE     ║");
@@ -366,7 +372,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating CONVERT proof");
     let (proof, convert_duration) = time_operation(|| convert.prove(proof));
     info!("Verifying CONVERT proof..");
-    assert!(convert.verify(&proof));
+    assert!(convert.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║     COMBINE PHASE     ║");
@@ -374,7 +380,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating COMBINE proof");
     let (proof, combine_duration) = time_operation(|| combine.prove(proof));
     info!("Verifying COMBINE proof..");
-    assert!(combine.verify(&proof));
+    assert!(combine.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║    COMPRESS PHASE     ║");
@@ -382,7 +388,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating COMPRESS proof");
     let (proof, compress_duration) = time_operation(|| compress.prove(proof));
     info!("Verifying COMPRESS proof..");
-    assert!(compress.verify(&proof));
+    assert!(compress.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║      EMBED PHASE      ║");
@@ -390,7 +396,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating EMBED proof");
     let (proof, embed_duration) = time_operation(|| embed.prove(proof));
     info!("Verifying EMBED proof..");
-    assert!(embed.verify(&proof));
+    assert!(embed.verify(&proof, riscv_vk));
 
     let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
@@ -446,13 +452,15 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     let compress = CompressProver::new_with_prev(&combine, (), None);
     let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
+    let riscv_vk = riscv.vk();
+
     info!("╔═══════════════════════╗");
     info!("║      RISCV PHASE      ║");
     info!("╚═══════════════════════╝");
     info!("Generating RISCV proof");
     let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
     info!("Verifying RISCV proof..");
-    assert!(riscv.verify(&proof));
+    assert!(riscv.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║     CONVERT PHASE     ║");
@@ -460,7 +468,7 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating CONVERT proof");
     let (proof, convert_duration) = time_operation(|| convert.prove(proof));
     info!("Verifying CONVERT proof..");
-    assert!(convert.verify(&proof));
+    assert!(convert.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║     COMBINE PHASE     ║");
@@ -468,7 +476,7 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating COMBINE proof");
     let (proof, combine_duration) = time_operation(|| combine.prove(proof));
     info!("Verifying COMBINE proof..");
-    assert!(combine.verify(&proof));
+    assert!(combine.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║    COMPRESS PHASE     ║");
@@ -476,7 +484,7 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating COMPRESS proof");
     let (proof, compress_duration) = time_operation(|| compress.prove(proof));
     info!("Verifying COMPRESS proof..");
-    assert!(compress.verify(&proof));
+    assert!(compress.verify(&proof, riscv_vk));
 
     info!("╔═══════════════════════╗");
     info!("║      EMBED PHASE      ║");
@@ -484,7 +492,7 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Generating EMBED proof");
     let (proof, embed_duration) = time_operation(|| embed.prove(proof));
     info!("Verifying EMBED proof..");
-    assert!(embed.verify(&proof));
+    assert!(embed.verify(&proof, riscv_vk));
 
     let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;

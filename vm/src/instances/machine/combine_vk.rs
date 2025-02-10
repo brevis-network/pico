@@ -23,8 +23,10 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+        keys::HashableKey,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
+        utils::{assert_recursion_public_values_valid, assert_riscv_vk_digest},
         witness::ProvingWitness,
     },
     primitives::consts::COMBINE_SIZE,
@@ -254,7 +256,7 @@ macro_rules! impl_combine_vk_machine {
             }
 
             /// Verify the proof.
-            fn verify(&self, proof: &MetaProof<$recur_sc>) -> Result<()> {
+            fn verify(&self, proof: &MetaProof<$recur_sc>, riscv_vk: &dyn HashableKey<Val<$recur_sc>>) -> Result<()> {
                 assert_eq!(proof.proofs().len(), 1);
 
                 // assert completion
@@ -265,6 +267,9 @@ macro_rules! impl_combine_vk_machine {
                 if public_values.flag_complete != <Val<$recur_sc>>::ONE {
                     panic!("flag_complete is not 1");
                 }
+
+                assert_recursion_public_values_valid(self.config().as_ref(), public_values);
+                assert_riscv_vk_digest(proof, riscv_vk);
 
                 // verify
                 self.base_machine

@@ -7,7 +7,7 @@ use crate::{
     emulator::{
         emulator::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
         record::RecordBehavior,
-        recursion::emulator::RecursionRecord,
+        recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
     },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType, compiler::riscv_circuit::stdin::ConvertStdin,
@@ -15,15 +15,17 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+        keys::HashableKey,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
+        utils::{assert_recursion_public_values_valid, assert_riscv_vk_digest},
         witness::ProvingWitness,
     },
 };
 use anyhow::Result;
 use p3_air::Air;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{any::type_name, time::Instant};
+use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, instrument};
 
 pub struct ConvertMachine<SC, C>
@@ -176,15 +178,25 @@ macro_rules! impl_convert_machine {
             }
 
             /// Verify the proof.
-            fn verify(&self, proof: &MetaProof<$recur_sc>) -> Result<()>
+            fn verify(
+                &self,
+                proof: &MetaProof<$recur_sc>,
+                riscv_vk: &dyn HashableKey<Val<$recur_sc>>,
+            ) -> Result<()>
             where
                 C: for<'a> Air<VerifierConstraintFolder<'a, $recur_sc>>,
             {
+                assert_riscv_vk_digest(proof, riscv_vk);
+
                 proof
                     .proofs()
                     .par_iter()
                     .zip(proof.vks().par_iter())
                     .try_for_each(|(p, vk)| {
+                        let public_values: &RecursionPublicValues<_> =
+                            p.public_values.as_ref().borrow();
+                        assert_recursion_public_values_valid(self.config().as_ref(), public_values);
+
                         self.base_machine
                             .verify_ensemble(vk, std::slice::from_ref(p))
                     })?;

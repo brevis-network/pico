@@ -19,6 +19,7 @@ use crate::{
     },
     machine::{
         field::FieldSpecificPoseidon2Config,
+        keys::HashableKey,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -113,8 +114,12 @@ macro_rules! impl_embeded_prover {
                 self.machine.prove(&witness)
             }
 
-            fn verify(&self, proof: &MetaProof<$embed_sc>) -> bool {
-                self.machine.verify(proof).is_ok()
+            fn verify(
+                &self,
+                proof: &MetaProof<$embed_sc>,
+                riscv_vk: &dyn HashableKey<Val<$embed_sc>>,
+            ) -> bool {
+                self.machine.verify(proof, riscv_vk).is_ok()
             }
         }
     };

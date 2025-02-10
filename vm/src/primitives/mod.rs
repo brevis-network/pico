@@ -2262,11 +2262,18 @@ pub fn poseidon2_kb_hasher() -> PaddingFreeSponge<PicoPoseidon2KoalaBear, 16, 8,
     PaddingFreeSponge::<PicoPoseidon2KoalaBear, 16, 8, 8>::new(hasher)
 }
 
+pub fn poseidon2_m31_hasher() -> PaddingFreeSponge<PicoPoseidon2Mersenne31, 16, 8, 8> {
+    let hasher = pico_poseidon2m31_init();
+    PaddingFreeSponge::<PicoPoseidon2Mersenne31, 16, 8, 8>::new(hasher)
+}
+
 lazy_static! {
     pub static ref POSEIDON2_BB_HASHER: PaddingFreeSponge::<PicoPoseidon2BabyBear, 16, 8, 8> =
         poseidon2_bb_hasher();
     pub static ref POSEIDON2_KB_HASHER: PaddingFreeSponge::<PicoPoseidon2KoalaBear, 16, 8, 8> =
         poseidon2_kb_hasher();
+    pub static ref POSEIDON2_M31_HASHER: PaddingFreeSponge::<PicoPoseidon2Mersenne31, 16, 8, 8> =
+        poseidon2_m31_hasher();
 }
 
 /*

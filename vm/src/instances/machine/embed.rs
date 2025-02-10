@@ -10,8 +10,10 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+        keys::HashableKey,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
+        utils::assert_riscv_vk_digest,
         witness::ProvingWitness,
     },
 };
@@ -91,7 +93,11 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<EmbedSC>) -> anyhow::Result<()>
+    fn verify(
+        &self,
+        proof: &MetaProof<EmbedSC>,
+        riscv_vk: &dyn HashableKey<EmbedSC::Val>,
+    ) -> anyhow::Result<()>
     where
         C: for<'a> Air<VerifierConstraintFolder<'a, EmbedSC>>,
     {
@@ -109,6 +115,8 @@ where
 
         // assert public value digest
         assert_embed_public_values_valid(&PrevSC::new(), public_values);
+
+        assert_riscv_vk_digest(proof, riscv_vk);
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;

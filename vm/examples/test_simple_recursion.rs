@@ -169,7 +169,7 @@ macro_rules! run {
 
             // Verify the proof.
             info!("\n Verifying proof (at {:?})..", start.elapsed());
-            let result = simple_machine.verify(&proof);
+            let result = simple_machine.verify(&proof, &vk);
             info!(
                 "The proof is verified: {} (at {:?})",
                 result.is_ok(),
@@ -279,7 +279,7 @@ macro_rules! run {
                 "\n Verifying simple recursion proof (at {:?})..",
                 start.elapsed()
             );
-            let recursion_result = recursion_machine.verify(&recursion_proof);
+            let recursion_result = recursion_machine.verify(&recursion_proof, &vk);
             info!(
                 "The proof is verified: {} (at {:?})",
                 recursion_result.is_ok(),

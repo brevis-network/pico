@@ -33,33 +33,33 @@ pico-patch-libs = { path = "pico/patch-libs" }
 
 # NOTE: Pin to known a "good" commit without recent API changes
 # Head of `pico-v1.0` branch
-p3-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
+p3-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
 p3-baby-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
   "nightly-features",
-], rev = "24efd9d8" }
+], rev = "7192b3e6" }
 p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
   "nightly-features",
-], rev = "24efd9d8" }
-p3-util = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
-p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", rev = "24efd9d8" }
+], rev = "7192b3e6" }
+p3-util = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
+p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7192b3e6" }
 
 # For local debugging
 # p3-air = { path = "../p3/air" }

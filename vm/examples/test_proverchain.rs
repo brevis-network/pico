@@ -27,18 +27,20 @@ fn main() {
     let compress = CompressProver::new_with_prev(&combine, Default::default(), None);
     let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, Default::default(), None);
 
+    let riscv_vk = riscv.vk();
+
     info!("Proving RISCV..");
     let proof = riscv.prove(riscv_stdin);
-    assert!(riscv.verify(&proof));
+    assert!(riscv.verify(&proof, riscv_vk));
     info!("Proving Recursion..");
     let proof = convert.prove(proof);
-    assert!(convert.verify(&proof));
+    assert!(convert.verify(&proof, riscv_vk));
     let proof = combine.prove(proof);
-    assert!(combine.verify(&proof));
+    assert!(combine.verify(&proof, riscv_vk));
     let proof = compress.prove(proof);
-    assert!(compress.verify(&proof));
+    assert!(compress.verify(&proof, riscv_vk));
     let proof = embed.prove(proof);
-    assert!(embed.verify(&proof));
+    assert!(embed.verify(&proof, riscv_vk));
 
     info!("ProverChain e2e succeeded.");
 }

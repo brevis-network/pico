@@ -14,7 +14,7 @@ use crate::{
     machine::{
         field::FieldSpecificPoseidon2Config,
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        keys::{BaseProvingKey, BaseVerifyingKey},
+        keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
@@ -47,6 +47,7 @@ where
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
@@ -67,6 +68,10 @@ where
 
     pub fn get_program(&self) -> Arc<Program> {
         self.program.clone()
+    }
+
+    pub fn vk(&self) -> &BaseVerifyingKey<SC> {
+        &self.vk
     }
 }
 
@@ -119,6 +124,7 @@ where
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
     FieldSpecificPoseidon2Chip<Val<SC>>:
         Air<ProverConstraintFolder<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
@@ -134,7 +140,7 @@ where
         self.prove_cycles(stdin).0
     }
 
-    fn verify(&self, proof: &MetaProof<SC>) -> bool {
-        self.machine.verify(proof).is_ok()
+    fn verify(&self, proof: &MetaProof<SC>, riscv_vk: &dyn HashableKey<Val<SC>>) -> bool {
+        self.machine.verify(proof, riscv_vk).is_ok()
     }
 }

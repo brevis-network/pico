@@ -13,6 +13,7 @@ use crate::{
     },
     machine::{
         field::FieldSpecificPoseidon2Config,
+        keys::HashableKey,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -101,8 +102,12 @@ macro_rules! impl_combine_vk_prover {
                 self.machine.prove(&witness)
             }
 
-            fn verify(&self, proof: &MetaProof<$recur_sc>) -> bool {
-                self.machine.verify(proof).is_ok()
+            fn verify(
+                &self,
+                proof: &MetaProof<$recur_sc>,
+                riscv_vk: &dyn HashableKey<Val<$recur_sc>>,
+            ) -> bool {
+                self.machine.verify(proof, riscv_vk).is_ok()
             }
         }
     };

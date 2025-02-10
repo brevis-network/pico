@@ -9,7 +9,7 @@ mod riscv;
 
 use crate::{
     configs::config::{StarkGenericConfig, Val},
-    machine::{chip::ChipBehavior, machine::BaseMachine, proof::MetaProof},
+    machine::{chip::ChipBehavior, keys::HashableKey, machine::BaseMachine, proof::MetaProof},
 };
 
 // re-exports
@@ -58,5 +58,5 @@ where
 
     fn machine(&self) -> &BaseMachine<SC, Self::Chips>;
     fn prove(&self, witness: Self::Witness) -> MetaProof<SC>;
-    fn verify(&self, proof: &MetaProof<SC>) -> bool;
+    fn verify(&self, proof: &MetaProof<SC>, riscv_vk: &dyn HashableKey<SC::Val>) -> bool;
 }

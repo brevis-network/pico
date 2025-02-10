@@ -9,9 +9,10 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::BaseVerifyingKey,
+        keys::{BaseVerifyingKey, HashableKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
+        utils::{assert_recursion_public_values_valid, assert_riscv_vk_digest},
         witness::ProvingWitness,
     },
     primitives::consts::EXTENSION_DEGREE,
@@ -46,7 +47,7 @@ where
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
     PcsProof<SC>: Send + Sync,
-    BaseVerifyingKey<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: HashableKey<SC::Val> + Send + Sync,
     C: ChipBehavior<
             Val<SC>,
             Program = RecursionProgram<Val<SC>>,
@@ -55,8 +56,6 @@ where
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + Send
         + Sync,
-    BaseVerifyingKey<SC>: Send + Sync,
-    BaseProof<SC>: Send + Sync,
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
@@ -112,7 +111,11 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<SC>) -> anyhow::Result<()> {
+    fn verify(
+        &self,
+        proof: &MetaProof<SC>,
+        riscv_vk: &dyn HashableKey<SC::Val>,
+    ) -> anyhow::Result<()> {
         let vk = proof.vks().first().unwrap();
 
         assert_eq!(proof.num_proofs(), 1);
@@ -125,7 +128,8 @@ where
             panic!("flag_complete is not 1");
         }
 
-        // todo: assert public values digest
+        assert_recursion_public_values_valid(self.config().as_ref(), public_values);
+        assert_riscv_vk_digest(proof, riscv_vk);
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;

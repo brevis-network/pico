@@ -1,16 +1,20 @@
 use super::septic::SepticDigest;
 use crate::{
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
-    primitives::{consts::DIGEST_SIZE, POSEIDON2_BB_HASHER, POSEIDON2_KB_HASHER},
+    primitives::{
+        consts::DIGEST_SIZE, POSEIDON2_BB_HASHER, POSEIDON2_KB_HASHER, POSEIDON2_M31_HASHER,
+    },
 };
 use alloc::sync::Arc;
 use hashbrown::HashMap;
 use p3_baby_bear::BabyBear;
 use p3_challenger::CanObserve;
-use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
+use p3_circle::CircleDomain;
+use p3_commit::{Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
 use p3_field::{FieldAlgebra, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
+use p3_mersenne_31::Mersenne31;
 use p3_symmetric::CryptographicHasher;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -141,5 +145,26 @@ where
         }
 
         POSEIDON2_KB_HASHER.hash_iter(inputs)
+    }
+}
+
+impl<SC: StarkGenericConfig<Val = Mersenne31, Domain = CircleDomain<Mersenne31>>>
+    HashableKey<Mersenne31> for BaseVerifyingKey<SC>
+where
+    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: AsRef<[Mersenne31; DIGEST_SIZE]>,
+{
+    fn hash_field(&self) -> [Mersenne31; DIGEST_SIZE] {
+        let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
+        let num_inputs = DIGEST_SIZE + 1 + (4 * prep_domains.len());
+        let mut inputs = Vec::with_capacity(num_inputs);
+        inputs.extend(self.commit.as_ref());
+        inputs.push(self.pc_start);
+        for domain in prep_domains {
+            inputs.push(Mersenne31::from_canonical_usize(domain.log_n));
+            inputs.push(Mersenne31::from_canonical_usize(domain.size()));
+            inputs.push(domain.first_point());
+        }
+
+        POSEIDON2_M31_HASHER.hash_iter(inputs)
     }
 }

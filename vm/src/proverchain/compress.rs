@@ -13,6 +13,7 @@ use crate::{
     },
     machine::{
         field::FieldSpecificPoseidon2Config,
+        keys::HashableKey,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -107,8 +108,12 @@ macro_rules! impl_compress_prover {
                 self.machine.prove(&witness)
             }
 
-            fn verify(&self, proof: &MetaProof<$mod_name::StarkConfig>) -> bool {
-                self.machine.verify(proof).is_ok()
+            fn verify(
+                &self,
+                proof: &MetaProof<$mod_name::StarkConfig>,
+                riscv_vk: &dyn HashableKey<Val<$mod_name::StarkConfig>>,
+            ) -> bool {
+                self.machine.verify(proof, riscv_vk).is_ok()
             }
         }
     };

@@ -3,6 +3,7 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
+        keys::HashableKey,
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         witness::ProvingWitness,
@@ -56,7 +57,7 @@ where
     }
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<SC>) -> Result<()>
+    fn verify(&self, proof: &MetaProof<SC>, _riscv_vk: &dyn HashableKey<SC::Val>) -> Result<()>
     where
         C: for<'a> Air<VerifierConstraintFolder<'a, SC>>,
     {

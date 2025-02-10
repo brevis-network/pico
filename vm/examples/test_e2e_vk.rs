@@ -98,7 +98,7 @@ fn main() {
         riscv_stdin,
         core_opts,
         riscv_pk,
-        riscv_vk,
+        riscv_vk.clone(),
     );
 
     // Generate the proof.
@@ -116,7 +116,7 @@ fn main() {
 
     // Verify the proof.
     info!("Verifying RISCV proof (at {:?})..", start.elapsed());
-    let riscv_result = riscv_machine.verify(&riscv_proof);
+    let riscv_result = riscv_machine.verify(&riscv_proof, &riscv_vk);
     info!(
         "The proof is verified: {} (at {:?})..",
         riscv_result.is_ok(),
@@ -180,7 +180,7 @@ fn main() {
 
     // Verify the proof.
     info!("Verifying CONVERT proof (at {:?})..", start.elapsed());
-    let convert_result = convert_machine.verify(&convert_proof);
+    let convert_result = convert_machine.verify(&convert_proof, riscv_vk);
     info!(
         "The CONVERT proof is verified: {} (at {:?})",
         convert_result.is_ok(),
@@ -253,7 +253,7 @@ fn main() {
 
     // Verify the proof.
     info!("Verifying COMBINE proof (at {:?})..", start.elapsed());
-    let combine_result = combine_machine.verify(&combine_proof);
+    let combine_result = combine_machine.verify(&combine_proof, riscv_vk);
     info!(
         "The COMBINE proof is verified: {} (at {:?})",
         combine_result.is_ok(),
@@ -328,7 +328,7 @@ fn main() {
     debug!("PERF-step=proof_size-{}", compress_proof_size);
 
     info!("Verifying COMPRESS proof (at {:?})..", start.elapsed());
-    let compress_result = compress_machine.verify(&compress_proof);
+    let compress_result = compress_machine.verify(&compress_proof, riscv_vk);
 
     info!(
         "The COMPRESS proof is verified: {} (at {:?})",
@@ -411,7 +411,7 @@ fn main() {
     debug!("PERF-step=proof_size-{}", embed_proof_size);
 
     info!("Verifying EMBED proof (at {:?})..", start.elapsed());
-    let embed_result = embed_machine.verify(&embed_proof);
+    let embed_result = embed_machine.verify(&embed_proof, riscv_vk);
 
     info!(
         "The EMBED proof is verified: {} (at {:?})",

@@ -95,23 +95,24 @@ impl ProverVkClient {
     > {
         let stdin = self.stdin_builder.borrow().clone().finalize();
         let riscv_proof = self.riscv.prove(stdin);
-        if !self.riscv.verify(&riscv_proof.clone()) {
+        let riscv_vk = self.riscv.vk();
+        if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
             return Err(Error::msg("verify riscv proof failed"));
         }
         let proof = self.convert.prove(riscv_proof.clone());
-        if !self.convert.verify(&proof) {
+        if !self.convert.verify(&proof, riscv_vk) {
             return Err(Error::msg("verify convert proof failed"));
         }
         let proof = self.combine.prove(proof);
-        if !self.combine.verify(&proof) {
+        if !self.combine.verify(&proof, riscv_vk) {
             return Err(Error::msg("verify combine proof failed"));
         }
         let proof = self.compress.prove(proof);
-        if !self.compress.verify(&proof) {
+        if !self.compress.verify(&proof, riscv_vk) {
             return Err(Error::msg("verify compress proof failed"));
         }
         let proof = self.embed.prove(proof);
-        if !self.embed.verify(&proof) {
+        if !self.embed.verify(&proof, riscv_vk) {
             return Err(Error::msg("verify embed proof failed"));
         }
 
@@ -132,8 +133,9 @@ impl ProverVkClient {
         let stdin = self.stdin_builder.borrow().clone().finalize();
         println!("stdin length: {}", stdin.inputs.len());
         let proof = self.riscv.prove(stdin);
+        let riscv_vk = self.riscv.vk();
         info!("riscv_prover prove success");
-        if !self.riscv.verify(&proof) {
+        if !self.riscv.verify(&proof, riscv_vk) {
             return Err(Error::msg("riscv_prover verify failed"));
         }
         println!("riscv_prover proof verify success");

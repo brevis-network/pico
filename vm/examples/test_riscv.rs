@@ -19,6 +19,7 @@ use pico_vm::{
     machine::{
         field::FieldSpecificPoseidon2Config,
         folder::{ProverConstraintFolder, SymbolicConstraintFolder, VerifierConstraintFolder},
+        keys::{BaseVerifyingKey, HashableKey},
         logger::setup_logger,
         machine::MachineBehavior,
         proof::BaseProof,
@@ -40,6 +41,7 @@ where
     PcsProverData<SC>: Send + Sync,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     BaseProof<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
     SC::Domain: Send + Sync,
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
         + Air<ProverConstraintFolder<SC>>
@@ -64,7 +66,7 @@ where
         riscv_stdin,
         EmulatorOpts::default(),
         riscv_pk,
-        riscv_vk,
+        riscv_vk.clone(),
     );
 
     // Generate the proof.
@@ -73,7 +75,7 @@ where
 
     // Verify the proof.
     info!("Verifying RISCV proof (at {:?})..", start.elapsed());
-    let riscv_result = riscv_machine.verify(&riscv_proof);
+    let riscv_result = riscv_machine.verify(&riscv_proof, &riscv_vk);
     info!(
         "The proof is verified: {} (at {:?})..",
         riscv_result.is_ok(),

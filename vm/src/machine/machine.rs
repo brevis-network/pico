@@ -1,4 +1,4 @@
-use super::{folder::DebugConstraintFolder, lookup::LookupScope};
+use super::{folder::DebugConstraintFolder, keys::HashableKey, lookup::LookupScope};
 use crate::{
     configs::config::{StarkGenericConfig, Val},
     emulator::record::RecordBehavior,
@@ -82,7 +82,7 @@ where
             + Air<ProverConstraintFolder<SC>>;
 
     /// Verify the proof.
-    fn verify(&self, proof: &MetaProof<SC>) -> Result<()>
+    fn verify(&self, proof: &MetaProof<SC>, riscv_vk: &dyn HashableKey<SC::Val>) -> Result<()>
     where
         C: for<'a> Air<VerifierConstraintFolder<'a, SC>>;
 }

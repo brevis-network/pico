@@ -21,7 +21,7 @@ use rayon::ThreadPoolBuilder;
 use crate::{
     chips::{chips::riscv_memory::read_write::columns::MemoryCols, gadgets::utils::limbs::Limbs},
     configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
-    emulator::recursion::public_values::RecursionPublicValues,
+    emulator::recursion::public_values::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, SymbolicConstraintFolder},
@@ -30,7 +30,7 @@ use crate::{
     },
 };
 
-use super::{keys::BaseVerifyingKey, proof::MetaProof};
+use super::proof::MetaProof;
 
 pub fn type_name_of<T>(_: &T) -> String {
     type_name::<T>().to_string()
@@ -410,15 +410,23 @@ where
     builder.constraints()
 }
 
-pub fn assert_vk_digest<SC, SC2>(proof: &MetaProof<SC>, riscv_vk: &BaseVerifyingKey<SC2>)
-where
-    SC: StarkGenericConfig,
-    SC2: StarkGenericConfig,
-    BaseVerifyingKey<SC2>: HashableKey<SC2::Val>,
-    SC::Val: PartialEq<SC2::Val>,
-{
+pub fn assert_riscv_vk_digest<SC: StarkGenericConfig>(
+    proof: &MetaProof<SC>,
+    riscv_vk: &dyn HashableKey<SC::Val>,
+) {
     let public_values: &RecursionPublicValues<_> = proof.proofs[0].public_values.as_ref().borrow();
     assert_eq!(public_values.riscv_vk_digest, riscv_vk.hash_field());
+}
+
+pub fn assert_recursion_public_values_valid<SC: StarkGenericConfig>(
+    config: &SC,
+    public_values: &RecursionPublicValues<SC::Val>,
+) {
+    let pv_array = public_values.as_array();
+    let expected_digest = config.hash_slice(&pv_array[0..NUM_PV_ELMS_TO_HASH]);
+    for (value, expected) in public_values.digest.iter().copied().zip_eq(expected_digest) {
+        assert_eq!(value, expected);
+    }
 }
 
 fn compute_degree<F: Field>(expr: &SymbolicExpression<F>) -> usize {
