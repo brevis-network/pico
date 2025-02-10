@@ -61,13 +61,11 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
             _ => panic!("Invalid operation"),
         };
 
-        let mut result = c0
-            .to_u32_digits()
-            .into_iter()
-            .chain(c1.to_u32_digits())
-            .collect::<Vec<u32>>();
-
-        result.resize(num_words, 0);
+        let mut result = vec![0; num_words];
+        let c0_digits = c0.to_u32_digits();
+        let c1_digits = c1.to_u32_digits();
+        result[..c0_digits.len()].copy_from_slice(&c0_digits);
+        result[num_words / 2..num_words / 2 + c1_digits.len()].copy_from_slice(&c1_digits);
         let x_memory_records = rt.mw_slice(x_ptr, &result);
 
         let chunk = rt.current_chunk();
