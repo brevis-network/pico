@@ -4,7 +4,10 @@ import (
 	"github.com/brevis-network/brevis-vm/gnark/koalabear"
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/frontend"
+	"github.com/consensys/gnark/logger"
 	"github.com/consensys/gnark/test"
+	"github.com/rs/zerolog"
+	"os"
 	"testing"
 )
 
@@ -30,6 +33,8 @@ func (circuit *TestPoseidon2KoalaBearCircuit) Define(api frontend.API) error {
 }
 
 func TestPoseidon2KoalaBear(t *testing.T) {
+	logger.Set(zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "15:04:05"}).With().Timestamp().Logger())
+
 	assert := test.NewAssert(t)
 
 	var circuit, witness *TestPoseidon2KoalaBearCircuit

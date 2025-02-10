@@ -116,14 +116,10 @@ jobs:
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --field m31
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf multiple-precompile --field m31
 
-      - name: compile babybear so
+      - name: compile field ffi so
         run: |
-          cargo build --release --package babybear-ffi
-          sudo mv ./target/release/libbabybear_ffi.so /usr/lib/
-      - name: compile koalabear so
-        run: |
-          cargo build --release --package koalabear-ffi
-          sudo mv ./target/release/libkoalabear_ffi.so /usr/lib/
+          cargo build --release --package field-ffi
+          sudo mv ./target/release/libfield_ffi.so /usr/lib/
       - uses: actions/setup-go@v2
         with:
           go-version: '1.22'

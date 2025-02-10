@@ -1,7 +1,7 @@
 package babybear
 
 /*
-#cgo LDFLAGS: -L. -lbabybear_ffi
+#cgo LDFLAGS: -L. -lfield_ffi
 #include "babybear_ffi.h"
 */
 import "C"

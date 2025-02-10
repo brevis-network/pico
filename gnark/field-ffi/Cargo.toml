@@ -1,5 +1,5 @@
 [package]
-name = "koalabear-ffi"
+name = "field-ffi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,6 +11,7 @@ build = "build.rs"
 
 [dependencies]
 p3-field = { workspace = true }
+p3-baby-bear = { workspace = true }
 p3-koala-bear = { workspace = true }
 
 [lib]

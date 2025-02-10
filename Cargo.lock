@@ -391,14 +391,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b7e4c2464d97fe331d41de9d5db0def0a96f4d823b8b32a2efd503578988973"
 
 [[package]]
-name = "babybear-ffi"
-version = "1.0.0"
-dependencies = [
- "p3-baby-bear 0.1.0",
- "p3-field 0.1.0",
-]
-
-[[package]]
 name = "backtrace"
 version = "0.3.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1354,6 +1346,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
+name = "field-ffi"
+version = "1.0.0"
+dependencies = [
+ "p3-baby-bear 0.1.0",
+ "p3-field 0.1.0",
+ "p3-koala-bear",
+]
+
+[[package]]
 name = "fixed-hash"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1953,14 +1954,6 @@ checksum = "505d1856a39b200489082f90d897c3f07c455563880bc5952e38eabf731c83b6"
 dependencies = [
  "digest 0.10.7",
  "sha3-asm",
-]
-
-[[package]]
-name = "koalabear-ffi"
-version = "1.0.0"
-dependencies = [
- "p3-field 0.1.0",
- "p3-koala-bear",
 ]
 
 [[package]]

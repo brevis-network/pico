@@ -1,7 +1,7 @@
 package koalabear
 
 /*
-#cgo LDFLAGS: -L. -lkoalabear_ffi
+#cgo LDFLAGS: -L. -lfield_ffi
 #include "koalabear_ffi.h"
 */
 import "C"

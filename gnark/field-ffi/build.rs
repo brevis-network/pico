@@ -1,4 +1,4 @@
 fn main() {
-    println!("start compile koalabear ffi");
+    println!("start compile field ffi");
     println!("cargo:rustc-link-lib=dylib=dl");
 }
