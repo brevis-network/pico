@@ -63,16 +63,6 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
     } else if args.elf == "keccak_precompile" {
         elf = load_elf("keccak-example");
         info!("Test Keccak Precompile");
-    } else if args.elf == "udiv" {
-        elf = load_elf("sp1-udiv");
-        info!("Test UDIV ELF");
-    } else if args.elf == "sha2_precompile" {
-        elf = load_elf("sp1-sha2-fibonacci");
-        stdin.write(&args.n);
-        info!(
-            "Test precompile sha2 public inputs for Fibonacci, sequence n={}",
-            &args.n
-        );
     } else if args.elf == "bls" {
         elf = load_elf("bls381");
         info!("Test precompile fptower for BLS381");

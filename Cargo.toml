@@ -1,5 +1,5 @@
 [workspace]
-members = ["derive", "vm", "babybear-ffi", "pico/*",  "tools/scripts", "koalabear-ffi"]
+members = ["derive", "vm", "babybear-ffi", "sdk/*",  "tools/scripts", "koalabear-ffi"]
 resolver = "2"
 
 [workspace.package]
@@ -26,9 +26,9 @@ debug-assertions = true
 [workspace.dependencies]
 pico-derive = { path = "derive" }
 pico-vm = { path = "vm" }
-pico-sdk = { path = "pico/sdk" }
-pico-cli = { path = "pico/cli" }
-pico-patch-libs = { path = "pico/patch-libs" }
+pico-sdk = { path = "sdk/sdk" }
+pico-cli = { path = "sdk/cli" }
+pico-patch-libs = { path = "sdk/patch-libs" }
 # p3
 
 # NOTE: Pin to known a "good" commit without recent API changes

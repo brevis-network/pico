@@ -103,10 +103,11 @@ pub fn generate_contract_inputs<EmbedFC: FieldGenericConfig>(
         ));
     }
 
+    let public_values_hex = "0x".to_string() + pv_string;
     let result_json = json!({
         "riscvVKey": vkey_hex,
         "proof": proof,
-        "publicValues":pv_string.to_string()
+        "publicValues": public_values_hex.to_string()
     });
 
     let json_string = serde_json::to_string_pretty(&result_json)?;
