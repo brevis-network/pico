@@ -12,7 +12,6 @@ use p3_bn254_fr::Bn254Fr;
 use p3_field::{FieldAlgebra, PrimeField32};
 use std::mem::MaybeUninit;
 
-// todo: make generic
 pub fn embed_public_values_digest<SC: StarkGenericConfig>(
     config: &SC,
     public_values: &RecursionPublicValues<Val<SC>>,
@@ -28,7 +27,6 @@ pub fn embed_public_values_digest<SC: StarkGenericConfig>(
     config.hash_slice(&input)
 }
 
-// todo: make generic
 pub fn assert_embed_public_values_valid<SC: StarkGenericConfig>(
     config: &SC,
     public_values: &RecursionPublicValues<Val<SC>>,

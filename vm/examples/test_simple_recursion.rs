@@ -76,6 +76,14 @@ macro_rules! run {
             records[1]
                 .memory_finalize_events
                 .clone_into(&mut record.memory_finalize_events);
+            records[1]
+                .public_values
+                .last_initialize_addr_bits
+                .clone_into(&mut record.public_values.last_initialize_addr_bits);
+            records[1]
+                .public_values
+                .last_finalize_addr_bits
+                .clone_into(&mut record.public_values.last_finalize_addr_bits);
             let program = record.program.clone();
 
             let stats = record.stats();

@@ -36,7 +36,6 @@ pub struct BytePreprocessedCols<T> {
     /// The result of the `LTU` operation on `b` and `c`
     pub ltu: T,
 
-    // TODO: maybe this can be moved into RangeCheckChip?
     /// The most significant bit of `b`.
     pub msb: T,
 

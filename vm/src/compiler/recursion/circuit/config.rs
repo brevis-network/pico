@@ -1,4 +1,4 @@
-//TODO: reorg config
+//TODO: reorganize these configurations
 
 use super::{
     builder::CircuitBuilder,

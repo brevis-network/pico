@@ -14,7 +14,7 @@ use crate::configs::config::FieldGenericConfig;
 #[derive(Debug, Clone)]
 pub struct TracedVec<T> {
     pub vec: Vec<T>,
-    pub traces: Vec<Option<Backtrace>>, // TODO: add pico_debug_mode to fill in traces
+    pub traces: Vec<Option<Backtrace>>,
 }
 
 impl<T> Default for TracedVec<T> {
@@ -49,7 +49,8 @@ impl<T> TracedVec<T> {
     /// Pushes a value to the vector and records a backtrace if PICO_DEBUG is enabled
     pub fn trace_push(&mut self, value: T) {
         self.vec.push(value);
-        self.traces.push(None); // TODO: add debug_mode
+        // TODO: add debug_mode
+        self.traces.push(None);
     }
 
     pub fn extend<I: IntoIterator<Item = (T, Option<Backtrace>)>>(&mut self, iter: I) {

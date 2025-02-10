@@ -1,6 +1,5 @@
 mod memory;
 mod opcode;
-mod runtime;
 
 use std::{
     array,
@@ -155,7 +154,7 @@ where
 {
     pub fn new(
         program: Arc<RecursionProgram<F>>,
-        perm: Poseidon2<<F as Field>::Packing, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>, // todo: update to support switching
+        perm: Poseidon2<<F as Field>::Packing, ExternalPerm, InternalPerm, PERMUTATION_WIDTH, D>,
     ) -> Self {
         let record = RecursionRecord::<F> {
             program: program.clone(),

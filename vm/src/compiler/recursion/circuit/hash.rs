@@ -90,7 +90,7 @@ macro_rules! impl_hash_related {
                     .flatten()
                     .chain(repeat(Val::<$recur_sc>::ZERO));
                 let mut pre = core::array::from_fn(move |_| pre_iter.next().unwrap());
-                ($hash_init()).permute_mut(&mut pre); // TODO: change to riscv_perm()
+                ($hash_init()).permute_mut(&mut pre);
                 pre[..DIGEST_SIZE].try_into().unwrap()
             }
         }

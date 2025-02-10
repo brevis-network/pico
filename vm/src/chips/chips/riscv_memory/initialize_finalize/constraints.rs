@@ -259,12 +259,10 @@ where
                 .when_last_row()
                 .when(local.is_real)
                 .assert_eq(*local_bit, pub_bit.clone());
-            /* TODO: Enable after adding deferred for the last addr (in the last chunk).
-                        builder
-                            .when_transition()
-                            .when(local.is_last_addr)
-                            .assert_eq(*local_bit, pub_bit.clone());
-            */
+            builder
+                .when_transition()
+                .when(local.is_last_addr)
+                .assert_eq(*local_bit, pub_bit.clone());
         }
     }
 }

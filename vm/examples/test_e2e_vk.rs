@@ -50,7 +50,6 @@ fn main() {
 
     // TODO: build vk_map_bb.bin
     let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
-    // COMBINE_DEGREE == COMPRESS_DEGREE == CONVERT_DEGREE == 3
     let recursion_shape_config =
         RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
     let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();

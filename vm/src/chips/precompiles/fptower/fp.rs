@@ -120,10 +120,8 @@ where
     }
 
     fn generate_main(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
-        // All the fp events for a given curve are coalesce to the curve's Add operation.  Only retrieve
+        // All the fp events for a given curve are coalesce to the curve's Add operation. Only retrieve
         // precompile events for that operation.
-        // TODO:  Fix this.
-
         let events = match P::FIELD_TYPE {
             FieldType::Bn254 => input
                 .get_precompile_events(SyscallCode::BN254_FP_ADD)

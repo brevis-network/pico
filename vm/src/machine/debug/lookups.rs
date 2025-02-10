@@ -90,8 +90,6 @@ where
         let mut result = Self::default();
         let empty = [];
 
-        // TODO: our current version of p3-matrix does not have row_slices, which can remove the
-        // computation of height
         for row in 0..height {
             let main_row = trace.row_slice(row);
             let preprocessed_row_slice = preprocessed_trace.map(|t| t.row_slice(row));

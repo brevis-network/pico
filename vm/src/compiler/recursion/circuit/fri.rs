@@ -290,11 +290,6 @@ where
         two_adic_generator,
         index_bits[..log_max_height].to_vec(),
     );
-    // let mut x = builder.uninit();
-    // builder.push(DslIr::AddFI(x, x_f, CC::F::ZERO));
-
-    // let mut x = builder.eval(x + CC::F::ZERO);
-    // let mut x: Ext<_, _> = builder.eval(SymbolicExt::ONE * SymbolicFelt::from(x_felt));
 
     for (offset, log_folded_height, commit, step, beta) in izip!(
         0..,

@@ -38,7 +38,6 @@ where
 
 macro_rules! impl_convert_prover {
     ($riscv_sc:ident, $recur_cc:ident, $recur_sc:ident) => {
-        // TODO: make ConvertVerifierCircuit and Hintable traits generic over FC/SC
         impl ProverChain<$riscv_sc, RiscvChips<$riscv_sc>, $recur_sc>
             for ConvertProver<$riscv_sc, $recur_sc>
         {

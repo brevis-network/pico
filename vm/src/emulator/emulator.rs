@@ -35,8 +35,6 @@ use alloc::sync::Arc;
 use p3_field::PrimeField32;
 use std::marker::PhantomData;
 
-// todo: refactor
-
 // Meta emulator that encapsulates multiple emulators
 // SC and C for configs in the emulated machine
 // P and I for the native program and input types

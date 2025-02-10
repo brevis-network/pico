@@ -264,7 +264,7 @@ where
         let mut programs = Vec::new();
         let mut inputs = Vec::new();
 
-        // TODO: Fix to parallel.
+        // TODO: fix to parallel
         proofs
             .chunks(combine_size)
             .zip(vks.chunks(combine_size))
@@ -272,7 +272,7 @@ where
                 if batch_proofs.len() > 1 {
                     let input = RecursionStdin {
                         machine,
-                        vks: batch_vks.into(), // todo: optimization to non-copy
+                        vks: batch_vks.into(),
                         proofs: batch_proofs.into(),
                         flag_complete,
                         vk_root,
@@ -365,7 +365,7 @@ where
                 if batch_proofs.len() > 1 {
                     let input = RecursionStdin {
                         machine,
-                        vks: batch_vks.into(), // todo: optimization to non-copy
+                        vks: batch_vks.into(),
                         proofs: batch_proofs.into(),
                         flag_complete,
                         vk_root,

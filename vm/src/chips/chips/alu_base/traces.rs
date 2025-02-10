@@ -77,7 +77,6 @@ impl<F: PrimeField32> ChipBehavior<F> for BaseAluChip<F> {
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
-        // todo: nb -> n
         let events = &input.base_alu_events;
         let nb_rows = events.len().div_ceil(BASE_ALU_DATAPAR);
         let fixed_log2_rows = input.fixed_log2_rows(&self.name());

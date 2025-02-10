@@ -37,7 +37,6 @@ impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
     }
 }
 
-// TODO: rename
 impl<F: Field> RecursionProgram<F> {
     #[inline]
     pub fn fixed_log2_rows(&self, chip_name: &String) -> Option<usize> {

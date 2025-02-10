@@ -30,8 +30,6 @@ pub struct FpEvent {
 }
 
 /// Fp2 addition and subtraction events
-///
-/// TODO: maybe unify this with FpEvent?
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Fp2AddSubEvent {
     /// The chunk number.
@@ -57,8 +55,6 @@ pub struct Fp2AddSubEvent {
 }
 
 /// Fp2 multiplication events
-///
-/// TODO: maybe unify this with FpEvent?
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Fp2MulEvent {
     /// The chunk number.

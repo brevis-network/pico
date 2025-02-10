@@ -32,7 +32,6 @@ where
     base_machine: BaseMachine<SC, C>,
 }
 
-// TODO: remove duplicated code
 impl<SC, C> RiscvMachine<SC, C>
 where
     SC: Send + StarkGenericConfig,
@@ -189,7 +188,6 @@ where
                 });
         });
 
-        // TODO: print more summary numbers
         let pv_stream = emulator.get_pv_stream();
         let riscv_emulator = emulator.emulator.unwrap();
 

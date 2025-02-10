@@ -78,7 +78,6 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
         };
 
         // Group all of the events for a specific curve into the same syscall code key.
-        // TODO:  FIX THIS.
         match P::FIELD_TYPE {
             FieldType::Bn254 => {
                 let syscall_code_key = match syscall_code {

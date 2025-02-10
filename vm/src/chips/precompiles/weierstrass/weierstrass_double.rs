@@ -241,10 +241,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                         row
                     })
                     .collect::<Vec<_>>();
-                //record.add_rangecheck_lookup_events(new_byte_lookup_events);
-                //output.add_rangecheck_lookup_events(new_byte_lookup_events)
-                // TODO can only get from out side
-                //output.add_range_lookup_events(new_byte_lookup_events);
                 (rows, new_byte_lookup_events)
             })
             .collect::<Vec<_>>();

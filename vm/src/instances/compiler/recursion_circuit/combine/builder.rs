@@ -252,7 +252,6 @@ where
                     }
                 }
 
-                // todo: Optimize
                 /*
                 Execution chunk
                  */
@@ -295,7 +294,6 @@ where
                     );
                 }
 
-                // todo: optimize
                 /*
                 Digest constraints.
                  */

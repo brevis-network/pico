@@ -39,7 +39,6 @@ where
 
 macro_rules! impl_compress_prover {
     ($mod_name:ident) => {
-        // TODO: make RecursionCompressVerifierCircuit and Hintable traits generic over FC/SC
         impl
             ProverChain<
                 $mod_name::StarkConfig,

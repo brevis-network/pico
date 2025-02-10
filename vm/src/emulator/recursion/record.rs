@@ -36,9 +36,6 @@ pub struct RecursionRecord<F> {
 }
 
 impl<F: PrimeField32> RecordBehavior for RecursionRecord<F> {
-    // TODO
-    //type Config = EmulatorOpts;
-
     fn name(&self) -> String {
         "RecursionRecord".to_string()
     }

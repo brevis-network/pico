@@ -143,7 +143,6 @@ where
         + Witnessable<CC, WitnessVariable = Felt<CC::F>>
         + BinomiallyExtendable<EXTENSION_DEGREE>
         + FieldSpecificPoseidon2Config,
-    // TODO: why do we need this?
     Val<SC>: FieldSpecificPoseidon2Config,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
     SC: FieldFriConfigVariable<
@@ -211,7 +210,6 @@ where
         + Witnessable<CC, WitnessVariable = Felt<CC::F>>
         + BinomiallyExtendable<EXTENSION_DEGREE>
         + FieldSpecificPoseidon2Config,
-    // TODO: why do we need this?
     Val<SC>: FieldSpecificPoseidon2Config,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
     SC: FieldFriConfigVariable<

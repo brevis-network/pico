@@ -170,7 +170,6 @@ macro_rules! run {
             debug!("PERF-machine=convert");
             let convert_start = Instant::now();
 
-            // TODO: Initialize the VK root.
             let vk_root = [Val::<$riscv_sc>::ZERO; DIGEST_SIZE];
 
             info!("Setting up CONVERT..");
@@ -242,7 +241,6 @@ macro_rules! run {
             debug!("PERF-machine=combine");
             let combine_start = Instant::now();
 
-            // TODO: Initialize the VK root.
             let vk_root = [Val::<$recur_sc>::ZERO; DIGEST_SIZE];
 
             info!("Setting up COMBINE");
@@ -318,7 +316,6 @@ macro_rules! run {
             debug!("PERF-machine=compress");
             let compress_start = Instant::now();
 
-            // TODO: Initialize the VK root.
             let vk_root = [Val::<$recur_sc>::ZERO; DIGEST_SIZE];
 
             info!("Setting up COMPRESS");
@@ -403,7 +400,6 @@ macro_rules! run {
             debug!("PERF-machine=embed");
             let embed_start = Instant::now();
 
-            // TODO: Initialize the VK root.
             let vk_root = [Val::<$embed_sc>::ZERO; DIGEST_SIZE];
 
             info!("Setting up EMBED");

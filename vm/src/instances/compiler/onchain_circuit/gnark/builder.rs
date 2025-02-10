@@ -91,7 +91,6 @@ where
         tracing::info!("building gnark witness");
 
         let witness = {
-            // TODO, better method?// let pv: &RecursionPublicValues<BabyBear> = template_proof.public_values.as_slice().borrow();
             let binding = input.proof.public_values.to_vec();
             let pv: &RecursionPublicValues<CC::F> = binding.as_slice().borrow();
             let vkey_hash = fields_to_bn254(&pv.riscv_vk_digest);

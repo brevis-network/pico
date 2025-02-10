@@ -43,7 +43,6 @@ where
 
 macro_rules! impl_embeded_prover {
     ($mod_name:ident, $embed_sc:ident) => {
-        // TODO: make RecursionCompressVerifierCircuit and Hintable traits generic over FC/SC
         impl<I>
             ProverChain<$mod_name::StarkConfig, CompressChips<$mod_name::StarkConfig>, $embed_sc>
             for EmbedProver<$mod_name::StarkConfig, $embed_sc, I>

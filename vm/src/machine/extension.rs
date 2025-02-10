@@ -1,4 +1,5 @@
-// TODO-Alan: refactor to use p3 BionmialExtensionField
+// TODO: refactor to use p3 BionmialExtensionField
+
 use core::marker::PhantomData;
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},

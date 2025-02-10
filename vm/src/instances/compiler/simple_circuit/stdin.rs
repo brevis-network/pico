@@ -25,7 +25,6 @@ where
     pub base_proofs: Vec<BaseProof<SC>>,
     pub flag_complete: bool,
     pub flag_first_chunk: bool,
-    // todo: vk_root
 }
 
 pub struct SimpleRecursionStdinVariable<CC, SC>

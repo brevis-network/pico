@@ -52,7 +52,6 @@ where
         &self.base_machine
     }
 
-    // todo: I is actually not used here
     /// Get the prover of the machine.
     #[instrument(name = "embed_prove", level = "debug", skip_all)]
     fn prove(&self, witness: &ProvingWitness<EmbedSC, C, I>) -> MetaProof<EmbedSC>

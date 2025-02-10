@@ -93,11 +93,6 @@ pub enum EmulatorMode {
     /// Run the emulation with no tracing or checkpointing.
     #[default]
     Simple,
-    /*
-    TODO: check if we need checkpoint feature in the future
-    /// Run the emulation with checkpoints for memory.
-    Checkpoint,
-    */
     /// Run the emulation with full tracing of events.
     Trace,
 }

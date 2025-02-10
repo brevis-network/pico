@@ -9,7 +9,7 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use std::mem::size_of;
-// todo: further cleanup since these might be repetitive
+
 /*
 For word and bytes
  */

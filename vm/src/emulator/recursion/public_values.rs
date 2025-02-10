@@ -80,7 +80,6 @@ impl<T: Clone> ChallengerPublicValues<T> {
     }
 }
 
-// todo: refactor
 /// The PublicValues struct is used to store all of a reduce proof's public values.
 #[derive(AlignedBorrow, Serialize, Deserialize, Clone, Copy, Default, Debug)]
 #[repr(C)]

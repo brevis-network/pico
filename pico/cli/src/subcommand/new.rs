@@ -38,7 +38,6 @@ pub struct NewCmd {
     vcs: Vcs,
 }
 
-// TODO: update the url
 const TEMPLATE_REPOSITORY_URL: &str = "https://github.com/brevis-network/pico-zkapp-template";
 
 impl NewCmd {

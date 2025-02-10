@@ -13,7 +13,9 @@ use pico_vm::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
     },
-    instances::configs::riscv_config::StarkConfig as RiscvBbSC,
+    instances::configs::{
+        riscv_config::StarkConfig as RiscvBbSC, riscv_m31_config::StarkConfig as RiscvM31SC,
+    },
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -139,38 +141,36 @@ fn main() {
     info!("\n The proof is verified: {}", result.is_ok());
     assert!(result.is_ok());
 
-    /* TODO: We will enable M31 after `SepticCurve` update.
-        /*
-        M31 Test
-        */
-        info!("\n *********** Testing for M31 Config ***********");
-        let program = compiler.compile();
-
-        // Create the prover.
-        info!("\n Creating Base Machine for M31 Config");
-        let config = RiscvM31SC::new();
-        let chips = ToyChipType::all_chips();
-        let base_machine = BaseMachine::new(config, chips, RISCV_NUM_PVS);
-
-        // Setup PK and VK.
-        info!("\n Setup PK and VK");
-        let (pk, vk) = base_machine.setup_keys(&program);
-
-        info!("\n Creating Runtime..");
-        let mut runtime = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
-        runtime.state.input_stream.push(vec![2, 0, 0, 0]);
-        runtime.run(None).unwrap();
-
-        let records = &mut vec![batch_records[0].clone()];
-
-        info!("\n Generating proof");
-        // Generate the proof.
-        let proof = base_machine.prove_ensemble(&pk, records);
-
-        // Verify the proof.
-        info!("\n Verifying proof");
-        let result = base_machine.verify_ensemble(&vk, &proof);
-        info!("\n The proof is verified: {}", result.is_ok());
-        assert!(result.is_ok());
+    /*
+    M31 Test
     */
+    info!("\n *********** Testing for M31 Config ***********");
+    let program = compiler.compile();
+
+    // Create the prover.
+    info!("\n Creating Base Machine for M31 Config");
+    let config = RiscvM31SC::new();
+    let chips = ToyChipType::all_chips();
+    let base_machine = BaseMachine::new(config, chips, RISCV_NUM_PVS);
+
+    // Setup PK and VK.
+    info!("\n Setup PK and VK");
+    let (pk, vk) = base_machine.setup_keys(&program);
+
+    info!("\n Creating Runtime..");
+    let mut runtime = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
+    runtime.state.input_stream.push(vec![2, 0, 0, 0]);
+    runtime.run(None).unwrap();
+
+    let records = &mut vec![batch_records[0].clone()];
+
+    info!("\n Generating proof");
+    // Generate the proof.
+    let proof = base_machine.prove_ensemble(&pk, records);
+
+    // Verify the proof.
+    info!("\n Verifying proof");
+    let result = base_machine.verify_ensemble(&vk, &proof);
+    info!("\n The proof is verified: {}", result.is_ok());
+    assert!(result.is_ok());
 }

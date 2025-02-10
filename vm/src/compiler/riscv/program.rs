@@ -47,8 +47,7 @@ impl Program {
         }
     }
 
-    // TODO: rename
-    /// for padding the trace to a power of two according to the proof shape.
+    /// Pad the trace to a power of two according to the proof shape.
     pub fn fixed_log2_rows(&self, chip_name: &String) -> Option<usize> {
         self.preprocessed_shape
             .as_ref()

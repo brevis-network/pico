@@ -37,7 +37,6 @@ where
 
 macro_rules! impl_combine_prover {
     ($recur_cc:ident, $recur_sc:ident) => {
-        // TODO: make RecursionCombineVerifierCircuit and Hintable traits generic over FC/SC
         impl ProverChain<$recur_sc, ConvertChips<$recur_sc>, $recur_sc>
             for CombineProver<$recur_sc, $recur_sc>
         {
