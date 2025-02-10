@@ -1,5 +1,4 @@
-use pico_sdk::client::BabyBearProveClient;
-use pico_sdk::init_logger;
+use pico_sdk::{client::BabyBearProverClient, init_logger};
 use tendermint_light_client_verifier::{options::Options, ProdVerifier, Verdict, Verifier};
 
 use std::error::Error;
@@ -30,7 +29,7 @@ fn main() {
     let elf = load_elf("./elf/riscv32im-pico-zkvm-elf");
     println!("elf length: {}", elf.len());
 
-    let client = BabyBearProveClient::new(&elf);
+    let client = BabyBearProverClient::new(&elf);
     let stdin_builder = client.get_stdin_builder(); // Shared instance
 
     // Load light blocks from the `files` subdirectory

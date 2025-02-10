@@ -148,14 +148,14 @@ pub fn save_proof_data<SC: StarkGenericConfig, Bn254SC: StarkGenericConfig>(
 }
 
 create_sdk_prove_client!(
-    BabyBearProveClient,
+    BabyBearProverClient,
     BabyBearPoseidon2,
     BabyBearBn254Poseidon2,
     BabyBearBn254,
     BabyBear
 );
 create_sdk_prove_client!(
-    KoalaBearProveClient,
+    KoalaBearProverClient,
     KoalaBearPoseidon2,
     KoalaBearBn254Poseidon2,
     KoalaBearBn254,
