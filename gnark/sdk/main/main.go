@@ -16,6 +16,7 @@ var (
 	constraintsFile = flag.String("constraints", "./data/constraints.json", "path of constraint json file")
 	proofPath       = flag.String("proof", "./data/proof.data", "path of proof file")
 	solidifyPath    = flag.String("sol", "./data/pico_vm_verifier.sol", "path of solidify file")
+	field           = flag.String("field", "babybear", "field for proving, support babybear and koala bear")
 )
 
 func main() {
@@ -63,46 +64,22 @@ func main() {
 		return
 	}
 
-	switch *cmd {
-	case "prove":
-		err = sdk.Prove()
+	switch *field {
+	case "babybear":
+		err = sdk.BabyBearCmd(*cmd)
 		if err != nil {
-			fmt.Printf("fail to prove: %v\n", err)
+			fmt.Printf("failed to babybear: %v\n", err)
+			return
 		}
-	case "setup":
-		err = sdk.Setup()
+	case "koalabear":
+		err = sdk.KoalaBearCmd(*cmd)
 		if err != nil {
-			fmt.Printf("fail to setup: %v\n", err)
-		}
-		err = sdk.ExportSolidify()
-		if err == nil {
-			fmt.Printf("fail to export solidity: %v\n", err)
-		}
-	case "solve":
-		_, _, err = sdk.DoSolve()
-		if err != nil {
-			fmt.Printf("fail to solve: %v\n", err)
-		}
-	case "setupAndProve":
-		err = sdk.Setup()
-		if err == nil {
-			fmt.Printf("fail to setup: %v\n", err)
-		}
-		err = sdk.ExportSolidify()
-		if err != nil {
-			fmt.Printf("fail to export solidity: %v\n", err)
-		}
-		err = sdk.Prove()
-		if err == nil {
-			fmt.Printf("fail to prove: %v\n", err)
-		}
-	case "exportSolidity":
-		err = sdk.ExportSolidify()
-		if err != nil {
-			fmt.Printf("fail to export solidity: %v\n", err)
+			fmt.Printf("failed to koalabear: %v\n", err)
+			return
 		}
 	default:
-		fmt.Printf("unknown command: %s \n", *cmd)
+		fmt.Printf("field %s not supported\n", *field)
 		return
 	}
+
 }

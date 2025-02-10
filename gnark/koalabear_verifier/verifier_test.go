@@ -1,4 +1,4 @@
-package vm_verifier
+package koalabear_verifier
 
 import (
 	"encoding/json"
