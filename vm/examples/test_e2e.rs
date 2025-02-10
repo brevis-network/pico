@@ -21,7 +21,7 @@ use pico_vm::{
     },
     emulator::{
         emulator::MetaEmulator, opts::EmulatorOpts, recursion::emulator::Runtime,
-        riscv::stdin::EmulatorStdin,
+        stdin::EmulatorStdin,
     },
     instances::{
         chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},

@@ -9,7 +9,7 @@ use pico_vm::{
         field_config::bb_simple::BabyBearSimple,
         stark_config::bb_poseidon2::BabyBearPoseidon2,
     },
-    emulator::{opts::EmulatorOpts, recursion::emulator::Runtime, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, recursion::emulator::Runtime, stdin::EmulatorStdin},
     instances::{
         chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler::{

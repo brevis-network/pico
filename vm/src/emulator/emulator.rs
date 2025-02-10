@@ -13,8 +13,8 @@ use crate::{
         riscv::{
             record::EmulationRecord,
             riscv_emulator::{EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
         },
+        stdin::EmulatorStdin,
     },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,

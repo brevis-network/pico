@@ -10,10 +10,8 @@ use pico_vm::{
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
-        riscv::{
-            riscv_emulator::{EmulatorMode, RiscvEmulator},
-            stdin::EmulatorStdin,
-        },
+        riscv::riscv_emulator::{EmulatorMode, RiscvEmulator},
+        stdin::EmulatorStdin,
     },
     machine::logger::setup_logger,
 };

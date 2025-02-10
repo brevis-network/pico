@@ -14,10 +14,9 @@ use pico_vm::{
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     emulator::{
-        opts::EmulatorOpts,
-        record::RecordBehavior,
-        recursion::emulator::Runtime as RecursionRuntime,
-        riscv::{riscv_emulator::RiscvEmulator, stdin::EmulatorStdin},
+        opts::EmulatorOpts, record::RecordBehavior,
+        recursion::emulator::Runtime as RecursionRuntime, riscv::riscv_emulator::RiscvEmulator,
+        stdin::EmulatorStdin,
     },
     instances::{
         chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},

@@ -7,7 +7,7 @@ use pico_vm::{
         program::Program,
     },
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
-    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
         configs::{

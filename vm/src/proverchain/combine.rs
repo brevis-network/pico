@@ -5,7 +5,7 @@ use crate::{
         field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
         stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
-    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType, machine::combine::CombineMachine,
     },

@@ -1,8 +1,7 @@
 use crate::primitives::consts::{
     BENCH_MAX_CHUNK_BATCH_SIZE, BENCH_MAX_CHUNK_SIZE, BENCH_MAX_DEFERRED_SPLIT_THRESHOLD,
-    BENCH_RECURSION_MAX_CHUNK_SIZE, DEFAULT_CHUNK_BATCH_SIZE, DEFAULT_CHUNK_SIZE,
-    DEFERRED_SPLIT_THRESHOLD, TEST_CHUNK_BATCH_SIZE, TEST_CHUNK_SIZE,
-    TEST_DEFERRED_SPLIT_THRESHOLD,
+    BENCH_RECURSION_MAX_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, TEST_CHUNK_BATCH_SIZE,
+    TEST_CHUNK_SIZE, TEST_DEFERRED_SPLIT_THRESHOLD,
 };
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -24,20 +23,31 @@ pub struct EmulatorOpts {
 
 impl Default for EmulatorOpts {
     fn default() -> Self {
+        let sys = System::new_all();
+        let total_available_mem = sys.total_memory() / (1024 * 1024 * 1024);
+        let auto_chunk_size = chunk_size(total_available_mem);
+        let auto_chunk_batch_size = chunk_batch_size(total_available_mem);
+        info!("Total available memory: {:?}", total_available_mem);
+
         let split_threshold = env::var("SPLIT_THRESHOLD")
-            .map(|s| s.parse::<usize>().unwrap_or(DEFERRED_SPLIT_THRESHOLD))
-            .unwrap_or(DEFERRED_SPLIT_THRESHOLD);
+            .map(|s| s.parse::<usize>().unwrap_or(auto_chunk_size as usize >> 2))
+            .unwrap_or(auto_chunk_size as usize >> 2);
+
+        let default_chunk_size = env::var("CHUNK_SIZE").map_or_else(
+            |_| auto_chunk_size,
+            |s| s.parse::<u32>().unwrap_or(auto_chunk_size),
+        );
+        let default_chunk_batch_size = env::var("CHUNK_BATCH_SIZE").map_or_else(
+            |_| auto_chunk_batch_size,
+            |s| s.parse::<u32>().unwrap_or(auto_chunk_batch_size),
+        );
+        let default_max_cycles = (default_chunk_size as u64) * (2 << MAX_LOG_NUMBER_OF_CHUNKS);
+
         Self {
-            chunk_size: env::var("CHUNK_SIZE").map_or_else(
-                |_| DEFAULT_CHUNK_SIZE,
-                |s| s.parse::<u32>().unwrap_or(DEFAULT_CHUNK_SIZE),
-            ),
-            chunk_batch_size: env::var("CHUNK_BATCH_SIZE").map_or_else(
-                |_| DEFAULT_CHUNK_BATCH_SIZE,
-                |s| s.parse::<u32>().unwrap_or(DEFAULT_CHUNK_BATCH_SIZE),
-            ),
+            chunk_size: default_chunk_size,
+            chunk_batch_size: default_chunk_batch_size,
             split_opts: SplitOpts::new(split_threshold),
-            max_cycles: None,
+            max_cycles: default_max_cycles.into(),
         }
     }
 }
@@ -54,7 +64,7 @@ impl EmulatorOpts {
                 |s| s.parse::<u32>().unwrap_or(TEST_CHUNK_BATCH_SIZE),
             ),
             split_opts: SplitOpts::new(TEST_DEFERRED_SPLIT_THRESHOLD),
-            max_cycles: None,
+            ..Default::default()
         }
     }
 
@@ -64,18 +74,12 @@ impl EmulatorOpts {
                 s.parse::<usize>()
                     .unwrap_or(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD)
             })
-            .unwrap_or(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD)
-            .max(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD);
+            .unwrap_or(BENCH_MAX_DEFERRED_SPLIT_THRESHOLD);
 
-        let sys = System::new_all();
-        let total_available_mem = sys.total_memory() / (1024 * 1024 * 1024);
-        info!("total_available_mem: {:?}", total_available_mem);
-        let default_chunk_size = chunk_size(total_available_mem);
-        let default_chunk_batch_size = chunk_batch_size(total_available_mem);
         (
             split_threshold,
-            default_chunk_size,
-            default_chunk_batch_size,
+            BENCH_MAX_CHUNK_SIZE,
+            BENCH_MAX_CHUNK_BATCH_SIZE,
         )
     }
 
@@ -142,17 +146,18 @@ impl SplitOpts {
 #[allow(clippy::cast_precision_loss)]
 fn chunk_size(total_available_mem: u64) -> u32 {
     let log_shard_size = match total_available_mem {
-        0..=14 => 17,
-        m => (((m as f64).log2() * 0.619) + 16.2).floor() as usize,
+        0..=15 => 17,
+        m => ((m as f64).log2() + 13.2).floor() as usize,
     };
     std::cmp::min(1 << log_shard_size, BENCH_MAX_CHUNK_SIZE)
 }
 
 fn chunk_batch_size(total_available_mem: u64) -> u32 {
     match total_available_mem {
-        0..=16 => 1,
-        17..=48 => 2,
-        256.. => BENCH_MAX_CHUNK_BATCH_SIZE,
-        _ => 4,
+        0..16 => 1,
+        16..48 => 2,
+        48..128 => 4,
+        128..512 => 8,
+        _ => BENCH_MAX_CHUNK_BATCH_SIZE,
     }
 }

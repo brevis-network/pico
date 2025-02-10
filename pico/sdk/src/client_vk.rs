@@ -1,5 +1,6 @@
 use std::{cell::RefCell, path::PathBuf, process::Command, rc::Rc};
 
+use crate::command::execute_command;
 use anyhow::{Error, Ok};
 use log::info;
 use p3_baby_bear::BabyBear;
@@ -12,7 +13,7 @@ use pico_vm::{
             bb_bn254_poseidon2::BabyBearBn254Poseidon2, bb_poseidon2::BabyBearPoseidon2,
         },
     },
-    emulator::riscv::stdin::{EmulatorStdin, EmulatorStdinBuilder},
+    emulator::stdin::{EmulatorStdin, EmulatorStdinBuilder},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
@@ -31,8 +32,6 @@ use pico_vm::{
         MachineProver, ProverChain, RiscvProver,
     },
 };
-
-use crate::command::execute_command;
 
 pub struct ProverVkClient {
     riscv: RiscvProver<BabyBearPoseidon2, Program>,

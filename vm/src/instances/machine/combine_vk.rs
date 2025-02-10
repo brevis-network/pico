@@ -11,7 +11,7 @@ use crate::{
         emulator::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
         record::RecordBehavior,
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
-        riscv::stdin::EmulatorStdin,
+        stdin::EmulatorStdin,
     },
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,

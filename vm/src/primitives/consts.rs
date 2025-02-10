@@ -54,10 +54,6 @@ For chunks
 
 pub const MAX_LOG_CHUNK_SIZE: usize = 22;
 
-pub const DEFAULT_CHUNK_SIZE: u32 = 1 << MAX_LOG_CHUNK_SIZE;
-pub const DEFAULT_CHUNK_BATCH_SIZE: u32 = 16;
-pub const DEFERRED_SPLIT_THRESHOLD: usize = 1 << 19;
-
 pub const TEST_CHUNK_SIZE: u32 = 1 << 16;
 pub const TEST_CHUNK_BATCH_SIZE: u32 = 2;
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
@@ -65,14 +61,13 @@ pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 // for benchmark
 pub const BENCH_MAX_CHUNK_SIZE: u32 = 1 << 22;
 pub const BENCH_MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 20;
-pub const BENCH_MAX_CHUNK_BATCH_SIZE: u32 = 8;
+pub const BENCH_MAX_CHUNK_BATCH_SIZE: u32 = 16;
 pub const BENCH_RECURSION_MAX_CHUNK_SIZE: u32 = 1 << 22;
 
 /*
 For RiscV
  */
 pub const MAX_LOG_NUMBER_OF_CHUNKS: usize = 16;
-pub const MAX_NUMBER_OF_CHUNKS: usize = 1 << MAX_LOG_NUMBER_OF_CHUNKS;
 
 /*
 For recursion
@@ -112,8 +107,6 @@ BabyBear consts
 
 pub const BABYBEAR_MONTY_INVERSE: BabyBear = BabyBear::new(1);
 
-pub const KOALABEAR_MONTY_INVERSE: KoalaBear = KoalaBear::new(1);
-
 // <https://github.com/Plonky3/Plonky3/blob/e61ed4aed488f8cef5618914042d8eb515b74ebb/baby-bear/src/poseidon2.rs#L66>
 pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
     BabyBear::ORDER_U32 - 2,
@@ -133,6 +126,14 @@ pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = Bab
     (BabyBear::ORDER_U32 - 1) >> 4,
     15,
 ]);
+
+pub const BABYBEAR_W: u32 = 11;
+
+/*
+KoalaBear consts
+ */
+
+pub const KOALABEAR_MONTY_INVERSE: KoalaBear = KoalaBear::new(1);
 
 pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] =
     KoalaBear::new_array([
@@ -157,18 +158,17 @@ pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] =
 pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_MERSENNE31_SHIFTS: [u8; 16] =
     [0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16];
 
+pub const KOALABEAR_W: u32 = 3;
+
 /*
 Poseidon2
  */
 
 pub const PERMUTATION_WIDTH: usize = 16;
-
 pub const PERMUTATION_RATE: usize = 8;
 
 pub const MULTI_FIELD_CHALLENGER_WIDTH: usize = 3;
-
 pub const MULTI_FIELD_CHALLENGER_RATE: usize = 2;
-
 pub const MULTI_FIELD_CHALLENGER_DIGEST_SIZE: usize = 1;
 
 #[derive(Clone, Copy, Default)]
@@ -184,9 +184,7 @@ impl Poseidon2Config for BabyBearConfig {
 }
 pub const BABYBEAR_S_BOX_DEGREE: u64 = 7;
 pub const BABYBEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
-pub const BABYBEAR_HALF_EXTERNAL_ROUNDS: usize = BABYBEAR_NUM_EXTERNAL_ROUNDS / 2;
 pub const BABYBEAR_NUM_INTERNAL_ROUNDS: usize = 13;
-pub const BABYBEAR_NUM_INTERNAL_ROUNDS_MINUS_ONE: usize = BABYBEAR_NUM_INTERNAL_ROUNDS - 1;
 
 pub const BABYBEAR_NUM_ROUNDS: usize = BABYBEAR_NUM_EXTERNAL_ROUNDS + BABYBEAR_NUM_INTERNAL_ROUNDS;
 
@@ -204,8 +202,6 @@ impl Poseidon2Config for KoalaBearConfig {
 pub const KOALABEAR_S_BOX_DEGREE: u64 = 3;
 pub const KOALABEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
 pub const KOALABEAR_NUM_INTERNAL_ROUNDS: usize = 20;
-pub const KOALABEAR_NUM_ROUNDS: usize =
-    KOALABEAR_NUM_EXTERNAL_ROUNDS + KOALABEAR_NUM_INTERNAL_ROUNDS;
 
 #[derive(Clone, Copy, Default)]
 pub struct Mersenne31Config;
@@ -221,34 +217,28 @@ impl Poseidon2Config for Mersenne31Config {
 pub const MERSENNE31_S_BOX_DEGREE: u64 = 5;
 pub const MERSENNE31_NUM_EXTERNAL_ROUNDS: usize = 8;
 pub const MERSENNE31_NUM_INTERNAL_ROUNDS: usize = 14;
-pub const MERSENNE31_NUM_ROUNDS: usize =
-    MERSENNE31_NUM_EXTERNAL_ROUNDS + MERSENNE31_NUM_INTERNAL_ROUNDS;
 
 pub const BN254_S_BOX_DEGREE: u64 = 5;
-
-pub const BABYBEAR_W: u32 = 11;
-pub const KOALABEAR_W: u32 = 3;
 
 /*
 Chip Data Parallelism
  */
-pub const ADD_SUB_DATAPAR: usize = 8; // optimized
-pub const MUL_DATAPAR: usize = 2; // optimized
-pub const DIVREM_DATAPAR: usize = 2; // optimized
-pub const LT_DATAPAR: usize = 2; // optimized
-pub const SLL_DATAPAR: usize = 4; // optimized
-pub const SR_DATAPAR: usize = 2; // optimized
-pub const BITWISE_DATAPAR: usize = 2; // optimized
-pub const MEMORY_RW_DATAPAR: usize = 1; // optimized
-pub const LOCAL_MEMORY_DATAPAR: usize = 4; // fixed
-pub const RISCV_POSEIDON2_DATAPAR: usize = 4; // optimized
+pub const ADD_SUB_DATAPAR: usize = 8;
+pub const MUL_DATAPAR: usize = 2;
+pub const DIVREM_DATAPAR: usize = 2;
+pub const LT_DATAPAR: usize = 2;
+pub const SLL_DATAPAR: usize = 4;
+pub const SR_DATAPAR: usize = 2;
+pub const BITWISE_DATAPAR: usize = 2;
+pub const MEMORY_RW_DATAPAR: usize = 1;
+pub const LOCAL_MEMORY_DATAPAR: usize = 4;
+pub const RISCV_POSEIDON2_DATAPAR: usize = 4;
 
-pub const BASE_ALU_DATAPAR: usize = 2; // optimized
-pub const EXT_ALU_DATAPAR: usize = 4; // optimized
-pub const VAR_MEM_DATAPAR: usize = 4; // optimized
-pub const CONST_MEM_DATAPAR: usize = 1; // optimized
-pub const SELECT_DATAPAR: usize = 2; // optimized
-pub const POSEIDON2_DATAPAR: usize = 1; // optimized
+pub const BASE_ALU_DATAPAR: usize = 2;
+pub const EXT_ALU_DATAPAR: usize = 4;
+pub const VAR_MEM_DATAPAR: usize = 4;
+pub const CONST_MEM_DATAPAR: usize = 1;
+pub const SELECT_DATAPAR: usize = 2;
+pub const POSEIDON2_DATAPAR: usize = 1;
 
-/// The width of the Poseidon2 permutation.
 pub const NUM_BITS: usize = 31;

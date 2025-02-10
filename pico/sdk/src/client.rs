@@ -12,7 +12,7 @@ use pico_vm::{
             bb_bn254_poseidon2::BabyBearBn254Poseidon2, bb_poseidon2::BabyBearPoseidon2,
         },
     },
-    emulator::riscv::stdin::{EmulatorStdin, EmulatorStdinBuilder},
+    emulator::stdin::{EmulatorStdin, EmulatorStdinBuilder},
     instances::{
         compiler::onchain_circuit::{
             gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin, utils::build_gnark_config,

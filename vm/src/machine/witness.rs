@@ -5,9 +5,8 @@ use crate::{
     },
     configs::config::{StarkGenericConfig, Val},
     emulator::{
-        opts::EmulatorOpts,
-        recursion::emulator::RecursionRecord,
-        riscv::{record::EmulationRecord, stdin::EmulatorStdin},
+        opts::EmulatorOpts, recursion::emulator::RecursionRecord, riscv::record::EmulationRecord,
+        stdin::EmulatorStdin,
     },
     instances::compiler::{
         recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,

@@ -1,7 +1,7 @@
 use clap::Parser;
 use pico_vm::{
     compiler::riscv::program::Program,
-    emulator::riscv::stdin::{EmulatorStdin, EmulatorStdinBuilder},
+    emulator::stdin::{EmulatorStdin, EmulatorStdinBuilder},
 };
 use tracing::info;
 

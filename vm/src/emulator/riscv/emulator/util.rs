@@ -2,10 +2,12 @@ use super::{EmulationError, EmulatorMode, RiscvEmulator};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::program::Program,
-    emulator::riscv::{
-        record::EmulationRecord,
+    emulator::{
+        riscv::{
+            record::EmulationRecord,
+            syscalls::{Syscall, SyscallCode, SyscallEvent},
+        },
         stdin::EmulatorStdin,
-        syscalls::{Syscall, SyscallCode, SyscallEvent},
     },
 };
 use alloc::sync::Arc;

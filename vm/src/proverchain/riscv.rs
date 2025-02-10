@@ -6,7 +6,7 @@ use crate::{
         program::Program,
     },
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
-    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType, compiler::shapes::riscv_shape::RiscvShapeConfig,
         machine::riscv::RiscvMachine,

@@ -182,7 +182,6 @@ impl RiscvEmulator {
             }
         }
 
-        // TODO: check if pc is 0 at the end
         let done = self.state.pc == 0
             || self.state.pc.wrapping_sub(self.program.pc_base)
                 >= (self.program.instructions.len() * 4) as u32;
@@ -202,8 +201,6 @@ impl RiscvEmulator {
     pub fn emulate_batch(&mut self) -> Result<(Vec<EmulationRecord>, bool), EmulationError> {
         let mut batch_records = Vec::with_capacity(self.opts.chunk_batch_size as usize);
 
-        // Get the current chunk.
-        info!("emulate - BEGIN");
         //let begin = Instant::now();
         let start_chunk = self.state.current_chunk; // needed for public input
         debug!("start_chunk: {}", start_chunk);
@@ -235,11 +232,6 @@ impl RiscvEmulator {
         }
         debug!("emulate - global clk {}", self.state.global_clk);
 
-        // let begin = Instant::now();
-
-        // Get the final public values.
-        // let public_values = self.record.public_values;
-
         if !self.record.cpu_events.is_empty() {
             self.bump_record(&mut batch_records);
         }
@@ -264,7 +256,7 @@ impl RiscvEmulator {
         }
 
         let deferred = deferred.split(true, self.opts.split_opts);
-        info!("split-chunks len: {:?}", deferred.len());
+        debug!("split-chunks len: {:?}", deferred.len());
 
         // remove empty memory init/finalize chunk
         if done {
@@ -273,12 +265,8 @@ impl RiscvEmulator {
 
         batch_records.reserve(deferred.len() + done as usize);
         batch_records.extend(deferred);
-        info!(
-            "batch record len after defer and split: {}",
-            batch_records.len()
-        );
 
-        debug!("batch record capaciy: {}", batch_records.capacity());
+        debug!("batch record capacity: {}", batch_records.capacity());
 
         info!(
             "batch record len after postprocess and split: {}",
@@ -858,7 +846,7 @@ mod tests {
     use super::{Program, RiscvEmulator};
     use crate::{
         compiler::riscv::compiler::{Compiler, SourceType},
-        emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+        emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     };
     use alloc::sync::Arc;
     use p3_baby_bear::BabyBear;

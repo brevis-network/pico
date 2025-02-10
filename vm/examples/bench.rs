@@ -8,7 +8,7 @@ use p3_baby_bear::BabyBear;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
     configs::config::StarkGenericConfig,
-    emulator::{opts::EmulatorOpts, riscv::stdin::EmulatorStdin},
+    emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
@@ -136,6 +136,14 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     let (elf, stdin) = load(bench)?;
     let core_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
+    info!(
+        "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
+        core_opts.chunk_size, core_opts.chunk_batch_size
+    );
+    info!(
+        "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
+        recursion_opts.chunk_size, recursion_opts.chunk_batch_size
+    );
 
     let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), &elf), core_opts, None);
     let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, None);
@@ -199,6 +207,15 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
     let recursion_shape_config =
         RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
+
+    info!(
+        "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
+        core_opts.chunk_size, core_opts.chunk_batch_size
+    );
+    info!(
+        "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
+        recursion_opts.chunk_size, recursion_opts.chunk_batch_size
+    );
 
     let riscv = RiscvProver::new_initial_prover(
         (RiscvBBSC::new(), &elf),
@@ -271,6 +288,15 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let recursion_shape_config =
         RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default();
 
+    info!(
+        "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
+        core_opts.chunk_size, core_opts.chunk_batch_size
+    );
+    info!(
+        "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
+        recursion_opts.chunk_size, recursion_opts.chunk_batch_size
+    );
+
     let riscv = RiscvProver::new_initial_prover(
         (RiscvKBSC::new(), &elf),
         core_opts,
@@ -338,6 +364,15 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     let (elf, stdin) = load(bench)?;
     let core_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
+
+    info!(
+        "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
+        core_opts.chunk_size, core_opts.chunk_batch_size
+    );
+    info!(
+        "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
+        recursion_opts.chunk_size, recursion_opts.chunk_batch_size
+    );
 
     let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), &elf), core_opts, None);
     let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, None);
