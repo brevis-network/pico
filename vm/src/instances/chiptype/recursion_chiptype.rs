@@ -17,7 +17,7 @@ use crate::{
         types::ExpReverseBitsInstr,
     },
     emulator::recursion::emulator::RecursionRecord,
-    instances::compiler::shapes::compress_shape::RecursionPadShape,
+    instances::compiler::shapes::recursion_shape::RecursionPadShape,
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},

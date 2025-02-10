@@ -19,7 +19,7 @@ use crate::{
         compiler::{
             recursion_circuit::{combine::builder::CombineVerifierCircuit, stdin::RecursionStdin},
             riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
-            shapes::compress_shape::RecursionShapeConfig,
+            shapes::recursion_shape::RecursionShapeConfig,
             vk_merkle::{
                 builder::CombineVkVerifierCircuit, stdin::RecursionVkStdin, VkMerkleManager,
             },

@@ -19,7 +19,7 @@ use crate::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
             recursion_circuit::stdin::{RecursionStdin, RecursionStdinVariable},
-            shapes::compress_shape::RecursionVkShape,
+            shapes::recursion_shape::RecursionVkShape,
         },
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},

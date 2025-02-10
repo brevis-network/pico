@@ -17,7 +17,7 @@ use pico_vm::{
                 stdin::{dummy_vk_and_chunk_proof, dummy_vk_and_chunk_proof_kb, ConvertStdin},
             },
             shapes::{
-                compress_shape::{RecursionShapeConfig, RecursionVkShape},
+                recursion_shape::{RecursionShapeConfig, RecursionVkShape},
                 riscv_shape::RiscvShapeConfig,
                 PicoRecursionProgramShape, ProofShape,
             },

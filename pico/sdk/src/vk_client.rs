@@ -19,7 +19,7 @@ use pico_vm::{
                 stdin::OnchainStdin,
                 utils::{build_gnark_config, generate_contract_inputs},
             },
-            shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
+            shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
         },
         configs::{embed_config::BabyBearBn254Poseidon2, embed_kb_config::KoalaBearBn254Poseidon2},
     },

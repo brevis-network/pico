@@ -1,7 +1,7 @@
 use super::instruction::Instruction;
 use crate::{
     compiler::program::ProgramBehavior,
-    instances::compiler::shapes::compress_shape::RecursionPadShape, machine::septic::SepticDigest,
+    instances::compiler::shapes::recursion_shape::RecursionPadShape, machine::septic::SepticDigest,
 };
 use backtrace::Backtrace;
 use hashbrown::HashMap;

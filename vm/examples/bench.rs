@@ -11,7 +11,7 @@ use pico_vm::{
     emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
-        compiler::shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
+        compiler::shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
         configs::{
             riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
         },

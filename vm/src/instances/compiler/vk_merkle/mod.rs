@@ -110,14 +110,14 @@ where
 }
 
 pub static VK_MANAGER_BB: Lazy<VkMerkleManager<BabyBearPoseidon2>> = Lazy::new(|| {
-    let file_content = include_bytes!("../../../../../vk_map_bb.bin");
+    let file_content = include_bytes!("../shape_vk_bins/vk_map_bb.bin");
     debug!("Initializing global BabyBear VK_MANAGER");
     VkMerkleManager::<BabyBearPoseidon2>::new_from_bytes(file_content)
         .expect("Failed to load BabyBear VkMerkleManager")
 });
 
 pub static VK_MANAGER_KB: Lazy<VkMerkleManager<KoalaBearPoseidon2>> = Lazy::new(|| {
-    let file_content = include_bytes!("../../../../../vk_map_kb.bin");
+    let file_content = include_bytes!("../shape_vk_bins/vk_map_kb.bin");
     debug!("Initializing global KoalaBear VK_MANAGER");
     VkMerkleManager::<KoalaBearPoseidon2>::new_from_bytes(file_content)
         .expect("Failed to load KoalaBear VkMerkleManager")

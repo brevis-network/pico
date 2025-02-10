@@ -1,7 +1,7 @@
-pub mod compress_shape;
+pub mod recursion_shape;
 pub mod riscv_shape;
 
-use crate::instances::compiler::shapes::compress_shape::{RecursionVkShape, RiscvRecursionShape};
+use crate::instances::compiler::shapes::recursion_shape::{RecursionVkShape, RiscvRecursionShape};
 use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::{cmp::Reverse, collections::BTreeSet};
@@ -60,7 +60,6 @@ impl ProofShape {
     }
 }
 
-// #[derive(Debug, Clone)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PicoRecursionProgramShape {
     Convert(RiscvRecursionShape),

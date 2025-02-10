@@ -16,7 +16,7 @@ use crate::{
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
-            shapes::compress_shape::RecursionShapeConfig,
+            shapes::recursion_shape::RecursionShapeConfig,
             vk_merkle::{stdin::RecursionVkStdin, HasStaticVkManager},
         },
     },

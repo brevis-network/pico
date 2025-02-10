@@ -16,7 +16,7 @@ use crate::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
             riscv_circuit::stdin::{dummy_vk_and_chunk_proof, dummy_vk_and_chunk_proof_kb},
-            shapes::compress_shape::RecursionShape,
+            shapes::recursion_shape::RecursionShape,
         },
     },
     machine::{chip::ChipBehavior, keys::BaseVerifyingKey, machine::BaseMachine, proof::BaseProof},

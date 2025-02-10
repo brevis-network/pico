@@ -14,7 +14,7 @@ use pico_vm::{
         chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
         compiler::{
             recursion_circuit::stdin::RecursionStdin,
-            shapes::{compress_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
+            shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
             vk_merkle::{
                 builder::{CompressVkVerifierCircuit, EmbedVkVerifierCircuit},
                 HasStaticVkManager,

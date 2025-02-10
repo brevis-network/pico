@@ -318,7 +318,6 @@ pub struct RiscvShapeConfig<F> {
     included_shapes: Vec<HashMap<String, usize>>,
     allowed_preprocessed_log_heights: HashMap<String, Vec<Option<usize>>>,
     allowed_log_heights: Vec<HashMap<String, Vec<Option<usize>>>>,
-    maximal_log_heights_mask: Vec<bool>,
     memory_allowed_log_heights: HashMap<String, Vec<Option<usize>>>,
     precompile_allowed_log_heights: HashMap<String, (usize, Vec<usize>)>,
     phantom_data: PhantomData<F>,
@@ -338,7 +337,6 @@ struct RiscvShapeSpec {
     syscall_riscv_height: Vec<Option<usize>>,
     riscv_poseidon2_height: Vec<Option<usize>>,
     global_height: Vec<Option<usize>>,
-    is_potentially_maximal: bool,
 }
 
 impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
@@ -704,36 +702,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             ))
             .chain(precompile_shapes)
     }
-
-    // TODO: add shape constraints in emulator
-    pub fn maximal_core_shapes(&self) -> Vec<RiscvPadShape> {
-        let max_preprocessed =
-            self.allowed_preprocessed_log_heights
-                .iter()
-                .map(|(air_name, allowed_heights)| {
-                    (air_name.clone(), allowed_heights.last().unwrap().unwrap())
-                });
-
-        let max_core_shapes = self
-            .allowed_log_heights
-            .iter()
-            .zip(self.maximal_log_heights_mask.iter())
-            .filter(|(_, mask)| **mask)
-            .map(|(allowed_log_heights, _)| {
-                max_preprocessed
-                    .clone()
-                    .chain(
-                        allowed_log_heights
-                            .iter()
-                            .map(|(air_name, allowed_heights)| {
-                                (air_name.clone(), allowed_heights.last().unwrap().unwrap())
-                            }),
-                    )
-                    .collect::<RiscvPadShape>()
-            });
-
-        max_core_shapes.collect()
-    }
 }
 
 impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfig<F> {
@@ -768,7 +736,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 memory_read_write_height: vec![Some(14)],
                 global_height: vec![Some(12)],
                 riscv_poseidon2_height: vec![Some(10)],
-                is_potentially_maximal: true,
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(19)],
@@ -784,7 +751,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 memory_read_write_height: vec![Some(18)],
                 global_height: vec![Some(19)],
                 riscv_poseidon2_height: vec![Some(17)],
-                is_potentially_maximal: true,
             },
             // fibonacci
             RiscvShapeSpec {
@@ -801,7 +767,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 memory_read_write_height: vec![Some(12)],
                 global_height: vec![Some(10)],
                 riscv_poseidon2_height: vec![Some(8)],
-                is_potentially_maximal: true,
             },
             // reth
             RiscvShapeSpec {
@@ -818,7 +783,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 memory_read_write_height: vec![Some(21)],
                 global_height: vec![Some(19), Some(21)],
                 riscv_poseidon2_height: vec![Some(17), Some(19)],
-                is_potentially_maximal: true,
             },
             // tendermint
             RiscvShapeSpec {
@@ -835,7 +799,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 memory_read_write_height: vec![Some(20)],
                 global_height: vec![Some(17)],
                 riscv_poseidon2_height: vec![Some(15)],
-                is_potentially_maximal: true,
             },
             // coprocessor integration
             RiscvShapeSpec {
@@ -852,7 +815,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(21), Some(22)],
                 riscv_poseidon2_height: vec![Some(19), Some(20)],
-                is_potentially_maximal: true,
             },
             // maximal riscv shape (22 divide by DATAPAR)
             RiscvShapeSpec {
@@ -869,14 +831,12 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
                 riscv_poseidon2_height: vec![Some(21)],
-                is_potentially_maximal: true,
             },
         ];
 
         add_none_if_missing(&mut riscv_shapes);
 
         let mut allowed_log_heights = vec![];
-        let mut maximal_log_heights_mask = vec![];
         for spec in riscv_shapes {
             let short_allowed_log_heights = HashMap::from([
                 (
@@ -933,7 +893,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 ),
             ]);
             allowed_log_heights.push(short_allowed_log_heights);
-            maximal_log_heights_mask.push(spec.is_potentially_maximal);
         }
 
         // Set the memory init and finalize heights.
@@ -1008,7 +967,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             included_shapes: vec![],
             allowed_preprocessed_log_heights,
             allowed_log_heights,
-            maximal_log_heights_mask,
             memory_allowed_log_heights,
             precompile_allowed_log_heights,
             phantom_data: PhantomData::<F>,
@@ -1049,14 +1007,12 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
                 riscv_poseidon2_height: vec![Some(21)],
-                is_potentially_maximal: true,
             },
         ];
 
         add_none_if_missing(&mut riscv_shapes);
 
         let mut allowed_log_heights = vec![];
-        let mut maximal_log_heights_mask = vec![];
         for spec in riscv_shapes {
             let short_allowed_log_heights = HashMap::from([
                 (
@@ -1113,7 +1069,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 ),
             ]);
             allowed_log_heights.push(short_allowed_log_heights);
-            maximal_log_heights_mask.push(spec.is_potentially_maximal);
         }
 
         // Set the memory init and finalize heights.
@@ -1157,7 +1112,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             included_shapes: vec![],
             allowed_preprocessed_log_heights,
             allowed_log_heights,
-            maximal_log_heights_mask,
             memory_allowed_log_heights,
             precompile_allowed_log_heights,
             phantom_data: PhantomData::<F>,
@@ -1196,14 +1150,12 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 memory_read_write_height: vec![Some(16)],
                 global_height: vec![Some(16)],
                 riscv_poseidon2_height: vec![Some(14)],
-                is_potentially_maximal: true,
             },
         ];
 
         add_none_if_missing(&mut riscv_shapes);
 
         let mut allowed_log_heights = vec![];
-        let mut maximal_log_heights_mask = vec![];
         for spec in riscv_shapes {
             let short_allowed_log_heights = HashMap::from([
                 (
@@ -1260,7 +1212,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 ),
             ]);
             allowed_log_heights.push(short_allowed_log_heights);
-            maximal_log_heights_mask.push(spec.is_potentially_maximal);
         }
 
         // Set the memory init and finalize heights.
@@ -1304,7 +1255,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             included_shapes: vec![],
             allowed_preprocessed_log_heights,
             allowed_log_heights,
-            maximal_log_heights_mask,
             memory_allowed_log_heights,
             precompile_allowed_log_heights,
             phantom_data: PhantomData::<F>,
