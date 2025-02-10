@@ -208,7 +208,6 @@ macro_rules! run {
             serialized_program.hash(&mut hasher);
             let hash = hasher.finish();
             info!("Recursion program hash: {}", hash);
-            // assert_eq!(hash, 560573883904547356);
 
             // Emulation.
             let recursion_record = tracing::debug_span!("Recursion Emulator").in_scope(|| {
@@ -237,30 +236,8 @@ macro_rules! run {
             }
 
             let mut expected_stats = HashMap::<String, usize>::new();
-            expected_stats.insert("mem_var_events".to_string(), 9494);
-            expected_stats.insert("select_events".to_string(), 1632);
-            expected_stats.insert("batch_fri_events".to_string(), 4059);
             expected_stats.insert("poseidon2_events".to_string(), 602);
-            expected_stats.insert("exp_reverse_bits_events".to_string(), 55);
-            // assert_eq!(
-            //     stats.get("mem_var_events"),
-            //     expected_stats.get("mem_var_events")
-            // );
-            // assert_eq!(
-            //     stats.get("select_events"),
-            //     expected_stats.get("select_events")
-            // );
-            // assert_eq!(
-            //     stats.get("batch_fri_events"),
-            //     expected_stats.get("batch_fri_events")
-            // );
-            // BabyBear is 733, and KoalaBear is 666.
-            // println!("poseidon2_events: {:?}", stats.get("poseidon2_events"));
             assert!([733, 666].contains(stats.get("poseidon2_events").unwrap()));
-            // assert_eq!(
-            //     stats.get("exp_reverse_bits_events"),
-            //     expected_stats.get("exp_reverse_bits_events")
-            // );
 
             // Setup field_config machine
             info!(
@@ -296,7 +273,6 @@ macro_rules! run {
                 start.elapsed()
             );
             let recursion_proof = recursion_machine.prove(&recursion_witness);
-            info!("{} generated.", recursion_proof.name());
 
             // Verify the proof.
             info!(
@@ -336,6 +312,6 @@ fn main() {
     match args.field.as_str() {
         "bb" => run_babybear(elf, stdin, args.step),
         "kb" => run_koalabear(elf, stdin, args.step),
-        _ => unreachable!("Unsupported field"),
+        _ => unreachable!("Unsupported field for simple recursion: {}", args.field),
     }
 }

@@ -8,7 +8,7 @@ use crate::{
         syscalls::{syscall_context::SyscallContext, SyscallCode},
     },
 };
-use tracing::{debug, trace};
+use tracing::debug;
 
 impl RiscvEmulator {
     /// Emulate the given instruction over the current state.
@@ -243,7 +243,7 @@ impl RiscvEmulator {
                 c = self.rr(Register::X11, MemoryAccessPosition::C);
                 b = self.rr(Register::X10, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
-                trace!("emulate syscall code: {:?}", syscall);
+                debug!("emulate syscall code: {:?}", syscall);
 
                 // `hint_slice` is allowed in unconstrained mode since it is used to write the hint.
                 // Other syscalls are not allowed because they can lead to non-deterministic

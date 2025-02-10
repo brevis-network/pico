@@ -16,7 +16,6 @@ use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
-use tracing::debug;
 
 /// struct of BaseVerifier where SC specifies type of config and C is not used
 pub struct BaseVerifier<SC, C> {
@@ -131,12 +130,10 @@ where
         }
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
-        debug!("VERIFIER: alpha: {:?}", alpha);
 
         challenger.observe(quotient_commit.clone());
 
         let zeta: SC::Challenge = challenger.sample_ext_element();
-        debug!("VERIFIER: zeta: {:?}", zeta);
 
         // main opening
         let main_domains = log_main_degrees

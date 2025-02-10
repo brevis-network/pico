@@ -4,7 +4,7 @@ use crate::{
         alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
-        poseidon2_p3::POSEIDON2_CHIPNAME,
+        poseidon2::POSEIDON2_CHIPNAME,
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,
@@ -20,7 +20,7 @@ use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_util::log2_ceil_usize;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RiscvRecursionShape {
@@ -223,7 +223,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
 
     // Get the allowed shape with a minimal hamming distance from the current shape.
     pub fn padding_shape(&self, program: &mut RecursionProgram<F>) {
-        info!("-------------Recursion Padding Shape-------------");
         let heights = RecursionChipType::<F>::chip_heights(program);
         let mut min_distance = usize::MAX;
         let mut closest_shape = None;
@@ -252,7 +251,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
 
             for (chip_name, height) in heights.iter() {
                 if shape.inner.contains_key(chip_name) {
-                    info!(
+                    debug!(
                         "Chip {:<20}: {:<3} -> {:<3}",
                         chip_name,
                         log2_ceil_usize(*height),

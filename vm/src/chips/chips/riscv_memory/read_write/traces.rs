@@ -37,7 +37,6 @@ use p3_maybe_rayon::prelude::{
 };
 use rayon::slice::ParallelSliceMut;
 use std::{array, borrow::BorrowMut};
-use tracing::debug;
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
     type Record = EmulationRecord;
@@ -112,8 +111,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         for blu_events_chunk in blu_events {
             extra.add_byte_lookup_events(blu_events_chunk);
         }
-
-        debug!("{} chip - extra_record", self.name());
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

@@ -1,7 +1,7 @@
 use crate::{
     chips::{
         chips::{
-            poseidon2_p3::{Poseidon2ChipP3, POSEIDON2_CHIPNAME},
+            poseidon2::{Poseidon2Chip, POSEIDON2_CHIPNAME},
             recursion_memory::MemoryAccessCols,
         },
         gadgets::poseidon2::{
@@ -31,7 +31,7 @@ impl<
         F: PrimeField32,
         LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
         Config: Poseidon2Config,
-    > ChipBehavior<F> for Poseidon2ChipP3<F, LinearLayers, Config>
+    > ChipBehavior<F> for Poseidon2Chip<F, LinearLayers, Config>
 {
     type Record = RecursionRecord<F>;
     type Program = RecursionProgram<F>;

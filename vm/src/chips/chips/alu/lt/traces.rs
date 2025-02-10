@@ -28,7 +28,6 @@ use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::prelude::*;
 use std::marker::PhantomData;
-use tracing::debug;
 
 /// Lt Chip for proving U32 Signed/Unsigned b < c
 #[derive(Default, Clone, Debug)]
@@ -88,7 +87,6 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
             .collect();
 
         extra.add_byte_lookup_events(blu_events);
-        debug!("{} chip - extra_record", self.name());
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

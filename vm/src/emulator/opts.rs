@@ -3,10 +3,10 @@ use crate::primitives::consts::{
     BENCH_RECURSION_MAX_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, TEST_CHUNK_BATCH_SIZE,
     TEST_CHUNK_SIZE, TEST_DEFERRED_SPLIT_THRESHOLD,
 };
-use log::info;
 use serde::{Deserialize, Serialize};
 use std::env;
 use sysinfo::System;
+use tracing::debug;
 
 /// Options for the core prover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ impl Default for EmulatorOpts {
         let total_available_mem = sys.total_memory() / (1024 * 1024 * 1024);
         let auto_chunk_size = chunk_size(total_available_mem);
         let auto_chunk_batch_size = chunk_batch_size(total_available_mem);
-        info!("Total available memory: {:?}", total_available_mem);
+        debug!("Total available memory: {:?}", total_available_mem);
 
         let split_threshold = env::var("SPLIT_THRESHOLD")
             .map(|s| s.parse::<usize>().unwrap_or(auto_chunk_size as usize >> 2))

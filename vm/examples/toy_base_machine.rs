@@ -107,11 +107,6 @@ fn main() {
     const ELF: &[u8] = include_bytes!("../src/compiler/test_data/riscv32im-pico-fibonacci-elf");
     let compiler = Compiler::new(SourceType::RiscV, ELF);
 
-    /*
-    BabyBear Test
-    */
-
-    info!("\n *********** Testing for BabyBear Config ***********");
     let program = compiler.compile();
 
     // Create the prover.

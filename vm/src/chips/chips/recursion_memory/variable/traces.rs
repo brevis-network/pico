@@ -79,10 +79,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
 
         let trace = RowMajorMatrix::new(values, NUM_MEM_PREPROCESSED_INIT_COLS);
 
-        // // Pad the trace to a power of two based on shape, if available.
-        // let log_size = program.fixed_log2_rows(&self.name());
-        // pad_to_power_of_two::<NUM_MEM_PREPROCESSED_INIT_COLS, F>(&mut trace.values, log_size);
-
         Some(trace)
     }
 

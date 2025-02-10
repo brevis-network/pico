@@ -45,22 +45,20 @@ where
         + Air<ProverConstraintFolder<SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
-    info!("\n Begin RiscV..");
+    info!("╔═══════════════════════╗");
+    info!("║      RISCV PHASE      ║");
+    info!("╚═══════════════════════╝");
     let start = Instant::now();
 
-    info!("Creating Program..");
     let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
     let riscv_program = riscv_compiler.compile();
 
     let riscv_machine = RiscvMachine::new(config, RiscvChipType::all_chips(), RISCV_NUM_PVS);
     // Setup config and chips.
-    info!("Creating RiscVMachine (at {:?})..", start.elapsed());
 
     // Setup machine prover, verifier, pk and vk.
-    info!("Setup RiscV machine (at {:?})..", start.elapsed());
     let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
 
-    info!("Construct RiscV proving witness..");
     let riscv_witness = ProvingWitness::setup_for_riscv(
         riscv_program,
         riscv_stdin,
@@ -70,16 +68,12 @@ where
     );
 
     // Generate the proof.
-    info!("Generating RiscV proof (at {:?})..", start.elapsed());
-    let timer = Instant::now();
+    info!("Generating RISCV proof (at {:?})..", start.elapsed());
     let riscv_proof = riscv_machine.prove(&riscv_witness);
-    println!("Proof-generation-time: {:?}", timer.elapsed());
 
     // Verify the proof.
-    info!("Verifying RiscV proof (at {:?})..", start.elapsed());
-    let timer = Instant::now();
+    info!("Verifying RISCV proof (at {:?})..", start.elapsed());
     let riscv_result = riscv_machine.verify(&riscv_proof);
-    println!("Proof-verification-time: {:?}", timer.elapsed());
     info!(
         "The proof is verified: {} (at {:?})..",
         riscv_result.is_ok(),
@@ -97,6 +91,6 @@ fn main() {
         "bb" => run(RiscvBBSC::new(), elf, riscv_stdin),
         "kb" => run(RiscvKBSC::new(), elf, riscv_stdin),
         "m31" => run(RiscvM31SC::new(), elf, riscv_stdin),
-        _ => panic!("unsupported field: {}", args.field),
+        _ => panic!("unsupported field for RISCV: {}", args.field),
     }
 }

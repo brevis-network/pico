@@ -40,7 +40,7 @@ use crate::{
 use p3_field::PrimeField32;
 use p3_util::log2_ceil_usize;
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 /// The shape of a riscv proof.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -353,10 +353,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             Self::find_shape_from_allowed_heights(&heights, &self.allowed_preprocessed_log_heights)
                 .ok_or(RiscvShapeError::PreprocessedShapeError)?;
 
-        info!("-------------Riscv Padding Shape-------------");
+        debug!("-------------RISCV Padding Shape-------------");
         for (chip_name, height) in heights.iter() {
             if prep_shape.inner.contains_key(chip_name) {
-                info!(
+                debug!(
                     "Chip {:<20}: {:<3} -> {:<3}",
                     chip_name,
                     log2_ceil_usize(*height),
@@ -413,7 +413,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
 
     /// Padding the shape of the proof.
     pub fn padding_shape(&self, record: &mut EmulationRecord) -> Result<(), RiscvShapeError> {
-        info!("-------------Riscv Padding Shape-------------");
+        debug!("-------------RISCV Padding Shape-------------");
         if record.program.preprocessed_shape.is_none() {
             return Err(RiscvShapeError::PrepcocessedShapeMissing);
         }
@@ -435,13 +435,13 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 if let Some(shape) =
                     Self::find_shape_from_allowed_heights(&heights, allowed_log_heights)
                 {
-                    info!(
+                    debug!(
                         "Chunk Lifted: Index={}, Cluster={}",
                         record.public_values.chunk, i
                     );
                     for (chip_name, height) in heights.iter() {
                         if shape.inner.contains_key(chip_name) {
-                            info!(
+                            debug!(
                                 "Chip {:<20}: {:<3} -> {:<3}, height: {}",
                                 chip_name,
                                 log2_ceil_usize(*height),
@@ -479,7 +479,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 )))?;
             for (chip_name, height) in heights.iter() {
                 if shape.inner.contains_key(chip_name) {
-                    tracing::info!(
+                    debug!(
                         "Chip {:<20}: {:<3} -> {:<3}",
                         chip_name,
                         log2_ceil_usize(*height),
@@ -516,7 +516,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                             if mem_events <= (1 << mem_events_height) * LOCAL_MEMORY_DATAPAR
                                 && num_global_events <= (1 << global_events_height)
                             {
-                                info!(
+                                debug!(
                                     "Chunk Lifted: Precompile={}, AllowedLogHeight={}",
                                     chip_name, allowed_log_height
                                 );
@@ -531,15 +531,15 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                                 let old_global_events_log = log2_ceil_usize(num_global_events);
                                 let new_global_events_log = global_events_height;
 
-                                info!(
+                                debug!(
                                     "Chip {:<20}: precompile height: {:<3} -> {:<3}",
                                     chip_name, old_height_log, new_height_log
                                 );
-                                info!(
+                                debug!(
                                     "Chip {:<20}: mem local height  : {:<3} -> {:<3}",
                                     chip_name, old_mem_events_log, new_mem_events_log
                                 );
-                                info!(
+                                debug!(
                                     "Chip {:<20}: global height: {:<3} -> {:<3}",
                                     chip_name, old_global_events_log, new_global_events_log
                                 );
@@ -1148,7 +1148,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             precompile_allowed_log_heights
                 .insert(chip_name, (mem_events_per_row, precompile_heights.clone()));
         }
-        println!(
+        debug!(
             "precompile_allowed_log_heights: {:?}",
             precompile_allowed_log_heights
         );
@@ -1295,7 +1295,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             precompile_allowed_log_heights
                 .insert(chip_name, (mem_events_per_row, precompile_heights.clone()));
         }
-        println!(
+        debug!(
             "precompile_allowed_log_heights: {:?}",
             precompile_allowed_log_heights
         );

@@ -25,7 +25,6 @@ use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use rayon::{iter::IndexedParallelIterator, slice::ParallelSliceMut};
-use tracing::debug;
 
 impl<F: PrimeField32> ChipBehavior<F> for AddSubChip<F> {
     type Record = EmulationRecord;
@@ -86,8 +85,6 @@ impl<F: PrimeField32> ChipBehavior<F> for AddSubChip<F> {
             .collect();
 
         extra.add_byte_lookup_events(blu_batches);
-
-        debug!("{} chip - extra_record", self.name());
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

@@ -24,13 +24,13 @@ pub struct Args {
     pub n: u32,
 
     // Step to exit the test.
-    // all | riscv | riscv_compress | riscv_combine | recur_combine | recur_compress | recur_embed
+    // all | riscv | convert | combine | compress | embed
     #[clap(long, default_value = "all")]
     pub step: String,
 
     // Field to work on.
     // bb | m31 | kb
-    #[clap(long, default_value = "bb")]
+    #[clap(long, default_value = "kb")]
     pub field: String,
 
     // use benchmark config

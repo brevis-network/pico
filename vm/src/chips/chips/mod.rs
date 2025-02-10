@@ -14,7 +14,7 @@ pub mod alu_base;
 pub mod alu_ext;
 pub mod batch_fri;
 pub mod exp_reverse_bits;
-pub mod poseidon2_p3;
+pub mod poseidon2;
 pub mod public_values;
 pub mod recursion_memory;
 pub mod select;

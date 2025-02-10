@@ -18,8 +18,6 @@ use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
 use crate::{chips::utils::pad_rows_fixed, compiler::recursion::types::ExpReverseBitsInstr};
-#[cfg(debug_assertions)]
-use p3_matrix::Matrix;
 
 impl<F: PrimeField32> ChipBehavior<F> for ExpReverseBitsLenChip<F> {
     type Record = RecursionRecord<F>;
@@ -134,19 +132,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ExpReverseBitsLenChip<F> {
         );
 
         // Convert the trace to a row major matrix.
-        let trace = RowMajorMatrix::new(
+        RowMajorMatrix::new(
             overall_rows.into_iter().flatten().collect(),
             NUM_EXP_REVERSE_BITS_LEN_COLS,
-        );
-
-        #[cfg(debug_assertions)]
-        println!(
-            "exp reverse bits len trace dims is width: {:?}, height: {:?}",
-            trace.width(),
-            trace.height()
-        );
-
-        trace
+        )
     }
 
     fn preprocessed_width(&self) -> usize {

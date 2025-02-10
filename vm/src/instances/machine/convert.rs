@@ -24,7 +24,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{any::type_name, time::Instant};
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 pub struct ConvertMachine<SC, C>
 where
@@ -105,7 +105,7 @@ macro_rules! impl_convert_machine {
 
                     self.complement_record(batch_records.as_mut_slice());
 
-                    info!(
+                    debug!(
                         "--- Generate convert records for batch {}, chunk {}-{} in {:?}",
                         batch_num,
                         chunk_index,
@@ -117,10 +117,10 @@ macro_rules! impl_convert_machine {
                     for record in batch_records.as_mut_slice() {
                         record.index = chunk_index;
                         chunk_index += 1;
-                        info!("CONVERT record stats: chunk {}", record.chunk_index());
+                        debug!("CONVERT record stats: chunk {}", record.chunk_index());
                         let stats = record.stats();
                         for (key, value) in &stats {
-                            info!("   |- {:<28}: {}", key, value);
+                            debug!("   |- {:<28}: {}", key, value);
                         }
                     }
 
@@ -132,7 +132,7 @@ macro_rules! impl_convert_machine {
                             let proof = self
                                 .base_machine
                                 .prove_ensemble(pk, std::slice::from_ref(record));
-                            info!(
+                            debug!(
                                 "--- Prove convert chunk {} in {:?}",
                                 record.chunk_index(),
                                 start_chunk.elapsed()
@@ -144,7 +144,7 @@ macro_rules! impl_convert_machine {
                     all_proofs.extend(batch_proofs);
                     all_vks.extend(batch_vks);
 
-                    info!(
+                    debug!(
                         "--- Finish convert batch {} in {:?}",
                         batch_num,
                         start.elapsed()
@@ -157,14 +157,14 @@ macro_rules! impl_convert_machine {
                 }
 
                 // construct meta proof
-                info!("CONVERT chip log degrees:");
+                debug!("CONVERT chip log degrees:");
                 all_proofs.iter().enumerate().for_each(|(i, proof)| {
-                    info!("Proof {}", i);
+                    debug!("Proof {}", i);
                     proof
                         .main_chip_ordering
                         .iter()
                         .for_each(|(chip_name, idx)| {
-                            info!(
+                            debug!(
                                 "   |- {:<20} main: {:<8}",
                                 chip_name,
                                 proof.opened_values.chips_opened_values[*idx].log_main_degree,
@@ -180,9 +180,6 @@ macro_rules! impl_convert_machine {
             where
                 C: for<'a> Air<VerifierConstraintFolder<'a, $recur_sc>>,
             {
-                debug!("PERF-machine=recursion");
-                let begin = Instant::now();
-
                 proof
                     .proofs()
                     .par_iter()
@@ -191,8 +188,6 @@ macro_rules! impl_convert_machine {
                         self.base_machine
                             .verify_ensemble(vk, std::slice::from_ref(p))
                     })?;
-
-                debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
                 Ok(())
             }

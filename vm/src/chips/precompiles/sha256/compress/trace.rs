@@ -52,7 +52,6 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
         let num_real_rows = rows.len();
 
         let log_rows = input.shape_chip_size(&self.name());
-        println!("log_rows in sha compress: {:?}", log_rows);
         pad_rows_fixed(&mut rows, || [F::ZERO; NUM_SHA_COMPRESS_COLS], log_rows);
 
         // Set the octet_num and octect columns for the padded rows.

@@ -133,7 +133,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         chips: &[MetaChip<SC::Val, C>],
         program: &C::Program,
     ) -> Vec<(String, bool, RowMajorMatrix<SC::Val>)> {
-        let begin = Instant::now();
         let mut durations = HashMap::new();
         let mut chips_and_preprocessed = chips
             .iter()
@@ -144,11 +143,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                     .map(|trace| (chip.name(), chip.local_only(), trace));
                 let elapsed_time = begin.elapsed();
                 durations.insert(chip.name(), elapsed_time);
-                debug!(
-                    "PERF-step=generate_preprocessed-chip={}-cpu_time={}",
-                    chip.name(),
-                    elapsed_time.as_millis()
-                );
                 trace
             })
             .collect::<Vec<_>>();
@@ -164,10 +158,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                 durations.get(&cp.0).unwrap()
             )
         }
-        debug!(
-            "PERF-step=generate_preprocessed-user_time={}",
-            begin.elapsed().as_millis(),
-        );
         chips_and_preprocessed
     }
 
@@ -178,7 +168,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         chips: &[MetaChip<SC::Val, C>],
         record: &C::Record,
     ) -> Vec<(String, RowMajorMatrix<SC::Val>)> {
-        let begin = Instant::now();
         let durations = DashMap::new();
 
         let generate_main_closure = || {
@@ -193,12 +182,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                     let trace = chip.generate_main(record, &mut C::Record::default());
                     let elapsed_time = begin.elapsed();
                     durations.insert(chip.name(), elapsed_time);
-                    debug!(
-                        "PERF-step=generate_main-chunk={}-chip={}-cpu_time={}",
-                        record.chunk_index(),
-                        chip.name(),
-                        elapsed_time.as_millis(),
-                    );
 
                     Some((chip.name(), trace))
                 })
@@ -233,12 +216,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             )
         }
 
-        let elapsed_time = begin.elapsed();
-        debug!(
-            "PERF-step=generate_main-chunk={}-user_time={}",
-            record.chunk_index(),
-            elapsed_time.as_millis(),
-        );
         chips_and_main
     }
 
@@ -252,8 +229,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         if chips_and_main.is_empty() {
             return None;
         }
-
-        let begin = Instant::now();
 
         let pcs = config.pcs();
         // todo optimize: parallel
@@ -277,11 +252,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             .map(|(_, trace)| trace)
             .collect::<Arc<[_]>>();
 
-        debug!(
-            "PERF-step=commit_main-chunk={}-user_time={}",
-            record.chunk_index(),
-            begin.elapsed().as_millis(),
-        );
         Some(MainTraceCommitments {
             main_traces,
             main_chip_ordering,
@@ -306,7 +276,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         Vec<SepticDigest<SC::Val>>,
         Vec<SC::Challenge>,
     ) {
-        let begin = Instant::now();
         let durations = DashMap::new();
         let preprocessed_traces = ordered_chips
             .iter()
@@ -346,13 +315,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                     let elapsed_time = begin.elapsed();
                     durations.insert(chip.name(), elapsed_time);
 
-                    debug!(
-                        "PERF-step=generate_permutation-chunk={}-chip={}-cpu_time={}",
-                        chunk_index,
-                        chip.name(),
-                        elapsed_time.as_millis()
-                    );
-
                     (permutation_trace, (global_sum, regional_sum))
                 })
                 .unzip()
@@ -377,11 +339,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                 durations.get(&ordered_chips[i].name()).unwrap().value()
             );
         }
-        debug!(
-            "PERF-step=generate_permutation-chunk={}-user_time={}",
-            chunk_index,
-            begin.elapsed().as_millis(),
-        );
 
         (permutation_traces, global_sums, local_sums)
     }
@@ -403,8 +360,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
     where
         C: Air<ProverConstraintFolder<SC>>,
     {
-        let begin = Instant::now();
-
         let chips = order_chips::<SC, C>(chips, &data.main_chip_ordering).collect_vec();
         let traces = data.main_traces;
         assert_eq!(chips.len(), traces.len());
@@ -443,8 +398,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             );
 
         // commit permutation traces on main domain
-        let begin_commit_permutation = Instant::now();
-
         let perm_domain = permutation_traces
             .into_iter()
             .zip(main_domains.iter())
@@ -455,12 +408,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             .collect::<Vec<_>>();
 
         let (permutation_commit, permutation_data) = config.pcs().commit(perm_domain);
-
-        debug!(
-            "PERF-step=commit_permutation-chunk={}-user_time={}",
-            chunk_index,
-            begin_commit_permutation.elapsed().as_millis(),
-        );
 
         // Observe the permutation commitment and cumulative sums.
         challenger.observe(permutation_commit.clone());
@@ -474,7 +421,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         }
 
         let alpha: SC::Challenge = challenger.sample_ext_element();
-        debug!("PROVER: alpha: {:?}", alpha);
 
         // Quotient
         let log_quotient_degrees = chips
@@ -504,15 +450,12 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         let perm_data = &permutation_data;
 
         let quotient_values = {
-            let begin = Instant::now();
             let quotient_values = debug_span!(parent: Span::current(), "compute_quotient_values")
                 .in_scope(|| {
                     quotient_domains
                         .into_par_iter()
                         .enumerate()
                         .map(|(i, quotient_domain)| {
-                            let begin_compute_quotient = Instant::now();
-
                             let pre_trace_on_quotient_domains = preprocessed_chip_ordering
                                 .get(&chips[i].name())
                                 .map(|index| {
@@ -542,7 +485,7 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                                 .to_row_major_matrix();
 
                             // todo: consider optimize quotient domain
-                            let qv = compute_quotient_values(
+                            compute_quotient_values(
                                 chips[i],
                                 data.public_values.clone(),
                                 main_domains[i],
@@ -554,31 +497,13 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                                 &regional_cumulative_sums[i],
                                 &global_cumulative_sums[i],
                                 alpha,
-                            );
-
-                            debug!(
-                                "PERF-step=compute_quotient_values-chunk={}-chip={}-cpu_time={}",
-                                chunk_index,
-                                chips[i].name(),
-                                begin_compute_quotient.elapsed().as_millis(),
-                            );
-
-                            qv
+                            )
                         })
                         .collect::<Vec<_>>()
                 });
 
-            debug!(
-                "PERF-step=compute_quotient_values-chunk={}-user_time={}",
-                chunk_index,
-                begin.elapsed().as_millis(),
-            );
-
             quotient_values
         };
-
-        // Commit quotient
-        let begin_commit_quotient = Instant::now();
 
         let quotient_domains_and_values = quotient_domains
             .into_iter()
@@ -592,20 +517,25 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             })
             .collect::<Vec<_>>();
 
+        // // Commit quotient
+        // let quotient_domains_and_values = quotient_domains
+        //     .into_iter()
+        //     .zip_eq(quotient_values)
+        //     .zip_eq(quotient_degrees.iter())
+        //     .flat_map(|((domain, values), degree)| {
+        //         let quotient_flat = RowMajorMatrix::new_col(values).flatten_to_base();
+        //         let quotient_chunks = domain.split_evals(*degree, quotient_flat);
+        //         let qc_domains = domain.split_domains(*degree);
+        //         qc_domains.into_iter().zip_eq(quotient_chunks)
+        //     })
+        //     .collect::<Vec<_>>();
+
         let (quotient_commit, quotient_data) = pcs.commit(quotient_domains_and_values);
-        debug!(
-            "PERF-step=commit_quotient-chunk={}-user_time={}",
-            chunk_index,
-            begin_commit_quotient.elapsed().as_millis(),
-        );
 
         challenger.observe(quotient_commit.clone());
 
         // quotient argument
-        let begin_open = Instant::now();
-
         let zeta: SC::Challenge = challenger.sample_ext_element();
-        debug!("PROVER: zeta: {:?}", zeta);
 
         let preprocessed_opening_points = pk
             .preprocessed_trace
@@ -740,18 +670,6 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                 },
             )
             .collect::<Arc<[_]>>();
-
-        debug!(
-            "PERF-step=open-chunk={}-user_time={}",
-            chunk_index,
-            begin_open.elapsed().as_millis(),
-        );
-
-        debug!(
-            "PERF-step=core_prove-chunk={}-user_time={}",
-            chunk_index,
-            begin.elapsed().as_millis(),
-        );
 
         // final base proof
         BaseProof::<SC> {

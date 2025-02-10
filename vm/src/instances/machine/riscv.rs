@@ -22,7 +22,7 @@ use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
 pub struct RiscvMachine<SC, C>
 where
@@ -97,7 +97,7 @@ where
                 }
             }
 
-            info!(
+            debug!(
                 "--- Generate riscv records for batch {}, chunk {}-{} in {:?}",
                 batch_num,
                 chunk_num + 1,
@@ -109,9 +109,9 @@ where
             // set index for each record
             for record in batch_records.iter() {
                 let stats = record.stats();
-                info!("RISCV record stats: chunk {}", record.chunk_index());
+                debug!("RISCV record stats: chunk {}", record.chunk_index());
                 for (key, value) in &stats {
-                    info!("   |- {:<28}: {}", key, value);
+                    debug!("   |- {:<28}: {}", key, value);
                 }
             }
 
@@ -139,7 +139,7 @@ where
                     main_commitment,
                 );
 
-                info!(
+                debug!(
                     "--- Prove riscv batch {} chunk {} in {:?}",
                     batch_num,
                     record.chunk_index(),
@@ -151,7 +151,7 @@ where
             // extend all_proofs to include batch_proofs
             all_proofs.par_extend(batch_proofs);
 
-            info!(
+            debug!(
                 "--- Finish riscv batch {} in {:?}",
                 batch_num,
                 start_local.elapsed()
@@ -164,7 +164,7 @@ where
             }
         }
         let cycles = emulator.cycles();
-        info!("--- Finish riscv phase 2 in {:?}", start_p2.elapsed());
+        debug!("--- Finish riscv phase 2 in {:?}", start_p2.elapsed());
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()];
@@ -174,14 +174,14 @@ where
         #[cfg(feature = "debug-lookups")]
         global_lookup_debugger.print_results();
 
-        info!("RISCV chip log degrees:");
+        debug!("RISCV chip log degrees:");
         all_proofs.iter().enumerate().for_each(|(i, proof)| {
-            info!("Proof {}", i);
+            debug!("Proof {}", i);
             proof
                 .main_chip_ordering
                 .iter()
                 .for_each(|(chip_name, idx)| {
-                    info!(
+                    debug!(
                         "   |- {:<20} main: {:<8}",
                         chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
                     );
@@ -247,7 +247,7 @@ where
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!("RiscvMachine <{}>", type_name::<SC>())
+        format!("RISCV machine <{}>", type_name::<SC>())
     }
 
     /// Get the base machine.
@@ -298,7 +298,7 @@ where
             let (mut batch_records, done) = emulator.next_record_batch();
             self.complement_record(&mut batch_records);
 
-            info!(
+            debug!(
                 "--- Generate riscv records for batch {}, chunk {}-{} in {:?}",
                 batch_num,
                 chunk_num + 1,
@@ -310,9 +310,9 @@ where
             // set index for each record
             for record in batch_records.iter() {
                 let stats = record.stats();
-                info!("RISCV record stats: chunk {}", record.chunk_index());
+                debug!("RISCV record stats: chunk {}", record.chunk_index());
                 for (key, value) in &stats {
-                    info!("   |- {:<28}: {}", key, value);
+                    debug!("   |- {:<28}: {}", key, value);
                 }
             }
 
@@ -340,7 +340,7 @@ where
                     main_commitment,
                 );
 
-                info!(
+                debug!(
                     "--- Prove riscv batch {} chunk {} in {:?}",
                     batch_num,
                     record.chunk_index(),
@@ -352,7 +352,7 @@ where
             // extend all_proofs to include batch_proofs
             all_proofs.par_extend(batch_proofs);
 
-            info!(
+            debug!(
                 "--- Finish riscv batch {} in {:?}",
                 batch_num,
                 start_local.elapsed()
@@ -364,7 +364,7 @@ where
                 break;
             }
         }
-        info!("--- Finish riscv phase 2 in {:?}", start_p2.elapsed());
+        debug!("--- Finish riscv phase 2 in {:?}", start_p2.elapsed());
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()];
@@ -374,14 +374,14 @@ where
         #[cfg(feature = "debug-lookups")]
         global_lookup_debugger.print_results();
 
-        info!("RISCV chip log degrees:");
+        debug!("RISCV chip log degrees:");
         all_proofs.iter().enumerate().for_each(|(i, proof)| {
-            info!("Proof {}", i);
+            debug!("Proof {}", i);
             proof
                 .main_chip_ordering
                 .iter()
                 .for_each(|(chip_name, idx)| {
-                    info!(
+                    debug!(
                         "   |- {:<20} main: {:<8}",
                         chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
                     );
@@ -431,7 +431,7 @@ where
             let public_values: &PublicValues<Word<_>, _> =
                 each_proof.public_values.as_ref().borrow();
 
-            println!(
+            debug!(
                 "chunk: {}, execution chunk: {}",
                 public_values.chunk, public_values.execution_chunk
             );

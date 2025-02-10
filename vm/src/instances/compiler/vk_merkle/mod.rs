@@ -19,6 +19,7 @@ use crate::{
 };
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
+use tracing::debug;
 
 pub struct VkMerkleManager<SC: StarkGenericConfig + FieldHasher<Val<SC>>> {
     pub allowed_vk_map: BTreeMap<[Val<SC>; DIGEST_SIZE], usize>,
@@ -110,14 +111,14 @@ where
 
 pub static VK_MANAGER_BB: Lazy<VkMerkleManager<BabyBearPoseidon2>> = Lazy::new(|| {
     let file_content = include_bytes!("../../../../../vk_map_bb.bin");
-    println!("Initializing global BabyBear VK_MANAGER");
+    debug!("Initializing global BabyBear VK_MANAGER");
     VkMerkleManager::<BabyBearPoseidon2>::new_from_bytes(file_content)
         .expect("Failed to load BabyBear VkMerkleManager")
 });
 
 pub static VK_MANAGER_KB: Lazy<VkMerkleManager<KoalaBearPoseidon2>> = Lazy::new(|| {
     let file_content = include_bytes!("../../../../../vk_map_kb.bin");
-    println!("Initializing global KoalaBear VK_MANAGER");
+    debug!("Initializing global KoalaBear VK_MANAGER");
     VkMerkleManager::<KoalaBearPoseidon2>::new_from_bytes(file_content)
         .expect("Failed to load KoalaBear VkMerkleManager")
 });

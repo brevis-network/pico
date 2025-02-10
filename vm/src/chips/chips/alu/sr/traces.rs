@@ -29,7 +29,6 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 use std::{borrow::BorrowMut, marker::PhantomData};
-use tracing::debug;
 
 /// A chip that implements bitwise operations for the opcodes SRL and SRA.
 #[derive(Default)]
@@ -100,7 +99,6 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
             .collect();
 
         extra.add_byte_lookup_events(blu_events);
-        debug!("{} chip - extra_record", self.name());
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

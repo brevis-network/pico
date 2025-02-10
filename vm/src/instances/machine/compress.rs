@@ -19,8 +19,8 @@ use crate::{
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
-use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument, trace};
+use std::{any::type_name, borrow::Borrow};
+use tracing::{debug, instrument, trace};
 
 pub struct CompressMachine<SC, C>
 where
@@ -75,10 +75,10 @@ where
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
 
-        info!("COMPRESS record stats");
+        debug!("COMPRESS record stats");
         let stats = records[0].stats();
         for (key, value) in &stats {
-            info!("   |- {:<28}: {}", key, value);
+            debug!("   |- {:<28}: {}", key, value);
         }
 
         let proofs = self.base_machine.prove_ensemble(witness.pk(), &records);
@@ -86,14 +86,14 @@ where
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();
 
-        info!("COMPRESS chip log degrees:");
+        debug!("COMPRESS chip log degrees:");
         proofs.iter().enumerate().for_each(|(i, proof)| {
-            info!("Proof {}", i);
+            debug!("Proof {}", i);
             proof
                 .main_chip_ordering
                 .iter()
                 .for_each(|(chip_name, idx)| {
-                    info!(
+                    debug!(
                         "   |- {:<20} main: {:<8}",
                         chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
                     );
@@ -106,10 +106,6 @@ where
     /// Verify the proof.
     fn verify(&self, proof: &MetaProof<SC>) -> anyhow::Result<()> {
         let vk = proof.vks().first().unwrap();
-
-        debug!("PERF-machine=convert");
-        let begin = Instant::now();
-
         assert_eq!(proof.num_proofs(), 1);
 
         let public_values: &RecursionPublicValues<_> =
@@ -125,8 +121,6 @@ where
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;
-
-        debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
 
         Ok(())
     }

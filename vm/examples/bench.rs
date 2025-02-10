@@ -106,13 +106,13 @@ fn format_duration(duration: Duration) -> String {
 pub struct PerformanceReport {
     program: String,
     cycles: u64,
-    exec_khz: f64,
-    exec_duration: Duration,
-    core_khz: f64,
-    core_duration: Duration,
-    compressed_khz: f64,
-    compressed_duration: Duration,
-    time: Duration,
+    riscv_duration: Duration,
+    convert_duration: Duration,
+    combine_duration: Duration,
+    compress_duration: Duration,
+    embed_duration: Duration,
+    recursion_duration: Duration,
+    total_duration: Duration,
     success: bool,
 }
 
@@ -123,86 +123,102 @@ fn time_operation<T, F: FnOnce() -> T>(operation: F) -> (T, Duration) {
     (result, duration)
 }
 
-fn to_khz(cycles: u64, duration: Duration) -> f64 {
-    let duration_secs = duration.as_secs_f64();
-    if duration_secs > 0.0 {
-        (cycles as f64 / duration_secs) / 1_000.0
-    } else {
-        0.0
-    }
-}
-
 fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
     let (elf, stdin) = load(bench)?;
-    let core_opts = EmulatorOpts::bench_riscv_ops();
+    let riscv_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
     info!(
         "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
-        core_opts.chunk_size, core_opts.chunk_batch_size
+        riscv_opts.chunk_size, riscv_opts.chunk_batch_size
     );
     info!(
         "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
         recursion_opts.chunk_size, recursion_opts.chunk_batch_size
     );
 
-    let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), &elf), core_opts, None);
+    let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), &elf), riscv_opts, None);
     let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, None);
     let combine = CombineProver::new_with_prev(&convert, recursion_opts, None);
     let compress = CompressProver::new_with_prev(&combine, (), None);
     let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
-    info!("Generating RiscV proof");
-    let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    info!("╔═══════════════════════╗");
+    info!("║      RISCV PHASE      ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating RISCV proof");
+    let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    info!("Verifying RISCV proof..");
     assert!(riscv.verify(&proof));
 
-    info!("Generating convert proof");
+    info!("╔═══════════════════════╗");
+    info!("║     CONVERT PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating CONVERT proof");
     let (proof, convert_duration) = time_operation(|| convert.prove(proof));
+    info!("Verifying CONVERT proof..");
     assert!(convert.verify(&proof));
 
-    info!("Generating combine proof");
+    info!("╔═══════════════════════╗");
+    info!("║     COMBINE PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating COMBINE proof");
     let (proof, combine_duration) = time_operation(|| combine.prove(proof));
+    info!("Verifying COMBINE proof..");
     assert!(combine.verify(&proof));
 
-    info!("Generating compress proof");
+    info!("╔═══════════════════════╗");
+    info!("║    COMPRESS PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating COMPRESS proof");
     let (proof, compress_duration) = time_operation(|| compress.prove(proof));
+    info!("Verifying COMPRESS proof..");
     assert!(compress.verify(&proof));
 
-    info!("Generating embed proof");
+    info!("╔═══════════════════════╗");
+    info!("║      EMBED PHASE      ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating EMBED proof");
     let (proof, embed_duration) = time_operation(|| embed.prove(proof));
+    info!("Verifying EMBED proof..");
     assert!(embed.verify(&proof));
 
-    let total_recursion_duration =
+    let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
-    let total_duration = core_duration + total_recursion_duration;
+    let total_duration = riscv_duration + recursion_duration;
 
-    info!("core duration: {}", format_duration(core_duration));
-    info!("convert duration: {}", format_duration(convert_duration));
-    info!("combine duration: {}", format_duration(combine_duration));
-    info!("compress duration: {}", format_duration(compress_duration));
-    info!("embed duration: {}", format_duration(embed_duration));
-    info!(
-        "total recursion duration: {}",
-        format_duration(total_recursion_duration)
-    );
-    info!("total duration: {}", format_duration(total_duration));
+    info!("╔═══════════════════════╗");
+    info!("║ PERFORMANCE SUMMARY   ║");
+    info!("╚═══════════════════════╝");
+    info!("Time Metrics (wall time)");
+    info!("----------------------------------------");
+    info!("RISCV:     {}", format_duration(riscv_duration));
+    info!("Recursion Steps:");
+    info!("  CONVERT: {}", format_duration(convert_duration));
+    info!("  COMBINE: {}", format_duration(combine_duration));
+    info!("  COMPRESS:{}", format_duration(compress_duration));
+    info!("  EMBED:   {}", format_duration(embed_duration));
+    info!("  ----------------------------------------");
+    info!("  TOTAL:   {}", format_duration(recursion_duration));
+    info!("----------------------------------------");
+    info!("TOTAL:     {}", format_duration(total_duration));
 
     Ok(PerformanceReport {
         program: bench.name.to_string(),
         cycles,
-        exec_khz: to_khz(cycles, Duration::ZERO),
-        exec_duration: Duration::ZERO,
-        core_khz: to_khz(cycles, core_duration),
-        core_duration,
-        compressed_khz: to_khz(cycles, total_recursion_duration + core_duration),
-        compressed_duration: total_recursion_duration,
-        time: total_duration,
+        riscv_duration,
+        convert_duration,
+        combine_duration,
+        compress_duration,
+        embed_duration,
+        recursion_duration,
+        total_duration,
         success: true,
     })
 }
 
 fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let (elf, stdin) = load(bench)?;
-    let core_opts = EmulatorOpts::bench_riscv_ops();
+    let riscv_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
     let riscv_shape_config = RiscvShapeConfig::<BabyBear>::default();
     let recursion_shape_config =
@@ -210,7 +226,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
 
     info!(
         "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
-        core_opts.chunk_size, core_opts.chunk_batch_size
+        riscv_opts.chunk_size, riscv_opts.chunk_batch_size
     );
     info!(
         "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
@@ -219,7 +235,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
 
     let riscv = RiscvProver::new_initial_prover(
         (RiscvBBSC::new(), &elf),
-        core_opts,
+        riscv_opts,
         Some(riscv_shape_config),
     );
     let convert =
@@ -231,58 +247,83 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let compress = CompressVkProver::new_with_prev(&combine, (), None);
     let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
-    info!("Generating RiscV proof");
-    let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    info!("╔═══════════════════════╗");
+    info!("║      RISCV PHASE      ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating RISCV proof");
+    let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    info!("Verifying RISCV proof..");
     assert!(riscv.verify(&proof));
 
-    info!("Generating convert proof");
+    info!("╔═══════════════════════╗");
+    info!("║     CONVERT PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating CONVERT proof");
     let (proof, convert_duration) = time_operation(|| convert.prove(proof));
+    info!("Verifying CONVERT proof..");
     assert!(convert.verify(&proof));
 
-    info!("Generating combine proof");
+    info!("╔═══════════════════════╗");
+    info!("║     COMBINE PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating COMBINE proof");
     let (proof, combine_duration) = time_operation(|| combine.prove(proof));
+    info!("Verifying COMBINE proof..");
     assert!(combine.verify(&proof));
 
-    info!("Generating compress proof");
+    info!("╔═══════════════════════╗");
+    info!("║    COMPRESS PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating COMPRESS proof");
     let (proof, compress_duration) = time_operation(|| compress.prove(proof));
+    info!("Verifying COMPRESS proof..");
     assert!(compress.verify(&proof));
 
-    info!("Generating embed proof");
+    info!("╔═══════════════════════╗");
+    info!("║      EMBED PHASE      ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating EMBED proof");
     let (proof, embed_duration) = time_operation(|| embed.prove(proof));
+    info!("Verifying EMBED proof..");
     assert!(embed.verify(&proof));
 
-    let total_recursion_duration =
+    let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
-    let total_duration = core_duration + total_recursion_duration;
+    let total_duration = riscv_duration + recursion_duration;
 
-    info!("core duration: {}", format_duration(core_duration));
-    info!("convert duration: {}", format_duration(convert_duration));
-    info!("combine duration: {}", format_duration(combine_duration));
-    info!("compress duration: {}", format_duration(compress_duration));
-    info!("embed duration: {}", format_duration(embed_duration));
-    info!(
-        "total recursion duration: {}",
-        format_duration(total_recursion_duration)
-    );
-    info!("total duration: {}", format_duration(total_duration));
+    info!("╔═══════════════════════╗");
+    info!("║ PERFORMANCE SUMMARY   ║");
+    info!("╚═══════════════════════╝");
+    info!("Time Metrics (wall time)");
+    info!("----------------------------------------");
+    info!("RISCV:     {}", format_duration(riscv_duration));
+    info!("Recursion Steps:");
+    info!("  CONVERT: {}", format_duration(convert_duration));
+    info!("  COMBINE: {}", format_duration(combine_duration));
+    info!("  COMPRESS:{}", format_duration(compress_duration));
+    info!("  EMBED:   {}", format_duration(embed_duration));
+    info!("  ----------------------------------------");
+    info!("  TOTAL:   {}", format_duration(recursion_duration));
+    info!("----------------------------------------");
+    info!("TOTAL:     {}", format_duration(total_duration));
 
     Ok(PerformanceReport {
         program: bench.name.to_string(),
         cycles,
-        exec_khz: to_khz(cycles, Duration::ZERO),
-        exec_duration: Duration::ZERO,
-        core_khz: to_khz(cycles, core_duration),
-        core_duration,
-        compressed_khz: to_khz(cycles, total_recursion_duration + core_duration),
-        compressed_duration: total_recursion_duration,
-        time: total_duration,
+        riscv_duration,
+        convert_duration,
+        combine_duration,
+        compress_duration,
+        embed_duration,
+        recursion_duration,
+        total_duration,
         success: true,
     })
 }
 
 fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let (elf, stdin) = load(bench)?;
-    let core_opts = EmulatorOpts::bench_riscv_ops();
+    let riscv_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
     let riscv_shape_config = RiscvShapeConfig::<KoalaBear>::default();
     let recursion_shape_config =
@@ -290,7 +331,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
 
     info!(
         "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
-        core_opts.chunk_size, core_opts.chunk_batch_size
+        riscv_opts.chunk_size, riscv_opts.chunk_batch_size
     );
     info!(
         "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
@@ -299,7 +340,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
 
     let riscv = RiscvProver::new_initial_prover(
         (RiscvKBSC::new(), &elf),
-        core_opts,
+        riscv_opts,
         Some(riscv_shape_config),
     );
     let convert =
@@ -311,120 +352,170 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let compress = CompressVkProver::new_with_prev(&combine, (), None);
     let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
-    info!("Generating RiscV proof");
-    let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    info!("╔═══════════════════════╗");
+    info!("║      RISCV PHASE      ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating RISCV proof");
+    let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    info!("Verifying RISCV proof..");
     assert!(riscv.verify(&proof));
 
-    info!("Generating convert proof");
+    info!("╔═══════════════════════╗");
+    info!("║     CONVERT PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating CONVERT proof");
     let (proof, convert_duration) = time_operation(|| convert.prove(proof));
+    info!("Verifying CONVERT proof..");
     assert!(convert.verify(&proof));
 
-    info!("Generating combine proof");
+    info!("╔═══════════════════════╗");
+    info!("║     COMBINE PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating COMBINE proof");
     let (proof, combine_duration) = time_operation(|| combine.prove(proof));
+    info!("Verifying COMBINE proof..");
     assert!(combine.verify(&proof));
 
-    info!("Generating compress proof");
+    info!("╔═══════════════════════╗");
+    info!("║    COMPRESS PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating COMPRESS proof");
     let (proof, compress_duration) = time_operation(|| compress.prove(proof));
+    info!("Verifying COMPRESS proof..");
     assert!(compress.verify(&proof));
 
-    info!("Generating embed proof");
+    info!("╔═══════════════════════╗");
+    info!("║      EMBED PHASE      ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating EMBED proof");
     let (proof, embed_duration) = time_operation(|| embed.prove(proof));
+    info!("Verifying EMBED proof..");
     assert!(embed.verify(&proof));
 
-    let total_recursion_duration =
+    let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
-    let total_duration = core_duration + total_recursion_duration;
+    let total_duration = riscv_duration + recursion_duration;
 
-    info!("core duration: {}", format_duration(core_duration));
-    info!("convert duration: {}", format_duration(convert_duration));
-    info!("combine duration: {}", format_duration(combine_duration));
-    info!("compress duration: {}", format_duration(compress_duration));
-    info!("embed duration: {}", format_duration(embed_duration));
-    info!(
-        "total recursion duration: {}",
-        format_duration(total_recursion_duration)
-    );
-    info!("total duration: {}", format_duration(total_duration));
+    info!("╔═══════════════════════╗");
+    info!("║ PERFORMANCE SUMMARY   ║");
+    info!("╚═══════════════════════╝");
+    info!("Time Metrics (wall time)");
+    info!("----------------------------------------");
+    info!("RISCV:     {}", format_duration(riscv_duration));
+    info!("Recursion Steps:");
+    info!("  CONVERT: {}", format_duration(convert_duration));
+    info!("  COMBINE: {}", format_duration(combine_duration));
+    info!("  COMPRESS:{}", format_duration(compress_duration));
+    info!("  EMBED:   {}", format_duration(embed_duration));
+    info!("  ----------------------------------------");
+    info!("  TOTAL:   {}", format_duration(recursion_duration));
+    info!("----------------------------------------");
+    info!("TOTAL:     {}", format_duration(total_duration));
 
     Ok(PerformanceReport {
         program: bench.name.to_string(),
         cycles,
-        exec_khz: to_khz(cycles, Duration::ZERO),
-        exec_duration: Duration::ZERO,
-        core_khz: to_khz(cycles, core_duration),
-        core_duration,
-        compressed_khz: to_khz(cycles, total_recursion_duration + core_duration),
-        compressed_duration: total_recursion_duration,
-        time: total_duration,
+        riscv_duration,
+        convert_duration,
+        combine_duration,
+        compress_duration,
+        embed_duration,
+        recursion_duration,
+        total_duration,
         success: true,
     })
 }
 
 fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
     let (elf, stdin) = load(bench)?;
-    let core_opts = EmulatorOpts::bench_riscv_ops();
+    let riscv_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
     info!(
         "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
-        core_opts.chunk_size, core_opts.chunk_batch_size
+        riscv_opts.chunk_size, riscv_opts.chunk_batch_size
     );
     info!(
         "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
         recursion_opts.chunk_size, recursion_opts.chunk_batch_size
     );
 
-    let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), &elf), core_opts, None);
+    let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), &elf), riscv_opts, None);
     let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, None);
     let combine = CombineProver::new_with_prev(&convert, recursion_opts, None);
     let compress = CompressProver::new_with_prev(&combine, (), None);
     let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
-    info!("Generating RiscV proof");
-    let ((proof, cycles), core_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    info!("╔═══════════════════════╗");
+    info!("║      RISCV PHASE      ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating RISCV proof");
+    let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
+    info!("Verifying RISCV proof..");
     assert!(riscv.verify(&proof));
 
-    info!("Generating convert proof");
+    info!("╔═══════════════════════╗");
+    info!("║     CONVERT PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating CONVERT proof");
     let (proof, convert_duration) = time_operation(|| convert.prove(proof));
+    info!("Verifying CONVERT proof..");
     assert!(convert.verify(&proof));
 
-    info!("Generating combine proof");
+    info!("╔═══════════════════════╗");
+    info!("║     COMBINE PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating COMBINE proof");
     let (proof, combine_duration) = time_operation(|| combine.prove(proof));
+    info!("Verifying COMBINE proof..");
     assert!(combine.verify(&proof));
 
-    info!("Generating compress proof");
+    info!("╔═══════════════════════╗");
+    info!("║    COMPRESS PHASE     ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating COMPRESS proof");
     let (proof, compress_duration) = time_operation(|| compress.prove(proof));
+    info!("Verifying COMPRESS proof..");
     assert!(compress.verify(&proof));
 
-    info!("Generating embed proof");
+    info!("╔═══════════════════════╗");
+    info!("║      EMBED PHASE      ║");
+    info!("╚═══════════════════════╝");
+    info!("Generating EMBED proof");
     let (proof, embed_duration) = time_operation(|| embed.prove(proof));
+    info!("Verifying EMBED proof..");
     assert!(embed.verify(&proof));
 
-    let total_recursion_duration =
+    let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
-    let total_duration = core_duration + total_recursion_duration;
+    let total_duration = riscv_duration + recursion_duration;
 
-    info!("core duration: {}", format_duration(core_duration));
-    info!("convert duration: {}", format_duration(convert_duration));
-    info!("combine duration: {}", format_duration(combine_duration));
-    info!("compress duration: {}", format_duration(compress_duration));
-    info!("embed duration: {}", format_duration(embed_duration));
-    info!(
-        "total recursion duration: {}",
-        format_duration(total_recursion_duration)
-    );
-    info!("total duration: {}", format_duration(total_duration));
+    info!("╔═══════════════════════╗");
+    info!("║ PERFORMANCE SUMMARY   ║");
+    info!("╚═══════════════════════╝");
+    info!("Time Metrics (wall time)");
+    info!("----------------------------------------");
+    info!("RISCV:     {}", format_duration(riscv_duration));
+    info!("Recursion Steps:");
+    info!("  CONVERT: {}", format_duration(convert_duration));
+    info!("  COMBINE: {}", format_duration(combine_duration));
+    info!("  COMPRESS:{}", format_duration(compress_duration));
+    info!("  EMBED:   {}", format_duration(embed_duration));
+    info!("  ----------------------------------------");
+    info!("  TOTAL:   {}", format_duration(recursion_duration));
+    info!("----------------------------------------");
+    info!("TOTAL:     {}", format_duration(total_duration));
 
     Ok(PerformanceReport {
         program: bench.name.to_string(),
         cycles,
-        exec_khz: to_khz(cycles, Duration::ZERO),
-        exec_duration: Duration::ZERO,
-        core_khz: to_khz(cycles, core_duration),
-        core_duration,
-        compressed_khz: to_khz(cycles, total_recursion_duration + core_duration),
-        compressed_duration: total_recursion_duration,
-        time: total_duration,
+        riscv_duration,
+        convert_duration,
+        combine_duration,
+        compress_duration,
+        embed_duration,
+        recursion_duration,
+        total_duration,
         success: true,
     })
 }
@@ -432,28 +523,28 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
 fn format_results(_args: &Args, results: &[PerformanceReport]) -> Vec<String> {
     let mut table_text = String::new();
     table_text.push_str("```\n");
-    table_text.push_str("| program     | cycles      | execute (mHz)  | execute_d      | core (kHZ)     | core_d     | compress (KHz) | compressed_d | time   | success  |\n");
-    table_text.push_str("|-------------|-------------|----------------|--------------- |----------------|------------|----------------|--------------|--------|----------|");
+    table_text.push_str(
+        "| program     | cycles      | riscv_d     | recursion_d | total_d    | success |\n",
+    );
+    table_text.push_str(
+        "|-------------|-------------|-------------|-------------|------------|---------|",
+    );
 
     for result in results.iter() {
         table_text.push_str(&format!(
-            "\n| {:<11} | {:>11} | {:>14.2} | {:>14} | {:>14.2} | {:>10} | {:>14.2} | {:>12} | {:>6} | {:<7} |",
+            "\n| {:<11} | {:>11} | {:>11} | {:>11} | {:>10} | {:<7} |",
             result.program,
             result.cycles,
-            result.exec_khz / 1000.0,
-            format_duration(result.exec_duration),
-            result.core_khz,
-            format_duration(result.core_duration),
-            result.compressed_khz,
-            format_duration(result.compressed_duration),
-            format_duration(result.time),
+            format_duration(result.riscv_duration),
+            format_duration(result.recursion_duration),
+            format_duration(result.total_duration),
             if result.success { "✅" } else { "❌" }
         ));
     }
     table_text.push_str("\n```");
 
     vec![
-        "*Pico Performance Test Results*\n".to_string(),
+        "*Pico Performance Benchmark Results*\n".to_string(),
         String::new(),
         table_text,
     ]

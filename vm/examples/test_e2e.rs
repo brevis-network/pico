@@ -65,11 +65,8 @@ macro_rules! run {
             step_name: String,
             bench: bool,
         ) {
-            debug!("PERF-machine=riscv");
             let start = Instant::now();
-            let riscv_start = Instant::now();
 
-            info!("Setting up RISCV..");
             let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
             let riscv_program = riscv_compiler.compile();
 
@@ -82,16 +79,15 @@ macro_rules! run {
             // Setup machine prover, verifier, pk and vk.
             let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
 
-            let core_opts = if bench {
-                info!("use benchmark options");
+            let riscv_opts = if bench {
                 EmulatorOpts::bench_riscv_ops()
             } else {
                 EmulatorOpts::default()
             };
-            info!("core_opts: {:?}", core_opts);
+            debug!("riscv_opts: {:?}", riscv_opts);
 
             // Getting public values stream.
-            info!(
+            debug!(
                 "Generating public values stream (at {:?})..",
                 start.elapsed()
             );
@@ -99,37 +95,35 @@ macro_rules! run {
                 ::setup_for_riscv(
                     riscv_program.clone(),
                     riscv_stdin.clone(),
-                    core_opts.clone(),
+                    riscv_opts.clone(),
                     riscv_pk.clone(),
                     riscv_vk.clone()
                 );
             let mut emulator = MetaEmulator::setup_riscv(&riscv_witness);
             let pv_stream = emulator.get_pv_stream_with_dryrun();
-            info!("Public values stream: {:?}", pv_stream);
+            debug!("Public values stream: {:?}", pv_stream);
 
             // Generate the proof.
+            info!("╔═══════════════════════╗");
+            info!("║      RISCV PHASE      ║");
+            info!("╚═══════════════════════╝");
             info!("Generating RISCV proof (at {:?})..", start.elapsed());
             let (riscv_proof, riscv_time) = timed_run(|| {
                 let riscv_witness = ProvingWitness::setup_for_riscv(
                     riscv_program.clone(),
                     riscv_stdin,
-                    core_opts,
+                    riscv_opts,
                     riscv_pk,
                     riscv_vk.clone(),
                 );
 
                 riscv_machine.prove(&riscv_witness)
             });
-            debug!(
-                "PERF-step=prove-user_time={}",
-                riscv_start.elapsed().as_millis()
-            );
 
             // assert pv_stream is the same as dryrun
             assert_eq!(riscv_proof.pv_stream.clone().unwrap(), pv_stream);
 
             let riscv_proof_size = bincode::serialize(&riscv_proof.proofs()).unwrap().len();
-            debug!("PERF-step=proof_size-{}", riscv_proof_size);
 
             // Verify the proof.
             info!("Verifying RISCV proof (at {:?})..", start.elapsed());
@@ -158,21 +152,19 @@ macro_rules! run {
 
             // -------- Riscv Convert Recursion Machine --------
 
-            info!("\n Begin CONVERT..");
+            info!("╔═══════════════════════╗");
+            info!("║     CONVERT PHASE     ║");
+            info!("╚═══════════════════════╝");
 
             let recursion_opts = if bench {
                 EmulatorOpts::bench_recursion_opts()
             } else {
                 EmulatorOpts::default()
             };
-            info!("recursion_opts: {:?}", recursion_opts);
-
-            debug!("PERF-machine=convert");
-            let convert_start = Instant::now();
+            debug!("recursion_opts: {:?}", recursion_opts);
 
             let vk_root = [Val::<$riscv_sc>::ZERO; DIGEST_SIZE];
 
-            info!("Setting up CONVERT..");
             let convert_machine = ConvertMachine::new(
                 $recur_sc::new(),
                 RecursionChipType::<Val<$recur_sc>>::all_chips(),
@@ -200,13 +192,8 @@ macro_rules! run {
 
                 convert_machine.prove(&convert_witness)
             });
-            debug!(
-                "PERF-step=prove-user_time={}",
-                convert_start.elapsed().as_millis()
-            );
 
             let convert_proof_size = bincode::serialize(&convert_proof.proofs()).unwrap().len();
-            debug!("PERF-step=proof_size-{}", convert_proof_size);
 
             // Verify the proof.
             info!("Verifying CONVERT proof (at {:?})..", start.elapsed());
@@ -236,14 +223,12 @@ macro_rules! run {
 
             // -------- Combine Recursion Machine --------
 
-            info!("\n Begin COMBINE..");
-
-            debug!("PERF-machine=combine");
-            let combine_start = Instant::now();
+            info!("╔═══════════════════════╗");
+            info!("║     COMBINE PHASE     ║");
+            info!("╚═══════════════════════╝");
 
             let vk_root = [Val::<$recur_sc>::ZERO; DIGEST_SIZE];
 
-            info!("Setting up COMBINE");
             let combine_machine = CombineMachine::<_, _>::new(
                 $recur_sc::new(),
                 RecursionChipType::<Val<$recur_sc>>::all_chips(),
@@ -275,13 +260,8 @@ macro_rules! run {
 
                 combine_machine.prove(&combine_witness)
             });
-            debug!(
-                "PERF-step=prove-user_time={}",
-                combine_start.elapsed().as_millis(),
-            );
 
             let combine_proof_size = bincode::serialize(&combine_proof.proofs()).unwrap().len();
-            debug!("PERF-step=proof_size-{}", combine_proof_size);
 
             // Verify the proof.
             info!("Verifying COMBINE proof (at {:?})..", start.elapsed());
@@ -311,14 +291,12 @@ macro_rules! run {
 
             // -------- Compress Recursion Machine --------
 
-            info!("\n Begin COMPRESS..");
-
-            debug!("PERF-machine=compress");
-            let compress_start = Instant::now();
+            info!("╔═══════════════════════╗");
+            info!("║    COMPRESS PHASE     ║");
+            info!("╚═══════════════════════╝");
 
             let vk_root = [Val::<$recur_sc>::ZERO; DIGEST_SIZE];
 
-            info!("Setting up COMPRESS");
             let compress_machine = CompressMachine::new(
                 $recur_sc::compress(),
                 RecursionChipType::<Val<$recur_sc>>::compress_chips(),
@@ -360,13 +338,8 @@ macro_rules! run {
                 );
                 compress_machine.prove(&compress_witness)
             });
-            debug!(
-                "PERF-step=prove-user_time={}",
-                compress_start.elapsed().as_millis()
-            );
 
             let compress_proof_size = bincode::serialize(&compress_proof.proofs()).unwrap().len();
-            debug!("PERF-step=proof_size-{}", compress_proof_size);
 
             info!("Verifying COMPRESS proof (at {:?})..", start.elapsed());
             let compress_result = compress_machine.verify(&compress_proof);
@@ -396,13 +369,12 @@ macro_rules! run {
 
             // -------- Embed Machine --------
 
-            info!("\n Begin EMBED..");
-            debug!("PERF-machine=embed");
-            let embed_start = Instant::now();
+            info!("╔═══════════════════════╗");
+            info!("║      EMBED PHASE      ║");
+            info!("╚═══════════════════════╝");
 
             let vk_root = [Val::<$embed_sc>::ZERO; DIGEST_SIZE];
 
-            info!("Setting up EMBED");
             let embed_machine = EmbedMachine::<$recur_sc, _, _, Vec<u8>>::new(
                 $embed_sc::new(),
                 RecursionChipType::<Val<$embed_sc>>::embed_chips(),
@@ -441,13 +413,8 @@ macro_rules! run {
                     ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
                 embed_machine.prove(&embed_witness)
             });
-            debug!(
-                "PERF-step=prove-user_time={}",
-                embed_start.elapsed().as_millis()
-            );
 
             let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
-            debug!("PERF-step=proof_size-{}", embed_proof_size);
 
             info!("Verifying EMBED proof (at {:?})..", start.elapsed());
             let embed_result = embed_machine.verify(&embed_proof);
@@ -458,6 +425,21 @@ macro_rules! run {
                 start.elapsed()
             );
             assert!(embed_result.is_ok());
+
+            info!("╔═══════════════════════╗");
+            info!("║     ONCHAIN PHASE     ║");
+            info!("╚═══════════════════════╝");
+            let onchain_stdin = OnchainStdin {
+                machine: embed_machine.base_machine().clone(),
+                vk: embed_proof.vks().first().unwrap().clone(),
+                proof: embed_proof.proofs().first().unwrap().clone(),
+                flag_complete: true,
+            };
+            let (constraints, witness) =
+                OnchainVerifierCircuit::<$embed_cc, $embed_sc>::build(&onchain_stdin);
+
+            build_gnark_config(constraints, witness, PathBuf::from("./"));
+            info!("Finished exporting gnark data");
 
             print_stats(
                 riscv_time,
@@ -471,19 +453,6 @@ macro_rules! run {
                 compress_proof_size,
                 embed_proof_size,
             );
-
-            info!("\n Begin Onchain..");
-            let onchain_stdin = OnchainStdin {
-                machine: embed_machine.base_machine().clone(),
-                vk: embed_proof.vks().first().unwrap().clone(),
-                proof: embed_proof.proofs().first().unwrap().clone(),
-                flag_complete: true,
-            };
-            let (constraints, witness) =
-                OnchainVerifierCircuit::<$embed_cc, $embed_sc>::build(&onchain_stdin);
-
-            build_gnark_config(constraints, witness, PathBuf::from("./"));
-            info!("Finished exporting gnark data");
         }
     };
 }
@@ -561,71 +530,86 @@ fn print_stats(
     let total_cpu_time = riscv_time.cpu_time + recursion_cpu_time;
     let total_parallelism = total_cpu_time.as_secs_f64() / total_time.as_secs_f64();
 
-    info!("Proof time: (wall_time, total_cpu_time, parallelism)");
+    info!("╔═══════════════════════╗");
+    info!("║ PERFORMANCE SUMMARY   ║");
+    info!("╚═══════════════════════╝");
+    info!("Time Metrics (wall time | CPU time | parallelism)");
+    info!("----------------------------------------");
     info!(
-        "|- riscv      {:<12}  {:<10}  {:.2}",
+        "RISCV:     {:>10} | {:>10} | {:>6.2}x",
         format_duration(riscv_time.wall_time.as_secs_f64()),
         format_duration(riscv_time.cpu_time.as_secs_f64()),
         riscv_time.parallelism
     );
+    info!("Recursion Steps:");
     info!(
-        "|- recursion  {:<12}  {:<10}  {:.2}",
-        format_duration(recursion_time.as_secs_f64()),
-        format_duration(recursion_cpu_time.as_secs_f64()),
-        recursion_parallelism
-    );
-    info!(
-        "   |- convert   {:10}  {:<10}  {:.2}",
+        "  CONVERT: {:>10} | {:>10} | {:>6.2}x",
         format_duration(convert_time.wall_time.as_secs_f64()),
         format_duration(convert_time.cpu_time.as_secs_f64()),
         convert_time.parallelism
     );
     info!(
-        "   |- combine   {:<10}  {:<10}  {:.2}",
+        "  COMBINE: {:>10} | {:>10} | {:>6.2}x",
         format_duration(combine_time.wall_time.as_secs_f64()),
         format_duration(combine_time.cpu_time.as_secs_f64()),
         combine_time.parallelism
     );
     info!(
-        "   |- compress  {:<10}  {:<10}  {:.2}",
+        "  COMPRESS:{:>10} | {:>10} | {:>6.2}x",
         format_duration(compress_time.wall_time.as_secs_f64()),
         format_duration(compress_time.cpu_time.as_secs_f64()),
         compress_time.parallelism
     );
     info!(
-        "   |- embed     {:<10}  {:<10}  {:.2}",
+        "  EMBED:   {:>10} | {:>10} | {:>6.2}x",
         format_duration(embed_time.wall_time.as_secs_f64()),
         format_duration(embed_time.cpu_time.as_secs_f64()),
         embed_time.parallelism
     );
+    info!("  ----------------------------------------");
     info!(
-        "|- total      {:<12}  {:<10}  {:.2}",
+        "  TOTAL:   {:>10} | {:>10} | {:>6.2}x",
+        format_duration(recursion_time.as_secs_f64()),
+        format_duration(recursion_cpu_time.as_secs_f64()),
+        recursion_parallelism
+    );
+    info!("----------------------------------------");
+    info!(
+        "TOTAL:     {:>10} | {:>10} | {:>6.2}x",
         format_duration(total_time.as_secs_f64()),
         format_duration(total_cpu_time.as_secs_f64()),
         total_parallelism
     );
-    info!("");
 
-    info!("Proof size:");
-    info!("|- riscv    {:?}K", (riscv_proof_size as f64) / 1000.0);
-    info!("|- convert  {:?}K", (convert_proof_size as f64) / 1000.0);
-    info!("|- combine  {:?}K", (combine_proof_size as f64) / 1000.0);
-    info!("|- compress {:?}K", (compress_proof_size as f64) / 1000.0);
-    info!("|- embed    {:?}K", (embed_proof_size as f64) / 1000.0);
+    info!("╔═══════════════════════╗");
+    info!("║      PROOF SIZES      ║");
+    info!("╚═══════════════════════╝");
+    info!("----------------------------------------");
+    info!("RISCV:     {:>10.2} KB", (riscv_proof_size as f64) / 1024.0);
+    info!(
+        "CONVERT:   {:>10.2} KB",
+        (convert_proof_size as f64) / 1024.0
+    );
+    info!(
+        "COMBINE:   {:>10.2} KB",
+        (combine_proof_size as f64) / 1024.0
+    );
+    info!(
+        "COMPRESS:  {:>10.2} KB",
+        (compress_proof_size as f64) / 1024.0
+    );
+    info!("EMBED:     {:>10.2} KB", (embed_proof_size as f64) / 1024.0);
+    info!("----------------------------------------");
 }
 
 fn main() {
     setup_logger();
 
-    // -------- Riscv Machine --------
-
-    info!("\n Begin RISCV..");
-
     let (elf, riscv_stdin, args) = parse_args::parse_args();
     match args.field.as_str() {
         "bb" => run_babybear(elf, riscv_stdin, args.step, args.bench),
         "kb" => run_koalabear(elf, riscv_stdin, args.step, args.bench),
-        _ => unreachable!("Unsupported field"),
+        _ => unreachable!("Unsupported field for e2e test"),
     }
 }
 

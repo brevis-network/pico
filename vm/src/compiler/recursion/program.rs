@@ -7,7 +7,7 @@ use backtrace::Backtrace;
 use hashbrown::HashMap;
 use p3_field::Field;
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::debug;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionProgram<F> {
@@ -78,9 +78,9 @@ impl<F: Field> RecursionProgram<F> {
     // print stats of the program
     pub fn print_stats(&self) {
         let stats = self.stats();
-        info!("Program stats:");
+        debug!("Program stats:");
         for (key, value) in stats {
-            info!("   |- {:<26}: {}", key, value);
+            debug!("   |- {:<26}: {}", key, value);
         }
     }
 }

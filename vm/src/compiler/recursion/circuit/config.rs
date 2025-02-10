@@ -1,5 +1,3 @@
-//TODO: reorganize these configurations
-
 use super::{
     builder::CircuitBuilder,
     challenger::{

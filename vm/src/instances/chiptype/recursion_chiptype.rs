@@ -4,7 +4,7 @@ use crate::{
         alu_ext::ExtAluChip,
         batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
-        poseidon2_p3::{FieldSpecificPoseidon2Chip, POSEIDON2_CHIPNAME},
+        poseidon2::{FieldSpecificPoseidon2Chip, POSEIDON2_CHIPNAME},
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         recursion_memory::{constant::MemoryConstChip, variable::MemoryVarChip},
         select::SelectChip,

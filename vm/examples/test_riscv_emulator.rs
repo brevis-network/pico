@@ -24,12 +24,12 @@ mod parse_args;
 fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8>>) {
     let start = Instant::now();
 
-    info!("\n Creating Program..");
+    info!("Creating Program..");
     let compiler = Compiler::new(SourceType::RiscV, elf);
     let program = compiler.compile();
     let pc_start = program.pc_start;
 
-    info!("\n Creating emulator (at {:?})..", start.elapsed());
+    info!("Creating emulator (at {:?})..", start.elapsed());
     let mut emulator = RiscvEmulator::new::<F>(program, EmulatorOpts::test_opts());
     info!(
         "Running with chunk size: {}, batch size: {}",
@@ -101,6 +101,6 @@ fn main() {
     match args.field.as_str() {
         "bb" => run::<BabyBear>(elf, stdin),
         "kb" => run::<KoalaBear>(elf, stdin),
-        _ => panic!("Invalid field: {}", args.field),
+        _ => panic!("Unsupported field for RISCV emulator: {}", args.field),
     }
 }

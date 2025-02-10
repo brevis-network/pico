@@ -28,7 +28,7 @@ use hashbrown::{hash_map::Entry, HashMap};
 use nohash_hasher::BuildNoHashHasher;
 use p3_field::PrimeField32;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, instrument};
 
 pub use error::EmulationError;
 pub use unconstrained::UnconstrainedState;
@@ -201,7 +201,6 @@ impl RiscvEmulator {
     pub fn emulate_batch(&mut self) -> Result<(Vec<EmulationRecord>, bool), EmulationError> {
         let mut batch_records = Vec::with_capacity(self.opts.chunk_batch_size as usize);
 
-        //let begin = Instant::now();
         let start_chunk = self.state.current_chunk; // needed for public input
         debug!("start_chunk: {}", start_chunk);
 
@@ -244,11 +243,6 @@ impl RiscvEmulator {
             self.state.current_batch += 1;
         }
 
-        info!(
-            "batch record len before defer and split: {}",
-            batch_records.len()
-        );
-
         let mut deferred = EmulationRecord::new(self.program.clone());
 
         for record in batch_records.iter_mut() {
@@ -256,6 +250,7 @@ impl RiscvEmulator {
         }
 
         let deferred = deferred.split(true, self.opts.split_opts);
+
         debug!("split-chunks len: {:?}", deferred.len());
 
         // remove empty memory init/finalize chunk
@@ -268,8 +263,8 @@ impl RiscvEmulator {
 
         debug!("batch record capacity: {}", batch_records.capacity());
 
-        info!(
-            "batch record len after postprocess and split: {}",
+        debug!(
+            "Final batch record len after postprocess and split: {}",
             batch_records.len()
         );
 

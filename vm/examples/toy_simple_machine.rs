@@ -75,7 +75,6 @@ impl<F: Field> BaseAir<F> for ToyChipType<F> {
         }
     }
 
-    /// todo: this should not be called. all should go to generate_preprocessed.
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<F>> {
         match self {
             Self::Toy(chip) => chip.preprocessed_trace(),

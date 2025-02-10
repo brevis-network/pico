@@ -36,7 +36,7 @@ use p3_field::{Field, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 use std::{fmt::Debug, marker::PhantomData};
-use tracing::info;
+use tracing::debug;
 use typenum::Unsigned;
 
 pub const fn num_weierstrass_add_cols<P: FieldParameters + NumWords>() -> usize {
@@ -174,7 +174,7 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
             _ => panic!("Unsupported curve"),
         };
 
-        info!("weierstrass add precompile events: {:?}", events.len());
+        debug!("weierstrass add precompile events: {:?}", events.len());
 
         let mut rows = Vec::new();
 

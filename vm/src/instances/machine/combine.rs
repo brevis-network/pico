@@ -28,7 +28,7 @@ use p3_air::Air;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 pub struct CombineMachine<SC, C>
 where
@@ -70,7 +70,7 @@ macro_rules! impl_combine_machine {
         {
             /// Get the name of the machine.
             fn name(&self) -> String {
-                format!("Combine Recursion Machine <{}>", type_name::<$recur_sc>())
+                format!("COMBINE Machine <{}>", type_name::<$recur_sc>())
             }
 
             /// Get the base machine.
@@ -120,7 +120,7 @@ macro_rules! impl_combine_machine {
 
                         self.complement_record(batch_records.as_mut_slice());
 
-                        info!(
+                        debug!(
                             "--- Generate combine records for layer {}, batch {}, chunk {}-{} in {:?}",
                             layer_index,
                             batch_num,
@@ -133,10 +133,10 @@ macro_rules! impl_combine_machine {
                         for record in batch_records.as_mut_slice() {
                             record.index = chunk_index;
                             chunk_index += 1;
-                            info!("COMBINE record stats: chunk {}", record.chunk_index());
+                            debug!("COMBINE record stats: chunk {}", record.chunk_index());
                             let stats = record.stats();
                             for (key, value) in &stats {
-                                info!("   |- {:<28}: {}", key, value);
+                                debug!("   |- {:<28}: {}", key, value);
                             }
                         }
 
@@ -149,7 +149,7 @@ macro_rules! impl_combine_machine {
                                 let proof = self
                                     .base_machine
                                     .prove_ensemble(pk, std::slice::from_ref(record));
-                                info!(
+                                debug!(
                                     "--- Prove combine layer {} chunk {} in {:?}",
                                     layer_index,
                                     record.chunk_index(),
@@ -162,7 +162,7 @@ macro_rules! impl_combine_machine {
                         all_proofs.extend(batch_proofs);
                         all_vks.extend(batch_vks);
 
-                        info!(
+                        debug!(
                             "--- Finish combine batch {} of layer {} in {:?}",
                             batch_num,
                             layer_index,
@@ -175,7 +175,7 @@ macro_rules! impl_combine_machine {
                         }
                     }
 
-                    info!(
+                    debug!(
                         "--- Finish combine layer {} in {:?}",
                         layer_index,
                         start_layer.elapsed()
@@ -186,7 +186,6 @@ macro_rules! impl_combine_machine {
                         all_proofs.push(last_proof.unwrap());
                     }
                     if all_proofs.len() == 1 {
-                        info!("recursion combine finished");
                         break;
                     }
 
@@ -226,14 +225,14 @@ macro_rules! impl_combine_machine {
                 }
 
                 // proof stats
-                info!("COMBINE chip log degrees:");
+                debug!("COMBINE chip log degrees:");
                 all_proofs
                     .iter()
                     .enumerate()
                     .for_each(|(i, proof)| {
-                        info!("Proof {}", i);
+                        debug!("Proof {}", i);
                         proof.main_chip_ordering.iter().for_each(|(chip_name, idx)| {
-                            info!(
+                            debug!(
                                 "   |- {:<20} main: {:<8}",
                                 chip_name,
                                 proof.opened_values.chips_opened_values[*idx].log_main_degree,
@@ -247,9 +246,6 @@ macro_rules! impl_combine_machine {
 
             /// Verify the proof.
             fn verify(&self, proof: &MetaProof<$recur_sc>) -> Result<()> {
-                debug!("PERF-machine=combine");
-                let begin = Instant::now();
-
                 assert_eq!(proof.proofs().len(), 1);
 
                 // assert completion
@@ -266,9 +262,6 @@ macro_rules! impl_combine_machine {
                 // verify
                 self.base_machine
                     .verify_ensemble(proof.vks().first().unwrap(), &proof.proofs())?;
-
-                debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
-
                 Ok(())
             }
         }

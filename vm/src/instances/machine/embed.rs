@@ -17,8 +17,8 @@ use crate::{
 };
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
-use std::{any::type_name, borrow::Borrow, marker::PhantomData, time::Instant};
-use tracing::{debug, info, instrument, trace};
+use std::{any::type_name, borrow::Borrow, marker::PhantomData};
+use tracing::{debug, instrument};
 
 pub struct EmbedMachine<PrevSC, SC, C, I>
 where
@@ -62,10 +62,10 @@ where
         let mut records = witness.records().to_vec();
         self.complement_record(&mut records);
 
-        info!("EMBED record stats");
+        debug!("EMBED record stats");
         let stats = records[0].stats();
         for (key, value) in &stats {
-            info!("   |- {:<28}: {}", key, value);
+            debug!("   |- {:<28}: {}", key, value);
         }
 
         let proofs = self.base_machine.prove_ensemble(witness.pk(), &records);
@@ -73,14 +73,14 @@ where
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();
 
-        info!("EMBED chip log degrees:");
+        debug!("EMBED chip log degrees:");
         proofs.iter().enumerate().for_each(|(i, proof)| {
-            info!("Proof {}", i);
+            debug!("Proof {}", i);
             proof
                 .main_chip_ordering
                 .iter()
                 .for_each(|(chip_name, idx)| {
-                    info!(
+                    debug!(
                         "   |- {:<20} main: {:<8}",
                         chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
                     );
@@ -97,14 +97,10 @@ where
     {
         let vk = proof.vks().first().unwrap();
 
-        debug!("PERF-machine=embed");
-        let begin = Instant::now();
-
         assert_eq!(proof.num_proofs(), 1);
 
         let public_values: &RecursionPublicValues<_> =
             proof.proofs[0].public_values.as_ref().borrow();
-        trace!("public values: {:?}", public_values);
 
         // assert completion
         if public_values.flag_complete != <Val<EmbedSC>>::ONE {
@@ -116,9 +112,6 @@ where
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;
-
-        debug!("PERF-step=verify-user_time={}", begin.elapsed().as_millis());
-
         Ok(())
     }
 }

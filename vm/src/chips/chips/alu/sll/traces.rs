@@ -23,7 +23,6 @@ use rayon::{
     slice::{ParallelSlice, ParallelSliceMut},
 };
 use std::{borrow::BorrowMut, marker::PhantomData};
-use tracing::debug;
 
 #[derive(Default, Clone, Debug)]
 pub struct SLLChip<F>(PhantomData<F>);
@@ -94,7 +93,6 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
             .collect::<Vec<_>>();
 
         extra.add_byte_lookup_events(blu_batches);
-        debug!("{} chip - extra_record", self.name());
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

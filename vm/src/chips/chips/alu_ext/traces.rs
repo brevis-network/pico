@@ -84,11 +84,11 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         let events = &input.ext_alu_events;
-        let nb_rows = events.len().div_ceil(EXT_ALU_DATAPAR);
+        let nrows = events.len().div_ceil(EXT_ALU_DATAPAR);
         let fixed_log2_rows = input.fixed_log2_rows(&self.name());
         let padded_nb_rows = match fixed_log2_rows {
             Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
+            None => next_power_of_two(nrows, None),
         };
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_COLS];
 

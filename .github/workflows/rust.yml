@@ -87,35 +87,35 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Cargo run examples
         run: |
-          # M31 tests
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e_no_recursion -- --field m31
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e_no_recursion -- --elf poseidon2_precompile --field m31
-         
-          # KoalaBear tests
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e_no_recursion -- --field kb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_simple_recursion -- --elf keccak --n 15 --field kb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e_no_recursion -- --elf poseidon2_precompile --field kb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e -- --field kb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e -- --elf multiple-precompile --step riscv --field kb
-          
-           # copy koalabear embed proof for later test
-          cp constraints.json gnark/koalabear_verifier/
-          cp groth16_witness.json gnark/koalabear_verifier/
-          
-          # BabyBear tests
+          # Basic tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_base_machine
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_simple_machine
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_lookup_machine
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv_emulator
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_simple_recursion -- --elf keccak --n 15
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e -- --elf multiple-precompile --step riscv
-
-          # We must run this test at the end, since it's related with the below gnark test.
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_proverchain
           
-          # copy babybear embed proof for later test
+          # KB basic tests
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_simple_recursion -- --elf keccak --n 15 --field kb
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf multiple-precompile --field kb
+          
+          # KB e2e test and copy the final STARK proof for later test
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e -- --field kb
+          cp constraints.json gnark/koalabear_verifier/
+          cp groth16_witness.json gnark/koalabear_verifier/
+          
+          # BB basic tests
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_simple_recursion -- --elf keccak --n 15 --field bb
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf multiple-precompile --field bb
+
+          # BB e2e test and copy the final STARK proof for later test
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e -- --field bb
           cp constraints.json gnark/babybear_verifier/
           cp groth16_witness.json gnark/babybear_verifier/
+          
+          # M31 basic tests
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --field m31
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf multiple-precompile --field m31
+
       - name: compile babybear so
         run: |
           cargo build --release --package babybear-ffi

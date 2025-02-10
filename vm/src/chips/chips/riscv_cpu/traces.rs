@@ -25,7 +25,6 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::ParallelSlice;
 use rayon::prelude::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
 use std::borrow::BorrowMut;
-use tracing::debug;
 
 impl<F: Field> BaseAir<F> for CpuChip<F> {
     fn width(&self) -> usize {
@@ -101,8 +100,6 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         for blu_events_chunk in blu_events {
             extra.add_byte_lookup_events(blu_events_chunk);
         }
-
-        debug!("{} chip - extra_record", self.name());
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {

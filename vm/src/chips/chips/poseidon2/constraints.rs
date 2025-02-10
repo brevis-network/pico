@@ -1,6 +1,6 @@
 use crate::{
     chips::{
-        chips::poseidon2_p3::Poseidon2ChipP3,
+        chips::poseidon2::Poseidon2Chip,
         gadgets::poseidon2::{
             columns::{Poseidon2Cols, Poseidon2PreprocessedCols, NUM_POSEIDON2_COLS},
             constraints::eval_poseidon2,
@@ -16,7 +16,7 @@ use p3_matrix::Matrix;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 use std::borrow::Borrow;
 
-impl<F, LinearLayers, Config> BaseAir<F> for Poseidon2ChipP3<F, LinearLayers, Config>
+impl<F, LinearLayers, Config> BaseAir<F> for Poseidon2Chip<F, LinearLayers, Config>
 where
     F: Sync,
     Config: Poseidon2Config,
@@ -26,7 +26,7 @@ where
     }
 }
 
-impl<F, LinearLayers, CB, Config> Air<CB> for Poseidon2ChipP3<F, LinearLayers, Config>
+impl<F, LinearLayers, CB, Config> Air<CB> for Poseidon2Chip<F, LinearLayers, Config>
 where
     F: Field,
     LinearLayers: GenericPoseidon2LinearLayers<CB::Expr, PERMUTATION_WIDTH>,

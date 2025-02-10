@@ -26,7 +26,6 @@ use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use rayon::{iter::IndexedParallelIterator, slice::ParallelSliceMut};
-use tracing::debug;
 
 impl<F: PrimeField32> ChipBehavior<F> for BitwiseChip<F> {
     type Record = EmulationRecord;
@@ -77,8 +76,6 @@ impl<F: PrimeField32> ChipBehavior<F> for BitwiseChip<F> {
             .collect();
 
         extra.add_byte_lookup_events(blu_events);
-
-        debug!("{} chip - extra_record", self.name());
     }
 
     // flag reflecting whether chip is used in the record

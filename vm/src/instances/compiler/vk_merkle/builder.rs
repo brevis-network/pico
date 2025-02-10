@@ -1,5 +1,5 @@
 use crate::{
-    chips::chips::poseidon2_p3::FieldSpecificPoseidon2Chip,
+    chips::chips::poseidon2::FieldSpecificPoseidon2Chip,
     compiler::recursion::{
         circuit::{
             config::{CircuitConfig, FieldFriConfigVariable},

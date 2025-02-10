@@ -125,7 +125,7 @@ fn main() {
     info!("\n Construct proving witness..");
     let witness = ProvingWitness::setup_with_keys_and_records(pk, vk, records);
 
-    info!("Generating proof..");
+    info!("\n Generating proof..");
     let proof = simple_machine.prove(&witness);
     info!("{} generated.", proof.name());
 

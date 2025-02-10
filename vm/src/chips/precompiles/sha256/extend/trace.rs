@@ -78,7 +78,6 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaExtendChip<F> {
 
         if let Some(log_rows) = log_rows {
             padded_nb_rows = 1 << log_rows;
-            println!("padded_nb_rows in sha extend {}", padded_nb_rows);
         }
 
         for i in nb_rows..padded_nb_rows {

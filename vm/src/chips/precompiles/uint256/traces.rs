@@ -115,7 +115,6 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
             .collect();
 
         let log_rows = input.shape_chip_size(&self.name());
-        println!("Log rows in uint256mul: {:?}", log_rows);
 
         pad_rows_fixed(
             &mut rows,
