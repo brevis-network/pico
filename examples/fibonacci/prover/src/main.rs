@@ -1,6 +1,6 @@
 use alloy_sol_types::SolType;
 use fibonacci_lib::{fibonacci, load_elf, PublicValuesStruct};
-use pico_sdk::{client::SDKProverClient, init_logger};
+use pico_sdk::{client::BabyBearProveClient, init_logger};
 
 fn main() {
     // Initialize logger
@@ -12,7 +12,7 @@ fn main() {
     println!("elf length: {}", elf.len());
 
     // Initialize the prover client
-    let client = SDKProverClient::new(&elf, false);
+    let client = BabyBearProveClient::new(&elf);
     let stdin_builder = client.get_stdin_builder(); // Shared instance
 
     // Set up input and generate proof

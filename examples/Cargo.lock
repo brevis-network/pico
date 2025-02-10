@@ -2570,6 +2570,7 @@ dependencies = [
  "p3-baby-bear",
  "p3-challenger",
  "p3-field",
+ "p3-koala-bear",
  "pico-patch-libs",
  "pico-vm",
  "rand",

@@ -392,7 +392,7 @@ checksum = "7b7e4c2464d97fe331d41de9d5db0def0a96f4d823b8b32a2efd503578988973"
 
 [[package]]
 name = "babybear-ffi"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "p3-baby-bear 0.1.0",
  "p3-field 0.1.0",
@@ -1957,7 +1957,7 @@ dependencies = [
 
 [[package]]
 name = "koalabear-ffi"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "p3-field 0.1.0",
  "p3-koala-bear",
@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "pico-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -2922,7 +2922,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bincode",
  "serde",
@@ -2930,7 +2930,7 @@ dependencies = [
 
 [[package]]
 name = "pico-scripts"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bincode",
  "clap",
@@ -2944,7 +2944,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2958,6 +2958,8 @@ dependencies = [
  "p3-baby-bear 0.1.0",
  "p3-challenger",
  "p3-field 0.1.0",
+ "p3-koala-bear",
+ "p3-mersenne-31",
  "pico-patch-libs",
  "pico-vm",
  "rand",
@@ -2967,7 +2969,7 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "arrayref",

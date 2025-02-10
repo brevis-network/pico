@@ -8,10 +8,12 @@ use pico_vm::machine::logger::setup_logger;
 extern crate alloc;
 
 pub mod client;
-pub mod client_vk;
 pub mod command;
 pub mod heap;
 pub mod io;
+pub mod m31_client;
+pub mod vk_client;
+
 #[cfg(all(target_os = "zkvm", feature = "libm"))]
 mod libm;
 pub mod poseidon2_hash;

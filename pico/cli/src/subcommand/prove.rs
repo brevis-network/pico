@@ -2,7 +2,7 @@ use anyhow::{Error, Result};
 use clap::{ArgAction, Parser};
 use hex;
 use log::{debug, info};
-use pico_sdk::client::SDKProverClient;
+use pico_sdk::vk_client::KoalaBearProveVKClient;
 use std::{
     env,
     fs::File,
@@ -102,9 +102,10 @@ impl ProveCmd {
         let bytes = Self::get_input_bytes(&self.input)?;
         debug!("input data: {:0x?}", bytes);
 
-        let vk_verification = self.evm || self.vk;
+        // todo: need to new client according to fieldand vk_verification options
+        // let vk_verification = self.evm || self.vk;
 
-        let prover_client = SDKProverClient::new(&elf, vk_verification);
+        let prover_client = KoalaBearProveVKClient::new(&elf);
 
         if self.fast {
             env::set_var("FRI_QUERIES", "1");
