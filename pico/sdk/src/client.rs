@@ -1,5 +1,5 @@
-use anyhow::{Error, Ok};
-use log::info;
+use anyhow::{Context, Error, Ok, Result};
+use log::{debug, info};
 use pico_vm::{
     compiler::riscv::program::Program,
     configs::{
@@ -20,7 +20,7 @@ use pico_vm::{
         MachineProver, ProverChain, RiscvProver,
     },
 };
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, fs::File, io::Write, path::PathBuf, rc::Rc};
 
 #[macro_export]
 macro_rules! create_sdk_prove_client {
@@ -115,6 +115,36 @@ macro_rules! create_sdk_prove_client {
             }
         }
     };
+}
+
+pub fn save_proof_data<SC: StarkGenericConfig, Bn254SC: StarkGenericConfig>(
+    riscv_proof: &MetaProof<SC>,
+    embed_proof: &MetaProof<Bn254SC>,
+    output: PathBuf,
+) -> Result<()> {
+    if let Some(ref pv_stream) = riscv_proof.pv_stream {
+        debug!("pv_stream is not null, storing in pico_out dir");
+
+        let pv_stream_str = hex::encode(pv_stream);
+        let pv_file_path = output.join("pv_file");
+
+        let mut file = File::create(&pv_file_path)
+            .with_context(|| format!("Failed to create file: {:?}", pv_file_path))?;
+        file.write_all(pv_stream_str.as_bytes())
+            .context("Failed to write pv_stream to file")?;
+    }
+
+    // Write proof to proof.json
+    let proof_path = output.join("proof.json");
+    let mut proof_file = File::create(&proof_path)
+        .with_context(|| format!("Failed to create file: {:?}", proof_path))?;
+    let proof_json = serde_json::to_string(&embed_proof.proofs())
+        .context("Failed to serialize proof to JSON")?;
+    proof_file
+        .write_all(proof_json.as_bytes())
+        .context("Failed to write proof JSON to file")?;
+
+    Ok(())
 }
 
 create_sdk_prove_client!(

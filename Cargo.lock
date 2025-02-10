@@ -2952,6 +2952,7 @@ dependencies = [
  "coprocessor-sdk",
  "env_logger",
  "getrandom",
+ "hex",
  "lazy_static",
  "libm",
  "log",
@@ -2964,6 +2965,7 @@ dependencies = [
  "pico-vm",
  "rand",
  "serde",
+ "serde_json",
  "sha2",
 ]
 

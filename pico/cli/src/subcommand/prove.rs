@@ -2,13 +2,8 @@ use anyhow::{Error, Result};
 use clap::{ArgAction, Parser};
 use hex;
 use log::{debug, info};
-use pico_sdk::vk_client::KoalaBearProveVKClient;
-use std::{
-    env,
-    fs::File,
-    io::{Read, Write},
-    path::PathBuf,
-};
+use pico_sdk::{client::save_proof_data, vk_client::KoalaBearProveVKClient};
+use std::{env, fs::File, io::Read, path::PathBuf};
 
 use crate::{
     build::build::{get_package, is_docker_installed},
@@ -144,24 +139,6 @@ impl ProveCmd {
             .get_stdin_builder()
             .borrow_mut()
             .write_slice(&bytes);
-        let (riscv_proof, embed_proof) = prover_client.prove(pico_dir.clone())?;
-
-        let pv_stream = riscv_proof.pv_stream;
-
-        if let Some(pv_stream) = pv_stream {
-            debug!("pv_stream is not null, storage in pico_out dir");
-            let pv_stream_str = hex::encode(pv_stream);
-            let pv_file_path = pico_dir.join("pv_file");
-            let mut file = File::create(pv_file_path)?;
-            file.write_all(pv_stream_str.as_bytes())
-                .expect("write pv file failed");
-
-            // write proof to proof.json
-            let proof_path = pico_dir.join("proof.json");
-            let mut proof_file = File::create(proof_path)?;
-            let proof_json = serde_json::to_string(&embed_proof.proofs())?;
-            proof_file.write_all(proof_json.as_bytes())?;
-        }
 
         if self.evm {
             if !is_docker_installed() {
@@ -171,6 +148,10 @@ impl ProveCmd {
                 ));
             }
             prover_client.prove_evm(self.setup, pico_dir)?;
+        } else {
+            let (riscv_proof, embed_proof) = prover_client.prove(pico_dir.clone())?;
+
+            save_proof_data(&riscv_proof, &embed_proof, pico_dir)?;
         }
         Ok(())
     }
