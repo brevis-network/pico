@@ -161,3 +161,5 @@ create_sdk_prove_client!(
     KoalaBearBn254,
     KoalaBear
 );
+
+pub use KoalaBearProverClient as DefaultProverClient;
