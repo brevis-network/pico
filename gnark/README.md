@@ -1,17 +1,26 @@
+# Pico Gnark CLI
 
-run this cmd to generate libbabybear_ffi.dylib in target/release
-cargo build --release
+### Build field ffi
 
-for mac
+run the following command to generate `libfield_ffi.dylib` in `target/release`
+```
+cargo build --release --package field-ffi
+```
+Then you will find the field ffi lib file in `{your_path}/brevis-vm/target/release`.
+The file name is different on Linux and MacOS.
 
-```export CGO_LDFLAGS="-L{your_path}/brevis-vm/target/release"```
+On linux, it is named as `libfield_ffi.so`
 
-for ubuntu 
+On MacOs, it is named as `libfield_ffi.dylib`
 
-```export CGO_LDFLAGS="-L{your_path}/brevis-vm/target/release" export LD_LIBRARY_PATH={your_path}/brevis-vm/target/release$LD_LIBRARY_PATH```
+### Load ffi lib to local env
+```
+export CGO_LDFLAGS="-L{your_path}/brevis-vm/target/release"
+export LD_LIBRARY_PATH={your_path}/brevis-vm/target/release:$LD_LIBRARY_PATH
+```
+### Run tests
 
-
-test poseidon2_babybear
+#### Poseidon2 on BabyBear
 
 ```
 cd brevis-vm/gnark/poseidon2
@@ -19,33 +28,34 @@ cd brevis-vm/gnark/poseidon2
 go test -timeout 300000s -run TestPoseidon2BabyBear
 ```
 
-test verify embed proof
+#### Poseidon2 on BabyBear
 
-copy the constraints.json and witness.json to brevis-vm/gnark/vm_verifier/
 ```
-cd brevis-vm/gnark/vm_verifier/
+cd brevis-vm/gnark/poseidon2
 
-go test -timeout 300000s -run TestVerifierCircuit
-```
-
-build docker:
-```
-docker buildx build --platform linux/amd64,linux/arm64 --secret id=gitcre,src=$HOME/git-read-credentials -t liuxiaobleach657/test_vm:0.02 --push .
+go test -timeout 300000s -run TestPoseidon2KoalaBear
 ```
 
-use docker:
+#### Verify Pico EMBED Proof on BabyBear
+You need copy the `groth16_witness.json` and `constraints.json` into the dir first.
+```
+cd brevis-vm/gnark/babybear_verifier/
 
-setup pk vk
-```
-docker run --rm -v ./data:/data {repo_in_docker_hub} /pico_vm_gnark_cli -cmd setup -witness /data/groth16_witness.json -constraints /data/constraints.json -pk /data/vm_pk -vk /data/vm_vk
-```
-
-generate proof
-```
-docker run --rm -v ./data:/data {repo_in_docker_hub} /pico_vm_gnark_cli -cmd setup -witness /data/groth16_witness.json -constraints /data/constraints.json -pk /data/vm_pk -vk /data/vm_vk -proof /data/proof.data
+go test -timeout 300000s -run TestSolveVerifierCircuit
 ```
 
-set up proof and generate proof
+#### Verify Pico EMBED Proof on KoalaBear
+You need copy the `groth16_witness.json` and `constraints.json` into the dir first.
 ```
-docker run --rm -v ./data:/data {repo_in_docker_hub} /pico_vm_gnark_cli -cmd setupAndProve -witness /data/groth16_witness.json -constraints /data/constraints.json -pk /data/vm_pk -vk /data/vm_vk -proof /data/proof.data
+cd brevis-vm/gnark/koalabear_verifier/
+
+go test -timeout 300000s -run TestSolveVerifierCircuit
+```
+
+#### Use Docker to Prove:
+```
+mkdir data
+cp groth16_witness.json ./data/
+cp constraints.json ./data/
+docker run --rm -v ./data:/data brevishub/pico_gnark_cli:1.0 /pico_gnark_cli -cmd setupAndProve
 ```

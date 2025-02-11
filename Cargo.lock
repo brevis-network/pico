@@ -725,7 +725,7 @@ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 [[package]]
 name = "coprocessor-sdk"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/coprocessor-vm-sdk.git#04e5e9c1e1325e02815b9f583e264d750cf4f6fe"
+source = "git+https://github.com/brevis-network/Pico-zkCoprocessor#1de063ffeb88f795b67107a04508fbf2bbf0089f"
 dependencies = [
  "alloy-sol-types",
  "anyhow",
@@ -875,7 +875,7 @@ dependencies = [
 [[package]]
 name = "crypto-bigint"
 version = "0.6.0-rc.6"
-source = "git+https://github.com/brevis-network/RustCrypto-bigint.git?branch=patch#61fb45572f00538583b842088a3802c195fa3e15"
+source = "git+https://github.com/brevis-network/crypto-bigint?branch=patch-v1.0.0#61fb45572f00538583b842088a3802c195fa3e15"
 dependencies = [
  "num-traits",
  "rand_core",

@@ -1,4 +1,4 @@
-//! Programs that can be emulated by the Pico zkVM.
+//! Programs that can be emulated by the Pico.
 
 use crate::{
     compiler::{program::ProgramBehavior, riscv::instruction::Instruction},
@@ -14,7 +14,7 @@ use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// A program that can be emulated by the Pico zkVM.
+/// A program that can be emulated by the Pico.
 ///
 /// Contains a series of instructions along with the initial memory image. It also contains the
 /// start address and base address of the program.
