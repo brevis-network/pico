@@ -70,7 +70,7 @@ pub struct CpuCols<T: Copy> {
     /// The result of selectors.is_ecall * the send_to_table column for the ECALL opcode.
     pub ecall_mul_send_to_table: T,
 
-    /// The result of selectors.is_ecall * (is_halt || is_commit_deferred_proofs)
+    /// The result of selectors.is_ecall * (is_halt)
     pub ecall_range_check_operand: T,
 
     /// This is true for all instructions that are not jumps, branches, and halt.  Those

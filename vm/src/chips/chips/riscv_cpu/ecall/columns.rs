@@ -23,9 +23,6 @@ pub struct EcallCols<T> {
     /// Whether the current ecall is a COMMIT.
     pub is_commit: IsZeroGadget<T>,
 
-    /// Whether the current ecall is a COMMIT_DEFERRED_PROOFS.
-    pub is_commit_deferred_proofs: IsZeroGadget<T>,
-
     /// Field to store the word index passed into the COMMIT ecall.  index_bitmap[word index]
     /// should be set to 1 and everything else set to 0.
     pub index_bitmap: [T; PV_DIGEST_NUM_WORDS],

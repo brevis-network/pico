@@ -45,33 +45,18 @@ struct Benchmark {
 const PROGRAMS: &[Benchmark] = &[
     Benchmark {
         name: "fibonacci",
-        elf: "./vm/src/compiler/test_data/bench/fib",
-        input: None,
-    },
-    Benchmark {
-        name: "f",
-        elf: "./vm/src/compiler/test_data/bench/fibo-small",
+        elf: "./vm/src/compiler/test_elf/bench/fib",
         input: None,
     },
     Benchmark {
         name: "tendermint",
-        elf: "./vm/src/compiler/test_data/bench/tendermint",
-        input: Some("./vm/src/compiler/test_data/bench/tendermint.in"),
-    },
-    Benchmark {
-        name: "reth",
-        elf: "./vm/src/compiler/test_data/bench/reth",
-        input: Some("./vm/src/compiler/test_data/bench/reth.in"),
+        elf: "./vm/src/compiler/test_elf/bench/tendermint",
+        input: None,
     },
     Benchmark {
         name: "reth-17106222",
-        elf: "./vm/src/compiler/test_data/bench/reth",
-        input: Some("./vm/src/compiler/test_data/bench/reth-17106222.in"),
-    },
-    Benchmark {
-        name: "reth-19409768",
-        elf: "./vm/src/compiler/test_data/bench/reth",
-        input: Some("./vm/src/compiler/test_data/bench/reth-19409768.in"),
+        elf: "./vm/src/compiler/test_elf/bench/reth",
+        input: Some("./vm/src/compiler/test_elf/bench/reth-17106222.in"),
     },
 ];
 

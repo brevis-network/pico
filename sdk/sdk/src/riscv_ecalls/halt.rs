@@ -61,10 +61,6 @@ pub extern "C" fn syscall_halt(exit_code: u8) -> ! {
             asm!("ecall", in("t0") crate::riscv_ecalls::COMMIT, in("a0") i, in("a1") word);
         }
 
-        for i in 0..POSEIDON_NUM_WORDS {
-            asm!("ecall", in("t0") crate::riscv_ecalls::COMMIT_DEFERRED_PROOFS, in("a0") i, in("a1") 0);
-        }
-
         asm!(
             "ecall",
             in("t0") crate::riscv_ecalls::HALT,

@@ -25,7 +25,7 @@ fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8
     let start = Instant::now();
 
     info!("Creating Program..");
-    let compiler = Compiler::new(SourceType::RiscV, elf);
+    let compiler = Compiler::new(SourceType::RISCV, elf);
     let program = compiler.compile();
     let pc_start = program.pc_start;
 

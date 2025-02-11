@@ -150,13 +150,13 @@ macro_rules! create_sdk_prove_vk_client {
                 if need_setup {
                     let mut setup_cmd = Command::new("sh");
                     setup_cmd.arg("-c")
-                        .arg(format!("docker run --rm -v {}:/data picovm/pico_gnark_cli:1.0 /pico_vm_gnark_cli -cmd setup", output.clone().display()));
+                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.0 /pico_vm_gnark_cli -cmd setup", output.clone().display()));
                     execute_command(setup_cmd);
                 }
 
                 let mut prove_cmd = Command::new("sh");
                 prove_cmd.arg("-c")
-                    .arg(format!("docker run --rm -v {}:/data picovm/pico_gnark_cli:1.0 /pico_vm_gnark_cli -cmd prove", output.clone().display()));
+                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.0 /pico_vm_gnark_cli -cmd prove", output.clone().display()));
 
                 execute_command(prove_cmd);
                 generate_contract_inputs::<$fc>(output.clone())?;

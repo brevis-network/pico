@@ -2,7 +2,6 @@
 
 pub mod code;
 mod commit;
-mod deferred;
 mod halt;
 mod hint;
 pub mod precompiles;
@@ -19,8 +18,7 @@ use crate::{
         field::field_op::FieldOperation,
     },
     emulator::riscv::syscalls::{
-        commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall,
-        syscall_context::SyscallContext,
+        commit::CommitSyscall, halt::HaltSyscall, syscall_context::SyscallContext,
     },
     machine::field::{FieldBehavior, FieldType},
     primitives::consts::{BabyBearConfig, KoalaBearConfig, Mersenne31Config},
@@ -101,11 +99,6 @@ pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Sy
     syscall_map.insert(SyscallCode::SHA_EXTEND, Arc::new(Sha256ExtendSyscall));
 
     syscall_map.insert(SyscallCode::SHA_COMPRESS, Arc::new(Sha256CompressSyscall));
-
-    syscall_map.insert(
-        SyscallCode::COMMIT_DEFERRED_PROOFS,
-        Arc::new(CommitDeferredSyscall),
-    );
 
     syscall_map.insert(SyscallCode::HALT, Arc::new(HaltSyscall));
 

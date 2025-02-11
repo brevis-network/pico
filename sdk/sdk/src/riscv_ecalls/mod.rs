@@ -68,9 +68,6 @@ pub const BN254_DOUBLE: u32 = 0x00_00_01_0F;
 /// Executes the `COMMIT` precompile.
 pub const COMMIT: u32 = 0x00_00_00_10;
 
-/// Executes the `COMMIT_DEFERRED_PROOFS` precompile.
-pub const COMMIT_DEFERRED_PROOFS: u32 = 0x00_00_00_1A;
-
 /// Executes `HINT_LEN`.
 pub const HINT_LEN: u32 = 0x00_00_00_F0;
 

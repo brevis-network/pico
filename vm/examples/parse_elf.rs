@@ -13,7 +13,7 @@ fn main() {
     let elf_bytes = std::fs::read(args.elf_path).expect("failed to read elf");
     println!("byte length: {}", elf_bytes.len());
 
-    let program = Compiler::new(SourceType::RiscV, elf_bytes.as_slice()).compile();
+    let program = Compiler::new(SourceType::RISCV, elf_bytes.as_slice()).compile();
 
     let instructions = program.instructions.clone();
 

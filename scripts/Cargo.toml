@@ -1,0 +1,23 @@
+[package]
+name = "pico-scripts"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+pico-vm.workspace = true
+
+# p3
+p3-field.workspace = true
+p3-baby-bear.workspace = true
+p3-koala-bear.workspace = true
+
+# misc
+bincode.workspace = true
+hashbrown.workspace = true
+rayon.workspace = true
+clap = {workspace = true, features = ["derive"]}
+
+
+[[bin]]
+name = "build_vk_map"
+path = "src/bin/build_vk_map.rs"

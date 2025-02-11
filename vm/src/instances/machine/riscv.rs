@@ -424,9 +424,7 @@ where
 
         // let mut flag_extra = true;
         let mut committed_value_digest_prev = Default::default();
-        let mut deferred_proofs_digest_prev = Default::default();
         let zero_cvd = Default::default();
-        let zero_dpd = Default::default();
 
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -509,21 +507,13 @@ where
             prev_last_initialize_addr_bits = public_values.last_initialize_addr_bits;
             prev_last_finalize_addr_bits = public_values.last_finalize_addr_bits;
 
-            // committed_value_digest and deferred_proofs_digest checks
+            // committed_value_digest checks
             transition_with_condition(
                 &mut committed_value_digest_prev,
                 &public_values.committed_value_digest,
                 &zero_cvd,
                 each_proof.includes_chip("Cpu"),
                 "committed_value_digest",
-                i,
-            );
-            transition_with_condition(
-                &mut deferred_proofs_digest_prev,
-                &public_values.deferred_proofs_digest,
-                &zero_dpd,
-                each_proof.includes_chip("Cpu"),
-                "deferred_proofs_digest",
                 i,
             );
         }
@@ -539,16 +529,11 @@ where
 //
 // Initialization:
 // - `committed_value_digest` should be zero.
-// - `deferred_proofs_digest` should be zero.
 //
 // Transition:
 // - If `commited_value_digest_prev` is not zero, then `committed_value_digest` should equal
 //   `commited_value_digest_prev`.
-// - If `deferred_proofs_digest_prev` is not zero, then `deferred_proofs_digest` should equal
-//   `deferred_proofs_digest_prev`.
 // - If it's not a chunk with "CPU", then `commited_value_digest` should not change from the
-//   previous chunk.
-// - If it's not a chunk with "CPU", then `deferred_proofs_digest` should not change from the
 //   previous chunk.
 //
 // This is replaced with the following impl.

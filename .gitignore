@@ -4,6 +4,5 @@
 .vscode
 .secrets
 tmp
-/scripts
 /logs
 /examples/target

@@ -67,7 +67,7 @@ macro_rules! run {
         ) {
             let start = Instant::now();
 
-            let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
+            let riscv_compiler = Compiler::new(SourceType::RISCV, elf);
             let riscv_program = riscv_compiler.compile();
 
             let riscv_machine = RiscvMachine::new(

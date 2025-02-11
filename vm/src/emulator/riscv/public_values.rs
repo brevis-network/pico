@@ -1,6 +1,6 @@
 use crate::{
     compiler::word::Word,
-    primitives::consts::{MAX_NUM_PVS, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
+    primitives::consts::{MAX_NUM_PVS, PV_DIGEST_NUM_WORDS},
 };
 use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
@@ -11,12 +11,6 @@ use std::borrow::{Borrow, BorrowMut};
 pub struct PublicValues<W, T> {
     pub committed_value_digest: [W; PV_DIGEST_NUM_WORDS],
 
-    /// The hash of all deferred proofs that have been witnessed in the VM. It will be rebuilt in
-    /// recursive verification as the proofs get verified. The hash itself is a rolling poseidon2
-    /// hash of each proof+vkey hash and the previous hash which is initially zero.
-    pub deferred_proofs_digest: [T; POSEIDON_NUM_WORDS],
-
-    // didn't include deferred since currently no need
     /// The chunk's start program counter.
     pub start_pc: T,
 
@@ -87,7 +81,6 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
     fn from(value: PublicValues<u32, u32>) -> Self {
         let PublicValues {
             committed_value_digest,
-            deferred_proofs_digest,
             start_pc,
             next_pc,
             exit_code,
@@ -103,9 +96,6 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
         let committed_value_digest: [_; PV_DIGEST_NUM_WORDS] =
             core::array::from_fn(|i| Word::from(committed_value_digest[i]));
 
-        let deferred_proofs_digest: [_; POSEIDON_NUM_WORDS] =
-            core::array::from_fn(|i| F::from_canonical_u32(deferred_proofs_digest[i]));
-
         let start_pc = F::from_canonical_u32(start_pc);
         let next_pc = F::from_canonical_u32(next_pc);
         let exit_code = F::from_canonical_u32(exit_code);
@@ -119,7 +109,6 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
 
         Self {
             committed_value_digest,
-            deferred_proofs_digest,
             start_pc,
             next_pc,
             exit_code,

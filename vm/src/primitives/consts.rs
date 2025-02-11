@@ -45,15 +45,13 @@ pub const DIGEST_SIZE: usize = 8;
 
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 
-/// The number of field elements in the poseidon2 digest.
-pub const POSEIDON_NUM_WORDS: usize = 8;
-
 /*
-For chunks
+For options
  */
 
 pub const MAX_LOG_CHUNK_SIZE: usize = 22;
 
+// for test
 pub const TEST_CHUNK_SIZE: u32 = 1 << 16;
 pub const TEST_CHUNK_BATCH_SIZE: u32 = 2;
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
@@ -106,6 +104,7 @@ BabyBear consts
  */
 
 pub const BABYBEAR_MONTY_INVERSE: BabyBear = BabyBear::new(1);
+pub const BABYBEAR_W: u32 = 11;
 
 // <https://github.com/Plonky3/Plonky3/blob/e61ed4aed488f8cef5618914042d8eb515b74ebb/baby-bear/src/poseidon2.rs#L66>
 pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = BabyBear::new_array([
@@ -127,13 +126,12 @@ pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_BABYBEAR_MONTY: [BabyBear; 16] = Bab
     15,
 ]);
 
-pub const BABYBEAR_W: u32 = 11;
-
 /*
 KoalaBear consts
  */
 
 pub const KOALABEAR_MONTY_INVERSE: KoalaBear = KoalaBear::new(1);
+pub const KOALABEAR_W: u32 = 3;
 
 pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] =
     KoalaBear::new_array([
@@ -155,10 +153,11 @@ pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_KOALABEAR_MONTY: [KoalaBear; 16] =
         127,
     ]);
 
+/*
+Mersenne31 consts
+ */
 pub const POSEIDON2_INTERNAL_MATRIX_DIAG_16_MERSENNE31_SHIFTS: [u8; 16] =
     [0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16];
-
-pub const KOALABEAR_W: u32 = 3;
 
 /*
 Poseidon2

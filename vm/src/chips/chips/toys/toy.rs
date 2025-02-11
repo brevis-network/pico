@@ -55,8 +55,8 @@ impl<F: PrimeField32> ChipBehavior<F> for ToyChip<F> {
 
     fn generate_preprocessed(&self, _program: &Program) -> Option<RowMajorMatrix<F>> {
         // NOTE: It's not reasonable, just to enable testing.
-        // `4096` is the column number equalled to main trace.
-        Some(RowMajorMatrix::new(vec![F::ZERO; 4096], 1))
+        // `2048` is the column number equalled to main trace.
+        Some(RowMajorMatrix::new(vec![F::ZERO; 2048], 1))
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {

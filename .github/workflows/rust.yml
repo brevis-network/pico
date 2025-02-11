@@ -88,15 +88,13 @@ jobs:
       - name: Cargo run examples
         run: |
           # Basic tests
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_base_machine
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_simple_machine
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_lookup_machine
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv_emulator
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_proverchain
           
           # KB basic tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_simple_recursion -- --elf keccak --n 15 --field kb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf multiple-precompile --field kb
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf precompile --field kb
           
           # KB e2e test and copy the final STARK proof for later test
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e -- --field kb
@@ -105,7 +103,7 @@ jobs:
           
           # BB basic tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_simple_recursion -- --elf keccak --n 15 --field bb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf multiple-precompile --field bb
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf precompile --field bb
 
           # BB e2e test and copy the final STARK proof for later test
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e -- --field bb
@@ -114,7 +112,7 @@ jobs:
           
           # M31 basic tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --field m31
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf multiple-precompile --field m31
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf precompile --field m31
 
       - name: compile field ffi so
         run: |

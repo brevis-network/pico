@@ -52,12 +52,10 @@ where
     info!("╚═══════════════════════╝");
     let start = Instant::now();
 
-    let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
+    let riscv_compiler = Compiler::new(SourceType::RISCV, elf);
     let riscv_program = riscv_compiler.compile();
 
     let riscv_machine = RiscvMachine::new(config, RiscvChipType::all_chips(), RISCV_NUM_PVS);
-    // Setup config and chips.
-
     // Setup machine prover, verifier, pk and vk.
     let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
 

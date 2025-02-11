@@ -64,7 +64,7 @@ fn main() {
     let riscv_start = Instant::now();
 
     info!("Setting up RISCV..");
-    let riscv_compiler = Compiler::new(SourceType::RiscV, elf);
+    let riscv_compiler = Compiler::new(SourceType::RISCV, elf);
     let mut riscv_program = riscv_compiler.compile();
 
     if let Some(program) = Arc::get_mut(&mut riscv_program) {

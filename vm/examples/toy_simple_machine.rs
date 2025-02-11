@@ -1,7 +1,9 @@
 use p3_air::{Air, BaseAir};
 use p3_baby_bear::BabyBear;
 use p3_field::{Field, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use p3_mersenne_31::Mersenne31;
 use pico_vm::{
     chips::chips::toys::toy::ToyChip,
     compiler::riscv::{
@@ -13,7 +15,14 @@ use pico_vm::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
     },
-    instances::{configs::riscv_config::StarkConfig as RiscvSC, machine::simple::SimpleMachine},
+    instances::{
+        configs::{
+            riscv_bb_poseidon2::StarkConfig as RiscvBBSC,
+            riscv_kb_poseidon2::StarkConfig as RiscvKBSC,
+            riscv_m31_poseidon2::StarkConfig as RiscvM31SC,
+        },
+        machine::simple::SimpleMachine,
+    },
     machine::{
         builder::ChipBuilder,
         chip::{ChipBehavior, MetaChip},
@@ -25,6 +34,9 @@ use pico_vm::{
 use tracing::info;
 
 use pico_vm::machine::witness::ProvingWitness;
+
+#[path = "common/parse_args.rs"]
+mod parse_args;
 
 pub enum ToyChipType<F: Field> {
     Toy(ToyChip<F>),
@@ -103,12 +115,53 @@ impl<F: PrimeField32> ToyChipType<F> {
 fn main() {
     setup_logger();
 
-    info!("\n Creating Program..");
-    const ELF: &[u8] = include_bytes!("../src/compiler/test_data/riscv32im-pico-fibonacci-elf");
-    let compiler = Compiler::new(SourceType::RiscV, ELF);
-    let program = compiler.compile();
+    info!("Setting-up..");
+    let (elf, _, _) = parse_args::parse_args();
+    let compiler = Compiler::new(SourceType::RISCV, elf);
 
-    info!("\n Creating Runtime..");
+    /*
+    KoalaBear Test
+    */
+    info!("\n *********** Testing for KoalaBear ***********");
+    let program = compiler.compile();
+    let mut runtime = RiscvEmulator::new::<KoalaBear>(program, EmulatorOpts::default());
+    runtime.state.input_stream.push(vec![2, 0, 0, 0]);
+    let batch_records = runtime.run(None).unwrap();
+
+    let record = &batch_records[0];
+    let mut records = vec![record.clone(), record.clone()];
+
+    // Setup config and chips.
+    info!("Creating SimpleMachine..");
+    let config = RiscvKBSC::new();
+    let chips = ToyChipType::all_chips();
+
+    // Create a new machine based on config and chips
+    let simple_machine = SimpleMachine::new(config, chips, RISCV_NUM_PVS);
+
+    // Setup machine prover, verifier, pk and vk.
+    let (pk, vk) = simple_machine.setup_keys(&record.program);
+
+    simple_machine.complement_record(&mut records);
+
+    let witness = ProvingWitness::setup_with_keys_and_records(pk, vk.clone(), records);
+
+    // Generate the proof.
+    info!("Generating proof..");
+    let proof = simple_machine.prove(&witness);
+
+    // Verify the proof.
+    info!("Verifying proof..");
+    let result = simple_machine.verify(&proof, &vk);
+    info!("The proof is verified: {}", result.is_ok());
+
+    assert!(result.is_ok());
+
+    /*
+    BabyBear Test
+    */
+    info!("\n *********** Testing for BabyBear ***********");
+    let program = compiler.compile();
     let mut runtime = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default());
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     let batch_records = runtime.run(None).unwrap();
@@ -117,30 +170,64 @@ fn main() {
     let mut records = vec![record.clone(), record.clone()];
 
     // Setup config and chips.
-    info!("\n Creating BaseMachine..");
-    let config = RiscvSC::new();
+    info!("Creating SimpleMachine..");
+    let config = RiscvBBSC::new();
     let chips = ToyChipType::all_chips();
 
     // Create a new machine based on config and chips
     let simple_machine = SimpleMachine::new(config, chips, RISCV_NUM_PVS);
-    info!("{} created.", simple_machine.name());
 
     // Setup machine prover, verifier, pk and vk.
-    info!("\n Setup machine..");
     let (pk, vk) = simple_machine.setup_keys(&record.program);
 
-    info!("\n Complement records..");
     simple_machine.complement_record(&mut records);
 
-    info!("\n Construct proving witness..");
     let witness = ProvingWitness::setup_with_keys_and_records(pk, vk.clone(), records);
 
     // Generate the proof.
-    info!("\n Generating proof..");
+    info!("Generating proof..");
     let proof = simple_machine.prove(&witness);
 
     // Verify the proof.
+    info!("Verifying proof..");
     let result = simple_machine.verify(&proof, &vk);
-    info!("\n The proof is verified: {}", result.is_ok());
+    info!("The proof is verified: {}", result.is_ok());
+
     assert!(result.is_ok());
+
+    /*
+    Mersenne31 Test
+    */
+    info!("\n *********** Testing for Mersenne31 ***********");
+    let program = compiler.compile();
+    let mut runtime = RiscvEmulator::new::<Mersenne31>(program, EmulatorOpts::default());
+    runtime.state.input_stream.push(vec![2, 0, 0, 0]);
+    let batch_records = runtime.run(None).unwrap();
+
+    let record = &batch_records[0];
+    let mut records = vec![record.clone(), record.clone()];
+
+    // Setup config and chips.
+    info!("Creating SimpleMachine..");
+    let config = RiscvM31SC::new();
+    let chips = ToyChipType::all_chips();
+
+    // Create a new machine based on config and chips
+    let simple_machine = SimpleMachine::new(config, chips, RISCV_NUM_PVS);
+
+    // Setup machine prover, verifier, pk and vk.
+    let (pk, vk) = simple_machine.setup_keys(&record.program);
+
+    simple_machine.complement_record(&mut records);
+
+    let witness = ProvingWitness::setup_with_keys_and_records(pk, vk.clone(), records);
+
+    // Generate the proof.
+    info!("Generating proof..");
+    let proof = simple_machine.prove(&witness);
+
+    // Verify the proof.
+    info!("Verifying proof..");
+    let result = simple_machine.verify(&proof, &vk);
+    info!("The proof is verified: {}", result.is_ok());
 }

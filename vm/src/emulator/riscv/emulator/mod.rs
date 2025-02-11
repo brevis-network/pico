@@ -848,20 +848,20 @@ mod tests {
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =
-        include_bytes!("../../../compiler/test_data/riscv32im-pico-fibonacci-elf");
+        include_bytes!("../../../compiler/test_elf/riscv32im-pico-fibonacci-elf");
 
     #[allow(dead_code)]
     const KECCAK_ELF: &[u8] =
-        include_bytes!("../../../compiler/test_data/riscv32im-pico-keccak-elf");
+        include_bytes!("../../../compiler/test_elf/riscv32im-pico-keccak-elf");
 
     pub fn simple_fibo_program() -> Arc<Program> {
-        let compiler = Compiler::new(SourceType::RiscV, FIBONACCI_ELF);
+        let compiler = Compiler::new(SourceType::RISCV, FIBONACCI_ELF);
 
         compiler.compile()
     }
 
     pub fn simple_keccak_program() -> Arc<Program> {
-        let compiler = Compiler::new(SourceType::RiscV, KECCAK_ELF);
+        let compiler = Compiler::new(SourceType::RISCV, KECCAK_ELF);
 
         compiler.compile()
     }
@@ -877,7 +877,7 @@ mod tests {
 
     #[test]
     fn test_simple_fib() {
-        // just run a simple elf file in the compiler folder(test_data)
+        // just run a simple elf file in the compiler folder(test_elf)
         let program = simple_fibo_program();
         let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder();
         stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);

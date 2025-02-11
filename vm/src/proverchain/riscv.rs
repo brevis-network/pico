@@ -95,7 +95,7 @@ where
         shape_config: Option<Self::ShapeConfig>,
     ) -> Self {
         let (config, elf) = input;
-        let mut program = Compiler::new(SourceType::RiscV, elf).compile();
+        let mut program = Compiler::new(SourceType::RISCV, elf).compile();
 
         if let Some(shape_config) = shape_config.clone() {
             let p = Arc::get_mut(&mut program).expect("cannot get program");

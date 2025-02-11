@@ -3,18 +3,18 @@ use alloc::sync::Arc;
 use tracing::debug;
 
 pub enum SourceType {
-    RiscV,
+    RISCV,
 }
 
 pub enum Compilable {
-    RiscV(Elf),
+    RISCV(Elf),
 }
 
 impl Compilable {
     fn compile(&self) -> Arc<Program> {
         // match on self
         match self {
-            Compilable::RiscV(elf) => elf.compile(),
+            Compilable::RISCV(elf) => elf.compile(),
         }
     }
 }
@@ -27,12 +27,12 @@ pub struct Compiler {
 impl Compiler {
     pub fn new(source_type: SourceType, source_code: &[u8]) -> Self {
         match source_type {
-            SourceType::RiscV => {
+            SourceType::RISCV => {
                 let source = Elf::new(source_code).unwrap();
                 // construct the compiler
                 Self {
                     source_type,
-                    source: Compilable::RiscV(source),
+                    source: Compilable::RISCV(source),
                 }
             }
         }
@@ -40,7 +40,7 @@ impl Compiler {
 
     pub fn name(&self) -> String {
         match self.source_type {
-            SourceType::RiscV => "RISCV ELF Compiler".to_string(),
+            SourceType::RISCV => "RISCV ELF Compiler".to_string(),
         }
     }
 

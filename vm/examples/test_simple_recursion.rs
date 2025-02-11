@@ -47,7 +47,7 @@ macro_rules! run {
             let start = Instant::now();
 
             info!("\n Creating Program..");
-            let compiler = Compiler::new(SourceType::RiscV, elf);
+            let compiler = Compiler::new(SourceType::RISCV, elf);
             let program = compiler.compile();
 
             info!("\n Creating emulator (at {:?})..", start.elapsed());
@@ -58,14 +58,17 @@ macro_rules! run {
             // TRICKY: We copy the memory initialize and finalize events from the second (last)
             // record to this record, since the memory lookups could only work if has the
             // full lookups in the all records.
+
+            for record in &records {
+                debug!("record events: {:?}", record.stats());
+            }
+
             assert_eq!(
                 records.len(),
                 2,
                 "We could only test for one record for now and the last is the final one",
             );
-            for record in &records {
-                debug!("record events: {:?}", record.stats());
-            }
+
             let mut record = records[0].clone();
             assert!(record.memory_initialize_events.is_empty());
             assert!(record.memory_finalize_events.is_empty());
@@ -237,7 +240,7 @@ macro_rules! run {
 
             let mut expected_stats = HashMap::<String, usize>::new();
             expected_stats.insert("poseidon2_events".to_string(), 602);
-            assert!([733, 666].contains(stats.get("poseidon2_events").unwrap()));
+            assert!([727, 660].contains(stats.get("poseidon2_events").unwrap()));
 
             // Setup field_config machine
             info!(
