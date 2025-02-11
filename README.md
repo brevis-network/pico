@@ -1,18 +1,18 @@
 # Pico
 
-![Pico Architecture](docs/pico.png)
+![Pico](docs/pico.png)
 
 Pico is an open-source zero-knowledge virtual machine (zkVM) that transforms how developers build secure, scalable, and high-performance decentralized applications. Drawing on the innovative [Glue-and-Coprocessor](https://vitalik.eth.limo/general/2024/09/02/gluecp.html) architecture, Pico fuses the efficiency of specialized circuits with the adaptability of a general-purpose zkVM. This unique design empowers you to craft tailored proof systems that meet the diverse needs of your applications.
 
-**[Install](https://google.com)**
-| [Docs](https://google.com)
-| [Examples](https://github.com/brevis-network/brevis-vm/tree/main/examples)
+**[Install](https://pico-docs.brevis.network/getting-started/installation)**
+| [Docs](https://pico-docs.brevis.network/)
+| [Examples](https://github.com/brevis-network/pico/tree/main/examples)
 | [Telegram](https://t.me/brevisnetwork)
 | [Discord](https://discord.com/invite/QTRkjKdZ6A)
 
 ## Getting Started
 
-Before you begin, please ensure that you have installed all the [requirements](./docs/requirements.md). For installation and setup instructions, refer to the [Installation Guide]() and follow the steps outlined in [Getting Started]() section in [Pico Docs]().
+Before you begin, please ensure that you have installed all the [requirements](./docs/requirements.md). For installation and setup instructions, refer to the [Installation Guide](https://pico-docs.brevis.network/getting-started/installation) and follow the steps outlined in [Quick Start](https://pico-docs.brevis.network/getting-started/quick-start) section in [Pico Docs](https://pico-docs.brevis.network/).
 
 ## Key Features
 Pico’s design is rooted in the need for adaptable, high-performance ZK systems that can keep up with the rapidly evolving cryptography research. Rather than relying on a "one size fits all" solution, Pico’s modular architecture lets you:
@@ -23,7 +23,7 @@ Pico’s design is rooted in the need for adaptable, high-performance ZK systems
 
 ## Supported Proving Backends
 One of Pico’s most innovative features is its ability to seamlessly switch between multiple proving backends.
-Currently, Pico supports generating proofs in [all phases]() — RISCV, CONVERT (RECURSION), COMBINE (RECURSION), COMPRESS (RECURSION) 
+Currently, Pico supports generating proofs in [all phases](https://pico-docs.brevis.network/writing-apps/advanced/proverchain) — RISCV, CONVERT (RECURSION), COMBINE (RECURSION), COMPRESS (RECURSION) 
 and ONCHAIN (for EVM) — with both STARK on KoalaBear and STARK on BabyBear.
 For CircleSTARK on Mersenne31, Pico currently supports the RISCV-Phase, with RECURSION and EVM phases coming soon.
 

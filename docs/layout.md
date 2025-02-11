@@ -1,4 +1,4 @@
-## Pico Repo Layout
+# Pico Repo Layout
 
 - `sdk` Provides user interface APIs for the projects, it includes a Cargo CLI for proving, an SDK for streamlined access, and patch interfaces. This structure simplifies building and managing workflows for the VM ecosystem.
 - `examples`: Pico SDK examples, quick start to use the Pico SDK, and provide more advanced usage examples.
