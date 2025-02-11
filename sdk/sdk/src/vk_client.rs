@@ -17,7 +17,7 @@ use pico_vm::{
             onchain_circuit::{
                 gnark::builder::OnchainVerifierCircuit,
                 stdin::OnchainStdin,
-                utils::{build_gnark_config, generate_contract_inputs},
+                utils::{build_gnark_config, generate_contract_inputs, save_embed_proof_data},
             },
             shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
         },
@@ -126,6 +126,7 @@ macro_rules! create_sdk_prove_vk_client {
                 };
                 let (constraints, witness) =
                     OnchainVerifierCircuit::<$fc, $bn254_sc>::build(&onchain_stdin);
+                save_embed_proof_data(&riscv_proof, &proof, output.clone())?;
                 build_gnark_config(constraints, witness, output.clone());
                 Ok((riscv_proof, proof))
             }
@@ -145,18 +146,29 @@ macro_rules! create_sdk_prove_vk_client {
             }
 
             /// prove and generate gnark proof and contract inputs. must install docker first
-            pub fn prove_evm(&self, need_setup: bool, output: PathBuf) -> Result<(), Error> {
+            pub fn prove_evm(&self, need_setup: bool, output: PathBuf, field_type: &str) -> Result<(), Error> {
                 self.prove(output.clone())?;
+                let field_name = match field_type {
+                    "kb" => {
+                        "koalabear"
+                    }
+                    "bb" => {
+                        "babybear"
+                    }
+                    _ => {
+                        return Err(Error::msg("field type not supported"));
+                    }
+                };
                 if need_setup {
                     let mut setup_cmd = Command::new("sh");
                     setup_cmd.arg("-c")
-                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field koalabear -cmd setup", output.clone().display()));
+                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd setup -sol ./data/Groth16Verifier.sol", output.clone().display(), field_name));
                     execute_command(setup_cmd);
                 }
 
                 let mut prove_cmd = Command::new("sh");
                 prove_cmd.arg("-c")
-                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field koalabear -cmd prove", output.clone().display()));
+                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd prove -sol ./data/Groth16Verifier.sol", output.clone().display(), field_name));
 
                 execute_command(prove_cmd);
                 generate_contract_inputs::<$fc>(output.clone())?;

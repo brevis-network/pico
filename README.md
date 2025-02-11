@@ -6,7 +6,7 @@ Pico is an open-source zero-knowledge virtual machine (zkVM) that transforms how
 
 **[Install](https://pico-docs.brevis.network/getting-started/installation)**
 | [Docs](https://pico-docs.brevis.network/)
-| [Examples](https://github.com/brevis-network/pico/tree/main/examples)
+| [Examples](./examples)
 | [Telegram](https://t.me/brevisnetwork)
 | [Discord](https://discord.com/invite/QTRkjKdZ6A)
 

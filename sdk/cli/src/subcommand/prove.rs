@@ -97,7 +97,7 @@ impl ProveCmd {
                     .parent()
                     .unwrap()
                     .join(DEFAULT_ELF_DIR)
-                    .join("riscv32im-pico-precompile-elf")
+                    .join("riscv32im-pico-zkvm-elf")
             }
         };
         let elf: Vec<u8> = std::fs::read(elf_path)?;
@@ -138,7 +138,7 @@ impl ProveCmd {
                 "Docker is not available on this system. please install docker fisrt.",
             ));
         }
-        prove(client, self.evm, self.setup, &bytes, pico_dir)
+        prove(client, self.evm, self.setup, &bytes, pico_dir, &self.field)
     }
 }
 
@@ -195,6 +195,7 @@ fn prove(
     need_setup: bool,
     bytes: &[u8],
     output: PathBuf,
+    field_type: &str,
 ) -> Result<(), Error> {
     match sdk_client {
         SDKProverClient::KoalaBearProver(client) => {
@@ -205,7 +206,7 @@ fn prove(
         SDKProverClient::KoalaBearProveVKProver(client) => {
             client.get_stdin_builder().borrow_mut().write_slice(bytes);
             if is_evm {
-                client.prove_evm(need_setup, output)?;
+                client.prove_evm(need_setup, output, field_type)?;
             } else {
                 client.prove(output.clone())?;
             }
@@ -220,7 +221,7 @@ fn prove(
             client.get_stdin_builder().borrow_mut().write_slice(bytes);
 
             if is_evm {
-                client.prove_evm(need_setup, output)?;
+                client.prove_evm(need_setup, output, field_type)?;
             } else {
                 client.prove(output.clone())?;
             }

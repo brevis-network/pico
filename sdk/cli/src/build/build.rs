@@ -14,7 +14,7 @@ use crate::{
 use super::{execute_command, find_target_file};
 
 const RUSTUP_TOOLCHAIN_NAME: &str = "nightly-2024-11-27";
-const TARGET_ELF: &str = "riscv32im-pico-precompile-elf";
+const TARGET_ELF: &str = "riscv32im-pico-zkvm-elf";
 
 pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<PathBuf, Error> {
     let program_dir = program_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
