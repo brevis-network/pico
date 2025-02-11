@@ -9,6 +9,6 @@ categories = { workspace = true }
 
 
 [dependencies]
-pico-sdk = { path = "../../../pico/sdk" }
+pico-sdk = { path = "../../../sdk/sdk" }
 alloy-sol-types = "0.8.0"
 fibonacci-lib ={ path = "../lib"}

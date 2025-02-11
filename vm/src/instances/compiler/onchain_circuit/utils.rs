@@ -1,8 +1,9 @@
 use crate::{
     compiler::recursion::{constraints::Constraint, ir::Witness},
-    configs::config::FieldGenericConfig,
+    configs::config::{FieldGenericConfig, StarkGenericConfig},
+    machine::proof::MetaProof,
 };
-use log::info;
+use log::{debug, info};
 use num::Num;
 use num_bigint::BigInt;
 use serde_json::json;
@@ -14,13 +15,43 @@ use std::{
 };
 
 use super::gnark::witness::GnarkWitness;
-use anyhow::{Error, Ok, Result};
+use anyhow::{Context, Error, Ok, Result};
 
 const CONSTRAINTS_JSON_FILE: &str = "constraints.json";
 const GROTH16_JSON_FILE: &str = "groth16_witness.json";
 const PV_FILE: &str = "pv_file";
 const PROOF_FILE: &str = "proof.data";
 const CONTRACT_INPUTS_FILE: &str = "inputs.json";
+
+pub fn save_embed_proof_data<SC: StarkGenericConfig, Bn254SC: StarkGenericConfig>(
+    riscv_proof: &MetaProof<SC>,
+    embed_proof: &MetaProof<Bn254SC>,
+    output: PathBuf,
+) -> Result<()> {
+    if let Some(ref pv_stream) = riscv_proof.pv_stream {
+        debug!("pv_stream is not null, storing in pico_out dir");
+
+        let pv_stream_str = hex::encode(pv_stream);
+        let pv_file_path = output.join("pv_file");
+
+        let mut file = File::create(&pv_file_path)
+            .with_context(|| format!("Failed to create file: {:?}", pv_file_path))?;
+        file.write_all(pv_stream_str.as_bytes())
+            .context("Failed to write pv_stream to file")?;
+    }
+
+    // Write proof to proof.json
+    let proof_path = output.join("proof.json");
+    let mut proof_file = File::create(&proof_path)
+        .with_context(|| format!("Failed to create file: {:?}", proof_path))?;
+    let proof_json = serde_json::to_string(&embed_proof.proofs())
+        .context("Failed to serialize proof to JSON")?;
+    proof_file
+        .write_all(proof_json.as_bytes())
+        .context("Failed to write proof JSON to file")?;
+
+    Ok(())
+}
 
 #[allow(unused)]
 pub fn build_gnark_config<EmbedFC: FieldGenericConfig>(

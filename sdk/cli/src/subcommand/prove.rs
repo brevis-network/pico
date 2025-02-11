@@ -2,11 +2,13 @@ use anyhow::{Error, Result};
 use clap::{ArgAction, Parser};
 use hex;
 use log::{debug, info};
-use pico_sdk::{client::save_proof_data, vk_client::KoalaBearProveVKClient};
 use std::{env, fs::File, io::Read, path::PathBuf};
 
 use crate::{
-    build::build::{get_package, is_docker_installed},
+    build::{
+        build::{get_package, is_docker_installed},
+        client::SDKProverClient,
+    },
     get_target_directory, DEFAULT_ELF_DIR,
 };
 
@@ -59,6 +61,11 @@ pub struct ProveCmd {
 
     #[clap(long, action = ArgAction::SetTrue, help = "enable vk verification in recursion circuit")]
     vk: bool,
+
+    // Field to work on.
+    // bb | m31 | kb
+    #[clap(long, default_value = "kb")]
+    pub field: String,
 }
 
 impl ProveCmd {
@@ -97,20 +104,11 @@ impl ProveCmd {
         let bytes = Self::get_input_bytes(&self.input)?;
         debug!("input data: {:0x?}", bytes);
 
-        // todo: need to new client according to fieldand vk_verification options
-        // let vk_verification = self.evm || self.vk;
-
-        let prover_client = KoalaBearProveVKClient::new(&elf);
+        let vk_verification = self.evm || self.vk;
+        let client = SDKProverClient::new(&elf, &self.field, vk_verification);
 
         if self.fast {
-            env::set_var("FRI_QUERIES", "1");
-            info!("proving in fast mode.");
-            prover_client
-                .get_stdin_builder()
-                .borrow_mut()
-                .write_slice(&bytes);
-            prover_client.prove_fast()?;
-            return Ok(());
+            return prove_fast(client, bytes.as_slice());
         }
 
         if self.setup && !self.evm {
@@ -135,24 +133,101 @@ impl ProveCmd {
             }
         };
 
-        prover_client
-            .get_stdin_builder()
-            .borrow_mut()
-            .write_slice(&bytes);
-
-        if self.evm {
-            if !is_docker_installed() {
-                debug!("Docker is not available on this system. please install docker fisrt.");
-                return Err(Error::msg(
-                    "Docker is not available on this system. please install docker fisrt.",
-                ));
-            }
-            prover_client.prove_evm(self.setup, pico_dir)?;
-        } else {
-            let (riscv_proof, embed_proof) = prover_client.prove(pico_dir.clone())?;
-
-            save_proof_data(&riscv_proof, &embed_proof, pico_dir)?;
+        if self.evm && !is_docker_installed() {
+            return Err(Error::msg(
+                "Docker is not available on this system. please install docker fisrt.",
+            ));
         }
-        Ok(())
+        prove(client, self.evm, self.setup, &bytes, pico_dir)
+    }
+}
+
+fn prove_fast(sdk_client: SDKProverClient, elf_bytes: &[u8]) -> Result<()> {
+    env::set_var("FRI_QUERIES", "1");
+    info!("proving in fast mode.");
+    match sdk_client {
+        SDKProverClient::KoalaBearProver(client) => {
+            client
+                .get_stdin_builder()
+                .borrow_mut()
+                .write_slice(elf_bytes);
+            client.prove_fast()?;
+            Ok(())
+        }
+        SDKProverClient::KoalaBearProveVKProver(client) => {
+            client
+                .get_stdin_builder()
+                .borrow_mut()
+                .write_slice(elf_bytes);
+            client.prove_fast()?;
+            Ok(())
+        }
+        SDKProverClient::BabyBearProver(client) => {
+            client
+                .get_stdin_builder()
+                .borrow_mut()
+                .write_slice(elf_bytes);
+            client.prove_fast()?;
+            Ok(())
+        }
+        SDKProverClient::BabyBearProveVKProver(client) => {
+            client
+                .get_stdin_builder()
+                .borrow_mut()
+                .write_slice(elf_bytes);
+            client.prove_fast()?;
+            Ok(())
+        }
+        SDKProverClient::M31Prover(client) => {
+            client
+                .get_stdin_builder()
+                .borrow_mut()
+                .write_slice(elf_bytes);
+            client.prove_fast()?;
+            Ok(())
+        }
+    }
+}
+
+fn prove(
+    sdk_client: SDKProverClient,
+    is_evm: bool,
+    need_setup: bool,
+    bytes: &[u8],
+    output: PathBuf,
+) -> Result<(), Error> {
+    match sdk_client {
+        SDKProverClient::KoalaBearProver(client) => {
+            client.get_stdin_builder().borrow_mut().write_slice(bytes);
+            client.prove(output.clone())?;
+            Ok(())
+        }
+        SDKProverClient::KoalaBearProveVKProver(client) => {
+            client.get_stdin_builder().borrow_mut().write_slice(bytes);
+            if is_evm {
+                client.prove_evm(need_setup, output)?;
+            } else {
+                client.prove(output.clone())?;
+            }
+            Ok(())
+        }
+        SDKProverClient::BabyBearProver(client) => {
+            client.get_stdin_builder().borrow_mut().write_slice(bytes);
+            client.prove(output.clone())?;
+            Ok(())
+        }
+        SDKProverClient::BabyBearProveVKProver(client) => {
+            client.get_stdin_builder().borrow_mut().write_slice(bytes);
+
+            if is_evm {
+                client.prove_evm(need_setup, output)?;
+            } else {
+                client.prove(output.clone())?;
+            }
+            Ok(())
+        }
+        _ => Err(Error::msg(
+            "not support config for prove, please check your config",
+        )),
     }
 }
