@@ -725,7 +725,7 @@ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 [[package]]
 name = "coprocessor-sdk"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Pico-zkCoprocessor#9d76842bc60c796247ed3ece4857225dd6359f12"
+source = "git+https://github.com/brevis-network/Pico-zkCoprocessor#1de063ffeb88f795b67107a04508fbf2bbf0089f"
 dependencies = [
  "alloy-sol-types",
  "anyhow",
