@@ -3,7 +3,7 @@ package koalabear_verifier
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/brevis-network/brevis-vm/gnark/utils"
+	"github.com/brevis-network/pico/gnark/utils"
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend"
 	"github.com/consensys/gnark/backend/groth16"

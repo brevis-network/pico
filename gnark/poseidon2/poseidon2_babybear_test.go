@@ -1,7 +1,7 @@
 package poseidon2
 
 import (
-	"github.com/brevis-network/brevis-vm/gnark/babybear"
+	"github.com/brevis-network/pico/gnark/babybear"
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/logger"

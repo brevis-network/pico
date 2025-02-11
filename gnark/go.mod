@@ -1,4 +1,4 @@
-module github.com/brevis-network/brevis-vm/gnark
+module github.com/brevis-network/pico/gnark
 
 go 1.22.10
 
@@ -6,6 +6,7 @@ require (
 	github.com/consensys/gnark v0.10.0
 	github.com/consensys/gnark-crypto v0.12.2-0.20240215234832-d72fcb379d3e
 	github.com/rs/zerolog v1.30.0
+	golang.org/x/crypto v0.26.0
 )
 
 require (
@@ -23,7 +24,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/crypto v0.26.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.23.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

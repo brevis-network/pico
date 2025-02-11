@@ -3,8 +3,8 @@ package koalabear_verifier
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/brevis-network/brevis-vm/gnark/koalabear"
-	"github.com/brevis-network/brevis-vm/gnark/poseidon2"
+	"github.com/brevis-network/pico/gnark/koalabear"
+	"github.com/brevis-network/pico/gnark/poseidon2"
 	"github.com/consensys/gnark/frontend"
 	"os"
 	"strconv"

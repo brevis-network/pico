@@ -1,7 +1,7 @@
 package poseidon2
 
 import (
-	"github.com/brevis-network/brevis-vm/gnark/koalabear"
+	"github.com/brevis-network/pico/gnark/koalabear"
 	"github.com/consensys/gnark/frontend"
 )
 

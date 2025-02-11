@@ -4,8 +4,6 @@ github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM
 github.com/blang/semver/v4 v4.0.0/go.mod h1:IbckMUScFkM3pff0VJDNKRiT6TG/YpiHIM2yvyW5YoQ=
 github.com/celer-network/gnark v0.1.0 h1:717CxKghLj02v2tAdE6hCuKUouGgzDfZv/W1D4e/sFA=
 github.com/celer-network/gnark v0.1.0/go.mod h1:2pxSqtFhSLeN7OdA9nQXPj4Gp4Tovzk+r/7eiIA/Qeg=
-github.com/celer-network/goutils v0.2.0 h1:FIt4XLuHaHRviqycmJFywdbBCvTHJO6Yd/GGFXps/TY=
-github.com/celer-network/goutils v0.2.0/go.mod h1:1cyIPHvkF//E0Ok6H3roaJkZuy56sPyRycq7MPTkS6U=
 github.com/consensys/bavard v0.1.13 h1:oLhMLOFGTLdlda/kma4VOJazblc7IM5y5QPd2A/YjhQ=
 github.com/consensys/bavard v0.1.13/go.mod h1:9ItSMtA/dXMAiL7BG6bqW2m3NdSEObYWoH223nGHukI=
 github.com/consensys/gnark-crypto v0.12.2-0.20240215234832-d72fcb379d3e h1:MKdOuCiy2DAX1tMp2YsmtNDaqdigpY6B5cZQDJ9BvEo=
