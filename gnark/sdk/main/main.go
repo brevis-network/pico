@@ -15,7 +15,7 @@ var (
 	witnessFile     = flag.String("witness", "./data/groth16_witness.json", "path of witness json file")
 	constraintsFile = flag.String("constraints", "./data/constraints.json", "path of constraint json file")
 	proofPath       = flag.String("proof", "./data/proof.data", "path of proof file")
-	solidifyPath    = flag.String("sol", "./data/pico_vm_verifier.sol", "path of solidify file")
+	solidifyPath    = flag.String("sol", "./data/Groth16Verifier.sol", "path of solidify file")
 	field           = flag.String("field", "babybear", "field for proving, support babybear and koala bear")
 )
 

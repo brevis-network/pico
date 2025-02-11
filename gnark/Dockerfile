@@ -22,10 +22,10 @@ RUN --mount=type=secret,id=gitcre,target=/root/.git-credentials cargo build --re
 RUN cp target/release/field_ffi.so /usr/lib/
 
 WORKDIR /pico/brevis-vm/gnark/sdk/main/
-RUN go build && cp main /pico_vm_gnark_cli
+RUN go build && cp main /pico_gnark_cli
 
 FROM rustlang/rust:nightly-bullseye-slim
-COPY --from=rust-builder /pico_vm_gnark_cli /pico_vm_gnark_cli
+COPY --from=rust-builder /pico_gnark_cli /pico_gnark_cli
 COPY --from=rust-builder /pico/brevis-vm/target/release/field_ffi.so /usr/lib/
 
 #CMD ["/pico_vm_gnark_cli"]
