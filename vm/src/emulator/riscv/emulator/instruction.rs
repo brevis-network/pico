@@ -376,7 +376,7 @@ impl RiscvEmulator {
                 self.alu_rw(instruction, rd, a, b, c);
             }
 
-            // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/master/riscv-asm.md#instruction-aliases
+            // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/main/src/asm-manual.adoc#instruction-aliases
             Opcode::UNIMP => {
                 return Err(EmulationError::Unimplemented());
             }

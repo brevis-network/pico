@@ -47,7 +47,7 @@ where
             // Check shift_by_n_bits[i] is 1 if i = num_bits_to_shift.
             let mut num_bits_to_shift = zero.clone();
 
-            //  num_bits_to_shift = event.c as usize % BYTE_SIZE, so the maximum value of num_bits_to_shift is 7, just neeed 3 bits to calculate this.
+            //  num_bits_to_shift = event.c as usize % BYTE_SIZE, so the maximum value of num_bits_to_shift is 7, just need 3 bits to calculate this.
             for i in 0..3 {
                 num_bits_to_shift += c_lsb[i] * F::from_canonical_u32(1 << i);
             }
