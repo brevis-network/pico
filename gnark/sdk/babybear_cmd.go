@@ -29,7 +29,7 @@ func BabyBearCmd(cmd string) (err error) {
 			return fmt.Errorf("fail to setup: %v\n", err)
 		}
 		err = ExportSolidify()
-		if err == nil {
+		if err != nil {
 			return fmt.Errorf("fail to export solidity: %v\n", err)
 		}
 	case "solve":
@@ -47,7 +47,7 @@ func BabyBearCmd(cmd string) (err error) {
 			return fmt.Errorf("fail to export solidity: %v\n", err)
 		}
 		err = BabyBearProve()
-		if err == nil {
+		if err != nil {
 			return fmt.Errorf("fail to prove: %v\n", err)
 		}
 	case "exportSolidity":
