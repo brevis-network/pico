@@ -11,7 +11,7 @@ use crate::{
 #[serde_as]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RiscvEmulationState {
-    /// The global clock keeps track of how many instrutions have been emulated through all chunks.
+    /// The global clock keeps track of how many instructions have been emulated through all chunks.
     pub global_clk: u64,
 
     /// Current batch number
