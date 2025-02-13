@@ -41,6 +41,6 @@ pub struct MemoryInitializeFinalizeCols<T> {
     /// Auxilary column, equal to `(1 - is_prev_addr_zero.result) * is_first_row`.
     pub is_first_comp: T,
 
-    /// A flag to inidicate the last non-padded address. An auxiliary column needed for degree 3.
+    /// A flag to indicate the last non-padded address. An auxiliary column needed for degree 3.
     pub is_last_addr: T,
 }
