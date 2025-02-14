@@ -62,7 +62,7 @@ macro_rules! create_sdk_prove_client {
             }
 
             /// prove and serialize embed proof, which provided to next step gnark verifier.
-            /// the constraints.json and groth16_witness.json will be genererated in output dir.
+            /// the constraints.json and groth16_witness.json will be generated in output dir.
             pub fn prove(
                 &self,
                 output: PathBuf,
