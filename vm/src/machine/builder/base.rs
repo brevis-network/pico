@@ -1,4 +1,4 @@
-//! Basic AIR associting functions for the chip builder
+//! Basic AIR associating functions for the chip builder
 
 use crate::machine::extension::BinomialExtension;
 use core::marker::PhantomData;
