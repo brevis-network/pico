@@ -318,7 +318,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
             + mem_val[3] * local.offset_is_three;
         let byte_value = Word::extend_expr::<CB>(mem_byte.clone());
 
-        // When the instruciton is LB or LBU, just use the lower byte.
+        // When the instruction is LB or LBU, just use the lower byte.
         builder
             .when(local.instruction.is_lb + local.instruction.is_lbu)
             .assert_word_eq(byte_value, local.unsigned_mem_val.map(|x| x.into()));
