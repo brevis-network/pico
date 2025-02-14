@@ -44,19 +44,24 @@ struct Benchmark {
 
 const PROGRAMS: &[Benchmark] = &[
     Benchmark {
-        name: "fibonacci",
-        elf: "./vm/src/compiler/test_elf/bench/fib",
-        input: None,
+        name: "fibonacci-300kn",
+        elf: "./vm/src/compiler/test_elf/bench/fibonacci-elf",
+        input: Some("fibonacci-300kn"),
     },
     Benchmark {
         name: "tendermint",
-        elf: "./vm/src/compiler/test_elf/bench/tendermint",
+        elf: "./vm/src/compiler/test_elf/bench/tendermint-elf",
         input: None,
     },
     Benchmark {
         name: "reth-17106222",
-        elf: "./vm/src/compiler/test_elf/bench/reth",
-        input: Some("./vm/src/compiler/test_elf/bench/reth-17106222.in"),
+        elf: "./vm/src/compiler/test_elf/bench/reth-elf",
+        input: Some("./vm/src/compiler/test_elf/bench/reth-17106222.bin"),
+    },
+    Benchmark {
+        name: "reth-20528709",
+        elf: "./vm/src/compiler/test_elf/bench/reth-elf",
+        input: Some("./vm/src/compiler/test_elf/bench/reth-20528709.bin"),
     },
 ];
 
@@ -65,7 +70,13 @@ fn load<P>(bench: &Benchmark) -> Result<(Vec<u8>, EmulatorStdin<P, Vec<u8>>)> {
     let elf = std::fs::read(bench.elf)?;
     let stdin = match bench.input {
         None => Vec::new(),
-        Some(path) => bincode::deserialize(&std::fs::read(path)?)?,
+        Some(input) => {
+            if input == "fibonacci-300kn" {
+                vec![bincode::serialize(&300_000u32).expect("failed to serialize")]
+            } else {
+                bincode::deserialize(&std::fs::read(input)?)?
+            }
+        }
     };
     let stdin = EmulatorStdin::new_riscv(&stdin);
 
