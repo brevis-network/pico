@@ -85,7 +85,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 /// instantiation should satisfy them here rather than at chip instantiation.
 pub trait Poseidon2Config: Copy {
     type FullRounds: ArraySize + Add<typenum::U3, Output: ArraySize> + core::fmt::Debug;
-    // the add constraint enforces external rounds is even
+    // the add constraint enforces that external rounds is even
     type HalfFullRounds: ArraySize
         + Add<Self::HalfFullRounds, Output: Same<Self::FullRounds>>
         + core::fmt::Debug;
