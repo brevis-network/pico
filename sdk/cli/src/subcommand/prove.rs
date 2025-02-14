@@ -135,7 +135,7 @@ impl ProveCmd {
 
         if self.evm && !is_docker_installed() {
             return Err(Error::msg(
-                "Docker is not available on this system. please install docker fisrt.",
+                "Docker is not available on this system. please install docker first.",
             ));
         }
         prove(client, self.evm, self.setup, &bytes, pico_dir, &self.field)
