@@ -21,7 +21,7 @@ pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<P
 
     let pkg = get_package(&program_dir);
 
-    // get buid directory by the manifest path
+    // get build directory by the manifest path
     let target_dir: PathBuf = get_target_directory(pkg.manifest_path.as_ref())?;
     fs::create_dir_all(&target_dir).unwrap();
 

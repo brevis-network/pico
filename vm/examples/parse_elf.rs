@@ -19,5 +19,5 @@ fn main() {
 
     println!("instructions length: {}", instructions.len());
     // group instructions by Opcode
-    //et grouped = instructions.into_iter().group_by(|i| i.opcode);
+    // let grouped = instructions.into_iter().group_by(|i| i.opcode);
 }

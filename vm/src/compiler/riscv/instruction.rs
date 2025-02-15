@@ -72,7 +72,7 @@ impl Instruction {
         )
     }
 
-    /// Returns if the instruction is a ecall instruction.
+    /// Returns if the instruction is an ecall instruction.
     #[must_use]
     pub fn is_ecall_instruction(&self) -> bool {
         self.opcode == Opcode::ECALL

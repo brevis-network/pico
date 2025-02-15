@@ -421,7 +421,7 @@ macro_rules! run {
 
             info!(
                 "The EMBED proof is verified: {} (at {:?})",
-                compress_result.is_ok(),
+                embed_result.is_ok(),
                 start.elapsed()
             );
             assert!(embed_result.is_ok());
