@@ -1,9 +1,10 @@
 #![no_main]
 
-pico_sdk::entrypoint!(main);
 use alloy_sol_types::SolValue;
 use fibonacci_lib::{fibonacci, PublicValuesStruct};
 use pico_sdk::io::{commit_bytes, read_as};
+
+pico_sdk::entrypoint!(main);
 
 pub fn main() {
     // Read inputs `n` from the environment
