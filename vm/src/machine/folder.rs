@@ -5,7 +5,8 @@ use crate::{
     configs::config::{FieldGenericConfig, PackedChallenge, PackedVal, StarkGenericConfig},
     machine::{
         builder::{
-            ChipBuilder, EmptyLookupBuilder, LookupBuilder, PermutationBuilder, PublicValuesBuilder,
+            ChipBuilder, EmptyLookupBuilder, LookupBuilder, PermutationBuilder,
+            PublicValuesBuilder, ScopedBuilder,
         },
         lookup::{symbolic_to_virtual_pair, SymbolicLookup, VirtualPairLookup},
         septic::SepticDigest,
@@ -82,6 +83,8 @@ impl<F: Field> SymbolicConstraintFolder<F> {
         self.constraints
     }
 }
+
+impl<F: Field> ScopedBuilder for SymbolicConstraintFolder<F> {}
 
 impl<F: Field> AirBuilder for SymbolicConstraintFolder<F> {
     type F = F;
@@ -187,6 +190,8 @@ pub struct ProverConstraintFolder<SC: StarkGenericConfig> {
     pub alpha: SC::Challenge,
     pub accumulator: PackedChallenge<SC>,
 }
+
+impl<SC: StarkGenericConfig> ScopedBuilder for ProverConstraintFolder<SC> {}
 
 impl<SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<SC> {
     type F = SC::Val;
@@ -298,6 +303,8 @@ pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
     pub alpha: SC::Challenge,
     pub accumulator: SC::Challenge,
 }
+
+impl<SC: StarkGenericConfig> ScopedBuilder for VerifierConstraintFolder<'_, SC> {}
 
 impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC> {
     type F = SC::Val;
@@ -429,6 +436,8 @@ pub struct GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr> {
     /// The marker type.
     pub _marker: PhantomData<(F, EF)>,
 }
+
+impl<F, EF, PV, V, E> ScopedBuilder for GenericVerifierConstraintFolder<'_, F, EF, PV, V, E> {}
 
 impl<'a, F, EF, PubVar, Var, Expr> AirBuilder
     for GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr>
@@ -727,32 +736,44 @@ pub enum DebugConstraintFailure<F, EF> {
 }
 
 /// A folder for debugging constraints.
-pub struct DebugConstraintFolder<'a, F: Field, EF: ExtensionField<F>> {
+pub struct DebugConstraintFolder<'a, F, EF> {
     pub(crate) preprocessed: ViewPair<'a, F>,
     pub(crate) main: ViewPair<'a, F>,
     pub(crate) permutation: ViewPair<'a, EF>,
-    pub(crate) regional_cumulative_sum: &'a EF,
-    pub(crate) global_cumulative_sum: &'a SepticDigest<F>,
-    pub(crate) permutation_challenges: &'a [EF],
+    pub(crate) regional_cumulative_sum: EF,
+    pub(crate) global_cumulative_sum: SepticDigest<F>,
+    pub(crate) permutation_challenges: [EF; 2],
     pub(crate) is_first_row: F,
     pub(crate) is_last_row: F,
     pub(crate) is_transition: F,
     pub(crate) public_values: &'a [F],
-    pub(crate) failures: Vec<DebugConstraintFailure<F, EF>>,
+    pub(crate) failures: Vec<(Vec<String>, DebugConstraintFailure<F, EF>)>,
+    pub(crate) scopes: Vec<String>,
 }
 
 impl<F, EF> DebugConstraintFolder<'_, F, EF>
 where
     F: Field,
-    EF: ExtensionField<F>,
 {
-    #[allow(clippy::unused_self)]
     #[inline]
     fn debug_eq_constraint(&mut self, x: F, y: F) {
         if x != y {
-            self.failures
-                .push(DebugConstraintFailure::FieldInequality(x, y));
+            self.new_failure(DebugConstraintFailure::FieldInequality(x, y));
         }
+    }
+
+    #[inline]
+    fn new_failure(&mut self, failure: DebugConstraintFailure<F, EF>) {
+        self.failures.push((self.scopes.clone(), failure));
+    }
+}
+
+impl<F, EF> ScopedBuilder for DebugConstraintFolder<'_, F, EF> {
+    fn enter_scope(&mut self, scope: impl AsRef<str>) {
+        self.scopes.push(scope.as_ref().to_string());
+    }
+    fn exit_scope(&mut self) {
+        self.scopes.pop();
     }
 }
 
@@ -802,7 +823,7 @@ where
     fn assert_bool<I: Into<Self::Expr>>(&mut self, x: I) {
         let x = x.into();
         if x != F::ZERO && x != F::ONE {
-            self.failures.push(DebugConstraintFailure::NonBoolean(x));
+            self.new_failure(DebugConstraintFailure::NonBoolean(x));
         }
     }
 }
@@ -822,8 +843,7 @@ where
     {
         let x = x.into();
         if x != EF::ZERO {
-            self.failures
-                .push(DebugConstraintFailure::ExtensionNonzero(x));
+            self.new_failure(DebugConstraintFailure::ExtensionNonzero(x));
         }
     }
 }
@@ -843,15 +863,15 @@ where
     }
 
     fn permutation_randomness(&self) -> &[Self::EF] {
-        self.permutation_challenges
+        &self.permutation_challenges
     }
 
-    fn regional_cumulative_sum(&self) -> &'a Self::RegionalSum {
-        self.regional_cumulative_sum
+    fn regional_cumulative_sum(&self) -> &Self::RegionalSum {
+        &self.regional_cumulative_sum
     }
 
-    fn global_cumulative_sum(&self) -> &'a SepticDigest<Self::GlobalSum> {
-        self.global_cumulative_sum
+    fn global_cumulative_sum(&self) -> &SepticDigest<Self::GlobalSum> {
+        &self.global_cumulative_sum
     }
 }
 

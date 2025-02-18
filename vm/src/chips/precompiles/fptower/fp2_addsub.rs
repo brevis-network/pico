@@ -20,7 +20,7 @@ use crate::{
     compiler::riscv::program::Program,
     emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
     machine::{
-        builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+        builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder, ScopedBuilder},
         chip::ChipBehavior,
     },
 };
@@ -264,7 +264,7 @@ where
 impl<F, P, CB> Air<CB> for Fp2AddSubChip<F, P>
 where
     F: Field,
-    CB: ChipBuilder<F>,
+    CB: ChipBuilder<F> + ScopedBuilder,
     P: FpOpField,
     Limbs<CB::Var, <P as NumLimbs>::Limbs>: Copy,
 {
@@ -291,29 +291,33 @@ where
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
         {
-            local.c0.eval_variable(
-                builder,
-                &p_x,
-                &q_x,
-                &p_modulus,
-                local.is_add,
-                CB::Expr::ONE - local.is_add,
-                CB::F::ZERO,
-                CB::F::ZERO,
-                local.is_real,
-            );
+            builder.with_scope("c0", |builder| {
+                local.c0.eval_variable(
+                    builder,
+                    &p_x,
+                    &q_x,
+                    &p_modulus,
+                    local.is_add,
+                    CB::Expr::ONE - local.is_add,
+                    CB::F::ZERO,
+                    CB::F::ZERO,
+                    local.is_real,
+                )
+            });
 
-            local.c1.eval_variable(
-                builder,
-                &p_y,
-                &q_y,
-                &p_modulus,
-                local.is_add,
-                CB::Expr::ONE - local.is_add,
-                CB::F::ZERO,
-                CB::F::ZERO,
-                local.is_real,
-            );
+            builder.with_scope("c1", |builder| {
+                local.c1.eval_variable(
+                    builder,
+                    &p_y,
+                    &q_y,
+                    &p_modulus,
+                    local.is_add,
+                    CB::Expr::ONE - local.is_add,
+                    CB::F::ZERO,
+                    CB::F::ZERO,
+                    local.is_real,
+                )
+            });
         }
 
         builder.when(local.is_real).inner.assert_all_eq(
