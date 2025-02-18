@@ -182,7 +182,7 @@ pub enum RiscvShapeError {
     #[error("no shape found {0:?}")]
     ShapeError(HashMap<String, usize>),
     #[error("Preprocessed shape missing")]
-    PrepcocessedShapeMissing,
+    PreprocessedShapeMissing,
     #[error("Shape already fixed")]
     ShapeAlreadyFixed,
     #[error("Precompile not included in allowed shapes {0:?}")]
@@ -413,7 +413,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
     pub fn padding_shape(&self, record: &mut EmulationRecord) -> Result<(), RiscvShapeError> {
         debug!("-------------RISCV Padding Shape-------------");
         if record.program.preprocessed_shape.is_none() {
-            return Err(RiscvShapeError::PrepcocessedShapeMissing);
+            return Err(RiscvShapeError::PreprocessedShapeMissing);
         }
         if record.shape.is_some() {
             return Err(RiscvShapeError::ShapeAlreadyFixed);
