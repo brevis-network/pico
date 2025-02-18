@@ -271,9 +271,16 @@ macro_rules! impl_combine_vk_machine {
                 assert_recursion_public_values_valid(self.config().as_ref(), public_values);
                 assert_riscv_vk_digest(proof, riscv_vk);
 
+                // Vk Verification
+                assert_eq!(proof.vks().len(), 1);
+                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+                let combine_vk = proof.vks().first().unwrap();
+                assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
+
+
                 // verify
                 self.base_machine
-                    .verify_ensemble(proof.vks().first().unwrap(), &proof.proofs())?;
+                    .verify_ensemble(combine_vk, &proof.proofs())?;
 
                 Ok(())
             }

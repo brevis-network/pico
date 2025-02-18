@@ -107,6 +107,10 @@ where
             recursion_stdin: stdin,
         }
     }
+
+    pub fn is_vk_allowed(&self, vk_digest: [Val<SC>; DIGEST_SIZE]) -> bool {
+        self.allowed_vk_map.contains_key(&vk_digest)
+    }
 }
 
 pub static VK_MANAGER_BB: Lazy<VkMerkleManager<BabyBearPoseidon2>> = Lazy::new(|| {
