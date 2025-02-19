@@ -1,6 +1,5 @@
 use super::super::stdin::{ConvertStdin, ConvertStdinVariable};
 use crate::{
-    chips::chips::riscv_cpu::MAX_CPU_LOG_DEGREE,
     compiler::{
         recursion::{
             circuit::{
@@ -28,7 +27,9 @@ use crate::{
         chip::ChipBehavior, field::FieldSpecificPoseidon2Config, lookup::LookupScope,
         machine::BaseMachine,
     },
-    primitives::consts::{ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS},
+    primitives::consts::{
+        ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS,
+    },
 };
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
@@ -220,7 +221,7 @@ where
             }
             if flag_cpu {
                 let log_degree_cpu = proofs[0].log_degree_cpu();
-                assert!(log_degree_cpu <= MAX_CPU_LOG_DEGREE);
+                assert!(log_degree_cpu <= MAX_LOG_CHUNK_SIZE);
 
                 builder.assert_felt_ne(public_values.start_pc, CC::F::ZERO);
             }

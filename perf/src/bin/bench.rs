@@ -1,4 +1,8 @@
-use anyhow::Result;
+// Benchmark as:
+// export JEMALLOC_SYS_WITH_MALLOC_CONF="retain:true,background_thread:true,metadata_thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true"
+// RUSTFLAGS="-C target-cpu=native -C target-feature=+avx512f,+avx512ifma,+avx512vl" SPLIT_THRESHOLD=1048576 CHUNK_SIZE=4194304 CHUNK_BATCH_SIZE=32 RUST_LOG=info cargo run --profile perf --bin bench --features jemalloc --features nightly-features -- --programs reth-17106222 --field kb_vk
+
+use anyhow::{Context, Result};
 use clap::{
     builder::{NonEmptyStringValueParser, TypedValueParser},
     Parser,
@@ -7,11 +11,23 @@ use log::info;
 use p3_baby_bear::BabyBear;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
-    configs::config::StarkGenericConfig,
+    configs::{
+        config::StarkGenericConfig,
+        field_config::{bb_bn254::BabyBearBn254, kb_bn254::KoalaBearBn254},
+        stark_config::{
+            bb_bn254_poseidon2::BabyBearBn254Poseidon2, kb_bn254_poseidon2::KoalaBearBn254Poseidon2,
+        },
+    },
     emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
-        compiler::shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
+        compiler::{
+            onchain_circuit::{
+                gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin,
+                utils::build_gnark_config_with_str,
+            },
+            shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
+        },
         configs::{
             riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
         },
@@ -22,8 +38,16 @@ use pico_vm::{
         EmbedProver, EmbedVkProver, InitialProverSetup, MachineProver, ProverChain, RiscvProver,
     },
 };
+use reqwest::blocking::Client;
 use serde::Serialize;
-use std::time::{Duration, Instant};
+use std::{
+    io::{BufRead, BufReader},
+    path::PathBuf,
+    process::{Command, Stdio},
+    thread,
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about=None)]
@@ -45,23 +69,23 @@ struct Benchmark {
 const PROGRAMS: &[Benchmark] = &[
     Benchmark {
         name: "fibonacci-300kn",
-        elf: "./vm/src/compiler/test_elf/bench/fibonacci-elf",
+        elf: "./perf/bench_data/fibonacci-elf",
         input: Some("fibonacci-300kn"),
     },
     Benchmark {
         name: "tendermint",
-        elf: "./vm/src/compiler/test_elf/bench/tendermint-elf",
+        elf: "./perf/bench_data/tendermint-elf",
         input: None,
     },
     Benchmark {
         name: "reth-17106222",
-        elf: "./vm/src/compiler/test_elf/bench/reth-elf",
-        input: Some("./vm/src/compiler/test_elf/bench/reth-17106222.bin"),
+        elf: "./perf/bench_data/reth-elf",
+        input: Some("./perf/bench_data/reth-17106222.bin"),
     },
     Benchmark {
         name: "reth-20528709",
-        elf: "./vm/src/compiler/test_elf/bench/reth-elf",
-        input: Some("./vm/src/compiler/test_elf/bench/reth-20528709.bin"),
+        elf: "./perf/bench_data/reth-elf",
+        input: Some("./perf/bench_data/reth-20528709.bin"),
     },
 ];
 
@@ -81,6 +105,52 @@ fn load<P>(bench: &Benchmark) -> Result<(Vec<u8>, EmulatorStdin<P, Vec<u8>>)> {
     let stdin = EmulatorStdin::new_riscv(&stdin);
 
     Ok((elf, stdin))
+}
+
+fn prepare_kb_gnark() {
+    clean_gnark_env();
+
+    let mut setup_cmd_setup = Command::new("sh");
+    setup_cmd_setup.arg("-c").arg(
+        "rm -f vm_pk vm_vk Groth16Verifier.sol && \
+        curl -O https://picobench.s3.us-west-2.amazonaws.com/koalabear_gnark/vm_pk && \
+        curl -O https://picobench.s3.us-west-2.amazonaws.com/koalabear_gnark/vm_vk && \
+        curl -O https://picobench.s3.us-west-2.amazonaws.com/koalabear_gnark/vm_ccs",
+    );
+    execute_command(setup_cmd_setup);
+
+    let mut setup_cmd_start_gnark_server = Command::new("sh");
+    setup_cmd_start_gnark_server.arg("-c")
+        .arg("docker run --rm -d -v `pwd`:/data -p 9099:9099 --name pico_bench brevishub/pico_gnark_server:1.1 -field kb");
+    execute_command(setup_cmd_start_gnark_server);
+
+    check_gnark_prover_ready()
+}
+
+fn prepare_bb_gnark() {
+    clean_gnark_env();
+
+    let mut setup_cmd_setup = Command::new("sh");
+    setup_cmd_setup.arg("-c").arg(
+        "rm -f vm_pk vm_vk Groth16Verifier.sol && \
+        curl -O https://picobench.s3.us-west-2.amazonaws.com/babybear_gnark/vm_pk && \
+        curl -O https://picobench.s3.us-west-2.amazonaws.com/babybear_gnark/vm_vk && \
+        curl -O https://picobench.s3.us-west-2.amazonaws.com/babybear_gnark/vm_ccs",
+    );
+    execute_command(setup_cmd_setup);
+
+    let mut setup_cmd_start_gnark_server = Command::new("sh");
+    setup_cmd_start_gnark_server.arg("-c")
+        .arg("docker run --rm -d -v `pwd`:/data -p 9099:9099 --name pico_bench brevishub/pico_gnark_server:1.1 -field bb");
+    execute_command(setup_cmd_start_gnark_server);
+
+    check_gnark_prover_ready()
+}
+
+fn clean_gnark_env() {
+    let mut setup_cmd_clean = Command::new("sh");
+    setup_cmd_clean.arg("-c").arg("docker rm -f pico_bench");
+    execute_command(setup_cmd_clean);
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -108,6 +178,7 @@ pub struct PerformanceReport {
     compress_duration: Duration,
     embed_duration: Duration,
     recursion_duration: Duration,
+    evm_duration: Duration,
     total_duration: Duration,
     success: bool,
 }
@@ -209,6 +280,7 @@ fn bench_bb(bench: &Benchmark) -> Result<PerformanceReport> {
         compress_duration,
         embed_duration,
         recursion_duration,
+        evm_duration: Duration::default(),
         total_duration,
         success: true,
     })
@@ -287,9 +359,31 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Verifying EMBED proof..");
     assert!(embed.verify(&proof, riscv_vk));
 
+    info!("╔═══════════════════════╗");
+    info!("║     ONCHAIN PHASE     ║");
+    info!("╚═══════════════════════╝");
+    let (_, evm_duration) = time_operation(|| {
+        let onchain_stdin = OnchainStdin {
+            machine: embed.machine().clone(),
+            vk: proof.vks().first().unwrap().clone(),
+            proof: proof.proofs().first().unwrap().clone(),
+            flag_complete: true,
+        };
+
+        // generate gnark data
+        let (constraints, witness) =
+            OnchainVerifierCircuit::<BabyBearBn254, BabyBearBn254Poseidon2>::build(&onchain_stdin);
+        let gnark_witness = build_gnark_config_with_str(constraints, witness, PathBuf::from("./"));
+
+        let gnark_proof_data = send_gnark_prove_task(gnark_witness);
+        info!("gnark prove success with proof data {}", gnark_proof_data);
+
+        1_u32
+    });
+
     let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
-    let total_duration = riscv_duration + recursion_duration;
+    let total_duration = riscv_duration + recursion_duration + evm_duration;
 
     info!("╔═══════════════════════╗");
     info!("║ PERFORMANCE SUMMARY   ║");
@@ -305,6 +399,8 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("  ----------------------------------------");
     info!("  TOTAL:   {}", format_duration(recursion_duration));
     info!("----------------------------------------");
+    info!("EVM:       {}", format_duration(evm_duration));
+    info!("----------------------------------------");
     info!("TOTAL:     {}", format_duration(total_duration));
 
     Ok(PerformanceReport {
@@ -316,6 +412,7 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
         compress_duration,
         embed_duration,
         recursion_duration,
+        evm_duration,
         total_duration,
         success: true,
     })
@@ -394,9 +491,32 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("Verifying EMBED proof..");
     assert!(embed.verify(&proof, riscv_vk));
 
+    info!("╔═══════════════════════╗");
+    info!("║     ONCHAIN PHASE     ║");
+    info!("╚═══════════════════════╝");
+    let (_, evm_duration) = time_operation(|| {
+        let onchain_stdin = OnchainStdin {
+            machine: embed.machine().clone(),
+            vk: proof.vks().first().unwrap().clone(),
+            proof: proof.proofs().first().unwrap().clone(),
+            flag_complete: true,
+        };
+
+        // generate gnark data
+        let (constraints, witness) = OnchainVerifierCircuit::<
+            KoalaBearBn254,
+            KoalaBearBn254Poseidon2,
+        >::build(&onchain_stdin);
+        let gnark_witness = build_gnark_config_with_str(constraints, witness, PathBuf::from("./"));
+        let gnark_proof_data = send_gnark_prove_task(gnark_witness);
+        info!("gnark prove success with proof data {}", gnark_proof_data);
+
+        1_u32
+    });
+
     let recursion_duration =
         convert_duration + combine_duration + compress_duration + embed_duration;
-    let total_duration = riscv_duration + recursion_duration;
+    let total_duration = riscv_duration + recursion_duration + evm_duration;
 
     info!("╔═══════════════════════╗");
     info!("║ PERFORMANCE SUMMARY   ║");
@@ -412,6 +532,8 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     info!("  ----------------------------------------");
     info!("  TOTAL:   {}", format_duration(recursion_duration));
     info!("----------------------------------------");
+    info!("EVM:       {}", format_duration(evm_duration));
+    info!("----------------------------------------");
     info!("TOTAL:     {}", format_duration(total_duration));
 
     Ok(PerformanceReport {
@@ -423,6 +545,7 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
         compress_duration,
         embed_duration,
         recursion_duration,
+        evm_duration,
         total_duration,
         success: true,
     })
@@ -519,6 +642,7 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
         compress_duration,
         embed_duration,
         recursion_duration,
+        evm_duration: Duration::default(),
         total_duration,
         success: true,
     })
@@ -567,6 +691,13 @@ fn main() -> Result<()> {
             .filter(|p| args.programs.iter().any(|name| name == p.name))
             .collect()
     };
+
+    if args.field.as_str() == "kb_vk" {
+        prepare_kb_gnark()
+    } else if args.field.as_str() == "bb_vk" {
+        prepare_bb_gnark()
+    }
+
     let run_bench: fn(&Benchmark) -> _ = match args.field.as_str() {
         "bb" => bench_bb,
         "kb" => bench_kb,
@@ -583,5 +714,101 @@ fn main() -> Result<()> {
     let output = format_results(&args, &results);
     println!("{}", output.join("\n"));
 
+    // stop and rm the docker server
+    if args.field.as_str() == "kb_vk" || args.field.as_str() == "bb_vk" {
+        clean_gnark_env()
+    }
+
     Ok(())
+}
+
+pub fn execute_command(mut command: Command) {
+    println!("Start to execute command...");
+    log_command(&command);
+    // Add necessary tags for stdout and stderr from the command.
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to spawn command")
+        .expect("cargo build failed");
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+
+    // Add prefix to the output of the process depending on the context.
+    let msg = "[pico]";
+
+    // Pipe stdout and stderr to the parent process with [docker] prefix
+    let stdout_handle = thread::spawn(move || {
+        stdout.lines().for_each(|line| {
+            println!("{} {}", msg, line.unwrap());
+        });
+    });
+    stderr.lines().for_each(|line| {
+        eprintln!("{} {}", msg, line.unwrap());
+    });
+    stdout_handle.join().unwrap();
+
+    let _ = child.wait().expect("failed to wait for child process");
+}
+
+fn log_command(command: &Command) {
+    let command_string = format!(
+        "{} {}",
+        command.get_program().to_string_lossy(),
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    println!("Command: {:?}", command_string);
+}
+
+fn send_gnark_prove_task(json_req: String) -> String {
+    let client = Client::new();
+    tracing::info!("start send witness to gnark prover");
+    let response = client
+        .post("http://127.0.0.1:9099/prove")
+        .body(json_req.to_string())
+        .header("Content-Type", "application/json")
+        .send()
+        .unwrap();
+
+    if !response.status().is_success() {
+        panic!(
+            "fail to prove task: {:?} {:?}",
+            response.status(),
+            response.text()
+        );
+    }
+    tracing::info!("gnark prover successful");
+    response.text().unwrap()
+}
+
+fn check_gnark_prover_ready() {
+    let client = Client::new();
+    let start = Instant::now();
+    loop {
+        let response = client
+            .post("http://127.0.0.1:9099/ready")
+            .header("Content-Type", "application/json")
+            .timeout(Duration::from_secs(2))
+            .send();
+
+        match response {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    tracing::info!("gnark prover is ready");
+                    break;
+                }
+            }
+            Err(_e) => {}
+        }
+        if start.elapsed() > Duration::from_secs(120) {
+            panic!("wait for docker prover timeout")
+        }
+        tracing::info!("docker prover not ready for conn, waiting...");
+        sleep(Duration::from_secs(2));
+    }
 }

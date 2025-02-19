@@ -7,9 +7,18 @@ import (
 	"github.com/consensys/gnark/backend/groth16"
 	groth16_bn254 "github.com/consensys/gnark/backend/groth16/bn254"
 	"github.com/consensys/gnark/backend/witness"
+	"github.com/consensys/gnark/constraint"
 	"math/big"
 	"os"
 )
+
+type WitnessInput struct {
+	Vars                  []string   `json:"vars"`
+	Felts                 []string   `json:"felts"`
+	Exts                  [][]string `json:"exts"`
+	VkeyHash              string     `json:"vkey_hash"`
+	CommittedValuesDigest string     `json:"committed_values_digest"`
+}
 
 type Groth16Proof struct {
 	A             [2]string    `json:"a"`
@@ -180,4 +189,27 @@ func Encode(b []byte) string {
 	copy(enc, "0x")
 	hex.Encode(enc[2:], b)
 	return string(enc)
+}
+
+func ReadCcs(filename string, ccs constraint.ConstraintSystem) error {
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = ccs.ReadFrom(f)
+	return err
+}
+
+func WriteCcs(filename string, css constraint.ConstraintSystem) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	_, err = css.WriteTo(f)
+	if err != nil {
+		return err
+	}
+	return nil
 }

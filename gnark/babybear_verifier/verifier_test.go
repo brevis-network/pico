@@ -11,9 +11,9 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/logger"
 	"github.com/consensys/gnark/test"
+	"github.com/labstack/gommon/log"
 	"github.com/rs/zerolog"
 	"golang.org/x/crypto/sha3"
-	"log"
 	"os"
 	"testing"
 )
@@ -47,7 +47,7 @@ func doSolve(assert *test.Assert) (circuit *Circuit, assigment *Circuit) {
 	assert.NoError(err)
 
 	// Deserialize the JSON data into a slice of Instruction structs
-	var inputs WitnessInput
+	var inputs utils.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	assert.NoError(err)
 	assigment = NewCircuit(inputs)
@@ -73,7 +73,7 @@ func doSetUp(assert *test.Assert, circuit *Circuit, assigment *Circuit) {
 
 	pk, vk, err := groth16.Setup(ccs)
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatal(err)
 	}
 
 	pf, err := groth16.Prove(ccs, pk, fullWitness, backend.WithProverHashToFieldFunction(sha3.NewLegacyKeccak256()))

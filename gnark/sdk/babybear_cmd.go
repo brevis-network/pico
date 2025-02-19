@@ -69,7 +69,7 @@ func DoBabyBearSolve() (circuit *babybear_verifier.Circuit, assigment *babybear_
 		return nil, nil, fmt.Errorf("fail to read witness file: %v\n", err)
 	}
 
-	var inputs babybear_verifier.WitnessInput
+	var inputs utils.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse witness json: %v\n", err)
@@ -132,6 +132,11 @@ func BabyBearSetup() error {
 	if err != nil {
 		return fmt.Errorf("fail to write vk: %v", err)
 	}
+
+	err = utils.WriteCcs(os.Getenv("CCS_PATH"), ccs)
+	if err != nil {
+		return fmt.Errorf("fail to write vk: %v", err)
+	}
 	return nil
 }
 
@@ -156,7 +161,7 @@ func BabyBearProve() error {
 		return fmt.Errorf("fail to read witness file: %v\n", err)
 	}
 
-	var inputs babybear_verifier.WitnessInput
+	var inputs utils.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return fmt.Errorf("failed to parse witness json: %v", err)

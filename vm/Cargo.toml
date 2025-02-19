@@ -36,36 +36,53 @@ p3-circle.workspace = true
 p3-koala-bear.workspace = true
 
 # misc
+amcl.workspace = true
 anyhow.workspace = true
 arrayref.workspace = true
 backtrace.workspace = true
 bincode.workspace = true
 bytemuck.workspace = true
+cfg-if.workspace = true
 clap.workspace = true
+cpu-time.workspace = true
 crossbeam.workspace = true
 csv.workspace = true
+curve25519-dalek.workspace = true
 dashmap.workspace = true
+dashu.workspace = true
 elf.workspace = true
+elliptic-curve.workspace = true
 eyre.workspace = true
 ff.workspace = true
+halo2curves.workspace = true
 hashbrown.workspace = true
 hex.workspace = true
+hybrid-array.workspace = true
 itertools.workspace = true
+k256.workspace = true
 lazy_static.workspace = true
 log.workspace = true
 nohash-hasher.workspace = true
+num-bigint.workspace = true
+num-traits.workspace = true
 num.workspace = true
 num_cpus.workspace = true
-num-traits.workspace = true
+once_cell.workspace = true
+p256.workspace = true
+paste.workspace = true
 rand.workspace = true
-rayon.workspace = true
 rayon-scan.workspace = true
+rayon.workspace = true
+reqwest.workspace = true
 rrs_lib.workspace = true
+rug = { workspace = true, optional = true }
 serde.workspace = true
+serde_json.workspace = true
 serde_with.workspace = true
 static_assertions.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
+sysinfo.workspace = true
 thiserror.workspace = true
 tiny-keccak.workspace = true
 tracing-forest.workspace = true
@@ -74,37 +91,24 @@ tracing.workspace = true
 typenum.workspace = true
 vec_map.workspace = true
 zkhash.workspace = true
-curve25519-dalek.workspace = true
-k256.workspace = true
-p256.workspace = true
-elliptic-curve.workspace = true
-dashu.workspace = true
-cfg-if.workspace = true
-halo2curves.workspace = true
-num-bigint.workspace = true
-once_cell.workspace = true
 
-serde_json = "1.0.121"
-rug = { version = "1.26.1", optional = true }
-amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = [
-  "bls381",
-] }
-sysinfo = "0.30.13"
-hybrid-array = "0.2.1"
-cpu-time = "1.0.0"
-paste = "1.0.15"
-
+# Set JEMALLOC_SYS_WITH_MALLOC_CONF="retain:true,background_thread:true,metadata_thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true"
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { workspace = true, optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5.1", features = ["html_reports"] }
-rand = "0.8.5"
-num = { version = "0.4.3", features = ["rand"] }
+num = { workspace = true, features = ["rand"] }
+rand.workspace = true
 
 [features]
 default = []
+bigint-rug = ["rug"] # curves
 debug = []
 debug-lookups = []
+jemalloc = ["dep:tikv-jemallocator"]
 single-threaded = []
-
-# curves
-bigint-rug = ["rug"]
+nightly-features = [
+    "p3-dft/nightly-features",
+    "p3-keccak/nightly-features",
+    "p3-poseidon2/nightly-features",
+]

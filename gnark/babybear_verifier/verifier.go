@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/brevis-network/pico/gnark/babybear"
 	"github.com/brevis-network/pico/gnark/poseidon2"
+	"github.com/brevis-network/pico/gnark/utils"
 	"github.com/consensys/gnark/frontend"
 	"os"
 	"strconv"
@@ -18,7 +19,7 @@ type Circuit struct {
 	Exts                  []babybear.ExtensionVariable
 }
 
-func NewCircuit(witnessInput WitnessInput) *Circuit {
+func NewCircuit(witnessInput utils.WitnessInput) *Circuit {
 	vars := make([]frontend.Variable, len(witnessInput.Vars))
 	felts := make([]babybear.Variable, len(witnessInput.Felts))
 	exts := make([]babybear.ExtensionVariable, len(witnessInput.Exts))
@@ -43,14 +44,6 @@ func NewCircuit(witnessInput WitnessInput) *Circuit {
 type Constraint struct {
 	Opcode string     `json:"opcode"`
 	Args   [][]string `json:"args"`
-}
-
-type WitnessInput struct {
-	Vars                  []string   `json:"vars"`
-	Felts                 []string   `json:"felts"`
-	Exts                  [][]string `json:"exts"`
-	VkeyHash              string     `json:"vkey_hash"`
-	CommittedValuesDigest string     `json:"committed_values_digest"`
 }
 
 type Proof struct {

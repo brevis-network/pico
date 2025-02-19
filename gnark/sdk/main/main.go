@@ -11,13 +11,14 @@ import (
 var (
 	cmd             = flag.String("cmd", "prove", "cmd to choose: prove(default)/setup/solve")
 	pkPath          = flag.String("pk", "./data/vm_pk", "path of proving key")
+	ccsPath         = flag.String("ccs", "./data/vm_ccs", "path of ccs")
 	vkPath          = flag.String("vk", "./data/vm_vk", "path of verifying key")
 	useGroth16      = flag.Bool("groth16", true, "use groth16")
 	witnessFile     = flag.String("witness", "./data/groth16_witness.json", "path of witness json file")
 	constraintsFile = flag.String("constraints", "./data/constraints.json", "path of constraint json file")
 	proofPath       = flag.String("proof", "./data/proof.data", "path of proof file")
 	solidifyPath    = flag.String("sol", "./data/Groth16Verifier.sol", "path of solidify file")
-	field           = flag.String("field", "babybear", "field for proving, support babybear and koala bear")
+	field           = flag.String("field", "kb", "field for proving, support bb and kb")
 )
 
 func main() {
@@ -32,6 +33,12 @@ func main() {
 	err := os.Setenv("PK_PATH", *pkPath)
 	if err != nil {
 		fmt.Printf("failed to set pk env var: %v\n", err)
+		return
+	}
+
+	err = os.Setenv("CCS_PATH", *ccsPath)
+	if err != nil {
+		fmt.Printf("failed to set ccs env var: %v\n", err)
 		return
 	}
 
@@ -66,13 +73,13 @@ func main() {
 	}
 
 	switch *field {
-	case "babybear":
+	case "bb":
 		err = sdk.BabyBearCmd(*cmd)
 		if err != nil {
 			fmt.Printf("failed to babybear: %v\n", err)
 			return
 		}
-	case "koalabear":
+	case "kb":
 		err = sdk.KoalaBearCmd(*cmd)
 		if err != nil {
 			fmt.Printf("failed to koalabear: %v\n", err)
