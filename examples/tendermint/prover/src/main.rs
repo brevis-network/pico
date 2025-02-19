@@ -26,7 +26,7 @@ fn main() {
     init_logger();
 
     // Load the ELF file
-    let elf = load_elf("./elf/riscv32im-pico-zkvm-elf");
+    let elf = load_elf("../app/elf/riscv32im-pico-zkvm-elf");
     println!("elf length: {}", elf.len());
 
     let client = DefaultProverClient::new(&elf);
