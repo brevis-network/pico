@@ -101,7 +101,7 @@ num = { workspace = true, features = ["rand"] }
 rand.workspace = true
 
 [features]
-default = ["jemalloc", "nightly-features"]
+default = ["nightly-features"]
 bigint-rug = ["rug"] # curves
 debug = []
 debug-lookups = []
