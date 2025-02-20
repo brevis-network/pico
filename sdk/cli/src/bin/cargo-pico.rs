@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{crate_version, Parser, Subcommand};
 use pico_cli::subcommand::{build::BuildCmd, new::NewCmd, prove::ProveCmd};
 use pico_sdk::init_logger;
 
@@ -10,7 +10,7 @@ pub enum Cargo {
 }
 
 #[derive(clap::Args)]
-#[command(author, about, long_about = None, args_conflicts_with_subcommands = true, version = "0.1.0")]
+#[command(author, about, long_about = None, args_conflicts_with_subcommands = true, version = crate_version!())]
 pub struct PicoCli {
     #[clap(subcommand)]
     pub command: Option<SubCommands>,
