@@ -73,7 +73,6 @@ paste.workspace = true
 rand.workspace = true
 rayon-scan.workspace = true
 rayon.workspace = true
-reqwest.workspace = true
 rrs_lib.workspace = true
 rug = { workspace = true, optional = true }
 serde.workspace = true

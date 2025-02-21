@@ -3274,7 +3274,6 @@ dependencies = [
  "rand",
  "rayon",
  "rayon-scan",
- "reqwest",
  "rrs-succinct",
  "rug",
  "serde",
