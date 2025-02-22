@@ -40,7 +40,7 @@ fn verify_public_values(n: u32, public_values: &PublicValuesStruct) {
     // Compute Fibonacci values locally
     let (result_a, result_b) = fibonacci(0, 1, n);
 
-    // Assert that the computed values match the public values
+    // Ensure that the computed values match the public values
     assert_eq!(result_a, public_values.a, "Mismatch in value 'a'");
     assert_eq!(result_b, public_values.b, "Mismatch in value 'b'");
 }
