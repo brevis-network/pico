@@ -1318,7 +1318,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "field-ffi"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "p3-baby-bear 0.1.0",
  "p3-field 0.1.0",
@@ -3118,7 +3118,7 @@ dependencies = [
 
 [[package]]
 name = "pico-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -3147,7 +3147,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "bincode",
  "serde",
@@ -3155,7 +3155,7 @@ dependencies = [
 
 [[package]]
 name = "pico-perf"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "pico-scripts"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "bincode",
  "clap",
@@ -3185,7 +3185,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3212,7 +3212,7 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "arrayref",
