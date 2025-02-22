@@ -1,9 +1,11 @@
-use crate::emulator::record::RecordBehavior;
+use crate::{
+    emulator::record::RecordBehavior,
+    iter::{PicoBridge, PicoIterator, PicoSlice},
+};
 use p3_air::BaseAir;
 use p3_field::PrimeField32;
 use p3_keccak_air::{generate_trace_rows, NUM_KECCAK_COLS, NUM_ROUNDS};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use std::borrow::BorrowMut;
 use tracing::debug;
 
@@ -61,7 +63,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
             .collect();
 
         let blu_events: Vec<Vec<ByteLookupEvent>> = events
-            .par_chunks(chunk_size)
+            .pico_chunks(chunk_size)
             .map(|ops: &[&KeccakPermuteEvent]| {
                 // The blu map stores chunk -> map(byte lookup event -> multiplicity).
                 let mut blu: Vec<ByteLookupEvent> = Vec::new();
@@ -115,7 +117,7 @@ impl<F: PrimeField32> ChipBehavior<F> for KeccakPermuteChip<F> {
         values
             .chunks_mut(chunk_size * NUM_KECCAK_MEM_COLS * NUM_ROUNDS)
             .enumerate()
-            .par_bridge()
+            .pico_bridge()
             .for_each(|(i, rows)| {
                 rows.chunks_mut(NUM_ROUNDS * NUM_KECCAK_MEM_COLS)
                     .enumerate()

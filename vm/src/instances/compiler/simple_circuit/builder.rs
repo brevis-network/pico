@@ -133,7 +133,7 @@ where
             );
 
             // Cumulative sum is updated by sums of all chips.
-            for values in base_proof.opened_values.chips_opened_values.iter() {
+            for values in base_proof.opened_values.iter() {
                 global_cumulative_sums.push(values.global_cumulative_sum);
             }
         }

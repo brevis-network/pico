@@ -17,14 +17,13 @@ use crate::{
     compiler::recursion::{instruction::Instruction::Poseidon2, program::RecursionProgram},
     configs::config::Poseidon2Config,
     emulator::recursion::emulator::RecursionRecord,
+    iter::{join, IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR},
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::ParallelIterator;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
-use rayon::{iter::IndexedParallelIterator, join, slice::ParallelSliceMut};
 use std::borrow::BorrowMut;
 
 impl<
@@ -61,7 +60,7 @@ impl<
 
         let populate_len = instructions.len() * NUM_PREPROCESSED_POSEIDON2_VALUE_COLS;
         values[..populate_len]
-            .par_chunks_mut(NUM_PREPROCESSED_POSEIDON2_VALUE_COLS)
+            .pico_chunks_mut(NUM_PREPROCESSED_POSEIDON2_VALUE_COLS)
             .zip_eq(instructions)
             .for_each(|(row, instruction)| {
                 // Set the memory columns.
@@ -95,7 +94,7 @@ impl<
         join(
             || {
                 values_pop
-                    .par_chunks_mut(NUM_POSEIDON2_VALUE_COLS::<Config>)
+                    .pico_chunks_mut(NUM_POSEIDON2_VALUE_COLS::<Config>)
                     .zip_eq(events)
                     .for_each(|(row, event)| {
                         let cols: &mut Poseidon2ValueCols<F, Config> = row.borrow_mut();
@@ -120,7 +119,7 @@ impl<
                     &self.constants,
                 );
                 values_dummy
-                    .par_chunks_mut(NUM_POSEIDON2_VALUE_COLS::<Config>)
+                    .pico_chunks_mut(NUM_POSEIDON2_VALUE_COLS::<Config>)
                     .for_each(|row| row.copy_from_slice(dummy))
             },
         );

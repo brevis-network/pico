@@ -29,7 +29,7 @@ func KoalaBearCmd(cmd string) (err error) {
 			return fmt.Errorf("fail to setup: %v\n", err)
 		}
 		err = ExportSolidify()
-		if err == nil {
+		if err != nil {
 			return fmt.Errorf("fail to export solidity: %v\n", err)
 		}
 	case "solve":
@@ -47,7 +47,7 @@ func KoalaBearCmd(cmd string) (err error) {
 			return fmt.Errorf("fail to export solidity: %v\n", err)
 		}
 		err = KoalaBearProve()
-		if err == nil {
+		if err != nil {
 			return fmt.Errorf("fail to prove: %v\n", err)
 		}
 	case "exportSolidity":
@@ -69,7 +69,7 @@ func DoKoalaBearSolve() (circuit *koalabear_verifier.Circuit, assigment *koalabe
 		return nil, nil, fmt.Errorf("fail to read witness file: %v\n", err)
 	}
 
-	var inputs koalabear_verifier.WitnessInput
+	var inputs utils.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse witness json: %v\n", err)
@@ -132,6 +132,12 @@ func KoalaBearSetup() error {
 	if err != nil {
 		return fmt.Errorf("fail to write vk: %v", err)
 	}
+
+	err = utils.WriteCcs(os.Getenv("CCS_PATH"), ccs)
+	if err != nil {
+		return fmt.Errorf("fail to write vk: %v", err)
+	}
+	return nil
 	return nil
 }
 
@@ -156,7 +162,7 @@ func KoalaBearProve() error {
 		return fmt.Errorf("fail to read witness file: %v\n", err)
 	}
 
-	var inputs koalabear_verifier.WitnessInput
+	var inputs utils.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return fmt.Errorf("failed to parse witness json: %v", err)

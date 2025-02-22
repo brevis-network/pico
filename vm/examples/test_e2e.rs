@@ -10,13 +10,9 @@ use pico_vm::{
     },
     configs::{
         config::{Challenge, FieldGenericConfig, StarkGenericConfig, Val},
-        field_config::{
-            bb_bn254::BabyBearBn254, bb_simple::BabyBearSimple, kb_bn254::KoalaBearBn254,
-            kb_simple::KoalaBearSimple,
-        },
+        field_config::{BabyBearBn254, BabyBearSimple, KoalaBearBn254, KoalaBearSimple},
         stark_config::{
-            bb_bn254_poseidon2::BabyBearBn254Poseidon2, bb_poseidon2::BabyBearPoseidon2,
-            kb_bn254_poseidon2::KoalaBearBn254Poseidon2, kb_poseidon2::KoalaBearPoseidon2,
+            BabyBearBn254Poseidon2, BabyBearPoseidon2, KoalaBearBn254Poseidon2, KoalaBearPoseidon2,
         },
     },
     emulator::{

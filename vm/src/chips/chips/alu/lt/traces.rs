@@ -18,6 +18,7 @@ use crate::{
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
+    iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::LT_DATAPAR,
 };
@@ -26,7 +27,6 @@ use itertools::izip;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use rayon::prelude::*;
 use std::marker::PhantomData;
 
 /// Lt Chip for proving U32 Signed/Unsigned b < c
@@ -60,7 +60,7 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
 
         let populate_len = events.len() * NUM_LT_VALUE_COLS;
         values[..populate_len]
-            .par_chunks_mut(NUM_LT_VALUE_COLS)
+            .pico_chunks_mut(NUM_LT_VALUE_COLS)
             .zip_eq(events)
             .for_each(|(row, event)| {
                 let cols: &mut LtValueCols<_> = row.borrow_mut();
@@ -75,7 +75,7 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
 
         let blu_events = input
             .lt_events
-            .par_chunks(chunk_size)
+            .pico_chunks(chunk_size)
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {

@@ -5,7 +5,7 @@ use crate::{
         record::RecordBehavior,
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
     },
-    instances::compiler::vk_merkle::stdin::RecursionVkStdin,
+    instances::compiler::vk_merkle::{stdin::RecursionVkStdin, HasStaticVkManager},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -41,7 +41,9 @@ where
     SC: StarkGenericConfig<Val = F, Domain = TwoAdicMultiplicativeCoset<F>>
         + Send
         + Sync
-        + FieldHasher<Val<SC>>,
+        + FieldHasher<Val<SC>>
+        + HasStaticVkManager
+        + 'static,
     Val<SC>: PrimeField32,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
@@ -117,6 +119,13 @@ where
         riscv_vk: &dyn HashableKey<SC::Val>,
     ) -> anyhow::Result<()> {
         let vk = proof.vks().first().unwrap();
+
+        let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
+
+        assert!(
+            vk_manager.is_vk_allowed(vk.hash_field()),
+            "Recursion Vk Verification failed"
+        );
 
         assert_eq!(proof.num_proofs(), 1);
 

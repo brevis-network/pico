@@ -2,6 +2,7 @@ use crate::{
     compiler::program::ProgramBehavior,
     configs::config::{PackedChallenge, StarkGenericConfig},
     emulator::record::RecordBehavior,
+    iter::ThreadPoolBuilder,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::ProverConstraintFolder,
@@ -25,7 +26,6 @@ use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
-use rayon::ThreadPoolBuilder;
 use std::{array, cmp::Reverse, time::Instant};
 use tracing::{debug, debug_span, instrument, Span};
 

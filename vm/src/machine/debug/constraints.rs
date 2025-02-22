@@ -2,6 +2,7 @@ use super::DebuggerMessageLevel;
 use crate::{
     configs::config::StarkGenericConfig,
     emulator::record::RecordBehavior,
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, IntoPicoRefMutIterator, PicoIterator},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::DebugConstraintFolder,
@@ -11,6 +12,7 @@ use crate::{
         utils::chunk_active_chips,
     },
 };
+use hashbrown::HashMap;
 use log::{debug, error, info};
 use p3_air::Air;
 use p3_challenger::FieldChallenger;
@@ -20,8 +22,23 @@ use p3_matrix::{
     stack::VerticalPair,
     Matrix,
 };
-use p3_maybe_rayon::prelude::*;
-use std::array;
+use std::{
+    array,
+    sync::{LazyLock, RwLock},
+};
+
+static DEFAULT_MAX_FAILURES: usize = 100;
+static MAX_FAILURES: LazyLock<usize> = LazyLock::new(|| {
+    let failures = std::env::var("DEBUG_MAX_FAILURES")
+        .ok()
+        .and_then(|x| x.parse().ok())
+        .unwrap_or(DEFAULT_MAX_FAILURES);
+    debug!("maximum number of failed rows for debugging: {}", failures);
+    failures
+});
+
+static FAILURE_COUNTS: LazyLock<RwLock<HashMap<String, usize>>> =
+    LazyLock::new(|| HashMap::new().into());
 
 pub struct IncrementalConstraintDebugger<'a, SC: StarkGenericConfig> {
     pk: &'a BaseProvingKey<SC>,
@@ -63,7 +80,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 (DebuggerMessageLevel::Info, msg) => log::info!("{}", msg),
                 (DebuggerMessageLevel::Debug, msg) => log::debug!("{}", msg),
                 (DebuggerMessageLevel::Error, msg) => {
-                    eprintln!("{}", msg);
+                    log::error!("{}", msg);
                     success = false;
                 }
             }
@@ -90,6 +107,8 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
     where
         C: ChipBehavior<SC::Val> + for<'b> Air<DebugConstraintFolder<'b, SC::Val, SC::Challenge>>,
     {
+        info!("Checking constraints");
+
         for chunk in chunks.iter() {
             // Filter the chips based on what is used.
             let chips = chunk_active_chips::<SC, C>(chips, chunk).collect::<Vec<_>>();
@@ -105,7 +124,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 })
                 .collect::<Vec<_>>();
             let mut traces = chips
-                .par_iter()
+                .pico_iter()
                 .map(|chip| chip.generate_main(chunk, &mut C::Record::default()))
                 .zip(preprocessed_traces)
                 .collect::<Vec<_>>();
@@ -114,8 +133,8 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
             let mut permutation_traces = Vec::with_capacity(chips.len());
             let mut cumulative_sums = Vec::with_capacity(chips.len());
             chips
-                .par_iter()
-                .zip(traces.par_iter_mut())
+                .pico_iter()
+                .zip(traces.pico_iter_mut())
                 .map(|(chip, (main_trace, preprocessed_trace))| {
                     let (trace, regional_sum) = chip.generate_permutation(
                         *preprocessed_trace,
@@ -185,13 +204,13 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                     &traces[i].0,
                     &permutation_traces[i],
                     chunk.public_values(),
-                    &cumulative_sums[i].1,
-                    &cumulative_sums[i].0,
+                    cumulative_sums[i].1,
+                    cumulative_sums[i].0,
                 );
             }
         }
 
-        info!("Constraints verified successfully");
+        info!("Finished checking constraints");
 
         let global_sum: SepticDigest<SC::Val> = self.global_sums.iter().copied().sum();
         if !global_sum.is_zero() {
@@ -210,8 +229,8 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         main_trace: &RowMajorMatrix<SC::Val>,
         permutation_trace: &RowMajorMatrix<SC::Challenge>,
         public_values: Vec<SC::Val>,
-        regional_cumulative_sum: &SC::Challenge,
-        global_cumulative_sum: &SepticDigest<SC::Val>,
+        regional_cumulative_sum: SC::Challenge,
+        global_cumulative_sum: SepticDigest<SC::Val>,
     ) where
         C: ChipBehavior<SC::Val> + for<'b> Air<DebugConstraintFolder<'b, SC::Val, SC::Challenge>>,
     {
@@ -221,14 +240,17 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
             return;
         }
 
-        let _cumulative_sum = permutation_trace
-            .row_slice(permutation_trace.height() - 1)
-            .last()
-            .copied()
-            .unwrap();
+        let mut failure_counts = FAILURE_COUNTS.try_write().expect("single writer");
+        let max_failures = failure_counts.entry(chip.name()).or_insert(*MAX_FAILURES);
+        info!("remaining failures for {}: {}", chip.name(), max_failures);
 
-        // Check that constraints are satisfied.
-        (0..height).for_each(|i| {
+        for i in 0..height {
+            // we don't care about any additional errors
+            if *max_failures == 0 {
+                break;
+            }
+
+            // eval the chip constraints with concrete values
             let i_next = (i + 1) % height;
 
             let main_local = &*main_trace.row_slice(i);
@@ -249,7 +271,6 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
             let permutation_local = &*permutation_trace.row_slice(i);
             let permutation_next = &*permutation_trace.row_slice(i_next);
 
-            let public_values = public_values.clone();
             let mut builder = DebugConstraintFolder {
                 preprocessed: VerticalPair::new(
                     RowMajorMatrixView::new_row(&preprocessed_local),
@@ -263,7 +284,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                     RowMajorMatrixView::new_row(permutation_local),
                     RowMajorMatrixView::new_row(permutation_next),
                 ),
-                permutation_challenges: &self.challenges,
+                permutation_challenges: self.challenges,
                 regional_cumulative_sum,
                 global_cumulative_sum,
                 is_first_row: SC::Val::ZERO,
@@ -271,6 +292,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 is_transition: SC::Val::ONE,
                 public_values: &public_values,
                 failures: Vec::new(),
+                scopes: Vec::new(),
             };
             if i == 0 {
                 builder.is_first_row = SC::Val::ONE;
@@ -280,7 +302,27 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 builder.is_transition = SC::Val::ZERO;
             }
             chip.eval(&mut builder);
-            for err in builder.failures.drain(..) {
+
+            // update the number of failures remaining
+            if !builder.failures.is_empty() {
+                *max_failures -= 1;
+                self.messages.push((
+                    DebuggerMessageLevel::Error,
+                    format!(
+                        "EVAL FAILURE at row {} of {}, {} failures left",
+                        i,
+                        chip.name(),
+                        max_failures
+                    ),
+                ));
+            }
+
+            // drain the failures
+            for (scopes, err) in builder.failures.drain(..) {
+                self.messages.push((
+                    DebuggerMessageLevel::Error,
+                    format!("failure in: {scopes:?}"),
+                ));
                 self.messages
                     .push((DebuggerMessageLevel::Error, format!("local: {err:?}")));
                 self.messages.push((
@@ -289,11 +331,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 ));
                 self.messages
                     .push((DebuggerMessageLevel::Error, format!("next:  {main_next:?}")));
-                self.messages.push((
-                    DebuggerMessageLevel::Error,
-                    format!("failed at row {} of chip {}", i, chip.name()),
-                ));
             }
-        });
+        }
     }
 }

@@ -8,7 +8,7 @@ use crate::{
     compiler::word::Word,
     emulator::riscv::public_values::PublicValues,
     machine::{
-        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
+        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ScopedBuilder},
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
     primitives::consts::RISCV_NUM_PVS,
@@ -18,7 +18,7 @@ use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::Matrix;
 use std::{array, borrow::Borrow, iter::once};
 
-impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for CpuChip<F>
+impl<F: PrimeField32, CB: ChipBuilder<F> + ScopedBuilder> Air<CB> for CpuChip<F>
 where
     CB::Var: Sized,
 {
@@ -161,7 +161,7 @@ impl<F: Field> CpuChip<F> {
     /// The function will verify that the pc increments by 4 for all instructions except branch,
     /// jump and halt instructions. Also, it ensures that the pc is carried down to the last row
     /// for non-real rows.
-    pub(crate) fn eval_pc<CB: ChipBuilder<F>>(
+    pub(crate) fn eval_pc<CB: ChipBuilder<F> + ScopedBuilder>(
         &self,
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
@@ -187,7 +187,9 @@ impl<F: Field> CpuChip<F> {
             .when_transition()
             .when(next.is_real)
             .when(local.is_sequential_instr)
-            .assert_eq(local.pc + CB::Expr::from_canonical_u8(4), next.pc);
+            .with_scope("is_sequential_instr", |builder| {
+                builder.assert_eq(local.pc + CB::Expr::from_canonical_u8(4), next.pc)
+            });
 
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
         // <==> local.pc + 4

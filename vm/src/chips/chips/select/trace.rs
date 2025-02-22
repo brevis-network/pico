@@ -14,12 +14,14 @@ use crate::{
         instruction::Instruction, program::RecursionProgram, types::SelectInstr,
     },
     emulator::recursion::emulator::RecursionRecord,
+    iter::{
+        current_num_threads, IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSliceMut,
+    },
     machine::chip::ChipBehavior,
     primitives::consts::SELECT_DATAPAR,
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::*;
 use std::borrow::BorrowMut;
 
 impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
@@ -38,7 +40,7 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let instructions: Vec<_> = program
             .instructions
-            .par_iter()
+            .pico_iter()
             .filter_map(|instruction| match instruction {
                 Instruction::Select(x) => Some(x),
                 _ => None,
@@ -54,11 +56,11 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
 
         let mut values: Vec<F> = vec![F::ZERO; padded_nrows * NUM_SELECT_PREPROCESSED_COLS];
 
-        let chunk_size = (instructions.len() / rayon::current_num_threads()).max(1);
+        let chunk_size = (instructions.len() / current_num_threads()).max(1);
         let populate_len = instructions.len() * NUM_SELECT_PREPROCESSED_VALUE_COLS;
 
         values[..populate_len]
-            .par_chunks_mut(NUM_SELECT_PREPROCESSED_VALUE_COLS)
+            .pico_chunks_mut(NUM_SELECT_PREPROCESSED_VALUE_COLS)
             .zip_eq(instructions)
             .with_min_len(chunk_size)
             .for_each(|(row, instr)| {
@@ -90,11 +92,11 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
 
         let mut values: Vec<F> = vec![F::ZERO; padded_nrows * NUM_SELECT_COLS];
 
-        let chunk_size = (events.len() / rayon::current_num_threads()).max(1);
+        let chunk_size = (events.len() / current_num_threads()).max(1);
         let populate_len = events.len() * NUM_SELECT_VALUE_COLS;
 
         values[..populate_len]
-            .par_chunks_mut(NUM_SELECT_VALUE_COLS)
+            .pico_chunks_mut(NUM_SELECT_VALUE_COLS)
             .zip_eq(events)
             .with_min_len(chunk_size)
             .for_each(|(row, &vals)| {

@@ -4,8 +4,8 @@ use crate::{
     },
     configs::{
         config::{Com, FieldGenericConfig, PcsProverData, StarkGenericConfig, Val},
-        field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        field_config::{BabyBearSimple, KoalaBearSimple},
+        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
     emulator::{
         emulator::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
@@ -271,9 +271,16 @@ macro_rules! impl_combine_vk_machine {
                 assert_recursion_public_values_valid(self.config().as_ref(), public_values);
                 assert_riscv_vk_digest(proof, riscv_vk);
 
+                // Vk Verification
+                assert_eq!(proof.vks().len(), 1);
+                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+                let combine_vk = proof.vks().first().unwrap();
+                assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
+
+
                 // verify
                 self.base_machine
-                    .verify_ensemble(proof.vks().first().unwrap(), &proof.proofs())?;
+                    .verify_ensemble(combine_vk, &proof.proofs())?;
 
                 Ok(())
             }

@@ -6,8 +6,8 @@ use pico_vm::{
     },
     configs::{
         config::{Challenge, StarkGenericConfig, Val},
-        field_config::bb_simple::BabyBearSimple,
-        stark_config::bb_poseidon2::BabyBearPoseidon2,
+        field_config::BabyBearSimple,
+        stark_config::BabyBearPoseidon2,
     },
     emulator::{opts::EmulatorOpts, recursion::emulator::Runtime, stdin::EmulatorStdin},
     instances::{

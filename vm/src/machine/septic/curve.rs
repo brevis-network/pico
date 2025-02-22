@@ -4,7 +4,10 @@ use super::{
     fields::{babybear, koalabear, mersenne31},
     FieldSepticCurve, SepticExtension,
 };
-use crate::machine::field::{same_field, FieldBehavior, FieldType};
+use crate::{
+    machine::field::{same_field, FieldBehavior, FieldType},
+    primitives::Poseidon2Init,
+};
 use p3_baby_bear::BabyBear;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
@@ -139,21 +142,21 @@ impl<F: PrimeField32 + FieldBehavior> SepticCurve<F> {
 
             let m_hash = match F::field_type() {
                 FieldType::TypeBabyBear => {
-                    let perm = crate::primitives::pico_poseidon2bb_init();
+                    let perm = crate::configs::stark_config::BabyBearPoseidon2::init();
                     perm.permute(
                         m_trial.map(|x| BabyBear::from_canonical_u32(x.as_canonical_u32())),
                     )
                     .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
                 }
                 FieldType::TypeKoalaBear => {
-                    let perm = crate::primitives::pico_poseidon2kb_init();
+                    let perm = crate::configs::stark_config::KoalaBearPoseidon2::init();
                     perm.permute(
                         m_trial.map(|x| KoalaBear::from_canonical_u32(x.as_canonical_u32())),
                     )
                     .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
                 }
                 FieldType::TypeMersenne31 => {
-                    let perm = crate::primitives::pico_poseidon2m31_init();
+                    let perm = crate::configs::stark_config::M31Poseidon2::init();
                     perm.permute(
                         m_trial.map(|x| Mersenne31::from_canonical_u32(x.as_canonical_u32())),
                     )

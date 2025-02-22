@@ -8,12 +8,12 @@ use super::{
 use crate::{
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator},
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
 };
 use hashbrown::HashMap;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use rayon::prelude::*;
 use std::borrow::BorrowMut;
 
 impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
@@ -64,13 +64,13 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
         // Collect instruction counts in parallel using a thread-safe HashMap
         let instruction_counts: HashMap<u32, usize> = input
             .cpu_events
-            .par_iter()
-            .fold(HashMap::new, |mut acc, event| {
+            .pico_iter()
+            .pico_fold(HashMap::new, |mut acc, event| {
                 let pc = event.pc;
                 *acc.entry(pc).or_insert(0) += 1;
                 acc
             })
-            .reduce(HashMap::new, |mut a, b| {
+            .pico_reduce(HashMap::new, |mut a, b| {
                 b.into_iter().for_each(|(pc, count)| {
                     *a.entry(pc).or_insert(0) += count;
                 });
@@ -81,7 +81,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
         let rows: Vec<[F; NUM_PROGRAM_MULT_COLS]> = input
             .program
             .instructions
-            .par_iter()
+            .pico_iter()
             .enumerate()
             .map(|(i, _)| {
                 let pc = input.program.pc_base + (i as u32 * 4);

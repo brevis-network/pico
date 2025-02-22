@@ -1,9 +1,12 @@
-use std::time::Duration;
+#![no_main]
 
 use pico_sdk::io::{commit_bytes, read_vec};
+use std::time::Duration;
 use tendermint_light_client_verifier::{
     options::Options, types::LightBlock, ProdVerifier, Verdict, Verifier,
 };
+
+pico_sdk::entrypoint!(main);
 
 fn main() {
     println!("cycle-tracker-start: io");

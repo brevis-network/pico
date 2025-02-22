@@ -54,7 +54,7 @@ pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<P
             let binary_file = find_target_file(pkg, build_dir)?;
             println!("Found binary file: {:?}", binary_file.display());
 
-            let output_dir = target_dir.parent().unwrap().join(&args.output_directory);
+            let output_dir = program_dir.join(&args.output_directory);
             println!("Copying binary file to {:?}", output_dir);
 
             copy_elf_file(args, binary_file, output_dir)

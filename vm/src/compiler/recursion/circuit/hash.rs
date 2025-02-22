@@ -2,16 +2,15 @@ use super::{builder::CircuitBuilder, challenger::reduce_32, config::CircuitConfi
 use crate::{
     compiler::recursion::ir::{Builder, DslIr, Felt, Var},
     configs::{
-        config::{FieldGenericConfig, Val},
+        config::{FieldGenericConfig, StarkGenericConfig, Val},
         stark_config::{
-            bb_bn254_poseidon2::BabyBearBn254Poseidon2, bb_poseidon2::BabyBearPoseidon2,
-            kb_bn254_poseidon2::KoalaBearBn254Poseidon2, kb_poseidon2::KoalaBearPoseidon2,
+            BabyBearBn254Poseidon2, BabyBearPoseidon2, KoalaBearBn254Poseidon2, KoalaBearPoseidon2,
         },
     },
     machine::field::{FieldBehavior, FieldType},
     primitives::{
         consts::{DIGEST_SIZE, MULTI_FIELD_CHALLENGER_WIDTH, PERMUTATION_RATE, PERMUTATION_WIDTH},
-        pico_poseidon2bb_init, pico_poseidon2bn254_init, pico_poseidon2kb_init,
+        pico_poseidon2bn254_init, Poseidon2Init,
     },
 };
 use itertools::Itertools;
@@ -79,92 +78,98 @@ pub trait FieldHasherVariable<CC: CircuitConfig>: FieldHasher<CC::F> {
     fn print_digest(builder: &mut Builder<CC>, digest: Self::DigestVariable);
 }
 
-macro_rules! impl_hash_related {
-    ($recur_sc:ident, $hash_init:ident) => {
-        impl FieldHasher<Val<$recur_sc>> for $recur_sc {
-            type Digest = [Val<$recur_sc>; DIGEST_SIZE];
+impl<SC> FieldHasher<SC::Val> for SC
+where
+    SC: StarkGenericConfig + Poseidon2Init,
+    SC::Val: Ord,
+    SC::Poseidon2: Permutation<[SC::Val; PERMUTATION_WIDTH]>,
+{
+    type Digest = [SC::Val; DIGEST_SIZE];
 
-            fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {
-                let mut pre_iter = input
-                    .into_iter()
-                    .flatten()
-                    .chain(repeat(Val::<$recur_sc>::ZERO));
-                let mut pre = core::array::from_fn(move |_| pre_iter.next().unwrap());
-                ($hash_init()).permute_mut(&mut pre);
-                pre[..DIGEST_SIZE].try_into().unwrap()
-            }
-        }
-
-        impl<CC: CircuitConfig<F = Val<$recur_sc>>> Posedion2FieldHasherVariable<CC> for $recur_sc {
-            fn poseidon2_permute(
-                builder: &mut Builder<CC>,
-                input: [Felt<<CC>::F>; PERMUTATION_WIDTH],
-            ) -> [Felt<<CC>::F>; PERMUTATION_WIDTH] {
-                builder.poseidon2_permute(input)
-            }
-        }
-
-        impl<CC: CircuitConfig<F = Val<$recur_sc>, Bit = Felt<Val<$recur_sc>>>>
-            FieldHasherVariable<CC> for $recur_sc
-        {
-            type DigestVariable = [Felt<Val<$recur_sc>>; DIGEST_SIZE];
-
-            fn hash(
-                builder: &mut Builder<CC>,
-                input: &[Felt<<CC as FieldGenericConfig>::F>],
-            ) -> Self::DigestVariable {
-                <Self as Posedion2FieldHasherVariable<CC>>::poseidon2_hash(builder, input)
-            }
-
-            fn compress(
-                builder: &mut Builder<CC>,
-                input: [Self::DigestVariable; 2],
-            ) -> Self::DigestVariable {
-                builder.poseidon2_compress(input.into_iter().flatten())
-            }
-
-            fn assert_digest_eq(
-                builder: &mut Builder<CC>,
-                a: Self::DigestVariable,
-                b: Self::DigestVariable,
-            ) {
-                zip(a, b).for_each(|(e1, e2)| builder.assert_felt_eq(e1, e2));
-            }
-
-            fn select_chain_digest(
-                builder: &mut Builder<CC>,
-                should_swap: <CC as CircuitConfig>::Bit,
-                input: [Self::DigestVariable; 2],
-            ) -> [Self::DigestVariable; 2] {
-                let result0: [Felt<CC::F>; DIGEST_SIZE] =
-                    core::array::from_fn(|_| builder.uninit());
-                let result1: [Felt<CC::F>; DIGEST_SIZE] =
-                    core::array::from_fn(|_| builder.uninit());
-
-                (0..DIGEST_SIZE).for_each(|i| {
-                    builder.push_op(DslIr::Select(
-                        should_swap,
-                        result0[i],
-                        result1[i],
-                        input[0][i],
-                        input[1][i],
-                    ));
-                });
-
-                [result0, result1]
-            }
-
-            fn print_digest(builder: &mut Builder<CC>, digest: Self::DigestVariable) {
-                for d in digest.iter() {
-                    builder.print_f(*d);
-                }
-            }
-        }
-    };
+    fn constant_compress(input: [Self::Digest; 2]) -> Self::Digest {
+        let mut pre_iter = input.into_iter().flatten().chain(repeat(SC::Val::ZERO));
+        let mut pre = core::array::from_fn(move |_| pre_iter.next().unwrap());
+        SC::init().permute_mut(&mut pre);
+        pre[..DIGEST_SIZE].try_into().unwrap()
+    }
 }
 
-impl_hash_related!(BabyBearPoseidon2, pico_poseidon2bb_init);
-impl_hash_related!(KoalaBearPoseidon2, pico_poseidon2kb_init);
+// define a trait to allow for easier blanket impls
+trait NonEmbedSC {}
+impl NonEmbedSC for BabyBearPoseidon2 {}
+impl NonEmbedSC for KoalaBearPoseidon2 {}
+
+impl<SC, CC> Posedion2FieldHasherVariable<CC> for SC
+where
+    SC: StarkGenericConfig + NonEmbedSC,
+    CC: CircuitConfig<F = SC::Val>,
+{
+    fn poseidon2_permute(
+        builder: &mut Builder<CC>,
+        input: [Felt<<CC>::F>; PERMUTATION_WIDTH],
+    ) -> [Felt<<CC>::F>; PERMUTATION_WIDTH] {
+        builder.poseidon2_permute(input)
+    }
+}
+
+impl<SC, CC> FieldHasherVariable<CC> for SC
+where
+    SC: StarkGenericConfig + NonEmbedSC + Poseidon2Init,
+    SC::Val: Ord,
+    SC::Poseidon2: Permutation<[SC::Val; PERMUTATION_WIDTH]>,
+    CC: CircuitConfig<F = SC::Val, Bit = Felt<SC::Val>>,
+{
+    type DigestVariable = [Felt<SC::Val>; DIGEST_SIZE];
+
+    fn hash(
+        builder: &mut Builder<CC>,
+        input: &[Felt<<CC as FieldGenericConfig>::F>],
+    ) -> Self::DigestVariable {
+        <Self as Posedion2FieldHasherVariable<CC>>::poseidon2_hash(builder, input)
+    }
+
+    fn compress(
+        builder: &mut Builder<CC>,
+        input: [Self::DigestVariable; 2],
+    ) -> Self::DigestVariable {
+        builder.poseidon2_compress(input.into_iter().flatten())
+    }
+
+    fn assert_digest_eq(
+        builder: &mut Builder<CC>,
+        a: Self::DigestVariable,
+        b: Self::DigestVariable,
+    ) {
+        zip(a, b).for_each(|(e1, e2)| builder.assert_felt_eq(e1, e2));
+    }
+
+    fn select_chain_digest(
+        builder: &mut Builder<CC>,
+        should_swap: <CC as CircuitConfig>::Bit,
+        input: [Self::DigestVariable; 2],
+    ) -> [Self::DigestVariable; 2] {
+        let result0: [Felt<CC::F>; DIGEST_SIZE] = core::array::from_fn(|_| builder.uninit());
+        let result1: [Felt<CC::F>; DIGEST_SIZE] = core::array::from_fn(|_| builder.uninit());
+
+        (0..DIGEST_SIZE).for_each(|i| {
+            builder.push_op(DslIr::Select(
+                should_swap,
+                result0[i],
+                result1[i],
+                input[0][i],
+                input[1][i],
+            ));
+        });
+
+        [result0, result1]
+    }
+
+    fn print_digest(builder: &mut Builder<CC>, digest: Self::DigestVariable) {
+        for d in digest.iter() {
+            builder.print_f(*d);
+        }
+    }
+}
 
 pub const BN254_DIGEST_SIZE: usize = 1;
 

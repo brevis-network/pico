@@ -10,7 +10,7 @@ use crate::{
     },
     configs::{
         config::{Com, PcsProof, StarkGenericConfig, Val},
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
@@ -60,19 +60,25 @@ macro_rules! impl_recursion_stdin_dummy {
                 machine: &'a BaseMachine<$poseidon_type, RecursionChipType<$field_type>>,
                 shape: &RecursionShape,
             ) -> Self {
-                let vks_and_proofs: Vec<_> = shape
-                    .proof_shapes
-                    .iter()
-                    .map(|proof_shape| {
-                        let (vk, proof) = $dummy_vk_fn(machine, proof_shape);
-                        (vk, proof)
-                    })
-                    .collect();
+                let vks_and_proofs = shape.proof_shapes.iter().map(|proof_shape| {
+                    let (vk, proof) = $dummy_vk_fn(machine, proof_shape);
+                    (vk, proof)
+                });
 
-                let (vks, proofs): (Vec<_>, Vec<_>) = vks_and_proofs.into_iter().unzip();
+                let num_shapes = shape.proof_shapes.len();
+                let mut vks = Arc::new_uninit_slice(num_shapes);
+                let mut proofs = Arc::new_uninit_slice(num_shapes);
+                let vk_writer = Arc::get_mut(&mut vks).unwrap();
+                let proof_writer = Arc::get_mut(&mut proofs).unwrap();
 
-                let vks = Arc::from(vks.into_boxed_slice());
-                let proofs = Arc::from(proofs.into_boxed_slice());
+                for (i, (vk, proof)) in vks_and_proofs.enumerate() {
+                    vk_writer[i].write(vk);
+                    proof_writer[i].write(proof);
+                }
+
+                // SAFETY: we've written num_shapes values so the Arc slices have been initialized
+                let vks = unsafe { vks.assume_init() };
+                let proofs = unsafe { proofs.assume_init() };
 
                 Self {
                     machine,

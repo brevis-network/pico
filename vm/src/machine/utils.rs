@@ -16,12 +16,12 @@ use p3_maybe_rayon::prelude::*;
 use p3_mersenne_31::Mersenne31;
 use p3_uni_stark::{Entry, SymbolicExpression};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
-use rayon::ThreadPoolBuilder;
 
 use crate::{
     chips::{chips::riscv_memory::read_write::columns::MemoryCols, gadgets::utils::limbs::Limbs},
     configs::config::{PackedChallenge, PackedVal, StarkGenericConfig},
     emulator::recursion::public_values::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
+    iter::ThreadPoolBuilder,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, SymbolicConstraintFolder},

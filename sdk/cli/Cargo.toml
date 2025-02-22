@@ -15,7 +15,7 @@ vergen = { version = "8", default-features = false, features = [
 ] }
 
 [dependencies]
-clap = {workspace = true, features = ["derive", "env"]}
+clap = {workspace = true, features = ["cargo", "derive", "env"]}
 anyhow.workspace = true
 hex.workspace = true
 pico-sdk.workspace = true
