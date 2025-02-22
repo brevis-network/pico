@@ -13,7 +13,7 @@ use p3_koala_bear::KoalaBear;
 use pico_vm::{
     configs::{
         config::StarkGenericConfig,
-        field_config::{bb_bn254::BabyBearBn254, kb_bn254::KoalaBearBn254},
+        field_config::{BabyBearBn254, KoalaBearBn254},
         stark_config::{
             bb_bn254_poseidon2::BabyBearBn254Poseidon2, kb_bn254_poseidon2::KoalaBearBn254Poseidon2,
         },

@@ -1,7 +1,10 @@
 pub mod consts;
 pub mod poseidon2;
 
-use crate::primitives::consts::{MERSENNE31_NUM_EXTERNAL_ROUNDS, MERSENNE31_NUM_INTERNAL_ROUNDS};
+use crate::{
+    configs::stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2, M31Poseidon2},
+    primitives::consts::{MERSENNE31_NUM_EXTERNAL_ROUNDS, MERSENNE31_NUM_INTERNAL_ROUNDS},
+};
 use consts::{
     BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
     KOALABEAR_NUM_INTERNAL_ROUNDS, PERMUTATION_WIDTH,
@@ -246,10 +249,37 @@ lazy_static! {
     };
 }
 
+pub trait Poseidon2Init {
+    type Poseidon2;
+
+    fn init() -> Self::Poseidon2;
+}
+
+impl Poseidon2Init for BabyBearPoseidon2 {
+    type Poseidon2 = PicoPoseidon2BabyBear;
+    fn init() -> Self::Poseidon2 {
+        pico_poseidon2bb_init()
+    }
+}
+
+impl Poseidon2Init for KoalaBearPoseidon2 {
+    type Poseidon2 = PicoPoseidon2KoalaBear;
+    fn init() -> Self::Poseidon2 {
+        pico_poseidon2kb_init()
+    }
+}
+
+impl Poseidon2Init for M31Poseidon2 {
+    type Poseidon2 = PicoPoseidon2Mersenne31;
+    fn init() -> Self::Poseidon2 {
+        pico_poseidon2m31_init()
+    }
+}
+
 /*
 Poseidon2 on BabyBear
  */
-pub fn pico_poseidon2bb_init() -> PicoPoseidon2BabyBear {
+fn pico_poseidon2bb_init() -> PicoPoseidon2BabyBear {
     const ROUNDS_F: usize = BABYBEAR_NUM_EXTERNAL_ROUNDS;
     const ROUNDS_P: usize = BABYBEAR_NUM_INTERNAL_ROUNDS;
 
@@ -272,7 +302,7 @@ pub fn pico_poseidon2bb_init() -> PicoPoseidon2BabyBear {
 /*
 Poseidon2 on KoalaBear
  */
-pub fn pico_poseidon2kb_init() -> PicoPoseidon2KoalaBear {
+fn pico_poseidon2kb_init() -> PicoPoseidon2KoalaBear {
     const ROUNDS_F: usize = KOALABEAR_NUM_EXTERNAL_ROUNDS;
     const ROUNDS_P: usize = KOALABEAR_NUM_INTERNAL_ROUNDS;
 
@@ -319,7 +349,7 @@ lazy_static! {
 /*
 Poseidon2 on M31
  */
-pub fn pico_poseidon2m31_init() -> PicoPoseidon2Mersenne31 {
+fn pico_poseidon2m31_init() -> PicoPoseidon2Mersenne31 {
     const ROUNDS_F: usize = MERSENNE31_NUM_EXTERNAL_ROUNDS;
     const ROUNDS_P: usize = MERSENNE31_NUM_INTERNAL_ROUNDS;
 

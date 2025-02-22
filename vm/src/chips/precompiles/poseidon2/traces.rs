@@ -20,13 +20,13 @@ use crate::{
             },
         },
     },
+    iter::{PicoIterator, PicoSlice},
     machine::chip::ChipBehavior,
     primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use rayon::{iter::ParallelIterator, slice::ParallelSlice};
 use std::borrow::BorrowMut;
 use tracing::debug;
 
@@ -121,7 +121,7 @@ impl<F: PrimeField32, Config: Poseidon2Config> ChipBehavior<F> for Poseidon2Perm
 
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
         let blu_batches = events
-            .par_chunks(chunk_size)
+            .pico_chunks(chunk_size)
             .map(|events| {
                 let mut blu: Vec<ByteLookupEvent> = Vec::new();
                 events.iter().for_each(|event| {

@@ -4,8 +4,8 @@ use pico_vm::{
     compiler::riscv::program::Program,
     configs::{
         config::StarkGenericConfig,
-        field_config::{bb_bn254::BabyBearBn254, kb_bn254::KoalaBearBn254},
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        field_config::{BabyBearBn254, KoalaBearBn254},
+        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
     emulator::stdin::{EmulatorStdin, EmulatorStdinBuilder},
     instances::{

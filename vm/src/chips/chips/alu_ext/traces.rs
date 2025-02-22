@@ -13,13 +13,12 @@ use crate::{
         instruction::Instruction, program::RecursionProgram, types::ExtAluInstr,
     },
     emulator::recursion::emulator::{ExtAluOpcode, RecursionRecord},
+    iter::{IndexedPicoIterator, PicoIterator, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::{EXTENSION_DEGREE, EXT_ALU_DATAPAR},
 };
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::ParallelIterator;
-use rayon::prelude::{IndexedParallelIterator, ParallelSliceMut};
 use std::borrow::BorrowMut;
 
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> for ExtAluChip<F> {
@@ -52,7 +51,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = instructions.len() * NUM_EXT_ALU_ACCESS_COLS;
         values[..populate_len]
-            .par_chunks_mut(NUM_EXT_ALU_ACCESS_COLS)
+            .pico_chunks_mut(NUM_EXT_ALU_ACCESS_COLS)
             .zip_eq(instructions)
             .for_each(|(row, instr)| {
                 let ExtAluInstr {
@@ -95,7 +94,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = events.len() * NUM_EXT_ALU_VALUE_COLS;
         values[..populate_len]
-            .par_chunks_mut(NUM_EXT_ALU_VALUE_COLS)
+            .pico_chunks_mut(NUM_EXT_ALU_VALUE_COLS)
             .zip_eq(events)
             .for_each(|(row, &vals)| {
                 let cols: &mut ExtAluValueCols<_> = row.borrow_mut();

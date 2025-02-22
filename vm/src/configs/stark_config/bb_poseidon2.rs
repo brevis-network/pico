@@ -1,6 +1,6 @@
 use crate::{
     configs::config::{Com, SimpleFriConfig, StarkGenericConfig, Val, ZeroCommitment},
-    primitives::{consts::DIGEST_SIZE, pico_poseidon2bb_init, PicoPoseidon2BabyBear},
+    primitives::{consts::DIGEST_SIZE, PicoPoseidon2BabyBear, Poseidon2Init},
 };
 use p3_baby_bear::BabyBear;
 use p3_challenger::DuplexChallenger;
@@ -26,6 +26,7 @@ pub type SC_Dft = Radix2DitParallel<SC_Val>;
 pub type SC_Pcs = TwoAdicFriPcs<SC_Val, SC_Dft, SC_ValMmcs, SC_ChallengeMmcs>;
 pub type SC_DigestHash = p3_symmetric::Hash<SC_Val, SC_Val, DIGEST_SIZE>;
 
+#[derive(Clone)]
 pub struct BabyBearPoseidon2 {
     pub perm: SC_Perm,
     simple_fri_config: SimpleFriConfig,
@@ -39,12 +40,6 @@ impl Serialize for BabyBearPoseidon2 {
         S: serde::Serializer,
     {
         std::marker::PhantomData::<BabyBearPoseidon2>.serialize(serializer)
-    }
-}
-
-impl Clone for BabyBearPoseidon2 {
-    fn clone(&self) -> Self {
-        Self::new()
     }
 }
 
@@ -63,7 +58,7 @@ impl StarkGenericConfig for BabyBearPoseidon2 {
 
     /// Targeting 100 bits of security.
     fn new() -> Self {
-        let perm = pico_poseidon2bb_init();
+        let perm = Self::init();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
             Err(_) => 84,
@@ -113,7 +108,7 @@ impl StarkGenericConfig for BabyBearPoseidon2 {
 
 impl BabyBearPoseidon2 {
     pub fn compress() -> Self {
-        let perm = pico_poseidon2bb_init();
+        let perm = Self::init();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
             Err(_) => 42,

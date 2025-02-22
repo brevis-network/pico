@@ -14,7 +14,7 @@ use crate::{
     },
     configs::{
         config::{Challenger, Com, PcsProof, StarkGenericConfig},
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
     instances::compiler::shapes::ProofShape,
     machine::{
@@ -182,15 +182,20 @@ macro_rules! dummy_vk_and_chunk_proof {
             let mut main_batch_shape = vec![];
             let mut permutation_batch_shape = vec![];
             let mut quotient_batch_shape = vec![];
-            let mut log_main_degrees = vec![];
-            let mut log_quotient_degrees = vec![];
+            let len = chunk_chips.len();
+            let mut log_main_degrees = Arc::new_uninit_slice(len);
+            let mut log_quotient_degrees = Arc::new_uninit_slice(len);
+            let main_writer = Arc::get_mut(&mut log_main_degrees).unwrap();
+            let quotient_writer = Arc::get_mut(&mut log_quotient_degrees).unwrap();
 
-            for (chip, chip_opening) in chunk_chips
+            for (i, (chip, chip_opening)) in chunk_chips
                 .iter()
                 .zip_eq(opened_values.chips_opened_values.iter())
+                .enumerate()
             {
-                log_main_degrees.push(chip_opening.log_main_degree);
-                log_quotient_degrees.push(chip_opening.log_main_degree);
+                main_writer[i].write(chip_opening.log_main_degree);
+                quotient_writer[i].write(chip_opening.log_main_degree);
+
                 if !chip_opening.preprocessed_local.is_empty() {
                     let prep_shape = PolynomialShape {
                         width: chip_opening.preprocessed_local.len(),
@@ -223,6 +228,10 @@ macro_rules! dummy_vk_and_chunk_proof {
                 }
             }
 
+            // SAFETY: we've written chunk_chips.len() elems to the Arc slices
+            let log_main_degrees = unsafe { log_main_degrees.assume_init() };
+            let log_quotient_degrees = unsafe { log_quotient_degrees.assume_init() };
+
             let batch_shapes = vec![
                 PolynomialBatchShape {
                     shapes: preprocessed_batch_shape,
@@ -242,7 +251,7 @@ macro_rules! dummy_vk_and_chunk_proof {
             let log_blowup = machine.config().fri_config().log_blowup;
             let opening_proof = $dummy_pcs(fri_queries, &batch_shapes, log_blowup);
 
-            let public_values = (0..MAX_NUM_PVS).map(|_| <$field>::ZERO).collect::<Vec<_>>();
+            let public_values = (0..MAX_NUM_PVS).map(|_| <$field>::ZERO).collect();
 
             // Get the preprocessed chip information.
             let config = machine.config();
@@ -284,10 +293,10 @@ macro_rules! dummy_vk_and_chunk_proof {
                 commitments,
                 opened_values,
                 opening_proof,
-                log_main_degrees: Arc::from(log_main_degrees),
-                log_quotient_degrees: Arc::from(log_quotient_degrees),
-                main_chip_ordering: Arc::from(chip_ordering),
-                public_values: public_values.into(),
+                log_main_degrees,
+                log_quotient_degrees,
+                main_chip_ordering: Arc::new(chip_ordering),
+                public_values,
             };
 
             (vk, chunk_proof)

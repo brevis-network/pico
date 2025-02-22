@@ -3,10 +3,12 @@ use super::{
     hash::{FieldHasher, FieldHasherVariable},
     stark::MerkleProofVariable,
 };
-use crate::compiler::recursion::ir::Builder;
+use crate::{
+    compiler::recursion::ir::Builder,
+    iter::{IndexedPicoIterator, PicoIterator, PicoSlice},
+};
 use p3_field::Field;
 use p3_util::{log2_strict_usize, reverse_bits_len, reverse_slice_index_bits};
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
@@ -63,7 +65,7 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         for _ in 0..height - 1 {
             let mut next_layer = Vec::with_capacity(last_layer.len() / 2);
             last_layer
-                .par_chunks_exact(2)
+                .pico_chunks_exact(2)
                 .map(|chunk| {
                     let [left, right] = chunk.try_into().unwrap();
                     HV::constant_compress([left, right])

@@ -10,8 +10,8 @@ use pico_vm::{
     },
     configs::{
         config::{StarkGenericConfig, Val},
-        field_config::{bb_simple::BabyBearSimple, kb_simple::KoalaBearSimple},
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        field_config::{BabyBearSimple, KoalaBearSimple},
+        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
     emulator::{
         opts::EmulatorOpts, record::RecordBehavior,

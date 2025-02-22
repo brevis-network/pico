@@ -13,7 +13,7 @@ use crate::{
     },
     configs::{
         config::{Com, PcsProof, StarkGenericConfig, Val},
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,

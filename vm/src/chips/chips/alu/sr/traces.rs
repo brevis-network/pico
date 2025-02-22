@@ -18,16 +18,13 @@ use crate::{
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
+    iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, SR_DATAPAR, WORD_SIZE},
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
-    slice::{ParallelSlice, ParallelSliceMut},
-};
 use std::{borrow::BorrowMut, marker::PhantomData};
 
 /// A chip that implements bitwise operations for the opcodes SRL and SRA.
@@ -61,7 +58,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
 
         let populate_len = events.len() * NUM_SLR_VALUE_COLS;
         values[..populate_len]
-            .par_chunks_mut(NUM_SLR_VALUE_COLS)
+            .pico_chunks_mut(NUM_SLR_VALUE_COLS)
             .zip_eq(events)
             .for_each(|(row, event)| {
                 let cols: &mut ShiftRightValueCols<_> = row.borrow_mut();
@@ -87,7 +84,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
 
         let blu_events = input
             .shift_right_events
-            .par_chunks(chunk_size)
+            .pico_chunks(chunk_size)
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {

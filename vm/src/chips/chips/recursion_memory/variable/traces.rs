@@ -12,14 +12,12 @@ use crate::{
         program::RecursionProgram,
     },
     emulator::recursion::emulator::RecursionRecord,
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSliceMut},
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::VAR_MEM_DATAPAR,
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{
-    IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSliceMut,
-};
 use std::{borrow::BorrowMut, iter::zip};
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
@@ -38,7 +36,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
         // Allocating an intermediate `Vec` is faster.
         let accesses = program
             .instructions
-            .par_iter() // Using `rayon` here provides a big speedup.
+            .pico_iter() // Using `rayon` here provides a big speedup.
             .flat_map_iter(|instruction| match instruction {
                 Instruction::Hint(HintInstr { output_addrs_mults })
                 | Instruction::HintBits(HintBitsInstr {
@@ -73,7 +71,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
         // Generate the trace rows & corresponding records for each chunk of events in parallel.
         let populate_len = accesses.len() * NUM_MEM_ACCESS_COLS;
         values[..populate_len]
-            .par_chunks_mut(NUM_MEM_ACCESS_COLS)
+            .pico_chunks_mut(NUM_MEM_ACCESS_COLS)
             .zip_eq(accesses)
             .for_each(|(row, &(addr, mult))| *row.borrow_mut() = MemoryAccessCols { addr, mult });
 

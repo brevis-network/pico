@@ -5,7 +5,7 @@ use crate::{
     compiler::recursion::circuit::{hash::FieldHasher, merkle_tree::MerkleTree},
     configs::{
         config::{StarkGenericConfig, Val},
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
     instances::compiler::{
         recursion_circuit::stdin::RecursionStdin,

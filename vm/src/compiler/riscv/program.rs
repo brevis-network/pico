@@ -3,6 +3,7 @@
 use crate::{
     compiler::{program::ProgramBehavior, riscv::instruction::Instruction},
     instances::compiler::shapes::riscv_shape::RiscvPadShape,
+    iter::{IntoPicoIterator, PicoBridge, PicoIterator},
     machine::{
         lookup::LookupType,
         septic::{SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
@@ -10,7 +11,6 @@ use crate::{
 };
 use alloc::sync::Arc;
 use p3_field::{FieldExtensionAlgebra, PrimeField32};
-use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -85,7 +85,7 @@ impl<F: PrimeField32> ProgramBehavior<F> for Program {
         let mut digests: Vec<SepticCurveComplete<F>> = self
             .memory_image
             .iter()
-            .par_bridge()
+            .pico_bridge()
             .map(|(&addr, &word)| {
                 let values = [
                     (LookupType::Memory as u32) << 16,
@@ -105,8 +105,8 @@ impl<F: PrimeField32> ProgramBehavior<F> for Program {
         digests.push(SepticCurveComplete::Affine(SepticDigest::<F>::zero().0));
         SepticDigest(
             digests
-                .into_par_iter()
-                .reduce(|| SepticCurveComplete::Infinity, |a, b| a + b)
+                .into_pico_iter()
+                .pico_reduce(|| SepticCurveComplete::Infinity, |a, b| a + b)
                 .point(),
         )
     }

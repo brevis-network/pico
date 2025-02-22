@@ -29,7 +29,7 @@ p3-merkle-tree.workspace = true
 p3-poseidon2.workspace = true
 p3-symmetric.workspace = true
 p3-uni-stark.workspace = true
-p3-maybe-rayon = { workspace = true, features = ["parallel"] }
+p3-maybe-rayon = { workspace = true, features = [] }
 p3-bn254-fr.workspace = true
 p3-mersenne-31.workspace = true
 p3-circle.workspace = true
@@ -71,8 +71,8 @@ once_cell.workspace = true
 p256.workspace = true
 paste.workspace = true
 rand.workspace = true
-rayon-scan.workspace = true
-rayon.workspace = true
+rayon-scan = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
 rrs_lib.workspace = true
 rug = { workspace = true, optional = true }
 serde.workspace = true
@@ -100,14 +100,16 @@ num = { workspace = true, features = ["rand"] }
 rand.workspace = true
 
 [features]
-default = ["nightly-features"]
+default = ["rayon", "nightly-features", "strict"]
 bigint-rug = ["rug"] # curves
 debug = []
 debug-lookups = []
 jemalloc = ["dep:tikv-jemallocator"]
 single-threaded = []
+rayon = ["dep:rayon", "dep:rayon-scan", "p3-maybe-rayon/parallel"]
 nightly-features = [
     "p3-dft/nightly-features",
     "p3-keccak/nightly-features",
     "p3-poseidon2/nightly-features",
 ]
+strict = []

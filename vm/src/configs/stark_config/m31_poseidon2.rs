@@ -1,6 +1,6 @@
 use crate::{
     configs::config::{Com, StarkGenericConfig, Val, ZeroCommitment},
-    primitives::{consts::DIGEST_SIZE, pico_poseidon2m31_init, PicoPoseidon2Mersenne31},
+    primitives::{consts::DIGEST_SIZE, PicoPoseidon2Mersenne31, Poseidon2Init},
 };
 use p3_challenger::DuplexChallenger;
 use p3_circle::CirclePcs;
@@ -26,6 +26,7 @@ pub type SC_Challenger = DuplexChallenger<SC_Val, SC_Perm, 16, 8>;
 pub type SC_Pcs = CirclePcs<SC_Val, SC_ValMmcs, SC_ChallengeMmcs>;
 pub type SC_DigestHash = p3_symmetric::Hash<SC_Val, SC_Val, DIGEST_SIZE>;
 
+#[derive(Clone)]
 pub struct M31Poseidon2 {
     pub perm: SC_Perm,
     val_mmcs: SC_ValMmcs,
@@ -40,12 +41,6 @@ impl Serialize for M31Poseidon2 {
     }
 }
 
-impl Clone for M31Poseidon2 {
-    fn clone(&self) -> Self {
-        Self::new()
-    }
-}
-
 impl StarkGenericConfig for M31Poseidon2 {
     type Val = SC_Val;
     type Domain = <SC_Pcs as Pcs<SC_Challenge, SC_Challenger>>::Domain;
@@ -54,7 +49,7 @@ impl StarkGenericConfig for M31Poseidon2 {
     type Pcs = SC_Pcs;
 
     fn new() -> Self {
-        let perm = pico_poseidon2m31_init();
+        let perm = Self::init();
         let hash = SC_Hash::new(perm.clone());
         let compress = SC_Compress::new(perm.clone());
         let val_mmcs = SC_ValMmcs::new(hash, compress);

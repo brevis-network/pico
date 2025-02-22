@@ -97,6 +97,7 @@ pub trait Poseidon2Config: Copy {
     type SBoxRegisters: ArraySize + core::fmt::Debug;
 }
 
+#[derive(Clone, Copy)]
 pub struct SimpleFriConfig {
     pub log_blowup: usize,
     pub num_queries: usize,

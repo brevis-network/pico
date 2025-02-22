@@ -2,6 +2,7 @@ use super::DebuggerMessageLevel;
 use crate::{
     configs::config::StarkGenericConfig,
     emulator::record::RecordBehavior,
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, IntoPicoRefMutIterator, PicoIterator},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::DebugConstraintFolder,
@@ -21,7 +22,6 @@ use p3_matrix::{
     stack::VerticalPair,
     Matrix,
 };
-use p3_maybe_rayon::prelude::*;
 use std::{
     array,
     sync::{LazyLock, RwLock},
@@ -124,7 +124,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 })
                 .collect::<Vec<_>>();
             let mut traces = chips
-                .par_iter()
+                .pico_iter()
                 .map(|chip| chip.generate_main(chunk, &mut C::Record::default()))
                 .zip(preprocessed_traces)
                 .collect::<Vec<_>>();
@@ -133,8 +133,8 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
             let mut permutation_traces = Vec::with_capacity(chips.len());
             let mut cumulative_sums = Vec::with_capacity(chips.len());
             chips
-                .par_iter()
-                .zip(traces.par_iter_mut())
+                .pico_iter()
+                .zip(traces.pico_iter_mut())
                 .map(|(chip, (main_trace, preprocessed_trace))| {
                     let (trace, regional_sum) = chip.generate_permutation(
                         *preprocessed_trace,
@@ -245,6 +245,11 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         info!("remaining failures for {}: {}", chip.name(), max_failures);
 
         for i in 0..height {
+            // we don't care about any additional errors
+            if *max_failures == 0 {
+                break;
+            }
+
             // eval the chip constraints with concrete values
             let i_next = (i + 1) % height;
 
@@ -303,7 +308,12 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 *max_failures -= 1;
                 self.messages.push((
                     DebuggerMessageLevel::Error,
-                    format!("EVAL FAILURE at row {} of {}", i, chip.name()),
+                    format!(
+                        "EVAL FAILURE at row {} of {}, {} failures left",
+                        i,
+                        chip.name(),
+                        max_failures
+                    ),
                 ));
             }
 
@@ -321,11 +331,6 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
                 ));
                 self.messages
                     .push((DebuggerMessageLevel::Error, format!("next:  {main_next:?}")));
-            }
-
-            // we don't care about any additional errors
-            if *max_failures == 0 {
-                break;
             }
         }
     }

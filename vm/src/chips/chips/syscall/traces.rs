@@ -8,6 +8,7 @@ use crate::{
     },
     compiler::riscv::program::Program,
     emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
+    iter::{IntoPicoIterator, IntoPicoRefIterator, PicoBridge, PicoIterator, PicoSlice},
     machine::{
         chip::ChipBehavior,
         lookup::{LookupScope, LookupType},
@@ -16,7 +17,6 @@ use crate::{
 use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::*;
 use std::borrow::BorrowMut;
 
 impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
@@ -49,13 +49,13 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
         let events = match self.chunk_kind {
             SyscallChunkKind::Riscv => input
                 .syscall_events
-                .par_iter()
+                .pico_iter()
                 .map(row_fn)
                 .collect::<Vec<_>>(),
             SyscallChunkKind::Precompile => input
                 .precompile_events
                 .all_events()
-                .par_bridge()
+                .pico_bridge()
                 .map(|(event, _)| row_fn(event))
                 .collect::<Vec<_>>(),
         };
@@ -66,7 +66,7 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
         pad_rows_fixed(&mut rows, || [F::ZERO; NUM_SYSCALL_COLS], log_rows);
 
         RowMajorMatrix::new(
-            rows.into_par_iter().flatten().collect::<Vec<_>>(),
+            rows.into_pico_iter().flatten().collect::<Vec<_>>(),
             NUM_SYSCALL_COLS,
         )
     }
@@ -82,7 +82,7 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
         };
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
         let global_events: Vec<_> = events
-            .par_chunks(chunk_size)
+            .pico_chunks(chunk_size)
             .flat_map(|events| {
                 events
                     .iter()

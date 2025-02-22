@@ -17,14 +17,13 @@ use crate::{
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
+    iter::{IndexedPicoIterator, PicoBridge, PicoIterator, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::ADD_SUB_DATAPAR,
 };
 use core::borrow::BorrowMut;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
-use rayon::{iter::IndexedParallelIterator, slice::ParallelSliceMut};
 
 impl<F: PrimeField32> ChipBehavior<F> for AddSubChip<F> {
     type Record = EmulationRecord;
@@ -51,7 +50,7 @@ impl<F: PrimeField32> ChipBehavior<F> for AddSubChip<F> {
 
         let populate_len = events.len() * NUM_ADD_SUB_VALUE_COLS;
         values[..populate_len]
-            .par_chunks_mut(NUM_ADD_SUB_VALUE_COLS)
+            .pico_chunks_mut(NUM_ADD_SUB_VALUE_COLS)
             .zip_eq(events)
             .for_each(|(row, event)| {
                 let cols: &mut AddSubValueCols<_> = row.borrow_mut();
@@ -73,7 +72,7 @@ impl<F: PrimeField32> ChipBehavior<F> for AddSubChip<F> {
             .chain(input.sub_events.chunks(chunk_size));
 
         let blu_batches = event_iter
-            .par_bridge()
+            .pico_bridge()
             .flat_map(|events| {
                 let mut blu = vec![];
                 events.iter().for_each(|event| {

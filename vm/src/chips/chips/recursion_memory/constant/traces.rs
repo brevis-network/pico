@@ -10,6 +10,7 @@ use crate::{
         types::{MemAccessKind, MemInstr},
     },
     emulator::recursion::emulator::RecursionRecord,
+    iter::IntoPicoRefIterator,
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
     primitives::consts::CONST_MEM_DATAPAR,
 };
@@ -17,7 +18,6 @@ use itertools::Itertools;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::ParallelIterator;
-use rayon::iter::IntoParallelRefIterator;
 use std::{borrow::BorrowMut, iter::zip};
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
@@ -36,7 +36,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
         // First collect the filtered and mapped items
         let filtered_items: Vec<_> = program
             .instructions
-            .par_iter()
+            .pico_iter()
             .filter_map(|instruction| match instruction {
                 Instruction::Mem(MemInstr {
                     addrs,

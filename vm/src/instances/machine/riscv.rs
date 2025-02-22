@@ -7,6 +7,7 @@ use crate::{
         riscv::{public_values::PublicValues, record::EmulationRecord},
     },
     instances::compiler::shapes::riscv_shape::RiscvShapeConfig,
+    iter::{IntoPicoIterator, PicoExtend, PicoIterator},
     machine::{
         chip::{ChipBehavior, MetaChip},
         field::FieldSpecificPoseidon2Config,
@@ -21,7 +22,6 @@ use crate::{
 use anyhow::Result;
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
-use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, info, instrument};
 
@@ -129,7 +129,7 @@ where
                 global_lookup_debugger.debug_incremental(&self.chips(), &batch_records);
             }
 
-            let batch_proofs = batch_records.into_par_iter().map(|record| {
+            let batch_proofs = batch_records.into_pico_iter().map(|record| {
                 let start_chunk = Instant::now();
                 let main_commitment = self.base_machine.commit(&record).unwrap();
 
@@ -150,7 +150,7 @@ where
             });
 
             // extend all_proofs to include batch_proofs
-            all_proofs.par_extend(batch_proofs);
+            all_proofs.pico_extend(batch_proofs);
 
             debug!(
                 "--- Finish riscv batch {} in {:?}",
@@ -330,7 +330,7 @@ where
                 global_lookup_debugger.debug_incremental(&self.chips(), &batch_records);
             }
 
-            let batch_proofs = batch_records.into_par_iter().map(|record| {
+            let batch_proofs = batch_records.into_pico_iter().map(|record| {
                 let start_chunk = Instant::now();
                 let main_commitment = self.base_machine.commit(&record).unwrap();
 
@@ -351,7 +351,7 @@ where
             });
 
             // extend all_proofs to include batch_proofs
-            all_proofs.par_extend(batch_proofs);
+            all_proofs.pico_extend(batch_proofs);
 
             debug!(
                 "--- Finish riscv batch {} in {:?}",

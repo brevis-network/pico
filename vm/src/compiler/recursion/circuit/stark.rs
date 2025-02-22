@@ -23,11 +23,12 @@ use crate::{
         chip::ChipBehavior,
         lookup::LookupScope,
         machine::BaseMachine,
-        proof::{BaseCommitments, BaseOpenedValues},
+        proof::{BaseCommitments, ChipOpenedValues},
         utils::order_chips,
     },
     primitives::consts::DIGEST_SIZE,
 };
+use alloc::sync::Arc;
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
 use p3_air::{Air, BaseAir};
@@ -38,7 +39,8 @@ use p3_koala_bear::KoalaBear;
 
 type F<FC> = <FC as FieldGenericConfig>::F;
 type EF<FC> = <FC as FieldGenericConfig>::EF;
-type Opening<FC> = BaseOpenedValues<Felt<F<FC>>, Ext<F<FC>, EF<FC>>>;
+//type Opening<FC> = BaseOpenedValues<Felt<F<FC>>, Ext<F<FC>, EF<FC>>>;
+type Opening<FC> = Vec<ChipOpenedValues<Felt<F<FC>>, Ext<F<FC>, EF<FC>>>>;
 
 /// Reference: [pico_machine::stark::BaseProof]
 #[allow(clippy::type_complexity)]
@@ -47,9 +49,9 @@ pub struct BaseProofVariable<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigV
     pub commitments: BaseCommitments<SC::DigestVariable>,
     pub opened_values: Opening<CC>,
     pub opening_proof: FriProofVariable<CC, SC>,
-    pub log_main_degrees: Vec<usize>,
-    pub log_quotient_degrees: Vec<usize>,
-    pub main_chip_ordering: HashMap<String, usize>,
+    pub log_main_degrees: Arc<[usize]>,
+    pub log_quotient_degrees: Arc<[usize]>,
+    pub main_chip_ordering: Arc<HashMap<String, usize>>,
     pub public_values: Vec<Felt<CC::F>>,
 }
 
@@ -121,7 +123,6 @@ where
         } = proof;
 
         let log_degrees = opened_values
-            .chips_opened_values
             .iter()
             .map(|val| val.log_main_degree)
             .collect_vec();
@@ -148,11 +149,7 @@ where
             (0..2).map(|_| challenger.sample_ext(builder)).collect_vec();
 
         challenger.observe(builder, permutation_commit);
-        for (opening, chip) in opened_values
-            .chips_opened_values
-            .iter()
-            .zip_eq(chips.iter())
-        {
+        for (opening, chip) in opened_values.iter().zip_eq(chips.iter()) {
             let regional_sum = CC::ext2felt(builder, opening.regional_cumulative_sum);
             let global_sum = opening.global_cumulative_sum;
             challenger.observe_slice(builder, regional_sum);
@@ -191,21 +188,15 @@ where
                         domain: *domain,
                         points: vec![zeta, domain.next_point_variable(builder, zeta)],
                         values: vec![
-                            opened_values.chips_opened_values[i]
-                                .preprocessed_local
-                                .clone(),
-                            opened_values.chips_opened_values[i]
-                                .preprocessed_next
-                                .clone(),
+                            opened_values[i].preprocessed_local.clone(),
+                            opened_values[i].preprocessed_next.clone(),
                         ],
                     }
                 } else {
                     TwoAdicPcsMatsVariable::<CC, SC::Domain> {
                         domain: *domain,
                         points: vec![zeta],
-                        values: vec![opened_values.chips_opened_values[i]
-                            .preprocessed_local
-                            .clone()],
+                        values: vec![opened_values[i].preprocessed_local.clone()],
                     }
                 }
             })
@@ -213,7 +204,7 @@ where
 
         let main_domains_points_and_opens = trace_domains
             .iter()
-            .zip_eq(opened_values.chips_opened_values.iter())
+            .zip_eq(opened_values.iter())
             .zip_eq(chips.iter())
             .map(|((domain, values), chip)| {
                 if !chip.local_only() {
@@ -234,7 +225,7 @@ where
 
         let perm_domains_points_and_opens = trace_domains
             .iter()
-            .zip_eq(opened_values.chips_opened_values.iter())
+            .zip_eq(opened_values.iter())
             .map(
                 |(domain, values)| TwoAdicPcsMatsVariable::<CC, SC::Domain> {
                     domain: *domain,
@@ -261,7 +252,6 @@ where
 
         let quotient_domains_points_and_opens = proof
             .opened_values
-            .chips_opened_values
             .iter()
             .zip_eq(quotient_chunk_domains.iter())
             .flat_map(|(values, qc_domains)| {
@@ -315,7 +305,7 @@ where
             chips.iter(),
             trace_domains,
             quotient_chunk_domains,
-            opened_values.chips_opened_values.iter(),
+            opened_values.iter(),
         ) {
             // Verify the shape of the opening arguments matches the expected values.
             let valid_shape = values.preprocessed_local.len() == chip.preprocessed_width()
@@ -353,7 +343,6 @@ where
 
         // Verify that the chips' regional_cumulative_sum sum to 0.
         let regional_cumulative_sum: Ext<CC::F, CC::EF> = opened_values
-            .chips_opened_values
             .iter()
             .map(|val| val.regional_cumulative_sum)
             .fold(builder.constant(CC::EF::ZERO), |acc, x| {
@@ -376,7 +365,7 @@ impl<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVariable<CC>> BaseProofVa
             .main_chip_ordering
             .get("Cpu")
             .expect("CPU chip not found");
-        self.opened_values.chips_opened_values[*idx].log_main_degree
+        self.opened_values[*idx].log_main_degree
     }
 
     pub fn contains_memory_initialize(&self) -> bool {

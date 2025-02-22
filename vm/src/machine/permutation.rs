@@ -1,7 +1,10 @@
 use super::lookup::LookupScope;
-use crate::machine::{
-    builder::{ChipBuilder, PermutationBuilder},
-    lookup::VirtualPairLookup,
+use crate::{
+    iter::PicoScanIterator,
+    machine::{
+        builder::{ChipBuilder, PermutationBuilder},
+        lookup::VirtualPairLookup,
+    },
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -9,7 +12,6 @@ use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
-use rayon_scan::ScanParallelIterator;
 use std::borrow::Borrow;
 use strum::IntoEnumIterator;
 
@@ -157,7 +159,7 @@ pub fn generate_permutation_trace<F: Field, EF: ExtensionField<F>>(
 
     let regional_cumulative_sums = regional_cumulative_sums
         .into_par_iter()
-        .scan(|a, b| *a + *b, zero)
+        .pico_scan(|a, b| *a + *b, zero)
         .collect::<Vec<_>>();
 
     regional_cumulative_sum = *regional_cumulative_sums.last().unwrap();

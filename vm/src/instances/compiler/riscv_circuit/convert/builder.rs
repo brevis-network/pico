@@ -267,10 +267,7 @@ where
         let chips = machine
             .chunk_ordered_chips(&proofs[0].main_chip_ordering)
             .collect::<Vec<_>>();
-        for (chip, values) in chips
-            .iter()
-            .zip(proofs[0].opened_values.chips_opened_values.iter())
-        {
+        for (chip, values) in chips.iter().zip(proofs[0].opened_values.iter()) {
             if chip.lookup_scope() == LookupScope::Global {
                 global_cumulative_sums.push(values.global_cumulative_sum);
             }

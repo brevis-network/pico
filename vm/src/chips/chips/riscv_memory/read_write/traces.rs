@@ -25,17 +25,13 @@ use crate::{
         register::Register::X0,
     },
     emulator::riscv::record::EmulationRecord,
+    iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice, PicoSliceMut},
     machine::chip::ChipBehavior,
     primitives::consts::{MEMORY_RW_DATAPAR, WORD_SIZE},
 };
 use hashbrown::HashMap;
-use itertools::Itertools;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{
-    IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator, ParallelSlice,
-};
-use rayon::slice::ParallelSliceMut;
 use std::{array, borrow::BorrowMut};
 
 impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
@@ -50,7 +46,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         // Parallelize the initial filtering and collection
         let events: Vec<_> = input
             .cpu_events
-            .par_iter()
+            .pico_iter()
             .filter(|e| e.instruction.is_memory_instruction())
             .collect();
 
@@ -69,8 +65,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
 
         // Use rayon's parallel slice operations for better chunk handling
         values[..populate_len]
-            .par_chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
-            .zip_eq(events.par_iter())
+            .pico_chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
+            .zip_eq(events.pico_iter())
             .for_each(|(row, event)| {
                 let cols: &mut MemoryChipValueCols<_> = row.borrow_mut();
                 self.event_to_row(event, cols, &mut vec![]);
@@ -85,11 +81,11 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
             .cpu_events
             .iter()
             .filter(|e| e.instruction.is_memory_instruction())
-            .collect_vec();
+            .collect::<Box<[_]>>();
         // Generate the trace rows for each event.
         let chunk_size = std::cmp::max(mem_events.len() / num_cpus::get(), 1);
         let (alu_events, blu_events): (Vec<_>, Vec<_>) = mem_events
-            .par_chunks(chunk_size)
+            .pico_chunks(chunk_size)
             .map(|ops: &[&CpuEvent]| {
                 let mut alu = HashMap::new();
                 // The range map stores range (u8) lookup event -> multiplicity.

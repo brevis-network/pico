@@ -14,6 +14,10 @@ use crate::{
     },
     compiler::riscv::program::Program,
     emulator::riscv::record::EmulationRecord,
+    iter::{
+        IndexedPicoIterator, IntoPicoIterator, IntoPicoRefMutIterator, PicoBridge, PicoIterator,
+        PicoScanIterator,
+    },
     machine::{
         chip::ChipBehavior,
         lookup::LookupScope,
@@ -22,11 +26,6 @@ use crate::{
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelBridge,
-    ParallelIterator,
-};
-use rayon_scan::ScanParallelIterator;
 use std::borrow::BorrowMut;
 
 impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
@@ -44,7 +43,7 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
 
         let (blu_batches, poseidon2_events): (Vec<_>, Vec<_>) = events
             .chunks(chunk_size)
-            .par_bridge()
+            .pico_bridge()
             .map(|events| {
                 let mut blu: Vec<ByteLookupEvent> = vec![];
                 let mut poseidon2: Vec<Poseidon2Event> = vec![];
@@ -88,7 +87,7 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
             .collect::<Vec<_>>();
 
         let point_chunks = chunks
-            .par_iter_mut()
+            .pico_iter_mut()
             .enumerate()
             .map(|(i, rows)| {
                 let mut point_chunks = Vec::with_capacity(chunk_size * NUM_GLOBAL_COLS + 1);
@@ -126,9 +125,9 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
 
         let points = point_chunks.into_iter().flatten().collect::<Vec<_>>();
         let cumulative_sum = points
-            .into_par_iter()
+            .into_pico_iter()
             .with_min_len(1 << 15)
-            .scan(|a, b| *a + *b, SepticCurveComplete::Infinity)
+            .pico_scan(|a, b| *a + *b, SepticCurveComplete::Infinity)
             .collect::<Vec<SepticCurveComplete<F>>>();
 
         let final_digest = match cumulative_sum.last() {
@@ -142,7 +141,7 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
         values
             .chunks_mut(chunk_size * NUM_GLOBAL_COLS)
             .enumerate()
-            .par_bridge()
+            .pico_bridge()
             .for_each(|(i, rows)| {
                 rows.chunks_mut(NUM_GLOBAL_COLS)
                     .enumerate()

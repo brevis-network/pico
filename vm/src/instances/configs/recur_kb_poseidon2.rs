@@ -1,5 +1,5 @@
 use crate::{
-    configs::{field_config::kb_simple, stark_config::kb_poseidon2},
+    configs::{field_config::KoalaBearSimple, stark_config::kb_poseidon2},
     primitives::consts::DIGEST_SIZE,
 };
 use p3_fri::{BatchOpening, CommitPhaseProofStep, FriProof, QueryProof};
@@ -11,7 +11,7 @@ use p3_symmetric::Hash;
 
 pub struct KoalaBearPoseidon2Recursion;
 
-pub type FieldConfig = kb_simple::KoalaBearSimple;
+pub type FieldConfig = KoalaBearSimple;
 pub type StarkConfig = kb_poseidon2::KoalaBearPoseidon2;
 
 pub type SC_Val = kb_poseidon2::SC_Val;

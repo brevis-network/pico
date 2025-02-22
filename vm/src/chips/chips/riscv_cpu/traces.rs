@@ -16,14 +16,13 @@ use crate::{
     },
     emulator::riscv::record::EmulationRecord,
     instances::compiler::shapes::riscv_shape::RiscvPadShape,
+    iter::{IntoPicoRefMutIterator, PicoBridge, PicoIterator, PicoSlice},
     machine::chip::ChipBehavior,
 };
 use hashbrown::HashMap;
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::ParallelSlice;
-use rayon::prelude::{IntoParallelRefMutIterator, ParallelBridge, ParallelIterator};
 use std::borrow::BorrowMut;
 
 impl<F: Field> BaseAir<F> for CpuChip<F> {
@@ -52,7 +51,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         values
             .chunks_mut(chunk_size * NUM_CPU_COLS)
             .enumerate()
-            .par_bridge()
+            .pico_bridge()
             .for_each(|(i, rows)| {
                 rows.chunks_mut(NUM_CPU_COLS)
                     .enumerate()
@@ -78,7 +77,7 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
         let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
         let (alu_events, blu_events): (Vec<_>, Vec<_>) = input
             .cpu_events
-            .par_chunks(chunk_size)
+            .pico_chunks(chunk_size)
             .map(|ops: &[CpuEvent]| {
                 let mut alu = HashMap::new();
                 // The range map stores range (u8) lookup event -> multiplicity.
@@ -201,7 +200,7 @@ impl<F: PrimeField32> CpuChip<F> {
             )
         };
 
-        rows[n_real_rows..].par_iter_mut().for_each(|padded_row| {
+        rows[n_real_rows..].pico_iter_mut().for_each(|padded_row| {
             padded_row[CPU_COL_MAP.opcode_selector.imm_b] = F::ONE;
             padded_row[CPU_COL_MAP.opcode_selector.imm_c] = F::ONE;
         });

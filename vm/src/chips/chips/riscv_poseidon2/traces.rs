@@ -10,6 +10,7 @@ use crate::{
     compiler::riscv::program::Program,
     configs::config::Poseidon2Config,
     emulator::riscv::record::EmulationRecord,
+    iter::{join, IndexedPicoIterator, IntoPicoIterator, PicoIterator, PicoSliceMut},
     machine::{chip::ChipBehavior, field::same_field},
     primitives::consts::{PERMUTATION_WIDTH, RISCV_POSEIDON2_DATAPAR},
 };
@@ -17,10 +18,8 @@ use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use p3_mersenne_31::Mersenne31;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
-use rayon::{iter::IndexedParallelIterator, join, slice::ParallelSliceMut};
 use std::borrow::BorrowMut;
 
 impl<
@@ -57,7 +56,7 @@ impl<
 
         // Initialize values in parallel
         let mut values: Vec<F> = (0..padded_nrows * total_cols)
-            .into_par_iter()
+            .into_pico_iter()
             .map(|_| F::ZERO)
             .collect();
 
@@ -84,7 +83,7 @@ impl<
             || {
                 // Process actual values in parallel
                 values_pop
-                    .par_chunks_mut(value_cols)
+                    .pico_chunks_mut(value_cols)
                     .zip_eq(events)
                     .for_each(|(row, event)| {
                         let cols: &mut Poseidon2ValueCols<F, Config> = row.borrow_mut();
@@ -100,7 +99,7 @@ impl<
             || {
                 // Process dummy values in parallel using the pre-computed dummy row
                 values_dummy
-                    .par_chunks_mut(value_cols)
+                    .pico_chunks_mut(value_cols)
                     .for_each(|row| row.copy_from_slice(&dummy_row));
             },
         );

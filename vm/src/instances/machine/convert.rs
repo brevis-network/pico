@@ -2,7 +2,7 @@ use crate::{
     compiler::recursion::program::RecursionProgram,
     configs::{
         config::{StarkGenericConfig, Val},
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
     emulator::{
         emulator::{BabyBearMetaEmulator, KoalaBearMetaEmulator},
