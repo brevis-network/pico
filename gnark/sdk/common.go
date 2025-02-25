@@ -32,18 +32,18 @@ type PicoGroth16Proof struct {
 func ExportSolidify() error {
 	err := utils.ReadVerifyingKey(os.Getenv("VK_PATH"), Vk)
 	if err != nil {
-		return fmt.Errorf("failed to read verifiing key: %v", err)
+		return fmt.Errorf("failed to read verifying key: %v", err)
 	}
 
 	f, err := os.Create(os.Getenv("SOLIDITY_PATH"))
 	defer f.Close()
 	if err != nil {
-		return fmt.Errorf("fail to solidify file: %v", err)
+		return fmt.Errorf("failed to solidify file: %v", err)
 	}
 
 	err = Vk.ExportSolidity(f)
 	if err != nil {
-		return fmt.Errorf("fail to export solidity: %v", err)
+		return fmt.Errorf("failed to export solidity: %v", err)
 	}
 	return nil
 }
