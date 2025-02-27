@@ -60,6 +60,15 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
     } else if args.elf == "precompile" {
         elf = load_elf("precompile");
         info!("Test multiple precompiles in a single elf");
+    } else if args.elf == "poseidon2-kb" {
+        elf = load_elf("poseidon2-kb");
+        info!("Test precompile KB poseidon2");
+    } else if args.elf == "poseidon2-m31" {
+        elf = load_elf("poseidon2-m31");
+        info!("Test precompile M31 poseidon2");
+    } else if args.elf == "poseidon2-bb" {
+        elf = load_elf("poseidon2-bb");
+        info!("Test precompile BB poseidon2");
     } else {
         eprintln!("Invalid test elf.\n");
         std::process::exit(1);

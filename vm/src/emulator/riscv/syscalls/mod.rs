@@ -227,19 +227,19 @@ pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Sy
     match F::field_type() {
         FieldType::TypeBabyBear => {
             syscall_map.insert(
-                SyscallCode::POSEIDON2_PERMUTE,
+                SyscallCode::POSEIDON2_PERMUTE_BB,
                 Arc::new(Poseidon2PermuteSyscall::<F, BabyBearConfig>(PhantomData)),
             );
         }
         FieldType::TypeKoalaBear => {
             syscall_map.insert(
-                SyscallCode::POSEIDON2_PERMUTE,
+                SyscallCode::POSEIDON2_PERMUTE_KB,
                 Arc::new(Poseidon2PermuteSyscall::<F, KoalaBearConfig>(PhantomData)),
             );
         }
         FieldType::TypeMersenne31 => {
             syscall_map.insert(
-                SyscallCode::POSEIDON2_PERMUTE,
+                SyscallCode::POSEIDON2_PERMUTE_M31,
                 Arc::new(Poseidon2PermuteSyscall::<F, Mersenne31Config>(PhantomData)),
             );
         }

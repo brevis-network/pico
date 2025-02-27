@@ -7,6 +7,14 @@ pub mod secp256k1;
 pub mod unconstrained;
 pub mod utils;
 
+/// Enum representing the different Precompile Poseidon2 permutation syscall types.
+#[repr(u32)]
+pub enum SyscallType {
+    BabyBear = 0,
+    KoalaBear = 1,
+    M31 = 2,
+}
+
 extern "C" {
     /// Halts the program with the given exit code.
     pub fn syscall_halt(exit_code: u8) -> !;
@@ -132,6 +140,10 @@ extern "C" {
     pub fn syscall_secp256k1_fp_mulmod(p: *mut u32, q: *const u32);
 
     /// Executes an poseidon2 permute on the given inputs.
-    pub fn syscall_poseidon2_permute(x: *const [u32; 16], y: *mut [u32; 16]);
+    pub fn syscall_poseidon2_permute(
+        x: *const [u32; 16],
+        y: *mut [u32; 16],
+        syscall_type: SyscallType,
+    );
 
 }

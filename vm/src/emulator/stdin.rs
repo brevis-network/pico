@@ -1,5 +1,8 @@
 use crate::{
-    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip as RiscvPoseidon2Chip,
+    chips::{
+        chips::riscv_poseidon2::FieldSpecificPoseidon2Chip as RiscvPoseidon2Chip,
+        precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    },
     compiler::recursion::{
         circuit::{
             challenger::DuplexChallengerVariable,
@@ -170,6 +173,8 @@ where
         PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
         Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
         RiscvPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+        FieldSpecificPrecompilePoseidon2Chip<F>:
+            for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
     {
         // initialize for base_ and reconstruct_challenger
         let [mut base_challenger, mut reconstruct_challenger] =

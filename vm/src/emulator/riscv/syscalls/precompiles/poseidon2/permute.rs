@@ -1,48 +1,23 @@
-use p3_field::PrimeField32;
-use std::marker::PhantomData;
-
 use super::event::Poseidon2PermuteEvent;
 use crate::{
-    chips::gadgets::poseidon2::utils::{external_linear_layer, internal_linear_layer},
     configs::config::Poseidon2Config,
     emulator::riscv::syscalls::{
         precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
     },
-    primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
+    machine::field::{FieldBehavior, FieldType},
+    primitives::{consts::PERMUTATION_WIDTH, Poseidon2Init},
 };
-use typenum::Unsigned;
+use p3_baby_bear::BabyBear;
+use p3_field::{FieldAlgebra, PrimeField32};
+use p3_koala_bear::KoalaBear;
+use p3_mersenne_31::Mersenne31;
+use p3_symmetric::Permutation;
+use std::marker::PhantomData;
 
 #[allow(clippy::type_complexity)]
 pub(crate) struct Poseidon2PermuteSyscall<F, Config>(
     pub(crate) PhantomData<fn(F, Config) -> (F, Config)>,
 );
-
-impl<F: PrimeField32, Config: Poseidon2Config> Poseidon2PermuteSyscall<F, Config> {
-    const NUM_INTERNAL_ROUNDS: usize = Config::PartialRounds::USIZE;
-    const HALF_EXTERNAL_ROUNDS: usize = Config::HalfFullRounds::USIZE;
-
-    pub fn full_round(
-        state: &mut [F; PERMUTATION_WIDTH],
-        round_constants: &[F; PERMUTATION_WIDTH],
-    ) {
-        for (s, r) in state.iter_mut().zip(round_constants.iter()) {
-            *s += *r;
-            Self::sbox(s);
-        }
-        external_linear_layer(state);
-    }
-
-    pub fn partial_round(state: &mut [F; PERMUTATION_WIDTH], round_constant: &F) {
-        state[0] += *round_constant;
-        Self::sbox(&mut state[0]);
-        internal_linear_layer::<F, _>(state);
-    }
-
-    #[inline]
-    pub fn sbox(x: &mut F) {
-        *x = x.exp_const_u64::<7>();
-    }
-}
 
 impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSyscall<F, Config> {
     fn num_extra_cycles(&self) -> u32 {
@@ -56,6 +31,27 @@ impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSysca
         arg1: u32,
         arg2: u32,
     ) -> Option<u32> {
+        if F::field_type() == FieldType::TypeBabyBear {
+            assert_eq!(
+                syscall_code.syscall_id(),
+                SyscallCode::POSEIDON2_PERMUTE_BB.syscall_id()
+            );
+        }
+
+        if F::field_type() == FieldType::TypeKoalaBear {
+            assert_eq!(
+                syscall_code.syscall_id(),
+                SyscallCode::POSEIDON2_PERMUTE_KB.syscall_id()
+            );
+        }
+
+        if F::field_type() == FieldType::TypeMersenne31 {
+            assert_eq!(
+                syscall_code.syscall_id(),
+                SyscallCode::POSEIDON2_PERMUTE_M31.syscall_id()
+            );
+        }
+
         let clk_init = ctx.clk;
         let input_memory_ptr = arg1;
         let output_memory_ptr = arg2;
@@ -66,35 +62,32 @@ impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSysca
         let (state_records, state_values) = ctx.mr_slice(input_memory_ptr, PERMUTATION_WIDTH);
         state_read_records.extend_from_slice(&state_records);
 
-        let mut state: [F; PERMUTATION_WIDTH] = state_values
+        let state: [F; PERMUTATION_WIDTH] = state_values
             .clone()
             .into_iter()
-            .map(F::from_wrapped_u32)
+            .map(F::from_canonical_u32)
             .collect::<Vec<F>>()
             .try_into()
             .unwrap();
 
-        // Perform permutation on the state
-        external_linear_layer(&mut state);
-
-        for round in 0..Self::HALF_EXTERNAL_ROUNDS {
-            Self::full_round(&mut state, &RC_16_30_U32[round].map(F::from_wrapped_u32));
-        }
-
-        for round in 0..Self::NUM_INTERNAL_ROUNDS {
-            Self::partial_round(
-                &mut state,
-                &RC_16_30_U32[round + Self::HALF_EXTERNAL_ROUNDS].map(F::from_wrapped_u32)[0],
-            );
-        }
-
-        for round in 0..Self::HALF_EXTERNAL_ROUNDS {
-            Self::full_round(
-                &mut state,
-                &RC_16_30_U32[round + Self::NUM_INTERNAL_ROUNDS + Self::HALF_EXTERNAL_ROUNDS]
-                    .map(F::from_wrapped_u32),
-            );
-        }
+        let state = match F::field_type() {
+            FieldType::TypeBabyBear => {
+                let perm = crate::configs::stark_config::BabyBearPoseidon2::init();
+                perm.permute(state.map(|x| BabyBear::from_canonical_u32(x.as_canonical_u32())))
+                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
+            }
+            FieldType::TypeKoalaBear => {
+                let perm = crate::configs::stark_config::KoalaBearPoseidon2::init();
+                perm.permute(state.map(|x| KoalaBear::from_canonical_u32(x.as_canonical_u32())))
+                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
+            }
+            FieldType::TypeMersenne31 => {
+                let perm = crate::configs::stark_config::M31Poseidon2::init();
+                perm.permute(state.map(|x| Mersenne31::from_canonical_u32(x.as_canonical_u32())))
+                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
+            }
+            _ => unimplemented!("Unsupported field type"),
+        };
 
         // Increment the clk by 1 before writing because we read from memory at start_clk.
         ctx.clk += 1;
@@ -109,7 +102,6 @@ impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSysca
         );
         state_write_records.extend_from_slice(&write_records);
 
-        // Push the SHA extend event.
         let chunk = ctx.current_chunk();
         let event = Poseidon2PermuteEvent {
             chunk,

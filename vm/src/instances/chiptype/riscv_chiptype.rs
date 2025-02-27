@@ -1,3 +1,4 @@
+use crate::chips::precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip;
 use hashbrown::HashSet;
 use p3_air::{Air, BaseAir};
 use p3_field::PrimeField32;
@@ -40,7 +41,6 @@ use crate::{
             edwards::{EdAddAssignChip, EdDecompressChip},
             fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
             keccak256::KeccakPermuteChip,
-            poseidon2::Poseidon2PermuteChip,
             sha256::{compress::ShaCompressChip, extend::ShaExtendChip},
             uint256::Uint256MulChip,
             weierstrass::{
@@ -122,7 +122,7 @@ define_chip_type!(
         (Fp2MulBls381, Fp2MulBls381),
         (FpSecp256k1, FpOpSecp256k1),
         (U256Mul, Uint256MulChip),
-        (Poseidon2P, Poseidon2PermuteChip),
+        (Poseidon2P, FieldSpecificPrecompilePoseidon2Chip),
         (SyscallRiscv, SyscallChip),
         (SyscallPrecompile, SyscallChip),
         (Global, GlobalChip),
@@ -292,7 +292,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
     ) -> Option<(usize, usize, usize)> {
         record
             .precompile_events
-            .get_events(precompile_syscall_code(chip_name))
+            .get_events(precompile_syscall_code::<F>(chip_name))
             .filter(|events| !events.is_empty())
             .map(|events| {
                 (

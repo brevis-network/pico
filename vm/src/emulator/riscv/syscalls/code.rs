@@ -135,7 +135,13 @@ pub enum SyscallCode {
     SECP256K1_FP_MUL = 0x00_01_01_2E,
 
     /// Executes the `POSEIDON2_PERMUTE` precompile.
-    POSEIDON2_PERMUTE = 0x00_01_01_2F,
+    POSEIDON2_PERMUTE_BB = 0x00_01_01_2F,
+
+    /// Executes the `POSEIDON2_PERMUTE_KB` precompile.
+    POSEIDON2_PERMUTE_KB = 0x00_01_01_30,
+
+    /// Executes the `POSEIDON2_PERMUTE_KB` precompile.
+    POSEIDON2_PERMUTE_M31 = 0x00_01_01_31,
 }
 
 impl SyscallCode {
@@ -180,7 +186,9 @@ impl SyscallCode {
             0x00_01_01_2D => SyscallCode::SECP256K1_FP_SUB,
             0x00_01_01_2E => SyscallCode::SECP256K1_FP_MUL,
             0x00_00_01_1C => SyscallCode::BLS12381_DECOMPRESS,
-            0x00_01_01_2F => SyscallCode::POSEIDON2_PERMUTE,
+            0x00_01_01_2F => SyscallCode::POSEIDON2_PERMUTE_BB,
+            0x00_01_01_30 => SyscallCode::POSEIDON2_PERMUTE_KB,
+            0x00_01_01_31 => SyscallCode::POSEIDON2_PERMUTE_M31,
             _ => panic!("invalid syscall number: {}", value),
         }
     }

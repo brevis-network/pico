@@ -1,7 +1,10 @@
 use p3_air::Air;
 use p3_field::PrimeField32;
 use pico_vm::{
-    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
+    chips::{
+        chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
+        precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    },
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
@@ -44,6 +47,9 @@ where
     BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
     SC::Domain: Send + Sync,
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
+        + Air<ProverConstraintFolder<SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
         + Air<ProverConstraintFolder<SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {

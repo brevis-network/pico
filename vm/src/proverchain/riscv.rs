@@ -1,6 +1,9 @@
 use super::{InitialProverSetup, MachineProver};
 use crate::{
-    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
+    chips::{
+        chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
+        precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    },
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
@@ -50,6 +53,7 @@ where
     BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
+    FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
     pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
         let witness = ProvingWitness::setup_for_riscv(
@@ -127,6 +131,8 @@ where
     BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
     FieldSpecificPoseidon2Chip<Val<SC>>:
+        Air<ProverConstraintFolder<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    FieldSpecificPrecompilePoseidon2Chip<Val<SC>>:
         Air<ProverConstraintFolder<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
 {
     type Witness = EmulatorStdin<Program, Vec<u8>>;
