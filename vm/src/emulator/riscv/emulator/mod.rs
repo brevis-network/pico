@@ -81,6 +81,9 @@ pub struct RiscvEmulator {
     /// Local memory access events.
     pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
 
+    /// Collects precompile and memory init/finalize events across batches
+    pub deferred_record: EmulationRecord,
+
     /// whether or not to log syscalls
     log_syscalls: bool,
 
@@ -101,6 +104,7 @@ impl RiscvEmulator {
     #[must_use]
     pub fn new<F: PrimeField32>(program: Arc<Program>, opts: EmulatorOpts) -> Self {
         let record = EmulationRecord::new(program.clone());
+        let deferred_record = record.clone();
 
         // Determine the maximum number of cycles for any syscall.
         let syscall_map = default_syscall_map::<F>();
@@ -127,6 +131,7 @@ impl RiscvEmulator {
             memory_checkpoint: Default::default(),
             max_syscall_cycles,
             local_memory_access: Default::default(),
+            deferred_record,
             log_syscalls,
             flag_active: true,
         }
@@ -243,20 +248,17 @@ impl RiscvEmulator {
             self.state.current_batch += 1;
         }
 
-        let mut deferred = EmulationRecord::new(self.program.clone());
-
         for record in batch_records.iter_mut() {
-            deferred.append(&mut record.defer());
+            self.deferred_record.append(&mut record.defer());
         }
-
-        let deferred = deferred.split(true, self.opts.split_opts);
-
-        debug!("split-chunks len: {:?}", deferred.len());
 
         // remove empty memory init/finalize chunk
         if done {
             batch_records.pop();
         }
+
+        let deferred = self.deferred_record.split(done, self.opts.split_opts);
+        debug!("split-chunks len: {:?}", deferred.len());
 
         batch_records.reserve(deferred.len() + done as usize);
         batch_records.extend(deferred);
