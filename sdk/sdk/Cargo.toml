@@ -32,6 +32,6 @@ serde_json.workspace = true
 
 [features]
 default = []
-prover = ["pico-vm/jemalloc"]
+prover = ["pico-vm/jemalloc", "pico-vm/nightly-features"]
 libm = ["dep:libm"]
 coprocessor = ["coprocessor-sdk"]
