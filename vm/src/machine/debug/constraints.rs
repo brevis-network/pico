@@ -22,10 +22,7 @@ use p3_matrix::{
     stack::VerticalPair,
     Matrix,
 };
-use std::{
-    array,
-    sync::{LazyLock, RwLock},
-};
+use std::{array, sync::LazyLock};
 
 static DEFAULT_MAX_FAILURES: usize = 100;
 static MAX_FAILURES: LazyLock<usize> = LazyLock::new(|| {
@@ -37,14 +34,12 @@ static MAX_FAILURES: LazyLock<usize> = LazyLock::new(|| {
     failures
 });
 
-static FAILURE_COUNTS: LazyLock<RwLock<HashMap<String, usize>>> =
-    LazyLock::new(|| HashMap::new().into());
-
 pub struct IncrementalConstraintDebugger<'a, SC: StarkGenericConfig> {
     pk: &'a BaseProvingKey<SC>,
     global_sums: Vec<SepticDigest<SC::Val>>,
     challenges: [SC::Challenge; 2],
     messages: Vec<(DebuggerMessageLevel, String)>,
+    failures: HashMap<String, usize>,
 }
 
 impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
@@ -61,12 +56,14 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         let challenges = array::from_fn(|_| challenger.sample_ext_element());
 
         let messages = vec![];
+        let failures = HashMap::new();
 
         Self {
             pk,
             global_sums,
             challenges,
             messages,
+            failures,
         }
     }
 
@@ -108,6 +105,11 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
         C: ChipBehavior<SC::Val> + for<'b> Air<DebugConstraintFolder<'b, SC::Val, SC::Challenge>>,
     {
         info!("Checking constraints");
+
+        // pre-fill failure hashmap
+        for chip in chips {
+            self.failures.entry(chip.name()).or_insert(*MAX_FAILURES);
+        }
 
         for chunk in chunks.iter() {
             // Filter the chips based on what is used.
@@ -240,8 +242,7 @@ impl<'a, SC: StarkGenericConfig> IncrementalConstraintDebugger<'a, SC> {
             return;
         }
 
-        let mut failure_counts = FAILURE_COUNTS.try_write().expect("single writer");
-        let max_failures = failure_counts.entry(chip.name()).or_insert(*MAX_FAILURES);
+        let max_failures = self.failures.get_mut(&chip.name()).expect("chip exists");
         info!("remaining failures for {}: {}", chip.name(), max_failures);
 
         for i in 0..height {
