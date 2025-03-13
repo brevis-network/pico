@@ -43,6 +43,7 @@ use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use serde::{Deserialize, Serialize};
 use std::{array, fmt::Debug};
+use tracing::instrument;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct EmulatorStdinBuilder<I> {
@@ -147,6 +148,7 @@ where
     /// Construct the recursion stdin for riscv_compress.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// batch_size should be greater than 1
+    #[instrument(name = "setup convert stdin", level = "debug", skip_all)]
     pub fn setup_for_convert<F, CC>(
         riscv_vk: &BaseVerifyingKey<SC>,
         vk_root: [Val<SC>; DIGEST_SIZE],
@@ -237,6 +239,7 @@ where
     >,
 {
     /// Construct the recursion stdin for one layer of combine.
+    #[instrument(name = "setup combine stdin", level = "debug", skip_all)]
     pub fn setup_for_combine<F, CC>(
         vk_root: [Val<SC>; DIGEST_SIZE],
         vks: &[BaseVerifyingKey<SC>],
@@ -320,6 +323,7 @@ where
         > + Send,
 {
     /// Construct the recursion stdin for one layer of combine.
+    #[instrument(name = "setup combine_vk stdin", level = "debug", skip_all)]
     #[allow(clippy::too_many_arguments)]
     pub fn setup_for_combine_vk<F, CC>(
         vk_root: [Val<SC>; DIGEST_SIZE],

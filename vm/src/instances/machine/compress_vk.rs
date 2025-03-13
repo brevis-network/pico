@@ -21,7 +21,7 @@ use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use std::{any::type_name, borrow::Borrow};
-use tracing::{debug, instrument};
+use tracing::{debug, debug_span, instrument};
 
 pub struct CompressVkMachine<SC, C>
 where
@@ -70,7 +70,7 @@ where
     }
 
     /// Get the prover of the machine.
-    #[instrument(name = "compress_prove", level = "debug", skip_all)]
+    #[instrument(name = "COMPRESS VK MACHINE PROVE", level = "debug", skip_all)]
     fn prove(&self, witness: &ProvingWitness<SC, C, RecursionVkStdin<SC, C>>) -> MetaProof<SC>
     where
         C: for<'c> Air<
@@ -82,7 +82,7 @@ where
         >,
     {
         let mut records = witness.records().to_vec();
-        self.complement_record(&mut records);
+        debug_span!("complement record").in_scope(|| self.complement_record(&mut records));
 
         debug!("COMPRESS record stats");
         let stats = records[0].stats();
@@ -90,7 +90,8 @@ where
             debug!("   |- {:<28}: {}", key, value);
         }
 
-        let proofs = self.base_machine.prove_ensemble(witness.pk(), &records);
+        let proofs = debug_span!("prove_ensemble")
+            .in_scope(|| self.base_machine.prove_ensemble(witness.pk(), &records));
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();

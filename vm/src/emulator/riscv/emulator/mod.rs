@@ -202,7 +202,7 @@ impl RiscvEmulator {
     }
 
     /// Emulate chunk_batch_size cycles and bump to self.batch_records.
-    #[instrument(name = "emulate_to_batch", level = "debug", skip_all)]
+    #[instrument(name = "emulate_batch_records", level = "debug", skip_all)]
     pub fn emulate_batch(&mut self) -> Result<(Vec<EmulationRecord>, bool), EmulationError> {
         let mut batch_records = Vec::with_capacity(self.opts.chunk_batch_size as usize);
 

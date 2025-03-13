@@ -1,9 +1,11 @@
 //! Logger setup
 
 use std::sync::Once;
+use tracing::Level;
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
-    fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry,
+    filter::filter_fn, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt,
+    EnvFilter, Layer, Registry,
 };
 
 static INIT: Once = Once::new();
@@ -30,6 +32,14 @@ pub fn setup_logger() {
         let logger_type = std::env::var("RUST_LOGGER").unwrap_or_else(|_| "flat".to_string());
         match logger_type.as_str() {
             "forest" => {
+                Registry::default()
+                    .with(env_filter)
+                    .with(ForestLayer::default().with_filter(filter_fn(|metadata| {
+                        metadata.is_span() || metadata.level() == &Level::INFO
+                    })))
+                    .init();
+            }
+            "forest-all" => {
                 Registry::default()
                     .with(env_filter)
                     .with(ForestLayer::default())

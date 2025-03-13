@@ -39,6 +39,7 @@ use std::{
     fmt::Debug,
     marker::PhantomData,
 };
+use tracing::instrument;
 
 /// Circuit that verifies a single riscv proof and checks constraints
 #[derive(Debug, Clone, Copy)]
@@ -69,6 +70,7 @@ where
     RiscvChipType<Val<SC>>:
         ChipBehavior<Val<SC>> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {
+    #[instrument(name = "build convert program", level = "debug", skip_all)]
     pub fn build(
         machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
         input: &ConvertStdin<SC, RiscvChipType<Val<SC>>>,

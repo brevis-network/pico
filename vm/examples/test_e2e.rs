@@ -113,7 +113,7 @@ macro_rules! run {
                     riscv_vk.clone(),
                 );
 
-                riscv_machine.prove(&riscv_witness)
+                riscv_machine.prove_cycles(&riscv_witness).0
             });
 
             // assert pv_stream is the same as dryrun

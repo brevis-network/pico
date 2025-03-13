@@ -30,7 +30,7 @@ use p3_air::Air;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, instrument};
+use tracing::{debug, debug_span, instrument};
 
 pub struct CombineMachine<SC, C>
 where
@@ -81,7 +81,7 @@ macro_rules! impl_combine_machine {
             }
 
             /// Get the prover of the machine.
-            #[instrument(name = "combine_prove", level = "debug", skip_all)]
+            #[instrument(name = "COMBINE MACHINE PROVE", level = "debug", skip_all)]
             fn prove(
                 &self,
                 proving_witness: &ProvingWitness<$recur_sc, C, RecursionStdin<$recur_sc, C>>,
@@ -111,16 +111,19 @@ macro_rules! impl_combine_machine {
                 loop {
                     let mut batch_num = 1;
                     let start_layer = Instant::now();
+                    let layer_span = debug_span!(parent: &tracing::Span::current(), "combine layer", layer_index).entered();
                     loop {
+                        let loop_span = debug_span!(parent: &tracing::Span::current(), "combine batch prove loop", batch_num).entered();
+
                         let start_batch = Instant::now();
                         if proving_witness.flag_empty_stdin {
                             break;
                         }
 
                         let (mut batch_records, batch_pks, batch_vks, done) =
-                            recursion_emulator.next_record_keys_batch();
+                        debug_span!("emulate_batch_records", layer_index).in_scope(|| { recursion_emulator.next_record_keys_batch() });
 
-                        self.complement_record(batch_records.as_mut_slice());
+                        debug_span!("complement record").in_scope(|| {self.complement_record(batch_records.as_mut_slice())});
 
                         debug!(
                             "--- Generate combine records for layer {}, batch {}, chunk {}-{} in {:?}",
@@ -148,9 +151,11 @@ macro_rules! impl_combine_machine {
                             .zip(batch_pks.par_iter())
                             .flat_map(|(record, pk)| {
                                 let start_chunk = Instant::now();
-                                let proof = self
+                                let proof = debug_span!(parent: &loop_span, "prove_ensemble", layer_index, chunk_index = record.chunk_index()).in_scope(|| {
+                                    self
                                     .base_machine
-                                    .prove_ensemble(pk, std::slice::from_ref(record));
+                                    .prove_ensemble(pk, std::slice::from_ref(record))
+                                });
                                 debug!(
                                     "--- Prove combine layer {} chunk {} in {:?}",
                                     layer_index,
@@ -224,6 +229,8 @@ macro_rules! impl_combine_machine {
 
                     all_proofs.clear();
                     all_vks.clear();
+
+                    layer_span.exit();
                 }
 
                 // proof stats

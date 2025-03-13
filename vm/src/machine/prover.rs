@@ -91,12 +91,15 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             .map(|(name, trace, domain)| (name.to_owned(), domain, trace.dimensions()))
             .collect();
 
-        let domains_and_preprocessed = preprocessed_iter
-            .map(|(_, trace, domain)| (domain, trace.to_owned()))
-            .collect();
+        let domains_and_preprocessed = debug_span!("domains_and_preprocessed").in_scope(|| {
+            preprocessed_iter
+                .map(|(_, trace, domain)| (domain, trace.to_owned()))
+                .collect()
+        });
 
         // Commit to the batch of traces.
-        let (commit, preprocessed_prover_data) = pcs.commit(domains_and_preprocessed);
+        let (commit, preprocessed_prover_data) = debug_span!("commit preprocessed trace")
+            .in_scope(|| pcs.commit(domains_and_preprocessed));
 
         let preprocessed_trace = chips_and_preprocessed
             .into_iter()
@@ -407,7 +410,9 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             })
             .collect::<Vec<_>>();
 
-        let (permutation_commit, permutation_data) = config.pcs().commit(perm_domain);
+        let (permutation_commit, permutation_data) =
+            debug_span!(parent: &Span::current(), "commit_permutation_traces")
+                .in_scope(|| config.pcs().commit(perm_domain));
 
         // Observe the permutation commitment and cumulative sums.
         challenger.observe(permutation_commit.clone());
@@ -530,7 +535,9 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         //     })
         //     .collect::<Vec<_>>();
 
-        let (quotient_commit, quotient_data) = pcs.commit(quotient_domains_and_values);
+        let (quotient_commit, quotient_data) =
+            debug_span!(parent: &Span::current(), "commit_quotient_domains_and_values")
+                .in_scope(|| pcs.commit(quotient_domains_and_values));
 
         challenger.observe(quotient_commit.clone());
 
@@ -578,7 +585,8 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             (&quotient_data, quotient_opening_points),
         ];
 
-        let (opened_values, opening_proof) = pcs.open(rounds, challenger);
+        let (opened_values, opening_proof) = debug_span!(parent: &Span::current(), "FRI open")
+            .in_scope(|| pcs.open(rounds, challenger));
 
         // Collect the opened values for each chip.
         let [preprocessed_values, main_values, permutation_values, mut quotient_values] =

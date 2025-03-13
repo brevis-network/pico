@@ -20,7 +20,7 @@ use crate::{
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use std::{any::type_name, borrow::Borrow, marker::PhantomData};
-use tracing::{debug, instrument};
+use tracing::{debug, debug_span, instrument};
 
 pub struct EmbedMachine<PrevSC, SC, C, I>
 where
@@ -55,14 +55,14 @@ where
     }
 
     /// Get the prover of the machine.
-    #[instrument(name = "embed_prove", level = "debug", skip_all)]
+    #[instrument(name = "EMBED MACHINE PROVE", level = "debug", skip_all)]
     fn prove(&self, witness: &ProvingWitness<EmbedSC, C, I>) -> MetaProof<EmbedSC>
     where
         C: for<'a> Air<DebugConstraintFolder<'a, Val<EmbedSC>, Challenge<EmbedSC>>>
             + Air<ProverConstraintFolder<EmbedSC>>,
     {
         let mut records = witness.records().to_vec();
-        self.complement_record(&mut records);
+        debug_span!("complement record").in_scope(|| self.complement_record(&mut records));
 
         debug!("EMBED record stats");
         let stats = records[0].stats();
@@ -70,7 +70,8 @@ where
             debug!("   |- {:<28}: {}", key, value);
         }
 
-        let proofs = self.base_machine.prove_ensemble(witness.pk(), &records);
+        let proofs = debug_span!("prove_ensemble")
+            .in_scope(|| self.base_machine.prove_ensemble(witness.pk(), &records));
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();

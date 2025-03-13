@@ -21,7 +21,7 @@ use p3_air::Air;
 use p3_field::{Field, PrimeField64};
 use p3_maybe_rayon::prelude::*;
 use std::time::Instant;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Functions that each machine instance should implement.
 pub trait MachineBehavior<SC, C, I>
@@ -205,6 +205,7 @@ where
     }
 
     /// setup proving and verifying keys.
+    #[instrument(name = "setup_keys", level = "debug", skip_all)]
     pub fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let (pk, vk) = self
             .prover

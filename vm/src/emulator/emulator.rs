@@ -34,6 +34,7 @@ use crate::{
 use alloc::sync::Arc;
 use p3_field::PrimeField32;
 use std::marker::PhantomData;
+use tracing::debug_span;
 
 // Meta emulator that encapsulates multiple emulators
 // SC and C for configs in the emulated machine
@@ -184,7 +185,7 @@ macro_rules! impl_emulator {
                     recursion_program: program.clone().into(),
                     config: self.machine.unwrap().config(),
                 };
-                let record = emulator.run_riscv(input);
+                let record = debug_span!("emulator run").in_scope(|| emulator.run_riscv(input));
                 self.pointer += 1;
                 (record, pk, vk, done)
             }
@@ -202,7 +203,8 @@ macro_rules! impl_emulator {
                 let mut batch_pks = vec![];
                 let mut batch_vks = vec![];
                 loop {
-                    let (record, pk, vk, done) = self.next_record_keys();
+                    let (record, pk, vk, done) =
+                        debug_span!("emulate record").in_scope(|| self.next_record_keys());
                     batch_records.push(record);
                     batch_pks.push(pk);
                     batch_vks.push(vk);
@@ -274,7 +276,7 @@ macro_rules! impl_emulator {
                     recursion_program: program.clone().into(),
                     config: self.machine.unwrap().config(),
                 };
-                let record = emulator.run_recursion(input);
+                let record = debug_span!("emulator run").in_scope(|| emulator.run_recursion(input));
                 self.pointer += 1;
                 (record, pk, vk, done)
             }
@@ -292,7 +294,8 @@ macro_rules! impl_emulator {
                 let mut batch_pks = vec![];
                 let mut batch_vks = vec![];
                 loop {
-                    let (record, pk, vk, done) = self.next_record_keys();
+                    let (record, pk, vk, done) =
+                        debug_span!("emulate record").in_scope(|| self.next_record_keys());
                     batch_records.push(record);
                     batch_pks.push(pk);
                     batch_vks.push(vk);
@@ -363,7 +366,8 @@ macro_rules! impl_emulator {
                     recursion_program: program.clone().into(),
                     config: self.machine.unwrap().config(),
                 };
-                let record = emulator.run_recursion_vk(input);
+                let record =
+                    debug_span!("emulator run").in_scope(|| emulator.run_recursion_vk(input));
                 self.pointer += 1;
                 (record, pk, vk, done)
             }
@@ -380,7 +384,8 @@ macro_rules! impl_emulator {
                 let mut batch_pks = vec![];
                 let mut batch_vks = vec![];
                 loop {
-                    let (record, pk, vk, done) = self.next_record_keys();
+                    let (record, pk, vk, done) =
+                        debug_span!("emulate record").in_scope(|| self.next_record_keys());
                     batch_records.push(record);
                     batch_pks.push(pk);
                     batch_vks.push(vk);

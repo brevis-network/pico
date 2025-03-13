@@ -20,6 +20,7 @@ use p3_field::{
     Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField, PrimeField64, TwoAdicField,
 };
 use std::{borrow::Borrow, collections::HashMap, mem::transmute};
+use tracing::instrument;
 use vec_map::VecMap;
 
 /// The backend for the circuit compiler.
@@ -40,6 +41,7 @@ where
     FC::F: PrimeField64,
 {
     /// Emit the instructions from a list of operations in the DSL.
+    #[instrument(name = "compile recursion program", level = "debug", skip_all)]
     pub fn compile<F>(&mut self, operations: TracedVec<DslIr<FC>>) -> RecursionProgram<FC::F>
     where
         F: PrimeField + TwoAdicField,
