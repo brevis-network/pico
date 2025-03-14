@@ -1,0 +1,17 @@
+[package]
+name = "patch-test-ecdsa-core"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+pico-sdk = { workspace = true }
+ecdsa = { git = "https://github.com/brevis-network/signatures.git", branch = "patch-v1.0.1", default-features = false, features = ["verifying"] }
+alloy-primitives = "0.8.19"
+k256 = { version = "0.13.3", default-features = false, features = ["ecdsa"] }
+tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak.git", features = ["keccak"], branch = "patch-v1.0.0" }
+
+[patch.crates-io]
+ecdsa-core = { git = "https://github.com/brevis-network/signatures.git", package = "ecdsa", branch = "patch-v1.0.1" }

@@ -1,0 +1,11 @@
+[package]
+name = "patch-test-curve25519-dalek-ng"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+pico-sdk = { workspace = true }
+curve25519-dalek = { git = "https://github.com/brevis-network/curve25519-dalek-ng.git", branch = "patch-v1.0.1", package = "curve25519-dalek-ng", default-features = false, features = ["std", "u32_backend", "alloc", "serde"] }

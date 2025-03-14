@@ -1,0 +1,11 @@
+[package]
+name = "patch-test-substate-bn"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+pico-sdk = { workspace = true }
+substrate-bn = { git = "https://github.com/brevis-network/bn.git", branch = "patch-v1.0.1" }
