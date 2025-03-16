@@ -8,10 +8,7 @@ use crate::{
     },
     configs::config::Poseidon2Config,
     emulator::riscv::syscalls::SyscallCode,
-    machine::{
-        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
-        field::{FieldBehavior, FieldType},
-    },
+    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
     primitives::consts::PERMUTATION_WIDTH,
 };
 use p3_air::Air;
@@ -72,12 +69,7 @@ where
             local.value_cols.is_real,
         );
 
-        let syscall_code = match F::field_type() {
-            FieldType::TypeBabyBear => SyscallCode::POSEIDON2_PERMUTE_BB,
-            FieldType::TypeKoalaBear => SyscallCode::POSEIDON2_PERMUTE_KB,
-            FieldType::TypeMersenne31 => SyscallCode::POSEIDON2_PERMUTE_M31,
-            _ => unimplemented!("Unsupported field type"),
-        };
+        let syscall_code = SyscallCode::POSEIDON2_PERMUTE;
 
         builder.looked_syscall(
             local.clk,

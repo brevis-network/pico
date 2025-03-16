@@ -20,13 +20,13 @@ use crate::{
     emulator::riscv::syscalls::{
         commit::CommitSyscall, halt::HaltSyscall, syscall_context::SyscallContext,
     },
-    machine::field::{FieldBehavior, FieldType},
-    primitives::consts::{BabyBearConfig, KoalaBearConfig, Mersenne31Config},
+    primitives::Poseidon2Init,
 };
 pub use code::*;
 use hashbrown::HashMap;
 use hint::{HintLenSyscall, HintReadSyscall};
 use p3_field::PrimeField32;
+use p3_symmetric::Permutation;
 use precompiles::{
     edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
     fptower::{fp::FpSyscall, fp2_addsub::Fp2AddSubSyscall, fp2_mul::Fp2MulSyscall},
@@ -72,7 +72,11 @@ pub trait Syscall: Send + Sync {
 
 /// Creates the default syscall map.
 #[must_use]
-pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Syscall>> {
+pub fn default_syscall_map<F>() -> HashMap<SyscallCode, Arc<dyn Syscall>>
+where
+    F: PrimeField32 + Poseidon2Init,
+    F::Poseidon2: Permutation<[F; 16]>,
+{
     use crate::chips::gadgets::field::{
         bls381::Bls381BaseField, bn254::Bn254BaseField, secp256k1::Secp256k1BaseField,
     };
@@ -224,27 +228,10 @@ pub fn default_syscall_map<F: PrimeField32>() -> HashMap<SyscallCode, Arc<dyn Sy
         Arc::new(WeierstrassDecompressSyscall::<Secp256k1>::new()),
     );
 
-    match F::field_type() {
-        FieldType::TypeBabyBear => {
-            syscall_map.insert(
-                SyscallCode::POSEIDON2_PERMUTE_BB,
-                Arc::new(Poseidon2PermuteSyscall::<F, BabyBearConfig>(PhantomData)),
-            );
-        }
-        FieldType::TypeKoalaBear => {
-            syscall_map.insert(
-                SyscallCode::POSEIDON2_PERMUTE_KB,
-                Arc::new(Poseidon2PermuteSyscall::<F, KoalaBearConfig>(PhantomData)),
-            );
-        }
-        FieldType::TypeMersenne31 => {
-            syscall_map.insert(
-                SyscallCode::POSEIDON2_PERMUTE_M31,
-                Arc::new(Poseidon2PermuteSyscall::<F, Mersenne31Config>(PhantomData)),
-            );
-        }
-        _ => unimplemented!(),
-    }
+    syscall_map.insert(
+        SyscallCode::POSEIDON2_PERMUTE,
+        Arc::new(Poseidon2PermuteSyscall::<F>(PhantomData)),
+    );
 
     syscall_map
 }

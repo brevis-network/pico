@@ -292,7 +292,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
     ) -> Option<(usize, usize, usize)> {
         record
             .precompile_events
-            .get_events(precompile_syscall_code::<F>(chip_name))
+            .get_events(precompile_syscall_code(chip_name))
             .filter(|events| !events.is_empty())
             .map(|events| {
                 (

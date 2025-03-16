@@ -131,11 +131,5 @@ pub const SECP256K1_FP_SUB: u32 = 0x00_01_01_2D;
 /// Executes the `BLS12381_FP_MUL` precompile.
 pub const SECP256K1_FP_MUL: u32 = 0x00_01_01_2E;
 
-/// Executes the `POSEIDON2_PERMUTE_BB` precompile.
-pub const POSEIDON2_PERMUTE_BB: u32 = 0x00_01_01_2F;
-
-/// Executes the `POSEIDON2_PERMUTE_KB` precompile.
-pub const POSEIDON2_PERMUTE_KB: u32 = 0x00_01_01_30;
-
-/// Executes the `POSEIDON2_PERMUTE_M31` precompile.
-pub const POSEIDON2_PERMUTE_M31: u32 = 0x00_01_01_31;
+/// Executes the `POSEIDON2_PERMUTE` precompile.
+pub const POSEIDON2_PERMUTE: u32 = 0x00_01_01_2F;

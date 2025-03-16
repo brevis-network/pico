@@ -105,7 +105,7 @@ jobs:
           # KB basic tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_simple_recursion -- --elf keccak --n 15 --field kb
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf precompile --field kb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf poseidon2-kb --field kb
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf poseidon2 --field kb --n 1066971790
 
           # KB e2e test and copy the final STARK proof for later test
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e -- --field kb
@@ -147,7 +147,7 @@ jobs:
           # BB basic tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_simple_recursion -- --elf keccak --n 15 --field bb
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf precompile --field bb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf poseidon2-bb --field bb
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf poseidon2 --field bb --n 1071209047
 
           # BB e2e test and copy the final STARK proof for later test
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e -- --field bb
@@ -189,4 +189,4 @@ jobs:
           # M31 basic tests
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --field m31
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf precompile --field m31
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf poseidon2-m31 --field m31
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf poseidon2 --field m31 --n 2118082624

@@ -29,10 +29,14 @@ use crate::{
         machine::BaseMachine,
         witness::ProvingWitness,
     },
-    primitives::consts::{BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE},
+    primitives::{
+        consts::{BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE},
+        Poseidon2Init,
+    },
 };
 use alloc::sync::Arc;
 use p3_field::PrimeField32;
+use p3_symmetric::Permutation;
 use std::marker::PhantomData;
 use tracing::debug_span;
 
@@ -55,7 +59,8 @@ where
 impl<SC, C> MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>
 where
     SC: StarkGenericConfig,
-    SC::Val: PrimeField32,
+    SC::Val: PrimeField32 + Poseidon2Init,
+    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
     pub fn setup_riscv(proving_witness: &ProvingWitness<SC, C, Vec<u8>>) -> Self {

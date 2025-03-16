@@ -1,8 +1,5 @@
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
-use p3_koala_bear::KoalaBear;
-use p3_mersenne_31::Mersenne31;
-use pico_patch_libs::{syscall_poseidon2_permute, SyscallType};
+use pico_patch_libs::syscall_poseidon2_permute;
 /// A stateful hasher for Poseidon2.
 pub struct Poseidon2<F: PrimeField32> {
     state: [F; 16],      // Poseidon2 works with a 16-element state.
@@ -47,13 +44,11 @@ impl<F: PrimeField32> Poseidon2<F> {
     /// Computes the Poseidon2 permutation on the state.
     fn permute(&mut self) {
         let mut ret = [0_u32; 16];
-        let syscall_type = Self::get_syscall_type();
 
         unsafe {
             syscall_poseidon2_permute(
                 &self.state.map(|f| f.as_canonical_u32()) as *const _,
                 &mut ret as *mut _,
-                syscall_type,
             );
         }
         self.state = ret.map(F::from_wrapped_u32);
@@ -66,13 +61,11 @@ impl<F: PrimeField32> Poseidon2<F> {
         state[1] += y;
 
         let mut ret = [0_u32; 16];
-        let syscall_type = Self::get_syscall_type();
 
         unsafe {
             syscall_poseidon2_permute(
                 &state.map(|f| f.as_canonical_u32()) as *const _,
                 &mut ret as *mut _,
-                syscall_type,
             );
         }
         F::from_wrapped_u32(ret[0])
@@ -84,12 +77,10 @@ impl<F: PrimeField32> Poseidon2<F> {
         state[0] += x;
 
         let mut ret = [0_u32; 16];
-        let syscall_type = Self::get_syscall_type();
         unsafe {
             syscall_poseidon2_permute(
                 &state.map(|f| f.as_canonical_u32()) as *const _,
                 &mut ret as *mut _,
-                syscall_type,
             );
         }
         F::from_wrapped_u32(ret[0])
@@ -102,16 +93,6 @@ impl<F: PrimeField32> Poseidon2<F> {
             hasher.update(input);
         }
         hasher.finalize()
-    }
-
-    // Helper func
-    fn get_syscall_type() -> SyscallType {
-        match F::ORDER_U32 {
-            BabyBear::ORDER_U32 => SyscallType::BabyBear,
-            KoalaBear::ORDER_U32 => SyscallType::KoalaBear,
-            Mersenne31::ORDER_U32 => SyscallType::M31,
-            _ => unreachable!(),
-        }
     }
 }
 

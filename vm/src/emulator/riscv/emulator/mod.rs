@@ -22,11 +22,13 @@ use crate::{
             syscalls::{default_syscall_map, Syscall, SyscallCode},
         },
     },
+    primitives::Poseidon2Init,
 };
 use alloc::sync::Arc;
 use hashbrown::{hash_map::Entry, HashMap};
 use nohash_hasher::BuildNoHashHasher;
 use p3_field::PrimeField32;
+use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, instrument};
 
@@ -102,7 +104,11 @@ pub enum EmulatorMode {
 
 impl RiscvEmulator {
     #[must_use]
-    pub fn new<F: PrimeField32>(program: Arc<Program>, opts: EmulatorOpts) -> Self {
+    pub fn new<F>(program: Arc<Program>, opts: EmulatorOpts) -> Self
+    where
+        F: PrimeField32 + Poseidon2Init,
+        F::Poseidon2: Permutation<[F; 16]>,
+    {
         let record = EmulationRecord::new(program.clone());
         let deferred_record = record.clone();
 
@@ -670,11 +676,11 @@ impl RiscvEmulator {
 
     /// Recover emulator state from a program and existing emulation state.
     #[must_use]
-    pub fn recover<F: PrimeField32>(
-        program: Arc<Program>,
-        state: RiscvEmulationState,
-        opts: EmulatorOpts,
-    ) -> Self {
+    pub fn recover<F>(program: Arc<Program>, state: RiscvEmulationState, opts: EmulatorOpts) -> Self
+    where
+        F: PrimeField32 + Poseidon2Init,
+        F::Poseidon2: Permutation<[F; 16]>,
+    {
         let mut runtime = Self::new::<F>(program, opts);
         runtime.state = state;
         runtime

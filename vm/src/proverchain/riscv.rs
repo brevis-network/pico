@@ -22,11 +22,12 @@ use crate::{
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
-    primitives::consts::RISCV_NUM_PVS,
+    primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
 };
 use alloc::sync::Arc;
 use p3_air::Air;
 use p3_field::PrimeField32;
+use p3_symmetric::Permutation;
 
 pub type RiscvChips<SC> = RiscvChipType<Val<SC>>;
 
@@ -51,7 +52,8 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
-    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config + Poseidon2Init,
+    <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
     FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
@@ -86,7 +88,8 @@ where
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
-    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config + Poseidon2Init,
+    <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
 {
     type Input<'a> = (SC, &'a [u8]);
     type Opts = EmulatorOpts;
@@ -129,7 +132,8 @@ where
     PcsProverData<SC>: Clone + Send + Sync,
     BaseProof<SC>: Send + Sync,
     BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
-    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config + Poseidon2Init,
+    <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
     FieldSpecificPoseidon2Chip<Val<SC>>:
         Air<ProverConstraintFolder<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
     FieldSpecificPrecompilePoseidon2Chip<Val<SC>>:

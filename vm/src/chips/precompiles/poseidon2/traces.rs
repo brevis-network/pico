@@ -19,10 +19,7 @@ use crate::{
         },
     },
     iter::{PicoIterator, PicoSlice},
-    machine::{
-        chip::ChipBehavior,
-        field::{FieldBehavior, FieldType},
-    },
+    machine::chip::ChipBehavior,
     primitives::consts::PERMUTATION_WIDTH,
 };
 use p3_air::BaseAir;
@@ -54,12 +51,7 @@ impl<
     }
 
     fn generate_main(&self, input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
-        let syscall_code = match F::field_type() {
-            FieldType::TypeBabyBear => SyscallCode::POSEIDON2_PERMUTE_BB,
-            FieldType::TypeKoalaBear => SyscallCode::POSEIDON2_PERMUTE_KB,
-            FieldType::TypeMersenne31 => SyscallCode::POSEIDON2_PERMUTE_M31,
-            _ => unimplemented!("Unsupported field type"),
-        };
+        let syscall_code = SyscallCode::POSEIDON2_PERMUTE;
         let events: Vec<_> = input
             .get_precompile_events(syscall_code)
             .iter()
@@ -122,11 +114,7 @@ impl<
         if let Some(shape) = record.shape.as_ref() {
             shape.included::<F, _>(self)
         } else {
-            let syscalls = [
-                SyscallCode::POSEIDON2_PERMUTE_BB,
-                SyscallCode::POSEIDON2_PERMUTE_KB,
-                SyscallCode::POSEIDON2_PERMUTE_M31,
-            ];
+            let syscalls = [SyscallCode::POSEIDON2_PERMUTE];
             syscalls
                 .iter()
                 .any(|&syscall| !record.get_precompile_events(syscall).is_empty())
@@ -141,12 +129,7 @@ impl<
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
-        let syscall_code = match F::field_type() {
-            FieldType::TypeBabyBear => SyscallCode::POSEIDON2_PERMUTE_BB,
-            FieldType::TypeKoalaBear => SyscallCode::POSEIDON2_PERMUTE_KB,
-            FieldType::TypeMersenne31 => SyscallCode::POSEIDON2_PERMUTE_M31,
-            _ => unimplemented!("Unsupported field type"),
-        };
+        let syscall_code = SyscallCode::POSEIDON2_PERMUTE;
         let events: Vec<_> = input
             .get_precompile_events(syscall_code)
             .iter()

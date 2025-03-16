@@ -1,5 +1,6 @@
 use p3_air::Air;
 use p3_field::PrimeField32;
+use p3_symmetric::Permutation;
 use pico_vm::{
     chips::{
         chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
@@ -28,7 +29,7 @@ use pico_vm::{
         proof::BaseProof,
         witness::ProvingWitness,
     },
-    primitives::consts::RISCV_NUM_PVS,
+    primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
 };
 use serde::Serialize;
 use std::time::Instant;
@@ -52,6 +53,8 @@ where
     FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
         + Air<ProverConstraintFolder<SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    SC::Val: Poseidon2Init,
+    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
 {
     info!("╔═══════════════════════╗");
     info!("║      RISCV PHASE      ║");

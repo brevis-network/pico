@@ -34,10 +34,7 @@ use crate::{
         riscv::{record::EmulationRecord, syscalls::SyscallCode},
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{
-        chip::ChipBehavior,
-        field::{FieldBehavior, FieldType},
-    },
+    machine::chip::ChipBehavior,
     primitives::consts::{LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
 };
 use p3_field::PrimeField32;
@@ -205,14 +202,7 @@ pub(crate) fn precompile_rows_per_event(chip_name: &str) -> usize {
 }
 
 // TODO: remove hardcode chip_names here
-pub(crate) fn precompile_syscall_code<F: PrimeField32>(chip_name: &str) -> SyscallCode {
-    let precompile_poseidon2_syscall_code = match F::field_type() {
-        FieldType::TypeBabyBear => SyscallCode::POSEIDON2_PERMUTE_BB,
-        FieldType::TypeKoalaBear => SyscallCode::POSEIDON2_PERMUTE_KB,
-        FieldType::TypeMersenne31 => SyscallCode::POSEIDON2_PERMUTE_M31,
-        _ => unimplemented!("Unsupported field type"),
-    };
-
+pub(crate) fn precompile_syscall_code(chip_name: &str) -> SyscallCode {
     match chip_name {
         "Bls12381AddAssign" => SyscallCode::BLS12381_ADD,
         "Bn254AddAssign" => SyscallCode::BN254_ADD,
@@ -235,7 +225,7 @@ pub(crate) fn precompile_syscall_code<F: PrimeField32>(chip_name: &str) -> Sysca
         "Bls381Fp2Mul" => SyscallCode::BLS12381_FP2_MUL,
         "Bls381Fp2AddSub" => SyscallCode::BLS12381_FP2_ADD,
         "Secp256k1FpOp" => SyscallCode::SECP256K1_FP_ADD,
-        "Poseidon2Permute" => precompile_poseidon2_syscall_code,
+        "Poseidon2Permute" => SyscallCode::POSEIDON2_PERMUTE,
         _ => {
             unreachable!("precompile {} not supported yet", chip_name);
         }

@@ -1,6 +1,5 @@
 #[cfg(target_os = "zkvm")]
 use core::arch::asm;
-use pico_patch_libs::SyscallType;
 
 /// Executes the Poseidon2 permutation on the given state.
 ///
@@ -10,16 +9,8 @@ use pico_patch_libs::SyscallType;
 /// byte boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_poseidon2_permute(
-    x: *const [u32; 16],
-    y: *mut [u32; 16],
-    syscall_type: SyscallType,
-) {
-    let syscall_id = match syscall_type {
-        SyscallType::BabyBear => crate::riscv_ecalls::POSEIDON2_PERMUTE_BB,
-        SyscallType::KoalaBear => crate::riscv_ecalls::POSEIDON2_PERMUTE_KB,
-        SyscallType::M31 => crate::riscv_ecalls::POSEIDON2_PERMUTE_M31,
-    };
+pub extern "C" fn syscall_poseidon2_permute(x: *const [u32; 16], y: *mut [u32; 16]) {
+    let syscall_id = crate::riscv_ecalls::POSEIDON2_PERMUTE;
 
     #[cfg(target_os = "zkvm")]
     unsafe {

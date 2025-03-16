@@ -17,11 +17,12 @@ use crate::{
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
-    primitives::consts::MAX_LOG_CHUNK_SIZE,
+    primitives::{consts::MAX_LOG_CHUNK_SIZE, Poseidon2Init},
 };
 use anyhow::Result;
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
+use p3_symmetric::Permutation;
 use std::{any::type_name, borrow::Borrow, time::Instant};
 use tracing::{debug, debug_span, info, instrument};
 
@@ -36,7 +37,8 @@ where
 impl<SC, C> RiscvMachine<SC, C>
 where
     SC: Send + StarkGenericConfig,
-    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config + Poseidon2Init,
+    <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
     C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     Com<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
@@ -255,7 +257,8 @@ where
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
 where
     SC: Send + StarkGenericConfig,
-    Val<SC>: PrimeField32,
+    Val<SC>: PrimeField32 + Poseidon2Init,
+    <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
     C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
     Com<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,

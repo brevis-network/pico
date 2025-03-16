@@ -2,6 +2,7 @@ use itertools::enumerate;
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
+use p3_symmetric::Permutation;
 use pico_vm::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
@@ -14,6 +15,7 @@ use pico_vm::{
         stdin::EmulatorStdin,
     },
     machine::logger::setup_logger,
+    primitives::Poseidon2Init,
 };
 use std::time::Instant;
 use tracing::{debug, info, trace};
@@ -21,7 +23,11 @@ use tracing::{debug, info, trace};
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
-fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8>>) {
+fn run<F>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8>>)
+where
+    F: PrimeField32 + Poseidon2Init,
+    F::Poseidon2: Permutation<[F; 16]>,
+{
     let start = Instant::now();
 
     info!("Creating Program..");
