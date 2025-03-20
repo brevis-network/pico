@@ -9,7 +9,7 @@ use crate::{
         program::Program,
     },
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
-    emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
+    emulator::{emulator::MetaEmulator, opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType, compiler::shapes::riscv_shape::RiscvShapeConfig,
         machine::riscv::RiscvMachine,
@@ -70,6 +70,24 @@ where
         } else {
             self.machine.prove_cycles(&witness)
         }
+    }
+
+    pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
+        let witness = ProvingWitness::<SC, RiscvChips<SC>, _>::setup_for_riscv(
+            self.program.clone(),
+            stdin,
+            self.opts,
+            self.pk.clone(),
+            self.vk.clone(),
+        );
+        let mut emulator = MetaEmulator::setup_riscv(&witness);
+        loop {
+            let (_, done) = emulator.next_record_batch();
+            if done {
+                break;
+            }
+        }
+        emulator.cycles()
     }
 
     pub fn get_program(&self) -> Arc<Program> {
