@@ -10,10 +10,7 @@ use crate::{
     },
     emulator::{
         recursion::emulator::{RecursionRecord, Runtime},
-        riscv::{
-            record::EmulationRecord,
-            riscv_emulator::{EmulatorMode, RiscvEmulator},
-        },
+        riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
         stdin::EmulatorStdin,
     },
     instances::{
@@ -68,7 +65,6 @@ where
         let opts = proving_witness.opts.unwrap();
         let mut emulator =
             RiscvEmulator::new::<SC::Val>(proving_witness.program.clone().unwrap(), opts);
-        emulator.emulator_mode = EmulatorMode::Trace;
         emulator.write_stdin(proving_witness.stdin.as_ref().unwrap());
 
         Self {

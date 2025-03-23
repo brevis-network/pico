@@ -1,12 +1,8 @@
-use super::{align, EmulationError, EmulatorMode, RiscvEmulator};
-
+use super::{align, EmulationError, RiscvEmulator};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
-    emulator::riscv::{
-        record::MemoryAccessRecord,
-        syscalls::{syscall_context::SyscallContext, SyscallCode},
-    },
+    emulator::riscv::syscalls::{syscall_context::SyscallContext, SyscallCode},
 };
 use tracing::debug;
 
@@ -26,61 +22,139 @@ impl RiscvEmulator {
         let (addr, memory_read_value): (u32, u32);
         let mut memory_store_value: Option<u32> = None;
 
-        if self.emulator_mode != EmulatorMode::Simple {
-            self.memory_accesses = MemoryAccessRecord::default();
-        }
+        self.mode.init_memory_access(&mut self.memory_accesses);
 
         match instruction.opcode {
             // Arithmetic instructions.
             Opcode::ADD => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_add(c);
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.add_events,
+                );
             }
             Opcode::SUB => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_sub(c);
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.sub_events,
+                );
             }
             Opcode::XOR => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b ^ c;
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.bitwise_events,
+                );
             }
             Opcode::OR => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b | c;
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.bitwise_events,
+                );
             }
             Opcode::AND => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b & c;
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.bitwise_events,
+                );
             }
             Opcode::SLL => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_shl(c);
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.shift_left_events,
+                );
             }
             Opcode::SRL => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_shr(c);
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.shift_right_events,
+                );
             }
             Opcode::SRA => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = (b as i32).wrapping_shr(c) as u32;
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.shift_right_events,
+                );
             }
             Opcode::SLT => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = if (b as i32) < (c as i32) { 1 } else { 0 };
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.lt_events,
+                );
             }
             Opcode::SLTU => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = if b < c { 1 } else { 0 };
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.lt_events,
+                );
             }
 
             // Load instructions.
@@ -243,18 +317,8 @@ impl RiscvEmulator {
                 c = self.rr(Register::X11, MemoryAccessPosition::C);
                 b = self.rr(Register::X10, MemoryAccessPosition::B);
                 let syscall = SyscallCode::from_u32(syscall_id);
-                // debug!("emulate syscall code: {:?}", syscall);
 
-                // `hint_slice` is allowed in unconstrained mode since it is used to write the hint.
-                // Other syscalls are not allowed because they can lead to non-deterministic
-                // behavior, especially since many syscalls modify memory in place,
-                // which is not permitted in unconstrained mode. This will result in
-                // non-zero memory interactions when generating a proof.
-                if self.unconstrained.is_some()
-                    && (syscall != SyscallCode::EXIT_UNCONSTRAINED && syscall != SyscallCode::WRITE)
-                {
-                    return Err(EmulationError::InvalidSyscallUsage(syscall_id as u64));
-                }
+                self.mode.check_unconstrained_syscall(syscall)?;
 
                 // Update the syscall counts.
                 let syscall_for_count = syscall.count_map();
@@ -264,10 +328,7 @@ impl RiscvEmulator {
                     .entry(syscall_for_count)
                     .or_insert(0);
                 if self.log_syscalls {
-                    debug!(
-                        ">>syscall_id: {:?}, syscall_count: {:?}",
-                        syscall_id, syscall_count,
-                    );
+                    debug!(">>syscall_id: {syscall_id:?}, syscall_count: {syscall_count:?}");
                 }
                 *syscall_count += 1;
 
@@ -322,22 +383,54 @@ impl RiscvEmulator {
             Opcode::MUL => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = b.wrapping_mul(c);
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.mul_events,
+                );
             }
             Opcode::MULH => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = (((b as i32) as i64).wrapping_mul((c as i32) as i64) >> 32) as u32;
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.mul_events,
+                );
             }
             Opcode::MULHU => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = ((b as u64).wrapping_mul(c as u64) >> 32) as u32;
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.mul_events,
+                );
             }
             Opcode::MULHSU => {
                 (rd, b, c) = self.alu_rr(instruction);
                 a = (((b as i32) as i64).wrapping_mul(c as i64) >> 32) as u32;
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.mul_events,
+                );
             }
             Opcode::DIV => {
                 (rd, b, c) = self.alu_rr(instruction);
@@ -346,7 +439,15 @@ impl RiscvEmulator {
                 } else {
                     a = (b as i32).wrapping_div(c as i32) as u32;
                 }
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.divrem_events,
+                );
             }
             Opcode::DIVU => {
                 (rd, b, c) = self.alu_rr(instruction);
@@ -355,7 +456,15 @@ impl RiscvEmulator {
                 } else {
                     a = b.wrapping_div(c);
                 }
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.divrem_events,
+                );
             }
             Opcode::REM => {
                 (rd, b, c) = self.alu_rr(instruction);
@@ -364,7 +473,15 @@ impl RiscvEmulator {
                 } else {
                     a = (b as i32).wrapping_rem(c as i32) as u32;
                 }
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.divrem_events,
+                );
             }
             Opcode::REMU => {
                 (rd, b, c) = self.alu_rr(instruction);
@@ -373,7 +490,15 @@ impl RiscvEmulator {
                 } else {
                     a = b.wrapping_rem(c);
                 }
-                self.alu_rw(instruction, rd, a, b, c);
+                self.alu_rw(rd, a);
+                self.mode.emit_alu(
+                    self.state.clk,
+                    a,
+                    b,
+                    c,
+                    instruction.opcode,
+                    &mut self.record.divrem_events,
+                );
             }
 
             // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/main/src/asm-manual.adoc#instruction-aliases
@@ -383,19 +508,20 @@ impl RiscvEmulator {
         }
 
         // Emit the CPU event for this cycle.
-        if self.emulator_mode == EmulatorMode::Trace {
-            self.emit_cpu(
-                clk,
-                next_pc,
-                *instruction,
-                a,
-                b,
-                c,
-                memory_store_value,
-                self.memory_accesses,
-                exit_code,
-            );
-        };
+        self.mode.emit_cpu(
+            self.chunk(),
+            clk,
+            self.state.pc,
+            next_pc,
+            exit_code,
+            a,
+            b,
+            c,
+            *instruction,
+            self.memory_accesses,
+            memory_store_value,
+            &mut self.record.cpu_events,
+        );
 
         // Update the program counter.
         self.state.pc = next_pc;

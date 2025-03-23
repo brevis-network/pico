@@ -33,8 +33,6 @@ pub struct EmulationRecord {
     /// The program.
     pub program: Arc<Program>,
 
-    pub unconstrained: bool,
-
     pub cpu_events: Vec<CpuEvent>,
 
     /// A trace of the ADD, and ADDI events.
@@ -385,10 +383,6 @@ impl RecordBehavior for EmulationRecord {
 
     fn chunk_index(&self) -> usize {
         self.public_values.chunk as usize
-    }
-
-    fn unconstrained(&self) -> bool {
-        self.unconstrained
     }
 }
 

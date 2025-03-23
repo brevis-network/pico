@@ -1,16 +1,15 @@
 pub mod error;
 pub mod instruction;
+pub mod mode;
 pub mod unconstrained;
 pub mod util;
 
 use crate::{
     chips::chips::events::{
-        AluEvent, CpuEvent, MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
-        MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
+        MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord,
+        MemoryRecord, MemoryWriteRecord,
     },
-    compiler::riscv::{
-        instruction::Instruction, opcode::Opcode, program::Program, register::Register,
-    },
+    compiler::riscv::{instruction::Instruction, program::Program, register::Register},
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
@@ -26,13 +25,13 @@ use crate::{
 };
 use alloc::sync::Arc;
 use hashbrown::{hash_map::Entry, HashMap};
-use nohash_hasher::BuildNoHashHasher;
 use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, instrument};
 
 pub use error::EmulationError;
+pub use mode::RiscvEmulatorMode;
 pub use unconstrained::UnconstrainedState;
 pub use util::align;
 
@@ -41,20 +40,14 @@ pub use util::align;
 /// The executor is responsible for executing a user program and tracing important events which
 /// occur during emulation (i.e., memory reads, alu operations, etc).
 pub struct RiscvEmulator {
+    /// The current running mode of RiscV emulator.
+    pub mode: RiscvEmulatorMode,
+
     /// The program.
     pub program: Arc<Program>,
 
     /// The options for the emulator.
     pub opts: EmulatorOpts,
-
-    /// Whether the emulator is in constrained mode or not.
-    ///
-    /// In unconstrained mode, any events, clock, register, or memory changes are reset after
-    /// leaving the unconstrained block. The only thing preserved is writes to the input
-    /// stream.
-    pub unconstrained: Option<UnconstrainedState>,
-
-    pub emulator_mode: EmulatorMode,
 
     /// The state of the emulation.
     pub state: RiscvEmulationState,
@@ -73,10 +66,6 @@ pub struct RiscvEmulator {
     /// The memory accesses for the current cycle.
     pub memory_accesses: MemoryAccessRecord,
 
-    /// Memory addresses that were touched in this batch of chunks. Used to minimize the size of
-    /// checkpoints.
-    pub memory_checkpoint: HashMap<u32, Option<MemoryRecord>, BuildNoHashHasher<u32>>,
-
     /// The maximum number of cycles for a syscall.
     pub max_syscall_cycles: u32,
 
@@ -86,10 +75,10 @@ pub struct RiscvEmulator {
     /// Collects precompile and memory init/finalize events across batches
     pub deferred_record: EmulationRecord,
 
+    flag_active: bool,
+
     /// whether or not to log syscalls
     log_syscalls: bool,
-
-    flag_active: bool,
 }
 
 /// The different modes the emulator can run in.
@@ -119,27 +108,26 @@ impl RiscvEmulator {
             .map(|syscall| syscall.num_extra_cycles())
             .max()
             .unwrap_or_default();
-        let log_syscalls = std::env::var_os("LOG_SYSCALLS").is_some();
 
         let hook_map = default_hook_map();
+
+        let log_syscalls = std::env::var_os("LOG_SYSCALLS").is_some();
 
         Self {
             syscall_map,
             hook_map,
             memory_accesses: Default::default(),
-            unconstrained: None,
             record,
             public_values_buffer: Default::default(),
             state: RiscvEmulationState::new(program.pc_start),
             program,
             opts,
-            emulator_mode: EmulatorMode::Simple,
-            memory_checkpoint: Default::default(),
             max_syscall_cycles,
             local_memory_access: Default::default(),
             deferred_record,
-            log_syscalls,
+            mode: RiscvEmulatorMode::Trace,
             flag_active: true,
+            log_syscalls,
         }
     }
 
@@ -177,7 +165,7 @@ impl RiscvEmulator {
         // Increment the clock.
         self.state.global_clk += 1;
 
-        if self.unconstrained.is_none() {
+        if !self.is_unconstrained() {
             // Check if there's enough cycles or move to the next chunk.
             if self.state.clk + self.max_syscall_cycles >= self.opts.chunk_size * 4 {
                 self.state.current_chunk += 1;
@@ -196,7 +184,7 @@ impl RiscvEmulator {
         let done = self.state.pc == 0
             || self.state.pc.wrapping_sub(self.program.pc_base)
                 >= (self.program.instructions.len() * 4) as u32;
-        if done && self.unconstrained.is_some() {
+        if done && self.is_unconstrained() {
             error!(
                 "program ended in unconstrained mode at clk {}",
                 self.state.global_clk
@@ -327,27 +315,8 @@ impl RiscvEmulator {
     ) -> MemoryReadRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
-        if self.emulator_mode != EmulatorMode::Simple || self.unconstrained.is_some() {
-            match entry {
-                Entry::Occupied(ref entry) => {
-                    let record = entry.get();
-                    self.memory_checkpoint
-                        .entry(addr)
-                        .or_insert_with(|| Some(*record));
-                }
-                Entry::Vacant(_) => {
-                    self.memory_checkpoint.entry(addr).or_insert(None);
-                }
-            }
-        }
 
-        if let Some(state) = self.unconstrained.as_mut() {
-            let record = match &entry {
-                Entry::Occupied(entry) => Some(entry.get()),
-                Entry::Vacant(_) => None,
-            };
-            state.memory_diff.entry(addr).or_insert(record.copied());
-        }
+        self.mode.add_unconstrained_memory_record(addr, &entry);
 
         // If it's the first time accessing this address, initialize previous values.
         let record: &mut MemoryRecord = match entry {
@@ -370,24 +339,12 @@ impl RiscvEmulator {
         record.chunk = chunk;
         record.timestamp = timestamp;
 
-        if self.unconstrained.is_none() && self.emulator_mode == EmulatorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
-        }
+        self.mode.add_memory_local_event(
+            addr,
+            *record,
+            prev_record,
+            local_memory_access.unwrap_or(&mut self.local_memory_access),
+        );
 
         // Construct the memory read record.
         MemoryReadRecord::new(value, chunk, timestamp, prev_chunk, prev_timestamp)
@@ -404,27 +361,8 @@ impl RiscvEmulator {
     ) -> MemoryWriteRecord {
         // Get the memory record entry.
         let entry = self.state.memory.entry(addr);
-        if self.emulator_mode != EmulatorMode::Simple || self.unconstrained.is_some() {
-            match entry {
-                Entry::Occupied(ref entry) => {
-                    let record = entry.get();
-                    self.memory_checkpoint
-                        .entry(addr)
-                        .or_insert_with(|| Some(*record));
-                }
-                Entry::Vacant(_) => {
-                    self.memory_checkpoint.entry(addr).or_insert(None);
-                }
-            }
-        }
 
-        if let Some(state) = self.unconstrained.as_mut() {
-            let record = match &entry {
-                Entry::Occupied(entry) => Some(entry.get()),
-                Entry::Vacant(_) => None,
-            };
-            state.memory_diff.entry(addr).or_insert(record.copied());
-        }
+        self.mode.add_unconstrained_memory_record(addr, &entry);
 
         // If it's the first time accessing this address, initialize previous values.
         let record: &mut MemoryRecord = match entry {
@@ -449,24 +387,12 @@ impl RiscvEmulator {
         record.chunk = chunk;
         record.timestamp = timestamp;
 
-        if self.unconstrained.is_none() && self.emulator_mode == EmulatorMode::Trace {
-            let local_memory_access = if let Some(local_memory_access) = local_memory_access {
-                local_memory_access
-            } else {
-                &mut self.local_memory_access
-            };
-
-            local_memory_access
-                .entry(addr)
-                .and_modify(|e| {
-                    e.final_mem_access = *record;
-                })
-                .or_insert(MemoryLocalEvent {
-                    addr,
-                    initial_mem_access: prev_record,
-                    final_mem_access: *record,
-                });
-        }
+        self.mode.add_memory_local_event(
+            addr,
+            *record,
+            prev_record,
+            local_memory_access.unwrap_or(&mut self.local_memory_access),
+        );
 
         // Construct the memory write record.
         MemoryWriteRecord::new(
@@ -485,14 +411,9 @@ impl RiscvEmulator {
         let record = self.mr(addr, self.chunk(), self.timestamp(&position), None);
 
         // If we're not in unconstrained mode, record the access for the current cycle.
-        if self.unconstrained.is_none() && self.emulator_mode == EmulatorMode::Trace {
-            match position {
-                MemoryAccessPosition::A => self.memory_accesses.a = Some(record.into()),
-                MemoryAccessPosition::B => self.memory_accesses.b = Some(record.into()),
-                MemoryAccessPosition::C => self.memory_accesses.c = Some(record.into()),
-                MemoryAccessPosition::Memory => self.memory_accesses.memory = Some(record.into()),
-            }
-        }
+        self.mode
+            .set_memory_access(position, record.into(), &mut self.memory_accesses);
+
         record.value
     }
 
@@ -507,26 +428,8 @@ impl RiscvEmulator {
         let record = self.mw(addr, value, self.chunk(), self.timestamp(&position), None);
 
         // If we're not in unconstrained mode, record the access for the current cycle.
-        if self.unconstrained.is_none() && self.emulator_mode == EmulatorMode::Trace {
-            match position {
-                MemoryAccessPosition::A => {
-                    assert!(self.memory_accesses.a.is_none());
-                    self.memory_accesses.a = Some(record.into());
-                }
-                MemoryAccessPosition::B => {
-                    assert!(self.memory_accesses.b.is_none());
-                    self.memory_accesses.b = Some(record.into());
-                }
-                MemoryAccessPosition::C => {
-                    assert!(self.memory_accesses.c.is_none());
-                    self.memory_accesses.c = Some(record.into());
-                }
-                MemoryAccessPosition::Memory => {
-                    assert!(self.memory_accesses.memory.is_none());
-                    self.memory_accesses.memory = Some(record.into());
-                }
-            }
-        }
+        self.mode
+            .set_memory_access(position, record.into(), &mut self.memory_accesses);
     }
 
     /// Read from a register.
@@ -543,75 +446,6 @@ impl RiscvEmulator {
             self.mw_cpu(register as u32, 0, MemoryAccessPosition::A);
         } else {
             self.mw_cpu(register as u32, value, MemoryAccessPosition::A);
-        }
-    }
-
-    /// Emit a CPU event.
-    #[allow(clippy::too_many_arguments)]
-    fn emit_cpu(
-        &mut self,
-        clk: u32,
-        next_pc: u32,
-        instruction: Instruction,
-        a: u32,
-        b: u32,
-        c: u32,
-        memory_store_value: Option<u32>,
-        record: MemoryAccessRecord,
-        exit_code: u32,
-    ) {
-        let cpu_event = CpuEvent::new(
-            self.chunk(),
-            clk,
-            self.state.pc,
-            next_pc,
-            instruction,
-            a,
-            b,
-            c,
-            memory_store_value,
-            record,
-            exit_code,
-        );
-
-        self.record.cpu_events.push(cpu_event);
-    }
-
-    /// Emit an ALU event.
-    fn emit_alu(&mut self, clk: u32, opcode: Opcode, a: u32, b: u32, c: u32) {
-        let event = AluEvent {
-            clk,
-            opcode,
-            a,
-            b,
-            c,
-        };
-        match opcode {
-            Opcode::ADD => {
-                self.record.add_events.push(event);
-            }
-            Opcode::SUB => {
-                self.record.sub_events.push(event);
-            }
-            Opcode::XOR | Opcode::OR | Opcode::AND => {
-                self.record.bitwise_events.push(event);
-            }
-            Opcode::SLL => {
-                self.record.shift_left_events.push(event);
-            }
-            Opcode::SRL | Opcode::SRA => {
-                self.record.shift_right_events.push(event);
-            }
-            Opcode::SLT | Opcode::SLTU => {
-                self.record.lt_events.push(event);
-            }
-            Opcode::MUL | Opcode::MULHU | Opcode::MULHSU | Opcode::MULH => {
-                self.record.mul_events.push(event);
-            }
-            Opcode::DIVU | Opcode::REMU | Opcode::DIV | Opcode::REM => {
-                self.record.divrem_events.push(event);
-            }
-            _ => {}
         }
     }
 
@@ -638,11 +472,9 @@ impl RiscvEmulator {
     }
 
     /// Set the destination register with the result and emit an ALU event.
-    fn alu_rw(&mut self, instruction: &Instruction, rd: Register, a: u32, b: u32, c: u32) {
+    #[inline]
+    fn alu_rw(&mut self, rd: Register, a: u32) {
         self.rw(rd, a);
-        if self.emulator_mode == EmulatorMode::Trace {
-            self.emit_alu(self.state.clk, instruction.opcode, a, b, c);
-        }
     }
 
     /// Fetch the input operand values for a load instruction.
@@ -695,19 +527,6 @@ impl RiscvEmulator {
             let addr = Register::from_u32(i as u32) as u32;
             let record = self.state.memory.get(&addr);
 
-            if self.emulator_mode != EmulatorMode::Simple || self.unconstrained.is_some() {
-                match record {
-                    Some(record) => {
-                        self.memory_checkpoint
-                            .entry(addr)
-                            .or_insert_with(|| Some(*record));
-                    }
-                    None => {
-                        self.memory_checkpoint.entry(addr).or_insert(None);
-                    }
-                }
-            }
-
             registers[i] = match record {
                 Some(record) => record.value,
                 None => 0,
@@ -722,19 +541,6 @@ impl RiscvEmulator {
         let addr = register as u32;
         let record = self.state.memory.get(&addr);
 
-        if self.emulator_mode != EmulatorMode::Simple || self.unconstrained.is_some() {
-            match record {
-                Some(record) => {
-                    self.memory_checkpoint
-                        .entry(addr)
-                        .or_insert_with(|| Some(*record));
-                }
-                None => {
-                    self.memory_checkpoint.entry(addr).or_insert(None);
-                }
-            }
-        }
-
         match record {
             Some(record) => record.value,
             None => 0,
@@ -747,19 +553,6 @@ impl RiscvEmulator {
         #[allow(clippy::single_match_else)]
         let record = self.state.memory.get(&addr);
 
-        if self.emulator_mode != EmulatorMode::Simple || self.unconstrained.is_some() {
-            match record {
-                Some(record) => {
-                    self.memory_checkpoint
-                        .entry(addr)
-                        .or_insert_with(|| Some(*record));
-                }
-                None => {
-                    self.memory_checkpoint.entry(addr).or_insert(None);
-                }
-            }
-        }
-
         match record {
             Some(record) => record.value,
             None => 0,
@@ -769,17 +562,15 @@ impl RiscvEmulator {
     /// Bump the record.
     pub fn bump_record(&mut self, batch_records: &mut Vec<EmulationRecord>) {
         // Copy all of the existing local memory accesses to the record's local_memory_access vec.
-        if self.emulator_mode == EmulatorMode::Trace {
-            for (_, event) in self.local_memory_access.drain() {
-                self.record.cpu_local_memory_access.push(event);
-            }
-        }
+        self.mode.copy_local_memory_events(
+            &mut self.local_memory_access,
+            &mut self.record.cpu_local_memory_access,
+        );
 
         let removed_record =
             std::mem::replace(&mut self.record, EmulationRecord::new(self.program.clone()));
         let public_values = removed_record.public_values;
         self.record.public_values = public_values;
-        self.record.unconstrained = removed_record.unconstrained;
         batch_records.push(removed_record);
     }
 
@@ -872,13 +663,6 @@ mod tests {
         let compiler = Compiler::new(SourceType::RISCV, KECCAK_ELF);
 
         compiler.compile()
-    }
-
-    fn _assert_send<T: Send>() {}
-
-    /// Runtime needs to be Send so we can use it across async calls.
-    fn _assert_runtime_is_send() {
-        _assert_send::<RiscvEmulator>();
     }
 
     const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 836789u32;

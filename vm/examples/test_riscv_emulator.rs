@@ -9,9 +9,7 @@ use pico_vm::{
         program::Program,
     },
     emulator::{
-        opts::EmulatorOpts,
-        record::RecordBehavior,
-        riscv::riscv_emulator::{EmulatorMode, RiscvEmulator},
+        opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator,
         stdin::EmulatorStdin,
     },
     machine::logger::setup_logger,
@@ -42,7 +40,6 @@ where
         emulator.opts.chunk_size, emulator.opts.chunk_batch_size
     );
 
-    emulator.emulator_mode = EmulatorMode::Trace;
     for input in &*stdin.inputs {
         emulator.state.input_stream.push(input.clone());
     }
