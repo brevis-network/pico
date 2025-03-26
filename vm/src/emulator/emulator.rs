@@ -75,9 +75,12 @@ where
         }
     }
 
-    pub fn next_record_batch(&mut self) -> (Vec<EmulationRecord>, bool) {
+    pub fn next_record_batch<F>(&mut self, record_callback: &mut F) -> bool
+    where
+        F: FnMut(EmulationRecord),
+    {
         let emulator = self.emulator.as_mut().unwrap();
-        emulator.emulate_batch().unwrap()
+        emulator.emulate_batch(record_callback).unwrap()
     }
 
     pub fn cycles(&self) -> u64 {
@@ -86,7 +89,7 @@ where
 
     pub fn get_pv_stream_with_dryrun(&mut self) -> Vec<u8> {
         loop {
-            let (_, done) = self.next_record_batch();
+            let done = self.next_record_batch(&mut |_| {});
             if done {
                 break;
             }

@@ -3,16 +3,15 @@ use crate::{
     configs::config::{Com, StarkGenericConfig, Val},
     emulator::{
         emulator::MetaEmulator,
-        record::RecordBehavior,
         riscv::{public_values::PublicValues, record::EmulationRecord},
     },
     instances::compiler::shapes::riscv_shape::RiscvShapeConfig,
-    iter::{IntoPicoIterator, PicoExtend, PicoIterator},
+    iter::{IntoPicoIterator, PicoIterator},
     machine::{
         chip::{ChipBehavior, MetaChip},
         field::FieldSpecificPoseidon2Config,
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::HashableKey,
+        keys::{BaseProvingKey, HashableKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
@@ -22,9 +21,13 @@ use crate::{
 use anyhow::Result;
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
+use p3_maybe_rayon::prelude::IndexedParallelIterator;
 use p3_symmetric::Permutation;
-use std::{any::type_name, borrow::Borrow, time::Instant};
+use std::{any::type_name, borrow::Borrow, cmp::min, mem, sync::mpsc, thread, time::Instant};
 use tracing::{debug, debug_span, info, instrument};
+
+/// Maximum number of pending emulation record for proving
+const MAX_PENDING_PROVING_RECORDS: usize = 32;
 
 pub struct RiscvMachine<SC, C>
 where
@@ -36,10 +39,10 @@ where
 
 impl<SC, C> RiscvMachine<SC, C>
 where
-    SC: Send + StarkGenericConfig,
+    SC: Send + StarkGenericConfig + 'static,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config + Poseidon2Init,
     <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
-    C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
+    C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord> + 'static,
     Com<SC>: Send + Sync,
     BaseProof<SC>: Send + Sync,
 {
@@ -59,137 +62,168 @@ where
                 >,
             > + Air<ProverConstraintFolder<SC>>,
     {
+        let start_global = Instant::now();
+
         // Initialize the challenger.
         let mut challenger = self.config().challenger();
 
-        // Get pk from witness and observe with challenger
+        // Get PK from witness and observe with challenger.
         let pk = witness.pk();
         pk.observed_by(&mut challenger);
 
+        // Initialize the emulator.
         let mut emulator = MetaEmulator::setup_riscv(witness);
 
-        // all_proofs is a vec that contains BaseProof's. Initialized to be empty.
-        let mut all_proofs = vec![];
+        // Initialize the channel for sending emulation records from the emulator thread to prover.
+        let (record_sender, record_receiver) = mpsc::channel();
 
-        #[cfg(feature = "debug")]
-        let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
-            pk,
-            &mut self.config().challenger(),
-            self.base_machine.has_global(),
-        );
-        #[cfg(feature = "debug-lookups")]
-        let mut global_lookup_debugger = crate::machine::debug::IncrementalLookupDebugger::new(
-            pk,
-            crate::machine::lookup::LookupScope::Global,
-            None,
-        );
+        // Start the emulator thread.
+        let emulator_handle = thread::spawn(move || {
+            let mut batch_num = 1;
+            loop {
+                let start_local = Instant::now();
 
-        let start_p2 = Instant::now();
-        let mut batch_num = 1;
-        let mut chunk_num = 0;
+                let done = emulator.next_record_batch(&mut |record| {
+                    record_sender.send(record).expect(
+                        "Failed to send an emulation record from emulator thread to prover thread",
+                    )
+                });
 
-        loop {
-            let loop_span =
-                debug_span!(parent: &tracing::Span::current(), "riscv batch prove loop", batch_num)
-                    .entered();
+                debug!(
+                    "--- Generate riscv records for batch-{} in {:?}",
+                    batch_num,
+                    start_local.elapsed(),
+                );
 
-            let start_local = Instant::now();
-            let (mut batch_records, done) = emulator.next_record_batch();
-            debug_span!("complement_record")
-                .in_scope(|| self.complement_record(&mut batch_records));
+                if done {
+                    break;
+                }
 
-            if let Some(shape_config) = shape_config {
-                for record in batch_records.iter_mut() {
-                    shape_config
-                        .padding_shape(record)
-                        .expect("padding_shape failed");
+                batch_num += 1;
+            }
+
+            // Move and return the emulator for futher usage.
+            emulator
+
+            // `record_sender` will be dropped when the emulator thread completes.
+        });
+
+        // Generate the proofs.
+        let mut current_chunk = 0;
+        let all_proofs = {
+            #[cfg(feature = "debug")]
+            let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
+                pk,
+                &mut self.config().challenger(),
+                self.base_machine.has_global(),
+            );
+            #[cfg(feature = "debug-lookups")]
+            let mut global_lookup_debugger = crate::machine::debug::IncrementalLookupDebugger::new(
+                pk,
+                crate::machine::lookup::LookupScope::Global,
+                None,
+            );
+
+            let mut all_proofs = Vec::with_capacity(MAX_PENDING_PROVING_RECORDS);
+            let max_pending_num = min(num_cpus::get(), MAX_PENDING_PROVING_RECORDS);
+            let mut pending_records = Vec::with_capacity(max_pending_num);
+
+            while let Ok(record) = record_receiver.recv() {
+                pending_records.push(record);
+
+                // Generate the proofs for pending records.
+                if pending_records.len() >= max_pending_num {
+                    debug!(
+                        "--- Start to prove chunks {}-{} at {:?}",
+                        current_chunk,
+                        current_chunk + max_pending_num - 1,
+                        start_global.elapsed(),
+                    );
+
+                    let records = mem::take(&mut pending_records);
+
+                    #[cfg(feature = "debug")]
+                    constraint_debugger.debug_incremental(&self.chips(), &records);
+                    #[cfg(feature = "debug-lookups")]
+                    {
+                        crate::machine::debug::debug_regional_lookups(
+                            pk,
+                            &self.chips(),
+                            &records,
+                            None,
+                        );
+                        global_lookup_debugger.debug_incremental(&self.chips(), &records);
+                    }
+
+                    let proofs =
+                        self.prove_records(current_chunk, pk, &challenger, shape_config, records);
+                    all_proofs.extend(proofs);
+
+                    debug!(
+                        "--- Finish proving chunks {}-{} at {:?}",
+                        current_chunk,
+                        current_chunk + max_pending_num - 1,
+                        start_global.elapsed(),
+                    );
+
+                    current_chunk += max_pending_num;
                 }
             }
 
-            debug!(
-                "--- Generate riscv records for batch {}, chunk {}-{} in {:?}",
-                batch_num,
-                chunk_num + 1,
-                chunk_num + batch_records.len() as u32,
-                start_local.elapsed()
-            );
-            chunk_num += batch_records.len() as u32;
+            // Generate the proofs for remaining records.
+            {
+                let pending_len = pending_records.len();
+                debug!(
+                    "--- Start to prove chunks {}-{} at {:?}",
+                    current_chunk,
+                    current_chunk + pending_len - 1,
+                    start_global.elapsed(),
+                );
 
-            // set index for each record
-            for record in batch_records.iter() {
-                let stats = record.stats();
-                debug!("RISCV record stats: chunk {}", record.chunk_index());
-                for (key, value) in &stats {
-                    debug!("   |- {:<28}: {}", key, value);
+                #[cfg(feature = "debug")]
+                constraint_debugger.debug_incremental(&self.chips(), &pending_records);
+                #[cfg(feature = "debug-lookups")]
+                {
+                    crate::machine::debug::debug_regional_lookups(
+                        pk,
+                        &self.chips(),
+                        &pending_records,
+                        None,
+                    );
+                    global_lookup_debugger.debug_incremental(&self.chips(), &pending_records);
                 }
+
+                let proofs = self.prove_records(
+                    current_chunk,
+                    pk,
+                    &challenger,
+                    shape_config,
+                    pending_records,
+                );
+                all_proofs.extend(proofs);
+
+                debug!(
+                    "--- Finish proving chunks {}-{} at {:?}",
+                    current_chunk,
+                    current_chunk + pending_len - 1,
+                    start_global.elapsed(),
+                );
             }
 
             #[cfg(feature = "debug")]
-            constraint_debugger.debug_incremental(&self.chips(), &batch_records);
+            constraint_debugger.print_results();
             #[cfg(feature = "debug-lookups")]
-            {
-                crate::machine::debug::debug_regional_lookups(
-                    pk,
-                    &self.chips(),
-                    &batch_records,
-                    None,
-                );
-                global_lookup_debugger.debug_incremental(&self.chips(), &batch_records);
-            }
+            global_lookup_debugger.print_results();
 
-            let batch_proofs = batch_records.into_pico_iter().map(|record| {
-                let start_chunk = Instant::now();
-                let chunk_index = record.chunk_index();
-                let main_commitment =
-                    debug_span!(parent: &loop_span, "generate_and_commit_main_traces", chunk_index)
-                        .in_scope(|| self.base_machine.commit(&record).unwrap());
+            all_proofs
+        };
 
-                let proof =
-                    debug_span!(parent: &loop_span, "prove_plain", chunk_index).in_scope(|| {
-                        self.base_machine.prove_plain(
-                            pk,
-                            &mut challenger.clone(),
-                            chunk_index,
-                            main_commitment,
-                        )
-                    });
-
-                debug!(
-                    "--- Prove riscv batch {} chunk {} in {:?}",
-                    batch_num,
-                    chunk_index,
-                    start_chunk.elapsed()
-                );
-
-                proof
-            });
-
-            // extend all_proofs to include batch_proofs
-            all_proofs.pico_extend(batch_proofs);
-
-            debug!(
-                "--- Finish riscv batch {} in {:?}",
-                batch_num,
-                start_local.elapsed()
-            );
-
-            batch_num += 1;
-
-            if done {
-                break;
-            }
-            loop_span.exit();
-        }
+        let mut emulator = emulator_handle.join().unwrap();
         let cycles = emulator.cycles();
-        debug!("--- Finish riscv phase 2 in {:?}", start_p2.elapsed());
 
-        // construct meta proof
+        debug!("--- Finish riscv in {:?}", start_global.elapsed());
+
         let vks = vec![witness.vk.clone().unwrap()];
-
-        #[cfg(feature = "debug")]
-        constraint_debugger.print_results();
-        #[cfg(feature = "debug-lookups")]
-        global_lookup_debugger.print_results();
 
         debug!("RISCV chip log degrees:");
         all_proofs.iter().enumerate().for_each(|(i, proof)| {
@@ -236,6 +270,7 @@ where
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             > + Air<ProverConstraintFolder<SC>>,
+        <SC as crate::configs::config::StarkGenericConfig>::Domain: Send,
     {
         self.prove_with_shape_cycles(witness, shape_config)
     }
@@ -249,8 +284,65 @@ where
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             > + Air<ProverConstraintFolder<SC>>,
+        <SC as crate::configs::config::StarkGenericConfig>::Domain: Send,
     {
         self.prove_with_shape_cycles(witness, None)
+    }
+
+    /// Generate the RiscV proofs for the emulation records.
+    fn prove_records(
+        &self,
+        base_chunk: usize,
+        pk: &BaseProvingKey<SC>,
+        challenger: &SC::Challenger,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        records: Vec<EmulationRecord>,
+    ) -> Vec<BaseProof<SC>>
+    where
+        C: Air<ProverConstraintFolder<SC>>,
+    {
+        let record_len = records.len();
+        let local_span =
+                debug_span!(parent: &tracing::Span::current(), "riscv chunks prove loop", base_chunk, record_len)
+                    .entered();
+
+        let chips = self.chips();
+        let proofs = records
+            .into_pico_iter()
+            .enumerate()
+            .map(|(i, mut record)| {
+                let chunk_index = base_chunk + i;
+                // Complete the record.
+                debug_span!(parent: &local_span, "complement_record", chunk_index).in_scope(|| {
+                    RiscvMachine::complement_record_static(chips.clone(), &mut record)
+                });
+
+                // Pad the shape.
+                if let Some(shape_config) = shape_config {
+                    debug_span!(parent: &local_span, "padding_shape", chunk_index)
+                        .in_scope(|| shape_config.padding_shape(&mut record).unwrap());
+                }
+
+                // Commit the record.
+                let main_commitment =
+                    debug_span!(parent: &local_span, "generate_and_commit_main_traces", chunk_index)
+                        .in_scope(|| self.base_machine.commit(&record).unwrap());
+
+                // Generate the proof.
+                debug_span!(parent: &local_span, "prove_plain", chunk_index).in_scope(|| {
+                    self.base_machine.prove_plain(
+                        pk,
+                        &mut challenger.clone(),
+                        base_chunk + i,
+                        main_commitment,
+                    )
+                })
+            })
+            .collect();
+
+        local_span.exit();
+
+        proofs
     }
 }
 

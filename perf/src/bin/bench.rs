@@ -667,7 +667,7 @@ fn bench_kb(bench: &Benchmark) -> Result<PerformanceReport> {
 
 fn bench_tracegen<SC>(bench: &Benchmark) -> Result<PerformanceReport>
 where
-    SC: Send + StarkGenericConfig,
+    SC: Send + StarkGenericConfig + 'static,
     Com<SC>: Send + Sync,
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Clone + Send + Sync,

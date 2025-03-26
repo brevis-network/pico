@@ -49,7 +49,10 @@ where
     let mut prev_next_pc = pc_start;
 
     loop {
-        let (batch_records, done) = emulator.emulate_batch().unwrap();
+        let mut batch_records = vec![];
+        let done = emulator
+            .emulate_batch(&mut |record| batch_records.push(record))
+            .unwrap();
 
         for (i, record) in enumerate(batch_records.iter()) {
             if !record.cpu_events.is_empty() {

@@ -30,10 +30,11 @@ impl RiscvEmulator {
             self.write_stdin(&stdin);
         }
         self.mode = RiscvEmulatorMode::Simple;
+        let mut all_records = vec![];
         loop {
-            let (batch, done) = self.emulate_batch()?;
+            let done = self.emulate_batch(&mut |record| all_records.push(record))?;
             if done {
-                return Ok(batch);
+                return Ok(all_records);
             }
         }
     }
@@ -47,10 +48,11 @@ impl RiscvEmulator {
         if let Some(stdin) = stdin {
             self.write_stdin(&stdin);
         }
+        let mut all_records = vec![];
         loop {
-            let (batch, done) = self.emulate_batch()?;
+            let done = self.emulate_batch(&mut |record| all_records.push(record))?;
             if done {
-                return Ok(batch);
+                return Ok(all_records);
             }
         }
     }

@@ -68,6 +68,17 @@ where
         debug!("complement record in {:?}", begin.elapsed());
     }
 
+    /// Static version of record completion for multiple threads
+    fn complement_record_static(chips: Arc<[MetaChip<SC::Val, C>]>, record: &mut C::Record) {
+        chips.as_ref().iter().for_each(|chip| {
+            if chip.is_active(record) {
+                let mut extra = C::Record::default();
+                chip.extra_record(record, &mut extra);
+                record.append(&mut extra);
+            }
+        });
+    }
+
     /// setup prover, verifier and keys.
     fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let (pk, vk) = self.base_machine().setup_keys(program);

@@ -11,7 +11,7 @@ use crate::{
     },
     compiler::riscv::{instruction::Instruction, program::Program, register::Register},
     emulator::{
-        opts::EmulatorOpts,
+        opts::{EmulatorOpts, SplitOpts},
         record::RecordBehavior,
         riscv::{
             hook::{default_hook_map, Hook},
@@ -35,6 +35,98 @@ pub use mode::RiscvEmulatorMode;
 pub use unconstrained::UnconstrainedState;
 pub use util::align;
 
+/// The state for saving deferred information
+struct EmulationDeferredState {
+    flag_active: bool,
+    deferred: EmulationRecord,
+    pvs: PublicValues<u32, u32>,
+}
+
+impl EmulationDeferredState {
+    fn new(program: Arc<Program>) -> Self {
+        let flag_active = true;
+        let deferred = EmulationRecord::new(program);
+        let pvs = PublicValues::<u32, u32>::default();
+
+        Self {
+            flag_active,
+            deferred,
+            pvs,
+        }
+    }
+
+    /// Only defer the record.
+    fn defer_record(&mut self, new_record: &mut EmulationRecord) {
+        self.deferred.append(&mut new_record.defer());
+    }
+
+    /// Update the public values, defer and return the record.
+    fn complete_and_return_record<F>(
+        &mut self,
+        emulation_done: bool,
+        mut new_record: EmulationRecord,
+        callback: &mut F,
+    ) where
+        F: FnMut(EmulationRecord),
+    {
+        self.defer_record(&mut new_record);
+        self.update_public_values(emulation_done, &mut new_record);
+
+        callback(new_record);
+    }
+
+    /// Update the public values, split and return the deferred records.
+    fn split_and_return_deferred_records<F>(
+        &mut self,
+        emulation_done: bool,
+        opts: SplitOpts,
+        callback: &mut F,
+    ) where
+        F: FnMut(EmulationRecord),
+    {
+        // Get the deferred records.
+        let records = self.deferred.split(emulation_done, opts);
+        debug!("split-chunks len: {:?}", records.len());
+
+        records.into_iter().for_each(|mut r| {
+            self.update_public_values(emulation_done, &mut r);
+
+            callback(r);
+        });
+    }
+
+    /// Update both the current state and record public values.
+    fn update_public_values(&mut self, emulation_done: bool, record: &mut EmulationRecord) {
+        self.pvs.chunk += 1;
+        if !record.cpu_events.is_empty() {
+            if !self.flag_active {
+                self.flag_active = true;
+            } else {
+                self.pvs.execution_chunk += 1;
+            }
+            self.pvs.start_pc = record.cpu_events[0].pc;
+            self.pvs.next_pc = record.cpu_events.last().unwrap().next_pc;
+            self.pvs.exit_code = record.cpu_events.last().unwrap().exit_code;
+            self.pvs.committed_value_digest = record.public_values.committed_value_digest;
+        } else {
+            // Make execution chunk consistent.
+            if self.flag_active && !emulation_done {
+                self.pvs.execution_chunk += 1;
+                self.flag_active = false;
+            }
+
+            self.pvs.start_pc = self.pvs.next_pc;
+            self.pvs.previous_initialize_addr_bits =
+                record.public_values.previous_initialize_addr_bits;
+            self.pvs.last_initialize_addr_bits = record.public_values.last_initialize_addr_bits;
+            self.pvs.previous_finalize_addr_bits = record.public_values.previous_finalize_addr_bits;
+            self.pvs.last_finalize_addr_bits = record.public_values.last_finalize_addr_bits;
+        }
+
+        record.public_values = self.pvs;
+    }
+}
+
 /// An emulator for the Pico RISC-V zkVM.
 ///
 /// The executor is responsible for executing a user program and tracing important events which
@@ -55,8 +147,6 @@ pub struct RiscvEmulator {
     /// The current trace of the emulation that is being collected.
     pub record: EmulationRecord,
 
-    pub public_values_buffer: PublicValues<u32, u32>,
-
     /// The mapping between syscall codes and their implementations.
     pub syscall_map: HashMap<SyscallCode, Arc<dyn Syscall>>,
 
@@ -72,10 +162,8 @@ pub struct RiscvEmulator {
     /// Local memory access events.
     pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
 
-    /// Collects precompile and memory init/finalize events across batches
-    pub deferred_record: EmulationRecord,
-
-    flag_active: bool,
+    /// The state for saving the deferred information
+    deferred_state: Option<EmulationDeferredState>,
 
     /// whether or not to log syscalls
     log_syscalls: bool,
@@ -99,7 +187,7 @@ impl RiscvEmulator {
         F::Poseidon2: Permutation<[F; 16]>,
     {
         let record = EmulationRecord::new(program.clone());
-        let deferred_record = record.clone();
+        let deferred_state = Some(EmulationDeferredState::new(program.clone()));
 
         // Determine the maximum number of cycles for any syscall.
         let syscall_map = default_syscall_map::<F>();
@@ -118,15 +206,13 @@ impl RiscvEmulator {
             hook_map,
             memory_accesses: Default::default(),
             record,
-            public_values_buffer: Default::default(),
             state: RiscvEmulationState::new(program.pc_start),
             program,
             opts,
             max_syscall_cycles,
             local_memory_access: Default::default(),
-            deferred_record,
             mode: RiscvEmulatorMode::Trace,
-            flag_active: true,
+            deferred_state,
             log_syscalls,
         }
     }
@@ -152,10 +238,10 @@ impl RiscvEmulator {
 
     /// Emulates one cycle of the program, returning whether the program has finished.
     #[inline]
-    fn emulate_cycle(
-        &mut self,
-        batch_records: &mut Vec<EmulationRecord>,
-    ) -> Result<bool, EmulationError> {
+    fn emulate_cycle<F>(&mut self, record_callback: F) -> Result<bool, EmulationError>
+    where
+        F: FnMut(bool, EmulationRecord),
+    {
         // Fetch the instruction at the current program counter.
         let instruction = self.program.fetch(self.state.pc);
 
@@ -164,16 +250,6 @@ impl RiscvEmulator {
 
         // Increment the clock.
         self.state.global_clk += 1;
-
-        if !self.is_unconstrained() {
-            // Check if there's enough cycles or move to the next chunk.
-            if self.state.clk + self.max_syscall_cycles >= self.opts.chunk_size * 4 {
-                self.state.current_chunk += 1;
-                self.state.clk = 0;
-
-                self.bump_record(batch_records);
-            }
-        }
 
         if let Some(max_cycles) = self.opts.max_cycles {
             if self.state.global_clk >= max_cycles {
@@ -187,35 +263,52 @@ impl RiscvEmulator {
         if done && self.is_unconstrained() {
             error!(
                 "program ended in unconstrained mode at clk {}",
-                self.state.global_clk
+                self.state.global_clk,
             );
             return Err(EmulationError::UnconstrainedEnd);
+        }
+
+        if !self.is_unconstrained() {
+            // Check if there's enough cycles or move to the next chunk.
+            if self.state.clk + self.max_syscall_cycles >= self.opts.chunk_size * 4 {
+                self.state.current_chunk += 1;
+                self.state.clk = 0;
+
+                self.bump_record(done, record_callback);
+            }
         }
 
         Ok(done)
     }
 
     /// Emulate chunk_batch_size cycles and bump to self.batch_records.
+    /// `record_callback` is used to return the EmulationRecord in function or closure.
+    /// Return the emulation complete flag if success.
     #[instrument(name = "emulate_batch_records", level = "debug", skip_all)]
-    pub fn emulate_batch(&mut self) -> Result<(Vec<EmulationRecord>, bool), EmulationError> {
-        let mut batch_records = Vec::with_capacity(self.opts.chunk_batch_size as usize);
-
-        let start_chunk = self.state.current_chunk; // needed for public input
-        debug!("start_chunk: {}", start_chunk);
-
+    pub fn emulate_batch<F>(&mut self, record_callback: &mut F) -> Result<bool, EmulationError>
+    where
+        F: FnMut(EmulationRecord),
+    {
         self.initialize_if_needed();
 
-        // Loop until we've emulated `self.chunk_batch_size` chunks if `self.chunk_batch_size` is
-        // set.
+        // Temporarily take out the deferred state during emulation.
+        // Will set it back before finishing this function.
+        // And since self cannot be invoked in a closure created by self.
+        let mut deferred_state = self.deferred_state.take().unwrap();
+
+        let mut done = false;
+        let mut num_chunks_emulated = 0;
+        let mut current_chunk = self.state.current_chunk;
         debug!(
             "emulate - current chunk {}, batch size {}",
-            self.state.current_chunk, self.opts.chunk_batch_size
+            current_chunk, self.opts.chunk_batch_size,
         );
-        let mut done = false;
-        let mut current_chunk = self.state.current_chunk;
-        let mut num_chunks_emulated = 0;
+
+        // Loop until we've emulated CHUNK_BATCH_SIZE chunks.
         loop {
-            if self.emulate_cycle(&mut batch_records)? {
+            if self.emulate_cycle(|done, new_record| {
+                deferred_state.complete_and_return_record(done, new_record, record_callback);
+            })? {
                 done = true;
                 break;
             }
@@ -231,78 +324,33 @@ impl RiscvEmulator {
         debug!("emulate - global clk {}", self.state.global_clk);
 
         if !self.record.cpu_events.is_empty() {
-            self.bump_record(&mut batch_records);
+            self.bump_record(done, |done, new_record| {
+                deferred_state.complete_and_return_record(done, new_record, record_callback);
+            });
         }
 
         if done {
             self.postprocess();
+
             // Push the remaining emulation record with memory initialize & finalize events.
-            self.bump_record(&mut batch_records);
+            self.bump_record(done, |_done, mut new_record| {
+                // Unnecessary to prove this record, since it's an empty record after deferring the memory events.
+                deferred_state.defer_record(&mut new_record);
+            });
         } else {
             self.state.current_batch += 1;
         }
 
-        for record in batch_records.iter_mut() {
-            self.deferred_record.append(&mut record.defer());
-        }
-
-        // remove empty memory init/finalize chunk
-        if done {
-            batch_records.pop();
-        }
-
-        let deferred = self.deferred_record.split(done, self.opts.split_opts);
-        debug!("split-chunks len: {:?}", deferred.len());
-
-        batch_records.reserve(deferred.len() + done as usize);
-        batch_records.extend(deferred);
-
-        debug!("batch record capacity: {}", batch_records.capacity());
-
-        debug!(
-            "Final batch record len after postprocess and split: {}",
-            batch_records.len()
+        deferred_state.split_and_return_deferred_records(
+            done,
+            self.opts.split_opts,
+            record_callback,
         );
 
-        // Set the global public values for all chunks.
-        // println!("# batch records to be processed: {}", self.batch_records.len());
-        let mut current_execution_chunk = 0;
-        for record in batch_records.iter_mut() {
-            self.public_values_buffer.chunk += 1;
-            if !record.cpu_events.is_empty() {
-                if !self.flag_active {
-                    self.flag_active = true;
-                } else {
-                    self.public_values_buffer.execution_chunk += 1;
-                }
-                current_execution_chunk = self.public_values_buffer.execution_chunk;
-                self.public_values_buffer.start_pc = record.cpu_events[0].pc;
-                self.public_values_buffer.next_pc = record.cpu_events.last().unwrap().next_pc;
-                self.public_values_buffer.exit_code = record.cpu_events.last().unwrap().exit_code;
-                self.public_values_buffer.committed_value_digest =
-                    record.public_values.committed_value_digest;
-            } else {
-                // hack to make execution chunk consistent
-                if (self.flag_active) & (!done) {
-                    current_execution_chunk += 1;
-                    self.flag_active = false;
-                }
-                self.public_values_buffer.execution_chunk = current_execution_chunk;
+        // Set back the deferred state.
+        self.deferred_state = Some(deferred_state);
 
-                self.public_values_buffer.start_pc = self.public_values_buffer.next_pc;
-                self.public_values_buffer.previous_initialize_addr_bits =
-                    record.public_values.previous_initialize_addr_bits;
-                self.public_values_buffer.last_initialize_addr_bits =
-                    record.public_values.last_initialize_addr_bits;
-                self.public_values_buffer.previous_finalize_addr_bits =
-                    record.public_values.previous_finalize_addr_bits;
-                self.public_values_buffer.last_finalize_addr_bits =
-                    record.public_values.last_finalize_addr_bits;
-            }
-            record.public_values = self.public_values_buffer;
-        }
-
-        Ok((batch_records, done))
+        Ok(done)
     }
 
     /// Read a word from memory and create an access record.
@@ -560,7 +608,10 @@ impl RiscvEmulator {
     }
 
     /// Bump the record.
-    pub fn bump_record(&mut self, batch_records: &mut Vec<EmulationRecord>) {
+    pub fn bump_record<F>(&mut self, emulation_done: bool, record_callback: F)
+    where
+        F: FnOnce(bool, EmulationRecord),
+    {
         // Copy all of the existing local memory accesses to the record's local_memory_access vec.
         self.mode.copy_local_memory_events(
             &mut self.local_memory_access,
@@ -571,7 +622,9 @@ impl RiscvEmulator {
             std::mem::replace(&mut self.record, EmulationRecord::new(self.program.clone()));
         let public_values = removed_record.public_values;
         self.record.public_values = public_values;
-        batch_records.push(removed_record);
+
+        // Return the record.
+        record_callback(emulation_done, removed_record);
     }
 
     fn postprocess(&mut self) {

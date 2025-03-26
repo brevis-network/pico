@@ -46,7 +46,7 @@ where
 
 impl<SC> RiscvProver<SC, Program>
 where
-    SC: Send + StarkGenericConfig,
+    SC: Send + StarkGenericConfig + 'static,
     Com<SC>: Send + Sync,
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Clone + Send + Sync,
@@ -82,7 +82,7 @@ where
         );
         let mut emulator = MetaEmulator::setup_riscv(&witness);
         loop {
-            let (_, done) = emulator.next_record_batch();
+            let done = emulator.next_record_batch(&mut |_| {});
             if done {
                 break;
             }
@@ -144,7 +144,7 @@ where
 
 impl<SC> MachineProver<SC> for RiscvProver<SC, Program>
 where
-    SC: Send + StarkGenericConfig,
+    SC: Send + StarkGenericConfig + 'static,
     Com<SC>: Send + Sync,
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Clone + Send + Sync,

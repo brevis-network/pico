@@ -40,7 +40,7 @@ mod parse_args;
 
 fn run<SC>(config: SC, elf: &'static [u8], riscv_stdin: EmulatorStdin<Program, Vec<u8>>)
 where
-    SC: StarkGenericConfig + Serialize + Send,
+    SC: StarkGenericConfig + Serialize + Send + 'static,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
