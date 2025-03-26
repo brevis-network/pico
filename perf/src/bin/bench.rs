@@ -55,7 +55,8 @@ use pico_vm::{
 use reqwest::blocking::Client;
 use serde::Serialize;
 use std::{
-    io::{BufRead, BufReader},
+    fs::File,
+    io::{BufRead, BufReader, Read},
     path::PathBuf,
     process::{Command, Stdio},
     thread,
@@ -100,6 +101,11 @@ const PROGRAMS: &[Benchmark] = &[
         input: Some("./perf/bench_data/reth-17106222.bin"),
     },
     Benchmark {
+        name: "reth-22059900",
+        elf: "./perf/bench_data/reth-elf",
+        input: Some("./perf/bench_data/reth-22059900.bin"),
+    },
+    Benchmark {
         name: "reth-20528709",
         elf: "./perf/bench_data/reth-elf",
         input: Some("./perf/bench_data/reth-20528709.bin"),
@@ -109,17 +115,23 @@ const PROGRAMS: &[Benchmark] = &[
 #[allow(clippy::type_complexity)]
 fn load<P>(bench: &Benchmark) -> Result<(Vec<u8>, EmulatorStdin<P, Vec<u8>>)> {
     let elf = std::fs::read(bench.elf)?;
-    let stdin = match bench.input {
-        None => Vec::new(),
-        Some(input) => {
-            if input == "fibonacci-300kn" {
-                vec![bincode::serialize(&300_000u32).expect("failed to serialize")]
-            } else {
-                bincode::deserialize(&std::fs::read(input)?)?
-            }
+    let mut stdin_builder = EmulatorStdin::<P, Vec<u8>>::new_builder();
+
+    match bench.input {
+        None => {}
+        Some("fibonacci-300kn") => {
+            let input_bytes = bincode::serialize(&300_000u32).expect("failed to serialize");
+            stdin_builder.write_slice(&input_bytes);
         }
-    };
-    let stdin = EmulatorStdin::new_riscv(&stdin);
+        Some(input_path) => {
+            let mut file = File::open(input_path).expect("Failed to open file");
+            let mut buffer: Vec<u8> = Vec::new();
+            file.read_to_end(&mut buffer).expect("Failed to read file");
+            stdin_builder.write_slice(&buffer);
+        }
+    }
+
+    let stdin = stdin_builder.finalize();
 
     Ok((elf, stdin))
 }
