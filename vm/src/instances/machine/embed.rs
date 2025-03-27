@@ -46,7 +46,7 @@ where
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!("Embed Recursion Machine <{}>", type_name::<EmbedSC>())
+        format!("Embed Machine <{}>", type_name::<EmbedSC>())
     }
 
     /// Get the base machine

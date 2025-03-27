@@ -3,7 +3,7 @@ use crate::{
         circuit::constraints::RecursiveVerifierConstraintFolder, program::RecursionProgram,
     },
     configs::{
-        config::{StarkGenericConfig, Val},
+        config::{Com, FieldGenericConfig, PcsProverData, StarkGenericConfig, Val},
         field_config::{BabyBearSimple, KoalaBearSimple},
         stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
@@ -13,7 +13,13 @@ use crate::{
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
         stdin::EmulatorStdin,
     },
-    instances::compiler::recursion_circuit::stdin::RecursionStdin,
+    instances::{
+        chiptype::recursion_chiptype::RecursionChipType,
+        compiler::{
+            shapes::recursion_shape::RecursionShapeConfig,
+            vk_merkle::{stdin::RecursionStdinVariant, HasStaticVkManager},
+        },
+    },
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -35,44 +41,32 @@ use tracing::{debug, debug_span, instrument};
 pub struct CombineMachine<SC, C>
 where
     SC: StarkGenericConfig,
-{
-    base_machine: BaseMachine<SC, C>,
-}
-
-impl<SC, C> CombineMachine<SC, C>
-where
-    SC: StarkGenericConfig,
     C: ChipBehavior<
         Val<SC>,
         Program = RecursionProgram<Val<SC>>,
         Record = RecursionRecord<Val<SC>>,
     >,
 {
-    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
-        Self {
-            base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
-        }
-    }
+    base_machine: BaseMachine<SC, C>,
 }
 
 macro_rules! impl_combine_machine {
     ($emul_name:ident, $recur_cc:ident, $recur_sc:ident) => {
-        impl<C> MachineBehavior<$recur_sc, C, RecursionStdin<'_, $recur_sc, C>>
+        impl<C> MachineBehavior<$recur_sc, C, RecursionStdinVariant<'_, $recur_sc, C>>
             for CombineMachine<$recur_sc, C>
         where
-            C: ChipBehavior<
+            C: Send + Sync
+                + ChipBehavior<
                     Val<$recur_sc>,
                     Program = RecursionProgram<Val<$recur_sc>>,
                     Record = RecursionRecord<Val<$recur_sc>>,
                 > + Air<ProverConstraintFolder<$recur_sc>>
                 + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>
-                + for<'b> Air<RecursiveVerifierConstraintFolder<'b, $recur_cc>>
-                + Send
-                + Sync,
+                + for<'b> Air<RecursiveVerifierConstraintFolder<'b, $recur_cc>>,
         {
             /// Get the name of the machine.
             fn name(&self) -> String {
-                format!("COMBINE Machine <{}>", type_name::<$recur_sc>())
+                format!("Combine Machine <{}>", type_name::<$recur_sc>())
             }
 
             /// Get the base machine.
@@ -84,7 +78,7 @@ macro_rules! impl_combine_machine {
             #[instrument(name = "COMBINE MACHINE PROVE", level = "debug", skip_all)]
             fn prove(
                 &self,
-                proving_witness: &ProvingWitness<$recur_sc, C, RecursionStdin<$recur_sc, C>>,
+                proving_witness: &ProvingWitness<$recur_sc, C, RecursionStdinVariant<$recur_sc, C>>,
             ) -> MetaProof<$recur_sc>
             where
                 C: for<'c> Air<
@@ -95,8 +89,14 @@ macro_rules! impl_combine_machine {
                     >,
                 >,
             {
-                let mut recursion_emulator =
-                    $emul_name::setup_combine(proving_witness, self.base_machine());
+                let mut recursion_emulator = $emul_name::<
+                    _,
+                    _,
+                    _,
+                    _,
+                >::setup_combine(
+                    proving_witness, self.base_machine()
+                );
                 let mut recursion_witness;
                 let mut recursion_stdin;
 
@@ -107,6 +107,12 @@ macro_rules! impl_combine_machine {
 
                 let mut chunk_index = 1;
                 let mut layer_index = 1;
+                // TODO: move recursion_shape_config creation in higher level functions
+                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+                let recursion_shape_config = RecursionShapeConfig::<
+                    Val<$recur_sc>,
+                    RecursionChipType<Val<$recur_sc>>,
+                >::default();
 
                 loop {
                     let mut batch_num = 1;
@@ -114,7 +120,6 @@ macro_rules! impl_combine_machine {
                     let layer_span = debug_span!(parent: &tracing::Span::current(), "combine layer", layer_index).entered();
                     loop {
                         let loop_span = debug_span!(parent: &tracing::Span::current(), "combine batch prove loop", batch_num).entered();
-
                         let start_batch = Instant::now();
                         if proving_witness.flag_empty_stdin {
                             break;
@@ -122,6 +127,7 @@ macro_rules! impl_combine_machine {
 
                         let (mut batch_records, batch_pks, batch_vks, done) =
                         debug_span!("emulate_batch_records", layer_index).in_scope(|| { recursion_emulator.next_record_keys_batch() });
+
 
                         debug_span!("complement record").in_scope(|| {self.complement_record(batch_records.as_mut_slice())});
 
@@ -152,10 +158,9 @@ macro_rules! impl_combine_machine {
                             .flat_map(|(record, pk)| {
                                 let start_chunk = Instant::now();
                                 let proof = debug_span!(parent: &loop_span, "prove_ensemble", layer_index, chunk_index = record.chunk_index()).in_scope(|| {
-                                    self
+                                self
                                     .base_machine
-                                    .prove_ensemble(pk, std::slice::from_ref(record))
-                                });
+                                    .prove_ensemble(pk, std::slice::from_ref(record))});
                                 debug!(
                                     "--- Prove combine layer {} chunk {} in {:?}",
                                     layer_index,
@@ -175,8 +180,8 @@ macro_rules! impl_combine_machine {
                             layer_index,
                             start_batch.elapsed()
                         );
-                        batch_num += 1;
 
+                        batch_num += 1;
                         if done {
                             break;
                         }
@@ -192,6 +197,7 @@ macro_rules! impl_combine_machine {
                         all_vks.push(last_vk.unwrap());
                         all_proofs.push(last_proof.unwrap());
                     }
+
                     if all_proofs.len() == 1 {
                         break;
                     }
@@ -200,19 +206,21 @@ macro_rules! impl_combine_machine {
                     chunk_index = 1;
 
                     // more than one proofs, need to combine another round
-                    (recursion_stdin, last_vk, last_proof)  = EmulatorStdin::<
-                        RecursionProgram<Val<$recur_sc>>,
-                        RecursionStdin<$recur_sc, C>,
-                    >::setup_for_combine::<Val<$recur_sc>, $recur_cc>(
+                    (recursion_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine::<
+                        <$recur_cc as FieldGenericConfig>::F,
+                        $recur_cc,
+                    >(
                         proving_witness.vk_root.unwrap(),
                         &all_vks,
                         &all_proofs,
                         self.base_machine(),
                         COMBINE_SIZE,
                         all_proofs.len() <= COMBINE_SIZE,
+                        &vk_manager,
+                        Some(&recursion_shape_config),
                     );
 
-                    recursion_witness = ProvingWitness::setup_for_recursion(
+                    recursion_witness = ProvingWitness::setup_for_combine(
                         proving_witness.vk_root.unwrap(),
                         recursion_stdin,
                         last_vk,
@@ -222,14 +230,13 @@ macro_rules! impl_combine_machine {
                     );
 
                     recursion_emulator =
-                        $emul_name::<_, _, _, _>::setup_combine(&recursion_witness, self.base_machine());
+                        $emul_name::setup_combine(&recursion_witness, self.base_machine());
 
                     last_proof = recursion_witness.proof.clone();
                     last_vk = recursion_witness.vk.clone();
 
                     all_proofs.clear();
                     all_vks.clear();
-
                     layer_span.exit();
                 }
 
@@ -269,9 +276,19 @@ macro_rules! impl_combine_machine {
                 assert_recursion_public_values_valid(self.config().as_ref(), public_values);
                 assert_riscv_vk_digest(proof, riscv_vk);
 
+                // Vk Verification
+                assert_eq!(proof.vks().len(), 1);
+                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+                let combine_vk = proof.vks().first().unwrap();
+                if vk_manager.vk_verification_enabled(){
+                    assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
+                }
+
+
                 // verify
                 self.base_machine
-                    .verify_ensemble(proof.vks().first().unwrap(), &proof.proofs())?;
+                    .verify_ensemble(combine_vk, &proof.proofs())?;
+
                 Ok(())
             }
         }
@@ -280,3 +297,21 @@ macro_rules! impl_combine_machine {
 
 impl_combine_machine!(BabyBearMetaEmulator, BabyBearSimple, BabyBearPoseidon2);
 impl_combine_machine!(KoalaBearMetaEmulator, KoalaBearSimple, KoalaBearPoseidon2);
+
+impl<SC, C> CombineMachine<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
+    Com<SC>: Send + Sync,
+    PcsProverData<SC>: Send + Sync,
+{
+    pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
+        Self {
+            base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
+        }
+    }
+}

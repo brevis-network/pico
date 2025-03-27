@@ -10,8 +10,11 @@ use crate::{
     emulator::recursion::emulator::Runtime,
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
-        compiler::recursion_circuit::{
-            embed::builder::EmbedVerifierCircuit, stdin::RecursionStdin,
+        compiler::{
+            recursion_circuit::{embed::builder::EmbedVerifierCircuit, stdin::RecursionStdin},
+            vk_merkle::{
+                builder::EmbedVkVerifierCircuit, stdin::RecursionStdinVariant, HasStaticVkManager,
+            },
         },
         configs::{recur_config, recur_kb_config},
         machine::embed::EmbedMachine,
@@ -42,7 +45,7 @@ where
     prev_machine: BaseMachine<PrevSC, CompressChips<PrevSC>>,
 }
 
-macro_rules! impl_embeded_prover {
+macro_rules! impl_embedded_prover {
     ($mod_name:ident, $embed_sc:ident) => {
         impl<I>
             ProverChain<$mod_name::StarkConfig, CompressChips<$mod_name::StarkConfig>, $embed_sc>
@@ -80,7 +83,15 @@ macro_rules! impl_embeded_prover {
             }
 
             fn prove(&self, proofs: Self::Witness) -> MetaProof<$embed_sc> {
-                let vk_root = [Val::<$mod_name::StarkConfig>::ZERO; DIGEST_SIZE];
+                let vk_manager =
+                    <$mod_name::StarkConfig as HasStaticVkManager>::static_vk_manager();
+
+                let vk_root = if vk_manager.vk_verification_enabled() {
+                    vk_manager.merkle_root
+                } else {
+                    [Val::<$mod_name::StarkConfig>::ZERO; DIGEST_SIZE]
+                };
+
                 let stdin = RecursionStdin::new(
                     &self.prev_machine,
                     proofs.vks.clone(),
@@ -88,11 +99,25 @@ macro_rules! impl_embeded_prover {
                     true,
                     vk_root,
                 );
-                let program =
-                    EmbedVerifierCircuit::<$mod_name::FieldConfig, $mod_name::StarkConfig>::build(
-                        &self.prev_machine,
-                        &stdin,
-                    );
+
+                let (program, stdin) = if vk_manager.vk_verification_enabled() {
+                    let stdin = vk_manager.add_vk_merkle_proof(stdin);
+
+                    let program = EmbedVkVerifierCircuit::<
+                        $mod_name::FieldConfig,
+                        $mod_name::StarkConfig,
+                    >::build(&self.prev_machine, &stdin, vk_manager);
+
+                    (program, RecursionStdinVariant::WithVk(stdin))
+                } else {
+                    let program = EmbedVerifierCircuit::<
+                        $mod_name::FieldConfig,
+                        $mod_name::StarkConfig,
+                    >::build(&self.prev_machine, &stdin);
+
+                    (program, RecursionStdinVariant::NoVk(stdin))
+                };
+
                 let (pk, vk) = self.machine.setup_keys(&program);
 
                 let mut witness_stream = Vec::new();
@@ -120,5 +145,5 @@ macro_rules! impl_embeded_prover {
     };
 }
 
-impl_embeded_prover!(recur_config, BabyBearBn254Poseidon2);
-impl_embeded_prover!(recur_kb_config, KoalaBearBn254Poseidon2);
+impl_embedded_prover!(recur_config, BabyBearBn254Poseidon2);
+impl_embedded_prover!(recur_kb_config, KoalaBearBn254Poseidon2);

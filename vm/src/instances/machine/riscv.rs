@@ -5,7 +5,9 @@ use crate::{
         emulator::MetaEmulator,
         riscv::{public_values::PublicValues, record::EmulationRecord},
     },
-    instances::compiler::shapes::riscv_shape::RiscvShapeConfig,
+    instances::compiler::{
+        shapes::riscv_shape::RiscvShapeConfig, vk_merkle::vk_verification_enabled,
+    },
     iter::{IntoPicoIterator, PicoIterator},
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -318,9 +320,11 @@ where
                 });
 
                 // Pad the shape.
-                if let Some(shape_config) = shape_config {
-                    debug_span!(parent: &local_span, "padding_shape", chunk_index)
-                        .in_scope(|| shape_config.padding_shape(&mut record).unwrap());
+                if vk_verification_enabled() {
+                    if let Some(shape_config) = shape_config {
+                        debug_span!(parent: &local_span, "padding_shape", chunk_index)
+                            .in_scope(|| shape_config.padding_shape(&mut record).unwrap());
+                    }
                 }
 
                 // Commit the record.

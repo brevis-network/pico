@@ -1,10 +1,7 @@
 mod combine;
-mod combine_vk;
 mod compress;
-mod compress_vk;
 mod convert;
 mod embed;
-mod embed_vk;
 mod riscv;
 
 use crate::{
@@ -14,12 +11,9 @@ use crate::{
 
 // re-exports
 pub use combine::CombineProver;
-pub use combine_vk::CombineVkProver;
 pub use compress::CompressProver;
-pub use compress_vk::CompressVkProver;
 pub use convert::ConvertProver;
 pub use embed::EmbedProver;
-pub use embed_vk::EmbedVkProver;
 pub use riscv::RiscvProver;
 
 /// Trait to assist with inline proving

@@ -5,8 +5,14 @@ use crate::{
     emulator::recursion::emulator::Runtime,
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
-        compiler::recursion_circuit::{
-            compress::builder::CompressVerifierCircuit, stdin::RecursionStdin,
+        compiler::{
+            recursion_circuit::{
+                compress::builder::CompressVerifierCircuit, stdin::RecursionStdin,
+            },
+            vk_merkle::{
+                builder::CompressVkVerifierCircuit, stdin::RecursionStdinVariant,
+                HasStaticVkManager,
+            },
         },
         configs::{recur_config, recur_kb_config},
         machine::compress::CompressMachine,
@@ -80,7 +86,15 @@ macro_rules! impl_compress_prover {
             }
 
             fn prove(&self, proofs: Self::Witness) -> MetaProof<$mod_name::StarkConfig> {
-                let vk_root = [Val::<$mod_name::StarkConfig>::ZERO; DIGEST_SIZE];
+                let vk_manager =
+                    <$mod_name::StarkConfig as HasStaticVkManager>::static_vk_manager();
+
+                let vk_root = if vk_manager.vk_verification_enabled() {
+                    vk_manager.merkle_root
+                } else {
+                    [Val::<$mod_name::StarkConfig>::ZERO; DIGEST_SIZE]
+                };
+
                 let stdin = RecursionStdin::new(
                     self.machine.base_machine(),
                     proofs.vks.clone(),
@@ -88,10 +102,29 @@ macro_rules! impl_compress_prover {
                     true,
                     vk_root,
                 );
-                let program = CompressVerifierCircuit::<
-                    $mod_name::FieldConfig,
-                    $mod_name::StarkConfig,
-                >::build(&self.prev_machine, &stdin);
+
+                let (program, stdin) = if vk_manager.vk_verification_enabled() {
+                    let stdin = vk_manager.add_vk_merkle_proof(stdin);
+
+                    let mut program = CompressVkVerifierCircuit::<
+                        $mod_name::FieldConfig,
+                        $mod_name::StarkConfig,
+                    >::build(&self.prev_machine, &stdin);
+
+                    let compress_pad_shape =
+                        RecursionChipType::<$mod_name::SC_Val>::compress_shape();
+                    program.shape = Some(compress_pad_shape);
+
+                    (program, RecursionStdinVariant::WithVk(stdin))
+                } else {
+                    let program = CompressVerifierCircuit::<
+                        $mod_name::FieldConfig,
+                        $mod_name::StarkConfig,
+                    >::build(&self.prev_machine, &stdin);
+
+                    (program, RecursionStdinVariant::NoVk(stdin))
+                };
+
                 let (pk, vk) = self.machine.setup_keys(&program);
 
                 let mut witness_stream = Vec::new();

@@ -1,11 +1,11 @@
 use crate::{
-    compiler::recursion::program::RecursionProgram,
+    compiler::recursion::{circuit::hash::FieldHasher, program::RecursionProgram},
     configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val},
     emulator::{
         record::RecordBehavior,
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
     },
-    instances::compiler::recursion_circuit::stdin::RecursionStdin,
+    instances::compiler::vk_merkle::{stdin::RecursionStdinVariant, HasStaticVkManager},
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -21,19 +21,29 @@ use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use std::{any::type_name, borrow::Borrow};
-use tracing::{debug, debug_span, instrument, trace};
+use tracing::{debug, debug_span, instrument};
 
 pub struct CompressMachine<SC, C>
 where
     SC: StarkGenericConfig,
+    C: ChipBehavior<
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
 {
     base_machine: BaseMachine<SC, C>,
 }
 
-impl<F, SC, C> MachineBehavior<SC, C, RecursionStdin<'_, SC, C>> for CompressMachine<SC, C>
+impl<F, SC, C> MachineBehavior<SC, C, RecursionStdinVariant<'_, SC, C>> for CompressMachine<SC, C>
 where
     F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + TwoAdicField,
-    SC: StarkGenericConfig<Val = F, Domain = TwoAdicMultiplicativeCoset<F>> + Send + Sync,
+    SC: StarkGenericConfig<Val = F, Domain = TwoAdicMultiplicativeCoset<F>>
+        + Send
+        + Sync
+        + FieldHasher<Val<SC>>
+        + HasStaticVkManager
+        + 'static,
     Val<SC>: PrimeField32,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
@@ -51,7 +61,7 @@ where
 {
     /// Get the name of the machine.
     fn name(&self) -> String {
-        format!("Compress Recursion Machine <{}>", type_name::<SC>())
+        format!("Compress Machine <{}>", type_name::<SC>())
     }
 
     /// Get the base machine
@@ -61,7 +71,7 @@ where
 
     /// Get the prover of the machine.
     #[instrument(name = "COMPRESS MACHINE PROVE", level = "debug", skip_all)]
-    fn prove(&self, witness: &ProvingWitness<SC, C, RecursionStdin<SC, C>>) -> MetaProof<SC>
+    fn prove(&self, witness: &ProvingWitness<SC, C, RecursionStdinVariant<SC, C>>) -> MetaProof<SC>
     where
         C: for<'c> Air<
             DebugConstraintFolder<
@@ -110,11 +120,20 @@ where
         riscv_vk: &dyn HashableKey<SC::Val>,
     ) -> anyhow::Result<()> {
         let vk = proof.vks().first().unwrap();
+
+        let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
+
+        if vk_manager.vk_verification_enabled() {
+            assert!(
+                vk_manager.is_vk_allowed(vk.hash_field()),
+                "Recursion Vk Verification failed"
+            );
+        }
+
         assert_eq!(proof.num_proofs(), 1);
 
         let public_values: &RecursionPublicValues<_> =
             proof.proofs[0].public_values.as_ref().borrow();
-        trace!("public values: {:?}", public_values);
 
         // assert completion
         if public_values.flag_complete != <Val<SC>>::ONE {

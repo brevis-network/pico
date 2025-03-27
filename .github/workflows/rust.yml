@@ -13,6 +13,9 @@ on:
 
 name: Check, Test, and Format
 
+env:
+  VK_VERIFICATION: false
+
 jobs:
   fmt:
     if: true

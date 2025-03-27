@@ -11,7 +11,8 @@ use crate::{
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
     emulator::{emulator::MetaEmulator, opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType, compiler::shapes::riscv_shape::RiscvShapeConfig,
+        chiptype::riscv_chiptype::RiscvChipType,
+        compiler::{shapes::riscv_shape::RiscvShapeConfig, vk_merkle::vk_verification_enabled},
         machine::riscv::RiscvMachine,
     },
     machine::{
@@ -122,11 +123,13 @@ where
         let (config, elf) = input;
         let mut program = Compiler::new(SourceType::RISCV, elf).compile();
 
-        if let Some(shape_config) = shape_config.clone() {
-            let p = Arc::get_mut(&mut program).expect("cannot get program");
-            shape_config
-                .padding_preprocessed_shape(p)
-                .expect("cannot padding preprocessed shape");
+        if vk_verification_enabled() {
+            if let Some(shape_config) = shape_config.clone() {
+                let p = Arc::get_mut(&mut program).expect("cannot get program");
+                shape_config
+                    .padding_preprocessed_shape(p)
+                    .expect("cannot padding preprocessed shape");
+            }
         }
 
         let machine = RiscvMachine::new(config, RiscvChipType::all_chips(), RISCV_NUM_PVS);

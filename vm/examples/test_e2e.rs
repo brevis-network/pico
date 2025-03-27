@@ -1,8 +1,10 @@
 use cpu_time::ProcessTime;
+use p3_baby_bear::BabyBear;
 use p3_field::FieldAlgebra;
+use p3_koala_bear::KoalaBear;
 use pico_vm::{
     compiler::{
-        recursion::circuit::witness::Witnessable,
+        recursion::circuit::{hash::FieldHasher, witness::Witnessable},
         riscv::{
             compiler::{Compiler, SourceType},
             program::Program,
@@ -30,13 +32,22 @@ use pico_vm::{
                 compress::builder::CompressVerifierCircuit, embed::builder::EmbedVerifierCircuit,
                 stdin::RecursionStdin,
             },
+            shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
+            vk_merkle::{
+                builder::{CompressVkVerifierCircuit, EmbedVkVerifierCircuit},
+                stdin::RecursionStdinVariant,
+                HasStaticVkManager, VkMerkleManager,
+            },
         },
         machine::{
             combine::CombineMachine, compress::CompressMachine, convert::ConvertMachine,
             embed::EmbedMachine, riscv::RiscvMachine,
         },
     },
-    machine::{logger::setup_logger, machine::MachineBehavior, witness::ProvingWitness},
+    machine::{
+        keys::BaseVerifyingKey, logger::setup_logger, machine::MachineBehavior,
+        witness::ProvingWitness,
+    },
     primitives::consts::{
         BABYBEAR_S_BOX_DEGREE, COMBINE_SIZE, DIGEST_SIZE, KOALABEAR_S_BOX_DEGREE,
         RECURSION_NUM_PVS, RISCV_NUM_PVS,
@@ -54,7 +65,8 @@ mod parse_args;
 
 #[rustfmt::skip]
 macro_rules! run {
-    ($func_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident, $embed_cc:ident, $embed_sc:ident, $s_box_degree:ident) => {
+    ($func_name:ident,$field_type:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident,
+    $embed_cc:ident, $embed_sc:ident, $s_box_degree:ident) => {
         fn $func_name(
             elf: &'static [u8],
             riscv_stdin: EmulatorStdin<Program, Vec<u8>>,
@@ -63,8 +75,25 @@ macro_rules! run {
         ) {
             let start = Instant::now();
 
+            let vk_manager = <$riscv_sc as HasStaticVkManager>::static_vk_manager();
+            let riscv_shape_config = vk_manager.vk_verification_enabled().then(|| {
+                RiscvShapeConfig::<$field_type>::default()
+            });
+            let recursion_shape_config = vk_manager.vk_verification_enabled().then(|| {
+                RecursionShapeConfig::<$field_type, RecursionChipType<$field_type >>::default()
+            });
             let riscv_compiler = Compiler::new(SourceType::RISCV, elf);
-            let riscv_program = riscv_compiler.compile();
+            let mut riscv_program = riscv_compiler.compile();
+            // With VK
+            if let Some(ref shape_config) = riscv_shape_config {
+                if let Some(program) = Arc::get_mut(&mut riscv_program) {
+                    shape_config
+                        .padding_preprocessed_shape(program)
+                        .expect("cannot padding preprocessed shape");
+                } else {
+                    panic!("cannot get_mut arc");
+                }
+            }
 
             let riscv_machine = RiscvMachine::new(
                 $riscv_sc::new(),
@@ -76,6 +105,7 @@ macro_rules! run {
             let (riscv_pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program.clone());
 
             let riscv_opts = if bench {
+                info!("use benchmark options");
                 EmulatorOpts::bench_riscv_ops()
             } else {
                 EmulatorOpts::default()
@@ -112,8 +142,14 @@ macro_rules! run {
                     riscv_pk,
                     riscv_vk.clone(),
                 );
+                let riscv_proof = match &riscv_shape_config {
+                    Some(shape_config) => {
+                        riscv_machine.prove_with_shape(&riscv_witness, Some(shape_config)).0
+                    }
+                    None => riscv_machine.prove_cycles(&riscv_witness).0,
+                };
 
-                riscv_machine.prove_cycles(&riscv_witness).0
+                riscv_proof
             });
 
             // assert pv_stream is the same as dryrun
@@ -159,7 +195,7 @@ macro_rules! run {
             };
             debug!("recursion_opts: {:?}", recursion_opts);
 
-            let vk_root = [Val::<$riscv_sc>::ZERO; DIGEST_SIZE];
+            let vk_root = get_vk_root(&vk_manager);
 
             let convert_machine = ConvertMachine::new(
                 $recur_sc::new(),
@@ -177,7 +213,7 @@ macro_rules! run {
                     vk_root,
                     riscv_machine.base_machine(),
                     &riscv_proof.proofs(),
-                    &None,
+                    &recursion_shape_config,
                 );
 
                 let convert_witness = ProvingWitness::setup_for_convert(
@@ -223,7 +259,7 @@ macro_rules! run {
             info!("║     COMBINE PHASE     ║");
             info!("╚═══════════════════════╝");
 
-            let vk_root = [Val::<$recur_sc>::ZERO; DIGEST_SIZE];
+            let vk_root = get_vk_root(&vk_manager);
 
             let combine_machine = CombineMachine::<_, _>::new(
                 $recur_sc::new(),
@@ -243,9 +279,11 @@ macro_rules! run {
                     convert_machine.base_machine(),
                     COMBINE_SIZE,
                     convert_proof.proofs().len() <= COMBINE_SIZE,
+                    vk_manager,
+                    recursion_shape_config.as_ref(),
                 );
 
-                let combine_witness = ProvingWitness::setup_for_recursion(
+                let combine_witness = ProvingWitness::setup_for_combine(
                     vk_root,
                     combine_stdin,
                     last_vk,
@@ -291,7 +329,7 @@ macro_rules! run {
             info!("║    COMPRESS PHASE     ║");
             info!("╚═══════════════════════╝");
 
-            let vk_root = [Val::<$recur_sc>::ZERO; DIGEST_SIZE];
+            let vk_root = get_vk_root(&vk_manager);
 
             let compress_machine = CompressMachine::new(
                 $recur_sc::compress(),
@@ -309,11 +347,29 @@ macro_rules! run {
                     vk_root,
                 );
 
-                let compress_program = CompressVerifierCircuit::<$recur_cc, $recur_sc>::build(
-                    combine_machine.base_machine(),
-                    &compress_stdin,
-                );
+                let (compress_program, compress_stdin) = if vk_manager.vk_verification_enabled() {
+                    let compress_vk_stdin = vk_manager.add_vk_merkle_proof(compress_stdin);
+
+                    let mut compress_program = CompressVkVerifierCircuit::<$recur_cc, $recur_sc>::build(
+                        combine_machine.base_machine(),
+                        &compress_vk_stdin,
+                    );
+
+                    let compress_pad_shape = RecursionChipType::<$field_type>::compress_shape();
+                    compress_program.shape = Some(compress_pad_shape);
+
+                    (compress_program, RecursionStdinVariant::WithVk(compress_vk_stdin))
+                } else {
+                    let compress_program = CompressVerifierCircuit::<$recur_cc, $recur_sc>::build(
+                        combine_machine.base_machine(),
+                        &compress_stdin,
+                    );
+
+                    (compress_program, RecursionStdinVariant::NoVk(compress_stdin))
+                };
+
                 compress_program.print_stats();
+
                 let (compress_pk, compress_vk) = compress_machine.setup_keys(&compress_program);
                 let record = {
                     let mut witness_stream = Vec::new();
@@ -369,7 +425,7 @@ macro_rules! run {
             info!("║      EMBED PHASE      ║");
             info!("╚═══════════════════════╝");
 
-            let vk_root = [Val::<$embed_sc>::ZERO; DIGEST_SIZE];
+            let vk_root = get_vk_root(&vk_manager);
 
             let embed_machine = EmbedMachine::<$recur_sc, _, _, Vec<u8>>::new(
                 $embed_sc::new(),
@@ -386,12 +442,28 @@ macro_rules! run {
                     true,
                     vk_root,
                 );
-                let embed_program = EmbedVerifierCircuit::<$recur_cc, $recur_sc>::build(
-                    compress_machine.base_machine(),
-                    &embed_stdin,
-                );
+
+                let (embed_program, embed_stdin) = if vk_manager.vk_verification_enabled() {
+                    let embed_vk_stdin = vk_manager.add_vk_merkle_proof(embed_stdin);
+
+                    let embed_program = EmbedVkVerifierCircuit::<$recur_cc, $recur_sc>::build(
+                        compress_machine.base_machine(),
+                        &embed_vk_stdin,
+                        vk_manager,
+                    );
+
+                    (embed_program, RecursionStdinVariant::WithVk(embed_vk_stdin))
+                } else {
+                    let embed_program = EmbedVerifierCircuit::<$recur_cc, $recur_sc>::build(
+                        compress_machine.base_machine(),
+                        &embed_stdin,
+                    );
+
+                    (embed_program, RecursionStdinVariant::NoVk(embed_stdin))
+                };
 
                 embed_program.print_stats();
+
                 let (embed_pk, embed_vk) = embed_machine.setup_keys(&embed_program);
                 let record = {
                     let mut witness_stream = Vec::new();
@@ -405,8 +477,19 @@ macro_rules! run {
                     runtime.run().unwrap();
                     runtime.record
                 };
+
+                // for all workloads of pico zkvm, the embed_vk.bin should be the same
+                let embed_vk_bytes = bincode::serialize(&embed_vk).unwrap();
+                std::fs::write("embed_vk.bin", embed_vk_bytes).unwrap();
+            
+                let new_embed_vk_bytes = std::fs::read("embed_vk.bin").unwrap();
+                let new_embed_vk: BaseVerifyingKey<$embed_sc> =
+                    bincode::deserialize(&new_embed_vk_bytes).unwrap();
+
                 let embed_witness =
-                    ProvingWitness::setup_with_keys_and_records(embed_pk, embed_vk, vec![record]);
+                    ProvingWitness::setup_with_keys_and_records(embed_pk, new_embed_vk,
+                vec![record]);
+
                 embed_machine.prove(&embed_witness)
             });
 
@@ -455,6 +538,7 @@ macro_rules! run {
 
 run!(
     run_babybear,
+    BabyBear,
     BabyBearPoseidon2,
     BabyBearSimple,
     BabyBearPoseidon2,
@@ -465,6 +549,7 @@ run!(
 
 run!(
     run_koalabear,
+    KoalaBear,
     KoalaBearPoseidon2,
     KoalaBearSimple,
     KoalaBearPoseidon2,
@@ -472,6 +557,18 @@ run!(
     KoalaBearBn254Poseidon2,
     KOALABEAR_S_BOX_DEGREE
 );
+
+fn get_vk_root<SC>(vk_manager: &VkMerkleManager<SC>) -> [Val<SC>; DIGEST_SIZE]
+where
+    SC: StarkGenericConfig + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZE]>,
+    Val<SC>: Ord,
+{
+    if vk_manager.vk_verification_enabled() {
+        vk_manager.merkle_root
+    } else {
+        [Val::<SC>::ZERO; DIGEST_SIZE]
+    }
+}
 
 struct TimeStats {
     pub wall_time: Duration,

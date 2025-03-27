@@ -48,8 +48,8 @@ use pico_vm::{
     },
     primitives::Poseidon2Init,
     proverchain::{
-        CombineProver, CombineVkProver, CompressProver, CompressVkProver, ConvertProver,
-        EmbedProver, EmbedVkProver, InitialProverSetup, MachineProver, ProverChain, RiscvProver,
+        CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
+        MachineProver, ProverChain, RiscvProver,
     },
 };
 use reqwest::blocking::Client;
@@ -342,9 +342,9 @@ fn bench_bb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let recursion_shape_config =
         RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default();
     let combine =
-        CombineVkProver::new_with_prev(&convert, recursion_opts, Some(recursion_shape_config));
-    let compress = CompressVkProver::new_with_prev(&combine, (), None);
-    let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
+        CombineProver::new_with_prev(&convert, recursion_opts, Some(recursion_shape_config));
+    let compress = CompressProver::new_with_prev(&combine, (), None);
+    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
     let riscv_vk = riscv.vk();
 
@@ -474,9 +474,9 @@ fn bench_kb_vk(bench: &Benchmark) -> Result<PerformanceReport> {
     let recursion_shape_config =
         RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default();
     let combine =
-        CombineVkProver::new_with_prev(&convert, recursion_opts, Some(recursion_shape_config));
-    let compress = CompressVkProver::new_with_prev(&combine, (), None);
-    let embed = EmbedVkProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
+        CombineProver::new_with_prev(&convert, recursion_opts, Some(recursion_shape_config));
+    let compress = CompressProver::new_with_prev(&combine, (), None);
+    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
     let riscv_vk = riscv.vk();
 

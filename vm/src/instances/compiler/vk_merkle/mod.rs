@@ -18,13 +18,21 @@ use crate::{
     primitives::consts::DIGEST_SIZE,
 };
 use once_cell::sync::Lazy;
-use std::collections::BTreeMap;
-use tracing::debug;
+use std::{collections::BTreeMap, env};
+use tracing::{debug, info};
 
+pub fn vk_verification_enabled() -> bool {
+    env::var("VK_VERIFICATION")
+        .map(|v| v.eq_ignore_ascii_case("true"))
+        .unwrap_or(true)
+}
+
+// TODO: use once lock for vk_manager
 pub struct VkMerkleManager<SC: StarkGenericConfig + FieldHasher<Val<SC>>> {
     pub allowed_vk_map: BTreeMap<[Val<SC>; DIGEST_SIZE], usize>,
     pub merkle_root: [Val<SC>; DIGEST_SIZE],
     pub merkle_tree: MerkleTree<Val<SC>, SC>,
+    vk_verification: bool,
 }
 
 impl<SC> VkMerkleManager<SC>
@@ -42,11 +50,19 @@ where
         let (merkle_root, merkle_tree) =
             MerkleTree::commit(allowed_vk_map.keys().copied().collect());
 
+        let vk_verification = vk_verification_enabled();
+        info!("VK_VERIFICATION: {}", vk_verification);
+
         Ok(Self {
             allowed_vk_map,
             merkle_root,
             merkle_tree,
+            vk_verification,
         })
+    }
+
+    pub fn vk_verification_enabled(&self) -> bool {
+        self.vk_verification
     }
 
     /// Initialize the VkMerkleManager from a file
@@ -59,10 +75,13 @@ where
         let (merkle_root, merkle_tree) =
             MerkleTree::commit(allowed_vk_map.keys().copied().collect());
 
+        let vk_verification = vk_verification_enabled();
+
         Ok(Self {
             allowed_vk_map,
             merkle_root,
             merkle_tree,
+            vk_verification,
         })
     }
 

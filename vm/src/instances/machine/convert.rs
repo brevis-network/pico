@@ -66,7 +66,7 @@ macro_rules! impl_convert_machine {
         {
             /// Get the name of the machine.
             fn name(&self) -> String {
-                format!("Riscv Compress Machine <{}>", type_name::<$recur_sc>())
+                format!("Convert Machine <{}>", type_name::<$recur_sc>())
             }
 
             /// Get the base machine.
