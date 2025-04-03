@@ -37,7 +37,7 @@ func TestSetupVerifierCircuit(t *testing.T) {
 	os.Setenv("CONSTRAINTS_JSON", "./constraints.json")
 	os.Setenv("GROTH16", "1")
 
-	circuit, assigment := doSolve(assert)
+	circuit, assignment := doSolve(assert)
 
 	doSetUp(assert, circuit, assigment)
 }
@@ -69,7 +69,7 @@ func doSetUp(assert *test.Assert, circuit *Circuit, assigment *Circuit) {
 
 	ccs, err := frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, circuit)
 	assert.NoError(err)
-	fmt.Printf("ccs: %d \n", ccs.GetNbConstraints())
+	fmt.Printf("ccs: %v\n", ccs.GetNbConstraints())
 
 	pk, vk, err := groth16.Setup(ccs)
 	if err != nil {
