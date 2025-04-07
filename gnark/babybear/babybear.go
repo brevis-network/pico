@@ -18,7 +18,7 @@ import (
 )
 
 var modulus = new(big.Int).SetUint64(2013265921)
-var modulus_sub_1 = new(big.Int).SetUint64(2013265920)
+var modulusSub1 = new(big.Int).SetUint64(2013265920)
 
 func init() {
 	// These functions must be public so Gnark's hint system can access them.
@@ -336,7 +336,7 @@ func (p *Chip) reduceFast(x Variable) Variable {
 	if x.UpperBound.BitLen() >= 120 {
 		return Variable{
 			Value:      p.reduceWithMaxBits(x.Value, uint64(x.UpperBound.BitLen())),
-			UpperBound: modulus_sub_1,
+			UpperBound: modulusSub1,
 		}
 	}
 	return x
@@ -348,7 +348,7 @@ func (p *Chip) ReduceSlow(x Variable) Variable {
 	}
 	return Variable{
 		Value:      p.reduceWithMaxBits(x.Value, uint64(x.UpperBound.BitLen())),
-		UpperBound: modulus_sub_1,
+		UpperBound: modulusSub1,
 	}
 }
 
