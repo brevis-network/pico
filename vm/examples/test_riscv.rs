@@ -37,6 +37,9 @@ use tracing::info;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
+#[path = "common/print_utils.rs"]
+mod print_utils;
+use print_utils::log_section;
 
 fn run<SC>(config: SC, elf: &'static [u8], riscv_stdin: EmulatorStdin<Program, Vec<u8>>)
 where
@@ -56,9 +59,7 @@ where
     SC::Val: Poseidon2Init,
     <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
 {
-    info!("╔═══════════════════════╗");
-    info!("║      RISCV PHASE      ║");
-    info!("╚═══════════════════════╝");
+    log_section("RISCV PHASE");
     let start = Instant::now();
 
     let riscv_compiler = Compiler::new(SourceType::RISCV, elf);

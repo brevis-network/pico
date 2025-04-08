@@ -3176,9 +3176,11 @@ dependencies = [
  "p3-field 0.1.0",
  "p3-koala-bear",
  "p3-symmetric 0.1.0",
+ "pico-sdk",
  "pico-vm",
  "reqwest",
  "serde",
+ "strum",
  "tracing",
 ]
 

@@ -14,15 +14,16 @@ use tracing::info;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
+#[path = "common/print_utils.rs"]
+mod print_utils;
+use print_utils::log_section;
 
 #[allow(clippy::unit_arg)]
 fn main() {
     setup_logger();
     let (elf, riscv_stdin, _) = parse_args::parse_args();
 
-    info!("╔═══════════════════════╗");
-    info!("║    KB PROVER CHAIN    ║");
-    info!("╚═══════════════════════╝");
+    log_section("KB PROVER CHAIN");
     let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), elf), Default::default(), None);
     let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
     let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
@@ -46,9 +47,7 @@ fn main() {
 
     info!("ProverChain on KoalaBear succeeded.");
 
-    info!("╔═══════════════════════╗");
-    info!("║    BB PROVER CHAIN    ║");
-    info!("╚═══════════════════════╝");
+    log_section("BB PROVER CHAIN");
     let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), elf), Default::default(), None);
     let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
     let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
