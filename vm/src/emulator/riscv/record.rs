@@ -25,6 +25,9 @@ use p3_field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{mem::take, sync::Arc};
 
+const THRESHOLD_2POW15: usize = 1 << 15;
+const THRESHOLD_2POW16: usize = 1 << 16;
+const THRESHOLD_2POW18: usize = 1 << 18;
 /// A record of the emulation of a program.
 ///
 /// The trace of the emulation is represented as a list of "events" that occur every cycle.
@@ -161,10 +164,12 @@ impl EmulationRecord {
         self.shape
             .as_ref()
             .map(|shape| {
-                shape
-                    .inner
-                    .get(chip_name)
-                    .unwrap_or_else(|| panic!("Chip {} not found in specified shape", chip_name))
+                shape.inner.get(chip_name).unwrap_or_else(|| {
+                    panic!(
+                        "Chip {} not found in specified shape, full shape: {:?}, ",
+                        chip_name, self.shape
+                    )
+                })
             })
             .copied()
     }
@@ -192,9 +197,28 @@ impl EmulationRecord {
 
         for (syscall_code, events) in precompile_events.into_iter() {
             let threshold = match syscall_code {
-                SyscallCode::KECCAK_PERMUTE => opts.keccak,
-                SyscallCode::SHA_EXTEND => opts.sha_extend,
+                SyscallCode::KECCAK_PERMUTE => THRESHOLD_2POW15.min(opts.keccak),
+                SyscallCode::SHA_EXTEND => THRESHOLD_2POW18.min(opts.sha_extend),
                 SyscallCode::SHA_COMPRESS => opts.sha_compress,
+                SyscallCode::BLS12381_FP_ADD => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::POSEIDON2_PERMUTE => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::BLS12381_ADD => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::BLS12381_FP2_MUL => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::BN254_FP2_MUL => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::ED_DECOMPRESS => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::UINT256_MUL => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::BLS12381_DOUBLE => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::BN254_DOUBLE => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::BLS12381_DECOMPRESS => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::SECP256K1_DECOMPRESS => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::ED_ADD => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::BN254_ADD => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::SECP256K1_FP_ADD => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::BN254_FP_ADD => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::SECP256K1_ADD => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::BLS12381_FP2_ADD => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::BN254_FP2_ADD => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::SECP256K1_DOUBLE => THRESHOLD_2POW16.min(opts.deferred),
                 _ => opts.deferred,
             };
 

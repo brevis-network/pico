@@ -546,7 +546,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                                 return Ok(());
                             }
                         }
-                        return Ok(());
                     }
                 }
                 warn!(
