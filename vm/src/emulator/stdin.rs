@@ -42,6 +42,7 @@ use alloc::sync::Arc;
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
+use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{array, fmt::Debug};
 use tracing::instrument;
@@ -178,6 +179,7 @@ where
         RiscvPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
         FieldSpecificPrecompilePoseidon2Chip<F>:
             for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+        SC: Send + Sync,
     {
         // initialize for base_ and reconstruct_challenger
         let [mut base_challenger, mut reconstruct_challenger] =
@@ -189,8 +191,8 @@ where
         // construct programs and inputs
         let total = proofs.len();
 
-        let (programs, inputs): (Vec<_>, Vec<_>) = proofs
-            .iter()
+        let pairs: Vec<_> = proofs
+            .par_iter()
             .enumerate()
             .map(|(i, proof)| {
                 let flag_complete = i == total - 1;
@@ -218,7 +220,9 @@ where
 
                 (program, input)
             })
-            .unzip();
+            .collect();
+
+        let (programs, inputs): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
 
         let flag_empty = programs.is_empty();
 

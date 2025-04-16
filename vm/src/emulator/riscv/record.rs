@@ -27,7 +27,7 @@ use std::{mem::take, sync::Arc};
 
 const THRESHOLD_2POW15: usize = 1 << 15;
 const THRESHOLD_2POW16: usize = 1 << 16;
-const THRESHOLD_2POW18: usize = 1 << 18;
+const THRESHOLD_2POW20: usize = 1 << 20;
 /// A record of the emulation of a program.
 ///
 /// The trace of the emulation is represented as a list of "events" that occur every cycle.
@@ -197,9 +197,10 @@ impl EmulationRecord {
 
         for (syscall_code, events) in precompile_events.into_iter() {
             let threshold = match syscall_code {
-                SyscallCode::KECCAK_PERMUTE => THRESHOLD_2POW15.min(opts.keccak),
-                SyscallCode::SHA_EXTEND => THRESHOLD_2POW18.min(opts.sha_extend),
-                SyscallCode::SHA_COMPRESS => opts.sha_compress,
+                // TODO: refactor to remove magic number
+                SyscallCode::KECCAK_PERMUTE => (THRESHOLD_2POW20 / 26).min(opts.keccak),
+                SyscallCode::SHA_EXTEND => (THRESHOLD_2POW20 / 48).min(opts.sha_extend),
+                SyscallCode::SHA_COMPRESS => (THRESHOLD_2POW20 / 80).min(opts.sha_compress),
                 SyscallCode::BLS12381_FP_ADD => THRESHOLD_2POW16.min(opts.deferred),
                 SyscallCode::POSEIDON2_PERMUTE => THRESHOLD_2POW15.min(opts.deferred),
                 SyscallCode::BLS12381_ADD => THRESHOLD_2POW15.min(opts.deferred),

@@ -77,9 +77,13 @@ where
         // Initialize the emulator.
         let mut emulator = MetaEmulator::setup_riscv(witness);
 
+        let channel_capacity = (4 * witness
+            .opts
+            .as_ref()
+            .map(|opts| opts.chunk_batch_size)
+            .unwrap_or(64)) as usize;
         // Initialize the channel for sending emulation records from the emulator thread to prover.
-        let (record_sender, record_receiver): (Sender<_>, Receiver<_>) =
-            bounded((4 * witness.opts.unwrap().chunk_batch_size) as usize);
+        let (record_sender, record_receiver): (Sender<_>, Receiver<_>) = bounded(channel_capacity);
 
         // Start the emulator thread.
         let emulator_handle = thread::spawn(move || {
