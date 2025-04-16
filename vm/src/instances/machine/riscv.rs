@@ -21,11 +21,12 @@ use crate::{
     primitives::{consts::MAX_LOG_CHUNK_SIZE, Poseidon2Init},
 };
 use anyhow::Result;
+use crossbeam::channel::{bounded, Receiver, Sender};
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::IndexedParallelIterator;
 use p3_symmetric::Permutation;
-use std::{any::type_name, borrow::Borrow, cmp::min, mem, sync::mpsc, thread, time::Instant};
+use std::{any::type_name, borrow::Borrow, cmp::min, mem, thread, time::Instant};
 use tracing::{debug, debug_span, info, instrument};
 
 /// Maximum number of pending emulation record for proving
@@ -77,7 +78,8 @@ where
         let mut emulator = MetaEmulator::setup_riscv(witness);
 
         // Initialize the channel for sending emulation records from the emulator thread to prover.
-        let (record_sender, record_receiver) = mpsc::channel();
+        let (record_sender, record_receiver): (Sender<_>, Receiver<_>) =
+            bounded((4 * witness.opts.unwrap().chunk_batch_size) as usize);
 
         // Start the emulator thread.
         let emulator_handle = thread::spawn(move || {
@@ -132,6 +134,11 @@ where
 
             while let Ok(record) = record_receiver.recv() {
                 pending_records.push(record);
+
+                debug!(
+                    "Current riscv records queue size: {}",
+                    record_receiver.len()
+                );
 
                 // Generate the proofs for pending records.
                 if pending_records.len() >= max_pending_num {
