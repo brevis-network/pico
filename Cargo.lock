@@ -363,6 +363,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "async-trait"
+version = "0.1.88"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e539d3fca749fcee5236ab05e93a52867dd549cc157c8cb7f99595f3cedffdb5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -384,6 +395,51 @@ name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
+
+[[package]]
+name = "axum"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de45108900e1f9b9242f7f2e254aa3e2c029c921c258fe9e6b4217eeebd54288"
+dependencies = [
+ "axum-core",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "itoa",
+ "matchit",
+ "memchr",
+ "mime",
+ "percent-encoding",
+ "pin-project-lite",
+ "rustversion",
+ "serde",
+ "sync_wrapper",
+ "tower",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "axum-core"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68464cd0412f486726fb3373129ef5d2993f90c34bc2bc1c1e9943b2f4fc7ca6"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "http",
+ "http-body",
+ "http-body-util",
+ "mime",
+ "pin-project-lite",
+ "rustversion",
+ "sync_wrapper",
+ "tower-layer",
+ "tower-service",
+]
 
 [[package]]
 name = "az"
@@ -1081,7 +1137,16 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
 dependencies = [
- "derive_more-impl",
+ "derive_more-impl 1.0.0",
+]
+
+[[package]]
+name = "derive_more"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+dependencies = [
+ "derive_more-impl 2.0.1",
 ]
 
 [[package]]
@@ -1089,6 +1154,17 @@ name = "derive_more-impl"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1125,6 +1201,38 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.98",
+]
+
+[[package]]
+name = "distributed-vm"
+version = "1.0.1"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "clap",
+ "crossbeam",
+ "derive_more 2.0.1",
+ "log",
+ "p3-air",
+ "p3-baby-bear 0.1.0",
+ "p3-commit",
+ "p3-field 0.1.0",
+ "p3-koala-bear",
+ "p3-poseidon2 0.1.0",
+ "p3-symmetric 0.1.0",
+ "pico-perf",
+ "pico-sdk",
+ "pico-vm",
+ "prost",
+ "prost-types",
+ "reqwest",
+ "serde",
+ "strum",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-build",
+ "tracing",
 ]
 
 [[package]]
@@ -1337,6 +1445,12 @@ dependencies = [
  "rustc-hex",
  "static_assertions",
 ]
+
+[[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "fnv"
@@ -1702,6 +1816,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2d708df4e7140240a16cd6ab0ab65c972d7433ab77819ea693fde9c43811e2a"
 
 [[package]]
+name = "httpdate"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
 name = "humantime"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1729,6 +1849,7 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -1750,6 +1871,19 @@ dependencies = [
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
+ "tower-service",
+]
+
+[[package]]
+name = "hyper-timeout"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b90d566bffbce6a75bd8b09a05aa8c2cb1fabb6cb348f8840c9e4c90a0d83b0"
+dependencies = [
+ "hyper",
+ "hyper-util",
+ "pin-project-lite",
+ "tokio",
  "tower-service",
 ]
 
@@ -2198,6 +2332,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchit"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2243,6 +2383,12 @@ dependencies = [
  "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "multimap"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "defc4c55412d89136f966bbb339008b474350e5e6e78d2714439c386b3137a03"
 
 [[package]]
 name = "native-tls"
@@ -2526,7 +2672,6 @@ dependencies = [
 [[package]]
 name = "p3-air"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "p3-field 0.1.0",
  "p3-matrix 0.1.0",
@@ -2535,7 +2680,6 @@ dependencies = [
 [[package]]
 name = "p3-baby-bear"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "p3-field 0.1.0",
  "p3-mds 0.1.0",
@@ -2565,7 +2709,6 @@ dependencies = [
 [[package]]
 name = "p3-blake3"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "blake3",
  "p3-symmetric 0.1.0",
@@ -2575,7 +2718,6 @@ dependencies = [
 [[package]]
 name = "p3-bn254-fr"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "ff 0.13.0",
  "halo2curves",
@@ -2590,7 +2732,6 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "p3-field 0.1.0",
  "p3-maybe-rayon 0.1.0",
@@ -2602,7 +2743,6 @@ dependencies = [
 [[package]]
 name = "p3-circle"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -2620,7 +2760,6 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -2634,7 +2773,6 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-field 0.1.0",
@@ -2661,7 +2799,6 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -2694,7 +2831,6 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -2713,7 +2849,6 @@ dependencies = [
 [[package]]
 name = "p3-goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "num-bigint 0.4.6",
  "p3-dft 0.1.0",
@@ -2729,7 +2864,6 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "p3-field 0.1.0",
  "p3-matrix 0.1.0",
@@ -2740,7 +2874,6 @@ dependencies = [
 [[package]]
 name = "p3-keccak"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-field 0.1.0",
@@ -2752,7 +2885,6 @@ dependencies = [
 [[package]]
 name = "p3-keccak-air"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "p3-air",
  "p3-field 0.1.0",
@@ -2765,7 +2897,6 @@ dependencies = [
 [[package]]
 name = "p3-koala-bear"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "p3-field 0.1.0",
  "p3-mds 0.1.0",
@@ -2779,7 +2910,6 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-field 0.1.0",
@@ -2810,7 +2940,6 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "rayon",
 ]
@@ -2824,7 +2953,6 @@ checksum = "3925562a4c03183eafc92fd07b19f65ac6cb4b48d68c3920ce58d9bee6efe362"
 [[package]]
 name = "p3-mds"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-dft 0.1.0",
@@ -2853,7 +2981,6 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-commit",
@@ -2870,7 +2997,6 @@ dependencies = [
 [[package]]
 name = "p3-mersenne-31"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -2889,7 +3015,6 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -2925,7 +3050,6 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "gcd",
  "p3-field 0.1.0",
@@ -2950,7 +3074,6 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-field 0.1.0",
@@ -2971,7 +3094,6 @@ dependencies = [
 [[package]]
 name = "p3-uni-stark"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "itertools 0.13.0",
  "p3-air",
@@ -2989,7 +3111,6 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=476cff48#476cff48576f11f5828fc7875be5b708c5a0e387"
 dependencies = [
  "serde",
 ]
@@ -3127,6 +3248,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "petgraph"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
+dependencies = [
+ "fixedbitset",
+ "indexmap 2.7.1",
+]
+
+[[package]]
 name = "pico-cli"
 version = "1.0.1"
 dependencies = [
@@ -3242,6 +3373,7 @@ dependencies = [
  "curve25519-dalek",
  "dashmap",
  "dashu",
+ "derive_more 2.0.1",
  "elf",
  "elliptic-curve",
  "eyre",
@@ -3311,6 +3443,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "pin-project"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "677f1add503faace112b9f1373e43e9e054bfdd22ff1a63c1bc485eaec6a6a8a"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e918e4ff8c4549eb882f14b3a4bc8c8bc93de829416eacf579f1207a8fbf861"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3351,6 +3503,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77957b295656769bb8ad2b6a6b09d897d94f05c41b069aede1fcdaa675eaea04"
 dependencies = [
  "zerocopy",
+]
+
+[[package]]
+name = "prettyplease"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "664ec5419c51e34154eec046ebcba56312d5a2fc3b09a06da188e1ad21afadf6"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.98",
 ]
 
 [[package]]
@@ -3443,6 +3605,58 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
+]
+
+[[package]]
+name = "prost"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-build"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
+dependencies = [
+ "heck",
+ "itertools 0.13.0",
+ "log",
+ "multimap",
+ "once_cell",
+ "petgraph",
+ "prettyplease",
+ "prost",
+ "prost-types",
+ "regex",
+ "syn 2.0.98",
+ "tempfile",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
+dependencies = [
+ "anyhow",
+ "itertools 0.13.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
+dependencies = [
+ "prost",
 ]
 
 [[package]]
@@ -4070,6 +4284,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9e9e0b4211b72e7b8b6e85c807d36c212bdb33ea8587f7569562a84df5465b1"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "signature"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4425,8 +4648,21 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
+ "tokio-macros",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e06d43f1345a3bcd39f6a56dbb7dcab2ba47e68e8ac134855e7e2bdbaf8cab8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.98",
 ]
 
 [[package]]
@@ -4446,6 +4682,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f6d0975eaace0cf0fcadee4e4aaa5da15b5c079146f2cffb67c113be122bf37"
 dependencies = [
  "rustls",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eca58d7bba4a75707817a2c44174253f9236b2d5fbd055602e9d5c07c139a047"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
  "tokio",
 ]
 
@@ -4491,6 +4738,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "tonic"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85839f0b32fd242bb3209262371d07feda6d780d16ee9d2bc88581b89da1549b"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64",
+ "bytes",
+ "h2",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-timeout",
+ "hyper-util",
+ "percent-encoding",
+ "pin-project",
+ "prost",
+ "socket2",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tonic-build"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d85f0383fadd15609306383a90e85eaed44169f931a5d2be1b42c76ceff1825e"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "prost-build",
+ "prost-types",
+ "quote",
+ "syn 2.0.98",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4498,11 +4788,15 @@ checksum = "d039ad9159c98b70ecfd540b2573b97f7f52c3e8d9f8ad57a24b916a536975f9"
 dependencies = [
  "futures-core",
  "futures-util",
+ "indexmap 2.7.1",
  "pin-project-lite",
+ "slab",
  "sync_wrapper",
  "tokio",
+ "tokio-util",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]

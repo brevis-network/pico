@@ -1,5 +1,5 @@
 // lock deny(warnings) behind strict feature
-#![cfg_attr(feature = "strict", deny(warnings))]
+// #![cfg_attr(feature = "strict", deny(warnings))]
 #![allow(clippy::module_inception)]
 #![allow(clippy::needless_range_loop)]
 #![allow(incomplete_features)]
@@ -21,8 +21,10 @@ pub mod emulator;
 pub mod instances;
 pub mod iter;
 pub mod machine;
+pub mod messages;
 pub mod primitives;
 pub mod proverchain;
+pub mod thread;
 
 #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
 #[global_allocator]

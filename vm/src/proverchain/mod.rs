@@ -7,7 +7,10 @@ mod riscv;
 use crate::{
     configs::config::{StarkGenericConfig, Val},
     machine::{chip::ChipBehavior, keys::HashableKey, machine::BaseMachine, proof::MetaProof},
+    messages::riscv::RiscvMsg,
+    thread::channel::DuplexUnboundedEndpoint,
 };
+use std::sync::Arc;
 
 // re-exports
 pub use combine::CombineProver;
@@ -31,7 +34,7 @@ where
 }
 
 /// Trait to assist with inline proving
-pub trait InitialProverSetup {
+pub trait InitialProverSetup<SC: StarkGenericConfig> {
     type Input<'a>;
     type Opts;
     type ShapeConfig;
@@ -39,6 +42,7 @@ pub trait InitialProverSetup {
         input: Self::Input<'_>,
         opts: Self::Opts,
         shape_config: Option<Self::ShapeConfig>,
+        coord_endpoint: Option<Arc<DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>>,
     ) -> Self;
 }
 

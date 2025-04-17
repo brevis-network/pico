@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package grpc;
+
+service Coordinator {
+  rpc CheckHealth(WorkerInfo) returns (google.protobuf.Empty);
+
+  rpc RequestRiscv(google.protobuf.Empty) returns (RiscvTask);
+
+  rpc RespondRiscv(RiscvResult) returns (google.protobuf.Empty);
+}
+
+message WorkerInfo {
+  string name = 1;
+  string ip = 2;
+}
+
+message RiscvTask {
+  string id = 1;
+  uint64 chunk_index = 2;
+  bytes pk = 3;
+  bytes challenger = 4;
+  bytes record = 5;
+}
+
+message RiscvResult {
+  string id = 1;
+  uint64 chunk_index = 2;
+  bytes proof = 3;
+}

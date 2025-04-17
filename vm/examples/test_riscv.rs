@@ -79,7 +79,9 @@ where
 
     // Generate the proof.
     info!("Generating RISCV proof (at {:?})..", start.elapsed());
-    let riscv_proof = riscv_machine.prove_cycles(&riscv_witness).0;
+    let riscv_proof = riscv_machine
+        .prove_with_shape_cycles(&riscv_witness, None, None)
+        .0;
 
     // Verify the proof.
     info!("Verifying RISCV proof (at {:?})..", start.elapsed());

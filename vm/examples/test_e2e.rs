@@ -150,14 +150,9 @@ macro_rules! run {
                     riscv_vk.clone(),
                 );
 
-                match &riscv_shape_config {
-                    Some(shape_config) => {
-                        riscv_machine
-                            .prove_with_shape(&riscv_witness, Some(shape_config))
-                            .0
-                    }
-                    None => riscv_machine.prove_cycles(&riscv_witness).0,
-                }
+                riscv_machine
+                    .prove_with_shape(&riscv_witness, riscv_shape_config.as_ref(), None)
+                    .0
             });
 
             // Assert pv_stream is the same as dryrun.

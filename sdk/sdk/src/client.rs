@@ -58,6 +58,7 @@ macro_rules! create_sdk_prove_client {
                         (<$sc>::new(), elf),
                         Default::default(),
                         Some(riscv_shape_config),
+                        None,
                     );
                     let convert = ConvertProver::new_with_prev(
                         &riscv,
@@ -78,7 +79,7 @@ macro_rules! create_sdk_prove_client {
                     (riscv, convert, combine, compress, embed)
                 } else {
                     let riscv =
-                        RiscvProver::new_initial_prover((<$sc>::new(), elf), Default::default(), None);
+                        RiscvProver::new_initial_prover((<$sc>::new(), elf), Default::default(), None, None);
                     let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
                     let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
                     let compress = CompressProver::new_with_prev(&combine, (), None);

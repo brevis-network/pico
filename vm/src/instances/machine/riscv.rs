@@ -18,7 +18,9 @@ use crate::{
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
+    messages::riscv::{RiscvMsg, RiscvRequest},
     primitives::{consts::MAX_LOG_CHUNK_SIZE, Poseidon2Init},
+    thread::channel::DuplexUnboundedEndpoint,
 };
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
@@ -55,6 +57,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        coord_endpoint: Option<&DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -116,119 +119,16 @@ where
             // `record_sender` will be dropped when the emulator thread completes.
         });
 
-        // Generate the proofs.
-        let mut current_chunk = 0;
-        let all_proofs = {
-            #[cfg(feature = "debug")]
-            let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
+        let all_proofs = if cfg!(feature = "distributed") {
+            self.prove_remote(pk, &challenger, record_receiver, coord_endpoint.unwrap())
+        } else {
+            self.prove_local(
                 pk,
-                &mut self.config().challenger(),
-                self.base_machine.has_global(),
-            );
-            #[cfg(feature = "debug-lookups")]
-            let mut global_lookup_debugger = crate::machine::debug::IncrementalLookupDebugger::new(
-                pk,
-                crate::machine::lookup::LookupScope::Global,
-                None,
-            );
-
-            let mut all_proofs = Vec::with_capacity(MAX_PENDING_PROVING_RECORDS);
-            let max_pending_num = min(num_cpus::get(), MAX_PENDING_PROVING_RECORDS);
-            let mut pending_records = Vec::with_capacity(max_pending_num);
-
-            while let Ok(record) = record_receiver.recv() {
-                pending_records.push(record);
-
-                debug!(
-                    "Current riscv records queue size: {}",
-                    record_receiver.len()
-                );
-
-                // Generate the proofs for pending records.
-                if pending_records.len() >= max_pending_num {
-                    debug!(
-                        "--- Start to prove chunks {}-{} at {:?}",
-                        current_chunk,
-                        current_chunk + max_pending_num - 1,
-                        start_global.elapsed(),
-                    );
-
-                    let records = mem::take(&mut pending_records);
-
-                    #[cfg(feature = "debug")]
-                    constraint_debugger.debug_incremental(&self.chips(), &records);
-                    #[cfg(feature = "debug-lookups")]
-                    {
-                        crate::machine::debug::debug_regional_lookups(
-                            pk,
-                            &self.chips(),
-                            &records,
-                            None,
-                        );
-                        global_lookup_debugger.debug_incremental(&self.chips(), &records);
-                    }
-
-                    let proofs =
-                        self.prove_records(current_chunk, pk, &challenger, shape_config, records);
-                    all_proofs.extend(proofs);
-
-                    debug!(
-                        "--- Finish proving chunks {}-{} at {:?}",
-                        current_chunk,
-                        current_chunk + max_pending_num - 1,
-                        start_global.elapsed(),
-                    );
-
-                    current_chunk += max_pending_num;
-                }
-            }
-
-            // Generate the proofs for remaining records.
-            {
-                let pending_len = pending_records.len();
-                debug!(
-                    "--- Start to prove chunks {}-{} at {:?}",
-                    current_chunk,
-                    current_chunk + pending_len - 1,
-                    start_global.elapsed(),
-                );
-
-                #[cfg(feature = "debug")]
-                constraint_debugger.debug_incremental(&self.chips(), &pending_records);
-                #[cfg(feature = "debug-lookups")]
-                {
-                    crate::machine::debug::debug_regional_lookups(
-                        pk,
-                        &self.chips(),
-                        &pending_records,
-                        None,
-                    );
-                    global_lookup_debugger.debug_incremental(&self.chips(), &pending_records);
-                }
-
-                let proofs = self.prove_records(
-                    current_chunk,
-                    pk,
-                    &challenger,
-                    shape_config,
-                    pending_records,
-                );
-                all_proofs.extend(proofs);
-
-                debug!(
-                    "--- Finish proving chunks {}-{} at {:?}",
-                    current_chunk,
-                    current_chunk + pending_len - 1,
-                    start_global.elapsed(),
-                );
-            }
-
-            #[cfg(feature = "debug")]
-            constraint_debugger.print_results();
-            #[cfg(feature = "debug-lookups")]
-            global_lookup_debugger.print_results();
-
-            all_proofs
+                &challenger,
+                shape_config,
+                record_receiver,
+                &start_global,
+            )
         };
 
         let mut emulator = emulator_handle.join().unwrap();
@@ -274,6 +174,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        coord_endpoint: Option<&DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -285,21 +186,38 @@ where
             > + Air<ProverConstraintFolder<SC>>,
         <SC as crate::configs::config::StarkGenericConfig>::Domain: Send,
     {
-        self.prove_with_shape_cycles(witness, shape_config)
+        self.prove_with_shape_cycles(witness, shape_config, coord_endpoint)
     }
 
-    pub fn prove_cycles(&self, witness: &ProvingWitness<SC, C, Vec<u8>>) -> (MetaProof<SC>, u64)
+    /// Generate RiscV proof for one emulation record.
+    pub fn prove_record(
+        &self,
+        chunk_index: usize,
+        pk: &BaseProvingKey<SC>,
+        challenger: &SC::Challenger,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        mut record: EmulationRecord,
+    ) -> BaseProof<SC>
     where
-        C: for<'a> Air<
-                DebugConstraintFolder<
-                    'a,
-                    <SC as StarkGenericConfig>::Val,
-                    <SC as StarkGenericConfig>::Challenge,
-                >,
-            > + Air<ProverConstraintFolder<SC>>,
-        <SC as crate::configs::config::StarkGenericConfig>::Domain: Send,
+        C: Air<ProverConstraintFolder<SC>>,
     {
-        self.prove_with_shape_cycles(witness, None)
+        // Complete the record.
+        let chips = self.chips();
+        RiscvMachine::complement_record_static(chips.clone(), &mut record);
+
+        // Pad the shape.
+        if vk_verification_enabled() {
+            if let Some(shape_config) = shape_config {
+                shape_config.padding_shape(&mut record).unwrap();
+            }
+        }
+
+        // Commit the record.
+        let main_commitment = self.base_machine.commit(&record).unwrap();
+
+        // Generate the proof.
+        self.base_machine
+            .prove_plain(pk, &mut challenger.clone(), chunk_index, main_commitment)
     }
 
     /// Generate the RiscV proofs for the emulation records.
@@ -348,7 +266,7 @@ where
                     self.base_machine.prove_plain(
                         pk,
                         &mut challenger.clone(),
-                        base_chunk + i,
+                        chunk_index,
                         main_commitment,
                     )
                 })
@@ -358,6 +276,178 @@ where
         local_span.exit();
 
         proofs
+    }
+
+    fn prove_local(
+        &self,
+        pk: &BaseProvingKey<SC>,
+        challenger: &SC::Challenger,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        record_receiver: Receiver<EmulationRecord>,
+        start_global: &Instant,
+    ) -> Vec<BaseProof<SC>>
+    where
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + Air<ProverConstraintFolder<SC>>,
+    {
+        // Generate the proofs.
+        let mut current_chunk = 0;
+
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
+            pk,
+            &mut self.config().challenger(),
+            self.base_machine.has_global(),
+        );
+        #[cfg(feature = "debug-lookups")]
+        let mut global_lookup_debugger = crate::machine::debug::IncrementalLookupDebugger::new(
+            pk,
+            crate::machine::lookup::LookupScope::Global,
+            None,
+        );
+
+        let mut all_proofs = Vec::with_capacity(MAX_PENDING_PROVING_RECORDS);
+        let max_pending_num = min(num_cpus::get(), MAX_PENDING_PROVING_RECORDS);
+        let mut pending_records = Vec::with_capacity(max_pending_num);
+
+        while let Ok(record) = record_receiver.recv() {
+            pending_records.push(record);
+
+            debug!(
+                "Current riscv records queue size: {}",
+                record_receiver.len()
+            );
+
+            // Generate the proofs for pending records.
+            if pending_records.len() >= max_pending_num {
+                debug!(
+                    "--- Start to prove chunks {}-{} at {:?}",
+                    current_chunk,
+                    current_chunk + max_pending_num - 1,
+                    start_global.elapsed(),
+                );
+
+                let records = mem::take(&mut pending_records);
+
+                #[cfg(feature = "debug")]
+                constraint_debugger.debug_incremental(&self.chips(), &records);
+                #[cfg(feature = "debug-lookups")]
+                {
+                    crate::machine::debug::debug_regional_lookups(
+                        pk,
+                        &self.chips(),
+                        &records,
+                        None,
+                    );
+                    global_lookup_debugger.debug_incremental(&self.chips(), &records);
+                }
+
+                let proofs =
+                    self.prove_records(current_chunk, pk, challenger, shape_config, records);
+                all_proofs.extend(proofs);
+
+                debug!(
+                    "--- Finish proving chunks {}-{} at {:?}",
+                    current_chunk,
+                    current_chunk + max_pending_num - 1,
+                    start_global.elapsed(),
+                );
+
+                current_chunk += max_pending_num;
+            }
+        }
+
+        // Generate the proofs for remaining records.
+        {
+            let pending_len = pending_records.len();
+            debug!(
+                "--- Start to prove chunks {}-{} at {:?}",
+                current_chunk,
+                current_chunk + pending_len - 1,
+                start_global.elapsed(),
+            );
+
+            #[cfg(feature = "debug")]
+            constraint_debugger.debug_incremental(&self.chips(), &pending_records);
+            #[cfg(feature = "debug-lookups")]
+            {
+                crate::machine::debug::debug_regional_lookups(
+                    pk,
+                    &self.chips(),
+                    &pending_records,
+                    None,
+                );
+                global_lookup_debugger.debug_incremental(&self.chips(), &pending_records);
+            }
+
+            let proofs =
+                self.prove_records(current_chunk, pk, challenger, shape_config, pending_records);
+            all_proofs.extend(proofs);
+
+            debug!(
+                "--- Finish proving chunks {}-{} at {:?}",
+                current_chunk,
+                current_chunk + pending_len - 1,
+                start_global.elapsed(),
+            );
+        }
+
+        #[cfg(feature = "debug")]
+        constraint_debugger.print_results();
+        #[cfg(feature = "debug-lookups")]
+        global_lookup_debugger.print_results();
+
+        all_proofs
+    }
+
+    fn prove_remote(
+        &self,
+        pk: &BaseProvingKey<SC>,
+        challenger: &SC::Challenger,
+        record_receiver: Receiver<EmulationRecord>,
+        coord_endpoint: &DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>,
+    ) -> Vec<BaseProof<SC>> {
+        let mut chunk_index = 0;
+
+        while let Ok(record) = record_receiver.recv() {
+            let req = RiscvRequest {
+                chunk_index,
+                pk: pk.clone(),
+                challenger: challenger.clone(),
+                record,
+            };
+
+            debug!("send emulation record-{chunk_index}");
+            coord_endpoint.send(RiscvMsg::Request(req)).unwrap();
+
+            chunk_index += 1;
+        }
+
+        let mut proofs = Vec::with_capacity(chunk_index);
+        proofs.resize(chunk_index, None);
+
+        while let Ok(msg) = coord_endpoint.recv() {
+            match msg {
+                RiscvMsg::Response(res) => {
+                    let chunk_index = res.chunk_index;
+                    debug!("receive riscv proof-{chunk_index}");
+
+                    proofs[chunk_index] = Some(res.proof);
+                    if proofs.iter().all(|p| p.is_some()) {
+                        break;
+                    }
+                }
+                RiscvMsg::Stop => break,
+                _ => panic!("unsupported"),
+            }
+        }
+
+        proofs.into_iter().map(|p| p.unwrap()).collect()
     }
 }
 

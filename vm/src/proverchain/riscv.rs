@@ -23,7 +23,9 @@ use crate::{
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
+    messages::riscv::RiscvMsg,
     primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
+    thread::channel::DuplexUnboundedEndpoint,
 };
 use alloc::sync::Arc;
 use p3_air::Air;
@@ -43,6 +45,7 @@ where
     shape_config: Option<RiscvShapeConfig<Val<SC>>>,
     pk: BaseProvingKey<SC>,
     vk: BaseVerifyingKey<SC>,
+    coord_endpoint: Option<Arc<DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>>,
 }
 
 impl<SC> RiscvProver<SC, Program>
@@ -66,11 +69,11 @@ where
             self.pk.clone(),
             self.vk.clone(),
         );
-        if let Some(shape_config) = &self.shape_config {
-            self.machine.prove_with_shape(&witness, Some(shape_config))
-        } else {
-            self.machine.prove_cycles(&witness)
-        }
+        self.machine.prove_with_shape(
+            &witness,
+            self.shape_config.as_ref(),
+            self.coord_endpoint.as_deref(),
+        )
     }
 
     pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
@@ -100,7 +103,7 @@ where
     }
 }
 
-impl<SC> InitialProverSetup for RiscvProver<SC, Program>
+impl<SC> InitialProverSetup<SC> for RiscvProver<SC, Program>
 where
     SC: Send + StarkGenericConfig,
     Com<SC>: Send + Sync,
@@ -119,6 +122,7 @@ where
         input: Self::Input<'_>,
         opts: Self::Opts,
         shape_config: Option<Self::ShapeConfig>,
+        coord_endpoint: Option<Arc<DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>>,
     ) -> Self {
         let (config, elf) = input;
         let mut program = Compiler::new(SourceType::RISCV, elf).compile();
@@ -141,6 +145,7 @@ where
             shape_config,
             pk,
             vk,
+            coord_endpoint,
         }
     }
 }

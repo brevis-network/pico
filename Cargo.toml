@@ -1,5 +1,5 @@
 [workspace]
-members = ["derive", "vm", "sdk/*", "scripts", "gnark/field-ffi", "perf"]
+members = ["derive", "vm", "sdk/*", "scripts", "gnark/field-ffi", "perf", "distributed-vm"]
 resolver = "2"
 
 [workspace.package]
@@ -33,62 +33,64 @@ pico-vm = { path = "vm" }
 pico-sdk = { path = "sdk/sdk" }
 pico-cli = { path = "sdk/cli" }
 pico-patch-libs = { path = "sdk/patch-libs" }
+pico-perf = { path = "perf" }
+
 # p3
 
 # NOTE: Pin to known a "good" commit without recent API changes
-# Head of `pico-v1.0` branch
-p3-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-baby-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
-  "nightly-features",
-], rev = "476cff48" }
-p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
-  "nightly-features",
-], rev = "476cff48" }
-p3-util = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
+# Head of `multi-machine-base` branch
+# p3-air = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-field = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-baby-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
+#   "nightly-features",
+# ], branch = "multi-machine-base" }
+# p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
+#   "nightly-features",
+# ], branch = "multi-machine-base" }
+# p3-util = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+# p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
 
 # For local debugging
-# p3-air = { path = "../p3/air" }
-# p3-field = { path = "../p3/field" }
-# p3-commit = { path = "../p3/commit" }
-# p3-matrix = { path = "../p3/matrix" }
-# p3-baby-bear = { path = "../p3/baby-bear", features = ["nightly-features"] }
-# p3-koala-bear = { path = "../p3/koala-bear", features = ["nightly-features"] }
-# p3-util = { path = "../p3/util" }
-# p3-challenger = { path = "../p3/challenger" }
-# p3-dft = { path = "../p3/dft" }
-# p3-fri = { path = "../p3/fri" }
-# p3-goldilocks = { path = "../p3/goldilocks" }
-# p3-keccak = { path = "../p3/keccak" }
-# p3-keccak-air = { path = "../p3/keccak-air" }
-# p3-blake3 = { path = "../p3/blake3" }
-# p3-mds = { path = "../p3/mds" }
-# p3-merkle-tree = { path = "../p3/merkle-tree" }
-# p3-poseidon2 = { path = "../p3/poseidon2" }
-# p3-symmetric = { path = "../p3/symmetric" }
-# p3-uni-stark = { path = "../p3/uni-stark" }
-# p3-maybe-rayon = { path = "../p3/maybe-rayon" }
-# p3-bn254-fr = { path = "../p3/bn254-fr" }
-# p3-mersenne-31 = { path = "../p3/mersenne-31" }
-# p3-circle = { path = "../p3/circle" }
+p3-air = { path = "../p3/air" }
+p3-field = { path = "../p3/field" }
+p3-commit = { path = "../p3/commit" }
+p3-matrix = { path = "../p3/matrix" }
+p3-baby-bear = { path = "../p3/baby-bear", features = ["nightly-features"] }
+p3-koala-bear = { path = "../p3/koala-bear", features = ["nightly-features"] }
+p3-util = { path = "../p3/util" }
+p3-challenger = { path = "../p3/challenger" }
+p3-dft = { path = "../p3/dft" }
+p3-fri = { path = "../p3/fri" }
+p3-goldilocks = { path = "../p3/goldilocks" }
+p3-keccak = { path = "../p3/keccak" }
+p3-keccak-air = { path = "../p3/keccak-air" }
+p3-blake3 = { path = "../p3/blake3" }
+p3-mds = { path = "../p3/mds" }
+p3-merkle-tree = { path = "../p3/merkle-tree" }
+p3-poseidon2 = { path = "../p3/poseidon2" }
+p3-symmetric = { path = "../p3/symmetric" }
+p3-uni-stark = { path = "../p3/uni-stark" }
+p3-maybe-rayon = { path = "../p3/maybe-rayon" }
+p3-bn254-fr = { path = "../p3/bn254-fr" }
+p3-mersenne-31 = { path = "../p3/mersenne-31" }
+p3-circle = { path = "../p3/circle" }
 
 # misc
 amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = ["bls381"] }
@@ -105,6 +107,7 @@ csv = "1.3"
 curve25519-dalek = { version = "4.1.2" }
 dashmap = "6.1.0"
 dashu = "0.4.2"
+derive_more = { version = "2.0", features = ["constructor"] }
 elf = "0.7.4"
 elliptic-curve = "0.13.8"
 env_logger = "0.11.6"
@@ -128,6 +131,8 @@ once_cell = "1.20"
 p256 = { version = "0.13.2", features = ["expose-field"] }
 paste = "1.0.15"
 proc-macro2 = "1.0"
+prost = "0.13"
+prost-types = "0.13"
 quote = "1.0"
 rand = "0.8.5"
 rayon = "1.10"
@@ -146,6 +151,10 @@ sysinfo = "0.30.13"
 thiserror = "1.0.63"
 tikv-jemallocator = "0.6"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "signal"] }
+tokio-stream = "0.1"
+tonic = "0.13"
+tonic-build = { version = "0.13", features = ["prost"] }
 tracing = "0.1.40"
 tracing-forest = { version = "0.1.6", features = ["ansi", "smallvec"] }
 tracing-subscriber = { version = "0.3.18", features = ["std", "env-filter"] }

@@ -2,7 +2,7 @@ use anyhow::Error;
 use pico_vm::emulator::stdin::EmulatorStdin;
 use std::fs;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BenchProgram {
     pub name: &'static str,
     pub elf: &'static str,

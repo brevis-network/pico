@@ -24,7 +24,8 @@ fn main() {
     let (elf, riscv_stdin, _) = parse_args::parse_args();
 
     log_section("KB PROVER CHAIN");
-    let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), elf), Default::default(), None);
+    let riscv =
+        RiscvProver::new_initial_prover((RiscvKBSC::new(), elf), Default::default(), None, None);
     let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
     let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
     let compress = CompressProver::new_with_prev(&combine, Default::default(), None);
@@ -48,7 +49,8 @@ fn main() {
     info!("ProverChain on KoalaBear succeeded.");
 
     log_section("BB PROVER CHAIN");
-    let riscv = RiscvProver::new_initial_prover((RiscvBBSC::new(), elf), Default::default(), None);
+    let riscv =
+        RiscvProver::new_initial_prover((RiscvBBSC::new(), elf), Default::default(), None, None);
     let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
     let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
     let compress = CompressProver::new_with_prev(&combine, Default::default(), None);
