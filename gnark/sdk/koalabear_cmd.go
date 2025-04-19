@@ -152,7 +152,7 @@ func KoalaBearProve() error {
 
 	err := utils.ReadVerifyingKey(os.Getenv("VK_PATH"), Vk)
 	if err != nil {
-		return fmt.Errorf("failed to read verifing key: %v", err)
+		return fmt.Errorf("failed to read verifying key: %v", err)
 	}
 
 	witnessFile := os.Getenv("WITNESS_JSON")
