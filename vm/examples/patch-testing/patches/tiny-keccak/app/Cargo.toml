@@ -1,0 +1,11 @@
+[package]
+name = "patch-test-tiny-keccak"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+pico-sdk = { workspace = true }
+tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak.git", features = ["keccak"], branch = "patch-v1.0.0" }

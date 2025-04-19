@@ -12,7 +12,6 @@ pub mod command;
 pub mod heap;
 pub mod io;
 pub mod m31_client;
-pub mod vk_client;
 
 #[cfg(all(target_os = "zkvm", feature = "libm"))]
 mod libm;

@@ -1,7 +1,11 @@
 use p3_air::Air;
 use p3_field::PrimeField32;
+use p3_symmetric::Permutation;
 use pico_vm::{
-    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
+    chips::{
+        chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
+        precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    },
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
@@ -25,7 +29,7 @@ use pico_vm::{
         proof::BaseProof,
         witness::ProvingWitness,
     },
-    primitives::consts::RISCV_NUM_PVS,
+    primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
 };
 use serde::Serialize;
 use std::time::Instant;
@@ -33,10 +37,13 @@ use tracing::info;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
+#[path = "common/print_utils.rs"]
+mod print_utils;
+use print_utils::log_section;
 
 fn run<SC>(config: SC, elf: &'static [u8], riscv_stdin: EmulatorStdin<Program, Vec<u8>>)
 where
-    SC: StarkGenericConfig + Serialize + Send,
+    SC: StarkGenericConfig + Serialize + Send + 'static,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
@@ -46,10 +53,13 @@ where
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
         + Air<ProverConstraintFolder<SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<SymbolicConstraintFolder<Val<SC>>>
+        + Air<ProverConstraintFolder<SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    SC::Val: Poseidon2Init,
+    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
 {
-    info!("╔═══════════════════════╗");
-    info!("║      RISCV PHASE      ║");
-    info!("╚═══════════════════════╝");
+    log_section("RISCV PHASE");
     let start = Instant::now();
 
     let riscv_compiler = Compiler::new(SourceType::RISCV, elf);
@@ -69,7 +79,7 @@ where
 
     // Generate the proof.
     info!("Generating RISCV proof (at {:?})..", start.elapsed());
-    let riscv_proof = riscv_machine.prove(&riscv_witness);
+    let riscv_proof = riscv_machine.prove_cycles(&riscv_witness).0;
 
     // Verify the proof.
     info!("Verifying RISCV proof (at {:?})..", start.elapsed());

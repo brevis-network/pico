@@ -131,6 +131,16 @@ impl<SC: StarkGenericConfig + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZ
 }
 
 #[derive(Clone)]
+pub enum RecursionStdinVariant<'a, SC, C>
+where
+    SC: StarkGenericConfig + FieldHasher<Val<SC>>,
+    C: ChipBehavior<Val<SC>>,
+{
+    NoVk(RecursionStdin<'a, SC, C>),
+    WithVk(RecursionVkStdin<'a, SC, C>),
+}
+
+#[derive(Clone)]
 pub struct RecursionVkStdin<'a, SC, C>
 where
     SC: StarkGenericConfig + FieldHasher<Val<SC>>,
@@ -140,13 +150,23 @@ where
     pub recursion_stdin: RecursionStdin<'a, SC, C>,
 }
 
+pub enum RecursionStdinVariantVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+{
+    NoVk(RecursionStdinVariable<CC, SC>),
+    WithVk(RecursionVkStdinVariable<CC, SC>),
+}
+
 pub struct RecursionVkStdinVariable<CC, SC>
 where
     CC: CircuitConfig,
     CC::F: TwoAdicField,
     SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
 {
-    pub resursion_stdin_var: RecursionStdinVariable<CC, SC>,
+    pub recursion_stdin_var: RecursionStdinVariable<CC, SC>,
     pub merkle_proof_var: MerkleProofStdinVariable<CC, SC>,
 }
 
@@ -170,7 +190,7 @@ where
 
     fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
         RecursionVkStdinVariable {
-            resursion_stdin_var: self.recursion_stdin.read(builder),
+            recursion_stdin_var: self.recursion_stdin.read(builder),
             merkle_proof_var: self.merkle_proof_stdin.read(builder),
         }
     }
@@ -178,6 +198,43 @@ where
     fn write(&self, witness: &mut impl WitnessWriter<CC>) {
         self.recursion_stdin.write(witness);
         self.merkle_proof_stdin.write(witness);
+    }
+}
+
+impl<CC, SC, C> Witnessable<CC> for RecursionStdinVariant<'_, SC, C>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+            CC,
+            Val = CC::F,
+            Challenge = CC::EF,
+            Domain = TwoAdicMultiplicativeCoset<CC::F>,
+        > + FieldHasher<CC::F>,
+    SC::Digest: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    C: ChipBehavior<CC::F>,
+{
+    type WitnessVariable = RecursionStdinVariantVariable<CC, SC>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        match self {
+            RecursionStdinVariant::NoVk(stdin) => {
+                RecursionStdinVariantVariable::NoVk(stdin.read(builder))
+            }
+            RecursionStdinVariant::WithVk(stdin) => {
+                RecursionStdinVariantVariable::WithVk(stdin.read(builder))
+            }
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        match self {
+            RecursionStdinVariant::NoVk(stdin) => stdin.write(witness),
+            RecursionStdinVariant::WithVk(stdin) => stdin.write(witness),
+        }
     }
 }
 

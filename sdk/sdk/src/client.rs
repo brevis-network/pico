@@ -1,5 +1,8 @@
+use crate::command::execute_command;
 use anyhow::{Error, Ok, Result};
-use log::info;
+use log::{debug, info};
+use p3_baby_bear::BabyBear;
+use p3_koala_bear::KoalaBear;
 use pico_vm::{
     compiler::riscv::program::Program,
     configs::{
@@ -9,10 +12,15 @@ use pico_vm::{
     },
     emulator::stdin::{EmulatorStdin, EmulatorStdinBuilder},
     instances::{
-        compiler::onchain_circuit::{
-            gnark::builder::OnchainVerifierCircuit,
-            stdin::OnchainStdin,
-            utils::{build_gnark_config, save_embed_proof_data},
+        chiptype::recursion_chiptype::RecursionChipType,
+        compiler::{
+            onchain_circuit::{
+                gnark::builder::OnchainVerifierCircuit,
+                stdin::OnchainStdin,
+                utils::{build_gnark_config, generate_contract_inputs, save_embed_proof_data},
+            },
+            shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
+            vk_merkle::vk_verification_enabled,
         },
         configs::{embed_config::BabyBearBn254Poseidon2, embed_kb_config::KoalaBearBn254Poseidon2},
     },
@@ -22,7 +30,7 @@ use pico_vm::{
         MachineProver, ProverChain, RiscvProver,
     },
 };
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, path::PathBuf, process::Command, rc::Rc};
 
 #[macro_export]
 macro_rules! create_sdk_prove_client {
@@ -38,12 +46,46 @@ macro_rules! create_sdk_prove_client {
 
         impl $client_name {
             pub fn new(elf: &[u8]) -> Self {
-                let riscv =
-                    RiscvProver::new_initial_prover((<$sc>::new(), elf), Default::default(), None);
-                let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
-                let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
-                let compress = CompressProver::new_with_prev(&combine, (), None);
-                let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
+                let vk_verification = vk_verification_enabled();
+                debug!("VK_VERIFICATION in prover client: {}", vk_verification);
+                let (riscv, convert, combine, compress, embed) = if vk_verification {
+                    let riscv_shape_config = RiscvShapeConfig::<$field_type>::default();
+                    let recursion_shape_config = RecursionShapeConfig::<
+                        $field_type,
+                        RecursionChipType<$field_type>,
+                    >::default();
+                    let riscv = RiscvProver::new_initial_prover(
+                        (<$sc>::new(), elf),
+                        Default::default(),
+                        Some(riscv_shape_config),
+                    );
+                    let convert = ConvertProver::new_with_prev(
+                        &riscv,
+                        Default::default(),
+                        Some(recursion_shape_config),
+                    );
+                    let recursion_shape_config = RecursionShapeConfig::<
+                        $field_type,
+                        RecursionChipType<$field_type>,
+                    >::default();
+                    let combine = CombineProver::new_with_prev(
+                        &convert,
+                        Default::default(),
+                        Some(recursion_shape_config),
+                    );
+                    let compress = CompressProver::new_with_prev(&combine, (), None);
+                    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
+                    (riscv, convert, combine, compress, embed)
+                } else {
+                    let riscv =
+                        RiscvProver::new_initial_prover((<$sc>::new(), elf), Default::default(), None);
+                    let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
+                    let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
+                    let compress = CompressProver::new_with_prev(&combine, (), None);
+                    let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
+                    (riscv, convert, combine, compress, embed)
+                };
+
                 let stdin_builder = Rc::new(RefCell::new(
                     EmulatorStdin::<Program, Vec<u8>>::new_builder(),
                 ));
@@ -115,6 +157,40 @@ macro_rules! create_sdk_prove_client {
                 }
                 info!("riscv_prover proof verify success");
                 Ok(proof)
+            }
+
+            /// prove and generate gnark proof and contract inputs. must install docker first
+            pub fn prove_evm(&self, need_setup: bool, output: PathBuf, field_type: &str) -> Result<(), Error> {
+                let vk_verification = vk_verification_enabled();
+                if !vk_verification {
+                    return Err(Error::msg("VK_VERIFICATION must be set to true in evm proof"));
+                }
+                self.prove(output.clone())?;
+                let field_name = match field_type {
+                    "kb" => {
+                        "koalabear"
+                    }
+                    "bb" => {
+                        "babybear"
+                    }
+                    _ => {
+                        return Err(Error::msg("field type not supported"));
+                    }
+                };
+                if need_setup {
+                    let mut setup_cmd = Command::new("sh");
+                    setup_cmd.arg("-c")
+                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd setup -sol ./data/Groth16Verifier.sol", output.clone().display(), field_name));
+                    execute_command(setup_cmd);
+                }
+
+                let mut prove_cmd = Command::new("sh");
+                prove_cmd.arg("-c")
+                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd prove -sol ./data/Groth16Verifier.sol", output.clone().display(), field_name));
+
+                execute_command(prove_cmd);
+                generate_contract_inputs::<$fc>(output.clone())?;
+                Ok(())
             }
         }
     };

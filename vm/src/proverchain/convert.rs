@@ -8,7 +8,10 @@ use crate::{
     emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
-        compiler::{shapes::recursion_shape::RecursionShapeConfig, vk_merkle::HasStaticVkManager},
+        compiler::{
+            shapes::recursion_shape::RecursionShapeConfig,
+            vk_merkle::{vk_verification_enabled, HasStaticVkManager},
+        },
         machine::convert::ConvertMachine,
     },
     machine::{
@@ -75,7 +78,7 @@ macro_rules! impl_convert_prover {
             fn prove(&self, proofs: Self::Witness) -> MetaProof<$recur_sc> {
                 assert_eq!(proofs.vks.len(), 1);
 
-                let vk_root = if self.shape_config.is_some() {
+                let vk_root = if self.shape_config.is_some() && vk_verification_enabled() {
                     let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
                     vk_manager.merkle_root
                 } else {

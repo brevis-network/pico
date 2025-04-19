@@ -1,11 +1,9 @@
-use super::{
-    columns::{num_poseidon2_cols, FullRound, PartialRound, Poseidon2Cols},
-    Poseidon2PermuteChip,
-};
+use super::{columns::num_poseidon2_cols, Poseidon2PermuteChip};
 use crate::{
     chips::{
         chips::{byte::event::ByteRecordBehavior, events::ByteLookupEvent},
-        gadgets::poseidon2::utils::{external_linear_layer, internal_linear_layer},
+        gadgets::poseidon2::traces::populate_perm,
+        precompiles::poseidon2::columns::Poseidon2Cols,
         utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
@@ -22,21 +20,29 @@ use crate::{
     },
     iter::{PicoIterator, PicoSlice},
     machine::chip::ChipBehavior,
-    primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
+    primitives::consts::PERMUTATION_WIDTH,
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+use p3_poseidon2::GenericPoseidon2LinearLayers;
 use std::borrow::BorrowMut;
 use tracing::debug;
 
-impl<F: Field, Config: Poseidon2Config> BaseAir<F> for Poseidon2PermuteChip<F, Config> {
+impl<F: Field, LinearLayers, Config: Poseidon2Config> BaseAir<F>
+    for Poseidon2PermuteChip<F, LinearLayers, Config>
+{
     fn width(&self) -> usize {
         num_poseidon2_cols::<Config>()
     }
 }
 
-impl<F: PrimeField32, Config: Poseidon2Config> ChipBehavior<F> for Poseidon2PermuteChip<F, Config> {
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > ChipBehavior<F> for Poseidon2PermuteChip<F, LinearLayers, Config>
+{
     type Record = EmulationRecord;
     type Program = Program;
 
@@ -45,8 +51,9 @@ impl<F: PrimeField32, Config: Poseidon2Config> ChipBehavior<F> for Poseidon2Perm
     }
 
     fn generate_main(&self, input: &Self::Record, _output: &mut Self::Record) -> RowMajorMatrix<F> {
+        let syscall_code = SyscallCode::POSEIDON2_PERMUTE;
         let events: Vec<_> = input
-            .get_precompile_events(SyscallCode::POSEIDON2_PERMUTE)
+            .get_precompile_events(syscall_code)
             .iter()
             .filter_map(|(_, event)| {
                 if let PrecompileEvent::Poseidon2Permute(event) = event {
@@ -69,21 +76,35 @@ impl<F: PrimeField32, Config: Poseidon2Config> ChipBehavior<F> for Poseidon2Perm
         let mut rows: Vec<Vec<F>> = events
             .iter()
             .map(|event| {
-                //let mut row: [F; $num_cols] = [F::ZERO; $num_cols];
                 // use a Vec because the size is too large to make a generic array
                 let mut row = Vec::new();
-                Poseidon2PermuteChip::<F, Config>::event_to_row(
-                    event,
-                    Some(&mut row),
-                    &mut new_byte_lookup_events,
-                );
+                self.event_to_row(event, Some(&mut row), &mut new_byte_lookup_events);
 
                 row
             })
             .collect();
 
+        // Create a shared dummy row that can be reused
+        let dummy_row = {
+            let mut dummy = vec![F::ZERO; self.width()];
+
+            let dummy_cols: &mut Poseidon2Cols<F, Config> = dummy.as_mut_slice().borrow_mut();
+
+            let dummy_perm = &mut dummy_cols.value_cols;
+
+            populate_perm::<F, LinearLayers, Config>(
+                F::ZERO,
+                dummy_perm,
+                [F::ZERO; PERMUTATION_WIDTH],
+                None,
+                &self.constants,
+            );
+
+            dummy
+        };
+
         let log_rows = input.shape_chip_size(&self.name());
-        pad_rows_fixed(&mut rows, || vec![F::ZERO; self.width()], log_rows);
+        pad_rows_fixed(&mut rows, || dummy_row.clone(), log_rows);
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), self.width())
@@ -93,9 +114,10 @@ impl<F: PrimeField32, Config: Poseidon2Config> ChipBehavior<F> for Poseidon2Perm
         if let Some(shape) = record.shape.as_ref() {
             shape.included::<F, _>(self)
         } else {
-            !record
-                .get_precompile_events(SyscallCode::POSEIDON2_PERMUTE)
-                .is_empty()
+            let syscalls = [SyscallCode::POSEIDON2_PERMUTE];
+            syscalls
+                .iter()
+                .any(|&syscall| !record.get_precompile_events(syscall).is_empty())
         }
     }
 
@@ -107,8 +129,9 @@ impl<F: PrimeField32, Config: Poseidon2Config> ChipBehavior<F> for Poseidon2Perm
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
+        let syscall_code = SyscallCode::POSEIDON2_PERMUTE;
         let events: Vec<_> = input
-            .get_precompile_events(SyscallCode::POSEIDON2_PERMUTE)
+            .get_precompile_events(syscall_code)
             .iter()
             .filter_map(|(_, event)| {
                 if let PrecompileEvent::Poseidon2Permute(event) = event {
@@ -125,7 +148,7 @@ impl<F: PrimeField32, Config: Poseidon2Config> ChipBehavior<F> for Poseidon2Perm
             .map(|events| {
                 let mut blu: Vec<ByteLookupEvent> = Vec::new();
                 events.iter().for_each(|event| {
-                    Poseidon2PermuteChip::<F, Config>::event_to_row(event, None, &mut blu);
+                    self.event_to_row(event, None, &mut blu);
                 });
                 blu
             })
@@ -138,19 +161,23 @@ impl<F: PrimeField32, Config: Poseidon2Config> ChipBehavior<F> for Poseidon2Perm
     }
 }
 
-impl<F: PrimeField32, Config: Poseidon2Config> Poseidon2PermuteChip<F, Config> {
+impl<
+        F: PrimeField32,
+        LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+        Config: Poseidon2Config,
+    > Poseidon2PermuteChip<F, LinearLayers, Config>
+{
     fn event_to_row(
+        &self,
         event: &Poseidon2PermuteEvent,
         input_row: Option<&mut Vec<F>>,
         blu: &mut impl ByteRecordBehavior,
     ) {
         // use Vec because num_cols is too large
-        //let mut row: [F; $num_cols] = [F::ZERO; $num_cols];
         let mut row = vec![F::ZERO; num_poseidon2_cols::<Config>()];
         let cols: &mut Poseidon2Cols<F, Config> = row.as_mut_slice().borrow_mut();
 
-        // Assign basic values to the columns.
-        cols.is_real = F::ONE;
+        // cols.value_cols.is_real is populated in the following populate_perm
         cols.chunk = F::from_canonical_u32(event.chunk);
         cols.clk = F::from_canonical_u32(event.clk);
         cols.input_memory_ptr = F::from_canonical_u32(event.input_memory_ptr);
@@ -161,47 +188,18 @@ impl<F: PrimeField32, Config: Poseidon2Config> Poseidon2PermuteChip<F, Config> {
             cols.input_memory[i].populate(*read_record, blu);
         }
 
-        let mut state: [F; PERMUTATION_WIDTH] = event
+        let state: [F; PERMUTATION_WIDTH] = event
             .state_values
             .clone()
             .into_iter()
-            .map(F::from_wrapped_u32)
+            .map(F::from_canonical_u32)
             .collect::<Vec<F>>()
             .try_into()
             .unwrap();
 
-        cols.inputs = state;
+        let perm = &mut cols.value_cols;
 
-        // Perform permutation on the state
-        external_linear_layer(&mut state);
-        cols.state_linear_layer = state;
-
-        for round in 0..Self::NUM_EXTERNAL_ROUNDS / 2 {
-            Self::populate_full_round(
-                &mut state,
-                &mut cols.beginning_full_rounds[round],
-                &RC_16_30_U32[round].map(F::from_wrapped_u32),
-            );
-        }
-
-        for round in 0..Self::NUM_INTERNAL_ROUNDS {
-            Self::populate_partial_round(
-                &mut state,
-                &mut cols.partial_rounds[round],
-                &RC_16_30_U32[round + { Self::NUM_EXTERNAL_ROUNDS / 2 }].map(F::from_wrapped_u32)
-                    [0],
-            );
-        }
-
-        for round in 0..Self::NUM_EXTERNAL_ROUNDS / 2 {
-            Self::populate_full_round(
-                &mut state,
-                &mut cols.ending_full_rounds[round],
-                &RC_16_30_U32
-                    [round + Self::NUM_INTERNAL_ROUNDS + { Self::NUM_EXTERNAL_ROUNDS / 2 }]
-                .map(F::from_wrapped_u32),
-            );
-        }
+        populate_perm::<F, LinearLayers, Config>(F::ONE, perm, state, None, &self.constants);
 
         for (i, write_record) in event.state_write_records.iter().enumerate() {
             cols.output_memory[i].populate(*write_record, blu);
@@ -210,40 +208,5 @@ impl<F: PrimeField32, Config: Poseidon2Config> Poseidon2PermuteChip<F, Config> {
         if let Some(input_row) = input_row {
             *input_row = row;
         }
-    }
-
-    pub fn populate_full_round(
-        state: &mut [F; PERMUTATION_WIDTH],
-        full_round: &mut FullRound<F>,
-        round_constants: &[F; PERMUTATION_WIDTH],
-    ) {
-        for (i, (s, r)) in state.iter_mut().zip(round_constants.iter()).enumerate() {
-            *s += *r;
-            Self::populate_sbox(&mut full_round.sbox_x3[i], &mut full_round.sbox_x7[i], s);
-        }
-        external_linear_layer(state);
-        full_round.post = *state;
-    }
-
-    pub fn populate_partial_round(
-        state: &mut [F; PERMUTATION_WIDTH],
-        partial_round: &mut PartialRound<F>,
-        round_constant: &F,
-    ) {
-        state[0] += *round_constant;
-        Self::populate_sbox(
-            &mut partial_round.sbox_x3,
-            &mut partial_round.sbox_x7,
-            &mut state[0],
-        );
-        internal_linear_layer::<F, _>(state);
-        partial_round.post = *state;
-    }
-
-    #[inline]
-    pub fn populate_sbox(sbox_x3: &mut F, sbox_x7: &mut F, x: &mut F) {
-        *sbox_x3 = x.cube();
-        *sbox_x7 = sbox_x3.square() * *x;
-        *x = *sbox_x7
     }
 }

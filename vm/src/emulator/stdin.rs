@@ -1,5 +1,8 @@
 use crate::{
-    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip as RiscvPoseidon2Chip,
+    chips::{
+        chips::riscv_poseidon2::FieldSpecificPoseidon2Chip as RiscvPoseidon2Chip,
+        precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    },
     compiler::recursion::{
         circuit::{
             challenger::DuplexChallengerVariable,
@@ -21,7 +24,8 @@ use crate::{
             riscv_circuit::{convert::builder::ConvertVerifierCircuit, stdin::ConvertStdin},
             shapes::recursion_shape::RecursionShapeConfig,
             vk_merkle::{
-                builder::CombineVkVerifierCircuit, stdin::RecursionVkStdin, VkMerkleManager,
+                builder::CombineVkVerifierCircuit, stdin::RecursionStdinVariant,
+                vk_verification_enabled, VkMerkleManager,
             },
         },
     },
@@ -38,8 +42,10 @@ use alloc::sync::Arc;
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
+use p3_maybe_rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{array, fmt::Debug};
+use tracing::instrument;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct EmulatorStdinBuilder<I> {
@@ -144,6 +150,7 @@ where
     /// Construct the recursion stdin for riscv_compress.
     /// base_challenger is assumed to be a fresh new one (has not observed anything)
     /// batch_size should be greater than 1
+    #[instrument(name = "setup convert stdin", level = "debug", skip_all)]
     pub fn setup_for_convert<F, CC>(
         riscv_vk: &BaseVerifyingKey<SC>,
         vk_root: [Val<SC>; DIGEST_SIZE],
@@ -170,6 +177,9 @@ where
         PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
         Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
         RiscvPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+        FieldSpecificPrecompilePoseidon2Chip<F>:
+            for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+        SC: Send + Sync,
     {
         // initialize for base_ and reconstruct_challenger
         let [mut base_challenger, mut reconstruct_challenger] =
@@ -181,8 +191,8 @@ where
         // construct programs and inputs
         let total = proofs.len();
 
-        let (programs, inputs): (Vec<_>, Vec<_>) = proofs
-            .iter()
+        let pairs: Vec<_> = proofs
+            .par_iter()
             .enumerate()
             .map(|(i, proof)| {
                 let flag_complete = i == total - 1;
@@ -200,15 +210,19 @@ where
                 };
                 let mut program = ConvertVerifierCircuit::<CC, SC>::build(machine, &input);
 
-                if let Some(config) = shape_config {
-                    config.padding_shape(&mut program);
+                if vk_verification_enabled() {
+                    if let Some(config) = shape_config {
+                        config.padding_shape(&mut program);
+                    }
                 }
 
                 program.print_stats();
 
                 (program, input)
             })
-            .unzip();
+            .collect();
+
+        let (programs, inputs): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
 
         let flag_empty = programs.is_empty();
 
@@ -221,91 +235,8 @@ where
     }
 }
 
-// for recursion stdin
-impl<'a, C, SC> EmulatorStdin<RecursionProgram<Val<SC>>, RecursionStdin<'a, SC, C>>
-where
-    SC: StarkGenericConfig,
-    C: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
-{
-    /// Construct the recursion stdin for one layer of combine.
-    pub fn setup_for_combine<F, CC>(
-        vk_root: [Val<SC>; DIGEST_SIZE],
-        vks: &[BaseVerifyingKey<SC>],
-        proofs: &[BaseProof<SC>],
-        machine: &'a BaseMachine<SC, C>,
-        combine_size: usize,
-        flag_complete: bool,
-    ) -> (Self, Option<BaseVerifyingKey<SC>>, Option<BaseProof<SC>>)
-    where
-        F: PrimeField32
-            + BinomiallyExtendable<EXTENSION_DEGREE>
-            + TwoAdicField
-            + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
-        CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug + Send + Sync,
-        CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
-        SC: FieldFriConfigVariable<CC, Val = F, Domain = TwoAdicMultiplicativeCoset<F>>
-            + Send
-            + Sync,
-        C: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>> + Send + Sync,
-        Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
-        PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
-        BaseVerifyingKey<SC>: Send + Sync,
-        BaseProof<SC>: Send + Sync,
-    {
-        assert_eq!(vks.len(), proofs.len());
-
-        let mut last_vk = None;
-        let mut last_proof = None;
-
-        let mut programs = Vec::new();
-        let mut inputs = Vec::new();
-
-        // TODO: fix to parallel
-        proofs
-            .chunks(combine_size)
-            .zip(vks.chunks(combine_size))
-            .for_each(|(batch_proofs, batch_vks)| {
-                if batch_proofs.len() > 1 {
-                    let input = RecursionStdin {
-                        machine,
-                        vks: batch_vks.into(),
-                        proofs: batch_proofs.into(),
-                        flag_complete,
-                        vk_root,
-                    };
-                    let program = CombineVerifierCircuit::<CC, SC, C>::build(machine, &input);
-
-                    program.print_stats();
-
-                    programs.push(program);
-                    inputs.push(input);
-                } else {
-                    last_vk = Some(batch_vks[0].clone());
-                    last_proof = Some(batch_proofs[0].clone());
-                }
-            });
-
-        let flag_empty = programs.is_empty();
-
-        (
-            Self {
-                programs: programs.into(),
-                inputs: inputs.into(),
-                flag_empty,
-                pointer: 0,
-            },
-            last_vk,
-            last_proof,
-        )
-    }
-}
-
 // for recursion_vk stdin
-impl<'a, C, SC> EmulatorStdin<RecursionProgram<Val<SC>>, RecursionVkStdin<'a, SC, C>>
+impl<'a, C, SC> EmulatorStdin<RecursionProgram<Val<SC>>, RecursionStdinVariant<'a, SC, C>>
 where
     SC: StarkGenericConfig + FieldHasher<Val<SC>>,
     C: ChipBehavior<
@@ -314,9 +245,11 @@ where
             Record = RecursionRecord<Val<SC>>,
         > + Send,
 {
+    // TODO: should we remove Option for recursion_shape_config? select path only by VK_VERIFICATION
     /// Construct the recursion stdin for one layer of combine.
+    #[instrument(name = "setup combine stdin", level = "debug", skip_all)]
     #[allow(clippy::too_many_arguments)]
-    pub fn setup_for_combine_vk<F, CC>(
+    pub fn setup_for_combine<F, CC>(
         vk_root: [Val<SC>; DIGEST_SIZE],
         vks: &[BaseVerifyingKey<SC>],
         proofs: &[BaseProof<SC>],
@@ -324,7 +257,7 @@ where
         combine_size: usize,
         flag_complete: bool,
         vk_manager: &VkMerkleManager<SC>,
-        recursion_shape_config: &RecursionShapeConfig<F, RecursionChipType<F>>,
+        recursion_shape_config: Option<&RecursionShapeConfig<F, RecursionChipType<F>>>,
     ) -> (Self, Option<BaseVerifyingKey<SC>>, Option<BaseProof<SC>>)
     where
         F: TwoAdicField
@@ -358,6 +291,7 @@ where
         let mut programs = Vec::new();
         let mut inputs = Vec::new();
 
+        // TODO: fix to parallel
         proofs
             .chunks(combine_size)
             .zip(vks.chunks(combine_size))
@@ -371,10 +305,21 @@ where
                         vk_root,
                     };
 
-                    let input = vk_manager.add_vk_merkle_proof(input);
-                    let mut program = CombineVkVerifierCircuit::<CC, SC, C>::build(machine, &input);
+                    let (program, input) = if vk_manager.vk_verification_enabled() {
+                        let input = vk_manager.add_vk_merkle_proof(input);
+                        let mut temp_program =
+                            CombineVkVerifierCircuit::<CC, SC, C>::build(machine, &input);
 
-                    recursion_shape_config.padding_shape(&mut program);
+                        let recursion_shape_config = recursion_shape_config
+                            .expect("recursion_shape_config in combine should not be None when VK_VERIFICATION enabled");
+                        recursion_shape_config.padding_shape(&mut temp_program);
+                        (temp_program, RecursionStdinVariant::WithVk(input))
+                    } else {
+                        (
+                            CombineVerifierCircuit::<CC, SC, C>::build(machine, &input),
+                            RecursionStdinVariant::NoVk(input),
+                        )
+                    };
 
                     program.print_stats();
 

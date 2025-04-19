@@ -1,0 +1,12 @@
+[package]
+name = "patch-test-bls12-381"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+
+[dependencies]
+pico-sdk = { workspace = true }
+bls12_381 = { git = "https://github.com/brevis-network/bls12_381.git", branch = "patch-v1.0.1" }

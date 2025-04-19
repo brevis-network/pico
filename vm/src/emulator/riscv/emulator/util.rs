@@ -1,4 +1,4 @@
-use super::{EmulationError, EmulatorMode, RiscvEmulator};
+use super::{EmulationError, RiscvEmulator, RiscvEmulatorMode};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::program::Program,
@@ -29,11 +29,12 @@ impl RiscvEmulator {
         if let Some(stdin) = stdin {
             self.write_stdin(&stdin);
         }
-        self.emulator_mode = EmulatorMode::Simple;
+        self.mode = RiscvEmulatorMode::Simple;
+        let mut all_records = vec![];
         loop {
-            let (batch, done) = self.emulate_batch()?;
+            let done = self.emulate_batch(&mut |record| all_records.push(record))?;
             if done {
-                return Ok(batch);
+                return Ok(all_records);
             }
         }
     }
@@ -47,17 +48,17 @@ impl RiscvEmulator {
         if let Some(stdin) = stdin {
             self.write_stdin(&stdin);
         }
-        self.emulator_mode = EmulatorMode::Trace;
+        let mut all_records = vec![];
         loop {
-            let (batch, done) = self.emulate_batch()?;
+            let done = self.emulate_batch(&mut |record| all_records.push(record))?;
             if done {
-                return Ok(batch);
+                return Ok(all_records);
             }
         }
     }
 
     pub fn is_unconstrained(&self) -> bool {
-        self.unconstrained.is_some()
+        self.mode.is_unconstrained()
     }
 
     pub(crate) fn get_syscall(&mut self, code: SyscallCode) -> Option<&Arc<dyn Syscall>> {

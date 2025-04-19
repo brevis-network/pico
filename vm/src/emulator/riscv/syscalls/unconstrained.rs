@@ -1,30 +1,15 @@
-use hashbrown::HashMap;
-
 use super::{Syscall, SyscallCode, SyscallContext};
-use crate::emulator::riscv::riscv_emulator::{EmulatorMode, UnconstrainedState};
+use crate::emulator::riscv::emulator::{RiscvEmulatorMode, UnconstrainedState};
 
 pub(crate) struct EnterUnconstrainedSyscall;
 
 impl Syscall for EnterUnconstrainedSyscall {
     fn emulate(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
-        if ctx.rt.unconstrained.is_some() {
-            panic!("Unconstrained block is already active.");
-        } else {
-            let program = ctx.rt.record.program.clone();
-            ctx.rt.unconstrained = Some(UnconstrainedState {
-                global_clk: ctx.rt.state.global_clk,
-                clk: ctx.rt.state.clk,
-                pc: ctx.rt.state.pc,
-                memory_diff: HashMap::default(),
-                record: core::mem::take(&mut ctx.rt.record),
-                op_record: core::mem::take(&mut ctx.rt.memory_accesses),
-                emulator_mode: ctx.rt.emulator_mode,
-            });
-            ctx.rt.emulator_mode = EmulatorMode::Simple;
-            ctx.rt.record.unconstrained = true;
-            ctx.rt.record.program = program;
-            Some(1)
-        }
+        // Panic if the previous mode is wrong.
+        let state = UnconstrainedState::new(ctx.rt);
+        ctx.rt.mode = RiscvEmulatorMode::Unconstrained(state);
+
+        Some(1)
     }
 }
 
@@ -32,7 +17,8 @@ pub(crate) struct ExitUnconstrainedSyscall;
 
 impl Syscall for ExitUnconstrainedSyscall {
     fn emulate(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
-        let state = core::mem::take(&mut ctx.rt.unconstrained);
+        // The emulator state is restored in this function if the previous mode is unconstrained.
+        let state = ctx.rt.mode.exit_unconstrained();
 
         // Reset the state of the emulator.
         if let Some(mut state) = state {
@@ -52,8 +38,6 @@ impl Syscall for ExitUnconstrainedSyscall {
             }
             ctx.rt.record = core::mem::take(&mut state.record);
             ctx.rt.memory_accesses = core::mem::take(&mut state.op_record);
-            ctx.rt.emulator_mode = state.emulator_mode;
-            assert!(!ctx.rt.record.unconstrained);
         }
         Some(0)
     }

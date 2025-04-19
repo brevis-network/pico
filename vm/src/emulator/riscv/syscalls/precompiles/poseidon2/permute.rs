@@ -1,50 +1,22 @@
-use p3_field::PrimeField32;
-use std::marker::PhantomData;
-
 use super::event::Poseidon2PermuteEvent;
 use crate::{
-    chips::gadgets::poseidon2::utils::{external_linear_layer, internal_linear_layer},
-    configs::config::Poseidon2Config,
     emulator::riscv::syscalls::{
         precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
     },
-    primitives::{consts::PERMUTATION_WIDTH, RC_16_30_U32},
+    primitives::{consts::PERMUTATION_WIDTH, Poseidon2Init},
 };
-use typenum::Unsigned;
+use p3_field::PrimeField32;
+use p3_symmetric::Permutation;
+use std::marker::PhantomData;
 
 #[allow(clippy::type_complexity)]
-pub(crate) struct Poseidon2PermuteSyscall<F, Config>(
-    pub(crate) PhantomData<fn(F, Config) -> (F, Config)>,
-);
+pub(crate) struct Poseidon2PermuteSyscall<F>(pub(crate) PhantomData<fn(F) -> F>);
 
-impl<F: PrimeField32, Config: Poseidon2Config> Poseidon2PermuteSyscall<F, Config> {
-    const NUM_INTERNAL_ROUNDS: usize = Config::PartialRounds::USIZE;
-    const HALF_EXTERNAL_ROUNDS: usize = Config::HalfFullRounds::USIZE;
-
-    pub fn full_round(
-        state: &mut [F; PERMUTATION_WIDTH],
-        round_constants: &[F; PERMUTATION_WIDTH],
-    ) {
-        for (s, r) in state.iter_mut().zip(round_constants.iter()) {
-            *s += *r;
-            Self::sbox(s);
-        }
-        external_linear_layer(state);
-    }
-
-    pub fn partial_round(state: &mut [F; PERMUTATION_WIDTH], round_constant: &F) {
-        state[0] += *round_constant;
-        Self::sbox(&mut state[0]);
-        internal_linear_layer::<F, _>(state);
-    }
-
-    #[inline]
-    pub fn sbox(x: &mut F) {
-        *x = x.exp_const_u64::<7>();
-    }
-}
-
-impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSyscall<F, Config> {
+impl<F> Syscall for Poseidon2PermuteSyscall<F>
+where
+    F: PrimeField32 + Poseidon2Init,
+    F::Poseidon2: Permutation<[F; 16]>,
+{
     fn num_extra_cycles(&self) -> u32 {
         1
     }
@@ -66,50 +38,22 @@ impl<F: PrimeField32, Config: Poseidon2Config> Syscall for Poseidon2PermuteSysca
         let (state_records, state_values) = ctx.mr_slice(input_memory_ptr, PERMUTATION_WIDTH);
         state_read_records.extend_from_slice(&state_records);
 
-        let mut state: [F; PERMUTATION_WIDTH] = state_values
+        let state: [F; PERMUTATION_WIDTH] = state_values
             .clone()
             .into_iter()
-            .map(F::from_wrapped_u32)
+            .map(F::from_canonical_u32)
             .collect::<Vec<F>>()
             .try_into()
             .unwrap();
 
-        // Perform permutation on the state
-        external_linear_layer(&mut state);
-
-        for round in 0..Self::HALF_EXTERNAL_ROUNDS {
-            Self::full_round(&mut state, &RC_16_30_U32[round].map(F::from_wrapped_u32));
-        }
-
-        for round in 0..Self::NUM_INTERNAL_ROUNDS {
-            Self::partial_round(
-                &mut state,
-                &RC_16_30_U32[round + Self::HALF_EXTERNAL_ROUNDS].map(F::from_wrapped_u32)[0],
-            );
-        }
-
-        for round in 0..Self::HALF_EXTERNAL_ROUNDS {
-            Self::full_round(
-                &mut state,
-                &RC_16_30_U32[round + Self::NUM_INTERNAL_ROUNDS + Self::HALF_EXTERNAL_ROUNDS]
-                    .map(F::from_wrapped_u32),
-            );
-        }
+        let state = F::init().permute(state);
 
         // Increment the clk by 1 before writing because we read from memory at start_clk.
         ctx.clk += 1;
 
-        let write_records = ctx.mw_slice(
-            output_memory_ptr,
-            state
-                .into_iter()
-                .map(|f| f.as_canonical_u32())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
+        let write_records = ctx.mw_slice(output_memory_ptr, &state.map(|f| f.as_canonical_u32()));
         state_write_records.extend_from_slice(&write_records);
 
-        // Push the SHA extend event.
         let chunk = ctx.current_chunk();
         let event = Poseidon2PermuteEvent {
             chunk,

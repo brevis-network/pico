@@ -1,0 +1,12 @@
+[package]
+name = "patch-test-secp256k1"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+pico-sdk = { workspace = true }
+alloy-sol-types = { workspace = true }
+secp256k1 = { git = "https://github.com/brevis-network/rust-secp256k1.git", branch = "patch-v1.0.1", features = ["recovery", "global-context"] }

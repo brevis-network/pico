@@ -67,7 +67,13 @@ where
 /// Represents the bottom layer of abstraction (the most concrete layer)
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
-pub struct BaseProof<SC: StarkGenericConfig> {
+pub struct BaseProof<SC: StarkGenericConfig>
+where
+    Com<SC>: Send + Sync,
+    SC::Val: Send + Sync,
+    SC::Challenge: Send + Sync,
+    PcsProof<SC>: Send + Sync,
+{
     pub commitments: BaseCommitments<Com<SC>>,
     pub opened_values: BaseOpenedValues<SC::Val, SC::Challenge>,
     pub opening_proof: PcsProof<SC>,

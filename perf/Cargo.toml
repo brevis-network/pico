@@ -8,13 +8,23 @@ anyhow.workspace = true
 bincode.workspace = true
 clap.workspace = true
 log.workspace = true
+p3-air.workspace = true
 p3-baby-bear.workspace = true
 p3-koala-bear.workspace = true
+p3-field.workspace = true
+p3-symmetric.workspace = true
 pico-vm.workspace = true
+pico-sdk.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 tracing.workspace = true
+strum.workspace = true
 
 [[bin]]
 name = "bench"
 path = "src/bin/bench.rs"
+
+
+[[bin]]
+name = "gnarkctl"
+path = "src/bin/gnarkctl.rs"

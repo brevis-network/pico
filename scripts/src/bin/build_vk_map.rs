@@ -33,7 +33,7 @@ use pico_vm::{
             riscv_kb_config::StarkConfig as RiscvKbSC,
         },
         machine::{
-            combine_vk::CombineVkMachine, compress_vk::CompressVkMachine, convert::ConvertMachine,
+            combine::CombineMachine, compress::CompressMachine, convert::ConvertMachine,
             riscv::RiscvMachine,
         },
     },
@@ -99,7 +99,7 @@ macro_rules! define_vk_digest_from_shape {
                     vk.hash_field()
                 }
                 PicoRecursionProgramShape::Combine(shape) => {
-                    let machine = CombineVkMachine::new(
+                    let machine = CombineMachine::new(
                         <$RecursionSC>::new(),
                         RecursionChipType::<$F>::combine_chips(),
                         RECURSION_NUM_PVS,
@@ -129,12 +129,12 @@ macro_rules! define_vk_digest_from_shape {
                     vk.hash_field()
                 }
                 PicoRecursionProgramShape::Compress(shape) => {
-                    let combine_machine = CombineVkMachine::new(
+                    let combine_machine = CombineMachine::new(
                         <$RecursionSC>::new(),
                         RecursionChipType::<$F>::combine_chips(),
                         RECURSION_NUM_PVS,
                     );
-                    let machine = CompressVkMachine::new(
+                    let machine = CompressMachine::new(
                         <$RecursionSC>::compress(),
                         RecursionChipType::<$F>::compress_chips(),
                         RECURSION_NUM_PVS,

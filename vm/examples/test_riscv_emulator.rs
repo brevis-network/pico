@@ -2,18 +2,18 @@ use itertools::enumerate;
 use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
+use p3_symmetric::Permutation;
 use pico_vm::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
     emulator::{
-        opts::EmulatorOpts,
-        record::RecordBehavior,
-        riscv::riscv_emulator::{EmulatorMode, RiscvEmulator},
+        opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator,
         stdin::EmulatorStdin,
     },
     machine::logger::setup_logger,
+    primitives::Poseidon2Init,
 };
 use std::time::Instant;
 use tracing::{debug, info, trace};
@@ -21,7 +21,11 @@ use tracing::{debug, info, trace};
 #[path = "common/parse_args.rs"]
 mod parse_args;
 
-fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8>>) {
+fn run<F>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8>>)
+where
+    F: PrimeField32 + Poseidon2Init,
+    F::Poseidon2: Permutation<[F; 16]>,
+{
     let start = Instant::now();
 
     info!("Creating Program..");
@@ -36,7 +40,6 @@ fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8
         emulator.opts.chunk_size, emulator.opts.chunk_batch_size
     );
 
-    emulator.emulator_mode = EmulatorMode::Trace;
     for input in &*stdin.inputs {
         emulator.state.input_stream.push(input.clone());
     }
@@ -46,7 +49,10 @@ fn run<F: PrimeField32>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8
     let mut prev_next_pc = pc_start;
 
     loop {
-        let (batch_records, done) = emulator.emulate_batch().unwrap();
+        let mut batch_records = vec![];
+        let done = emulator
+            .emulate_batch(&mut |record| batch_records.push(record))
+            .unwrap();
 
         for (i, record) in enumerate(batch_records.iter()) {
             if !record.cpu_events.is_empty() {

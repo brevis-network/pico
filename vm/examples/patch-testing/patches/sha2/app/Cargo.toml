@@ -1,0 +1,11 @@
+[package]
+name = "patch-test-sha2"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+pico-sdk = { workspace = true }
+sha2 = { git = "https://github.com/brevis-network/hashes.git", package = "sha2", branch = "sha2-0.10.8-v1.0.0" }

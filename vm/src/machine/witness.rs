@@ -9,8 +9,7 @@ use crate::{
         stdin::EmulatorStdin,
     },
     instances::compiler::{
-        recursion_circuit::stdin::RecursionStdin, riscv_circuit::stdin::ConvertStdin,
-        vk_merkle::stdin::RecursionVkStdin,
+        riscv_circuit::stdin::ConvertStdin, vk_merkle::stdin::RecursionStdinVariant,
     },
     machine::{
         chip::ChipBehavior,
@@ -160,46 +159,7 @@ where
 }
 
 // implement Witness for recursion-recursion machine
-impl<'a, C, PrevC, SC> ProvingWitness<SC, C, RecursionStdin<'a, SC, PrevC>>
-where
-    SC: StarkGenericConfig,
-    PrevC: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
-    C: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
-{
-    pub fn setup_for_recursion(
-        vk_root: [Val<SC>; DIGEST_SIZE],
-        stdin: EmulatorStdin<C::Program, RecursionStdin<'a, SC, PrevC>>,
-        last_vk: Option<BaseVerifyingKey<SC>>,
-        last_proof: Option<BaseProof<SC>>,
-        config: Arc<SC>,
-        opts: EmulatorOpts,
-    ) -> Self {
-        let flag_empty_stdin = stdin.flag_empty;
-        Self {
-            program: None,
-            pk: None,
-            vk: last_vk,
-            proof: last_proof,
-            vk_root: Some(vk_root),
-            stdin: Some(stdin),
-            flag_empty_stdin,
-            opts: Some(opts),
-            config: Some(config),
-            records: vec![],
-        }
-    }
-}
-
-// implement Witness for recursion-recursion machine
-impl<'a, C, SC, PrevC> ProvingWitness<SC, C, RecursionVkStdin<'a, SC, PrevC>>
+impl<'a, C, SC, PrevC> ProvingWitness<SC, C, RecursionStdinVariant<'a, SC, PrevC>>
 where
     SC: StarkGenericConfig + FieldHasher<Val<SC>>,
     PrevC: ChipBehavior<
@@ -213,9 +173,9 @@ where
         Record = RecursionRecord<Val<SC>>,
     >,
 {
-    pub fn setup_for_recursion_vk(
+    pub fn setup_for_combine(
         vk_root: [Val<SC>; DIGEST_SIZE],
-        stdin: EmulatorStdin<C::Program, RecursionVkStdin<'a, SC, PrevC>>,
+        stdin: EmulatorStdin<C::Program, RecursionStdinVariant<'a, SC, PrevC>>,
         last_vk: Option<BaseVerifyingKey<SC>>,
         last_proof: Option<BaseProof<SC>>,
         config: Arc<SC>,

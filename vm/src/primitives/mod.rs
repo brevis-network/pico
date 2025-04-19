@@ -262,6 +262,13 @@ impl Poseidon2Init for BabyBearPoseidon2 {
     }
 }
 
+impl Poseidon2Init for BabyBear {
+    type Poseidon2 = PicoPoseidon2BabyBear;
+    fn init() -> Self::Poseidon2 {
+        pico_poseidon2bb_init()
+    }
+}
+
 impl Poseidon2Init for KoalaBearPoseidon2 {
     type Poseidon2 = PicoPoseidon2KoalaBear;
     fn init() -> Self::Poseidon2 {
@@ -269,7 +276,21 @@ impl Poseidon2Init for KoalaBearPoseidon2 {
     }
 }
 
+impl Poseidon2Init for KoalaBear {
+    type Poseidon2 = PicoPoseidon2KoalaBear;
+    fn init() -> Self::Poseidon2 {
+        pico_poseidon2kb_init()
+    }
+}
+
 impl Poseidon2Init for M31Poseidon2 {
+    type Poseidon2 = PicoPoseidon2Mersenne31;
+    fn init() -> Self::Poseidon2 {
+        pico_poseidon2m31_init()
+    }
+}
+
+impl Poseidon2Init for Mersenne31 {
     type Poseidon2 = PicoPoseidon2Mersenne31;
     fn init() -> Self::Poseidon2 {
         pico_poseidon2m31_init()

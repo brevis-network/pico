@@ -26,7 +26,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, instrument};
+use tracing::{debug, debug_span, instrument};
 
 pub struct ConvertMachine<SC, C>
 where
@@ -66,7 +66,7 @@ macro_rules! impl_convert_machine {
         {
             /// Get the name of the machine.
             fn name(&self) -> String {
-                format!("Riscv Compress Machine <{}>", type_name::<$recur_sc>())
+                format!("Convert Machine <{}>", type_name::<$recur_sc>())
             }
 
             /// Get the base machine.
@@ -75,7 +75,7 @@ macro_rules! impl_convert_machine {
             }
 
             /// Get the prover of the machine.
-            #[instrument(name = "riscv_recursion", level = "debug", skip_all)]
+            #[instrument(name = "CONVERT MACHINE PROVE", level = "debug", skip_all)]
             fn prove(
                 &self,
                 proving_witness: &ProvingWitness<
@@ -101,11 +101,12 @@ macro_rules! impl_convert_machine {
                 let mut batch_num = 1;
                 let mut chunk_index = 1;
                 loop {
+                    let loop_span = debug_span!(parent: &tracing::Span::current(), "convert batch prove loop", batch_num).entered();
                     let start = Instant::now();
                     let (mut batch_records, batch_pks, batch_vks, done) =
-                        emulator.next_record_keys_batch();
+                    debug_span!("emulate_batch_records").in_scope(|| {emulator.next_record_keys_batch()});
 
-                    self.complement_record(batch_records.as_mut_slice());
+                    debug_span!("complement_record").in_scope(|| {self.complement_record(batch_records.as_mut_slice())});
 
                     debug!(
                         "--- Generate convert records for batch {}, chunk {}-{} in {:?}",
@@ -131,9 +132,11 @@ macro_rules! impl_convert_machine {
                         .zip(batch_pks.par_iter())
                         .flat_map(|(record, pk)| {
                             let start_chunk = Instant::now();
-                            let proof = self
+                            let proof = debug_span!(parent: &loop_span, "prove_ensemble", chunk_index = record.chunk_index()).in_scope(||{
+                                self
                                 .base_machine
-                                .prove_ensemble(pk, std::slice::from_ref(record));
+                                .prove_ensemble(pk, std::slice::from_ref(record))
+                            });
                             debug!(
                                 "--- Prove convert chunk {} in {:?}",
                                 record.chunk_index(),
@@ -156,6 +159,8 @@ macro_rules! impl_convert_machine {
                     if done {
                         break;
                     }
+
+                    loop_span.exit();
                 }
 
                 // construct meta proof

@@ -57,7 +57,7 @@ pub const TEST_CHUNK_BATCH_SIZE: u32 = 2;
 pub const TEST_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 7;
 
 // for benchmark
-pub const BENCH_MAX_CHUNK_SIZE: u32 = 1 << 23;
+pub const BENCH_MAX_CHUNK_SIZE: u32 = 1 << 22;
 pub const BENCH_MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 20;
 pub const BENCH_MAX_CHUNK_BATCH_SIZE: u32 = 16;
 pub const BENCH_RECURSION_MAX_CHUNK_SIZE: u32 = 1 << 22;

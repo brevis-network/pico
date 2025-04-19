@@ -6,6 +6,7 @@ macro_rules! impl_air {
             $F: PrimeField32 + $crate::machine::field::FieldSpecificPoseidon2Config,
             CB: ChipBuilder<$F> + $crate::machine::builder::ScopedBuilder,
             FieldSpecificPoseidon2Chip<$F>: Air<CB>,
+            FieldSpecificPrecompilePoseidon2Chip<$F>: Air<CB>,
             CB::Expr: std::any::Any,
         {
             fn eval(&self, b: &mut CB) {

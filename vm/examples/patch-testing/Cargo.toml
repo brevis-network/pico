@@ -1,0 +1,30 @@
+[workspace]
+members = [
+    "common",
+    "patches/tiny-keccak/*",
+    "patches/sha2/*",
+    "patches/sha3/*",
+    "patches/curve25519-dalek/*",
+    "patches/bls12-381/*",
+    "patches/curve25519-dalek-ng/*",
+    "patches/ed25519-consensus/*",
+    "patches/ecdsa-core/*",
+    "patches/secp256k1/*",
+    "patches/substate-bn/*",
+    "patches/bigint/*",
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+keywords = ["zkvm", "plonky3", "stark", "FRI"]
+categories = ["cryptography"]
+
+[workspace.dependencies]
+pico-sdk = { path = "../../../sdk/sdk" }
+alloy-sol-types = "0.8.19"
+
+[patch.crates-io]
+ecdsa-core = { git = "https://github.com/brevis-network/signatures.git", package = "ecdsa", branch = "patch-v1.0.1" }

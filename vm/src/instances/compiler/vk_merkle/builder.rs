@@ -34,6 +34,7 @@ use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use std::{fmt::Debug, marker::PhantomData};
+use tracing::debug;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CombineVkVerifierCircuit<FC: FieldGenericConfig, SC: StarkGenericConfig, C>(
@@ -67,30 +68,31 @@ where
         machine: &BaseMachine<SC, C>,
         input: &RecursionVkStdin<SC, C>,
     ) -> RecursionProgram<Val<SC>> {
+        debug!("Build CombineVkVerifierCircuit Program");
         // Construct the builder.
         let mut builder = Builder::<CC>::new();
         let input = input.read(&mut builder);
         let RecursionVkStdinVariable {
-            resursion_stdin_var,
+            recursion_stdin_var,
             merkle_proof_var,
         } = input;
 
         let vk_root: [Felt<Val<SC>>; 8] = merkle_proof_var.merkle_root.map(|x| builder.eval(x));
 
         // Constraint that the vk_root of the merkle tree aligns with the vk_root of the recursion_stdin
-        for (expected, actual) in vk_root.iter().zip(resursion_stdin_var.vk_root.iter()) {
+        for (expected, actual) in vk_root.iter().zip(recursion_stdin_var.vk_root.iter()) {
             builder.assert_felt_eq(*expected, *actual);
         }
 
         // Constraint that ensures all the vk of the recursion program are included in the vk Merkle tree.
-        let vk_digests = resursion_stdin_var
+        let vk_digests = recursion_stdin_var
             .vks
             .iter()
             .map(|vk| vk.hash_field(&mut builder))
             .collect::<Vec<_>>();
 
         MerkleProofVerifier::verify(&mut builder, vk_digests, merkle_proof_var);
-        CombineVerifierCircuit::build_verifier(&mut builder, machine, resursion_stdin_var);
+        CombineVerifierCircuit::build_verifier(&mut builder, machine, recursion_stdin_var);
         let operations = builder.into_operations();
 
         // Compile the program.
@@ -163,23 +165,24 @@ where
         machine: &BaseMachine<SC, RecursionChipType<Val<SC>>>,
         input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>>>,
     ) -> RecursionProgram<Val<SC>> {
+        debug!("Build CompressVkVerifierCircuit Program");
         // Construct the builder.
         let mut builder = Builder::<CC>::new();
         let input = input.read(&mut builder);
         let RecursionVkStdinVariable {
-            resursion_stdin_var,
+            recursion_stdin_var,
             merkle_proof_var,
         } = input;
 
         let vk_root: [Felt<Val<SC>>; 8] = merkle_proof_var.merkle_root.map(|x| builder.eval(x));
 
         // Constraint that the vk_root of the merkle tree aligns with the vk_root of the recursion_stdin
-        for (expected, actual) in vk_root.iter().zip(resursion_stdin_var.vk_root.iter()) {
+        for (expected, actual) in vk_root.iter().zip(recursion_stdin_var.vk_root.iter()) {
             builder.assert_felt_eq(*expected, *actual);
         }
 
         // Constraint that ensures all the vk of the recursion program are included in the vk Merkle tree.
-        let vk_digests = resursion_stdin_var
+        let vk_digests = recursion_stdin_var
             .vks
             .iter()
             .map(|vk| vk.hash_field(&mut builder))
@@ -187,7 +190,7 @@ where
 
         MerkleProofVerifier::verify(&mut builder, vk_digests, merkle_proof_var);
 
-        CompressVerifierCircuit::build_verifier(&mut builder, machine, resursion_stdin_var);
+        CompressVerifierCircuit::build_verifier(&mut builder, machine, recursion_stdin_var);
 
         let operations = builder.into_operations();
 
@@ -232,6 +235,7 @@ where
         input: &RecursionVkStdin<SC, RecursionChipType<Val<SC>>>,
         vk_manager: &VkMerkleManager<SC>,
     ) -> RecursionProgram<Val<SC>> {
+        debug!("Build EmbedVkVerifierCircuit Program");
         // Construct the builder.
         let mut builder = Builder::<CC>::new();
         let input = input.read(&mut builder);
@@ -240,7 +244,7 @@ where
         let static_vk_root: [Felt<Val<SC>>; 8] = vk_manager.merkle_root.map(|x| builder.eval(x));
 
         let RecursionVkStdinVariable {
-            resursion_stdin_var,
+            recursion_stdin_var,
             merkle_proof_var,
         } = input;
 
@@ -252,12 +256,12 @@ where
         }
 
         // Constraint that the vk_root of the merkle tree aligns with the vk_root of the recursion_stdin
-        for (expected, actual) in vk_root.iter().zip(resursion_stdin_var.vk_root.iter()) {
+        for (expected, actual) in vk_root.iter().zip(recursion_stdin_var.vk_root.iter()) {
             builder.assert_felt_eq(*expected, *actual);
         }
 
         // Constraint that ensures all the vk of the recursion program are included in the vk Merkle tree.
-        let vk_digests = resursion_stdin_var
+        let vk_digests = recursion_stdin_var
             .vks
             .iter()
             .map(|vk| vk.hash_field(&mut builder))
@@ -265,7 +269,7 @@ where
 
         MerkleProofVerifier::verify(&mut builder, vk_digests, merkle_proof_var);
 
-        EmbedVerifierCircuit::build_verifier(&mut builder, machine, resursion_stdin_var);
+        EmbedVerifierCircuit::build_verifier(&mut builder, machine, recursion_stdin_var);
 
         let operations = builder.into_operations();
 

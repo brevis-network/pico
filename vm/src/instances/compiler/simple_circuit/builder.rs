@@ -1,6 +1,9 @@
 use super::stdin::{SimpleRecursionStdin, SimpleRecursionStdinVariable};
 use crate::{
-    chips::chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
+    chips::{
+        chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
+        precompiles::poseidon2::FieldSpecificPrecompilePoseidon2Chip,
+    },
     compiler::recursion::{
         circuit::{
             challenger::{CanObserveVariable, DuplexChallengerVariable},
@@ -51,6 +54,7 @@ where
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
     FieldSpecificPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    FieldSpecificPrecompilePoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build(
         machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
@@ -83,6 +87,7 @@ where
         DigestVariable = [Felt<F>; DIGEST_SIZE],
     >,
     FieldSpecificPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+    FieldSpecificPrecompilePoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
 {
     pub fn build_verifier(
         builder: &mut Builder<CC>,

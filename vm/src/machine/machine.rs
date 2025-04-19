@@ -21,7 +21,7 @@ use p3_air::Air;
 use p3_field::{Field, PrimeField64};
 use p3_maybe_rayon::prelude::*;
 use std::time::Instant;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// Functions that each machine instance should implement.
 pub trait MachineBehavior<SC, C, I>
@@ -66,6 +66,17 @@ where
             });
         });
         debug!("complement record in {:?}", begin.elapsed());
+    }
+
+    /// Static version of record completion for multiple threads
+    fn complement_record_static(chips: Arc<[MetaChip<SC::Val, C>]>, record: &mut C::Record) {
+        chips.as_ref().iter().for_each(|chip| {
+            if chip.is_active(record) {
+                let mut extra = C::Record::default();
+                chip.extra_record(record, &mut extra);
+                record.append(&mut extra);
+            }
+        });
     }
 
     /// setup prover, verifier and keys.
@@ -205,6 +216,7 @@ where
     }
 
     /// setup proving and verifying keys.
+    #[instrument(name = "setup_keys", level = "debug", skip_all)]
     pub fn setup_keys(&self, program: &C::Program) -> (BaseProvingKey<SC>, BaseVerifyingKey<SC>) {
         let (pk, vk) = self
             .prover

@@ -47,7 +47,8 @@ pub trait StarkGenericConfig: Clone + Serialize + Sync {
     type Challenger: FieldChallenger<Self::Val>
         + CanObserve<<Self::Pcs as Pcs<Self::Challenge, Self::Challenger>>::Commitment>
         + CanSample<Self::Challenge>
-        + Clone;
+        + Clone
+        + Send;
 
     /// The PCS used to commit to trace polynomials.
     // TODO: figure out how to fix the ProverData: Sync bound within the context of prove

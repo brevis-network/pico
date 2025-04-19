@@ -59,9 +59,6 @@ pub struct ProveCmd {
     #[clap(long, action = ArgAction::SetTrue, help = "groth16 circuit setup, it must be used with --evm")]
     setup: bool,
 
-    #[clap(long, action = ArgAction::SetTrue, help = "enable vk verification in recursion circuit")]
-    vk: bool,
-
     // Field to work on.
     // bb | m31 | kb
     #[clap(long, default_value = "kb")]
@@ -104,8 +101,7 @@ impl ProveCmd {
         let bytes = Self::get_input_bytes(&self.input)?;
         debug!("input data: {:0x?}", bytes);
 
-        let vk_verification = self.evm || self.vk;
-        let client = SDKProverClient::new(&elf, &self.field, vk_verification);
+        let client = SDKProverClient::new(&elf, &self.field);
 
         if self.fast {
             return prove_fast(client, bytes.as_slice());
@@ -142,7 +138,7 @@ impl ProveCmd {
     }
 }
 
-fn prove_fast(sdk_client: SDKProverClient, elf_bytes: &[u8]) -> Result<()> {
+fn prove_fast(sdk_client: SDKProverClient, stdin_bytes: &[u8]) -> Result<()> {
     env::set_var("FRI_QUERIES", "1");
     info!("proving in fast mode.");
     match sdk_client {
@@ -150,15 +146,7 @@ fn prove_fast(sdk_client: SDKProverClient, elf_bytes: &[u8]) -> Result<()> {
             client
                 .get_stdin_builder()
                 .borrow_mut()
-                .write_slice(elf_bytes);
-            client.prove_fast()?;
-            Ok(())
-        }
-        SDKProverClient::KoalaBearProveVKProver(client) => {
-            client
-                .get_stdin_builder()
-                .borrow_mut()
-                .write_slice(elf_bytes);
+                .write_slice(stdin_bytes);
             client.prove_fast()?;
             Ok(())
         }
@@ -166,15 +154,7 @@ fn prove_fast(sdk_client: SDKProverClient, elf_bytes: &[u8]) -> Result<()> {
             client
                 .get_stdin_builder()
                 .borrow_mut()
-                .write_slice(elf_bytes);
-            client.prove_fast()?;
-            Ok(())
-        }
-        SDKProverClient::BabyBearProveVKProver(client) => {
-            client
-                .get_stdin_builder()
-                .borrow_mut()
-                .write_slice(elf_bytes);
+                .write_slice(stdin_bytes);
             client.prove_fast()?;
             Ok(())
         }
@@ -182,7 +162,7 @@ fn prove_fast(sdk_client: SDKProverClient, elf_bytes: &[u8]) -> Result<()> {
             client
                 .get_stdin_builder()
                 .borrow_mut()
-                .write_slice(elf_bytes);
+                .write_slice(stdin_bytes);
             client.prove_fast()?;
             Ok(())
         }
@@ -200,11 +180,6 @@ fn prove(
     match sdk_client {
         SDKProverClient::KoalaBearProver(client) => {
             client.get_stdin_builder().borrow_mut().write_slice(bytes);
-            client.prove(output.clone())?;
-            Ok(())
-        }
-        SDKProverClient::KoalaBearProveVKProver(client) => {
-            client.get_stdin_builder().borrow_mut().write_slice(bytes);
             if is_evm {
                 client.prove_evm(need_setup, output, field_type)?;
             } else {
@@ -214,12 +189,6 @@ fn prove(
         }
         SDKProverClient::BabyBearProver(client) => {
             client.get_stdin_builder().borrow_mut().write_slice(bytes);
-            client.prove(output.clone())?;
-            Ok(())
-        }
-        SDKProverClient::BabyBearProveVKProver(client) => {
-            client.get_stdin_builder().borrow_mut().write_slice(bytes);
-
             if is_evm {
                 client.prove_evm(need_setup, output, field_type)?;
             } else {

@@ -60,6 +60,11 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
     } else if args.elf == "precompile" {
         elf = load_elf("precompile");
         info!("Test multiple precompiles in a single elf");
+    } else if args.elf == "poseidon2" {
+        elf = load_elf("poseidon2");
+        // pass in the expected hash value as input
+        stdin.write(&args.n);
+        info!("Test precompile poseidon2");
     } else {
         eprintln!("Invalid test elf.\n");
         std::process::exit(1);

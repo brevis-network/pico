@@ -546,7 +546,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                                 return Ok(());
                             }
                         }
-                        return Ok(());
                     }
                 }
                 warn!(
@@ -572,6 +571,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
         // TODO: this is a temporary workaround to the precompile chunk shape
         // vec![1, precompile_rows_per_event(&chip_name)]
         // .into_iter()
+        // (precompile_rows_per_event(&chip_name)..=4 * precompile_rows_per_event(&chip_name))
         (1..=4 * precompile_rows_per_event(&chip_name))
             .rev()
             .map(|event_rows| {
