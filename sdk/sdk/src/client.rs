@@ -24,7 +24,7 @@ use pico_vm::{
         },
         configs::{embed_config::BabyBearBn254Poseidon2, embed_kb_config::KoalaBearBn254Poseidon2},
     },
-    machine::{machine::MachineBehavior, proof::MetaProof},
+    machine::{keys::BaseVerifyingKey, machine::MachineBehavior, proof::MetaProof},
     proverchain::{
         CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
         MachineProver, ProverChain, RiscvProver,
@@ -103,6 +103,10 @@ macro_rules! create_sdk_prove_client {
                 Rc::clone(&self.stdin_builder)
             }
 
+            pub fn riscv_vk(&self) -> &BaseVerifyingKey<$sc> {
+                self.riscv.vk()
+            }
+
             /// prove and serialize embed proof, which provided to next step gnark verifier.
             /// the constraints.json and groth16_witness.json will be generated in output dir.
             pub fn prove(
@@ -111,7 +115,7 @@ macro_rules! create_sdk_prove_client {
             ) -> Result<(MetaProof<$sc>, MetaProof<$bn254_sc>), Error> {
                 let stdin = self.stdin_builder.borrow().clone().finalize();
                 let riscv_proof = self.riscv.prove(stdin);
-                let riscv_vk = self.riscv.vk();
+                let riscv_vk = self.riscv_vk();
                 if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
                     return Err(Error::msg("verify riscv proof failed"));
                 }
@@ -150,7 +154,7 @@ macro_rules! create_sdk_prove_client {
                 let stdin = self.stdin_builder.borrow().clone().finalize();
                 info!("stdin length: {}", stdin.inputs.len());
                 let proof = self.riscv.prove(stdin);
-                let riscv_vk = self.riscv.vk();
+                let riscv_vk = self.riscv_vk();
                 info!("riscv_prover prove success");
                 if !self.riscv.verify(&proof, riscv_vk) {
                     return Err(Error::msg("riscv_prover verify failed"));

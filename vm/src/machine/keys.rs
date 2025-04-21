@@ -8,10 +8,11 @@ use crate::{
 use alloc::sync::Arc;
 use hashbrown::HashMap;
 use p3_baby_bear::BabyBear;
+use p3_bn254_fr::Bn254Fr;
 use p3_challenger::CanObserve;
 use p3_circle::CircleDomain;
 use p3_commit::{Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldAlgebra, TwoAdicField};
+use p3_field::{FieldAlgebra, PrimeField, PrimeField32, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::{dense::RowMajorMatrix, Dimensions};
 use p3_mersenne_31::Mersenne31;
@@ -98,6 +99,28 @@ impl<SC: StarkGenericConfig> BaseVerifyingKey<SC> {
 pub trait HashableKey<F> {
     /// Hash the key into a digest of BabyBear elements.
     fn hash_field(&self) -> [F; DIGEST_SIZE];
+
+    fn hash_bn254(&self) -> Bn254Fr
+    where
+        F: PrimeField32,
+    {
+        let mut bn254 = Bn254Fr::ZERO;
+        for word in self.hash_field() {
+            bn254 *= Bn254Fr::from_canonical_u32(1 << 31);
+            bn254 += Bn254Fr::from_canonical_u32(word.as_canonical_u32());
+        }
+        bn254
+    }
+
+    fn hash_str_via_bn254(&self) -> String
+    where
+        F: PrimeField32,
+    {
+        format!(
+            "0x{:0>64}",
+            self.hash_bn254().as_canonical_biguint().to_str_radix(16)
+        )
+    }
 }
 
 impl<SC: StarkGenericConfig<Val = BabyBear, Domain = TwoAdicMultiplicativeCoset<BabyBear>>>
