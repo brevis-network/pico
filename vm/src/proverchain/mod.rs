@@ -7,7 +7,7 @@ mod riscv;
 use crate::{
     configs::config::{StarkGenericConfig, Val},
     machine::{chip::ChipBehavior, keys::HashableKey, machine::BaseMachine, proof::MetaProof},
-    messages::riscv::RiscvMsg,
+    messages::gateway::GatewayMsg,
     thread::channel::DuplexUnboundedEndpoint,
 };
 use std::sync::Arc;
@@ -42,7 +42,7 @@ pub trait InitialProverSetup<SC: StarkGenericConfig> {
         input: Self::Input<'_>,
         opts: Self::Opts,
         shape_config: Option<Self::ShapeConfig>,
-        coord_endpoint: Option<Arc<DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>>,
+        coord_endpoint: Option<Arc<DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>>,
     ) -> Self;
 }
 

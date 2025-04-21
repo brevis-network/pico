@@ -1,27 +1,72 @@
 use anyhow::Result;
 use clap::Parser;
-use distributed_vm::{
-    coordinator::{config::CoordinatorConfig, emulator},
-    worker::riscv,
-};
+use distributed_vm::worker::{config::WorkerConfig, grpc, message::WorkerMsg, riscv};
 use log::debug;
-use pico_perf::common::{bench_field::BenchField, bench_program::PROGRAMS};
+use pico_perf::common::bench_field::BenchField;
 use pico_vm::{
-    configs::{
-        config::StarkGenericConfig,
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
-    },
+    configs::stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     machine::logger::setup_logger,
-    messages::{emulator::EmulatorMsg, riscv::RiscvMsg},
-    thread::channel::{DuplexUnboundedChannel, SingleUnboundedChannel},
+    thread::channel::DuplexUnboundedChannel,
 };
 use std::{str::FromStr, sync::Arc};
 use tokio::signal::ctrl_c;
+
+#[derive(Debug, Parser)]
+#[clap(author, version, about, long_about=None)]
+struct Args {
+    #[clap(long, default_value = "kb")]
+    field: String,
+}
+
+impl From<Args> for WorkerConfig {
+    fn from(args: Args) -> Self {
+        let field = BenchField::from_str(&args.field).unwrap();
+
+        Self { field }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     setup_logger();
 
-    // gupeng
-    todo!()
+    let cfg = Arc::new(WorkerConfig::from(Args::parse()));
+    let field = cfg.field;
+
+    let (grpc, riscv) = match field {
+        BenchField::BabyBear => {
+            let channel = DuplexUnboundedChannel::default();
+
+            let grpc = grpc::run(channel.endpoint1());
+            let riscv = riscv::run(BabyBearPoseidon2::default(), channel.endpoint2());
+
+            // wait for CTRL + C then close the channels to exit
+            debug!("waiting for stop");
+            ctrl_c().await.unwrap();
+
+            channel.endpoint1().send(WorkerMsg::Exit).unwrap();
+            channel.endpoint2().send(WorkerMsg::Exit).unwrap();
+
+            (grpc, riscv)
+        }
+        BenchField::KoalaBear => {
+            let channel = DuplexUnboundedChannel::default();
+
+            let grpc = grpc::run(channel.endpoint1());
+            let riscv = riscv::run(KoalaBearPoseidon2::default(), channel.endpoint2());
+
+            // wait for CTRL + C then close the channels to exit
+            debug!("waiting for stop");
+            ctrl_c().await.unwrap();
+
+            channel.endpoint1().send(WorkerMsg::Exit).unwrap();
+            channel.endpoint2().send(WorkerMsg::Exit).unwrap();
+
+            (grpc, riscv)
+        }
+    };
+
+    let _ = tokio::join!(grpc, riscv);
+
+    Ok(())
 }

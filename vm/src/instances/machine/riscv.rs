@@ -18,7 +18,10 @@ use crate::{
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
-    messages::riscv::{RiscvMsg, RiscvRequest},
+    messages::{
+        gateway::GatewayMsg,
+        riscv::{RiscvMsg, RiscvRequest},
+    },
     primitives::{consts::MAX_LOG_CHUNK_SIZE, Poseidon2Init},
     thread::channel::DuplexUnboundedEndpoint,
 };
@@ -57,7 +60,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-        coord_endpoint: Option<&DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>,
+        coord_endpoint: Option<&DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -120,7 +123,7 @@ where
         });
 
         let all_proofs = if cfg!(feature = "distributed") {
-            self.prove_remote(pk, &challenger, record_receiver, coord_endpoint.unwrap())
+            self.prove_remote(pk, record_receiver, coord_endpoint.unwrap())
         } else {
             self.prove_local(
                 pk,
@@ -174,7 +177,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-        coord_endpoint: Option<&DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>,
+        coord_endpoint: Option<&DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -408,9 +411,8 @@ where
     fn prove_remote(
         &self,
         pk: &BaseProvingKey<SC>,
-        challenger: &SC::Challenger,
         record_receiver: Receiver<EmulationRecord>,
-        coord_endpoint: &DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>,
+        coord_endpoint: &DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>,
     ) -> Vec<BaseProof<SC>> {
         let mut chunk_index = 0;
 
@@ -418,12 +420,18 @@ where
             let req = RiscvRequest {
                 chunk_index,
                 pk: pk.clone(),
-                challenger: challenger.clone(),
                 record,
             };
 
             debug!("send emulation record-{chunk_index}");
-            coord_endpoint.send(RiscvMsg::Request(req)).unwrap();
+            coord_endpoint
+                .send(GatewayMsg::Riscv(
+                    RiscvMsg::Request(req),
+                    // TODO: fix to id and ip address
+                    chunk_index.to_string(),
+                    "".to_string(),
+                ))
+                .unwrap();
 
             chunk_index += 1;
         }
@@ -433,7 +441,7 @@ where
 
         while let Ok(msg) = coord_endpoint.recv() {
             match msg {
-                RiscvMsg::Response(res) => {
+                GatewayMsg::Riscv(RiscvMsg::Response(res), _, _) => {
                     let chunk_index = res.chunk_index;
                     debug!("receive riscv proof-{chunk_index}");
 
@@ -442,7 +450,7 @@ where
                         break;
                     }
                 }
-                RiscvMsg::Stop => break,
+                GatewayMsg::Exit => break,
                 _ => panic!("unsupported"),
             }
         }

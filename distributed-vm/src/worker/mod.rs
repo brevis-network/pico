@@ -1,5 +1,6 @@
 pub mod config;
 pub mod grpc;
+pub mod message;
 pub mod riscv;
 // TODO: add covert and combine provers here
 

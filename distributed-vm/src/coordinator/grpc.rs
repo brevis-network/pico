@@ -10,7 +10,6 @@ use pico_vm::{
     configs::config::StarkGenericConfig, messages::gateway::GatewayMsg,
     thread::channel::DuplexUnboundedEndpoint,
 };
-use serde::Serialize;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tonic::{async_trait, transport::Server, Request, Response, Status};
@@ -25,7 +24,6 @@ where
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
-    SC::Challenger: Serialize,
 {
     // TODO: read from a toml file
     let addr = "[::1]:50051".parse().unwrap();
@@ -52,7 +50,6 @@ where
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
-    SC::Challenger: Serialize,
 {
     async fn check_health(&self, request: Request<WorkerInfo>) -> Result<Response<()>, Status> {
         debug!("health from worker: {:?}", request.into_inner());

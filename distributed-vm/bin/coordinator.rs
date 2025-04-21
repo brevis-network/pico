@@ -1,18 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
-use distributed_vm::{
-    coordinator::{config::CoordinatorConfig, emulator},
-    worker::riscv,
-};
+use distributed_vm::coordinator::{config::CoordinatorConfig, emulator, grpc};
 use log::debug;
 use pico_perf::common::{bench_field::BenchField, bench_program::PROGRAMS};
 use pico_vm::{
-    configs::{
-        config::StarkGenericConfig,
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
-    },
+    configs::stark_config::bb_poseidon2::BabyBearPoseidon2,
     machine::logger::setup_logger,
-    messages::{emulator::EmulatorMsg, riscv::RiscvMsg},
+    messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
     thread::channel::{DuplexUnboundedChannel, SingleUnboundedChannel},
 };
 use std::{str::FromStr, sync::Arc};
@@ -50,45 +44,50 @@ async fn main() -> Result<()> {
     // TODO: fix to trggier from a gprc call
     emulator_channel.send(EmulatorMsg::Start).unwrap();
 
-    let (emulator, riscv) = match field {
+    let (emulator, grpc) = match field {
         BenchField::BabyBear => {
-            let riscv_channel = DuplexUnboundedChannel::default();
+            let gateway_channel = DuplexUnboundedChannel::default();
 
-            // gupeng
-            let emulator =
-                emulator::run(cfg, emulator_channel.receiver(), riscv_channel.endpoint1());
-            let riscv = riscv::run(BabyBearPoseidon2::new(), riscv_channel.endpoint2());
+            let emulator = emulator::run::<BabyBearPoseidon2>(
+                cfg,
+                emulator_channel.receiver(),
+                gateway_channel.endpoint1(),
+            );
+            let grpc = grpc::run(gateway_channel.endpoint2());
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
             ctrl_c().await.unwrap();
 
-            riscv_channel.endpoint1().send(RiscvMsg::Stop).unwrap();
-            riscv_channel.endpoint2().send(RiscvMsg::Stop).unwrap();
+            gateway_channel.endpoint1().send(GatewayMsg::Exit).unwrap();
+            gateway_channel.endpoint2().send(GatewayMsg::Exit).unwrap();
 
-            (emulator, riscv)
+            (emulator, grpc)
         }
         BenchField::KoalaBear => {
-            let riscv_channel = DuplexUnboundedChannel::default();
+            let gateway_channel = DuplexUnboundedChannel::default();
 
-            let emulator =
-                emulator::run(cfg, emulator_channel.receiver(), riscv_channel.endpoint1());
-            let riscv = riscv::run(KoalaBearPoseidon2::new(), riscv_channel.endpoint2());
+            let emulator = emulator::run(
+                cfg,
+                emulator_channel.receiver(),
+                gateway_channel.endpoint1(),
+            );
+            let grpc = grpc::run(gateway_channel.endpoint2());
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
             ctrl_c().await.unwrap();
 
-            riscv_channel.endpoint1().send(RiscvMsg::Stop).unwrap();
-            riscv_channel.endpoint2().send(RiscvMsg::Stop).unwrap();
+            gateway_channel.endpoint1().send(GatewayMsg::Exit).unwrap();
+            gateway_channel.endpoint2().send(GatewayMsg::Exit).unwrap();
 
-            (emulator, riscv)
+            (emulator, grpc)
         }
     };
 
     emulator_channel.send(EmulatorMsg::Stop).unwrap();
 
-    let _ = tokio::join!(emulator, riscv);
+    let _ = tokio::join!(emulator, grpc);
 
     Ok(())
 }

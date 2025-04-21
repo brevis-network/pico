@@ -7,6 +7,8 @@ pub enum GatewayMsg<SC: StarkGenericConfig> {
     Riscv(RiscvMsg<SC>, TaskId, IpAddr),
     // close a client by ip
     Close(IpAddr),
+    // exit
+    Exit,
 }
 
 impl<SC: StarkGenericConfig> GatewayMsg<SC> {
@@ -14,6 +16,7 @@ impl<SC: StarkGenericConfig> GatewayMsg<SC> {
         match self {
             Self::Riscv(_, _, ip_addr) => ip_addr,
             Self::Close(ip_addr) => ip_addr,
+            Self::Exit => "",
         }
         .to_string()
     }

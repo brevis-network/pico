@@ -34,7 +34,7 @@ use pico_vm::{
             riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
         },
     },
-    messages::{emulator::EmulatorMsg, riscv::RiscvMsg},
+    messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
     proverchain::{
         CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
         MachineProver, ProverChain, RiscvProver,
@@ -52,7 +52,7 @@ use tokio::task::JoinHandle;
 trait EmulatorRunner: StarkGenericConfig {
     fn run(
         bench_program: &BenchProgram,
-        riscv_endpoint: Arc<DuplexUnboundedEndpoint<RiscvMsg<Self>, RiscvMsg<Self>>>,
+        riscv_endpoint: Arc<DuplexUnboundedEndpoint<GatewayMsg<Self>, GatewayMsg<Self>>>,
     ) -> Result<PerformanceReport>;
 }
 
@@ -60,7 +60,7 @@ impl<SC: StarkGenericConfig> EmulatorRunner for SC {
     /// default implementation
     default fn run(
         _bench_program: &BenchProgram,
-        _riscv_endpoint: Arc<DuplexUnboundedEndpoint<RiscvMsg<Self>, RiscvMsg<Self>>>,
+        _riscv_endpoint: Arc<DuplexUnboundedEndpoint<GatewayMsg<Self>, GatewayMsg<Self>>>,
     ) -> Result<PerformanceReport> {
         panic!("unsupported");
     }
@@ -69,7 +69,7 @@ impl<SC: StarkGenericConfig> EmulatorRunner for SC {
 impl EmulatorRunner for BabyBearPoseidon2 {
     fn run(
         bench_program: &BenchProgram,
-        riscv_endpoint: Arc<DuplexUnboundedEndpoint<RiscvMsg<Self>, RiscvMsg<Self>>>,
+        riscv_endpoint: Arc<DuplexUnboundedEndpoint<GatewayMsg<Self>, GatewayMsg<Self>>>,
     ) -> Result<PerformanceReport> {
         let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
         let vk_enabled = vk_manager.vk_verification_enabled();
@@ -202,7 +202,7 @@ impl EmulatorRunner for BabyBearPoseidon2 {
 impl EmulatorRunner for KoalaBearPoseidon2 {
     fn run(
         bench_program: &BenchProgram,
-        riscv_endpoint: Arc<DuplexUnboundedEndpoint<RiscvMsg<Self>, RiscvMsg<Self>>>,
+        riscv_endpoint: Arc<DuplexUnboundedEndpoint<GatewayMsg<Self>, GatewayMsg<Self>>>,
     ) -> Result<PerformanceReport> {
         let vk_manager = <KoalaBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
         let vk_enabled = vk_manager.vk_verification_enabled();
@@ -335,7 +335,7 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
 pub fn run<SC: StarkGenericConfig + 'static>(
     config: Arc<CoordinatorConfig>,
     emulator_receiver: Arc<Receiver<EmulatorMsg>>,
-    riscv_endpoint: Arc<DuplexUnboundedEndpoint<RiscvMsg<SC>, RiscvMsg<SC>>>,
+    riscv_endpoint: Arc<DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>,
 ) -> JoinHandle<()>
 where
     <SC::Pcs as Pcs<

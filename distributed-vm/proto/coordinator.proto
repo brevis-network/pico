@@ -21,8 +21,7 @@ message RiscvTask {
   string id = 1;
   uint64 chunk_index = 2;
   bytes pk = 3;
-  bytes challenger = 4;
-  bytes record = 5;
+  bytes record = 4;
 }
 
 message RiscvResult {
