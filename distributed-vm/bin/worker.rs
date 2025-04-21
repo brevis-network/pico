@@ -36,6 +36,7 @@ async fn main() -> Result<()> {
     let (grpc, riscv) = match field {
         BenchField::BabyBear => {
             let channel = DuplexUnboundedChannel::default();
+            channel.endpoint2().send(WorkerMsg::RequestTask).unwrap();
 
             let grpc = grpc::run(channel.endpoint1());
             let riscv = riscv::run(BabyBearPoseidon2::default(), channel.endpoint2());
@@ -51,6 +52,7 @@ async fn main() -> Result<()> {
         }
         BenchField::KoalaBear => {
             let channel = DuplexUnboundedChannel::default();
+            channel.endpoint2().send(WorkerMsg::RequestTask).unwrap();
 
             let grpc = grpc::run(channel.endpoint1());
             let riscv = riscv::run(KoalaBearPoseidon2::default(), channel.endpoint2());

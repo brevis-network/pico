@@ -4,7 +4,7 @@ use distributed_vm::coordinator::{config::CoordinatorConfig, emulator, grpc};
 use log::debug;
 use pico_perf::common::{bench_field::BenchField, bench_program::PROGRAMS};
 use pico_vm::{
-    configs::stark_config::bb_poseidon2::BabyBearPoseidon2,
+    configs::stark_config::{bb_poseidon2::BabyBearPoseidon2, KoalaBearPoseidon2},
     machine::logger::setup_logger,
     messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
     thread::channel::{DuplexUnboundedChannel, SingleUnboundedChannel},
@@ -67,11 +67,12 @@ async fn main() -> Result<()> {
         BenchField::KoalaBear => {
             let gateway_channel = DuplexUnboundedChannel::default();
 
-            let emulator = emulator::run(
+            let emulator = emulator::run::<KoalaBearPoseidon2>(
                 cfg,
                 emulator_channel.receiver(),
                 gateway_channel.endpoint1(),
             );
+
             let grpc = grpc::run(gateway_channel.endpoint2());
 
             // wait for CTRL + C then close the channels to exit

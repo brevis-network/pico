@@ -1,7 +1,7 @@
 use super::config::CoordinatorConfig;
 use anyhow::Result;
 use crossbeam::channel::Receiver;
-use log::info;
+use log::{debug, info};
 use p3_baby_bear::BabyBear;
 use p3_commit::Pcs;
 use p3_koala_bear::KoalaBear;
@@ -343,7 +343,9 @@ where
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
 {
-    tokio::spawn(async move {
+    debug!("[coordinator] emulator init");
+
+    let handle = tokio::spawn(async move {
         while let Ok(msg) = emulator_receiver.recv() {
             match msg {
                 EmulatorMsg::Start => {
@@ -356,7 +358,11 @@ where
                 EmulatorMsg::Stop => break,
             }
         }
-    })
+    });
+
+    debug!("[coordinator] emulator init end");
+
+    handle
 }
 
 fn time_operation<T, F: FnOnce() -> T>(operation: F) -> (T, Duration) {

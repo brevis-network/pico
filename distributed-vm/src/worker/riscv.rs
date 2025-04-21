@@ -1,4 +1,5 @@
 use crate::worker::message::WorkerMsg;
+use log::debug;
 use p3_commit::Pcs;
 use p3_field::PrimeField32;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
@@ -52,6 +53,9 @@ where
                     pk.observed_by(&mut challenger);
 
                     let chunk_index = req.chunk_index;
+
+                    debug!("[worker] start to prove chunk-{chunk_index}");
+
                     let proof = machine.prove_record(
                         chunk_index,
                         &pk,
@@ -59,6 +63,8 @@ where
                         Some(&shape_config),
                         req.record,
                     );
+
+                    debug!("[worker] finish proving chunk-{chunk_index}");
 
                     // return the riscv result
                     let msg = WorkerMsg::RespondResult(GatewayMsg::Riscv(

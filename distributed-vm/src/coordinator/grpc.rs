@@ -16,7 +16,7 @@ use tonic::{async_trait, transport::Server, Request, Response, Status};
 
 type GatewayEndpoint<SC> = Arc<DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>;
 
-pub async fn run<SC: Send + StarkGenericConfig + 'static>(
+pub fn run<SC: Send + StarkGenericConfig + 'static>(
     gateway_endpoint: GatewayEndpoint<SC>,
 ) -> JoinHandle<()>
 where
@@ -25,17 +25,23 @@ where
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
 {
+    debug!("[coordinator] grpc server init");
+
     // TODO: read from a toml file
     let addr = "[::1]:50051".parse().unwrap();
     let srv = GrpcService::new(gateway_endpoint);
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         Server::builder()
             .add_service(CoordinatorServer::new(srv))
             .serve(addr)
             .await
             .expect("failed");
-    })
+    });
+
+    debug!("[coordinator] grpc server init end");
+
+    handle
 }
 
 #[derive(Constructor)]
