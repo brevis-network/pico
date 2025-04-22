@@ -6,5 +6,5 @@ pub mod worker;
 
 tonic::include_proto!("grpc");
 
-// 1 GB
-const MAX_GRPC_MSG_SIZE: usize = 1024 * 1024 * 1024;
+// 600MB
+const MAX_GRPC_MSG_SIZE: usize = 600 * 1024 * 1024;

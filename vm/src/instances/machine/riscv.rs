@@ -123,7 +123,7 @@ where
         });
 
         let all_proofs = if cfg!(feature = "distributed") {
-            self.prove_remote(pk, record_receiver, coord_endpoint.unwrap())
+            self.prove_remote(record_receiver, coord_endpoint.unwrap())
         } else {
             self.prove_local(
                 pk,
@@ -187,7 +187,7 @@ where
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             > + Air<ProverConstraintFolder<SC>>,
-        <SC as crate::configs::config::StarkGenericConfig>::Domain: Send,
+        <SC as StarkGenericConfig>::Domain: Send,
     {
         self.prove_with_shape_cycles(witness, shape_config, coord_endpoint)
     }
@@ -410,7 +410,6 @@ where
 
     fn prove_remote(
         &self,
-        pk: &BaseProvingKey<SC>,
         record_receiver: Receiver<EmulationRecord>,
         coord_endpoint: &DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>,
     ) -> Vec<BaseProof<SC>> {
@@ -419,7 +418,6 @@ where
         while let Ok(record) = record_receiver.recv() {
             let req = RiscvRequest {
                 chunk_index,
-                pk: pk.clone(),
                 record,
             };
 

@@ -1,20 +1,18 @@
 use crate::{
-    configs::config::StarkGenericConfig,
-    emulator::riscv::record::EmulationRecord,
-    machine::{keys::BaseProvingKey, proof::BaseProof},
+    configs::config::StarkGenericConfig, emulator::riscv::record::EmulationRecord,
+    machine::proof::BaseProof,
 };
 use derive_more::Constructor;
 
 pub enum RiscvMsg<SC: StarkGenericConfig> {
-    Request(RiscvRequest<SC>),
+    Request(RiscvRequest),
     Response(RiscvResponse<SC>),
 }
 
 #[derive(Constructor)]
-pub struct RiscvRequest<SC: StarkGenericConfig> {
+pub struct RiscvRequest {
     // TODO: add identifier
     pub chunk_index: usize,
-    pub pk: BaseProvingKey<SC>,
     pub record: EmulationRecord,
 }
 

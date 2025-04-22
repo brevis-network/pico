@@ -4,10 +4,16 @@ use p3_commit::Pcs;
 use p3_field::PrimeField32;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 use p3_symmetric::Permutation;
+use pico_perf::common::bench_program::{load, BenchProgram};
 use pico_vm::{
-    configs::config::StarkGenericConfig,
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
+    },
+    configs::config::{StarkGenericConfig, Val},
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType, compiler::shapes::riscv_shape::RiscvShapeConfig,
+        chiptype::riscv_chiptype::RiscvChipType,
+        compiler::{shapes::riscv_shape::RiscvShapeConfig, vk_merkle::vk_verification_enabled},
         machine::riscv::RiscvMachine,
     },
     machine::{field::FieldSpecificPoseidon2Config, machine::MachineBehavior},
@@ -23,6 +29,7 @@ use tokio::task::JoinHandle;
 
 pub fn run<SC: Send + StarkGenericConfig + 'static>(
     sc: SC,
+    program: BenchProgram,
     endpoint: Arc<DuplexUnboundedEndpoint<WorkerMsg<SC>, WorkerMsg<SC>>>,
 ) -> JoinHandle<()>
 where
@@ -39,6 +46,19 @@ where
         let shape_config = RiscvShapeConfig::<SC::Val>::default();
         let machine = RiscvMachine::new(sc, RiscvChipType::all_chips(), RISCV_NUM_PVS);
 
+        let (elf, _) = load::<Program>(&program).unwrap();
+        let riscv_shape_config =
+            vk_verification_enabled().then(RiscvShapeConfig::<Val<SC>>::default);
+        let riscv_compiler = Compiler::new(SourceType::RISCV, &elf);
+        let mut riscv_program = riscv_compiler.compile();
+        if let Some(ref shape_config) = riscv_shape_config {
+            let program = Arc::get_mut(&mut riscv_program).expect("cannot get_mut arc");
+            shape_config
+                .padding_preprocessed_shape(program)
+                .expect("cannot padding preprocessed shape");
+        }
+        let (pk, _) = machine.setup_keys(&riscv_program);
+
         let challenger = machine.config().challenger();
 
         while let Ok(msg) = endpoint.recv() {
@@ -48,7 +68,6 @@ where
                     task_id,
                     ip_addr,
                 )) => {
-                    let pk = req.pk;
                     let mut challenger = challenger.clone();
                     pk.observed_by(&mut challenger);
 

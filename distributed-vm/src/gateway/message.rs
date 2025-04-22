@@ -20,13 +20,11 @@ impl<SC: StarkGenericConfig> From<GatewayMsg<SC>> for RiscvTask {
         };
 
         let chunk_index = req.chunk_index as u64;
-        let pk = bincode::serialize(&req.pk).unwrap();
         let record = bincode::serialize(&req.record).unwrap();
 
         RiscvTask {
             id,
             chunk_index,
-            pk,
             record,
         }
     }
@@ -59,13 +57,11 @@ impl<SC: StarkGenericConfig> From<RiscvTask> for GatewayMsg<SC> {
     fn from(task: RiscvTask) -> Self {
         let id = task.id;
         let chunk_index = task.chunk_index as usize;
-        let pk = bincode::deserialize(&task.pk).unwrap();
         let record = bincode::deserialize(&task.record).unwrap();
 
         GatewayMsg::Riscv(
             RiscvMsg::Request(RiscvRequest {
                 chunk_index,
-                pk,
                 record,
             }),
             id,
