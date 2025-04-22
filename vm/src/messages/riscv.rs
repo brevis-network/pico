@@ -4,19 +4,20 @@ use crate::{
 };
 use derive_more::Constructor;
 
+#[derive(Clone)]
 pub enum RiscvMsg<SC: StarkGenericConfig> {
     Request(RiscvRequest),
     Response(RiscvResponse<SC>),
 }
 
-#[derive(Constructor)]
+#[derive(Clone, Constructor)]
 pub struct RiscvRequest {
     // TODO: add identifier
     pub chunk_index: usize,
     pub record: EmulationRecord,
 }
 
-#[derive(Constructor)]
+#[derive(Clone, Constructor)]
 pub struct RiscvResponse<SC: StarkGenericConfig> {
     // TODO: add identifier
     pub chunk_index: usize,

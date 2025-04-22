@@ -1,6 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
-use distributed_vm::coordinator::{config::CoordinatorConfig, emulator, grpc};
+use distributed_vm::{
+    coordinator::{config::CoordinatorConfig, emulator, grpc},
+    gateway,
+};
+use futures::future::join_all;
 use log::debug;
 use pico_perf::common::{bench_field::BenchField, bench_program::PROGRAMS};
 use pico_vm::{
@@ -40,55 +44,78 @@ async fn main() -> Result<()> {
     let field = cfg.field;
 
     // emulator channel for starting the proving process
-    let emulator_channel = SingleUnboundedChannel::default();
+    let start_channel = SingleUnboundedChannel::default();
     // TODO: fix to trggier from a gprc call
-    emulator_channel.send(EmulatorMsg::Start).unwrap();
+    start_channel.send(EmulatorMsg::Start).unwrap();
 
-    let (emulator, grpc) = match field {
+    let handles = match field {
         BenchField::BabyBear => {
-            let gateway_channel = DuplexUnboundedChannel::default();
+            let emulator_gateway_channel = SingleUnboundedChannel::default();
+            let gateway_grpc_channel = DuplexUnboundedChannel::default();
 
             let emulator = emulator::run::<BabyBearPoseidon2>(
                 cfg,
-                emulator_channel.receiver(),
-                gateway_channel.endpoint1(),
+                start_channel.receiver(),
+                emulator_gateway_channel.sender(),
             );
-            let grpc = grpc::run(gateway_channel.endpoint2());
+            let gateway = gateway::run(
+                emulator_gateway_channel.receiver(),
+                gateway_grpc_channel.endpoint1(),
+            );
+            let grpc = grpc::run(gateway_grpc_channel.endpoint2());
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
             ctrl_c().await.unwrap();
 
-            gateway_channel.endpoint1().send(GatewayMsg::Exit).unwrap();
-            gateway_channel.endpoint2().send(GatewayMsg::Exit).unwrap();
+            emulator_gateway_channel.send(GatewayMsg::Exit).unwrap();
+            gateway_grpc_channel
+                .endpoint1()
+                .send(GatewayMsg::Exit)
+                .unwrap();
+            gateway_grpc_channel
+                .endpoint2()
+                .send(GatewayMsg::Exit)
+                .unwrap();
 
-            (emulator, grpc)
+            vec![emulator, gateway, grpc]
         }
         BenchField::KoalaBear => {
-            let gateway_channel = DuplexUnboundedChannel::default();
+            let emulator_gateway_channel = SingleUnboundedChannel::default();
+            let gateway_grpc_channel = DuplexUnboundedChannel::default();
 
             let emulator = emulator::run::<KoalaBearPoseidon2>(
                 cfg,
-                emulator_channel.receiver(),
-                gateway_channel.endpoint1(),
+                start_channel.receiver(),
+                emulator_gateway_channel.sender(),
             );
-
-            let grpc = grpc::run(gateway_channel.endpoint2());
+            let gateway = gateway::run(
+                emulator_gateway_channel.receiver(),
+                gateway_grpc_channel.endpoint1(),
+            );
+            let grpc = grpc::run(gateway_grpc_channel.endpoint2());
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
             ctrl_c().await.unwrap();
 
-            gateway_channel.endpoint1().send(GatewayMsg::Exit).unwrap();
-            gateway_channel.endpoint2().send(GatewayMsg::Exit).unwrap();
+            emulator_gateway_channel.send(GatewayMsg::Exit).unwrap();
+            gateway_grpc_channel
+                .endpoint1()
+                .send(GatewayMsg::Exit)
+                .unwrap();
+            gateway_grpc_channel
+                .endpoint2()
+                .send(GatewayMsg::Exit)
+                .unwrap();
 
-            (emulator, grpc)
+            vec![emulator, gateway, grpc]
         }
     };
 
-    emulator_channel.send(EmulatorMsg::Stop).unwrap();
+    start_channel.send(EmulatorMsg::Stop).unwrap();
 
-    let _ = tokio::join!(emulator, grpc);
+    join_all(handles).await;
 
     Ok(())
 }

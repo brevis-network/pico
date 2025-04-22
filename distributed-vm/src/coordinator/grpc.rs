@@ -1,23 +1,19 @@
 use crate::{
     coordinator_server::{Coordinator, CoordinatorServer},
+    gateway::GatewayEndpoint,
     RiscvResult, RiscvTask, WorkerInfo,
 };
 use anyhow::Result;
 use derive_more::Constructor;
 use log::debug;
 use p3_commit::Pcs;
-use pico_vm::{
-    configs::config::StarkGenericConfig, messages::gateway::GatewayMsg,
-    thread::channel::DuplexUnboundedEndpoint,
-};
+use pico_vm::configs::config::StarkGenericConfig;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tonic::{async_trait, transport::Server, Request, Response, Status};
 
-type GatewayEndpoint<SC> = Arc<DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>;
-
 pub fn run<SC: Send + StarkGenericConfig + 'static>(
-    gateway_endpoint: GatewayEndpoint<SC>,
+    gateway_endpoint: Arc<GatewayEndpoint<SC>>,
 ) -> JoinHandle<()>
 where
     <SC::Pcs as Pcs<
@@ -46,7 +42,7 @@ where
 
 #[derive(Constructor)]
 struct GrpcService<SC: StarkGenericConfig> {
-    gateway_endpoint: GatewayEndpoint<SC>,
+    gateway_endpoint: Arc<GatewayEndpoint<SC>>,
 }
 
 #[async_trait]

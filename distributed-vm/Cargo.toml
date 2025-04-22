@@ -17,6 +17,7 @@ bincode.workspace = true
 clap.workspace = true
 crossbeam.workspace = true
 derive_more.workspace = true
+futures.workspace = true
 log.workspace = true
 p3-air.workspace = true
 p3-baby-bear.workspace = true

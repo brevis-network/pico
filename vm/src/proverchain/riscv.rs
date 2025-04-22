@@ -25,9 +25,9 @@ use crate::{
     },
     messages::gateway::GatewayMsg,
     primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
-    thread::channel::DuplexUnboundedEndpoint,
 };
 use alloc::sync::Arc;
+use crossbeam::channel::Sender;
 use p3_air::Air;
 use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
@@ -45,7 +45,7 @@ where
     shape_config: Option<RiscvShapeConfig<Val<SC>>>,
     pk: BaseProvingKey<SC>,
     vk: BaseVerifyingKey<SC>,
-    coord_endpoint: Option<Arc<DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>>,
+    coord_endpoint: Option<Arc<Sender<GatewayMsg<SC>>>>,
 }
 
 impl<SC> RiscvProver<SC, Program>
@@ -122,7 +122,7 @@ where
         input: Self::Input<'_>,
         opts: Self::Opts,
         shape_config: Option<Self::ShapeConfig>,
-        coord_endpoint: Option<Arc<DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>>,
+        coord_endpoint: Option<Arc<Sender<GatewayMsg<SC>>>>,
     ) -> Self {
         let (config, elf) = input;
         let mut program = Compiler::new(SourceType::RISCV, elf).compile();

@@ -8,8 +8,8 @@ use crate::{
     configs::config::{StarkGenericConfig, Val},
     machine::{chip::ChipBehavior, keys::HashableKey, machine::BaseMachine, proof::MetaProof},
     messages::gateway::GatewayMsg,
-    thread::channel::DuplexUnboundedEndpoint,
 };
+use crossbeam::channel::Sender;
 use std::sync::Arc;
 
 // re-exports
@@ -42,7 +42,7 @@ pub trait InitialProverSetup<SC: StarkGenericConfig> {
         input: Self::Input<'_>,
         opts: Self::Opts,
         shape_config: Option<Self::ShapeConfig>,
-        coord_endpoint: Option<Arc<DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>>,
+        coord_endpoint: Option<Arc<Sender<GatewayMsg<SC>>>>,
     ) -> Self;
 }
 

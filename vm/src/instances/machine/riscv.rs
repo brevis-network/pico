@@ -23,7 +23,6 @@ use crate::{
         riscv::{RiscvMsg, RiscvRequest},
     },
     primitives::{consts::MAX_LOG_CHUNK_SIZE, Poseidon2Init},
-    thread::channel::DuplexUnboundedEndpoint,
 };
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
@@ -60,7 +59,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-        coord_endpoint: Option<&DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>,
+        coord_endpoint: Option<&Sender<GatewayMsg<SC>>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -177,7 +176,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-        coord_endpoint: Option<&DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>>,
+        coord_endpoint: Option<&Sender<GatewayMsg<SC>>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -411,7 +410,7 @@ where
     fn prove_remote(
         &self,
         record_receiver: Receiver<EmulationRecord>,
-        coord_endpoint: &DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>,
+        coord_endpoint: &Sender<GatewayMsg<SC>>,
     ) -> Vec<BaseProof<SC>> {
         let mut chunk_index = 0;
 
@@ -434,26 +433,11 @@ where
             chunk_index += 1;
         }
 
-        let mut proofs = Vec::with_capacity(chunk_index);
-        proofs.resize(chunk_index, None);
+        // send the emulator complete message
+        coord_endpoint.send(GatewayMsg::EmulatorComplete).unwrap();
 
-        while let Ok(msg) = coord_endpoint.recv() {
-            match msg {
-                GatewayMsg::Riscv(RiscvMsg::Response(res), _, _) => {
-                    let chunk_index = res.chunk_index;
-                    debug!("receive riscv proof-{chunk_index}");
-
-                    proofs[chunk_index] = Some(res.proof);
-                    if proofs.iter().all(|p| p.is_some()) {
-                        break;
-                    }
-                }
-                GatewayMsg::Exit => break,
-                _ => panic!("unsupported"),
-            }
-        }
-
-        proofs.into_iter().map(|p| p.unwrap()).collect()
+        // TODO: we don't continue processing the further processes (as covert, combine) here
+        vec![]
     }
 }
 
