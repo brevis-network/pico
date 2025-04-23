@@ -8,12 +8,13 @@ use derive_more::Constructor;
 use log::debug;
 use p3_commit::Pcs;
 use pico_vm::configs::config::StarkGenericConfig;
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::task::JoinHandle;
 use tonic::{async_trait, transport::Server, Request, Response, Status};
 
 pub fn run<SC: Send + StarkGenericConfig + 'static>(
     gateway_endpoint: Arc<GatewayEndpoint<SC>>,
+    addr: SocketAddr,
 ) -> JoinHandle<()>
 where
     <SC::Pcs as Pcs<
@@ -24,8 +25,6 @@ where
 {
     debug!("[coordinator] grpc server init");
 
-    // TODO: read from a toml file
-    let addr = "[::1]:50051".parse().unwrap();
     let srv = GrpcService::new(gateway_endpoint);
 
     let handle = tokio::spawn(async move {

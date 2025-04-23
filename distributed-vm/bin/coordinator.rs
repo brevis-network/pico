@@ -4,57 +4,40 @@ use distributed_vm::{
     coordinator::{config::CoordinatorConfig, emulator, grpc},
     gateway,
 };
+use dotenvy::dotenv;
 use futures::future::join_all;
 use log::debug;
-use pico_perf::common::{bench_field::BenchField, bench_program::PROGRAMS};
+use pico_perf::common::bench_field::BenchField;
 use pico_vm::{
     configs::stark_config::{bb_poseidon2::BabyBearPoseidon2, KoalaBearPoseidon2},
     machine::logger::setup_logger,
     messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
     thread::channel::{DuplexUnboundedChannel, SingleUnboundedChannel},
 };
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 use tokio::signal::ctrl_c;
-
-#[derive(Debug, Parser)]
-#[clap(author, version, about, long_about=None)]
-struct Args {
-    #[clap(long, default_value = "kb")]
-    field: String,
-
-    // #[clap(long, default_value = "reth-17106222")]
-    #[clap(long, default_value = "fibonacci-300kn")]
-    program: String,
-}
-
-impl From<Args> for CoordinatorConfig {
-    fn from(args: Args) -> Self {
-        let field = BenchField::from_str(&args.field).unwrap();
-        let program = *PROGRAMS.iter().find(|p| p.name == args.program).unwrap();
-
-        Self { field, program }
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     setup_logger();
 
-    let cfg = Arc::new(CoordinatorConfig::from(Args::parse()));
-    let field = cfg.field;
+    dotenv().ok();
+
+    let cfg = Arc::new(CoordinatorConfig::parse());
+    debug!("starting with config: {:?}", cfg);
 
     // emulator channel for starting the proving process
     let start_channel = SingleUnboundedChannel::default();
     // TODO: fix to trggier from a gprc call
-    start_channel.send(EmulatorMsg::Start).unwrap();
+    start_channel.send(EmulatorMsg::Start)?;
 
-    let handles = match field {
+    let handles = match cfg.field {
         BenchField::BabyBear => {
             let emulator_gateway_channel = SingleUnboundedChannel::default();
             let gateway_grpc_channel = DuplexUnboundedChannel::default();
 
             let emulator = emulator::run::<BabyBearPoseidon2>(
-                cfg,
+                cfg.clone(),
                 start_channel.receiver(),
                 emulator_gateway_channel.sender(),
             );
@@ -62,21 +45,15 @@ async fn main() -> Result<()> {
                 emulator_gateway_channel.receiver(),
                 gateway_grpc_channel.endpoint1(),
             );
-            let grpc = grpc::run(gateway_grpc_channel.endpoint2());
+            let grpc = grpc::run(gateway_grpc_channel.endpoint2(), cfg.grpc_addr);
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
-            ctrl_c().await.unwrap();
+            ctrl_c().await?;
 
-            emulator_gateway_channel.send(GatewayMsg::Exit).unwrap();
-            gateway_grpc_channel
-                .endpoint1()
-                .send(GatewayMsg::Exit)
-                .unwrap();
-            gateway_grpc_channel
-                .endpoint2()
-                .send(GatewayMsg::Exit)
-                .unwrap();
+            emulator_gateway_channel.send(GatewayMsg::Exit)?;
+            gateway_grpc_channel.endpoint1().send(GatewayMsg::Exit)?;
+            gateway_grpc_channel.endpoint2().send(GatewayMsg::Exit)?;
 
             vec![emulator, gateway, grpc]
         }
@@ -85,7 +62,7 @@ async fn main() -> Result<()> {
             let gateway_grpc_channel = DuplexUnboundedChannel::default();
 
             let emulator = emulator::run::<KoalaBearPoseidon2>(
-                cfg,
+                cfg.clone(),
                 start_channel.receiver(),
                 emulator_gateway_channel.sender(),
             );
@@ -93,27 +70,21 @@ async fn main() -> Result<()> {
                 emulator_gateway_channel.receiver(),
                 gateway_grpc_channel.endpoint1(),
             );
-            let grpc = grpc::run(gateway_grpc_channel.endpoint2());
+            let grpc = grpc::run(gateway_grpc_channel.endpoint2(), cfg.grpc_addr);
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
-            ctrl_c().await.unwrap();
+            ctrl_c().await?;
 
-            emulator_gateway_channel.send(GatewayMsg::Exit).unwrap();
-            gateway_grpc_channel
-                .endpoint1()
-                .send(GatewayMsg::Exit)
-                .unwrap();
-            gateway_grpc_channel
-                .endpoint2()
-                .send(GatewayMsg::Exit)
-                .unwrap();
+            emulator_gateway_channel.send(GatewayMsg::Exit)?;
+            gateway_grpc_channel.endpoint1().send(GatewayMsg::Exit)?;
+            gateway_grpc_channel.endpoint2().send(GatewayMsg::Exit)?;
 
             vec![emulator, gateway, grpc]
         }
     };
 
-    start_channel.send(EmulatorMsg::Stop).unwrap();
+    start_channel.send(EmulatorMsg::Stop)?;
 
     join_all(handles).await;
 

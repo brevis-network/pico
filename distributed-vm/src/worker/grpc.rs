@@ -1,18 +1,17 @@
-use crate::{
-    coordinator_client::CoordinatorClient, worker::message::WorkerMsg, RiscvResult,
-    MAX_GRPC_MSG_SIZE,
-};
+use crate::{coordinator_client::CoordinatorClient, worker::message::WorkerMsg, RiscvResult};
 use p3_commit::Pcs;
 use pico_vm::{
     configs::config::StarkGenericConfig, messages::gateway::GatewayMsg,
     thread::channel::DuplexUnboundedEndpoint,
 };
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
 
 pub fn run<SC: StarkGenericConfig + 'static>(
     endpoint: Arc<DuplexUnboundedEndpoint<WorkerMsg<SC>, WorkerMsg<SC>>>,
+    coordinator_addr: SocketAddr,
+    max_grpc_msg_size: usize,
 ) -> JoinHandle<()>
 where
     <SC::Pcs as Pcs<
@@ -22,13 +21,14 @@ where
     <SC as StarkGenericConfig>::Domain: Send,
 {
     tokio::spawn(async move {
-        let channel = Channel::from_static("http://[::1]:50051")
+        let channel = Channel::from_shared(format!("http://{}", coordinator_addr))
+            .expect("invalid coordinator address")
             .connect()
             .await
             .unwrap();
         let mut client = CoordinatorClient::new(channel)
-            .max_encoding_message_size(MAX_GRPC_MSG_SIZE)
-            .max_decoding_message_size(MAX_GRPC_MSG_SIZE);
+            .max_encoding_message_size(max_grpc_msg_size)
+            .max_decoding_message_size(max_grpc_msg_size);
 
         while let Ok(msg) = endpoint.recv() {
             match msg {

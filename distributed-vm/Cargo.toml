@@ -38,6 +38,7 @@ tokio-stream.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tracing.workspace = true
+dotenvy.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true
