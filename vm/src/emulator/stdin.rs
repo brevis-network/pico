@@ -80,7 +80,7 @@ impl<P, I> EmulatorStdin<P, I> {
     // get both program and input for emulator
     pub fn get_program_and_input(&self, index: usize) -> (&P, &I, bool) {
         let flag_last = index == self.inputs.len() - 1;
-        println!("flag_last: {:?}", flag_last);
+        println!("batch flag_last: {:?}", flag_last);
 
         if index < self.programs.len() && index < self.inputs.len() {
             (&self.programs[index], &self.inputs[index], flag_last)
@@ -243,10 +243,10 @@ where
         riscv_vk: &BaseVerifyingKey<SC>,
         vk_root: [Val<SC>; DIGEST_SIZE],
         machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
-        proofs: &[BaseProof<SC>],
+        proof: &BaseProof<SC>,
         shape_config: &Option<RecursionShapeConfig<Val<SC>, RecursionChipType<Val<SC>>>>,
         chunk_index: usize,
-        // total: usize,
+        is_last: bool,
     ) -> Self
     where
         F: TwoAdicField
@@ -280,48 +280,34 @@ where
         riscv_vk.observed_by(&mut reconstruct_challenger);
 
         // construct programs and inputs
-        // let total = proofs.len();
-        let total = 2;
+        let flag_complete = is_last;
+        let flag_first_chunk = chunk_index == 0;
 
-        let pairs: Vec<_> = proofs
-            .par_iter()
-            .enumerate()
-            .map(|(i, proof)| {
-                let flag_complete = chunk_index == 3;
-                let flag_first_chunk = chunk_index == 0;
+        let input = ConvertStdin {
+            machine: machine.clone(),
+            riscv_vk: riscv_vk.clone(),
+            proofs: Arc::new([proof.clone()]),
+            base_challenger: base_challenger.clone(),
+            reconstruct_challenger: reconstruct_challenger.clone(),
+            flag_complete,
+            flag_first_chunk,
+            vk_root,
+        };
 
-                let input = ConvertStdin {
-                    machine: machine.clone(),
-                    riscv_vk: riscv_vk.clone(),
-                    proofs: Arc::new([proof.clone()]),
-                    base_challenger: base_challenger.clone(),
-                    reconstruct_challenger: reconstruct_challenger.clone(),
-                    flag_complete,
-                    flag_first_chunk,
-                    vk_root,
-                };
-                let mut program = ConvertVerifierCircuit::<CC, SC>::build(machine, &input);
+        let mut program = ConvertVerifierCircuit::<CC, SC>::build(machine, &input);
 
-                if vk_verification_enabled() {
-                    if let Some(config) = shape_config {
-                        config.padding_shape(&mut program);
-                    }
-                }
+        if vk_verification_enabled() {
+            if let Some(config) = shape_config {
+                config.padding_shape(&mut program);
+            }
+        }
 
-                program.print_stats();
-
-                (program, input)
-            })
-            .collect();
-
-        let (programs, inputs): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
-
-        let flag_empty = programs.is_empty();
+        program.print_stats();
 
         Self {
-            programs: programs.into(),
-            inputs: inputs.into(),
-            flag_empty,
+            programs: Arc::from([program]),
+            inputs: Arc::from([input]),
+            flag_empty: false,
             pointer: 0,
         }
     }

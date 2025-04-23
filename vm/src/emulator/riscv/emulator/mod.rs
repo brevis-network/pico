@@ -85,8 +85,14 @@ impl EmulationDeferredState {
         F: FnMut(EmulationRecord),
     {
         // Get the deferred records.
-        let records = self.deferred.split(emulation_done, opts);
+        let mut records = self.deferred.split(emulation_done, opts);
         debug!("split-chunks len: {:?}", records.len());
+
+        if emulation_done {
+            if let Some(last) = records.last_mut() {
+                last.is_last = true;
+            }
+        }
 
         records.into_iter().for_each(|mut r| {
             self.update_public_values(emulation_done, &mut r);

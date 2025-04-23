@@ -176,6 +176,7 @@ pub fn run_bb(
                     pk.observed_by(&mut challenger);
 
                     let chunk_index = req.chunk_index;
+                    let is_last_chunk = req.record.is_last;
 
                     debug!("[worker] start to prove chunk-{chunk_index}");
                     let start = Instant::now();
@@ -215,9 +216,10 @@ pub fn run_bb(
                         &riscv_vk,
                         vk_root,
                         machine.base_machine(),
-                        &vec![proof],
+                        &proof,
                         &recursion_shape_config,
-                        chunk_index
+                        chunk_index,
+                        is_last_chunk,
                     );
                     // TODO: replace SC::new() with convert_machine.config()
                     let convert_witness = ProvingWitness::setup_for_convert(
