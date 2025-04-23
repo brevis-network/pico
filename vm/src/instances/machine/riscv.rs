@@ -24,13 +24,13 @@ use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
-use p3_maybe_rayon::prelude::IndexedParallelIterator;
+use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefMutIterator};
 use p3_symmetric::Permutation;
-use std::{any::type_name, borrow::Borrow, cmp::min, mem, thread, time::Instant};
+use std::{any::type_name, array, borrow::Borrow, cmp::min, mem, thread, time::Instant};
 use tracing::{debug, debug_span, info, instrument};
 
 /// Maximum number of pending emulation record for proving
-const MAX_PENDING_PROVING_RECORDS: usize = 32;
+const MAX_PENDING_PROVING_RECORDS: usize = 4;
 
 pub struct RiscvMachine<SC, C>
 where
@@ -309,7 +309,7 @@ where
         pk: &BaseProvingKey<SC>,
         challenger: &SC::Challenger,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-        records: Vec<EmulationRecord>,
+        mut records: Vec<EmulationRecord>,
     ) -> Vec<BaseProof<SC>>
     where
         C: Air<ProverConstraintFolder<SC>>,
@@ -319,39 +319,44 @@ where
                 debug_span!(parent: &tracing::Span::current(), "riscv chunks prove loop", base_chunk, record_len)
                     .entered();
 
+        // complete records on host
         let chips = self.chips();
+        records.par_iter_mut().for_each(|record| {
+            // Complete the record.
+            RiscvMachine::complement_record_static(chips.clone(), record);
+
+            // Pad the shape.
+            if vk_verification_enabled() {
+                if let Some(shape_config) = shape_config {
+                    shape_config.padding_shape(record).unwrap();
+                }
+            }
+        });
+
+        // commit and prove records
+        let contexts: [_; MAX_PENDING_PROVING_RECORDS] = array::from_fn(|_| ProvingContext {
+            base_machine: self.base_machine.clone(),
+            pk: pk.clone(),
+            challenger: challenger.clone(),
+        });
         let proofs = records
             .into_pico_iter()
             .enumerate()
-            .map(|(i, mut record)| {
-                let chunk_index = base_chunk + i;
-                // Complete the record.
-                debug_span!(parent: &local_span, "complement_record", chunk_index).in_scope(|| {
-                    RiscvMachine::complement_record_static(chips.clone(), &mut record)
-                });
-
-                // Pad the shape.
-                if vk_verification_enabled() {
-                    if let Some(shape_config) = shape_config {
-                        debug_span!(parent: &local_span, "padding_shape", chunk_index)
-                            .in_scope(|| shape_config.padding_shape(&mut record).unwrap());
-                    }
-                }
+            .map(|(i, record)| {
+                let base_machine = &contexts[i].base_machine;
+                let pk = &contexts[i].pk;
+                let challenger = &contexts[i].challenger;
 
                 // Commit the record.
-                let main_commitment =
-                    debug_span!(parent: &local_span, "generate_and_commit_main_traces", chunk_index)
-                        .in_scope(|| self.base_machine.commit(&record).unwrap());
+                let main_commitment = base_machine.commit(&record).unwrap();
 
                 // Generate the proof.
-                debug_span!(parent: &local_span, "prove_plain", chunk_index).in_scope(|| {
-                    self.base_machine.prove_plain(
-                        pk,
-                        &mut challenger.clone(),
-                        base_chunk + i,
-                        main_commitment,
-                    )
-                })
+                base_machine.prove_plain(
+                    pk,
+                    &mut challenger.clone(),
+                    base_chunk + i,
+                    main_commitment,
+                )
             })
             .collect();
 
@@ -359,6 +364,16 @@ where
 
         proofs
     }
+}
+
+struct ProvingContext<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<SC::Val>,
+{
+    base_machine: BaseMachine<SC, C>,
+    pk: BaseProvingKey<SC>,
+    challenger: SC::Challenger,
 }
 
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
