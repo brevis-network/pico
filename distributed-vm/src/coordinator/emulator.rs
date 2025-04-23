@@ -169,7 +169,7 @@ impl EmulatorRunner for BabyBearPoseidon2 {
                 batch_num += 1;
             }
 
-            // Move and return the emulator for futher usage.
+            // Move and return the emulator for further usage.
             emulator
 
             // `record_sender` will be dropped when the emulator thread completes.
@@ -201,6 +201,9 @@ impl EmulatorRunner for BabyBearPoseidon2 {
         // send the emulator complete message
         gateway_endpoint.send(GatewayMsg::EmulatorComplete).unwrap();
 
+        let mut emulator = emulator_handle.join().unwrap();
+        info!("Total Cycles: {}", emulator.cycles());
+
         Ok(())
     }
 }
@@ -210,37 +213,103 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
         bench_program: &BenchProgram,
         gateway_endpoint: Arc<Sender<GatewayMsg<Self>>>,
     ) -> Result<()> {
+        // Setups
         let vk_manager = <KoalaBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
-        let vk_enabled = vk_manager.vk_verification_enabled();
+        let (elf, stdin) = load::<Program>(bench_program)?;
+        println!("bench program: {}", bench_program.name);
 
-        let (elf, stdin) = load(bench_program)?;
+        let riscv_machine =
+            RiscvMachine::new(RiscvKBSC::new(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
+        let mut program = Compiler::new(SourceType::RISCV, &elf).compile();
+        if vk_manager.vk_verification_enabled() {
+            let shape_config = RiscvShapeConfig::<KoalaBear>::default();
+            let p = Arc::get_mut(&mut program).expect("cannot get program");
+            shape_config
+                .padding_preprocessed_shape(p)
+                .expect("cannot padding preprocessed shape");
+        }
+        let (pk, vk) = riscv_machine.setup_keys(&program);
+
         let riscv_opts = EmulatorOpts::bench_riscv_ops();
-        let recursion_opts = EmulatorOpts::bench_recursion_opts();
+        let witness =
+            ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<KoalaBear>, Vec<u8>>::setup_for_riscv(
+                program.clone(),
+                stdin,
+                riscv_opts,
+                pk.clone(),
+                vk.clone(),
+            );
+        // Initialize the emulator.
+        let mut emulator = MetaEmulator::setup_riscv(&witness);
 
-        info!(
-            "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
-            riscv_opts.chunk_size, riscv_opts.chunk_batch_size
-        );
-        info!(
-            "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
-            recursion_opts.chunk_size, recursion_opts.chunk_batch_size
-        );
+        let channel_capacity = (4 * witness
+            .opts
+            .as_ref()
+            .map(|opts| opts.chunk_batch_size)
+            .unwrap_or(64)) as usize;
+        // Initialize the channel for sending emulation records from the emulator thread to prover.
+        let (record_sender, record_receiver): (Sender<_>, Receiver<_>) = bounded(channel_capacity);
 
-        // Conditionally create shape configs if VK is enabled.
-        let riscv_shape_config = vk_enabled.then(RiscvShapeConfig::<KoalaBear>::default);
+        // Start the emulator thread.
+        log_section("RISCV EMULATE PHASE");
+        let emulator_handle = thread::spawn(move || {
+            let mut batch_num = 1;
+            loop {
+                let start_local = Instant::now();
 
-        let riscv = RiscvProver::new_initial_prover(
-            (RiscvKBSC::new(), &elf),
-            riscv_opts,
-            riscv_shape_config,
-        );
+                let done = emulator.next_record_batch(&mut |record| {
+                    record_sender.send(record).expect(
+                        "Failed to send an emulation record from emulator thread to prover thread",
+                    )
+                });
+
+                tracing::debug!(
+                    "--- Generate riscv records for batch-{} in {:?}",
+                    batch_num,
+                    start_local.elapsed(),
+                );
+
+                if done {
+                    break;
+                }
+
+                batch_num += 1;
+            }
+
+            // Move and return the emulator for further usage.
+            emulator
+
+            // `record_sender` will be dropped when the emulator thread completes.
+        });
 
         // RISCV Phase
-        log_section("RISCV PHASE");
+        log_section("RISCV & CONVERT PHASE");
+        let mut chunk_index = 0;
 
-        // emulate the current program and send proving tasks to workers
-        info!("Emulating RISCV program");
-        riscv.prove_cycles(stdin);
+        while let Ok(record) = record_receiver.recv() {
+            let req = RiscvRequest {
+                chunk_index,
+                record,
+            };
+
+            tracing::debug!("send emulation record-{chunk_index}");
+            gateway_endpoint
+                .send(GatewayMsg::Riscv(
+                    RiscvMsg::Request(req),
+                    // TODO: fix to id and ip address
+                    chunk_index.to_string(),
+                    "".to_string(),
+                ))
+                .unwrap();
+
+            chunk_index += 1;
+        }
+
+        // send the emulator complete message
+        gateway_endpoint.send(GatewayMsg::EmulatorComplete).unwrap();
+
+        let mut emulator = emulator_handle.join().unwrap();
+        info!("Total Cycles: {}", emulator.cycles());
 
         Ok(())
     }

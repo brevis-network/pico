@@ -61,83 +61,6 @@ where
         [Val::<SC>::ZERO; DIGEST_SIZE]
     }
 }
-//
-// pub fn run<SC: Send + StarkGenericConfig + 'static>(
-//     sc: SC,
-//     program: BenchProgram,
-//     endpoint: Arc<DuplexUnboundedEndpoint<WorkerMsg<SC>, WorkerMsg<SC>>>,
-// ) -> JoinHandle<()>
-// where
-//     SC::Val: FieldSpecificPoseidon2Config + Poseidon2Init + PrimeField32 + Send,
-//     <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
-//     <SC::Val as FieldSpecificPoseidon2Config>::LinearLayers:
-//         GenericPoseidon2LinearLayers<<SC::Val as p3_field::Field>::Packing, 16>,
-//     <SC::Pcs as Pcs<
-//         <SC as StarkGenericConfig>::Challenge,
-//         <SC as StarkGenericConfig>::Challenger,
-//     >>::ProverData: Send,
-// {
-//     tokio::spawn(async move {
-//         let shape_config = RiscvShapeConfig::<SC::Val>::default();
-//         let machine = RiscvMachine::new(sc, RiscvChipType::all_chips(), RISCV_NUM_PVS);
-//
-//         let (elf, _) = load::<Program>(&program).unwrap();
-//         let riscv_shape_config =
-//             vk_verification_enabled().then(RiscvShapeConfig::<Val<SC>>::default);
-//         let riscv_compiler = Compiler::new(SourceType::RISCV, &elf);
-//         let mut riscv_program = riscv_compiler.compile();
-//         if let Some(ref shape_config) = riscv_shape_config {
-//             let program = Arc::get_mut(&mut riscv_program).expect("cannot get_mut arc");
-//             shape_config
-//                 .padding_preprocessed_shape(program)
-//                 .expect("cannot padding preprocessed shape");
-//         }
-//         let (pk, _) = machine.setup_keys(&riscv_program);
-//
-//         let challenger = machine.config().challenger();
-//
-//         while let Ok(msg) = endpoint.recv() {
-//             match msg {
-//                 WorkerMsg::ProcessTask(GatewayMsg::Riscv(
-//                     RiscvMsg::Request(req),
-//                     task_id,
-//                     ip_addr,
-//                 )) => {
-//                     let mut challenger = challenger.clone();
-//                     pk.observed_by(&mut challenger);
-//
-//                     let chunk_index = req.chunk_index;
-//
-//                     debug!("[worker] start to prove chunk-{chunk_index}");
-//
-//                     let proof = machine.prove_record(
-//                         chunk_index,
-//                         &pk,
-//                         &challenger,
-//                         Some(&shape_config),
-//                         req.record,
-//                     );
-//
-//                     debug!("[worker] finish proving chunk-{chunk_index}");
-//
-//                     // return the riscv result
-//                     let msg = WorkerMsg::RespondResult(GatewayMsg::Riscv(
-//                         RiscvMsg::Response(RiscvResponse { chunk_index, proof }),
-//                         task_id,
-//                         ip_addr,
-//                     ));
-//                     endpoint.send(msg).unwrap();
-//
-//                     // request for the next task
-//                     let msg = WorkerMsg::RequestTask;
-//                     endpoint.send(msg).unwrap();
-//                 }
-//                 WorkerMsg::Exit => break,
-//                 _ => panic!("unsupported"),
-//             }
-//         }
-//     })
-// }
 
 pub fn run_bb(
     program: BenchProgram,
@@ -272,16 +195,28 @@ pub fn run_kb(
     >,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let shape_config = RiscvShapeConfig::<KoalaBear>::default();
+        // opts and setups
+        let vk_manager = <KoalaBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
+        let vk_enabled = vk_manager.vk_verification_enabled();
+        let vk_root = get_vk_root(&vk_manager);
+        println!("vk_root: {:?}", vk_root);
+        let riscv_shape_config = if vk_enabled {
+            Some(RiscvShapeConfig::<KoalaBear>::default())
+        } else {
+            None
+        };
+        let recursion_shape_config = vk_enabled
+            .then(|| RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default());
+        let (elf, _) = load::<Program>(&program).unwrap();
+
+        // RISCV PHASE
+        log_section("RISCV PHASE");
         let machine = RiscvMachine::new(
             KoalaBearPoseidon2::default(),
             RiscvChipType::all_chips(),
             RISCV_NUM_PVS,
         );
 
-        let (elf, _) = load::<Program>(&program).unwrap();
-        let riscv_shape_config =
-            vk_verification_enabled().then(RiscvShapeConfig::<KoalaBear>::default);
         let riscv_compiler = Compiler::new(SourceType::RISCV, &elf);
         let mut riscv_program = riscv_compiler.compile();
         if let Some(ref shape_config) = riscv_shape_config {
@@ -305,6 +240,7 @@ pub fn run_kb(
                     pk.observed_by(&mut challenger);
 
                     let chunk_index = req.chunk_index;
+                    let is_last_chunk = req.record.is_last;
 
                     debug!("[worker] start to prove chunk-{chunk_index}");
                     let start = Instant::now();
@@ -313,21 +249,17 @@ pub fn run_kb(
                         chunk_index,
                         &pk,
                         &challenger,
-                        Some(&shape_config),
+                        riscv_shape_config.as_ref(),
                         req.record,
                     );
 
-                    // CONVERT Phase
+                    println!("RISCV Phase complete! chunk_index: {}", chunk_index);
+
+                    // CONVERT PHASE
+                    log_section("CONVERT PHASE");
+
                     let recursion_opts = EmulatorOpts::default();
                     debug!("recursion_opts: {:?}", recursion_opts);
-                    let vk_manager =
-                        <KoalaBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
-                    let vk_enabled = vk_manager.vk_verification_enabled();
-                    let recursion_shape_config = vk_enabled.then(|| {
-                        RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default()
-                    });
-
-                    let vk_root = get_vk_root(&vk_manager);
 
                     let convert_machine = ConvertMachine::new(
                         KoalaBearPoseidon2::new(),
@@ -336,15 +268,17 @@ pub fn run_kb(
                     );
 
                     // println!("Generating CONVERT proof (at {:?})..", start.elapsed());
-                    let convert_stdin = EmulatorStdin::setup_for_convert::<
+                    let convert_stdin = EmulatorStdin::setup_for_convert_with_index::<
                         <KoalaBearSimple as FieldGenericConfig>::F,
                         KoalaBearSimple,
                     >(
                         &riscv_vk,
                         vk_root,
                         machine.base_machine(),
-                        &vec![proof],
+                        &proof,
                         &recursion_shape_config,
+                        chunk_index,
+                        is_last_chunk,
                     );
                     // TODO: replace SC::new() with convert_machine.config()
                     let convert_witness = ProvingWitness::setup_for_convert(
@@ -353,9 +287,10 @@ pub fn run_kb(
                         recursion_opts,
                     );
 
-                    let proof = convert_machine.prove(&convert_witness);
+                    let proof =
+                        convert_machine.prove_with_index(chunk_index as u32, &convert_witness);
 
-                    debug!(
+                    info!(
                         "[worker] finish proving chunk-{chunk_index}, time used: {}ms",
                         start.elapsed().as_millis()
                     );
