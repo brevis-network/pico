@@ -110,12 +110,8 @@ fn bench_bb(bench_program: &BenchProgram) -> Result<PerformanceReport> {
     let recursion_shape_config =
         vk_enabled.then(RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default);
 
-    let riscv = RiscvProver::new_initial_prover(
-        (RiscvBBSC::new(), &elf),
-        riscv_opts,
-        riscv_shape_config,
-        None,
-    );
+    let riscv =
+        RiscvProver::new_initial_prover((RiscvBBSC::new(), &elf), riscv_opts, riscv_shape_config);
     let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, recursion_shape_config);
 
     let recursion_shape_config =
@@ -237,12 +233,8 @@ fn bench_kb(bench_program: &BenchProgram) -> Result<PerformanceReport> {
     let recursion_shape_config =
         vk_enabled.then(RecursionShapeConfig::<KoalaBear, RecursionChipType<KoalaBear>>::default);
 
-    let riscv = RiscvProver::new_initial_prover(
-        (RiscvKBSC::new(), &elf),
-        riscv_opts,
-        riscv_shape_config,
-        None,
-    );
+    let riscv =
+        RiscvProver::new_initial_prover((RiscvKBSC::new(), &elf), riscv_opts, riscv_shape_config);
     let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, recursion_shape_config);
 
     let recursion_shape_config =
@@ -363,7 +355,7 @@ where
         riscv_opts.chunk_size, riscv_opts.chunk_batch_size
     );
 
-    let riscv = RiscvProver::new_initial_prover((SC::new(), &elf), riscv_opts, None, None);
+    let riscv = RiscvProver::new_initial_prover((SC::new(), &elf), riscv_opts, None);
 
     log_section("RISCV PHASE");
     info!("Running RISCV");

@@ -59,7 +59,6 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-        coord_endpoint: Option<&Sender<GatewayMsg<SC>>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -121,17 +120,13 @@ where
             // `record_sender` will be dropped when the emulator thread completes.
         });
 
-        let all_proofs = if cfg!(feature = "distributed") {
-            self.prove_remote(record_receiver, coord_endpoint.unwrap())
-        } else {
-            self.prove_local(
-                pk,
-                &challenger,
-                shape_config,
-                record_receiver,
-                &start_global,
-            )
-        };
+        let all_proofs = self.prove_local(
+            pk,
+            &challenger,
+            shape_config,
+            record_receiver,
+            &start_global,
+        );
 
         let mut emulator = emulator_handle.join().unwrap();
         let cycles = emulator.cycles();
@@ -176,7 +171,6 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-        coord_endpoint: Option<&Sender<GatewayMsg<SC>>>,
     ) -> (MetaProof<SC>, u64)
     where
         C: for<'a> Air<
@@ -186,9 +180,8 @@ where
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             > + Air<ProverConstraintFolder<SC>>,
-        <SC as StarkGenericConfig>::Domain: Send,
     {
-        self.prove_with_shape_cycles(witness, shape_config, coord_endpoint)
+        self.prove_with_shape_cycles(witness, shape_config)
     }
 
     /// Generate RiscV proof for one emulation record.
@@ -405,39 +398,6 @@ where
         global_lookup_debugger.print_results();
 
         all_proofs
-    }
-
-   pub fn prove_remote(
-        &self,
-        record_receiver: Receiver<EmulationRecord>,
-        coord_endpoint: &Sender<GatewayMsg<SC>>,
-    ) -> Vec<BaseProof<SC>> {
-        let mut chunk_index = 0;
-
-        while let Ok(record) = record_receiver.recv() {
-            let req = RiscvRequest {
-                chunk_index,
-                record,
-            };
-
-            debug!("send emulation record-{chunk_index}");
-            coord_endpoint
-                .send(GatewayMsg::Riscv(
-                    RiscvMsg::Request(req),
-                    // TODO: fix to id and ip address
-                    chunk_index.to_string(),
-                    "".to_string(),
-                ))
-                .unwrap();
-
-            chunk_index += 1;
-        }
-
-        // send the emulator complete message
-        coord_endpoint.send(GatewayMsg::EmulatorComplete).unwrap();
-
-        // TODO: we don't continue processing the further processes (as covert, combine) here
-        vec![]
     }
 }
 

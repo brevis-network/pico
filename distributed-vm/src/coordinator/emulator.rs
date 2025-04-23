@@ -40,7 +40,11 @@ use pico_vm::{
         machine::riscv::RiscvMachine,
     },
     machine::{machine::MachineBehavior, proof::MetaProof, witness::ProvingWitness},
-    messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
+    messages::{
+        emulator::EmulatorMsg,
+        gateway::GatewayMsg,
+        riscv::{RiscvMsg, RiscvRequest},
+    },
     primitives::consts::RISCV_NUM_PVS,
     proverchain::{
         CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
@@ -185,11 +189,32 @@ impl EmulatorRunner for BabyBearPoseidon2 {
             // `record_sender` will be dropped when the emulator thread completes.
         });
 
-
         // RISCV Phase
         log_section("RISCV & CONVERT PHASE");
         info!("Generating RISCV & CONVERT proof");
-        riscv.prove_remote(record_receiver, &gateway_endpoint);
+        let mut chunk_index = 0;
+
+        while let Ok(record) = record_receiver.recv() {
+            let req = RiscvRequest {
+                chunk_index,
+                record,
+            };
+
+            tracing::debug!("send emulation record-{chunk_index}");
+            gateway_endpoint
+                .send(GatewayMsg::Riscv(
+                    RiscvMsg::Request(req),
+                    // TODO: fix to id and ip address
+                    chunk_index.to_string(),
+                    "".to_string(),
+                ))
+                .unwrap();
+
+            chunk_index += 1;
+        }
+
+        // send the emulator complete message
+        gateway_endpoint.send(GatewayMsg::EmulatorComplete).unwrap();
 
         Ok(())
     }
@@ -223,7 +248,6 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
             (RiscvKBSC::new(), &elf),
             riscv_opts,
             riscv_shape_config,
-            Some(gateway_endpoint),
         );
 
         // RISCV Phase

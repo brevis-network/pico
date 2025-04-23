@@ -18,12 +18,8 @@ pub struct M31RiscvProverClient {
 
 impl M31RiscvProverClient {
     pub fn new(elf: &[u8]) -> M31RiscvProverClient {
-        let riscv = RiscvProver::new_initial_prover(
-            (M31Poseidon2::new(), elf),
-            Default::default(),
-            None,
-            None,
-        );
+        let riscv =
+            RiscvProver::new_initial_prover((M31Poseidon2::new(), elf), Default::default(), None);
         let stdin_builder = Rc::new(RefCell::new(
             EmulatorStdin::<Program, Vec<u8>>::new_builder(),
         ));

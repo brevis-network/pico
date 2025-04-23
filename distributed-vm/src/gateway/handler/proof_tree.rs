@@ -1,6 +1,8 @@
 use anyhow::Result;
-use pico_vm::{configs::config::StarkGenericConfig, machine::proof::BaseProof};
-use pico_vm::machine::proof::MetaProof;
+use pico_vm::{
+    configs::config::StarkGenericConfig,
+    machine::proof::{BaseProof, MetaProof},
+};
 
 pub struct ProofTree<SC: StarkGenericConfig> {
     leaves: Vec<Option<MetaProof<SC>>>,

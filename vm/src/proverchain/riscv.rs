@@ -45,7 +45,6 @@ where
     shape_config: Option<RiscvShapeConfig<Val<SC>>>,
     pk: BaseProvingKey<SC>,
     vk: BaseVerifyingKey<SC>,
-    coord_endpoint: Option<Arc<Sender<GatewayMsg<SC>>>>,
 }
 
 impl<SC> RiscvProver<SC, Program>
@@ -69,11 +68,8 @@ where
             self.pk.clone(),
             self.vk.clone(),
         );
-        self.machine.prove_with_shape(
-            &witness,
-            self.shape_config.as_ref(),
-            self.coord_endpoint.as_deref(),
-        )
+        self.machine
+            .prove_with_shape(&witness, self.shape_config.as_ref())
     }
 
     pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
@@ -122,7 +118,6 @@ where
         input: Self::Input<'_>,
         opts: Self::Opts,
         shape_config: Option<Self::ShapeConfig>,
-        coord_endpoint: Option<Arc<Sender<GatewayMsg<SC>>>>,
     ) -> Self {
         let (config, elf) = input;
         let mut program = Compiler::new(SourceType::RISCV, elf).compile();
@@ -145,7 +140,6 @@ where
             shape_config,
             pk,
             vk,
-            coord_endpoint,
         }
     }
 }

@@ -42,7 +42,6 @@ pub trait InitialProverSetup<SC: StarkGenericConfig> {
         input: Self::Input<'_>,
         opts: Self::Opts,
         shape_config: Option<Self::ShapeConfig>,
-        coord_endpoint: Option<Arc<Sender<GatewayMsg<SC>>>>,
     ) -> Self;
 }
 
