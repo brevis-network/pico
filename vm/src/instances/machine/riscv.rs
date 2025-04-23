@@ -167,23 +167,6 @@ where
         )
     }
 
-    pub fn prove_with_shape(
-        &self,
-        witness: &ProvingWitness<SC, C, Vec<u8>>,
-        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-    ) -> (MetaProof<SC>, u64)
-    where
-        C: for<'a> Air<
-                DebugConstraintFolder<
-                    'a,
-                    <SC as StarkGenericConfig>::Val,
-                    <SC as StarkGenericConfig>::Challenge,
-                >,
-            > + Air<ProverConstraintFolder<SC>>,
-    {
-        self.prove_with_shape_cycles(witness, shape_config)
-    }
-
     /// Generate RiscV proof for one emulation record.
     pub fn prove_record(
         &self,

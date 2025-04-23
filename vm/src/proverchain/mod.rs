@@ -7,10 +7,7 @@ mod riscv;
 use crate::{
     configs::config::{StarkGenericConfig, Val},
     machine::{chip::ChipBehavior, keys::HashableKey, machine::BaseMachine, proof::MetaProof},
-    messages::gateway::GatewayMsg,
 };
-use crossbeam::channel::Sender;
-use std::sync::Arc;
 
 // re-exports
 pub use combine::CombineProver;
@@ -34,7 +31,7 @@ where
 }
 
 /// Trait to assist with inline proving
-pub trait InitialProverSetup<SC: StarkGenericConfig> {
+pub trait InitialProverSetup {
     type Input<'a>;
     type Opts;
     type ShapeConfig;

@@ -106,37 +106,22 @@ impl EmulatorRunner for BabyBearPoseidon2 {
         bench_program: &BenchProgram,
         gateway_endpoint: Arc<Sender<GatewayMsg<Self>>>,
     ) -> Result<()> {
+        // Setups
         let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
-        let vk_enabled = vk_manager.vk_verification_enabled();
-
         let (elf, stdin) = load::<Program>(bench_program)?;
         println!("bench program: {}", bench_program.name);
-        let riscv_opts = EmulatorOpts::bench_riscv_ops();
-        let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
-        info!(
-            "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
-            riscv_opts.chunk_size, riscv_opts.chunk_batch_size
-        );
-        info!(
-            "Recursion Chunk Size: {}, Recursion Chunk Batch Size: {}",
-            recursion_opts.chunk_size, recursion_opts.chunk_batch_size
-        );
-
-        // Conditionally create shape configs if VK is enabled.
-        let riscv_shape_config = vk_enabled.then(RiscvShapeConfig::<BabyBear>::default);
-
-        let riscv = RiscvMachine::new(RiscvBBSC::new(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
+        let riscv_machine =
+            RiscvMachine::new(RiscvBBSC::new(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
         let mut program = Compiler::new(SourceType::RISCV, &elf).compile();
-        if vk_verification_enabled() {
-            if let Some(shape_config) = riscv_shape_config.clone() {
-                let p = Arc::get_mut(&mut program).expect("cannot get program");
-                shape_config
-                    .padding_preprocessed_shape(p)
-                    .expect("cannot padding preprocessed shape");
-            }
+        if vk_manager.vk_verification_enabled() {
+            let shape_config = RiscvShapeConfig::<BabyBear>::default();
+            let p = Arc::get_mut(&mut program).expect("cannot get program");
+            shape_config
+                .padding_preprocessed_shape(p)
+                .expect("cannot padding preprocessed shape");
         }
-        let (pk, vk) = riscv.setup_keys(&program);
+        let (pk, vk) = riscv_machine.setup_keys(&program);
 
         let riscv_opts = EmulatorOpts::bench_riscv_ops();
         let witness =
@@ -159,6 +144,7 @@ impl EmulatorRunner for BabyBearPoseidon2 {
         let (record_sender, record_receiver): (Sender<_>, Receiver<_>) = bounded(channel_capacity);
 
         // Start the emulator thread.
+        log_section("RISCV EMULATE PHASE");
         let emulator_handle = thread::spawn(move || {
             let mut batch_num = 1;
             loop {
@@ -191,7 +177,6 @@ impl EmulatorRunner for BabyBearPoseidon2 {
 
         // RISCV Phase
         log_section("RISCV & CONVERT PHASE");
-        info!("Generating RISCV & CONVERT proof");
         let mut chunk_index = 0;
 
         while let Ok(record) = record_receiver.recv() {

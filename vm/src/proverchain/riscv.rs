@@ -23,11 +23,9 @@ use crate::{
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
-    messages::gateway::GatewayMsg,
     primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
 };
 use alloc::sync::Arc;
-use crossbeam::channel::Sender;
 use p3_air::Air;
 use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
@@ -69,7 +67,7 @@ where
             self.vk.clone(),
         );
         self.machine
-            .prove_with_shape(&witness, self.shape_config.as_ref())
+            .prove_with_shape_cycles(&witness, self.shape_config.as_ref())
     }
 
     pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
@@ -99,7 +97,7 @@ where
     }
 }
 
-impl<SC> InitialProverSetup<SC> for RiscvProver<SC, Program>
+impl<SC> InitialProverSetup for RiscvProver<SC, Program>
 where
     SC: Send + StarkGenericConfig,
     Com<SC>: Send + Sync,
