@@ -45,6 +45,7 @@ use pico_vm::{
 use std::{fmt::Debug, sync::Arc, time::Instant};
 use tokio::task::JoinHandle;
 use tracing::info;
+use pico_perf::common::print_utils::log_section;
 
 // TODO: remove redundant code
 pub fn get_vk_root<SC>(vk_manager: &VkMerkleManager<SC>) -> [Val<SC>; DIGEST_SIZE]
@@ -143,16 +144,29 @@ pub fn run_bb(
     >,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let shape_config = RiscvShapeConfig::<BabyBear>::default();
+        // opts and setups
+        let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
+        let vk_enabled = vk_manager.vk_verification_enabled();
+        let vk_root = get_vk_root(&vk_manager);
+        println!("vk_root: {:?}", vk_root);
+        let riscv_shape_config = if vk_enabled {
+            Some(RiscvShapeConfig::<BabyBear>::default())
+        } else {
+            None
+        };
+        let recursion_shape_config = vk_enabled.then(|| {
+            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default()
+        });
+        let (elf, _) = load::<Program>(&program).unwrap();
+
+        // RISCV PHASE
+        log_section("RISCV PHASE");
         let machine = RiscvMachine::new(
             BabyBearPoseidon2::default(),
             RiscvChipType::all_chips(),
             RISCV_NUM_PVS,
         );
 
-        let (elf, _) = load::<Program>(&program).unwrap();
-        let riscv_shape_config =
-            vk_verification_enabled().then(RiscvShapeConfig::<BabyBear>::default);
         let riscv_compiler = Compiler::new(SourceType::RISCV, &elf);
         let mut riscv_program = riscv_compiler.compile();
         if let Some(ref shape_config) = riscv_shape_config {
@@ -185,22 +199,21 @@ pub fn run_bb(
                         chunk_index,
                         &pk,
                         &challenger,
-                        Some(&shape_config),
+                        riscv_shape_config.as_ref(),
                         req.record,
                     );
 
-                    println!("riscv complete! chunk_index: {}", chunk_index);
-                    // CONVERT Phase
+                    println!("RISCV Phase complete! chunk_index: {}", chunk_index);
+
+                    // CONVERT PHASE
+                    log_section("CONVERT PHASE");
+
                     let recursion_opts = EmulatorOpts::default();
                     debug!("recursion_opts: {:?}", recursion_opts);
-                    let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
-                    let vk_enabled = vk_manager.vk_verification_enabled();
-                    let recursion_shape_config = vk_enabled.then(|| {
-                        RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default()
-                    });
 
-                    let vk_root = get_vk_root(&vk_manager);
-                    println!("vk_root: {:?}", vk_root);
+
+
+
 
                     let convert_machine = ConvertMachine::new(
                         BabyBearPoseidon2::new(),

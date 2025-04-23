@@ -5,6 +5,7 @@ use crate::{
 };
 use derive_more::Constructor;
 
+// TODO: rename
 #[derive(Clone)]
 pub enum RiscvMsg<SC: StarkGenericConfig> {
     Request(RiscvRequest),

@@ -39,6 +39,7 @@ pub const PROGRAMS: &[BenchProgram] = &[
 
 fn load_input(input: &str) -> Result<Vec<u8>, Error> {
     if input == "fibonacci-300kn" {
+        // TODO: Temp update to locally test
         Ok(bincode::serialize(&20)?)
     } else {
         Ok(fs::read(input)?)

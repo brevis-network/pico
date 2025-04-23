@@ -80,7 +80,6 @@ impl<P, I> EmulatorStdin<P, I> {
     // get both program and input for emulator
     pub fn get_program_and_input(&self, index: usize) -> (&P, &I, bool) {
         let flag_last = index == self.inputs.len() - 1;
-        println!("batch flag_last: {:?}", flag_last);
 
         if index < self.programs.len() && index < self.inputs.len() {
             (&self.programs[index], &self.inputs[index], flag_last)

@@ -212,7 +212,7 @@ macro_rules! impl_convert_machine {
     };
 }
 
-// TODO:
+// TODO: cleanup this fn (remove loop and batch)
 macro_rules! impl_indexed_convert_machine {
     ($emul_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident) => {
         impl<C> ConvertMachine<$recur_sc, C>
@@ -258,6 +258,10 @@ macro_rules! impl_indexed_convert_machine {
                     let start = Instant::now();
                     let (mut batch_records, batch_pks, batch_vks, done) =
                     debug_span!("emulate_batch_records").in_scope(|| {emulator.next_record_keys_batch()});
+
+                    assert_eq!(batch_records.len(), 1);
+                    assert_eq!(batch_pks.len(), 1);
+                    assert_eq!(batch_vks.len(), 1);
 
                     debug_span!("complement_record").in_scope(|| {self.complement_record(batch_records.as_mut_slice())});
 
