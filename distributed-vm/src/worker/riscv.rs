@@ -6,7 +6,10 @@ use p3_field::{FieldAlgebra, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 use p3_symmetric::Permutation;
-use pico_perf::common::bench_program::{load, BenchProgram};
+use pico_perf::common::{
+    bench_program::{load, BenchProgram},
+    print_utils::log_section,
+};
 use pico_vm::{
     compiler::{
         recursion::circuit::{config::CircuitConfig, hash::FieldHasher, witness::Witnessable},
@@ -45,7 +48,6 @@ use pico_vm::{
 use std::{fmt::Debug, sync::Arc, time::Instant};
 use tokio::task::JoinHandle;
 use tracing::info;
-use pico_perf::common::print_utils::log_section;
 
 // TODO: remove redundant code
 pub fn get_vk_root<SC>(vk_manager: &VkMerkleManager<SC>) -> [Val<SC>; DIGEST_SIZE]
@@ -154,9 +156,8 @@ pub fn run_bb(
         } else {
             None
         };
-        let recursion_shape_config = vk_enabled.then(|| {
-            RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default()
-        });
+        let recursion_shape_config = vk_enabled
+            .then(|| RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default());
         let (elf, _) = load::<Program>(&program).unwrap();
 
         // RISCV PHASE
@@ -211,10 +212,6 @@ pub fn run_bb(
                     let recursion_opts = EmulatorOpts::default();
                     debug!("recursion_opts: {:?}", recursion_opts);
 
-
-
-
-
                     let convert_machine = ConvertMachine::new(
                         BabyBearPoseidon2::new(),
                         RecursionChipType::<BabyBear>::all_chips(),
@@ -241,7 +238,8 @@ pub fn run_bb(
                         recursion_opts,
                     );
 
-                    let proof = convert_machine.prove_with_index(chunk_index as u32, &convert_witness);
+                    let proof =
+                        convert_machine.prove_with_index(chunk_index as u32, &convert_witness);
 
                     info!(
                         "[worker] finish proving chunk-{chunk_index}, time used: {}ms",

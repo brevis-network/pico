@@ -193,7 +193,6 @@ impl EmulatorRunner for BabyBearPoseidon2 {
         let recursion_shape_config =
             vk_enabled.then(RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default);
 
-
         let riscv_vk = &vk;
 
         // RISCV Phase
@@ -212,8 +211,6 @@ impl EmulatorRunner for BabyBearPoseidon2 {
         // let (proof, convert_duration) = time_operation(|| convert.prove(proof));
         let convert_duration = Duration::ZERO;
 
-
-
         // JUST FOR TEMP CHECK
         let riscv = RiscvProver::new_initial_prover(
             (RiscvBBSC::new(), &elf),
@@ -230,7 +227,6 @@ impl EmulatorRunner for BabyBearPoseidon2 {
             CombineProver::new_with_prev(&convert, recursion_opts, recursion_shape_config);
         let compress = CompressProver::new_with_prev(&combine, (), None);
         let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
-
 
         info!("Verifying CONVERT proof..");
         assert!(convert.verify(&proof, riscv_vk));

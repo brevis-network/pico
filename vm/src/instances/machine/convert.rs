@@ -26,7 +26,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, debug_span, instrument, info};
+use tracing::{debug, debug_span, info, instrument};
 
 pub struct ConvertMachine<SC, C>
 where

@@ -249,10 +249,10 @@ where
     ) -> Self
     where
         F: TwoAdicField
-        + PrimeField32
-        + Witnessable<CC, WitnessVariable = Felt<CC::F>>
-        + BinomiallyExtendable<EXTENSION_DEGREE>
-        + FieldSpecificPoseidon2Config,
+            + PrimeField32
+            + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+            + BinomiallyExtendable<EXTENSION_DEGREE>
+            + FieldSpecificPoseidon2Config,
         SC: FieldFriConfigVariable<
             CC,
             Val = F,
@@ -270,7 +270,10 @@ where
             for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
         SC: Send + Sync,
     {
-        println!("chunk_index in setup_for_convert_with_index: {:?}", chunk_index);
+        println!(
+            "chunk_index in setup_for_convert_with_index: {:?}",
+            chunk_index
+        );
         // initialize for base_ and reconstruct_challenger
         let [mut base_challenger, mut reconstruct_challenger] =
             array::from_fn(|_| machine.config().challenger());
