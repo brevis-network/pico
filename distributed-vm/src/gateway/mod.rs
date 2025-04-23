@@ -24,6 +24,7 @@ where
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
+    <SC as StarkGenericConfig>::Domain: Send,
 {
     debug!("[coordinator] gateway init");
 

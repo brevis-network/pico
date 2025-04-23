@@ -1,8 +1,9 @@
 use anyhow::Result;
 use pico_vm::{configs::config::StarkGenericConfig, machine::proof::BaseProof};
+use pico_vm::machine::proof::MetaProof;
 
 pub struct ProofTree<SC: StarkGenericConfig> {
-    leaves: Vec<Option<BaseProof<SC>>>,
+    leaves: Vec<Option<MetaProof<SC>>>,
     // TODO: add branch layers
 }
 
@@ -16,7 +17,7 @@ impl<SC: StarkGenericConfig> ProofTree<SC> {
         self.leaves.iter().all(|leaf| leaf.is_some())
     }
 
-    pub fn set_leaf(&mut self, index: usize, proof: Option<BaseProof<SC>>) -> Result<()> {
+    pub fn set_leaf(&mut self, index: usize, proof: Option<MetaProof<SC>>) -> Result<()> {
         // extend to save the specified index
         if index >= self.leaves.len() {
             self.leaves.resize(index + 1, None);

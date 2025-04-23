@@ -47,7 +47,6 @@ use pico_vm::{
         MachineProver, ProverChain, RiscvProver,
     },
     thread::channel::DuplexUnboundedEndpoint,
-    proverchain::{InitialProverSetup},
 };
 use std::{
     path::PathBuf,
@@ -122,8 +121,6 @@ impl EmulatorRunner for BabyBearPoseidon2 {
 
         // Conditionally create shape configs if VK is enabled.
         let riscv_shape_config = vk_enabled.then(RiscvShapeConfig::<BabyBear>::default);
-        let recursion_shape_config =
-            vk_enabled.then(RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default);
 
         let riscv = RiscvMachine::new(RiscvBBSC::new(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
         let mut program = Compiler::new(SourceType::RISCV, &elf).compile();
@@ -188,121 +185,13 @@ impl EmulatorRunner for BabyBearPoseidon2 {
             // `record_sender` will be dropped when the emulator thread completes.
         });
 
-        // let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, recursion_shape_config);
-
-        let recursion_shape_config =
-            vk_enabled.then(RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default);
-
-        let riscv_vk = &vk;
 
         // RISCV Phase
         log_section("RISCV & CONVERT PHASE");
         info!("Generating RISCV & CONVERT proof");
+        riscv.prove_remote(record_receiver, &gateway_endpoint);
 
-        let all_proofs = riscv.prove_remote(record_receiver, &riscv_endpoint);
-
-        let proof = merge_meta_proofs(all_proofs);
-        let riscv_duration = Duration::ZERO;
-
-        // let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
-        // info!("Verifying RISCV proof..");
-        // assert!(riscv.verify(&proof, riscv_vk));
-
-        // let (proof, convert_duration) = time_operation(|| convert.prove(proof));
-        let convert_duration = Duration::ZERO;
-
-        // JUST FOR TEMP CHECK
-        let riscv = RiscvProver::new_initial_prover(
-            (RiscvBBSC::new(), &elf),
-            riscv_opts,
-            riscv_shape_config,
-            Some(gateway_endpoint),
-        );
-
-        let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, recursion_shape_config);
-
-        let recursion_shape_config =
-            vk_enabled.then(RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default);
-        let combine =
-            CombineProver::new_with_prev(&convert, recursion_opts, recursion_shape_config);
-        let compress = CompressProver::new_with_prev(&combine, (), None);
-        let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
-
-        info!("Verifying CONVERT proof..");
-        assert!(convert.verify(&proof, riscv_vk));
-        //
-        // Combine Phase
-        log_section("COMBINE PHASE");
-        info!("Generating COMBINE proof");
-        let (proof, combine_duration) = time_operation(|| combine.prove(proof));
-        info!("Verifying COMBINE proof..");
-        assert!(combine.verify(&proof, riscv_vk));
-
-        // Compress Phase
-        log_section("COMPRESS PHASE");
-        info!("Generating COMPRESS proof");
-        let (proof, compress_duration) = time_operation(|| compress.prove(proof));
-        info!("Verifying COMPRESS proof..");
-        assert!(compress.verify(&proof, riscv_vk));
-        // Embed Phase
-        log_section("EMBED PHASE");
-        info!("Generating EMBED proof");
-        let (proof, embed_duration) = time_operation(|| embed.prove(proof));
-        info!("Verifying EMBED proof..");
-        assert!(embed.verify(&proof, riscv_vk));
-
-        // Onchain Phase (only if VK enabled)
-        // let evm_duration_opt = vk_enabled.then(|| {
-        //     log_section("ONCHAIN PHASE");
-        //     let (_, evm_duration) = time_operation(|| {
-        //         let onchain_stdin = OnchainStdin {
-        //             machine: embed.machine().clone(),
-        //             vk: proof.vks().first().unwrap().clone(),
-        //             proof: proof.proofs().first().unwrap().clone(),
-        //             flag_complete: true,
-        //         };
-        //
-        //         // Generate gnark data
-        //         let (constraints, witness) = OnchainVerifierCircuit::<
-        //             BabyBearBn254,
-        //             BabyBearBn254Poseidon2,
-        //         >::build(&onchain_stdin);
-        //         let gnark_witness =
-        //             build_gnark_config_with_str(constraints, witness, PathBuf::from("./"));
-        //         let gnark_proof_data = send_gnark_prove_task(gnark_witness);
-        //         info!(
-        //             "gnark prove success with proof data {}",
-        //             gnark_proof_data.unwrap_or_else(|e| format!("Error: {}", e))
-        //         );
-        //
-        //         1_u32
-        //     });
-        //
-        //     evm_duration
-        // });
-        //
-        // let (recursion_duration, total_duration) = log_performance_summary(
-        //     riscv_duration,
-        //     convert_duration,
-        //     combine_duration,
-        //     compress_duration,
-        //     embed_duration,
-        //     evm_duration_opt,
-        // );
-
-        Ok(PerformanceReport {
-            program: bench_program.name.to_string(),
-            cycles: 0u64,
-            riscv_duration: Duration::ZERO,
-            convert_duration: Duration::ZERO,
-            combine_duration: Duration::ZERO,
-            compress_duration: Duration::ZERO,
-            embed_duration: Duration::ZERO,
-            recursion_duration: Duration::ZERO,
-            evm_duration: Duration::ZERO,
-            total_duration: Duration::ZERO,
-            success: true,
-        })
+        Ok(())
     }
 }
 
