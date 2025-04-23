@@ -26,7 +26,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, debug_span, instrument};
+use tracing::{debug, debug_span, instrument, info};
 
 pub struct ConvertMachine<SC, C>
 where
@@ -212,6 +212,133 @@ macro_rules! impl_convert_machine {
     };
 }
 
+// TODO:
+macro_rules! impl_indexed_convert_machine {
+    ($emul_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident) => {
+        impl<C> ConvertMachine<$recur_sc, C>
+        where
+            C: Send
+                + ChipBehavior<
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                >,
+        {
+             /// Get the prover of the machine.
+            #[instrument(name = "CONVERT MACHINE PROVE", level = "debug", skip_all)]
+            pub fn prove_with_index(
+                &self,
+                chunk_index: u32,
+                proving_witness: &ProvingWitness<
+                    $recur_sc,
+                    C,
+                    ConvertStdin<$riscv_sc, RiscvChipType<Val<$riscv_sc>>>,
+                >,
+            ) -> MetaProof<$recur_sc>
+            where
+                C: for<'a> Air<
+                        DebugConstraintFolder<
+                            'a,
+                            <$recur_sc as StarkGenericConfig>::Val,
+                            <$recur_sc as StarkGenericConfig>::Challenge,
+                        >,
+                    > + Air<ProverConstraintFolder<$recur_sc>>,
+            {
+                // setup
+                let mut emulator = $emul_name::setup_convert(proving_witness, self.base_machine());
+                let mut all_proofs = vec![];
+                let mut all_vks = vec![];
+
+                let mut batch_num = chunk_index + 1;
+                // change to mutable, and modify 0 to 1 to align
+                let mut chunk_index = chunk_index + 1;
+                info!("chunk_index in prove_with_index: {}", chunk_index);
+                loop {
+                    let loop_span = debug_span!(parent: &tracing::Span::current(), "convert batch prove loop", batch_num).entered();
+                    let start = Instant::now();
+                    let (mut batch_records, batch_pks, batch_vks, done) =
+                    debug_span!("emulate_batch_records").in_scope(|| {emulator.next_record_keys_batch()});
+
+                    debug_span!("complement_record").in_scope(|| {self.complement_record(batch_records.as_mut_slice())});
+
+                    info!(
+                        "--- Generate convert records for batch {}, chunk {}-{} in {:?}",
+                        batch_num,
+                        chunk_index,
+                        chunk_index + batch_records.len() as u32 - 1,
+                        start.elapsed()
+                    );
+
+                    // set index for each record
+                    for record in batch_records.as_mut_slice() {
+                        record.index = chunk_index;
+                        chunk_index += 1;
+                        debug!("CONVERT record stats: chunk {}", record.chunk_index());
+                        let stats = record.stats();
+                        for (key, value) in &stats {
+                            debug!("   |- {:<28}: {}", key, value);
+                        }
+                    }
+
+                    let batch_proofs = batch_records
+                        .par_iter()
+                        .zip(batch_pks.par_iter())
+                        .flat_map(|(record, pk)| {
+                            let start_chunk = Instant::now();
+                            let proof = debug_span!(parent: &loop_span, "prove_ensemble", chunk_index = record.chunk_index()).in_scope(||{
+                                self
+                                .base_machine
+                                .prove_ensemble(pk, std::slice::from_ref(record))
+                            });
+                            debug!(
+                                "--- Prove convert chunk {} in {:?}",
+                                record.chunk_index(),
+                                start_chunk.elapsed()
+                            );
+                            proof
+                        })
+                        .collect::<Vec<_>>();
+
+                    all_proofs.extend(batch_proofs);
+                    all_vks.extend(batch_vks);
+
+                    debug!(
+                        "--- Finish convert batch {} in {:?}",
+                        batch_num,
+                        start.elapsed()
+                    );
+                    batch_num += 1;
+
+                    if done {
+                        break;
+                    }
+
+                    loop_span.exit();
+                }
+
+                // construct meta proof
+                debug!("CONVERT chip log degrees:");
+                all_proofs.iter().enumerate().for_each(|(i, proof)| {
+                    debug!("Proof {}", i);
+                    proof
+                        .main_chip_ordering
+                        .iter()
+                        .for_each(|(chip_name, idx)| {
+                            debug!(
+                                "   |- {:<20} main: {:<8}",
+                                chip_name,
+                                proof.opened_values.chips_opened_values[*idx].log_main_degree,
+                            );
+                        });
+                });
+
+                MetaProof::new(all_proofs.into(), all_vks.into(), None)
+            }
+        }
+
+        }
+    }
+
 impl_convert_machine!(
     BabyBearMetaEmulator,
     BabyBearPoseidon2,
@@ -219,6 +346,20 @@ impl_convert_machine!(
     BabyBearPoseidon2
 );
 impl_convert_machine!(
+    KoalaBearMetaEmulator,
+    KoalaBearPoseidon2,
+    KoalaBearSimple,
+    KoalaBearPoseidon2
+);
+
+impl_indexed_convert_machine!(
+    BabyBearMetaEmulator,
+    BabyBearPoseidon2,
+    BabyBearSimple,
+    BabyBearPoseidon2
+);
+
+impl_indexed_convert_machine!(
     KoalaBearMetaEmulator,
     KoalaBearPoseidon2,
     KoalaBearSimple,

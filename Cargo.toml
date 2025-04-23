@@ -39,58 +39,58 @@ pico-perf = { path = "perf" }
 
 # NOTE: Pin to known a "good" commit without recent API changes
 # Head of `multi-machine-base` branch
-p3-air = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-field = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-baby-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
-  "nightly-features",
-], branch = "multi-machine-base" }
-p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
-  "nightly-features",
-], branch = "multi-machine-base" }
-p3-util = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
-p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-air = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-field = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-baby-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
+#  "nightly-features",
+#], branch = "multi-machine-base" }
+#p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
+#  "nightly-features",
+#], branch = "multi-machine-base" }
+#p3-util = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+#p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
 
 # For local debugging
-# p3-air = { path = "../p3/air" }
-# p3-field = { path = "../p3/field" }
-# p3-commit = { path = "../p3/commit" }
-# p3-matrix = { path = "../p3/matrix" }
-# p3-baby-bear = { path = "../p3/baby-bear", features = ["nightly-features"] }
-# p3-koala-bear = { path = "../p3/koala-bear", features = ["nightly-features"] }
-# p3-util = { path = "../p3/util" }
-# p3-challenger = { path = "../p3/challenger" }
-# p3-dft = { path = "../p3/dft" }
-# p3-fri = { path = "../p3/fri" }
-# p3-goldilocks = { path = "../p3/goldilocks" }
-# p3-keccak = { path = "../p3/keccak" }
-# p3-keccak-air = { path = "../p3/keccak-air" }
-# p3-blake3 = { path = "../p3/blake3" }
-# p3-mds = { path = "../p3/mds" }
-# p3-merkle-tree = { path = "../p3/merkle-tree" }
-# p3-poseidon2 = { path = "../p3/poseidon2" }
-# p3-symmetric = { path = "../p3/symmetric" }
-# p3-uni-stark = { path = "../p3/uni-stark" }
-# p3-maybe-rayon = { path = "../p3/maybe-rayon" }
-# p3-bn254-fr = { path = "../p3/bn254-fr" }
-# p3-mersenne-31 = { path = "../p3/mersenne-31" }
-# p3-circle = { path = "../p3/circle" }
+ p3-air = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/air" }
+ p3-field = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/field" }
+ p3-commit = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/commit" }
+ p3-matrix = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/matrix" }
+ p3-baby-bear = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/baby-bear", features = ["nightly-features"] }
+ p3-koala-bear = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/koala-bear", features = ["nightly-features"] }
+ p3-util = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/util" }
+ p3-challenger = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/challenger" }
+ p3-dft = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/dft" }
+ p3-fri = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/fri" }
+ p3-goldilocks = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/goldilocks" }
+ p3-keccak = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/keccak" }
+ p3-keccak-air = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/keccak-air" }
+ p3-blake3 = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/blake3" }
+ p3-mds = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/mds" }
+ p3-merkle-tree = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/merkle-tree" }
+ p3-poseidon2 = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/poseidon2" }
+ p3-symmetric = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/symmetric" }
+ p3-uni-stark = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/uni-stark" }
+ p3-maybe-rayon = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/maybe-rayon" }
+ p3-bn254-fr = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/bn254-fr" }
+ p3-mersenne-31 = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/mersenne-31" }
+ p3-circle = { path = "/Users/kaiwei/RustroverProjects/Plonky3-GPU/circle" }
 
 # misc
 amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = ["bls381"] }

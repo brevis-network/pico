@@ -1,6 +1,7 @@
 use crate::{
-    configs::config::StarkGenericConfig, emulator::riscv::record::EmulationRecord,
-    machine::proof::BaseProof,
+    configs::config::StarkGenericConfig,
+    emulator::riscv::record::EmulationRecord,
+    machine::proof::{BaseProof, MetaProof},
 };
 use derive_more::Constructor;
 
@@ -8,6 +9,7 @@ use derive_more::Constructor;
 pub enum RiscvMsg<SC: StarkGenericConfig> {
     Request(RiscvRequest),
     Response(RiscvResponse<SC>),
+    // ConvertResponse(ConvertResponse<SC>),
 }
 
 #[derive(Clone, Constructor)]
@@ -21,5 +23,12 @@ pub struct RiscvRequest {
 pub struct RiscvResponse<SC: StarkGenericConfig> {
     // TODO: add identifier
     pub chunk_index: usize,
-    pub proof: BaseProof<SC>,
+    pub proof: MetaProof<SC>,
 }
+
+// #[derive(Constructor)]
+// pub struct ConvertResponse<SC: StarkGenericConfig> {
+//     // TODO: add identifier
+//     pub chunk_index: usize,
+//     pub proof: MetaProof<SC>,
+// }

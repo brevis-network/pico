@@ -20,6 +20,7 @@ where
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
+    <SC as StarkGenericConfig>::Domain: Send,
 {
     debug!("[coordinator] grpc server init");
 
@@ -52,6 +53,7 @@ where
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
+    <SC as StarkGenericConfig>::Domain: Send,
 {
     async fn check_health(&self, request: Request<WorkerInfo>) -> Result<Response<()>, Status> {
         debug!("health from worker: {:?}", request.into_inner());

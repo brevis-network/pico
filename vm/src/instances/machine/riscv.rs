@@ -407,7 +407,7 @@ where
         all_proofs
     }
 
-    fn prove_remote(
+   pub fn prove_remote(
         &self,
         record_receiver: Receiver<EmulationRecord>,
         coord_endpoint: &Sender<GatewayMsg<SC>>,

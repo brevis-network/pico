@@ -39,7 +39,7 @@ pub const PROGRAMS: &[BenchProgram] = &[
 
 fn load_input(input: &str) -> Result<Vec<u8>, Error> {
     if input == "fibonacci-300kn" {
-        Ok(bincode::serialize(&300_000u32)?)
+        Ok(bincode::serialize(&20)?)
     } else {
         Ok(fs::read(input)?)
     }

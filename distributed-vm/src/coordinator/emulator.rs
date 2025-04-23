@@ -1,32 +1,85 @@
 use super::config::CoordinatorConfig;
 use anyhow::Result;
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::{bounded, Receiver, Sender};
 use log::{debug, info};
 use p3_baby_bear::BabyBear;
 use p3_commit::Pcs;
 use p3_koala_bear::KoalaBear;
 use pico_perf::common::{
     bench_program::{load, BenchProgram},
-    print_utils::log_section,
+    gnark_utils::send_gnark_prove_task,
+    print_utils::{format_results, log_performance_summary, log_section, PerformanceReport},
 };
 use pico_vm::{
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
+    },
     configs::{
         config::StarkGenericConfig,
-        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
+        field_config::{BabyBearBn254, KoalaBearBn254},
+        stark_config::{
+            bb_bn254_poseidon2::BabyBearBn254Poseidon2, bb_poseidon2::BabyBearPoseidon2,
+            kb_bn254_poseidon2::KoalaBearBn254Poseidon2, kb_poseidon2::KoalaBearPoseidon2,
+        },
     },
-    emulator::opts::EmulatorOpts,
+    emulator::{emulator::MetaEmulator, opts::EmulatorOpts},
     instances::{
-        compiler::{shapes::riscv_shape::RiscvShapeConfig, vk_merkle::HasStaticVkManager},
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler::{
+            onchain_circuit::{
+                gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin,
+                utils::build_gnark_config_with_str,
+            },
+            shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
+            vk_merkle::{vk_verification_enabled, HasStaticVkManager},
+        },
         configs::{
             riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
         },
+        machine::riscv::RiscvMachine,
     },
+    machine::{machine::MachineBehavior, proof::MetaProof, witness::ProvingWitness},
     messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
-    proverchain::{InitialProverSetup, RiscvProver},
+    primitives::consts::RISCV_NUM_PVS,
+    proverchain::{
+        CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
+        MachineProver, ProverChain, RiscvProver,
+    },
+    thread::channel::DuplexUnboundedEndpoint,
+    proverchain::{InitialProverSetup},
 };
-use std::sync::Arc;
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    thread,
+    time::{Duration, Instant},
+};
 use tokio::task::JoinHandle;
 
+pub fn merge_meta_proofs<SC>(list: Vec<MetaProof<SC>>) -> MetaProof<SC>
+where
+    SC: StarkGenericConfig,
+{
+    let mut proofs_vec = Vec::with_capacity(list.len());
+    let mut vks_vec = Vec::with_capacity(list.len());
+    let mut pv_stream = None;
+
+    for mut mp in list {
+        debug_assert_eq!(mp.proofs.len(), 1);
+        debug_assert_eq!(mp.vks.len(), 1);
+        debug_assert_eq!(mp.pv_stream.is_none(), true);
+
+        proofs_vec.extend_from_slice(mp.proofs.as_ref());
+        vks_vec.extend_from_slice(mp.vks.as_ref());
+    }
+
+    MetaProof {
+        proofs: Arc::from(proofs_vec.into_boxed_slice()),
+        vks: Arc::from(vks_vec.into_boxed_slice()),
+        pv_stream,
+    }
+}
 /// specialization for running emulator on either babybear or  koalabear
 trait EmulatorRunner: StarkGenericConfig {
     fn run(
@@ -53,7 +106,8 @@ impl EmulatorRunner for BabyBearPoseidon2 {
         let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
         let vk_enabled = vk_manager.vk_verification_enabled();
 
-        let (elf, stdin) = load(bench_program)?;
+        let (elf, stdin) = load::<Program>(bench_program)?;
+        println!("bench program: {}", bench_program.name);
         let riscv_opts = EmulatorOpts::bench_riscv_ops();
         let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
@@ -68,7 +122,99 @@ impl EmulatorRunner for BabyBearPoseidon2 {
 
         // Conditionally create shape configs if VK is enabled.
         let riscv_shape_config = vk_enabled.then(RiscvShapeConfig::<BabyBear>::default);
+        let recursion_shape_config =
+            vk_enabled.then(RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default);
 
+        let riscv = RiscvMachine::new(RiscvBBSC::new(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
+        let mut program = Compiler::new(SourceType::RISCV, &elf).compile();
+        if vk_verification_enabled() {
+            if let Some(shape_config) = riscv_shape_config.clone() {
+                let p = Arc::get_mut(&mut program).expect("cannot get program");
+                shape_config
+                    .padding_preprocessed_shape(p)
+                    .expect("cannot padding preprocessed shape");
+            }
+        }
+        let (pk, vk) = riscv.setup_keys(&program);
+
+        let riscv_opts = EmulatorOpts::bench_riscv_ops();
+        let witness =
+            ProvingWitness::<BabyBearPoseidon2, RiscvChipType<BabyBear>, Vec<u8>>::setup_for_riscv(
+                program.clone(),
+                stdin,
+                riscv_opts,
+                pk.clone(),
+                vk.clone(),
+            );
+        // Initialize the emulator.
+        let mut emulator = MetaEmulator::setup_riscv(&witness);
+
+        let channel_capacity = (4 * witness
+            .opts
+            .as_ref()
+            .map(|opts| opts.chunk_batch_size)
+            .unwrap_or(64)) as usize;
+        // Initialize the channel for sending emulation records from the emulator thread to prover.
+        let (record_sender, record_receiver): (Sender<_>, Receiver<_>) = bounded(channel_capacity);
+
+        // Start the emulator thread.
+        let emulator_handle = thread::spawn(move || {
+            let mut batch_num = 1;
+            loop {
+                let start_local = Instant::now();
+
+                let done = emulator.next_record_batch(&mut |record| {
+                    record_sender.send(record).expect(
+                        "Failed to send an emulation record from emulator thread to prover thread",
+                    )
+                });
+
+                tracing::debug!(
+                    "--- Generate riscv records for batch-{} in {:?}",
+                    batch_num,
+                    start_local.elapsed(),
+                );
+
+                if done {
+                    break;
+                }
+
+                batch_num += 1;
+            }
+
+            // Move and return the emulator for futher usage.
+            emulator
+
+            // `record_sender` will be dropped when the emulator thread completes.
+        });
+
+        // let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, recursion_shape_config);
+
+        let recursion_shape_config =
+            vk_enabled.then(RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default);
+
+
+        let riscv_vk = &vk;
+
+        // RISCV Phase
+        log_section("RISCV & CONVERT PHASE");
+        info!("Generating RISCV & CONVERT proof");
+
+        let all_proofs = riscv.prove_remote(record_receiver, &riscv_endpoint);
+
+        let proof = merge_meta_proofs(all_proofs);
+        let riscv_duration = Duration::ZERO;
+
+        // let ((proof, cycles), riscv_duration) = time_operation(|| riscv.prove_cycles(stdin));
+        // info!("Verifying RISCV proof..");
+        // assert!(riscv.verify(&proof, riscv_vk));
+
+        // let (proof, convert_duration) = time_operation(|| convert.prove(proof));
+        let convert_duration = Duration::ZERO;
+
+
+
+        // JUST FOR TEMP CHECK
         let riscv = RiscvProver::new_initial_prover(
             (RiscvBBSC::new(), &elf),
             riscv_opts,
@@ -76,14 +222,91 @@ impl EmulatorRunner for BabyBearPoseidon2 {
             Some(gateway_endpoint),
         );
 
-        // RISCV Phase
-        log_section("RISCV PHASE");
+        let convert = ConvertProver::new_with_prev(&riscv, recursion_opts, recursion_shape_config);
 
-        // emulate the current program and send proving tasks to workers
-        info!("Emulating RISCV program");
-        riscv.prove_cycles(stdin);
+        let recursion_shape_config =
+            vk_enabled.then(RecursionShapeConfig::<BabyBear, RecursionChipType<BabyBear>>::default);
+        let combine =
+            CombineProver::new_with_prev(&convert, recursion_opts, recursion_shape_config);
+        let compress = CompressProver::new_with_prev(&combine, (), None);
+        let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
 
-        Ok(())
+
+        info!("Verifying CONVERT proof..");
+        assert!(convert.verify(&proof, riscv_vk));
+        //
+        // Combine Phase
+        log_section("COMBINE PHASE");
+        info!("Generating COMBINE proof");
+        let (proof, combine_duration) = time_operation(|| combine.prove(proof));
+        info!("Verifying COMBINE proof..");
+        assert!(combine.verify(&proof, riscv_vk));
+
+        // Compress Phase
+        log_section("COMPRESS PHASE");
+        info!("Generating COMPRESS proof");
+        let (proof, compress_duration) = time_operation(|| compress.prove(proof));
+        info!("Verifying COMPRESS proof..");
+        assert!(compress.verify(&proof, riscv_vk));
+        // Embed Phase
+        log_section("EMBED PHASE");
+        info!("Generating EMBED proof");
+        let (proof, embed_duration) = time_operation(|| embed.prove(proof));
+        info!("Verifying EMBED proof..");
+        assert!(embed.verify(&proof, riscv_vk));
+
+        // Onchain Phase (only if VK enabled)
+        // let evm_duration_opt = vk_enabled.then(|| {
+        //     log_section("ONCHAIN PHASE");
+        //     let (_, evm_duration) = time_operation(|| {
+        //         let onchain_stdin = OnchainStdin {
+        //             machine: embed.machine().clone(),
+        //             vk: proof.vks().first().unwrap().clone(),
+        //             proof: proof.proofs().first().unwrap().clone(),
+        //             flag_complete: true,
+        //         };
+        //
+        //         // Generate gnark data
+        //         let (constraints, witness) = OnchainVerifierCircuit::<
+        //             BabyBearBn254,
+        //             BabyBearBn254Poseidon2,
+        //         >::build(&onchain_stdin);
+        //         let gnark_witness =
+        //             build_gnark_config_with_str(constraints, witness, PathBuf::from("./"));
+        //         let gnark_proof_data = send_gnark_prove_task(gnark_witness);
+        //         info!(
+        //             "gnark prove success with proof data {}",
+        //             gnark_proof_data.unwrap_or_else(|e| format!("Error: {}", e))
+        //         );
+        //
+        //         1_u32
+        //     });
+        //
+        //     evm_duration
+        // });
+        //
+        // let (recursion_duration, total_duration) = log_performance_summary(
+        //     riscv_duration,
+        //     convert_duration,
+        //     combine_duration,
+        //     compress_duration,
+        //     embed_duration,
+        //     evm_duration_opt,
+        // );
+
+        Ok(PerformanceReport {
+            program: bench_program.name.to_string(),
+            cycles: 0u64,
+            riscv_duration: Duration::ZERO,
+            convert_duration: Duration::ZERO,
+            combine_duration: Duration::ZERO,
+            compress_duration: Duration::ZERO,
+            embed_duration: Duration::ZERO,
+            recursion_duration: Duration::ZERO,
+            evm_duration: Duration::ZERO,
+            total_duration: Duration::ZERO,
+            success: true,
+        })
     }
 }
 
@@ -139,6 +362,7 @@ where
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
+    <SC as StarkGenericConfig>::Domain: Send,
 {
     debug!("[coordinator] emulator init");
 

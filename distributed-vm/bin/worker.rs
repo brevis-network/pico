@@ -44,11 +44,7 @@ async fn main() -> Result<()> {
             channel.endpoint2().send(WorkerMsg::RequestTask).unwrap();
 
             let grpc = grpc::run(channel.endpoint1());
-            let riscv = riscv::run(
-                BabyBearPoseidon2::default(),
-                cfg.program,
-                channel.endpoint2(),
-            );
+            let riscv = riscv::run_bb(cfg.program, channel.endpoint2());
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
@@ -64,11 +60,7 @@ async fn main() -> Result<()> {
             channel.endpoint2().send(WorkerMsg::RequestTask).unwrap();
 
             let grpc = grpc::run(channel.endpoint1());
-            let riscv = riscv::run(
-                KoalaBearPoseidon2::default(),
-                cfg.program,
-                channel.endpoint2(),
-            );
+            let riscv = riscv::run_kb(cfg.program, channel.endpoint2());
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");

@@ -19,6 +19,7 @@ where
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::ProverData: Send,
+    <SC as StarkGenericConfig>::Domain: Send,
 {
     tokio::spawn(async move {
         let channel = Channel::from_static("http://[::1]:50051")
