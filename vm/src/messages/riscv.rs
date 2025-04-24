@@ -1,7 +1,6 @@
 use crate::{
-    configs::config::StarkGenericConfig,
-    emulator::riscv::record::EmulationRecord,
-    machine::proof::{BaseProof, MetaProof},
+    configs::config::StarkGenericConfig, emulator::riscv::record::EmulationRecord,
+    machine::proof::MetaProof,
 };
 use derive_more::Constructor;
 

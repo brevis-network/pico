@@ -1,3 +1,4 @@
+pub mod combine;
 pub mod config;
 pub mod grpc;
 pub mod message;

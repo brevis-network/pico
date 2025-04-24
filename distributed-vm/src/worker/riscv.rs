@@ -181,6 +181,8 @@ pub fn run_bb(
                     let msg = WorkerMsg::RequestTask;
                     endpoint.send(msg).unwrap();
                 }
+                // ignore other task types
+                WorkerMsg::ProcessTask(..) => (),
                 WorkerMsg::Exit => break,
                 _ => panic!("unsupported"),
             }
@@ -307,6 +309,8 @@ pub fn run_kb(
                     let msg = WorkerMsg::RequestTask;
                     endpoint.send(msg).unwrap();
                 }
+                // ignore other task types
+                WorkerMsg::ProcessTask(..) => (),
                 WorkerMsg::Exit => break,
                 _ => panic!("unsupported"),
             }

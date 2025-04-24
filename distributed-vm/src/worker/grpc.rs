@@ -1,4 +1,4 @@
-use crate::{coordinator_client::CoordinatorClient, worker::message::WorkerMsg, RiscvResult};
+use crate::{coordinator_client::CoordinatorClient, worker::message::WorkerMsg, ProofResult};
 use p3_commit::Pcs;
 use pico_vm::{
     configs::config::StarkGenericConfig, messages::gateway::GatewayMsg,
@@ -33,14 +33,14 @@ where
         while let Ok(msg) = endpoint.recv() {
             match msg {
                 WorkerMsg::RequestTask => {
-                    let res = client.request_riscv(()).await.unwrap();
+                    let res = client.request_task(()).await.unwrap();
                     let msg: GatewayMsg<SC> = res.into_inner().into();
 
                     endpoint.send(WorkerMsg::ProcessTask(msg)).unwrap();
                 }
                 WorkerMsg::RespondResult(msg) => {
-                    let res: RiscvResult = msg.into();
-                    client.respond_riscv(res).await.unwrap();
+                    let res: ProofResult = msg.into();
+                    client.respond_result(res).await.unwrap();
                 }
                 WorkerMsg::Exit => break,
                 _ => panic!("unsupported"),

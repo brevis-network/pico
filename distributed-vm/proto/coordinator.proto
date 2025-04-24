@@ -7,9 +7,14 @@ package grpc;
 service Coordinator {
   rpc CheckHealth(WorkerInfo) returns (google.protobuf.Empty);
 
-  rpc RequestRiscv(google.protobuf.Empty) returns (RiscvTask);
+  rpc RequestTask(google.protobuf.Empty) returns (ProofTask);
 
-  rpc RespondRiscv(RiscvResult) returns (google.protobuf.Empty);
+  rpc RespondResult(ProofResult) returns (google.protobuf.Empty);
+}
+
+enum TaskType {
+  RISCV = 0;
+  COMBINE = 1;
 }
 
 message WorkerInfo {
@@ -17,14 +22,18 @@ message WorkerInfo {
   string ip = 2;
 }
 
-message RiscvTask {
+message ProofTask {
   string id = 1;
-  uint64 chunk_index = 2;
-  bytes record = 4;
+  TaskType task_type = 2;
+  uint64 chunk_index = 3;
+  optional bytes record = 4;
+  optional bool flag_complete = 5;
+  repeated bytes proofs = 6;
 }
 
-message RiscvResult {
+message ProofResult {
   string id = 1;
-  uint64 chunk_index = 2;
-  bytes proof = 3;
+  TaskType task_type = 2;
+  uint64 chunk_index = 3;
+  bytes proof = 4;
 }

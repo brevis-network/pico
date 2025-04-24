@@ -1,7 +1,7 @@
 use crate::{
     coordinator_server::{Coordinator, CoordinatorServer},
     gateway::GatewayEndpoint,
-    RiscvResult, RiscvTask, WorkerInfo,
+    ProofResult, ProofTask, WorkerInfo,
 };
 use anyhow::Result;
 use derive_more::Constructor;
@@ -62,7 +62,7 @@ where
         Ok(Response::new(()))
     }
 
-    async fn request_riscv(&self, _request: Request<()>) -> Result<Response<RiscvTask>, Status> {
+    async fn request_task(&self, _request: Request<()>) -> Result<Response<ProofTask>, Status> {
         while let Ok(msg) = self.gateway_endpoint.recv() {
             // TODO: check worker ip address
             if msg.ip_addr() == "blocked" {
@@ -75,7 +75,7 @@ where
         Err(Status::not_found("no task"))
     }
 
-    async fn respond_riscv(&self, req: Request<RiscvResult>) -> Result<Response<()>, Status> {
+    async fn respond_result(&self, req: Request<ProofResult>) -> Result<Response<()>, Status> {
         let msg = req.into_inner().into();
 
         self.gateway_endpoint.send(msg).unwrap();

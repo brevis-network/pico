@@ -7,7 +7,7 @@ use log::debug;
 use p3_commit::Pcs;
 use pico_vm::{
     configs::config::StarkGenericConfig,
-    messages::{gateway::GatewayMsg, riscv::RiscvMsg},
+    messages::{combine::CombineMsg, gateway::GatewayMsg, riscv::RiscvMsg},
     thread::channel::DuplexUnboundedEndpoint,
 };
 use std::sync::Arc;
@@ -37,22 +37,27 @@ where
                     let msg = msg.unwrap();
                     match msg {
                         GatewayMsg::Riscv(RiscvMsg::Request(..), _, _) => {
-                            // save a none proof as placeholder to the chunk_index slot in proof tree
-                            // TODO: avoid clone msg, and move msg into process for proof response
-                            gateway_handler.process(msg.clone()).unwrap();
+                            let no_task = gateway_handler.process(msg.clone()).unwrap();
+                            assert!(no_task.is_none());
                             // send the task to grpc
                             grpc_endpoint.send(msg).unwrap();
                         }
-                        GatewayMsg::EmulatorComplete => gateway_handler.process(msg.clone()).unwrap(),
+                        GatewayMsg::EmulatorComplete => {
+                            let no_task = gateway_handler.process(msg.clone()).unwrap();
+                            assert!(no_task.is_none());
+                        }
                         _ => panic!("unsupported"),
                     }
                 }
                 recv(grpc_endpoint.receiver()) -> msg => {
                     let msg = msg.unwrap();
                     match msg {
-                        GatewayMsg::Riscv(RiscvMsg::Response(..), _, _) => {
+                        GatewayMsg::Riscv(RiscvMsg::Response(..), _, _) | GatewayMsg::Combine(CombineMsg::Response(..), _, _) => {
                             // save the generated proof to the chunk_index slot in proof tree
-                            gateway_handler.process(msg).unwrap();
+                            if let Some(msg) = gateway_handler.process(msg).unwrap() {
+                                // send the new combine task to grpc
+                                grpc_endpoint.send(msg).unwrap();
+                            }
                         }
                         _ => panic!("unsupported"),
                     }
