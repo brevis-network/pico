@@ -1,4 +1,7 @@
-use crate::{configs::config::StarkGenericConfig, messages::riscv::RiscvMsg};
+use crate::{
+    configs::config::StarkGenericConfig,
+    messages::{combine::CombineMsg, riscv::RiscvMsg},
+};
 
 type IpAddr = String;
 type TaskId = String;
@@ -10,6 +13,8 @@ pub enum GatewayMsg<SC: StarkGenericConfig> {
     EmulatorComplete,
     // riscv
     Riscv(RiscvMsg<SC>, TaskId, IpAddr),
+    // combine
+    Combine(CombineMsg<SC>, TaskId, IpAddr),
     // close a client by ip
     Close(IpAddr),
     // exit
@@ -21,6 +26,7 @@ impl<SC: StarkGenericConfig> GatewayMsg<SC> {
         match self {
             Self::EmulatorComplete => "",
             Self::Riscv(_, _, ip_addr) => ip_addr,
+            Self::Combine(_, _, ip_addr) => ip_addr,
             Self::Close(ip_addr) => ip_addr,
             Self::Exit => "",
         }
