@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y \
     git \
     openssh-client
 
-RUN cargo install --locked cargo-chef
+COPY rust-toolchain .
+RUN cargo install --locked cargo-chef && rustup show
 
 WORKDIR /app
 
