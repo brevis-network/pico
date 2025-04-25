@@ -62,6 +62,20 @@ where
     pub fn num_proofs(&self) -> usize {
         self.proofs.len()
     }
+
+    pub fn split_into_individuals(&self) -> Vec<Self> {
+        assert_eq!(self.proofs.len(), self.vks.len());
+        self.proofs
+            .iter()
+            .cloned()
+            .zip(self.vks.iter().cloned())
+            .map(|(proof, vk)| MetaProof {
+                proofs: Arc::from([proof]),
+                vks: Arc::from([vk]),
+                pv_stream: self.pv_stream.clone(),
+            })
+            .collect()
+    }
 }
 
 /// Base proof produced by base prover

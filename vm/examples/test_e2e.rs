@@ -50,7 +50,7 @@ use pico_vm::{
         RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
 };
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{fs::File, io::Write, path::PathBuf, sync::Arc, time::Instant};
 use tracing::{debug, info};
 
 #[path = "common/parse_args.rs"]
@@ -230,6 +230,7 @@ macro_rules! run {
             }
 
             // === Combine Phase: Combine Recursion Machine ===
+            let convert_proofs = convert_proof.split_into_individuals();
             log_section("COMBINE PHASE");
             let vk_root = get_vk_root(&vk_manager);
             let combine_machine = CombineMachine::<_, _>::new(
@@ -263,6 +264,12 @@ macro_rules! run {
                 );
 
                 combine_machine.prove(&combine_witness)
+                // let meta1 = combine_machine.prove_two(convert_proofs[1].clone(), convert_proofs[2].clone(), false);
+                // let meta2 = combine_machine.prove_two(convert_proofs[0].clone(), meta1, false);
+                // let meta3 = combine_machine.prove_two(meta2, convert_proofs[3].clone(), true);
+                // meta3
+                // let meta2 = combine_machine.prove_two(convert_proofs[2].clone(), convert_proofs[3].clone(), false);
+                // combine_machine.prove_two(meta1, meta2, true)
             });
 
             let combine_proof_size = bincode::serialize(&combine_proof.proofs()).unwrap().len();
@@ -439,6 +446,12 @@ macro_rules! run {
                 embed_machine.prove(&embed_witness)
             });
             let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
+
+            let serialized_proofs = bincode::serialize(&embed_proof.proofs()).unwrap();
+            let mut file = File::create("embed_proof_proofs.bin").expect("cannot create file");
+            file.write_all(&serialized_proofs).expect("failed to write to file");
+
+
 
             info!("Verifying EMBED proof (at {:?})..", start.elapsed());
             let embed_result = embed_machine.verify(&embed_proof, &riscv_vk);

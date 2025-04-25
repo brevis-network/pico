@@ -65,6 +65,9 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
         // pass in the expected hash value as input
         stdin.write(&args.n);
         info!("Test precompile poseidon2");
+    } else if args.elf == "fibonacci-sha" {
+        elf = load_elf("fibonacci-sha");
+        stdin.write(&args.n);
     } else {
         eprintln!("Invalid test elf.\n");
         std::process::exit(1);
