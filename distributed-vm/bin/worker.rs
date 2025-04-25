@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
 
             let grpc = grpc::run(
                 channel.endpoint1(),
-                cfg.coordinator_grpc_addr,
+                cfg.coordinator_grpc_addr.clone(),
                 cfg.max_grpc_msg_size,
             );
             let riscv = riscv::run_bb(cfg.program, channel.endpoint2());
@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
 
             let grpc = grpc::run(
                 channel.endpoint1(),
-                cfg.coordinator_grpc_addr,
+                cfg.coordinator_grpc_addr.clone(),
                 cfg.max_grpc_msg_size,
             );
             let riscv = riscv::run_kb(cfg.program, channel.endpoint2());

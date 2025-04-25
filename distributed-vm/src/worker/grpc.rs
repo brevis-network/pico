@@ -4,13 +4,13 @@ use pico_vm::{
     configs::config::StarkGenericConfig, messages::gateway::GatewayMsg,
     thread::channel::DuplexUnboundedEndpoint,
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
 
 pub fn run<SC: StarkGenericConfig + 'static>(
     endpoint: Arc<DuplexUnboundedEndpoint<WorkerMsg<SC>, WorkerMsg<SC>>>,
-    coordinator_addr: SocketAddr,
+    coordinator_addr: String,
     max_grpc_msg_size: usize,
 ) -> JoinHandle<()>
 where
@@ -21,11 +21,33 @@ where
     <SC as StarkGenericConfig>::Domain: Send,
 {
     tokio::spawn(async move {
-        let channel = Channel::from_shared(format!("http://{}", coordinator_addr))
-            .expect("invalid coordinator address")
-            .connect()
-            .await
-            .unwrap();
+        // TODO: consider adding max attempts to the config
+        const MAX_ATTEMPTS: usize = 10;
+        let mut attempts = 0;
+        let delay = std::time::Duration::from_secs(1);
+
+        let channel = loop {
+            match Channel::from_shared(coordinator_addr.clone())
+                .expect("Invalid coordinator address format")
+                .connect()
+                .await
+            {
+                Ok(c) => break c,
+                Err(e) if attempts < MAX_ATTEMPTS => {
+                    eprintln!(
+                        "Retrying gRPC connection to coordinator (attempt {}): {}",
+                        attempts + 1,
+                        e
+                    );
+                    tokio::time::sleep(delay).await;
+                    attempts += 1;
+                }
+                Err(e) => panic!(
+                    "Failed to connect to coordinator after {} attempts: {}",
+                    MAX_ATTEMPTS, e
+                ),
+            }
+        };
         let mut client = CoordinatorClient::new(channel)
             .max_encoding_message_size(max_grpc_msg_size)
             .max_decoding_message_size(max_grpc_msg_size);

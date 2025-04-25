@@ -1,7 +1,6 @@
 use crate::common::parse::{parse_field, parse_program};
 use clap::Parser;
 use pico_perf::common::{bench_field::BenchField, bench_program::BenchProgram};
-use std::net::SocketAddr;
 
 #[derive(Debug, Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -36,8 +35,8 @@ pub struct WorkerConfig {
     #[clap(
         long,
         env = "COORDINATOR_GRPC_ADDR",
-        default_value = "[::1]:50051",
+        default_value = "http://[::1]:50051",
         help = "gRPC address of the coordinator server to connect to"
     )]
-    pub coordinator_grpc_addr: SocketAddr,
+    pub coordinator_grpc_addr: String,
 }

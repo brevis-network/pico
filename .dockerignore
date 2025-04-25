@@ -1,0 +1,13 @@
+target
+.git
+*.log
+*.rs.bk
+*.swp
+.DS_Store
+*.tmp
+__pycache__/
+.idea/
+.vscode/
+# Ignore env files from distributed-vm (they're used at runtime, not needed in image)
+docker/distributed-vm/.env
+docker/distributed-vm/.env.*
