@@ -11,9 +11,8 @@ use pico_vm::{
     },
     machine::field::FieldSpecificPoseidon2Config,
     messages::combine::{CombineRequest, CombineResponse},
-    primitives::consts::{EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    primitives::consts::{COMBINE_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
-use std::sync::Arc;
 use tracing::info;
 
 pub struct CombineProver<SC>
@@ -72,12 +71,8 @@ impl CombineHandler<BabyBearPoseidon2> for CombineProver<BabyBearPoseidon2> {
 
         info!("receive combine request: chunk_index = {}", chunk_index);
 
-        let meta_a = Arc::try_unwrap(proofs[0].clone()).unwrap_or_else(|_| {
-            panic!("meta_a still has multiple references, cannot unwrap Arc");
-        });
-        let meta_b = Arc::try_unwrap(proofs[1].clone()).unwrap_or_else(|_| {
-            panic!("meta_b still has multiple references, cannot unwrap Arc");
-        });
+        let meta_a = proofs[0].clone();
+        let meta_b = proofs[1].clone();
 
         let proof = self.machine.prove_two(meta_a, meta_b, flag_complete);
 
@@ -99,13 +94,10 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
         } = req;
 
         info!("receive combine request: chunk_index = {}", chunk_index);
+        assert!(proofs.len() <= COMBINE_SIZE);
 
-        let meta_a = Arc::try_unwrap(proofs[0].clone()).unwrap_or_else(|_| {
-            panic!("meta_a still has multiple references, cannot unwrap Arc");
-        });
-        let meta_b = Arc::try_unwrap(proofs[1].clone()).unwrap_or_else(|_| {
-            panic!("meta_b still has multiple references, cannot unwrap Arc");
-        });
+        let meta_a = proofs[0].clone();
+        let meta_b = proofs[1].clone();
 
         let proof = self.machine.prove_two(meta_a, meta_b, flag_complete);
 

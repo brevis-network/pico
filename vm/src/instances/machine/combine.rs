@@ -35,7 +35,7 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
-use std::{any::type_name, borrow::Borrow, time::Instant};
+use std::{any::type_name, borrow::Borrow, sync::Arc, time::Instant};
 use tracing::{debug, debug_span, instrument};
 
 pub struct CombineMachine<SC, C>
@@ -334,8 +334,8 @@ macro_rules! impl_indexed_combine_machine {
             #[instrument(name = "PROVE TWO META PROOFS", level = "debug", skip_all)]
             pub fn prove_two(
                 &self,
-                meta_a: MetaProof<$recur_sc>,
-                meta_b: MetaProof<$recur_sc>,
+                meta_a: Arc<MetaProof<$recur_sc>>,
+                meta_b: Arc<MetaProof<$recur_sc>>,
                 is_complete: bool,
             ) -> MetaProof<$recur_sc>
             where
