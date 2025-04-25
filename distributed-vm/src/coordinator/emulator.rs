@@ -83,7 +83,7 @@ where
         pv_stream,
     }
 }
-/// specialization for running emulator on either babybear or  koalabear
+/// specialization for running emulator on either babybear or koalabear
 trait EmulatorRunner: StarkGenericConfig {
     fn run(
         bench_program: &BenchProgram,

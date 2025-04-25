@@ -1,15 +1,14 @@
 use crate::{coordinator_client::CoordinatorClient, worker::message::WorkerMsg, ProofResult};
 use p3_commit::Pcs;
-use pico_vm::{
-    configs::config::StarkGenericConfig, messages::gateway::GatewayMsg,
-    thread::channel::DuplexUnboundedEndpoint,
-};
+use pico_vm::{configs::config::StarkGenericConfig, messages::gateway::GatewayMsg};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
 
+use super::WorkerEndpoint;
+
 pub fn run<SC: StarkGenericConfig + 'static>(
-    endpoint: Arc<DuplexUnboundedEndpoint<WorkerMsg<SC>, WorkerMsg<SC>>>,
+    endpoint: Arc<WorkerEndpoint<SC>>,
     coordinator_addr: String,
     max_grpc_msg_size: usize,
 ) -> JoinHandle<()>

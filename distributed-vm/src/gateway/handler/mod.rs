@@ -73,7 +73,7 @@ impl<SC: StarkGenericConfig> GatewayHandler<SC> {
             // return the combine message
             return Ok(Some(GatewayMsg::Combine(
                 CombineMsg::Request(CombineRequest {
-                    flag_complete: proofs.len() <= COMBINE_SIZE,
+                    flag_complete: self.proof_tree.len() == 1,
                     chunk_index,
                     proofs,
                 }),

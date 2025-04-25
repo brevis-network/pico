@@ -53,6 +53,10 @@ impl<P> ProofTree<P> {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.tree.len()
+    }
+
     pub fn complete(&self) -> bool {
         // TODO: fix to check if embed proof is generated
         if self.tree.len() == 1 {
