@@ -316,7 +316,7 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
 }
 
 pub fn run<SC: StarkGenericConfig + 'static>(
-    config: Arc<CoordinatorConfig>,
+    program: BenchProgram,
     emulator_receiver: Arc<Receiver<EmulatorMsg>>,
     gateway_endpoint: Arc<Sender<GatewayMsg<SC>>>,
 ) -> JoinHandle<()>
@@ -332,7 +332,7 @@ where
     let handle = tokio::spawn(async move {
         while let Ok(msg) = emulator_receiver.recv() {
             match msg {
-                EmulatorMsg::Start => SC::run(&config.program, gateway_endpoint.clone()).unwrap(),
+                EmulatorMsg::Start => SC::run(&program, gateway_endpoint.clone()).unwrap(),
                 EmulatorMsg::Stop => break,
             }
         }

@@ -2,7 +2,6 @@ pub mod combine;
 pub mod riscv;
 
 use super::WorkerEndpoint;
-use crate::worker::message::WorkerMsg;
 use combine::{CombineHandler, CombineProver};
 use p3_commit::Pcs;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
@@ -92,38 +91,22 @@ impl ProverRunner for Prover<BabyBearPoseidon2> {
         tokio::spawn(async move {
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {
-                    WorkerMsg::ProcessTask(GatewayMsg::Riscv(
-                        RiscvMsg::Request(req),
-                        task_id,
-                        ip_addr,
-                    )) => {
+                    GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr) => {
                         let res = self.riscv_convert.process(req, &self.vk_root);
-                        let msg = WorkerMsg::RespondResult(GatewayMsg::Riscv(
-                            RiscvMsg::Response(res),
-                            task_id,
-                            ip_addr,
-                        ));
+                        let msg = GatewayMsg::Riscv(RiscvMsg::Response(res), task_id, ip_addr);
                         self.endpoint.send(msg).unwrap();
                     }
-                    WorkerMsg::ProcessTask(GatewayMsg::Combine(
-                        CombineMsg::Request(req),
-                        task_id,
-                        ip_addr,
-                    )) => {
+                    GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr) => {
                         let res = self.combine.process(req);
-                        let msg = WorkerMsg::RespondResult(GatewayMsg::Combine(
-                            CombineMsg::Response(res),
-                            task_id,
-                            ip_addr,
-                        ));
+                        let msg = GatewayMsg::Combine(CombineMsg::Response(res), task_id, ip_addr);
                         self.endpoint.send(msg).unwrap();
                     }
-                    WorkerMsg::Exit => break,
+                    GatewayMsg::Exit => break,
                     _ => panic!("unsupported"),
                 }
 
                 // request for the next task
-                let msg = WorkerMsg::RequestTask;
+                let msg = GatewayMsg::RequestTask;
                 self.endpoint.send(msg).unwrap();
             }
         })
@@ -135,38 +118,22 @@ impl ProverRunner for Prover<KoalaBearPoseidon2> {
         tokio::spawn(async move {
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {
-                    WorkerMsg::ProcessTask(GatewayMsg::Riscv(
-                        RiscvMsg::Request(req),
-                        task_id,
-                        ip_addr,
-                    )) => {
+                    GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr) => {
                         let res = self.riscv_convert.process(req, &self.vk_root);
-                        let msg = WorkerMsg::RespondResult(GatewayMsg::Riscv(
-                            RiscvMsg::Response(res),
-                            task_id,
-                            ip_addr,
-                        ));
+                        let msg = GatewayMsg::Riscv(RiscvMsg::Response(res), task_id, ip_addr);
                         self.endpoint.send(msg).unwrap();
                     }
-                    WorkerMsg::ProcessTask(GatewayMsg::Combine(
-                        CombineMsg::Request(req),
-                        task_id,
-                        ip_addr,
-                    )) => {
+                    GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr) => {
                         let res = self.combine.process(req);
-                        let msg = WorkerMsg::RespondResult(GatewayMsg::Combine(
-                            CombineMsg::Response(res),
-                            task_id,
-                            ip_addr,
-                        ));
+                        let msg = GatewayMsg::Combine(CombineMsg::Response(res), task_id, ip_addr);
                         self.endpoint.send(msg).unwrap();
                     }
-                    WorkerMsg::Exit => break,
+                    GatewayMsg::Exit => break,
                     _ => panic!("unsupported"),
                 }
 
                 // request for the next task
-                let msg = WorkerMsg::RequestTask;
+                let msg = GatewayMsg::RequestTask;
                 self.endpoint.send(msg).unwrap();
             }
         })

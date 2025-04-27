@@ -18,10 +18,6 @@ use crate::{
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
-    messages::{
-        gateway::GatewayMsg,
-        riscv::{RiscvMsg, RiscvRequest},
-    },
     primitives::{consts::MAX_LOG_CHUNK_SIZE, Poseidon2Init},
 };
 use anyhow::Result;

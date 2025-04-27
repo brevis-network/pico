@@ -10,7 +10,6 @@ use pico_vm::{
         gateway::GatewayMsg,
         riscv::{RiscvMsg, RiscvRequest, RiscvResponse},
     },
-    primitives::consts::COMBINE_SIZE,
 };
 use proof_tree::ProofTree;
 

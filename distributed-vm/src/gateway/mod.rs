@@ -59,6 +59,8 @@ where
                                 grpc_endpoint.send(msg).unwrap();
                             }
                         }
+                        // nothing to do here, this's used for single-node
+                        GatewayMsg::RequestTask => (),
                         _ => panic!("unsupported"),
                     }
                 }

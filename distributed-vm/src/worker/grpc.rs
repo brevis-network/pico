@@ -1,6 +1,9 @@
-use crate::{coordinator_client::CoordinatorClient, worker::message::WorkerMsg, ProofResult};
+use crate::{coordinator_client::CoordinatorClient, ProofResult};
 use p3_commit::Pcs;
-use pico_vm::{configs::config::StarkGenericConfig, messages::gateway::GatewayMsg};
+use pico_vm::{
+    configs::config::StarkGenericConfig,
+    messages::{combine::CombineMsg, gateway::GatewayMsg, riscv::RiscvMsg},
+};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tonic::transport::Channel;
@@ -53,17 +56,18 @@ where
 
         while let Ok(msg) = endpoint.recv() {
             match msg {
-                WorkerMsg::RequestTask => {
+                GatewayMsg::RequestTask => {
                     let res = client.request_task(()).await.unwrap();
                     let msg: GatewayMsg<SC> = res.into_inner().into();
 
-                    endpoint.send(WorkerMsg::ProcessTask(msg)).unwrap();
+                    endpoint.send(msg).unwrap();
                 }
-                WorkerMsg::RespondResult(msg) => {
+                GatewayMsg::Riscv(RiscvMsg::Response(_), _, _)
+                | GatewayMsg::Combine(CombineMsg::Response(_), _, _) => {
                     let res: ProofResult = msg.into();
                     client.respond_result(res).await.unwrap();
                 }
-                WorkerMsg::Exit => break,
+                GatewayMsg::Exit => break,
                 _ => panic!("unsupported"),
             }
         }

@@ -11,6 +11,10 @@ path = "bin/coordinator.rs"
 name = "worker"
 path = "bin/worker.rs"
 
+[[bin]]
+name = "single-node"
+path = "bin/single_node.rs"
+
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true

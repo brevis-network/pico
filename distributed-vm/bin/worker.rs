@@ -3,7 +3,6 @@ use clap::Parser;
 use distributed_vm::worker::{
     config::WorkerConfig,
     grpc,
-    message::WorkerMsg,
     prover::{Prover, ProverRunner},
 };
 use dotenvy::dotenv;
@@ -13,6 +12,7 @@ use pico_perf::common::bench_field::BenchField;
 use pico_vm::{
     configs::stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     machine::logger::setup_logger,
+    messages::gateway::GatewayMsg,
     thread::channel::DuplexUnboundedChannel,
 };
 use std::sync::Arc;
@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
     let handles = match cfg.field {
         BenchField::BabyBear => {
             let channel = DuplexUnboundedChannel::default();
-            channel.endpoint2().send(WorkerMsg::RequestTask)?;
+            channel.endpoint2().send(GatewayMsg::RequestTask)?;
 
             let grpc = grpc::run(
                 channel.endpoint1(),
@@ -44,14 +44,14 @@ async fn main() -> Result<()> {
             debug!("waiting for stop");
             ctrl_c().await?;
 
-            channel.endpoint1().send(WorkerMsg::Exit)?;
-            channel.endpoint2().send(WorkerMsg::Exit)?;
+            channel.endpoint1().send(GatewayMsg::Exit)?;
+            channel.endpoint2().send(GatewayMsg::Exit)?;
 
             [grpc, prover]
         }
         BenchField::KoalaBear => {
             let channel = DuplexUnboundedChannel::default();
-            channel.endpoint2().send(WorkerMsg::RequestTask)?;
+            channel.endpoint2().send(GatewayMsg::RequestTask)?;
 
             let grpc = grpc::run(
                 channel.endpoint1(),
@@ -65,8 +65,8 @@ async fn main() -> Result<()> {
             debug!("waiting for stop");
             ctrl_c().await?;
 
-            channel.endpoint1().send(WorkerMsg::Exit)?;
-            channel.endpoint2().send(WorkerMsg::Exit)?;
+            channel.endpoint1().send(GatewayMsg::Exit)?;
+            channel.endpoint2().send(GatewayMsg::Exit)?;
 
             [grpc, prover]
         }
