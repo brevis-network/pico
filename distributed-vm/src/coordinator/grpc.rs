@@ -63,7 +63,8 @@ where
     }
 
     async fn request_task(&self, _request: Request<()>) -> Result<Response<ProofTask>, Status> {
-        while let Ok(msg) = self.gateway_endpoint.recv() {
+        // clone the receiver here, since need to handle each grpc connection separately
+        while let Ok(msg) = self.gateway_endpoint.clone_receiver().recv() {
             // TODO: check worker ip address
             if msg.ip_addr() == "blocked" {
                 continue;

@@ -37,8 +37,18 @@ async fn main() -> Result<()> {
                 cfg.coordinator_grpc_addr.clone(),
                 cfg.max_grpc_msg_size,
             );
-            let prover = Prover::<BabyBearPoseidon2>::new(cfg.program, channel.endpoint2());
-            let prover = prover.run();
+
+            // start provers
+            let mut provers: Vec<_> = (0..cfg.prover_count)
+                .enumerate()
+                .map(|(i, _)| {
+                    let prover_id = format!("{}-prover-{}", cfg.worker_name, i);
+                    let worker_endpoint = channel.endpoint2().clone_inner();
+                    let prover =
+                        Prover::<BabyBearPoseidon2>::new(prover_id, cfg.program, worker_endpoint);
+                    prover.run()
+                })
+                .collect();
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
@@ -47,7 +57,8 @@ async fn main() -> Result<()> {
             channel.endpoint1().send(GatewayMsg::Exit)?;
             channel.endpoint2().send(GatewayMsg::Exit)?;
 
-            [grpc, prover]
+            provers.push(grpc);
+            provers
         }
         BenchField::KoalaBear => {
             let channel = DuplexUnboundedChannel::default();
@@ -58,8 +69,18 @@ async fn main() -> Result<()> {
                 cfg.coordinator_grpc_addr.clone(),
                 cfg.max_grpc_msg_size,
             );
-            let prover = Prover::<KoalaBearPoseidon2>::new(cfg.program, channel.endpoint2());
-            let prover = prover.run();
+
+            // start provers
+            let mut provers: Vec<_> = (0..cfg.prover_count)
+                .enumerate()
+                .map(|(i, _)| {
+                    let prover_id = format!("{}-prover-{}", cfg.worker_name, i);
+                    let worker_endpoint = channel.endpoint2().clone_inner();
+                    let prover =
+                        Prover::<KoalaBearPoseidon2>::new(prover_id, cfg.program, worker_endpoint);
+                    prover.run()
+                })
+                .collect();
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
@@ -68,7 +89,8 @@ async fn main() -> Result<()> {
             channel.endpoint1().send(GatewayMsg::Exit)?;
             channel.endpoint2().send(GatewayMsg::Exit)?;
 
-            [grpc, prover]
+            provers.push(grpc);
+            provers
         }
     };
 

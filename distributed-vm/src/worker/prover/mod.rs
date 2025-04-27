@@ -24,6 +24,7 @@ use pico_vm::{
 use riscv::{RiscvConvertHandler, RiscvConvertProver};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
+use tracing::info;
 
 type VkRoot<SC> = [<SC as StarkGenericConfig>::Val; DIGEST_SIZE];
 
@@ -32,6 +33,7 @@ where
     SC: StarkGenericConfig,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config + BinomiallyExtendable<EXTENSION_DEGREE>,
 {
+    prover_id: String,
     endpoint: Arc<WorkerEndpoint<SC>>,
     riscv_convert: RiscvConvertProver<SC>,
     combine: CombineProver<SC>,
@@ -54,14 +56,19 @@ where
     <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
     <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::ProverData: Send,
 {
-    pub fn new(program: BenchProgram, endpoint: Arc<WorkerEndpoint<SC>>) -> Self {
-        let riscv_convert = RiscvConvertProver::new(program);
-        let combine = CombineProver::default();
+    pub fn new(
+        prover_id: String,
+        program: BenchProgram,
+        endpoint: Arc<WorkerEndpoint<SC>>,
+    ) -> Self {
+        let riscv_convert = RiscvConvertProver::new(prover_id.clone(), program);
+        let combine = CombineProver::new(prover_id.clone());
 
         let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
         let vk_root = get_vk_root(vk_manager);
 
         Self {
+            prover_id,
             endpoint,
             riscv_convert,
             combine,
@@ -115,6 +122,8 @@ impl ProverRunner for Prover<BabyBearPoseidon2> {
 
 impl ProverRunner for Prover<KoalaBearPoseidon2> {
     fn run(self) -> JoinHandle<()> {
+        info!("[{}] : start", self.prover_id);
+
         tokio::spawn(async move {
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {

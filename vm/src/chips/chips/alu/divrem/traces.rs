@@ -274,7 +274,7 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
         // Create the template for the padded rows. These are fake rows that don't fail on some
         // sanity checks.
         let padded_row_template = {
-            let mut row = [F::ZERO; NUM_DIVREM_COLS];
+            let mut row = [F::ZERO; NUM_DIVREM_VALUE_COLS];
             let cols: &mut DivRemValueCols<F> = row.as_mut_slice().borrow_mut();
             // 0 divided by 1. quotient = remainder = 0.
             cols.is_divu = F::ONE;

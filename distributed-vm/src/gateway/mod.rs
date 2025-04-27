@@ -16,6 +16,8 @@ use tokio::task::JoinHandle;
 pub type GatewayEndpoint<SC> = DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>;
 
 pub fn run<SC: Send + StarkGenericConfig + 'static>(
+    // exit the whole app directly if proving complete
+    exit_complete: bool,
     emulator_receiver: Arc<Receiver<GatewayMsg<SC>>>,
     grpc_endpoint: Arc<GatewayEndpoint<SC>>,
 ) -> JoinHandle<()>
@@ -29,7 +31,7 @@ where
     debug!("[coordinator] gateway init");
 
     let thread_handle = tokio::spawn(async move {
-        let mut gateway_handler = GatewayHandler::default();
+        let mut gateway_handler = GatewayHandler::new(exit_complete);
 
         loop {
             select! {

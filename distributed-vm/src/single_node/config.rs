@@ -26,9 +26,9 @@ pub struct SingleNodeConfig {
 
     #[clap(
         long,
-        env = "WORKER_COUNT",
+        env = "PROVER_COUNT",
         default_value = "1",
-        help = "Worker count to start"
+        help = "Prover count to start"
     )]
-    pub worker_count: usize,
+    pub prover_count: usize,
 }

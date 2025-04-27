@@ -47,7 +47,7 @@ impl<T> SingleUnboundedChannel<T> {
 }
 
 /// duplex unbounded endpoint includes a sender for type T and a receiver for type U
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DuplexUnboundedEndpoint<T, U> {
     sender: Sender<T>,
     receiver: Receiver<U>,
@@ -56,6 +56,22 @@ pub struct DuplexUnboundedEndpoint<T, U> {
 impl<T, U> DuplexUnboundedEndpoint<T, U> {
     pub fn new(sender: Sender<T>, receiver: Receiver<U>) -> Self {
         Self { sender, receiver }
+    }
+
+    pub fn clone_inner(&self) -> Arc<Self>
+    where
+        T: Clone,
+        U: Clone,
+    {
+        Arc::new(self.clone())
+    }
+
+    pub fn clone_sender(&self) -> Arc<Sender<T>> {
+        Arc::new(self.sender.clone())
+    }
+
+    pub fn clone_receiver(&self) -> Arc<Receiver<U>> {
+        Arc::new(self.receiver.clone())
     }
 
     pub fn sender(&self) -> &Sender<T> {

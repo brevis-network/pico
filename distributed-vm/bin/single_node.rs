@@ -40,18 +40,31 @@ async fn main() -> Result<()> {
                 .endpoint2()
                 .send(GatewayMsg::RequestTask)?;
 
+            // start emulator
             let emulator = emulator::run::<BabyBearPoseidon2>(
                 cfg.program,
                 start_channel.receiver(),
                 emulator_gateway_channel.sender(),
             );
+
+            // start gateway
             let gateway = gateway::run(
+                true,
                 emulator_gateway_channel.receiver(),
                 gateway_worker_channel.endpoint1(),
             );
-            let prover =
-                Prover::<BabyBearPoseidon2>::new(cfg.program, gateway_worker_channel.endpoint2());
-            let prover = prover.run();
+
+            // start provers
+            let mut provers: Vec<_> = (0..cfg.prover_count)
+                .enumerate()
+                .map(|(i, _)| {
+                    let prover_id = format!("prover-{i}");
+                    let worker_endpoint = gateway_worker_channel.endpoint2().clone_inner();
+                    let prover =
+                        Prover::<BabyBearPoseidon2>::new(prover_id, cfg.program, worker_endpoint);
+                    prover.run()
+                })
+                .collect();
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
@@ -61,7 +74,8 @@ async fn main() -> Result<()> {
             gateway_worker_channel.endpoint1().send(GatewayMsg::Exit)?;
             gateway_worker_channel.endpoint2().send(GatewayMsg::Exit)?;
 
-            vec![emulator, gateway, prover]
+            provers.extend([emulator, gateway]);
+            provers
         }
         BenchField::KoalaBear => {
             let emulator_gateway_channel = SingleUnboundedChannel::default();
@@ -70,18 +84,31 @@ async fn main() -> Result<()> {
                 .endpoint2()
                 .send(GatewayMsg::RequestTask)?;
 
+            // start emulator
             let emulator = emulator::run::<KoalaBearPoseidon2>(
                 cfg.program,
                 start_channel.receiver(),
                 emulator_gateway_channel.sender(),
             );
+
+            // start gateway
             let gateway = gateway::run(
+                true,
                 emulator_gateway_channel.receiver(),
                 gateway_worker_channel.endpoint1(),
             );
-            let prover =
-                Prover::<KoalaBearPoseidon2>::new(cfg.program, gateway_worker_channel.endpoint2());
-            let prover = prover.run();
+
+            // start provers
+            let mut provers: Vec<_> = (0..cfg.prover_count)
+                .enumerate()
+                .map(|(i, _)| {
+                    let prover_id = format!("prover-{i}");
+                    let worker_endpoint = gateway_worker_channel.endpoint2().clone_inner();
+                    let prover =
+                        Prover::<KoalaBearPoseidon2>::new(prover_id, cfg.program, worker_endpoint);
+                    prover.run()
+                })
+                .collect();
 
             // wait for CTRL + C then close the channels to exit
             debug!("waiting for stop");
@@ -91,7 +118,8 @@ async fn main() -> Result<()> {
             gateway_worker_channel.endpoint1().send(GatewayMsg::Exit)?;
             gateway_worker_channel.endpoint2().send(GatewayMsg::Exit)?;
 
-            vec![emulator, gateway, prover]
+            provers.extend([emulator, gateway]);
+            provers
         }
     };
 

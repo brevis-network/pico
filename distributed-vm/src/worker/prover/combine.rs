@@ -20,23 +20,24 @@ where
     SC: StarkGenericConfig,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config + BinomiallyExtendable<EXTENSION_DEGREE>,
 {
+    prover_id: String,
     machine: CombineMachine<SC, RecursionChipType<SC::Val>>,
 }
 
-impl<SC> Default for CombineProver<SC>
+impl<SC> CombineProver<SC>
 where
     SC: Default + StarkGenericConfig,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config + BinomiallyExtendable<EXTENSION_DEGREE>,
     <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::ProverData: Send,
 {
-    fn default() -> Self {
+    pub fn new(prover_id: String) -> Self {
         let machine = CombineMachine::<_, _>::new(
             SC::default(),
             RecursionChipType::<SC::Val>::all_chips(),
             RECURSION_NUM_PVS,
         );
 
-        Self { machine }
+        Self { prover_id, machine }
     }
 }
 
@@ -68,8 +69,12 @@ impl CombineHandler<BabyBearPoseidon2> for CombineProver<BabyBearPoseidon2> {
             flag_complete,
             proofs,
         } = req;
+        assert!(proofs.len() <= COMBINE_SIZE);
 
-        info!("receive combine request: chunk_index = {}", chunk_index);
+        info!(
+            "[{}] receive combine request: chunk_index = {}",
+            self.prover_id, chunk_index,
+        );
 
         let meta_a = proofs[0].clone();
         let meta_b = proofs[1].clone();
@@ -92,9 +97,12 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
             flag_complete,
             proofs,
         } = req;
-
-        info!("receive combine request: chunk_index = {}", chunk_index);
         assert!(proofs.len() <= COMBINE_SIZE);
+
+        info!(
+            "[{}] receive combine request: chunk_index = {}",
+            self.prover_id, chunk_index,
+        );
 
         let meta_a = proofs[0].clone();
         let meta_b = proofs[1].clone();

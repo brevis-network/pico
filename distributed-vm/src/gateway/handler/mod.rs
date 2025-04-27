@@ -12,8 +12,11 @@ use pico_vm::{
     },
 };
 use proof_tree::ProofTree;
+use std::process;
 
 pub struct GatewayHandler<SC: StarkGenericConfig> {
+    // exit the whole app directly if proving complete
+    exit_complete: bool,
     // identify if emulation is complete, it could be used to check if the leaves are complete in
     // proof tree
     emulator_complete: bool,
@@ -21,16 +24,15 @@ pub struct GatewayHandler<SC: StarkGenericConfig> {
     // TODO: add other fields
 }
 
-impl<SC: StarkGenericConfig> Default for GatewayHandler<SC> {
-    fn default() -> Self {
+impl<SC: StarkGenericConfig> GatewayHandler<SC> {
+    pub fn new(exit_complete: bool) -> Self {
         Self {
+            exit_complete,
             emulator_complete: false,
             proof_tree: ProofTree::new(),
         }
     }
-}
 
-impl<SC: StarkGenericConfig> GatewayHandler<SC> {
     pub fn complete(&self) -> bool {
         self.emulator_complete && self.proof_tree.complete()
     }
@@ -65,7 +67,11 @@ impl<SC: StarkGenericConfig> GatewayHandler<SC> {
         }
 
         if self.complete() {
-            info!("[coordinator] proving complete");
+            info!("[gateway] proving complete");
+            if self.exit_complete {
+                // TODO: may exit gracefully
+                process::exit(0);
+            }
         }
 
         if let Some((chunk_index, proofs)) = index_proofs_to_combine {

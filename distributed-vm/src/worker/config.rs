@@ -39,4 +39,20 @@ pub struct WorkerConfig {
         help = "gRPC address of the coordinator server to connect to"
     )]
     pub coordinator_grpc_addr: String,
+
+    #[clap(
+        long,
+        env = "WORKER_NAME",
+        default_value = "default-worker",
+        help = "Worker name"
+    )]
+    pub worker_name: String,
+
+    #[clap(
+        long,
+        env = "PROVER_COUNT",
+        default_value = "1",
+        help = "Prover count to start"
+    )]
+    pub prover_count: usize,
 }

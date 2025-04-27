@@ -48,6 +48,7 @@ where
     SC: StarkGenericConfig,
     SC::Val: FieldSpecificPoseidon2Config + PrimeField32,
 {
+    prover_id: String,
     riscv_shape_config: Option<RiscvShapeConfig<SC::Val>>,
     recursion_shape_config: Option<RecursionShapeConfig<SC::Val, RecursionChipType<SC::Val>>>,
     riscv_machine: RiscvMachine<SC, RiscvChipType<SC::Val>>,
@@ -71,7 +72,7 @@ where
         + BinomiallyExtendable<EXTENSION_DEGREE>,
     <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
 {
-    pub fn new(program: BenchProgram) -> Self {
+    pub fn new(prover_id: String, program: BenchProgram) -> Self {
         // opts and setups
         let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
         let vk_enabled = vk_manager.vk_verification_enabled();
@@ -107,6 +108,7 @@ where
         );
 
         Self {
+            prover_id,
             riscv_shape_config,
             recursion_shape_config,
             riscv_machine,
@@ -147,7 +149,11 @@ impl RiscvConvertHandler<BabyBearPoseidon2> for RiscvConvertProver<BabyBearPosei
         let chunk_index = req.chunk_index;
         let is_last_chunk = req.record.is_last;
 
-        info!("[worker] start to prove chunk-{chunk_index}");
+        info!(
+            "[{}] receive riscv-convert request: chunk_index = {}",
+            self.prover_id, chunk_index,
+        );
+
         let start = Instant::now();
 
         let proof = self.riscv_machine.prove_record(
@@ -210,7 +216,11 @@ impl RiscvConvertHandler<KoalaBearPoseidon2> for RiscvConvertProver<KoalaBearPos
         let chunk_index = req.chunk_index;
         let is_last_chunk = req.record.is_last;
 
-        info!("[worker] start to prove chunk-{chunk_index}");
+        info!(
+            "[{}] receive riscv-convert request: chunk_index = {}",
+            self.prover_id, chunk_index,
+        );
+
         let start = Instant::now();
 
         let proof = self.riscv_machine.prove_record(

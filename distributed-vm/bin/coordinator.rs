@@ -42,6 +42,7 @@ async fn main() -> Result<()> {
                 emulator_gateway_channel.sender(),
             );
             let gateway = gateway::run(
+                false,
                 emulator_gateway_channel.receiver(),
                 gateway_grpc_channel.endpoint1(),
             );
@@ -67,6 +68,7 @@ async fn main() -> Result<()> {
                 emulator_gateway_channel.sender(),
             );
             let gateway = gateway::run(
+                false,
                 emulator_gateway_channel.receiver(),
                 gateway_grpc_channel.endpoint1(),
             );
