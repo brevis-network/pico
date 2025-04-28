@@ -6,6 +6,7 @@ use pico_vm::{
 };
 use std::sync::Arc;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 
 use super::WorkerEndpoint;
@@ -14,6 +15,7 @@ pub fn run<SC: StarkGenericConfig + 'static>(
     endpoint: Arc<WorkerEndpoint<SC>>,
     coordinator_addr: String,
     max_grpc_msg_size: usize,
+    shutdown: CancellationToken,
 ) -> JoinHandle<()>
 where
     <SC::Pcs as Pcs<
@@ -54,21 +56,32 @@ where
             .max_encoding_message_size(max_grpc_msg_size)
             .max_decoding_message_size(max_grpc_msg_size);
 
-        while let Ok(msg) = endpoint.recv() {
-            match msg {
-                GatewayMsg::RequestTask => {
-                    let res = client.request_task(()).await.unwrap();
-                    let msg: GatewayMsg<SC> = res.into_inner().into();
+        loop {
+            tokio::select! {
+                biased;
 
-                    endpoint.send(msg).unwrap();
+                _ = shutdown.cancelled() => break,
+                maybe_msg = async { endpoint.recv() } => match maybe_msg {
+                    Ok(msg) => match msg {
+                        GatewayMsg::RequestTask => {
+                            let res = client.request_task(()).await.unwrap();
+                            let msg: GatewayMsg<SC> = res.into_inner().into();
+
+                            endpoint.send(msg).unwrap();
+                        }
+                        GatewayMsg::Riscv(RiscvMsg::Response(_), _, _)
+                        | GatewayMsg::Combine(CombineMsg::Response(_), _, _) => {
+                            let res: ProofResult = msg.into();
+                            client.respond_result(res).await.unwrap();
+                        }
+                        GatewayMsg::Exit => break,
+                        _ => panic!("unsupported"),
+                    }
+                    Err(_) => {
+                        eprintln!("Failed to receive message from endpoint");
+                        break;
+                    }
                 }
-                GatewayMsg::Riscv(RiscvMsg::Response(_), _, _)
-                | GatewayMsg::Combine(CombineMsg::Response(_), _, _) => {
-                    let res: ProofResult = msg.into();
-                    client.respond_result(res).await.unwrap();
-                }
-                GatewayMsg::Exit => break,
-                _ => panic!("unsupported"),
             }
         }
     })

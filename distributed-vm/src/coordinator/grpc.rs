@@ -9,7 +9,7 @@ use log::debug;
 use p3_commit::Pcs;
 use pico_vm::configs::config::StarkGenericConfig;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::task::JoinHandle;
+use tokio::{signal::ctrl_c, task::JoinHandle};
 use tonic::{async_trait, transport::Server, Request, Response, Status};
 
 pub fn run<SC: Send + StarkGenericConfig + 'static>(
@@ -30,7 +30,9 @@ where
     let handle = tokio::spawn(async move {
         Server::builder()
             .add_service(CoordinatorServer::new(srv))
-            .serve(addr)
+            .serve_with_shutdown(addr, async {
+                ctrl_c().await.expect("failed to wait for shutdown");
+            })
             .await
             .expect("failed");
     });

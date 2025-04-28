@@ -30,7 +30,7 @@ where
 {
     debug!("[coordinator] gateway init");
 
-    let thread_handle = tokio::spawn(async move {
+    let thread_handle = tokio::task::spawn_blocking(move || {
         let mut gateway_handler = GatewayHandler::new(exit_complete);
 
         loop {

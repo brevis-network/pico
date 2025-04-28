@@ -95,7 +95,7 @@ where
 
 impl ProverRunner for Prover<BabyBearPoseidon2> {
     fn run(self) -> JoinHandle<()> {
-        tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {
                     GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr) => {
@@ -124,7 +124,7 @@ impl ProverRunner for Prover<KoalaBearPoseidon2> {
     fn run(self) -> JoinHandle<()> {
         info!("[{}] : start", self.prover_id);
 
-        tokio::spawn(async move {
+        tokio::task::spawn_blocking(move || {
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {
                     GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr) => {
