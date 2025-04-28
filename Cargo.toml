@@ -39,33 +39,33 @@ pico-perf = { path = "perf" }
 
 # NOTE: Pin to known a "good" commit without recent API changes
 # Head of `multi-machine-base` branch
-p3-air = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-field = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-commit = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-matrix = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-baby-bear = { git = "https://github.com/brevis-network/Plonky3-GPU.git", features = [
+p3-air = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-field = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-baby-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
   "nightly-features",
 ], branch = "multi-machine-base" }
-p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3-GPU.git", features = [
+p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
   "nightly-features",
 ], branch = "multi-machine-base" }
-p3-util = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-challenger = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-dft = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-fri = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-keccak = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-blake3 = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-mds = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-symmetric = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
-p3-circle = { git = "https://github.com/brevis-network/Plonky3-GPU.git", branch = "multi-machine-base" }
+p3-util = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
+p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", branch = "multi-machine-base" }
 
 # For local debugging
 # p3-air = { path = "../p3/air" }
