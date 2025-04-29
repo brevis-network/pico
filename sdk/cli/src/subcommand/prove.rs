@@ -143,27 +143,21 @@ fn prove_fast(sdk_client: SDKProverClient, stdin_bytes: &[u8]) -> Result<()> {
     info!("proving in fast mode.");
     match sdk_client {
         SDKProverClient::KoalaBearProver(client) => {
-            client
-                .get_stdin_builder()
-                .borrow_mut()
-                .write_slice(stdin_bytes);
-            client.prove_fast()?;
+            let mut stdin = client.new_stdin_builder();
+            stdin.write_slice(stdin_bytes);
+            client.prove_fast(stdin)?;
             Ok(())
         }
         SDKProverClient::BabyBearProver(client) => {
-            client
-                .get_stdin_builder()
-                .borrow_mut()
-                .write_slice(stdin_bytes);
-            client.prove_fast()?;
+            let mut stdin = client.new_stdin_builder();
+            stdin.write_slice(stdin_bytes);
+            client.prove_fast(stdin)?;
             Ok(())
         }
         SDKProverClient::M31Prover(client) => {
-            client
-                .get_stdin_builder()
-                .borrow_mut()
-                .write_slice(stdin_bytes);
-            client.prove_fast()?;
+            let mut stdin = client.new_stdin_builder();
+            stdin.write_slice(stdin_bytes);
+            client.prove_fast(stdin)?;
             Ok(())
         }
     }
@@ -179,20 +173,24 @@ fn prove(
 ) -> Result<(), Error> {
     match sdk_client {
         SDKProverClient::KoalaBearProver(client) => {
-            client.get_stdin_builder().borrow_mut().write_slice(bytes);
+            let mut stdin = client.new_stdin_builder();
+            stdin.write_slice(bytes);
             if is_evm {
-                client.prove_evm(need_setup, output, field_type)?;
+                client.prove_evm(stdin, need_setup, &output, field_type)?;
             } else {
-                client.prove(output.clone())?;
+                let (riscv_proof, embed_proof) = client.prove(stdin)?;
+                client.write_onchain_data(&output, &riscv_proof, &embed_proof)?;
             }
             Ok(())
         }
         SDKProverClient::BabyBearProver(client) => {
-            client.get_stdin_builder().borrow_mut().write_slice(bytes);
+            let mut stdin = client.new_stdin_builder();
+            stdin.write_slice(bytes);
             if is_evm {
-                client.prove_evm(need_setup, output, field_type)?;
+                client.prove_evm(stdin, need_setup, &output, field_type)?;
             } else {
-                client.prove(output.clone())?;
+                let (riscv_proof, embed_proof) = client.prove(stdin)?;
+                client.write_onchain_data(&output, &riscv_proof, &embed_proof)?;
             }
             Ok(())
         }
