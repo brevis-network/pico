@@ -13,6 +13,7 @@ use pico_vm::configs::config::StarkGenericConfig;
 use std::sync::Arc;
 use tokio::{signal::ctrl_c, task::JoinHandle};
 use tonic::{async_trait, transport::Server, Request, Response, Status};
+use tracing::info;
 
 pub fn run<SC: Send + StarkGenericConfig + 'static>(
     gateway_endpoint: Arc<GatewayEndpoint<SC>>,
@@ -33,6 +34,10 @@ where
 
     let handle = tokio::spawn(async move {
         Server::builder()
+            // TODO: check below configurations if extended for lots of machines
+            // .concurrency_limit_per_connection(512)
+            // .initial_stream_window_size(Some(1024 * 1024 * 1024))
+            // .initial_connection_window_size(Some(1024 * 1024 * 1024))
             .add_service(CoordinatorServer::with_interceptor(srv, auth_interceptor))
             .serve_with_shutdown(addr, async {
                 ctrl_c().await.expect("failed to wait for shutdown");
@@ -69,20 +74,18 @@ where
     }
 
     async fn request_task(&self, _request: Request<()>) -> Result<Response<ProofTask>, Status> {
-        // clone the receiver here, since need to handle each grpc connection separately
-        while let Ok(msg) = self.gateway_endpoint.clone_receiver().recv() {
-            // TODO: check worker ip address
-            if msg.ip_addr() == "blocked" {
-                continue;
-            }
-
-            return Ok(Response::new(msg.into()));
+        let receiver = self.gateway_endpoint.clone_receiver();
+        if let Ok(msg) = receiver.try_recv() {
+            tracing::error!("[coord-grpc] return new task");
+            Ok::<_, Status>(Response::new(msg.into()))
+        } else {
+            Err(Status::not_found("no task"))
         }
-
-        Err(Status::not_found("no task"))
     }
 
     async fn respond_result(&self, req: Request<ProofResult>) -> Result<Response<()>, Status> {
+        info!("[coord-grpc] got response result");
+
         let msg = req.into_inner().into();
 
         self.gateway_endpoint.send(msg).unwrap();

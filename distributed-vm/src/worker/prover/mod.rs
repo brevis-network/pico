@@ -95,16 +95,38 @@ where
 
 impl ProverRunner for Prover<BabyBearPoseidon2> {
     fn run(self) -> JoinHandle<()> {
+        info!("[{}] : start", self.prover_id);
+
         tokio::task::spawn_blocking(move || {
+            // request for task first
+            let msg = GatewayMsg::RequestTask;
+            self.endpoint.send(msg).unwrap();
+
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {
                     GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr) => {
+                        info!(
+                            "[{}] receive riscv request of chunk-{}",
+                            self.prover_id, &req.chunk_index,
+                        );
                         let res = self.riscv_convert.process(req, &self.vk_root);
+                        info!(
+                            "[{}] send riscv response of chunk-{}",
+                            self.prover_id, &res.chunk_index,
+                        );
                         let msg = GatewayMsg::Riscv(RiscvMsg::Response(res), task_id, ip_addr);
                         self.endpoint.send(msg).unwrap();
                     }
                     GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr) => {
+                        info!(
+                            "[{}] receive combine request of chunk-{}",
+                            self.prover_id, &req.chunk_index,
+                        );
                         let res = self.combine.process(req);
+                        info!(
+                            "[{}] send combine response of chunk-{}",
+                            self.prover_id, &res.chunk_index,
+                        );
                         let msg = GatewayMsg::Combine(CombineMsg::Response(res), task_id, ip_addr);
                         self.endpoint.send(msg).unwrap();
                     }
@@ -125,15 +147,35 @@ impl ProverRunner for Prover<KoalaBearPoseidon2> {
         info!("[{}] : start", self.prover_id);
 
         tokio::task::spawn_blocking(move || {
+            // request for task first
+            let msg = GatewayMsg::RequestTask;
+            self.endpoint.send(msg).unwrap();
+
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {
                     GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr) => {
+                        info!(
+                            "[{}] receive riscv request of chunk-{}",
+                            self.prover_id, &req.chunk_index,
+                        );
                         let res = self.riscv_convert.process(req, &self.vk_root);
+                        info!(
+                            "[{}] send riscv response of chunk-{}",
+                            self.prover_id, &res.chunk_index,
+                        );
                         let msg = GatewayMsg::Riscv(RiscvMsg::Response(res), task_id, ip_addr);
                         self.endpoint.send(msg).unwrap();
                     }
                     GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr) => {
+                        info!(
+                            "[{}] receive combine request of chunk-{}",
+                            self.prover_id, &req.chunk_index,
+                        );
                         let res = self.combine.process(req);
+                        info!(
+                            "[{}] send combine response of chunk-{}",
+                            self.prover_id, &res.chunk_index,
+                        );
                         let msg = GatewayMsg::Combine(CombineMsg::Response(res), task_id, ip_addr);
                         self.endpoint.send(msg).unwrap();
                     }

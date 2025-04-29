@@ -162,7 +162,7 @@ impl EmulatorRunner for BabyBearPoseidon2 {
                 record,
             };
 
-            tracing::debug!("send emulation record-{chunk_index}");
+            tracing::info!("send emulation record-{chunk_index}");
             gateway_endpoint.send(GatewayMsg::Riscv(
                 RiscvMsg::Request(req),
                 // TODO: fix to id and ip address
