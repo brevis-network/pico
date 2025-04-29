@@ -1,4 +1,6 @@
 use crate::{
+    common::auth::AuthConfig,
+    coordinator::config::CoordinatorConfig,
     coordinator_server::{Coordinator, CoordinatorServer},
     gateway::GatewayEndpoint,
     ProofResult, ProofTask, WorkerInfo,
@@ -8,13 +10,13 @@ use derive_more::Constructor;
 use log::debug;
 use p3_commit::Pcs;
 use pico_vm::configs::config::StarkGenericConfig;
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 use tokio::{signal::ctrl_c, task::JoinHandle};
 use tonic::{async_trait, transport::Server, Request, Response, Status};
 
 pub fn run<SC: Send + StarkGenericConfig + 'static>(
     gateway_endpoint: Arc<GatewayEndpoint<SC>>,
-    addr: SocketAddr,
+    cfg: &CoordinatorConfig,
 ) -> JoinHandle<()>
 where
     <SC::Pcs as Pcs<
@@ -26,10 +28,12 @@ where
     debug!("[coordinator] grpc server init");
 
     let srv = GrpcService::new(gateway_endpoint);
+    let addr = cfg.grpc_addr;
+    let auth_interceptor = cfg.server_auth_interceptor();
 
     let handle = tokio::spawn(async move {
         Server::builder()
-            .add_service(CoordinatorServer::new(srv))
+            .add_service(CoordinatorServer::with_interceptor(srv, auth_interceptor))
             .serve_with_shutdown(addr, async {
                 ctrl_c().await.expect("failed to wait for shutdown");
             })

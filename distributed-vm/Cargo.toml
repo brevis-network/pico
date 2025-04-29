@@ -15,6 +15,10 @@ path = "bin/worker.rs"
 name = "single-node"
 path = "bin/single_node.rs"
 
+[[bin]]
+name = "bearer-token-gen"
+path = "bin/bearer_token_gen.rs"
+
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true
@@ -44,6 +48,8 @@ tokio.workspace = true
 tonic.workspace = true
 tracing.workspace = true
 dotenvy.workspace = true
+rand = "0.9.1"
+base64 = "0.22.1"
 
 [build-dependencies]
 tonic-build.workspace = true

@@ -1,4 +1,10 @@
-use crate::common::parse::{parse_field, parse_program};
+use crate::{
+    common::{
+        auth::{AuthConfig, AuthMethod},
+        parse::{parse_field, parse_program},
+    },
+    impl_auth_config,
+};
 use clap::Parser;
 use pico_perf::common::{bench_field::BenchField, bench_program::BenchProgram};
 use std::net::SocketAddr;
@@ -40,4 +46,29 @@ pub struct CoordinatorConfig {
         help = "gRPC listen address"
     )]
     pub grpc_addr: SocketAddr,
+
+    #[clap(
+        long,
+        env = "AUTH_METHOD",
+        default_value = "none",
+        value_enum,
+        help = "Authentication method (none, bearer)"
+    )]
+    pub auth_method: AuthMethod,
+
+    #[clap(
+        long,
+        env = "BEARER_TOKEN",
+        requires = "auth_method",
+        help = "Bearer token (required if auth_method=bearer)"
+    )]
+    pub bearer_token: Option<String>,
+}
+
+impl_auth_config!(CoordinatorConfig);
+
+impl CoordinatorConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        self.validate_auth()
+    }
 }

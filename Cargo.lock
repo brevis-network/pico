@@ -1207,6 +1207,7 @@ name = "distributed-vm"
 version = "1.0.1"
 dependencies = [
  "anyhow",
+ "base64",
  "bincode",
  "clap",
  "crossbeam",
@@ -1226,6 +1227,7 @@ dependencies = [
  "pico-vm",
  "prost",
  "prost-types",
+ "rand 0.9.1",
  "reqwest",
  "serde",
  "strum",

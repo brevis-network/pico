@@ -1,4 +1,9 @@
-use crate::{coordinator_client::CoordinatorClient, ProofResult};
+use super::WorkerEndpoint;
+use crate::{
+    common::auth::AuthConfig, coordinator_client::CoordinatorClient, worker::config::WorkerConfig,
+    ProofResult,
+};
+use log::error;
 use p3_commit::Pcs;
 use pico_vm::{
     configs::config::StarkGenericConfig,
@@ -9,12 +14,9 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 
-use super::WorkerEndpoint;
-
 pub fn run<SC: StarkGenericConfig + 'static>(
     endpoint: Arc<WorkerEndpoint<SC>>,
-    coordinator_addr: String,
-    max_grpc_msg_size: usize,
+    cfg: &WorkerConfig,
     shutdown: CancellationToken,
 ) -> JoinHandle<()>
 where
@@ -24,6 +26,10 @@ where
     >>::ProverData: Send,
     <SC as StarkGenericConfig>::Domain: Send,
 {
+    let coordinator_addr = cfg.coordinator_grpc_addr.clone();
+    let max_grpc_msg_size = cfg.max_grpc_msg_size;
+    let auth_interceptor = cfg.client_auth_interceptor();
+
     tokio::spawn(async move {
         // TODO: consider adding max attempts to the config
         const MAX_ATTEMPTS: usize = 10;
@@ -38,7 +44,7 @@ where
             {
                 Ok(c) => break c,
                 Err(e) if attempts < MAX_ATTEMPTS => {
-                    eprintln!(
+                    error!(
                         "Retrying gRPC connection to coordinator (attempt {}): {}",
                         attempts + 1,
                         e
@@ -52,7 +58,7 @@ where
                 ),
             }
         };
-        let mut client = CoordinatorClient::new(channel)
+        let mut client = CoordinatorClient::with_interceptor(channel, auth_interceptor)
             .max_encoding_message_size(max_grpc_msg_size)
             .max_decoding_message_size(max_grpc_msg_size);
 
@@ -64,21 +70,39 @@ where
                 maybe_msg = async { endpoint.recv() } => match maybe_msg {
                     Ok(msg) => match msg {
                         GatewayMsg::RequestTask => {
-                            let res = client.request_task(()).await.unwrap();
-                            let msg: GatewayMsg<SC> = res.into_inner().into();
-
-                            endpoint.send(msg).unwrap();
+                            match client.request_task(()).await {
+                                Ok(response) => {
+                                    let new_msg: GatewayMsg<SC> = response.into_inner().into();
+                                    endpoint.send(new_msg).unwrap();
+                                }
+                                Err(status) => {
+                                    if status.code() == tonic::Code::Unauthenticated {
+                                        error!("gRPC authentication failed: {}", status.message
+                                            ());
+                                        std::process::exit(1);
+                                    } else {
+                                        error!("gRPC request failed: {}", status.message());
+                                    }
+                                }
+                            }
                         }
                         GatewayMsg::Riscv(RiscvMsg::Response(_), _, _)
                         | GatewayMsg::Combine(CombineMsg::Response(_), _, _) => {
                             let res: ProofResult = msg.into();
-                            client.respond_result(res).await.unwrap();
+                            if let Err(status) = client.respond_result(res).await {
+                                if status.code() == tonic::Code::Unauthenticated {
+                                    error!("gRPC authentication failed: {}", status.message());
+                                    std::process::exit(1);
+                                } else {
+                                    error!("gRPC response failed: {}", status.message());
+                                }
+                            }
                         }
                         GatewayMsg::Exit => break,
                         _ => panic!("unsupported"),
                     }
                     Err(_) => {
-                        eprintln!("Failed to receive message from endpoint");
+                        error!("Failed to receive message from endpoint");
                         break;
                     }
                 }

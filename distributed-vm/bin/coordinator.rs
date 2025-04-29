@@ -23,6 +23,7 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     let cfg = Arc::new(CoordinatorConfig::parse());
+    cfg.validate().expect("invalid config");
     debug!("starting with config: {:?}", cfg);
 
     // emulator channel for starting the proving process
@@ -45,7 +46,7 @@ async fn main() -> Result<()> {
                 emulator_gateway_channel.receiver(),
                 gateway_grpc_channel.endpoint1(),
             );
-            grpc::run(gateway_grpc_channel.endpoint2(), cfg.grpc_addr);
+            grpc::run(gateway_grpc_channel.endpoint2(), &cfg);
         }
         BenchField::KoalaBear => {
             let emulator_gateway_channel = SingleUnboundedChannel::default();
@@ -61,7 +62,7 @@ async fn main() -> Result<()> {
                 emulator_gateway_channel.receiver(),
                 gateway_grpc_channel.endpoint1(),
             );
-            grpc::run(gateway_grpc_channel.endpoint2(), cfg.grpc_addr);
+            grpc::run(gateway_grpc_channel.endpoint2(), &cfg);
         }
     };
 

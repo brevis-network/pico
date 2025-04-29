@@ -25,6 +25,7 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     let cfg = Arc::new(WorkerConfig::parse());
+    cfg.validate().expect("invalid config");
     debug!("starting with config: {:?}", cfg);
 
     let shutdown = CancellationToken::new();
@@ -34,12 +35,7 @@ async fn main() -> Result<()> {
             let channel = DuplexUnboundedChannel::default();
             channel.endpoint2().send(GatewayMsg::RequestTask)?;
 
-            grpc::run(
-                channel.endpoint1(),
-                cfg.coordinator_grpc_addr.clone(),
-                cfg.max_grpc_msg_size,
-                shutdown.clone(),
-            );
+            grpc::run(channel.endpoint1(), &cfg, shutdown.clone());
 
             // start provers
             (0..cfg.prover_count).enumerate().for_each(|(i, _)| {
@@ -54,12 +50,7 @@ async fn main() -> Result<()> {
             let channel = DuplexUnboundedChannel::default();
             channel.endpoint2().send(GatewayMsg::RequestTask)?;
 
-            grpc::run(
-                channel.endpoint1(),
-                cfg.coordinator_grpc_addr.clone(),
-                cfg.max_grpc_msg_size,
-                shutdown.clone(),
-            );
+            grpc::run(channel.endpoint1(), &cfg, shutdown.clone());
 
             // start provers
             (0..cfg.prover_count).enumerate().for_each(|(i, _)| {
