@@ -1,18 +1,18 @@
 use super::WorkerEndpoint;
 use crate::{
-    common::auth::AuthConfig, coordinator_client::CoordinatorClient, worker::config::WorkerConfig,
-    ProofResult,
-};
-use log::error;
-use p3_commit::Pcs;
-use pico_vm::{
-    configs::config::StarkGenericConfig,
+    common::auth::AuthConfig,
+    coordinator_client::CoordinatorClient,
     messages::{
         combine::{CombineMsg, CombineResponse},
         gateway::GatewayMsg,
         riscv::{RiscvMsg, RiscvResponse},
     },
+    worker::config::WorkerConfig,
+    ProofResult,
 };
+use log::error;
+use p3_commit::Pcs;
+use pico_vm::configs::config::StarkGenericConfig;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -108,8 +108,8 @@ where
                                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                             }
                         }
-                        GatewayMsg::Riscv(RiscvMsg::Response(RiscvResponse { chunk_index, ..}), _, _)
-                        | GatewayMsg::Combine(CombineMsg::Response(CombineResponse { chunk_index, .. }), _, _) => {
+                        GatewayMsg::Riscv(RiscvMsg::Response(RiscvResponse { chunk_index, ..}), _, _, _)
+                        | GatewayMsg::Combine(CombineMsg::Response(CombineResponse { chunk_index, .. }), _, _, _) => {
                             info!("[{grpc_client_id}] sending proved result: chunk-{chunk_index}");
 
                             let res: ProofResult = msg.into();

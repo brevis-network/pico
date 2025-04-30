@@ -1,9 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
-use distributed_vm::worker::{
-    config::WorkerConfig,
-    grpc,
-    prover::{Prover, ProverRunner},
+use distributed_vm::{
+    messages::gateway::GatewayMsg,
+    worker::{
+        config::WorkerConfig,
+        grpc,
+        prover::{Prover, ProverRunner},
+    },
 };
 use dotenvy::dotenv;
 use log::debug;

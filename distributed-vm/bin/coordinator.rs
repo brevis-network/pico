@@ -3,6 +3,8 @@ use clap::Parser;
 use distributed_vm::{
     coordinator::{config::CoordinatorConfig, emulator, grpc},
     gateway,
+    messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
+    timeline::{InMemStore, Stage, Timeline, TimelineStore, COORD_TL_ID},
 };
 use dotenvy::dotenv;
 use log::debug;
@@ -10,7 +12,6 @@ use pico_perf::common::bench_field::BenchField;
 use pico_vm::{
     configs::stark_config::{bb_poseidon2::BabyBearPoseidon2, KoalaBearPoseidon2},
     machine::logger::setup_logger,
-    messages::emulator::EmulatorMsg,
     thread::channel::{DuplexUnboundedChannel, SingleUnboundedChannel},
 };
 use std::{process, sync::Arc};
@@ -18,6 +19,12 @@ use tokio::signal::ctrl_c;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let timeline_store = Arc::new(InMemStore::new());
+
+    let mut coord_tl = Timeline::new(COORD_TL_ID, COORD_TL_ID);
+    coord_tl.mark(Stage::CoordinatorStarted);
+    timeline_store.insert_active(COORD_TL_ID, coord_tl);
+
     setup_logger();
 
     dotenv().ok();
@@ -43,6 +50,7 @@ async fn main() -> Result<()> {
             );
             gateway::run(
                 false,
+                timeline_store.clone(),
                 emulator_gateway_channel.receiver(),
                 gateway_grpc_channel.endpoint1(),
             );
@@ -59,6 +67,7 @@ async fn main() -> Result<()> {
             );
             gateway::run(
                 false,
+                timeline_store.clone(),
                 emulator_gateway_channel.receiver(),
                 gateway_grpc_channel.endpoint1(),
             );

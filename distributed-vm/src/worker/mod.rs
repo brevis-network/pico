@@ -4,6 +4,7 @@ pub mod prover;
 
 tonic::include_proto!("grpc");
 
-use pico_vm::{messages::gateway::GatewayMsg, thread::channel::DuplexUnboundedEndpoint};
+use crate::messages::gateway::GatewayMsg;
+use pico_vm::thread::channel::DuplexUnboundedEndpoint;
 
 pub type WorkerEndpoint<SC> = DuplexUnboundedEndpoint<GatewayMsg<SC>, GatewayMsg<SC>>;

@@ -3,6 +3,7 @@ use clap::Parser;
 use distributed_vm::{
     coordinator::emulator,
     gateway,
+    messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
     single_node::config::SingleNodeConfig,
     worker::prover::{Prover, ProverRunner},
 };
@@ -13,7 +14,6 @@ use pico_perf::common::bench_field::BenchField;
 use pico_vm::{
     configs::stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     machine::logger::setup_logger,
-    messages::{emulator::EmulatorMsg, gateway::GatewayMsg},
     thread::channel::{DuplexUnboundedChannel, SingleUnboundedChannel},
 };
 use std::sync::Arc;

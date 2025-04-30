@@ -1,3 +1,7 @@
+use crate::{
+    gateway::handler::proof_tree::IndexedProof,
+    messages::combine::{CombineRequest, CombineResponse},
+};
 use p3_commit::Pcs;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use pico_perf::common::print_utils::log_section;
@@ -10,7 +14,6 @@ use pico_vm::{
         chiptype::recursion_chiptype::RecursionChipType, machine::combine::CombineMachine,
     },
     machine::field::FieldSpecificPoseidon2Config,
-    messages::combine::{CombineRequest, CombineResponse},
     primitives::consts::{COMBINE_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use tracing::info;
@@ -76,10 +79,23 @@ impl CombineHandler<BabyBearPoseidon2> for CombineProver<BabyBearPoseidon2> {
             self.prover_id, chunk_index,
         );
 
-        let meta_a = proofs[0].clone();
-        let meta_b = proofs[1].clone();
+        let start_a = proofs[0].start_chunk;
+        let end_a = proofs[0].end_chunk;
+
+        let start_b = proofs[1].start_chunk;
+        let end_b = proofs[1].end_chunk;
+
+        assert_eq!(
+            end_a + 1,
+            start_b,
+            "proofs are not adjacent: cannot combine"
+        );
+
+        let meta_a = proofs[0].get_inner().clone();
+        let meta_b = proofs[1].get_inner().clone();
 
         let proof = self.machine.prove_two(meta_a, meta_b, flag_complete);
+        let proof = IndexedProof::new(proof, start_a, end_b);
 
         info!(
             "[{}] finish combine proving chunk-{chunk_index}",
@@ -109,10 +125,23 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
             self.prover_id, chunk_index,
         );
 
-        let meta_a = proofs[0].clone();
-        let meta_b = proofs[1].clone();
+        let start_a = proofs[0].start_chunk;
+        let end_a = proofs[0].end_chunk;
+
+        let start_b = proofs[1].start_chunk;
+        let end_b = proofs[1].end_chunk;
+
+        assert_eq!(
+            end_a + 1,
+            start_b,
+            "proofs are not adjacent: cannot combine"
+        );
+
+        let meta_a = proofs[0].get_inner().clone();
+        let meta_b = proofs[1].get_inner().clone();
 
         let proof = self.machine.prove_two(meta_a, meta_b, flag_complete);
+        let proof = IndexedProof::new(proof, start_a, end_b);
 
         CombineResponse { chunk_index, proof }
     }

@@ -1,7 +1,8 @@
 use crate::{
-    configs::config::StarkGenericConfig,
     messages::{combine::CombineMsg, riscv::RiscvMsg},
+    timeline::Timeline,
 };
+use pico_vm::configs::config::StarkGenericConfig;
 
 type IpAddr = String;
 type TaskId = String;
@@ -14,9 +15,9 @@ pub enum GatewayMsg<SC: StarkGenericConfig> {
     // request task by worker
     RequestTask,
     // riscv
-    Riscv(RiscvMsg<SC>, TaskId, IpAddr),
+    Riscv(RiscvMsg<SC>, TaskId, IpAddr, Option<Timeline>),
     // combine
-    Combine(CombineMsg<SC>, TaskId, IpAddr),
+    Combine(CombineMsg<SC>, TaskId, IpAddr, Option<Timeline>),
     // close a client by ip
     Close(IpAddr),
     // exit
@@ -27,8 +28,8 @@ impl<SC: StarkGenericConfig> GatewayMsg<SC> {
     pub fn ip_addr(&self) -> IpAddr {
         match self {
             Self::EmulatorComplete | Self::RequestTask | Self::Exit => "",
-            Self::Riscv(_, _, ip_addr) => ip_addr,
-            Self::Combine(_, _, ip_addr) => ip_addr,
+            Self::Riscv(_, _, ip_addr, _) => ip_addr,
+            Self::Combine(_, _, ip_addr, _) => ip_addr,
             Self::Close(ip_addr) => ip_addr,
         }
         .to_string()

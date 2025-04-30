@@ -3,6 +3,8 @@ use crate::{
     coordinator::config::CoordinatorConfig,
     coordinator_server::{Coordinator, CoordinatorServer},
     gateway::GatewayEndpoint,
+    messages::gateway::GatewayMsg,
+    timeline::Stage,
     ProofResult, ProofTask, WorkerInfo,
 };
 use anyhow::Result;
@@ -75,8 +77,24 @@ where
 
     async fn request_task(&self, _request: Request<()>) -> Result<Response<ProofTask>, Status> {
         let receiver = self.gateway_endpoint.clone_receiver();
-        if let Ok(msg) = receiver.try_recv() {
-            tracing::error!("[coord-grpc] return new task");
+        if let Ok(mut msg) = receiver.try_recv() {
+            match &mut msg {
+                GatewayMsg::EmulatorComplete => {}
+                GatewayMsg::RequestTask => {}
+                GatewayMsg::Riscv(_, _, _, tl_opt) => {
+                    if let Some(tl) = tl_opt.as_mut() {
+                        tl.mark(Stage::RecordSending);
+                    }
+                }
+                GatewayMsg::Combine(_, _, _, tl_opt) => {
+                    if let Some(tl) = tl_opt.as_mut() {
+                        tl.mark(Stage::CombineSending);
+                    }
+                }
+                GatewayMsg::Close(_) => {}
+                GatewayMsg::Exit => {}
+            }
+            info!("[coord-grpc] return new task");
             Ok::<_, Status>(Response::new(msg.into()))
         } else {
             Err(Status::not_found("no task"))
