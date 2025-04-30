@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, ops::Bound, sync::Arc};
+use std::{collections::BTreeMap, fmt, ops::Bound, sync::Arc};
 
 // chunk index of this proof
 type ProofIndex = usize;
@@ -16,6 +16,17 @@ enum ProofNode<P> {
     InProgress(Vec<Proof<P>>),
     // proof has been generated in this node, wait for the next process
     Proved(Proof<P>),
+}
+
+impl<P> fmt::Display for ProofNode<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let status = match self {
+            Self::InProgress(_) => "in-progress",
+            Self::Proved(_) => "proved",
+        };
+
+        write!(f, "{status}")
+    }
 }
 
 #[allow(dead_code)]
@@ -46,6 +57,18 @@ pub struct ProofTree<P> {
     tree: BTreeMap<ProofIndex, ProofNode<P>>,
 }
 
+impl<P> fmt::Display for ProofTree<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "=== Start of ProofTree ===")?;
+
+        self.tree
+            .iter()
+            .try_for_each(|(i, n)| writeln!(f, "\t{i}: {n}"))?;
+
+        writeln!(f, "=== End of ProofTree ===")
+    }
+}
+
 impl<P> ProofTree<P> {
     pub fn new() -> Self {
         Self {
@@ -73,6 +96,9 @@ impl<P> ProofTree<P> {
 
         let old = self.tree.insert(index, node);
         assert!(old.is_none(), "proof node must be initialized once in tree");
+
+        // log for debuggin proof tree
+        // tracing::info!("after init_node:\n{self}");
     }
 
     // return two adjacent nodes for combine proving if any
@@ -116,6 +142,9 @@ impl<P> ProofTree<P> {
             }
         };
         *self.tree.get_mut(&index).unwrap() = node_to_set;
+
+        // log for debuggin proof tree
+        // tracing::info!("after set_proof:\n{self}");
 
         proofs_to_combine
     }

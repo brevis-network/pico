@@ -81,6 +81,11 @@ impl CombineHandler<BabyBearPoseidon2> for CombineProver<BabyBearPoseidon2> {
 
         let proof = self.machine.prove_two(meta_a, meta_b, flag_complete);
 
+        info!(
+            "[{}] finish combine proving chunk-{chunk_index}",
+            self.prover_id,
+        );
+
         CombineResponse { chunk_index, proof }
     }
 }

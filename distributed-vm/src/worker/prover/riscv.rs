@@ -193,8 +193,9 @@ impl RiscvConvertHandler<BabyBearPoseidon2> for RiscvConvertProver<BabyBearPosei
             .prove_with_index(chunk_index as u32, &convert_witness);
 
         info!(
-            "[worker] finish proving chunk-{chunk_index}, time used: {}ms",
-            start.elapsed().as_millis()
+            "[{}] finish riscv proving chunk-{chunk_index}, time used: {}ms",
+            self.prover_id,
+            start.elapsed().as_millis(),
         );
 
         // return the riscv-convert result

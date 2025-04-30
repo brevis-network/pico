@@ -1,4 +1,10 @@
-use crate::common::parse::{parse_field, parse_program};
+use crate::{
+    common::{
+        auth::{AuthConfig, AuthMethod},
+        parse::{parse_field, parse_program},
+    },
+    impl_auth_config,
+};
 use clap::Parser;
 use pico_perf::common::{bench_field::BenchField, bench_program::BenchProgram};
 
@@ -55,4 +61,29 @@ pub struct WorkerConfig {
         help = "Prover count to start"
     )]
     pub prover_count: usize,
+
+    #[clap(
+        long,
+        env = "AUTH_METHOD",
+        default_value = "none",
+        value_enum,
+        help = "Authentication method (none, bearer)"
+    )]
+    pub auth_method: AuthMethod,
+
+    #[clap(
+        long,
+        env = "BEARER_TOKEN",
+        requires = "auth_method",
+        help = "Bearer token (required if auth_method=bearer)"
+    )]
+    pub bearer_token: Option<String>,
+}
+
+impl_auth_config!(WorkerConfig);
+
+impl WorkerConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        self.validate_auth()
+    }
 }

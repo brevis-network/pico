@@ -1,4 +1,3 @@
-use super::config::CoordinatorConfig;
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
 use log::{debug, info};
@@ -7,8 +6,7 @@ use p3_commit::Pcs;
 use p3_koala_bear::KoalaBear;
 use pico_perf::common::{
     bench_program::{load, BenchProgram},
-    gnark_utils::send_gnark_prove_task,
-    print_utils::{format_results, log_performance_summary, log_section, PerformanceReport},
+    print_utils::log_section,
 };
 use pico_vm::{
     compiler::riscv::{
@@ -17,23 +15,12 @@ use pico_vm::{
     },
     configs::{
         config::StarkGenericConfig,
-        field_config::{BabyBearBn254, KoalaBearBn254},
-        stark_config::{
-            bb_bn254_poseidon2::BabyBearBn254Poseidon2, bb_poseidon2::BabyBearPoseidon2,
-            kb_bn254_poseidon2::KoalaBearBn254Poseidon2, kb_poseidon2::KoalaBearPoseidon2,
-        },
+        stark_config::{bb_poseidon2::BabyBearPoseidon2, kb_poseidon2::KoalaBearPoseidon2},
     },
     emulator::{emulator::MetaEmulator, opts::EmulatorOpts},
     instances::{
-        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler::{
-            onchain_circuit::{
-                gnark::builder::OnchainVerifierCircuit, stdin::OnchainStdin,
-                utils::build_gnark_config_with_str,
-            },
-            shapes::{recursion_shape::RecursionShapeConfig, riscv_shape::RiscvShapeConfig},
-            vk_merkle::{vk_verification_enabled, HasStaticVkManager},
-        },
+        chiptype::riscv_chiptype::RiscvChipType,
+        compiler::{shapes::riscv_shape::RiscvShapeConfig, vk_merkle::HasStaticVkManager},
         configs::{
             riscv_config::StarkConfig as RiscvBBSC, riscv_kb_config::StarkConfig as RiscvKBSC,
         },
@@ -46,18 +33,8 @@ use pico_vm::{
         riscv::{RiscvMsg, RiscvRequest},
     },
     primitives::consts::RISCV_NUM_PVS,
-    proverchain::{
-        CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
-        MachineProver, ProverChain, RiscvProver,
-    },
-    thread::channel::DuplexUnboundedEndpoint,
 };
-use std::{
-    path::PathBuf,
-    sync::Arc,
-    thread,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, thread, time::Instant};
 use tokio::task::JoinHandle;
 
 pub fn merge_meta_proofs<SC>(list: Vec<MetaProof<SC>>) -> MetaProof<SC>
@@ -66,12 +43,12 @@ where
 {
     let mut proofs_vec = Vec::with_capacity(list.len());
     let mut vks_vec = Vec::with_capacity(list.len());
-    let mut pv_stream = None;
+    let pv_stream = None;
 
-    for mut mp in list {
+    for mp in list {
         debug_assert_eq!(mp.proofs.len(), 1);
         debug_assert_eq!(mp.vks.len(), 1);
-        debug_assert_eq!(mp.pv_stream.is_none(), true);
+        debug_assert!(mp.pv_stream.is_none());
 
         proofs_vec.extend_from_slice(mp.proofs.as_ref());
         vks_vec.extend_from_slice(mp.vks.as_ref());
@@ -185,23 +162,21 @@ impl EmulatorRunner for BabyBearPoseidon2 {
                 record,
             };
 
-            tracing::debug!("send emulation record-{chunk_index}");
-            gateway_endpoint
-                .send(GatewayMsg::Riscv(
-                    RiscvMsg::Request(req),
-                    // TODO: fix to id and ip address
-                    chunk_index.to_string(),
-                    "".to_string(),
-                ))
-                .unwrap();
+            tracing::info!("send emulation record-{chunk_index}");
+            gateway_endpoint.send(GatewayMsg::Riscv(
+                RiscvMsg::Request(req),
+                // TODO: fix to id and ip address
+                chunk_index.to_string(),
+                "".to_string(),
+            ))?;
 
             chunk_index += 1;
         }
 
         // send the emulator complete message
-        gateway_endpoint.send(GatewayMsg::EmulatorComplete).unwrap();
+        gateway_endpoint.send(GatewayMsg::EmulatorComplete)?;
 
-        let mut emulator = emulator_handle.join().unwrap();
+        let emulator = emulator_handle.join().unwrap();
         info!("Total Cycles: {}", emulator.cycles());
 
         Ok(())
@@ -293,22 +268,20 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
             };
 
             tracing::debug!("send emulation record-{chunk_index}");
-            gateway_endpoint
-                .send(GatewayMsg::Riscv(
-                    RiscvMsg::Request(req),
-                    // TODO: fix to id and ip address
-                    chunk_index.to_string(),
-                    "".to_string(),
-                ))
-                .unwrap();
+            gateway_endpoint.send(GatewayMsg::Riscv(
+                RiscvMsg::Request(req),
+                // TODO: fix to id and ip address
+                chunk_index.to_string(),
+                "".to_string(),
+            ))?;
 
             chunk_index += 1;
         }
 
         // send the emulator complete message
-        gateway_endpoint.send(GatewayMsg::EmulatorComplete).unwrap();
+        gateway_endpoint.send(GatewayMsg::EmulatorComplete)?;
 
-        let mut emulator = emulator_handle.join().unwrap();
+        let emulator = emulator_handle.join().unwrap();
         info!("Total Cycles: {}", emulator.cycles());
 
         Ok(())
@@ -329,7 +302,7 @@ where
 {
     debug!("[coordinator] emulator init");
 
-    let handle = tokio::spawn(async move {
+    let handle = tokio::task::spawn_blocking(move || {
         while let Ok(msg) = emulator_receiver.recv() {
             match msg {
                 EmulatorMsg::Start => SC::run(&program, gateway_endpoint.clone()).unwrap(),

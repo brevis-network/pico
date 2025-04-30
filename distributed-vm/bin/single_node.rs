@@ -36,9 +36,6 @@ async fn main() -> Result<()> {
         BenchField::BabyBear => {
             let emulator_gateway_channel = SingleUnboundedChannel::default();
             let gateway_worker_channel = DuplexUnboundedChannel::default();
-            gateway_worker_channel
-                .endpoint2()
-                .send(GatewayMsg::RequestTask)?;
 
             // start emulator
             let emulator = emulator::run::<BabyBearPoseidon2>(
@@ -80,9 +77,6 @@ async fn main() -> Result<()> {
         BenchField::KoalaBear => {
             let emulator_gateway_channel = SingleUnboundedChannel::default();
             let gateway_worker_channel = DuplexUnboundedChannel::default();
-            gateway_worker_channel
-                .endpoint2()
-                .send(GatewayMsg::RequestTask)?;
 
             // start emulator
             let emulator = emulator::run::<KoalaBearPoseidon2>(
