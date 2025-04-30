@@ -119,7 +119,7 @@ jobs:
         run: |
           cargo build --release --package field-ffi
           sudo mv ./target/release/libfield_ffi.so /usr/lib/
-      - uses: actions/setup-go@v2
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
       - name: Gnark verification
@@ -161,7 +161,7 @@ jobs:
         run: |
           cargo build --release --package field-ffi
           sudo mv ./target/release/libfield_ffi.so /usr/lib/
-      - uses: actions/setup-go@v2
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
       - name: Gnark verification
