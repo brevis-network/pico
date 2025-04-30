@@ -84,11 +84,6 @@ impl<SC: StarkGenericConfig> GatewayHandler<SC> {
 
         if self.complete() {
             info!("[gateway] proving complete");
-            if self.exit_complete {
-                // TODO: may exit gracefully
-                process::exit(0);
-            }
-
             // handle coordinator timeline
             let mut tl = timelines
                 .remove_active(&COORD_TL_ID)
@@ -97,7 +92,12 @@ impl<SC: StarkGenericConfig> GatewayHandler<SC> {
             tl.mark(CoordinatorFinished);
             timelines.push_finished(tl.clone());
 
-            timelines.summarize_finished()
+            timelines.summarize_finished();
+
+            if self.exit_complete {
+                // TODO: may exit gracefully
+                process::exit(0);
+            }
         }
 
         if let Some((chunk_index, proofs)) = index_proofs_to_combine {

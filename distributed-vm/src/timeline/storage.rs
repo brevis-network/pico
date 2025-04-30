@@ -42,13 +42,24 @@ impl TimelineStore for InMemStore {
 
 impl InMemStore {
     pub fn summarize_finished(&self) {
-        let all = self.all_finished();
-        let ts = |tl: &Timeline, s: Stage| tl.get(s).expect(&format!("{s:?} not found"));
-        let ms = |a: SystemTime, b: SystemTime| {
-            a.duration_since(b)
-                .expect("time went backwards")
-                .as_millis()
+        let mut all = self.all_finished();
+        let (mut single, mut multi): (Vec<_>, Vec<_>) = all
+            .into_iter()
+            .partition(|tl| tl.start_index == tl.end_index);
+        single.sort_by_key(|tl| tl.start_index);
+        single.extend(multi);
+        let all = single;
+
+        // helper fn in this script
+        let ts = |tl: &Timeline, s: Stage| tl.get(s);
+        let ms = |a: Option<SystemTime>, b: Option<SystemTime>| match (a, b) {
+            (Some(a), Some(b)) => a.duration_since(b).ok().map(|d| d.as_millis()),
+            _ => None,
         };
+        fn fmt_ms(opt: Option<u128>) -> String {
+            opt.map(|v| format!("{v} ms"))
+                .unwrap_or_else(|| "N/A".into())
+        }
 
         // Coordinator Timeline
         let coord_tl = all
@@ -58,16 +69,17 @@ impl InMemStore {
         let e2e_ms = ms(
             ts(coord_tl, CoordinatorFinished),
             ts(coord_tl, CoordinatorStarted),
-        );
+        )
+        .expect("No E2E coordinator timeline!");
 
         // Riscv & Convert
         struct RiscvRow {
             chunk: usize,
-            created: u128,
-            waiting: u128,
-            net_c2w: u128,
-            gen: u128,
-            net_w2c: u128,
+            created: Option<u128>,
+            waiting: Option<u128>,
+            net_c2w: Option<u128>,
+            gen: Option<u128>,
+            net_w2c: Option<u128>,
         }
 
         let mut riscv_rows = Vec::<RiscvRow>::new();
@@ -83,15 +95,25 @@ impl InMemStore {
                     let convert_end = ts(tl, RiscvConvertDone);
                     let cordi_recv = ts(tl, CoordinatorRecv);
 
-                    let created_gap = prev_created
-                        .map(|p| ms(created, p))
-                        .unwrap_or_else(|| ms(created, ts(coord_tl, CoordinatorStarted)));
-                    prev_created = Some(created);
+                    let mut waiting_ms = ms(sending, created);
+                    // used for single-node mode
+                    if sending.is_none() {
+                        waiting_ms = ms(recv, created);
+                    }
+
+                    let mut created_gap = ms(created, prev_created);
+
+                    // chunk_index starts from 0
+                    if idx == 0 {
+                        created_gap = ms(created, ts(coord_tl, CoordinatorStarted));
+                    }
+
+                    prev_created = created;
 
                     riscv_rows.push(RiscvRow {
                         chunk: idx,
                         created: created_gap,
-                        waiting: ms(sending, created),
+                        waiting: waiting_ms,
                         net_c2w: ms(recv, sending),
                         gen: ms(convert_end, recv),
                         net_w2c: ms(cordi_recv, convert_end),
@@ -104,10 +126,10 @@ impl InMemStore {
         // Combine
         struct CombRow {
             inputs: String,
-            wait: u128,
-            net_c2w: u128,
-            comb: u128,
-            net_w2c: u128,
+            wait: Option<u128>,
+            net_c2w: Option<u128>,
+            comb: Option<u128>,
+            net_w2c: Option<u128>,
         }
         let mut comb_rows = Vec::<CombRow>::new();
 
@@ -128,7 +150,11 @@ impl InMemStore {
             let combine_done_time = ts(tl, CombineDone);
             let cordi_recv_time = ts(tl, CoordinatorRecv);
 
-            let wait = ms(sending_time, start_time);
+            let mut wait = ms(sending_time, start_time);
+            // used for single-node mode
+            if sending_time.is_none() {
+                wait = ms(w_recv_time, start_time);
+            }
             let net_c2w = ms(w_recv_time, sending_time);
             let comb_ms = ms(combine_done_time, w_recv_time);
             let net_w2c = ms(cordi_recv_time, combine_done_time);
@@ -172,11 +198,11 @@ impl InMemStore {
                     &mut buf,
                     "{:<6} │ {:>20} │ {:>10} │ {:>8} │ {:>15}│ {:>8}",
                     r.chunk,
-                    format!("{} ms", r.created),
-                    format!("{} ms", r.waiting),
-                    format!("{} ms", r.net_c2w),
-                    format!("{} ms", r.gen),
-                    format!("{} ms", r.net_w2c),
+                    fmt_ms(r.created),
+                    fmt_ms(r.waiting),
+                    fmt_ms(r.net_c2w),
+                    fmt_ms(r.gen),
+                    fmt_ms(r.net_w2c),
                 )
                 .unwrap();
             }
@@ -192,10 +218,10 @@ impl InMemStore {
             writeln!(&mut buf, "{}", "─".repeat(100)).unwrap();
 
             for c in comb_rows {
-                let wait_str = format!("{} ms", c.wait);
-                let net_c2w_str = format!("{} ms", c.net_c2w);
-                let comb_str = format!("{} ms", c.comb);
-                let net_w2c_str = format!("{} ms", c.net_w2c);
+                let wait_str = fmt_ms(c.wait);
+                let net_c2w_str = fmt_ms(c.net_c2w);
+                let comb_str = fmt_ms(c.comb);
+                let net_w2c_str = fmt_ms(c.net_w2c);
                 writeln!(
                     &mut buf,
                     "{:<23} │ {:>12} │ {:>12} │ {:>12} │ {:>12}",
