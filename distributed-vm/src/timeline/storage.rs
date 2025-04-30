@@ -1,11 +1,7 @@
-use crate::timeline::{Stage, Timeline};
+use crate::timeline::{Stage, Stage::*, Timeline, COORD_TL_ID};
 use dashmap::DashMap;
-use std::{sync::RwLock, time::SystemTime};
+use std::{collections::HashMap, fmt::Write as _, sync::RwLock, time::SystemTime};
 use tracing::{info, warn};
-use crate::timeline::{Stage::*, COORD_TL_ID};
-use std::fmt::Write as _;
-use std::collections::HashMap;
-
 
 pub trait TimelineStore {
     fn insert_active(&self, key: usize, tl: Timeline);
@@ -43,7 +39,6 @@ impl TimelineStore for InMemStore {
         self.finished.read().unwrap().clone()
     }
 }
-
 
 impl InMemStore {
     pub fn summarize_finished(&self) {

@@ -26,6 +26,11 @@ pub const PROGRAMS: &[BenchProgram] = &[
         input: Some("./perf/bench_data/reth-17106222.bin"),
     },
     BenchProgram {
+        name: "reth-18884864",
+        elf: "./perf/bench_data/reth-elf",
+        input: Some("./perf/bench_data/reth-18884864.bin"),
+    },
+    BenchProgram {
         name: "reth-22059900",
         elf: "./perf/bench_data/reth-elf",
         input: Some("./perf/bench_data/reth-22059900.bin"),
