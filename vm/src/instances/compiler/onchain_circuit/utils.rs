@@ -11,7 +11,7 @@ use serde_json::json;
 use std::{
     fs::{self, File},
     io::{BufReader, Write},
-    path::PathBuf,
+    path::Path,
 };
 
 use super::gnark::witness::GnarkWitness;
@@ -26,8 +26,9 @@ const CONTRACT_INPUTS_FILE: &str = "inputs.json";
 pub fn save_embed_proof_data<SC: StarkGenericConfig, Bn254SC: StarkGenericConfig>(
     riscv_proof: &MetaProof<SC>,
     embed_proof: &MetaProof<Bn254SC>,
-    output: PathBuf,
+    output: impl AsRef<Path>,
 ) -> Result<()> {
+    let output = output.as_ref().to_path_buf();
     if let Some(ref pv_stream) = riscv_proof.pv_stream {
         debug!("pv_stream is not null, storing in pico_out dir");
 
@@ -57,8 +58,9 @@ pub fn save_embed_proof_data<SC: StarkGenericConfig, Bn254SC: StarkGenericConfig
 pub fn build_gnark_config<EmbedFC: FieldGenericConfig>(
     constraints: Vec<Constraint>,
     witness: Witness<EmbedFC>,
-    build_dir: PathBuf,
+    build_dir: impl AsRef<Path>,
 ) {
+    let build_dir = build_dir.as_ref().to_path_buf();
     let serialized = serde_json::to_string(&constraints).unwrap();
 
     // Write constraints.
@@ -78,8 +80,9 @@ pub fn build_gnark_config<EmbedFC: FieldGenericConfig>(
 pub fn build_gnark_config_with_str<EmbedFC: FieldGenericConfig>(
     constraints: Vec<Constraint>,
     witness: Witness<EmbedFC>,
-    build_dir: PathBuf,
+    build_dir: impl AsRef<Path>,
 ) -> String {
+    let build_dir = build_dir.as_ref().to_path_buf();
     let serialized = serde_json::to_string(&constraints).unwrap();
 
     // Write constraints.
@@ -95,8 +98,9 @@ pub fn build_gnark_config_with_str<EmbedFC: FieldGenericConfig>(
 }
 
 pub fn generate_contract_inputs<EmbedFC: FieldGenericConfig>(
-    pico_out_dir: PathBuf,
-) -> Result<PathBuf, Error> {
+    pico_out_dir: impl AsRef<Path>,
+) -> Result<impl AsRef<Path>, Error> {
+    let pico_out_dir = pico_out_dir.as_ref().to_path_buf();
     info!("Start to generate contract inputs...");
     let proof_path = pico_out_dir.join(PROOF_FILE);
     if !proof_path.exists() {

@@ -1,3 +1,11 @@
+use crate::{
+    messages::{
+        emulator::EmulatorMsg,
+        gateway::GatewayMsg,
+        riscv::{RiscvMsg, RiscvRequest},
+    },
+    timeline::{InMemStore, Stage, Stage::RecordCreated, Timeline, TimelineStore},
+};
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
 use log::{debug, info};
@@ -27,11 +35,6 @@ use pico_vm::{
         machine::riscv::RiscvMachine,
     },
     machine::{machine::MachineBehavior, proof::MetaProof, witness::ProvingWitness},
-    messages::{
-        emulator::EmulatorMsg,
-        gateway::GatewayMsg,
-        riscv::{RiscvMsg, RiscvRequest},
-    },
     primitives::consts::RISCV_NUM_PVS,
 };
 use std::{sync::Arc, thread, time::Instant};
@@ -157,6 +160,9 @@ impl EmulatorRunner for BabyBearPoseidon2 {
         let mut chunk_index = 0;
 
         while let Ok(record) = record_receiver.recv() {
+            let mut tl = Timeline::new(chunk_index, chunk_index);
+            tl.mark(RecordCreated);
+
             let req = RiscvRequest {
                 chunk_index,
                 record,
@@ -168,6 +174,7 @@ impl EmulatorRunner for BabyBearPoseidon2 {
                 // TODO: fix to id and ip address
                 chunk_index.to_string(),
                 "".to_string(),
+                Some(tl),
             ))?;
 
             chunk_index += 1;
@@ -262,6 +269,8 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
         let mut chunk_index = 0;
 
         while let Ok(record) = record_receiver.recv() {
+            let mut tl = Timeline::new(chunk_index, chunk_index);
+            tl.mark(RecordCreated);
             let req = RiscvRequest {
                 chunk_index,
                 record,
@@ -273,6 +282,7 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
                 // TODO: fix to id and ip address
                 chunk_index.to_string(),
                 "".to_string(),
+                Some(tl),
             ))?;
 
             chunk_index += 1;

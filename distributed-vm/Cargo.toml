@@ -50,6 +50,9 @@ tracing.workspace = true
 dotenvy.workspace = true
 rand = "0.9.1"
 base64 = "0.22.1"
+dashmap.workspace = true
+strum_macros.workspace = true
+thiserror.workspace = true
 
 [build-dependencies]
 tonic-build.workspace = true

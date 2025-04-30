@@ -1,20 +1,21 @@
-use crate::{ProofResult, ProofTask, TaskType};
-use pico_vm::{
-    configs::config::StarkGenericConfig,
+use crate::{
+    gateway::handler::proof_tree::IndexedProof,
     messages::{
         combine::{CombineMsg, CombineRequest, CombineResponse},
         gateway::GatewayMsg,
         riscv::{RiscvMsg, RiscvRequest, RiscvResponse},
     },
+    ProofResult, ProofTask, TaskType,
 };
-use std::sync::Arc;
+use pico_vm::{configs::config::StarkGenericConfig, machine::proof::MetaProof};
 
 impl<SC: StarkGenericConfig> From<GatewayMsg<SC>> for ProofTask {
     fn from(msg: GatewayMsg<SC>) -> Self {
         match msg {
-            GatewayMsg::Riscv(RiscvMsg::Request(req), id, _) => {
+            GatewayMsg::Riscv(RiscvMsg::Request(req), id, _, tl) => {
                 let chunk_index = req.chunk_index as u64;
                 let record = Some(bincode::serialize(&req.record).unwrap());
+                let timeline = tl.map(Into::into);
 
                 ProofTask {
                     id,
@@ -23,9 +24,10 @@ impl<SC: StarkGenericConfig> From<GatewayMsg<SC>> for ProofTask {
                     record,
                     flag_complete: None,
                     proofs: vec![],
+                    timeline,
                 }
             }
-            GatewayMsg::Combine(CombineMsg::Request(req), id, _) => {
+            GatewayMsg::Combine(CombineMsg::Request(req), id, _, tl) => {
                 let chunk_index = req.chunk_index as u64;
                 let flag_complete = Some(req.flag_complete);
                 let proofs = req
@@ -33,6 +35,7 @@ impl<SC: StarkGenericConfig> From<GatewayMsg<SC>> for ProofTask {
                     .iter()
                     .map(|p| bincode::serialize(&p).unwrap())
                     .collect();
+                let timeline = tl.map(Into::into);
 
                 ProofTask {
                     id,
@@ -41,6 +44,7 @@ impl<SC: StarkGenericConfig> From<GatewayMsg<SC>> for ProofTask {
                     record: None,
                     flag_complete,
                     proofs,
+                    timeline,
                 }
             }
             _ => panic!("unsupported"),
@@ -51,26 +55,30 @@ impl<SC: StarkGenericConfig> From<GatewayMsg<SC>> for ProofTask {
 impl<SC: StarkGenericConfig> From<GatewayMsg<SC>> for ProofResult {
     fn from(msg: GatewayMsg<SC>) -> Self {
         match msg {
-            GatewayMsg::Riscv(RiscvMsg::Response(res), id, _) => {
+            GatewayMsg::Riscv(RiscvMsg::Response(res), id, _, tl) => {
                 let chunk_index = res.chunk_index as u64;
                 let proof = bincode::serialize(&res.proof).unwrap();
+                let timeline = tl.map(Into::into);
 
                 ProofResult {
                     id,
                     task_type: TaskType::Riscv as i32,
                     chunk_index,
                     proof,
+                    timeline,
                 }
             }
-            GatewayMsg::Combine(CombineMsg::Response(res), id, _) => {
+            GatewayMsg::Combine(CombineMsg::Response(res), id, _, tl) => {
                 let chunk_index = res.chunk_index as u64;
                 let proof = bincode::serialize(&res.proof).unwrap();
+                let timeline = tl.map(Into::into);
 
                 ProofResult {
                     id,
                     task_type: TaskType::Combine as i32,
                     chunk_index,
                     proof,
+                    timeline,
                 }
             }
 
@@ -86,6 +94,7 @@ impl<SC: StarkGenericConfig> From<ProofTask> for GatewayMsg<SC> {
                 let id = task.id;
                 let chunk_index = task.chunk_index as usize;
                 let record = bincode::deserialize(&task.record.unwrap()).unwrap();
+                let timeline = task.timeline.map(TryInto::try_into).transpose().unwrap();
 
                 GatewayMsg::Riscv(
                     RiscvMsg::Request(RiscvRequest {
@@ -94,6 +103,7 @@ impl<SC: StarkGenericConfig> From<ProofTask> for GatewayMsg<SC> {
                     }),
                     id,
                     "".to_string(),
+                    timeline,
                 )
             }
             TaskType::Combine => {
@@ -103,8 +113,9 @@ impl<SC: StarkGenericConfig> From<ProofTask> for GatewayMsg<SC> {
                 let proofs = task
                     .proofs
                     .iter()
-                    .map(|p| Arc::new(bincode::deserialize(p).unwrap()))
+                    .map(|p| bincode::deserialize::<IndexedProof<MetaProof<SC>>>(p).unwrap())
                     .collect();
+                let timeline = task.timeline.map(TryInto::try_into).transpose().unwrap();
 
                 GatewayMsg::Combine(
                     CombineMsg::Request(CombineRequest {
@@ -114,6 +125,7 @@ impl<SC: StarkGenericConfig> From<ProofTask> for GatewayMsg<SC> {
                     }),
                     id,
                     "".to_string(),
+                    timeline,
                 )
             }
         }
@@ -127,19 +139,21 @@ impl<SC: StarkGenericConfig> From<ProofResult> for GatewayMsg<SC> {
                 let id = res.id;
                 let chunk_index = res.chunk_index as usize;
                 let proof = bincode::deserialize(&res.proof).unwrap();
+                let timeline = res.timeline.map(TryInto::try_into).transpose().unwrap();
 
                 let res = RiscvResponse::new(chunk_index, proof);
 
-                GatewayMsg::Riscv(RiscvMsg::Response(res), id, "".to_string())
+                GatewayMsg::Riscv(RiscvMsg::Response(res), id, "".to_string(), timeline)
             }
             TaskType::Combine => {
                 let id = res.id;
                 let chunk_index = res.chunk_index as usize;
                 let proof = bincode::deserialize(&res.proof).unwrap();
+                let timeline = res.timeline.map(TryInto::try_into).transpose().unwrap();
 
                 let res = CombineResponse::new(chunk_index, proof);
 
-                GatewayMsg::Combine(CombineMsg::Response(res), id, "".to_string())
+                GatewayMsg::Combine(CombineMsg::Response(res), id, "".to_string(), timeline)
             }
         }
     }

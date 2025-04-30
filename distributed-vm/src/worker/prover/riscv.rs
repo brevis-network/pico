@@ -1,4 +1,8 @@
 use super::VkRoot;
+use crate::{
+    gateway::handler::proof_tree::IndexedProof,
+    messages::riscv::{RiscvRequest, RiscvResponse},
+};
 use log::debug;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_symmetric::Permutation;
@@ -34,7 +38,6 @@ use pico_vm::{
         machine::MachineBehavior,
         witness::ProvingWitness,
     },
-    messages::riscv::{RiscvRequest, RiscvResponse},
     primitives::{
         consts::{DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS, RISCV_NUM_PVS},
         Poseidon2Init,
@@ -117,6 +120,10 @@ where
             riscv_vk,
         }
     }
+
+    pub fn riscv_vk(&self) -> &BaseVerifyingKey<SC> {
+        &self.riscv_vk
+    }
 }
 
 /// specialization for running prover on either babybear or koalabear
@@ -191,6 +198,7 @@ impl RiscvConvertHandler<BabyBearPoseidon2> for RiscvConvertProver<BabyBearPosei
         let proof = self
             .convert_machine
             .prove_with_index(chunk_index as u32, &convert_witness);
+        let proof = IndexedProof::new(proof, chunk_index, chunk_index);
 
         info!(
             "[{}] finish riscv proving chunk-{chunk_index}, time used: {}ms",
@@ -260,6 +268,7 @@ impl RiscvConvertHandler<KoalaBearPoseidon2> for RiscvConvertProver<KoalaBearPos
         let proof = self
             .convert_machine
             .prove_with_index(chunk_index as u32, &convert_witness);
+        let proof = IndexedProof::new(proof, chunk_index, chunk_index);
 
         info!(
             "[worker] finish proving chunk-{chunk_index}, time used: {}ms",

@@ -10,7 +10,7 @@ use pico_vm::{
         field_config::{BabyBearBn254, KoalaBearBn254},
         stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
-    emulator::stdin::{EmulatorStdin, EmulatorStdinBuilder},
+    emulator::stdin::EmulatorStdinBuilder,
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
@@ -30,7 +30,7 @@ use pico_vm::{
         MachineProver, ProverChain, RiscvProver,
     },
 };
-use std::{cell::RefCell, path::PathBuf, process::Command, rc::Rc};
+use std::{path::Path, process::Command};
 
 #[macro_export]
 macro_rules! create_sdk_prove_client {
@@ -41,7 +41,6 @@ macro_rules! create_sdk_prove_client {
             combine: CombineProver<$sc, $sc>,
             compress: CompressProver<$sc, $sc>,
             embed: EmbedProver<$sc, $bn254_sc, Vec<u8>>,
-            stdin_builder: Rc<RefCell<EmulatorStdinBuilder<Vec<u8>>>>,
         }
 
         impl $client_name {
@@ -86,21 +85,17 @@ macro_rules! create_sdk_prove_client {
                     (riscv, convert, combine, compress, embed)
                 };
 
-                let stdin_builder = Rc::new(RefCell::new(
-                    EmulatorStdin::<Program, Vec<u8>>::new_builder(),
-                ));
                 Self {
                     riscv,
                     convert,
                     combine,
                     compress,
                     embed,
-                    stdin_builder,
                 }
             }
 
-            pub fn get_stdin_builder(&self) -> Rc<RefCell<EmulatorStdinBuilder<Vec<u8>>>> {
-                Rc::clone(&self.stdin_builder)
+            pub fn new_stdin_builder(&self) -> EmulatorStdinBuilder<Vec<u8>> {
+                EmulatorStdinBuilder::default()
             }
 
             pub fn riscv_vk(&self) -> &BaseVerifyingKey<$sc> {
@@ -111,9 +106,9 @@ macro_rules! create_sdk_prove_client {
             /// the constraints.json and groth16_witness.json will be generated in output dir.
             pub fn prove(
                 &self,
-                output: PathBuf,
+                stdin: EmulatorStdinBuilder<Vec<u8>>,
             ) -> Result<(MetaProof<$sc>, MetaProof<$bn254_sc>), Error> {
-                let stdin = self.stdin_builder.borrow().clone().finalize();
+                let stdin = stdin.finalize();
                 let riscv_proof = self.riscv.prove(stdin);
                 let riscv_vk = self.riscv_vk();
                 if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
@@ -135,23 +130,34 @@ macro_rules! create_sdk_prove_client {
                 if !self.embed.verify(&proof, riscv_vk) {
                     return Err(Error::msg("verify embed proof failed"));
                 }
+                Ok((riscv_proof, proof))
+            }
 
+            pub fn write_onchain_data(
+                &self,
+                outdir: impl AsRef<Path>,
+                riscv_proof: &MetaProof<$sc>,
+                embed_proof: &MetaProof<$bn254_sc>,
+            ) -> Result<()> {
                 let onchain_stdin = OnchainStdin {
                     machine: self.embed.machine.base_machine().clone(),
-                    vk: proof.vks().first().unwrap().clone(),
-                    proof: proof.proofs().first().unwrap().clone(),
+                    vk: embed_proof.vks().first().unwrap().clone(),
+                    proof: embed_proof.proofs().first().unwrap().clone(),
                     flag_complete: true,
                 };
                 let (constraints, witness) =
                     OnchainVerifierCircuit::<$fc, $bn254_sc>::build(&onchain_stdin);
-                save_embed_proof_data(&riscv_proof, &proof, output.clone())?;
-                build_gnark_config(constraints, witness, output.clone());
-                Ok((riscv_proof, proof))
+                save_embed_proof_data(&riscv_proof, &embed_proof, &outdir)?;
+                build_gnark_config(constraints, witness, &outdir);
+                Ok(())
             }
 
             /// prove and verify riscv program. default not include convert, combine, compress, embed
-            pub fn prove_fast(&self) -> Result<MetaProof<$sc>, Error> {
-                let stdin = self.stdin_builder.borrow().clone().finalize();
+            pub fn prove_fast(
+                &self,
+                stdin: EmulatorStdinBuilder<Vec<u8>>,
+            ) -> Result<MetaProof<$sc>, Error> {
+                let stdin = stdin.finalize();
                 info!("stdin length: {}", stdin.inputs.len());
                 let proof = self.riscv.prove(stdin);
                 let riscv_vk = self.riscv_vk();
@@ -164,12 +170,20 @@ macro_rules! create_sdk_prove_client {
             }
 
             /// prove and generate gnark proof and contract inputs. must install docker first
-            pub fn prove_evm(&self, need_setup: bool, output: PathBuf, field_type: &str) -> Result<(), Error> {
+            pub fn prove_evm(
+                &self,
+                stdin: EmulatorStdinBuilder<Vec<u8>>,
+                need_setup: bool,
+                output: impl AsRef<Path>,
+                field_type: &str,
+            ) -> Result<(), Error> {
+                let output = output.as_ref();
                 let vk_verification = vk_verification_enabled();
                 if !vk_verification {
                     return Err(Error::msg("VK_VERIFICATION must be set to true in evm proof"));
                 }
-                self.prove(output.clone())?;
+                let (riscv_proof, embed_proof) = self.prove(stdin)?;
+                self.write_onchain_data(output, &riscv_proof, &embed_proof)?;
                 let field_name = match field_type {
                     "kb" => {
                         "koalabear"
@@ -184,13 +198,13 @@ macro_rules! create_sdk_prove_client {
                 if need_setup {
                     let mut setup_cmd = Command::new("sh");
                     setup_cmd.arg("-c")
-                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd setup -sol ./data/Groth16Verifier.sol", output.clone().display(), field_name));
+                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd setup -sol ./data/Groth16Verifier.sol", output.display(), field_name));
                     execute_command(setup_cmd);
                 }
 
                 let mut prove_cmd = Command::new("sh");
                 prove_cmd.arg("-c")
-                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd prove -sol ./data/Groth16Verifier.sol", output.clone().display(), field_name));
+                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd prove -sol ./data/Groth16Verifier.sol", output.display(), field_name));
 
                 execute_command(prove_cmd);
                 generate_contract_inputs::<$fc>(output.clone())?;

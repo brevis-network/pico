@@ -21,7 +21,6 @@ pub mod emulator;
 pub mod instances;
 pub mod iter;
 pub mod machine;
-pub mod messages;
 pub mod primitives;
 pub mod proverchain;
 pub mod thread;

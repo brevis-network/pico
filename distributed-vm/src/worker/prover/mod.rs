@@ -2,6 +2,10 @@ pub mod combine;
 pub mod riscv;
 
 use super::WorkerEndpoint;
+use crate::{
+    messages::{combine::CombineMsg, gateway::GatewayMsg, riscv::RiscvMsg},
+    timeline::Stage::*,
+};
 use combine::{CombineHandler, CombineProver};
 use p3_commit::Pcs;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
@@ -15,7 +19,6 @@ use pico_vm::{
     },
     instances::compiler::vk_merkle::{HasStaticVkManager, VkMerkleManager},
     machine::field::FieldSpecificPoseidon2Config,
-    messages::{combine::CombineMsg, gateway::GatewayMsg, riscv::RiscvMsg},
     primitives::{
         consts::{DIGEST_SIZE, EXTENSION_DEGREE},
         Poseidon2Init,
@@ -24,7 +27,7 @@ use pico_vm::{
 use riscv::{RiscvConvertHandler, RiscvConvertProver};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{error, info};
 
 type VkRoot<SC> = [<SC as StarkGenericConfig>::Val; DIGEST_SIZE];
 
@@ -104,30 +107,46 @@ impl ProverRunner for Prover<BabyBearPoseidon2> {
 
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {
-                    GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr) => {
+                    GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr, tl) => {
                         info!(
                             "[{}] receive riscv request of chunk-{}",
                             self.prover_id, &req.chunk_index,
                         );
+                        let mut timeline = tl.unwrap();
+                        timeline.mark(WorkerRecv);
                         let res = self.riscv_convert.process(req, &self.vk_root);
                         info!(
                             "[{}] send riscv response of chunk-{}",
                             self.prover_id, &res.chunk_index,
                         );
-                        let msg = GatewayMsg::Riscv(RiscvMsg::Response(res), task_id, ip_addr);
+                        timeline.mark(RiscvConvertDone);
+                        let msg = GatewayMsg::Riscv(
+                            RiscvMsg::Response(res),
+                            task_id,
+                            ip_addr,
+                            Some(timeline),
+                        );
                         self.endpoint.send(msg).unwrap();
                     }
-                    GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr) => {
+                    GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr, tl) => {
                         info!(
                             "[{}] receive combine request of chunk-{}",
                             self.prover_id, &req.chunk_index,
                         );
+                        let mut timeline = tl.unwrap();
+                        timeline.mark(WorkerRecv);
                         let res = self.combine.process(req);
                         info!(
                             "[{}] send combine response of chunk-{}",
                             self.prover_id, &res.chunk_index,
                         );
-                        let msg = GatewayMsg::Combine(CombineMsg::Response(res), task_id, ip_addr);
+                        timeline.mark(CombineDone);
+                        let msg = GatewayMsg::Combine(
+                            CombineMsg::Response(res),
+                            task_id,
+                            ip_addr,
+                            Some(timeline),
+                        );
                         self.endpoint.send(msg).unwrap();
                     }
                     GatewayMsg::Exit => break,
@@ -153,30 +172,61 @@ impl ProverRunner for Prover<KoalaBearPoseidon2> {
 
             while let Ok(msg) = self.endpoint.recv() {
                 match msg {
-                    GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr) => {
+                    GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr, tl) => {
                         info!(
                             "[{}] receive riscv request of chunk-{}",
                             self.prover_id, &req.chunk_index,
                         );
+                        let mut timeline = tl.unwrap();
+                        timeline.mark(WorkerRecv);
                         let res = self.riscv_convert.process(req, &self.vk_root);
                         info!(
                             "[{}] send riscv response of chunk-{}",
                             self.prover_id, &res.chunk_index,
                         );
-                        let msg = GatewayMsg::Riscv(RiscvMsg::Response(res), task_id, ip_addr);
+                        timeline.mark(RiscvConvertDone);
+                        let msg = GatewayMsg::Riscv(
+                            RiscvMsg::Response(res),
+                            task_id,
+                            ip_addr,
+                            Some(timeline),
+                        );
                         self.endpoint.send(msg).unwrap();
                     }
-                    GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr) => {
+                    GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr, tl) => {
                         info!(
                             "[{}] receive combine request of chunk-{}",
                             self.prover_id, &req.chunk_index,
                         );
+                        let mut timeline = tl.unwrap();
+                        timeline.mark(WorkerRecv);
+                        let flag_complete = req.flag_complete;
                         let res = self.combine.process(req);
+                        if flag_complete {
+                            if self
+                                .combine
+                                .verify(&res.proof.inner, self.riscv_convert.riscv_vk())
+                                .is_ok()
+                            {
+                                info!(
+                                    "[{}] succeeded to verify last combine proof",
+                                    self.prover_id,
+                                );
+                            } else {
+                                error!("[{}] failed to verify last combine proof", self.prover_id);
+                            }
+                        }
                         info!(
                             "[{}] send combine response of chunk-{}",
                             self.prover_id, &res.chunk_index,
                         );
-                        let msg = GatewayMsg::Combine(CombineMsg::Response(res), task_id, ip_addr);
+                        timeline.mark(CombineDone);
+                        let msg = GatewayMsg::Combine(
+                            CombineMsg::Response(res),
+                            task_id,
+                            ip_addr,
+                            Some(timeline),
+                        );
                         self.endpoint.send(msg).unwrap();
                     }
                     GatewayMsg::Exit => break,
