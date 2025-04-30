@@ -27,7 +27,7 @@ use pico_vm::{
 use riscv::{RiscvConvertHandler, RiscvConvertProver};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{error, info};
 
 type VkRoot<SC> = [<SC as StarkGenericConfig>::Val; DIGEST_SIZE];
 
@@ -200,7 +200,22 @@ impl ProverRunner for Prover<KoalaBearPoseidon2> {
                         );
                         let mut timeline = tl.unwrap();
                         timeline.mark(WorkerRecv);
+                        let flag_complete = req.flag_complete;
                         let res = self.combine.process(req);
+                        if flag_complete {
+                            if self
+                                .combine
+                                .verify(&res.proof.inner, self.riscv_convert.riscv_vk())
+                                .is_ok()
+                            {
+                                info!(
+                                    "[{}] succeeded to verify last combine proof",
+                                    self.prover_id,
+                                );
+                            } else {
+                                error!("[{}] failed to verify last combine proof", self.prover_id);
+                            }
+                        }
                         info!(
                             "[{}] send combine response of chunk-{}",
                             self.prover_id, &res.chunk_index,

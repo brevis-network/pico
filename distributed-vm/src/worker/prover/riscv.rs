@@ -120,6 +120,10 @@ where
             riscv_vk,
         }
     }
+
+    pub fn riscv_vk(&self) -> &BaseVerifyingKey<SC> {
+        &self.riscv_vk
+    }
 }
 
 /// specialization for running prover on either babybear or koalabear

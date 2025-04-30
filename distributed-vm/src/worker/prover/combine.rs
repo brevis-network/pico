@@ -2,8 +2,11 @@ use crate::{
     gateway::handler::proof_tree::IndexedProof,
     messages::combine::{CombineRequest, CombineResponse},
 };
+use anyhow::Result;
+use p3_baby_bear::BabyBear;
 use p3_commit::Pcs;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use pico_perf::common::print_utils::log_section;
 use pico_vm::{
     configs::{
@@ -13,7 +16,10 @@ use pico_vm::{
     instances::{
         chiptype::recursion_chiptype::RecursionChipType, machine::combine::CombineMachine,
     },
-    machine::field::FieldSpecificPoseidon2Config,
+    machine::{
+        field::FieldSpecificPoseidon2Config, keys::HashableKey, machine::MachineBehavior,
+        proof::MetaProof,
+    },
     primitives::consts::{COMBINE_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use tracing::info;
@@ -47,6 +53,7 @@ where
 /// specialization for running prover on either babybear or koalabear
 pub trait CombineHandler<SC: StarkGenericConfig> {
     fn process(&self, req: CombineRequest<SC>) -> CombineResponse<SC>;
+    fn verify(&self, proof: &MetaProof<SC>, riscv_vk: &dyn HashableKey<SC::Val>) -> Result<()>;
 }
 
 impl<SC> CombineHandler<SC> for CombineProver<SC>
@@ -56,6 +63,13 @@ where
 {
     /// default implementation
     default fn process(&self, _req: CombineRequest<SC>) -> CombineResponse<SC> {
+        panic!("unsupported");
+    }
+    default fn verify(
+        &self,
+        _proof: &MetaProof<SC>,
+        _riscv_vk: &dyn HashableKey<SC::Val>,
+    ) -> Result<()> {
         panic!("unsupported");
     }
 }
@@ -104,6 +118,14 @@ impl CombineHandler<BabyBearPoseidon2> for CombineProver<BabyBearPoseidon2> {
 
         CombineResponse { chunk_index, proof }
     }
+
+    default fn verify(
+        &self,
+        proof: &MetaProof<BabyBearPoseidon2>,
+        riscv_vk: &dyn HashableKey<BabyBear>,
+    ) -> Result<()> {
+        self.machine.verify(proof, riscv_vk)
+    }
 }
 
 impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
@@ -144,5 +166,13 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
         let proof = IndexedProof::new(proof, start_a, end_b);
 
         CombineResponse { chunk_index, proof }
+    }
+
+    default fn verify(
+        &self,
+        proof: &MetaProof<KoalaBearPoseidon2>,
+        riscv_vk: &dyn HashableKey<KoalaBear>,
+    ) -> Result<()> {
+        self.machine.verify(proof, riscv_vk)
     }
 }
