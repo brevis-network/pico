@@ -89,8 +89,8 @@ impl CombineHandler<BabyBearPoseidon2> for CombineProver<BabyBearPoseidon2> {
         assert!(proofs.len() <= COMBINE_SIZE);
 
         info!(
-            "[{}] receive combine request: chunk_index = {}",
-            self.prover_id, chunk_index,
+            "[{}] receive combine request: chunk_index = {}, flag_complete = {}",
+            self.prover_id, chunk_index, flag_complete,
         );
 
         let start_a = proofs[0].start_chunk;
@@ -108,6 +108,10 @@ impl CombineHandler<BabyBearPoseidon2> for CombineProver<BabyBearPoseidon2> {
         let meta_a = proofs[0].get_inner().clone();
         let meta_b = proofs[1].get_inner().clone();
 
+        info!(
+            "[{}] combine-combine: chunk_index = {}, flag_complete = {}",
+            self.prover_id, chunk_index, flag_complete,
+        );
         let proof = self.machine.prove_two(meta_a, meta_b, flag_complete);
         let proof = IndexedProof::new(proof, start_a, end_b);
 
@@ -148,8 +152,8 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
         assert!(proofs.len() <= COMBINE_SIZE);
 
         info!(
-            "[{}] receive combine request: chunk_index = {}",
-            self.prover_id, chunk_index,
+            "[{}] receive combine request: chunk_index = {}, flag_complete = {}",
+            self.prover_id, chunk_index, flag_complete,
         );
 
         let start_a = proofs[0].start_chunk;
@@ -167,6 +171,10 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
         let meta_a = proofs[0].get_inner().clone();
         let meta_b = proofs[1].get_inner().clone();
 
+        info!(
+            "[{}] combine-combine: chunk_index = {}, flag_complete = {}",
+            self.prover_id, chunk_index, flag_complete,
+        );
         let proof = self.machine.prove_two(meta_a, meta_b, flag_complete);
         let proof = IndexedProof::new(proof, start_a, end_b);
 

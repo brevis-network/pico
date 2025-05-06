@@ -17,7 +17,9 @@ use crate::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
             shapes::recursion_shape::RecursionShapeConfig,
-            vk_merkle::{stdin::RecursionStdinVariant, HasStaticVkManager},
+            vk_merkle::{
+                stdin::RecursionStdinVariant, vk_verification_enabled, HasStaticVkManager,
+            },
         },
     },
     machine::{
@@ -29,7 +31,7 @@ use crate::{
         utils::{assert_recursion_public_values_valid, assert_riscv_vk_digest},
         witness::ProvingWitness,
     },
-    primitives::consts::COMBINE_SIZE,
+    primitives::consts::{COMBINE_SIZE, DIGEST_SIZE},
 };
 use anyhow::Result;
 use p3_air::Air;
@@ -373,28 +375,35 @@ macro_rules! impl_indexed_combine_machine {
                 // Step 2: prepare recursion witness & emulator
                 // TODO: update to use VK_VERIFICATION flag
                 let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
-                let recursion_shape_config = RecursionShapeConfig::<
-                    Val<$recur_sc>,
-                    RecursionChipType<Val<$recur_sc>>,
-                >::default();
+                let (vk_root, recursion_shape_config) = if vk_verification_enabled() {
+                    (
+                        vk_manager.merkle_root,
+                        Some(RecursionShapeConfig::<
+                            Val<$recur_sc>,
+                            RecursionChipType<Val<$recur_sc>>,
+                        >::default()),
+                    )
+                } else {
+                    ([Val::<$recur_sc>::ZERO; DIGEST_SIZE], None)
+                };
 
                 let (recursion_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine::<
                     <$recur_cc as FieldGenericConfig>::F,
                     $recur_cc,
                 >(
-                    vk_manager.merkle_root,
+                    vk_root,
                     &all_vks,
                     &all_proofs,
                     self.base_machine(),
                     COMBINE_SIZE,
                     is_complete,
                     &vk_manager,
-                    Some(&recursion_shape_config),
+                    recursion_shape_config.as_ref(),
                 );
 
                 // TODO: opts
                 let recursion_witness = ProvingWitness::setup_for_combine(
-                    vk_manager.merkle_root,
+                    vk_root,
                     recursion_stdin,
                     last_vk,
                     last_proof,

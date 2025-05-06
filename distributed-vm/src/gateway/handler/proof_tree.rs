@@ -137,7 +137,7 @@ impl<P> ProofTree<P> {
         assert!(old.is_none(), "proof node must be initialized once in tree");
 
         // log for debuggin proof tree
-        // tracing::info!("after init_node:\n{self}");
+        tracing::info!("after init_node:\n{self}");
     }
 
     // return two adjacent nodes for combine proving if any
@@ -187,7 +187,7 @@ impl<P> ProofTree<P> {
         *self.tree.get_mut(&index).unwrap() = node_to_set;
 
         // log for debuggin proof tree
-        // tracing::info!("after set_proof:\n{self}");
+        tracing::info!("after set_proof:\n{self}");
 
         proofs_to_combine
     }
