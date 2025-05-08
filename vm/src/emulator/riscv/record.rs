@@ -74,6 +74,8 @@ pub struct EmulationRecord {
     pub global_lookup_events: Vec<GlobalInteractionEvent>,
     /// The shape of the proof.
     pub shape: Option<RiscvPadShape>,
+    /// Last record flag.
+    pub is_last: bool,
 }
 
 impl EmulationRecord {

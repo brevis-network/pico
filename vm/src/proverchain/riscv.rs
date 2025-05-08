@@ -66,11 +66,8 @@ where
             self.pk.clone(),
             self.vk.clone(),
         );
-        if let Some(shape_config) = &self.shape_config {
-            self.machine.prove_with_shape(&witness, Some(shape_config))
-        } else {
-            self.machine.prove_cycles(&witness)
-        }
+        self.machine
+            .prove_with_shape_cycles(&witness, self.shape_config.as_ref())
     }
 
     pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {

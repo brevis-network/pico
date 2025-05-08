@@ -50,7 +50,7 @@ use pico_vm::{
         RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
 };
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{fs::File, io::Write, path::PathBuf, sync::Arc, time::Instant};
 use tracing::{debug, info};
 
 #[path = "common/parse_args.rs"]
@@ -150,14 +150,9 @@ macro_rules! run {
                     riscv_vk.clone(),
                 );
 
-                match &riscv_shape_config {
-                    Some(shape_config) => {
-                        riscv_machine
-                            .prove_with_shape(&riscv_witness, Some(shape_config))
-                            .0
-                    }
-                    None => riscv_machine.prove_cycles(&riscv_witness).0,
-                }
+                riscv_machine
+                .prove_with_shape_cycles(&riscv_witness, riscv_shape_config.as_ref())
+                .0
             });
 
             // Assert pv_stream is the same as dryrun.
@@ -444,6 +439,10 @@ macro_rules! run {
                 embed_machine.prove(&embed_witness)
             });
             let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
+
+            let serialized_proofs = bincode::serialize(&embed_proof.proofs()).unwrap();
+            let mut file = File::create("embed_proof_proofs.bin").expect("cannot create file");
+            file.write_all(&serialized_proofs).expect("failed to write to file");
 
             info!("Verifying EMBED proof (at {:?})..", start.elapsed());
             let embed_result = embed_machine.verify(&embed_proof, &riscv_vk);

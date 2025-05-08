@@ -23,6 +23,7 @@ pub mod iter;
 pub mod machine;
 pub mod primitives;
 pub mod proverchain;
+pub mod thread;
 
 #[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
 #[global_allocator]

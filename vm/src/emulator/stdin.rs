@@ -233,6 +233,86 @@ where
             pointer: 0,
         }
     }
+
+    /// Construct the recursion stdin for riscv_compress.
+    /// base_challenger is assumed to be a fresh new one (has not observed anything)
+    /// batch_size should be greater than 1
+    #[instrument(name = "setup convert stdin", level = "debug", skip_all)]
+    pub fn setup_for_convert_with_index<F, CC>(
+        riscv_vk: &BaseVerifyingKey<SC>,
+        vk_root: [Val<SC>; DIGEST_SIZE],
+        machine: &BaseMachine<SC, RiscvChipType<Val<SC>>>,
+        proof: &BaseProof<SC>,
+        shape_config: &Option<RecursionShapeConfig<Val<SC>, RecursionChipType<Val<SC>>>>,
+        chunk_index: usize,
+        is_last: bool,
+    ) -> Self
+    where
+        F: TwoAdicField
+            + PrimeField32
+            + Witnessable<CC, WitnessVariable = Felt<CC::F>>
+            + BinomiallyExtendable<EXTENSION_DEGREE>
+            + FieldSpecificPoseidon2Config,
+        SC: FieldFriConfigVariable<
+            CC,
+            Val = F,
+            Domain = TwoAdicMultiplicativeCoset<F>,
+            FriChallengerVariable = DuplexChallengerVariable<CC>,
+            DigestVariable = [Felt<F>; DIGEST_SIZE],
+        >,
+        CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug,
+        Challenge<SC>: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+        Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+        PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+        Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
+        RiscvPoseidon2Chip<F>: for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+        FieldSpecificPrecompilePoseidon2Chip<F>:
+            for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,
+        SC: Send + Sync,
+    {
+        println!(
+            "chunk_index in setup_for_convert_with_index: {:?}",
+            chunk_index
+        );
+        // initialize for base_ and reconstruct_challenger
+        let [mut base_challenger, mut reconstruct_challenger] =
+            array::from_fn(|_| machine.config().challenger());
+
+        riscv_vk.observed_by(&mut base_challenger);
+        riscv_vk.observed_by(&mut reconstruct_challenger);
+
+        // construct programs and inputs
+        let flag_complete = is_last;
+        let flag_first_chunk = chunk_index == 0;
+
+        let input = ConvertStdin {
+            machine: machine.clone(),
+            riscv_vk: riscv_vk.clone(),
+            proofs: Arc::new([proof.clone()]),
+            base_challenger: base_challenger.clone(),
+            reconstruct_challenger: reconstruct_challenger.clone(),
+            flag_complete,
+            flag_first_chunk,
+            vk_root,
+        };
+
+        let mut program = ConvertVerifierCircuit::<CC, SC>::build(machine, &input);
+
+        if vk_verification_enabled() {
+            if let Some(config) = shape_config {
+                config.padding_shape(&mut program);
+            }
+        }
+
+        program.print_stats();
+
+        Self {
+            programs: Arc::from([program]),
+            inputs: Arc::from([input]),
+            flag_empty: false,
+            pointer: 0,
+        }
+    }
 }
 
 // for recursion_vk stdin

@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 /// Wrapper for all proof types
 /// The top layer of abstraction (the most abstract layer)
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct MetaProof<SC>
 where
     SC: StarkGenericConfig,
@@ -60,6 +61,20 @@ where
     /// Get the number of proofs
     pub fn num_proofs(&self) -> usize {
         self.proofs.len()
+    }
+
+    pub fn split_into_individuals(&self) -> Vec<Self> {
+        assert_eq!(self.proofs.len(), self.vks.len());
+        self.proofs
+            .iter()
+            .cloned()
+            .zip(self.vks.iter().cloned())
+            .map(|(proof, vk)| MetaProof {
+                proofs: Arc::from([proof]),
+                vks: Arc::from([vk]),
+                pv_stream: self.pv_stream.clone(),
+            })
+            .collect()
     }
 }
 

@@ -19,6 +19,8 @@ use p3_mersenne_31::Mersenne31;
 use p3_symmetric::CryptographicHasher;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// The commitment to the named traces.
     pub commit: Com<SC>,
