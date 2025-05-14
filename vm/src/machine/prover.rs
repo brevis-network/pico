@@ -1,6 +1,7 @@
 use crate::{
     compiler::program::ProgramBehavior,
-    configs::config::{PackedChallenge, StarkGenericConfig},
+    configs::config::{PackedChallenge, PcsProverData, StarkGenericConfig},
+    cuda_adaptor::fri_commit::fri_commit_from_host,
     emulator::record::RecordBehavior,
     iter::ThreadPoolBuilder,
     machine::{
@@ -16,6 +17,8 @@ use crate::{
     },
 };
 use alloc::sync::Arc;
+use cudart::memory_pools::CudaMemPool;
+use cudart::stream::CudaStream;
 use dashmap::DashMap;
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -23,11 +26,16 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use p3_koala_bear::KoalaBearParameters;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
+use p3_monty_31::MontyField31;
 use p3_util::log2_strict_usize;
 use std::{array, cmp::Reverse, time::Instant};
 use tracing::{debug, debug_span, instrument, Span};
+
+//
+use crate::cuda_adaptor::gpuacc_struct::fri_commit::MerkleTree as GPUMerkleTree;
 
 pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
@@ -110,6 +118,90 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         let initial_global_cumulative_sum = program.initial_global_cumulative_sum();
 
         (
+            BaseProvingKey {
+                commit: commit.clone(),
+                pc_start,
+                initial_global_cumulative_sum,
+                preprocessed_trace,
+                preprocessed_prover_data,
+                preprocessed_chip_ordering: preprocessed_chip_ordering.clone(),
+                local_only,
+            },
+            BaseVerifyingKey {
+                commit,
+                pc_start,
+                initial_global_cumulative_sum,
+                preprocessed_info,
+                preprocessed_chip_ordering,
+            },
+        )
+    }
+
+    pub fn setup_keys_gpumktree(
+        &self,
+        config: &SC,
+        chips: &[MetaChip<SC::Val, C>],
+        program: &C::Program,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+    ) -> (
+        GPUMerkleTree<'static, MontyField31<KoalaBearParameters>>,
+        BaseProvingKey<SC>,
+        BaseVerifyingKey<SC>,
+    ) {
+        let chips_and_preprocessed = self.generate_preprocessed(chips, program);
+
+        let local_only = chips_and_preprocessed
+            .iter()
+            .map(|(_, local_only, _)| *local_only)
+            .collect();
+
+        // Get the chip ordering.
+        let preprocessed_chip_ordering: HashMap<_, _> = chips_and_preprocessed
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _, _))| (name.to_owned(), i))
+            .collect();
+        let preprocessed_chip_ordering = Arc::new(preprocessed_chip_ordering);
+
+        let pcs = config.pcs();
+
+        //let (preprocessed_info, domains_and_preprocessed): (Arc<[_]>, Vec<_>) =
+        let preprocessed_iter = chips_and_preprocessed.iter().map(|(name, _, trace)| {
+            let domain = pcs.natural_domain_for_degree(trace.height());
+            (name, trace, domain)
+        });
+        let preprocessed_info = preprocessed_iter
+            .clone()
+            .map(|(name, trace, domain)| (name.to_owned(), domain, trace.dimensions()))
+            .collect();
+
+        let domains_and_preprocessed: Vec<(
+            <SC as StarkGenericConfig>::Domain,
+            p3_matrix::dense::DenseMatrix<<SC as StarkGenericConfig>::Val>,
+        )> = debug_span!("domains_and_preprocessed").in_scope(|| {
+            preprocessed_iter
+                .map(|(_, trace, domain)| (domain, trace.to_owned()))
+                .collect()
+        });
+
+        // Commit to the batch of traces.
+        let (commit, preprocessed_prover_data) = debug_span!("commit preprocessed trace")
+            .in_scope(|| pcs.commit(domains_and_preprocessed.clone()));
+
+        let prep_gpumktree =
+            fri_commit_from_host::<SC>(domains_and_preprocessed.clone(), pcs, stream, mem_pool);
+
+        let preprocessed_trace = chips_and_preprocessed
+            .into_iter()
+            .map(|t| t.2)
+            .collect::<Arc<[_]>>();
+
+        let pc_start = program.pc_start();
+        let initial_global_cumulative_sum = program.initial_global_cumulative_sum();
+
+        (
+            prep_gpumktree,
             BaseProvingKey {
                 commit: commit.clone(),
                 pc_start,
@@ -228,7 +320,7 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         config: &SC,
         record: &C::Record,
         chips_and_main: Vec<(String, RowMajorMatrix<SC::Val>)>,
-    ) -> Option<MainTraceCommitments<SC>> {
+    ) -> Option<MainTraceCommitments<SC, Arc<[RowMajorMatrix<SC::Val>]>, PcsProverData<SC>>> {
         if chips_and_main.is_empty() {
             return None;
         }
@@ -355,7 +447,7 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         config: &SC,
         chips: &[MetaChip<SC::Val, C>],
         pk: &BaseProvingKey<SC>,
-        data: MainTraceCommitments<SC>,
+        data: MainTraceCommitments<SC, Arc<[RowMajorMatrix<SC::Val>]>, PcsProverData<SC>>,
         challenger: &mut SC::Challenger,
         chunk_index: usize,
         num_public_values: usize,

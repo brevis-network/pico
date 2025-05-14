@@ -13,6 +13,10 @@ use anyhow::Result;
 use p3_air::Air;
 use p3_field::PrimeField32;
 use std::any::type_name;
+use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
+use cudart::stream::CudaStream;
+use cudart::memory_pools::CudaMemPool;
+
 
 pub struct SimpleMachine<SC, C>
 where
@@ -54,6 +58,26 @@ where
         // Construct the metaproof with proofs and vks where vks is a repetition of the same witness.vk
         let vks = vec![witness.vk.clone().unwrap()].into();
         MetaProof::new(proofs.into(), vks, None)
+    }
+
+    fn prove_cuda(
+        &self,
+        _witness: &ProvingWitness<SC, C, Vec<u8>>,
+        _pk_cuda: Option<&BaseProvingKeyCuda>,
+        _stream: &'static CudaStream,
+        _mem_pool: & CudaMemPool,
+        _dev_id: usize,
+    ) -> MetaProof<SC>
+    where
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + Air<ProverConstraintFolder<SC>>,
+    {
+        unreachable!();
     }
 
     /// Verify the proof.

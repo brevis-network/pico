@@ -28,6 +28,8 @@ use crate::{
 };
 use alloc::sync::Arc;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
+use crate::proverchain::CudaStream;
+use cudart::memory_pools::CudaMemPool;
 
 pub type CompressChips<SC> = RecursionChipType<Val<SC>>;
 
@@ -139,6 +141,16 @@ macro_rules! impl_compress_prover {
                 let witness =
                     ProvingWitness::setup_with_keys_and_records(pk, vk, vec![runtime.record]);
                 self.machine.prove(&witness)
+            }
+
+            fn prove_cuda(
+                &self,
+                _proofs: Self::Witness,
+                _stream: &'static CudaStream,
+                _mem_pool: &CudaMemPool,
+                _dev_id: usize,
+            ) -> MetaProof<$mod_name::StarkConfig> {
+                unreachable!();
             }
 
             fn verify(

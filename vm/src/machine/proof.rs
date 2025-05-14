@@ -1,12 +1,11 @@
 use crate::{
-    configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig},
+    configs::config::{Com, PcsProof, StarkGenericConfig},
     instances::compiler::shapes::ProofShape,
     machine::{keys::BaseVerifyingKey, septic::SepticDigest},
 };
 use alloc::{sync::Arc, vec::Vec};
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 
 /// Wrapper for all proof types
@@ -137,11 +136,11 @@ pub struct BaseCommitments<Com> {
     pub quotient_commit: Com,
 }
 
-pub struct MainTraceCommitments<SC: StarkGenericConfig> {
-    pub main_traces: Arc<[RowMajorMatrix<SC::Val>]>,
+pub struct MainTraceCommitments<SC: StarkGenericConfig, M, P> {
+    pub main_traces: M,
     pub main_chip_ordering: Arc<HashMap<String, usize>>,
     pub commitment: Com<SC>,
-    pub data: PcsProverData<SC>,
+    pub data: P,
     pub public_values: Arc<[SC::Val]>,
 }
 

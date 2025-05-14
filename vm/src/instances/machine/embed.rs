@@ -21,6 +21,10 @@ use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use std::{any::type_name, borrow::Borrow, marker::PhantomData};
 use tracing::{debug, debug_span, instrument};
+use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
+use cudart::stream::CudaStream;
+use cudart::memory_pools::CudaMemPool;
+
 
 pub struct EmbedMachine<PrevSC, SC, C, I>
 where
@@ -91,6 +95,26 @@ where
         });
 
         MetaProof::new(proofs.into(), vks, None)
+    }
+
+    fn prove_cuda(
+        &self,
+        _witness: &ProvingWitness<EmbedSC, C, I>,
+        _pk_cuda: Option<&BaseProvingKeyCuda>,
+        _stream: &'static CudaStream,
+        _mem_pool: & CudaMemPool,
+        _dev_id: usize,
+    ) -> MetaProof<EmbedSC>
+    where
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <EmbedSC as StarkGenericConfig>::Val,
+                    <EmbedSC as StarkGenericConfig>::Challenge,
+                >,
+            > + Air<ProverConstraintFolder<EmbedSC>>,
+    {
+        unreachable!();
     }
 
     /// Verify the proof.

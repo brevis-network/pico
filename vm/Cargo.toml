@@ -34,6 +34,10 @@ p3-bn254-fr.workspace = true
 p3-mersenne-31.workspace = true
 p3-circle.workspace = true
 p3-koala-bear.workspace = true
+p3-monty-31.workspace = true
+
+cudart.workspace = true
+cudart-sys.workspace = true
 
 # misc
 amcl.workspace = true

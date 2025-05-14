@@ -1,6 +1,7 @@
 use crate::{
     compiler::{riscv::program::Program, word::Word},
     configs::config::{Com, StarkGenericConfig, Val},
+    cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda,
     emulator::{
         emulator::MetaEmulator,
         riscv::{public_values::PublicValues, record::EmulationRecord},
@@ -22,12 +23,14 @@ use crate::{
 };
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::IndexedParallelIterator;
 use p3_symmetric::Permutation;
-use std::{any::type_name, borrow::Borrow, cmp::min, fmt::Write as _, mem, thread, time::Instant};
+use std::{any::type_name, borrow::Borrow, cmp::min, fmt::Write, mem, thread, time::Instant};
 use tracing::{debug, debug_span, info, instrument};
+
 /// Maximum number of pending emulation record for proving
 const MAX_PENDING_PROVING_RECORDS: usize = 32;
 
@@ -162,6 +165,126 @@ where
         )
     }
 
+    /// Prove with shape config
+    #[instrument(name = "RISCV MACHINE PROVE GPUMKTREE", level = "debug", skip_all)]
+    pub fn prove_with_shape_cycles_cuda(
+        &self,
+        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        pk_gm: &BaseProvingKeyCuda,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> (MetaProof<SC>, u64)
+    where
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + Air<ProverConstraintFolder<SC>>,
+    {
+        let start_global = Instant::now();
+        // Initialize the challenger.
+        let mut challenger = self.config().challenger();
+
+        // Get PK from witness and observe with challenger.
+        let pk = witness.pk();
+        pk.observed_by(&mut challenger);
+
+        // Initialize the emulator.
+        let mut emulator = MetaEmulator::setup_riscv(witness);
+
+        let channel_capacity = (4 * witness
+            .opts
+            .as_ref()
+            .map(|opts| opts.chunk_batch_size)
+            .unwrap_or(64)) as usize;
+        // Initialize the channel for sending emulation records from the emulator thread to prover.
+        let (record_sender, record_receiver): (Sender<_>, Receiver<_>) = bounded(channel_capacity);
+
+        // Start the emulator thread.
+        let emulator_handle = thread::spawn(move || {
+            let mut batch_num = 1;
+            loop {
+                let start_local = Instant::now();
+
+                let done = emulator.next_record_batch(&mut |record| {
+                    record_sender.send(record).expect(
+                        "Failed to send an emulation record from emulator thread to prover thread",
+                    )
+                });
+
+                debug!(
+                    "--- Generate riscv records for batch-{} in {:?}",
+                    batch_num,
+                    start_local.elapsed(),
+                );
+
+                if done {
+                    break;
+                }
+
+                batch_num += 1;
+            }
+
+            // Move and return the emulator for futher usage.
+            emulator
+
+            // `record_sender` will be dropped when the emulator thread completes.
+        });
+
+        let all_proofs = self.prove_local_cuda(
+            &pk_gm,
+            &challenger,
+            shape_config,
+            record_receiver,
+            &start_global,
+            stream,
+            mem_pool,
+            dev_id,
+        );
+
+        let mut emulator = emulator_handle.join().unwrap();
+        let cycles = emulator.cycles();
+
+        debug!("--- Finish riscv in {:?}", start_global.elapsed());
+
+        let vks = vec![witness.vk.clone().unwrap()];
+
+        debug!("RISCV chip log degrees:");
+        all_proofs.iter().enumerate().for_each(|(i, proof)| {
+            debug!("Proof {}", i);
+            proof
+                .main_chip_ordering
+                .iter()
+                .for_each(|(chip_name, idx)| {
+                    debug!(
+                        "   |- {:<20} main: {:<8}",
+                        chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
+                    );
+                });
+        });
+
+        let pv_stream = emulator.get_pv_stream();
+        let riscv_emulator = emulator.emulator.unwrap();
+
+        info!("RiscV execution report:");
+        info!("|- cycles:           {}", riscv_emulator.state.global_clk);
+        info!("|- chunk_num:        {}", all_proofs.len());
+        info!("|- chunk_size:       {}", riscv_emulator.opts.chunk_size);
+        info!(
+            "|- chunk_batch_size: {}",
+            riscv_emulator.opts.chunk_batch_size
+        );
+
+        (
+            MetaProof::new(all_proofs.into(), vks.into(), Some(pv_stream)),
+            cycles,
+        )
+    }
+
     /// Generate RiscV proof for one emulation record.
     pub fn prove_record(
         &self,
@@ -196,6 +319,49 @@ where
             self.base_machine
                 .prove_plain(pk, &mut challenger.clone(), chunk_index, main_commitment)
         })
+    }
+
+    pub fn prove_record_cuda(
+        &self,
+        _chunk_index: usize,
+        _pk: &BaseProvingKey<SC>,
+        challenger: &SC::Challenger,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        mut record: EmulationRecord,
+        pk_gm: &BaseProvingKeyCuda,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> BaseProof<SC>
+    where
+        C: Air<ProverConstraintFolder<SC>>,
+    {
+        // Complete the record.
+        let chips = self.chips();
+        RiscvMachine::complement_record_static(chips.clone(), &mut record);
+
+        // Pad the shape.
+        if vk_verification_enabled() {
+            if let Some(shape_config) = shape_config {
+                shape_config.padding_shape(&mut record).unwrap();
+            }
+        }
+
+        // Commit the record.
+        let main_commitment_gm_some = self
+            .base_machine
+            .commit_gm(&record, stream, mem_pool, dev_id);
+        let main_commitment_gm = main_commitment_gm_some.unwrap();
+
+        // Generate the proof.
+        self.base_machine.prove_plain_cuda(
+            &mut challenger.clone(),
+            main_commitment_gm,
+            pk_gm,
+            stream,
+            mem_pool,
+            dev_id,
+        )
     }
 
     /// Generate the RiscV proofs for the emulation records.
@@ -249,6 +415,69 @@ where
             writeln!(&mut buf, "{:<6} │ {:>12}", "total", format!("{} ms", total)).unwrap();
             info!("\n{}", buf);
         }
+
+        local_span.exit();
+
+        proofs
+    }
+
+    fn prove_records_cuda(
+        &self,
+        base_chunk: usize,
+        pk_gm: &BaseProvingKeyCuda,
+        challenger: &SC::Challenger,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        records: Vec<EmulationRecord>,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> Vec<BaseProof<SC>>
+    where
+        C: Air<ProverConstraintFolder<SC>>,
+    {
+        let record_len = records.len();
+        let local_span =
+                debug_span!(parent: &tracing::Span::current(), "riscv chunks prove loop", base_chunk, record_len)
+                    .entered();
+
+        let chips = self.chips();
+        let proofs = records
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut record)| {
+                let chunk_index = base_chunk + i;
+                // Complete the record.
+                debug_span!(parent: &local_span, "complement_record", chunk_index).in_scope(|| {
+                    RiscvMachine::complement_record_static(chips.clone(), &mut record)
+                });
+
+                // Pad the shape.
+                if vk_verification_enabled() {
+                    if let Some(shape_config) = shape_config {
+                        debug_span!(parent: &local_span, "padding_shape", chunk_index)
+                            .in_scope(|| shape_config.padding_shape(&mut record).unwrap());
+                    }
+                }
+
+                // Commit the record.
+                let main_commitment_gm_some =
+                    debug_span!(parent: &local_span, "generate_and_commit_main_traces", chunk_index)
+                        .in_scope(|| self.base_machine.commit_gm(&record, stream, mem_pool, dev_id));
+                let main_commitment_gm = main_commitment_gm_some.unwrap();
+
+                // Generate the proof.
+                debug_span!(parent: &local_span, "prove_plain", chunk_index).in_scope(|| {
+                    self.base_machine.prove_plain_cuda(
+                        &mut challenger.clone(),
+                        main_commitment_gm,
+                        pk_gm,
+                        stream,
+                        mem_pool,
+                        dev_id,
+                    )
+                })
+            })
+            .collect();
 
         local_span.exit();
 
@@ -381,6 +610,152 @@ where
 
         all_proofs
     }
+
+    fn prove_local_cuda(
+        &self,
+        pk_gm: &BaseProvingKeyCuda,
+        challenger: &SC::Challenger,
+        shape_config: Option<&RiscvShapeConfig<SC::Val>>,
+        record_receiver: Receiver<EmulationRecord>,
+        start_global: &Instant,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> Vec<BaseProof<SC>>
+    where
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + Air<ProverConstraintFolder<SC>>,
+    {
+        // Generate the proofs.
+        let mut current_chunk = 0;
+
+        #[cfg(feature = "debug")]
+        let mut constraint_debugger = crate::machine::debug::IncrementalConstraintDebugger::new(
+            pk,
+            &mut self.config().challenger(),
+            self.base_machine.has_global(),
+        );
+        #[cfg(feature = "debug-lookups")]
+        let mut global_lookup_debugger = crate::machine::debug::IncrementalLookupDebugger::new(
+            pk,
+            crate::machine::lookup::LookupScope::Global,
+            None,
+        );
+
+        let mut all_proofs = Vec::with_capacity(MAX_PENDING_PROVING_RECORDS);
+        let max_pending_num = min(num_cpus::get(), MAX_PENDING_PROVING_RECORDS);
+        let mut pending_records = Vec::with_capacity(max_pending_num);
+
+        while let Ok(record) = record_receiver.recv() {
+            pending_records.push(record);
+
+            debug!(
+                "Current riscv records queue size: {}",
+                record_receiver.len()
+            );
+
+            // Generate the proofs for pending records.
+            if pending_records.len() >= max_pending_num {
+                debug!(
+                    "--- Start to prove chunks {}-{} at {:?}",
+                    current_chunk,
+                    current_chunk + max_pending_num - 1,
+                    start_global.elapsed(),
+                );
+
+                let records = mem::take(&mut pending_records);
+
+                #[cfg(feature = "debug")]
+                constraint_debugger.debug_incremental(&self.chips(), &records);
+                #[cfg(feature = "debug-lookups")]
+                {
+                    crate::machine::debug::debug_regional_lookups(
+                        pk,
+                        &self.chips(),
+                        &records,
+                        None,
+                    );
+                    global_lookup_debugger.debug_incremental(&self.chips(), &records);
+                }
+
+                let proofs = self.prove_records_cuda(
+                    current_chunk,
+                    pk_gm,
+                    challenger,
+                    shape_config,
+                    records,
+                    stream,
+                    mem_pool,
+                    dev_id,
+                );
+                all_proofs.extend(proofs);
+
+                debug!(
+                    "--- Finish proving chunks {}-{} at {:?}",
+                    current_chunk,
+                    current_chunk + max_pending_num - 1,
+                    start_global.elapsed(),
+                );
+
+                current_chunk += max_pending_num;
+            }
+        }
+
+        // Generate the proofs for remaining records.
+        {
+            let pending_len = pending_records.len();
+            debug!(
+                "--- Start to prove chunks {}-{} at {:?}",
+                current_chunk,
+                current_chunk + pending_len - 1,
+                start_global.elapsed(),
+            );
+
+            #[cfg(feature = "debug")]
+            constraint_debugger.debug_incremental(&self.chips(), &pending_records);
+            #[cfg(feature = "debug-lookups")]
+            {
+                crate::machine::debug::debug_regional_lookups(
+                    pk,
+                    &self.chips(),
+                    &pending_records,
+                    None,
+                );
+                global_lookup_debugger.debug_incremental(&self.chips(), &pending_records);
+            }
+
+            let proofs = self.prove_records_cuda(
+                current_chunk,
+                pk_gm,
+                challenger,
+                shape_config,
+                pending_records,
+                stream,
+                mem_pool,
+                dev_id,
+            );
+            all_proofs.extend(proofs);
+
+            debug!(
+                "--- Finish proving chunks {}-{} at {:?}",
+                current_chunk,
+                current_chunk + pending_len - 1,
+                start_global.elapsed(),
+            );
+        }
+
+        #[cfg(feature = "debug")]
+        constraint_debugger.print_results();
+        #[cfg(feature = "debug-lookups")]
+        global_lookup_debugger.print_results();
+
+        all_proofs
+    }
 }
 
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
@@ -403,6 +778,27 @@ where
     }
 
     fn prove(&self, _witness: &ProvingWitness<SC, C, Vec<u8>>) -> MetaProof<SC>
+    where
+        C: for<'a> Air<
+                DebugConstraintFolder<
+                    'a,
+                    <SC as StarkGenericConfig>::Val,
+                    <SC as StarkGenericConfig>::Challenge,
+                >,
+            > + Air<ProverConstraintFolder<SC>>,
+    {
+        // Please use prove_cycles instead
+        unreachable!();
+    }
+
+    fn prove_cuda(
+        &self,
+        _witness: &ProvingWitness<SC, C, Vec<u8>>,
+        _pk_cuda: Option<&BaseProvingKeyCuda>,
+        _stream: &'static CudaStream,
+        _mem_pool: &CudaMemPool,
+        _dev_id: usize,
+    ) -> MetaProof<SC>
     where
         C: for<'a> Air<
                 DebugConstraintFolder<

@@ -25,6 +25,7 @@ base64.workspace = true
 bincode.workspace = true
 clap.workspace = true
 crossbeam.workspace = true
+cudart.workspace = true
 dashmap.workspace = true
 derive_more.workspace = true
 dotenvy.workspace = true

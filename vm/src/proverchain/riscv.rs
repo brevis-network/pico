@@ -9,6 +9,7 @@ use crate::{
         program::Program,
     },
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
+    cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda,
     emulator::{emulator::MetaEmulator, opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -26,6 +27,7 @@ use crate::{
     primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
 };
 use alloc::sync::Arc;
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use p3_air::Air;
 use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
@@ -68,6 +70,39 @@ where
         );
         self.machine
             .prove_with_shape_cycles(&witness, self.shape_config.as_ref())
+    }
+
+    pub fn prove_cycles_cuda(
+        &self,
+        stdin: EmulatorStdin<Program, Vec<u8>>,
+        pk_cuda: &BaseProvingKeyCuda,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> (MetaProof<SC>, u64) {
+        let witness = ProvingWitness::setup_for_riscv(
+            self.program.clone(),
+            stdin,
+            self.opts,
+            self.pk.clone(),
+            self.vk.clone(),
+        );
+        if let Some(shape_config) = &self.shape_config {
+            use std::time::Instant;
+            let start = Instant::now();
+            let res = self.machine.prove_with_shape_cycles_cuda(
+                &witness,
+                Some(shape_config),
+                pk_cuda,
+                stream,
+                mem_pool,
+                dev_id,
+            );
+            println!("self.machine.prove_with_shape_cuda: {:?}", start.elapsed());
+            res
+        } else {
+            unreachable!();
+        }
     }
 
     pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
@@ -166,6 +201,16 @@ where
 
     fn prove(&self, stdin: Self::Witness) -> MetaProof<SC> {
         self.prove_cycles(stdin).0
+    }
+
+    fn prove_cuda(
+        &self,
+        _stdin: Self::Witness,
+        _stream: &'static CudaStream,
+        _mem_pool: &CudaMemPool,
+        _dev_id: usize,
+    ) -> MetaProof<SC> {
+        unreachable!();
     }
 
     fn verify(&self, proof: &MetaProof<SC>, riscv_vk: &dyn HashableKey<Val<SC>>) -> bool {

@@ -6,6 +6,7 @@ use crate::{
         Stage::{AfterRiscv, BeforeRiscv, ConvertDone, ConvertSetupDone},
         Timeline,
     },
+    worker::prover::{CudaMemPool, CudaStream},
 };
 use log::debug;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
@@ -26,6 +27,10 @@ use pico_vm::{
         config::{FieldGenericConfig, StarkGenericConfig, Val},
         field_config::{BabyBearSimple, KoalaBearSimple},
         stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
+    },
+    cuda_adaptor::{
+        resource_pool::{mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool},
+        setup_keys_gm::BaseProvingKeyCuda,
     },
     emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
@@ -125,6 +130,62 @@ where
         }
     }
 
+    pub fn new_cuda(
+        prover_id: String,
+        program: BenchProgram,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> (Self, BaseProvingKeyCuda) {
+        // opts and setups
+        let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
+        let vk_enabled = vk_manager.vk_verification_enabled();
+        let riscv_shape_config = if vk_enabled {
+            Some(RiscvShapeConfig::<SC::Val>::default())
+        } else {
+            None
+        };
+        let recursion_shape_config = if vk_enabled {
+            Some(RecursionShapeConfig::<SC::Val, RecursionChipType<SC::Val>>::default())
+        } else {
+            None
+        };
+        let (elf, _) = load::<Program>(&program).unwrap();
+
+        let riscv_machine =
+            RiscvMachine::new(SC::default(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
+
+        let riscv_compiler = Compiler::new(SourceType::RISCV, &elf);
+        let mut riscv_program = riscv_compiler.compile();
+        if let Some(ref shape_config) = riscv_shape_config {
+            let program = Arc::get_mut(&mut riscv_program).expect("cannot get_mut arc");
+            shape_config
+                .padding_preprocessed_shape(program)
+                .expect("cannot padding preprocessed shape");
+        }
+        let (pk, riscv_vk) = riscv_machine.setup_keys(&riscv_program);
+        let (_prep_gpumktree, _riscv_pk, _riscv_vk, riscv_pk_gm, _riscv_vk_gm) =
+            riscv_machine.setup_keys_gm(&riscv_program.clone(), stream, mem_pool, dev_id);
+
+        let convert_machine = ConvertMachine::new(
+            SC::default(),
+            RecursionChipType::<SC::Val>::all_chips(),
+            RECURSION_NUM_PVS,
+        );
+        (
+            Self {
+                prover_id,
+                riscv_shape_config,
+                recursion_shape_config,
+                riscv_machine,
+                convert_machine,
+                pk,
+                riscv_vk,
+            },
+            riscv_pk_gm,
+        )
+    }
+
     pub fn riscv_vk(&self) -> &BaseVerifyingKey<SC> {
         &self.riscv_vk
     }
@@ -137,6 +198,12 @@ pub trait RiscvConvertHandler<SC: StarkGenericConfig> {
         req: RiscvRequest,
         vk_root: &VkRoot<SC>,
         timeline: &mut Timeline,
+    ) -> RiscvResponse<SC>;
+    fn process_cuda(
+        &self,
+        req: RiscvRequest,
+        vk_root: &VkRoot<SC>,
+        pk_gm: &BaseProvingKeyCuda,
     ) -> RiscvResponse<SC>;
 }
 
@@ -151,6 +218,14 @@ where
         _req: RiscvRequest,
         _vk_root: &VkRoot<SC>,
         _timeline: &mut Timeline,
+    ) -> RiscvResponse<SC> {
+        panic!("unsupported");
+    }
+    default fn process_cuda(
+        &self,
+        _req: RiscvRequest,
+        _vk_root: &VkRoot<SC>,
+        _pk_gm: &BaseProvingKeyCuda,
     ) -> RiscvResponse<SC> {
         panic!("unsupported");
     }
@@ -231,6 +306,14 @@ impl RiscvConvertHandler<BabyBearPoseidon2> for RiscvConvertProver<BabyBearPosei
         // return the riscv-convert result
         RiscvResponse { chunk_index, proof }
     }
+    default fn process_cuda(
+        &self,
+        _req: RiscvRequest,
+        _vk_root: &VkRoot<BabyBearPoseidon2>,
+        _pk_gm: &BaseProvingKeyCuda,
+    ) -> RiscvResponse<BabyBearPoseidon2> {
+        panic!("unsupported");
+    }
 }
 
 impl RiscvConvertHandler<KoalaBearPoseidon2> for RiscvConvertProver<KoalaBearPoseidon2> {
@@ -302,6 +385,95 @@ impl RiscvConvertHandler<KoalaBearPoseidon2> for RiscvConvertProver<KoalaBearPos
             start.elapsed().as_millis()
         );
         timeline.mark(ConvertDone);
+
+        // return the riscv-convert result
+        RiscvResponse { chunk_index, proof }
+    }
+
+    fn process_cuda(
+        &self,
+        req: RiscvRequest,
+        vk_root: &VkRoot<KoalaBearPoseidon2>,
+        pk_gm: &BaseProvingKeyCuda,
+    ) -> RiscvResponse<KoalaBearPoseidon2> {
+        log_section("RISCV PHASE");
+
+        let mut challenger = self.riscv_machine.config().challenger().clone();
+        self.pk.observed_by(&mut challenger);
+
+        let chunk_index = req.chunk_index;
+        let is_last_chunk = req.record.is_last;
+
+        info!(
+            "[{}] receive riscv-convert request: chunk_index = {}",
+            self.prover_id, chunk_index,
+        );
+
+        let start = Instant::now();
+
+        let dev_id = self
+            .prover_id
+            .strip_prefix("prover-")
+            .unwrap()
+            .parse::<usize>()
+            .unwrap();
+        let sync_pool = get_global_mem_pool(dev_id);
+        let mem_pool = &sync_pool.0;
+
+        let sync_stream = get_global_stream_pool(dev_id);
+        let stream = &sync_stream.0;
+
+        let proof = self.riscv_machine.prove_record_cuda(
+            chunk_index,
+            &self.pk,
+            &challenger,
+            self.riscv_shape_config.as_ref(),
+            req.record,
+            pk_gm,
+            stream,
+            mem_pool,
+            dev_id,
+        );
+
+        info!("RISCV Phase complete! chunk_index: {}", chunk_index);
+
+        log_section("CONVERT PHASE");
+
+        let recursion_opts = EmulatorOpts::default();
+        debug!("recursion_opts: {:?}", recursion_opts);
+
+        let convert_stdin = EmulatorStdin::setup_for_convert_with_index::<
+            <KoalaBearSimple as FieldGenericConfig>::F,
+            KoalaBearSimple,
+        >(
+            &self.riscv_vk,
+            *vk_root,
+            self.riscv_machine.base_machine(),
+            &proof,
+            &self.recursion_shape_config,
+            chunk_index,
+            is_last_chunk,
+        );
+        let convert_witness = ProvingWitness::setup_for_convert(
+            convert_stdin,
+            KoalaBearPoseidon2::new().into(),
+            recursion_opts,
+        );
+
+        let proof = self.convert_machine.prove_with_index_cuda(
+            chunk_index as u32,
+            &convert_witness,
+            stream,
+            mem_pool,
+            dev_id,
+        );
+
+        let proof = IndexedProof::new(proof, chunk_index, chunk_index);
+
+        info!(
+            "[worker] finish proving chunk-{chunk_index}, time used: {}ms",
+            start.elapsed().as_millis()
+        );
 
         // return the riscv-convert result
         RiscvResponse { chunk_index, proof }

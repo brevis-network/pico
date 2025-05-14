@@ -22,6 +22,10 @@ use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use std::{any::type_name, borrow::Borrow};
 use tracing::{debug, debug_span, instrument};
+use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
+use cudart::stream::CudaStream;
+use cudart::memory_pools::CudaMemPool;
+
 
 pub struct CompressMachine<SC, C>
 where
@@ -92,6 +96,56 @@ where
 
         let proofs = debug_span!("prove_ensemble")
             .in_scope(|| self.base_machine.prove_ensemble(witness.pk(), &records));
+
+        // construct meta proof
+        let vks = vec![witness.vk.clone().unwrap()].into();
+
+        debug!("COMPRESS chip log degrees:");
+        proofs.iter().enumerate().for_each(|(i, proof)| {
+            debug!("Proof {}", i);
+            proof
+                .main_chip_ordering
+                .iter()
+                .for_each(|(chip_name, idx)| {
+                    debug!(
+                        "   |- {:<20} main: {:<8}",
+                        chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
+                    );
+                });
+        });
+
+        MetaProof::new(proofs.into(), vks, None)
+    }
+
+    fn prove_cuda(
+        &self,
+        witness: &ProvingWitness<SC, C, RecursionStdinVariant<SC, C>>,
+        pk_cuda: Option<&BaseProvingKeyCuda>,
+        stream: &'static CudaStream,
+        mem_pool: & CudaMemPool,
+        dev_id: usize,
+    ) -> MetaProof<SC>
+    where
+        C: for<'c> Air<
+            DebugConstraintFolder<
+                'c,
+                <SC as StarkGenericConfig>::Val,
+                <SC as StarkGenericConfig>::Challenge,
+            >,
+        >,
+    {
+        let mut records = witness.records().to_vec();
+        debug_span!("complement record").in_scope(|| self.complement_record(&mut records));
+
+        debug!("COMPRESS record stats");
+        let stats = records[0].stats();
+        for (key, value) in &stats {
+            debug!("   |- {:<28}: {}", key, value);
+        }
+
+        let pk_cuda_unwrap = pk_cuda.unwrap();
+        let proofs = debug_span!("prove_ensemble")
+            .in_scope(|| self.base_machine.prove_ensemble_cuda(&records, pk_cuda_unwrap, stream, mem_pool, dev_id));
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();

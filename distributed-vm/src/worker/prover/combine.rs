@@ -53,6 +53,11 @@ where
 /// specialization for running prover on either babybear or koalabear
 pub trait CombineHandler<SC: StarkGenericConfig> {
     fn process(&self, req: CombineRequest<SC>) -> CombineResponse<SC>;
+    fn process_cuda(
+        &self,
+        req: CombineRequest<SC>,
+        dev_id: usize,
+    ) -> CombineResponse<SC>;
     fn verify(&self, proof: &MetaProof<SC>, riscv_vk: &dyn HashableKey<SC::Val>) -> Result<()>;
 }
 
@@ -63,6 +68,13 @@ where
 {
     /// default implementation
     default fn process(&self, _req: CombineRequest<SC>) -> CombineResponse<SC> {
+        panic!("unsupported");
+    }
+    default fn process_cuda(
+        &self,
+        _req: CombineRequest<SC>,
+        _dev_id: usize,
+    ) -> CombineResponse<SC> {
         panic!("unsupported");
     }
     default fn verify(
@@ -116,7 +128,20 @@ impl CombineHandler<BabyBearPoseidon2> for CombineProver<BabyBearPoseidon2> {
             self.prover_id,
         );
 
+        info!(
+            "[{}] finish combine proving chunk-{chunk_index}",
+            self.prover_id,
+        );
+
         CombineResponse { chunk_index, proof }
+    }
+
+    fn process_cuda(
+        &self,
+        req: CombineRequest<BabyBearPoseidon2>,
+        _dev_id: usize,
+    ) -> CombineResponse<BabyBearPoseidon2> {
+        unreachable!()
     }
 
     default fn verify(
@@ -163,6 +188,55 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
         let meta_b = proofs[1].get_inner().clone();
 
         let proof = self.machine.prove_two(meta_a, meta_b, flag_complete);
+        let proof = IndexedProof::new(proof, start_a, end_b);
+
+        CombineResponse { chunk_index, proof }
+    }
+
+    fn process_cuda(
+        &self,
+        req: CombineRequest<KoalaBearPoseidon2>,
+        dev_id: usize,
+    ) -> CombineResponse<KoalaBearPoseidon2> {
+
+        use pico_vm::cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool;
+        let sync_pool = get_global_mem_pool(dev_id);
+        let mem_pool = &sync_pool.0;    
+    
+        use pico_vm::cuda_adaptor::resource_pool::stream_pool::get_global_stream_pool;
+        let sync_stream = get_global_stream_pool(dev_id);
+        let stream = &sync_stream.0;
+
+        log_section("COMBINE PHASE");
+
+        let CombineRequest {
+            chunk_index,
+            flag_complete,
+            proofs,
+        } = req;
+        assert!(proofs.len() <= COMBINE_SIZE);
+
+        info!(
+            "[{}] receive combine request: chunk_index = {}",
+            self.prover_id, chunk_index,
+        );
+
+        let start_a = proofs[0].start_chunk;
+        let end_a = proofs[0].end_chunk;
+
+        let start_b = proofs[1].start_chunk;
+        let end_b = proofs[1].end_chunk;
+
+        assert_eq!(
+            end_a + 1,
+            start_b,
+            "proofs are not adjacent: cannot combine"
+        );
+
+        let meta_a = proofs[0].get_inner().clone();
+        let meta_b = proofs[1].get_inner().clone();
+
+        let proof = self.machine.prove_two_cuda(meta_a, meta_b, flag_complete, stream, mem_pool, dev_id);
         let proof = IndexedProof::new(proof, start_a, end_b);
 
         CombineResponse { chunk_index, proof }

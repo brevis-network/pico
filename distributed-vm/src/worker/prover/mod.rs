@@ -29,6 +29,9 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
+use pico_vm::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
+
 type VkRoot<SC> = [<SC as StarkGenericConfig>::Val; DIGEST_SIZE];
 
 pub struct Prover<SC>
@@ -78,11 +81,47 @@ where
             vk_root,
         }
     }
+
+    pub fn new_cuda(
+        prover_id: String,
+        program: BenchProgram,
+        endpoint: Arc<WorkerEndpoint<SC>>,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> (Self, BaseProvingKeyCuda) {
+        // let riscv_convert = RiscvConvertProver::new(prover_id.clone(), program);
+        let (riscv_convert, pk_gm) =
+            RiscvConvertProver::new_cuda(prover_id.clone(), program, stream, mem_pool, dev_id);
+
+        let combine = CombineProver::new(prover_id.clone());
+
+        let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
+        let vk_root = get_vk_root(vk_manager);
+
+        (
+            Self {
+                prover_id,
+                endpoint,
+                riscv_convert,
+                combine,
+                vk_root,
+            },
+            pk_gm,
+        )
+    }
 }
 
 /// specialization for running emulator on either babybear or koalabear
 pub trait ProverRunner {
     fn run(self) -> JoinHandle<()>;
+    fn run_cuda(
+        self,
+        pk_gm: BaseProvingKeyCuda,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> JoinHandle<()>;
 }
 
 impl<SC> ProverRunner for Prover<SC>
@@ -92,6 +131,15 @@ where
 {
     /// default implementation
     default fn run(self) -> JoinHandle<()> {
+        panic!("unsupported");
+    }
+    default fn run_cuda(
+        self,
+        _pk_gm: BaseProvingKeyCuda,
+        _stream: &'static CudaStream,
+        _mem_pool: &CudaMemPool,
+        _dev_id: usize,
+    ) -> JoinHandle<()> {
         panic!("unsupported");
     }
 }
@@ -161,6 +209,15 @@ impl ProverRunner for Prover<BabyBearPoseidon2> {
             }
         })
     }
+    fn run_cuda(
+        self,
+        _pk_gm: BaseProvingKeyCuda,
+        _stream: &'static CudaStream,
+        _mem_pool: &CudaMemPool,
+        _dev_id: usize,
+    ) -> JoinHandle<()> {
+        panic!("unsupported");
+    }
 }
 
 impl ProverRunner for Prover<KoalaBearPoseidon2> {
@@ -206,6 +263,95 @@ impl ProverRunner for Prover<KoalaBearPoseidon2> {
                         timeline.mark(WorkerRecv);
                         let flag_complete = req.flag_complete;
                         let res = self.combine.process(req);
+                        if flag_complete {
+                            if self
+                                .combine
+                                .verify(&res.proof.inner, self.riscv_convert.riscv_vk())
+                                .is_ok()
+                            {
+                                info!(
+                                    "[{}] succeeded to verify last combine proof",
+                                    self.prover_id,
+                                );
+                            } else {
+                                error!("[{}] failed to verify last combine proof", self.prover_id);
+                            }
+                        }
+                        info!(
+                            "[{}] send combine response of chunk-{}",
+                            self.prover_id, &res.chunk_index,
+                        );
+                        timeline.mark(CombineDone);
+                        let msg = GatewayMsg::Combine(
+                            CombineMsg::Response(res),
+                            task_id,
+                            ip_addr,
+                            Some(timeline),
+                        );
+                        self.endpoint.send(msg).unwrap();
+                    }
+                    GatewayMsg::Exit => break,
+                    _ => panic!("unsupported"),
+                }
+
+                // request for the next task
+                let msg = GatewayMsg::RequestTask;
+                self.endpoint.send(msg).unwrap();
+            }
+        })
+    }
+
+    fn run_cuda(
+        self,
+        pk_gm: BaseProvingKeyCuda,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> JoinHandle<()> {
+        info!("[{}] : start", self.prover_id);
+
+        info!("[{}] : start", self.prover_id);
+
+        tokio::task::spawn_blocking(move || {
+            // request for task first
+            let msg = GatewayMsg::RequestTask;
+            self.endpoint.send(msg).unwrap();
+
+            while let Ok(msg) = self.endpoint.recv() {
+                use cudart::device::set_device;
+                set_device(dev_id as _).unwrap();
+
+                match msg {
+                    GatewayMsg::Riscv(RiscvMsg::Request(req), task_id, ip_addr, tl) => {
+                        info!(
+                            "[{}] receive riscv request of chunk-{}",
+                            self.prover_id, &req.chunk_index,
+                        );
+                        let mut timeline = tl.unwrap();
+                        timeline.mark(WorkerRecv);
+                        let res = self.riscv_convert.process_cuda(req, &self.vk_root, &pk_gm);
+                        info!(
+                            "[{}] send riscv response of chunk-{}",
+                            self.prover_id, &res.chunk_index,
+                        );
+                        timeline.mark(RiscvConvertDone);
+                        let msg = GatewayMsg::Riscv(
+                            RiscvMsg::Response(res),
+                            task_id,
+                            ip_addr,
+                            Some(timeline),
+                        );
+                        self.endpoint.send(msg).unwrap();
+                    }
+                    GatewayMsg::Combine(CombineMsg::Request(req), task_id, ip_addr, tl) => {
+                        info!(
+                            "[{}] receive combine request of chunk-{}",
+                            self.prover_id, &req.chunk_index,
+                        );
+                        let mut timeline = tl.unwrap();
+                        timeline.mark(WorkerRecv);
+                        let flag_complete = req.flag_complete;
+                        let res = self.combine.process_cuda(req, dev_id);
                         if flag_complete {
                             if self
                                 .combine

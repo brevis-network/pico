@@ -13,6 +13,7 @@ use crate::{
 pub use combine::CombineProver;
 pub use compress::CompressProver;
 pub use convert::ConvertProver;
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 pub use embed::EmbedProver;
 pub use riscv::RiscvProver;
 
@@ -52,5 +53,12 @@ where
 
     fn machine(&self) -> &BaseMachine<SC, Self::Chips>;
     fn prove(&self, witness: Self::Witness) -> MetaProof<SC>;
+    fn prove_cuda(
+        &self,
+        witness: Self::Witness,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> MetaProof<SC>;
     fn verify(&self, proof: &MetaProof<SC>, riscv_vk: &dyn HashableKey<SC::Val>) -> bool;
 }

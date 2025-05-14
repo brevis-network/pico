@@ -135,10 +135,10 @@ impl SplitOpts {
     pub fn new(deferred_shift_threshold: usize) -> Self {
         Self {
             deferred: deferred_shift_threshold,
-            keccak: deferred_shift_threshold / 24,
-            sha_extend: deferred_shift_threshold / 48,
-            sha_compress: deferred_shift_threshold / 80,
-            memory: deferred_shift_threshold * 4,
+            keccak: 4 * deferred_shift_threshold / 24,
+            sha_extend: 16 * deferred_shift_threshold / 48,
+            sha_compress: 16 * deferred_shift_threshold / 80,
+            memory: 8 * deferred_shift_threshold * 4,
         }
     }
 }

@@ -33,6 +33,9 @@ use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
 use std::marker::PhantomData;
 use tracing::debug_span;
+use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
+use cudart::stream::CudaStream;
+use cudart::memory_pools::CudaMemPool;
 
 // Meta emulator that encapsulates multiple emulators
 // SC and C for configs in the emulated machine
@@ -191,6 +194,29 @@ macro_rules! impl_emulator {
                 (record, pk, vk, done)
             }
 
+            #[allow(clippy::should_implement_trait)]
+            pub fn next_record_keys_cuda(
+                &mut self,
+                stream: &'static CudaStream,
+                mem_pool: &CudaMemPool,
+                dev_id: usize,
+            ) -> (
+                RecursionRecord<Val<$recur_sc>>,
+                BaseVerifyingKey<$recur_sc>,
+                bool,
+                BaseProvingKeyCuda,
+            ) {
+                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
+                let (vk_gm, pk_gm) = self.machine.unwrap().setup_keys_cuda(program, stream, mem_pool, dev_id);
+                let mut emulator = RecursionEmulator::<$recur_sc> {
+                    recursion_program: program.clone().into(),
+                    config: self.machine.unwrap().config(),
+                };
+                let record = debug_span!("emulator run").in_scope(|| emulator.run_riscv(input));
+                self.pointer += 1;
+                (record, vk_gm, done, pk_gm)
+            }
+
             #[allow(clippy::type_complexity)]
             pub fn next_record_keys_batch(
                 &mut self,
@@ -217,6 +243,37 @@ macro_rules! impl_emulator {
                     }
                 }
                 (batch_records, batch_pks, batch_vks, false)
+            }
+
+            #[allow(clippy::type_complexity)]
+            pub fn next_record_keys_batch_cuda(
+                &mut self,
+                stream: &'static CudaStream,
+                mem_pool: &CudaMemPool,
+                dev_id: usize,
+            ) -> (
+                Vec<RecursionRecord<Val<$recur_sc>>>,
+                Vec<BaseVerifyingKey<$recur_sc>>,
+                bool,
+                Vec<BaseProvingKeyCuda>,
+            ) {
+                let mut batch_records = vec![];
+                let mut batch_vks = vec![];
+                let mut batch_pks_cuda = vec![];
+                loop {
+                    let (record, vk, done, pk_cuda) =
+                        debug_span!("emulate record").in_scope(|| self.next_record_keys_cuda(stream, mem_pool, dev_id));
+                    batch_records.push(record);
+                    batch_vks.push(vk);
+                    batch_pks_cuda.push(pk_cuda);
+                    if done {
+                        return (batch_records, batch_vks, true, batch_pks_cuda);
+                    }
+                    if batch_records.len() >= self.batch_size as usize {
+                        break;
+                    }
+                }
+                (batch_records, batch_vks, false, batch_pks_cuda)
             }
         }
 
@@ -280,6 +337,30 @@ macro_rules! impl_emulator {
                 self.pointer += 1;
                 (record, pk, vk, done)
             }
+
+            #[allow(clippy::should_implement_trait)]
+            pub fn next_record_keys_cuda(
+                &mut self,
+                stream: &'static CudaStream,
+                mem_pool: &CudaMemPool,
+                dev_id: usize,
+            ) -> (
+                RecursionRecord<Val<$recur_sc>>,
+                BaseVerifyingKey<$recur_sc>,
+                bool,
+                BaseProvingKeyCuda,
+            ) {
+                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
+                let (vk_gm, pk_gm) = self.machine.unwrap().setup_keys_cuda(program, stream, mem_pool, dev_id);
+                let mut emulator = RecursionEmulator::<$recur_sc> {
+                    recursion_program: program.clone().into(),
+                    config: self.machine.unwrap().config(),
+                };
+                let record = debug_span!("emulator run").in_scope(|| emulator.run_recursion(input));
+                self.pointer += 1;
+                (record, vk_gm, done, pk_gm)
+            }
+
             #[allow(clippy::type_complexity)]
             pub fn next_record_keys_batch(
                 &mut self,
@@ -306,6 +387,37 @@ macro_rules! impl_emulator {
                     }
                 }
                 (batch_records, batch_pks, batch_vks, false)
+            }
+
+            #[allow(clippy::type_complexity)]
+            pub fn next_record_keys_batch_cuda(
+                &mut self,
+                stream: &'static CudaStream,
+                mem_pool: &CudaMemPool,
+                dev_id: usize,
+            ) -> (
+                Vec<RecursionRecord<Val<$recur_sc>>>,
+                Vec<BaseVerifyingKey<$recur_sc>>,
+                bool,
+                Vec<BaseProvingKeyCuda>,
+            ) {
+                let mut batch_records = vec![];
+                let mut batch_vks = vec![];
+                let mut batch_pks_cuda = vec![];
+                loop {
+                    let (record, vk, done, pk_cuda) =
+                        debug_span!("emulate record").in_scope(|| self.next_record_keys_cuda(stream, mem_pool, dev_id));
+                    batch_records.push(record);
+                    batch_vks.push(vk);
+                    batch_pks_cuda.push(pk_cuda);
+                    if done {
+                        return (batch_records, batch_vks, true, batch_pks_cuda);
+                    }
+                    if batch_records.len() >= self.batch_size as usize {
+                        break;
+                    }
+                }
+                (batch_records, batch_vks, false, batch_pks_cuda)
             }
         }
 

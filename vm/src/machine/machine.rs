@@ -1,6 +1,13 @@
 use super::{folder::DebugConstraintFolder, keys::HashableKey, lookup::LookupScope};
 use crate::{
-    configs::config::{StarkGenericConfig, Val},
+    configs::{
+        config::{PcsProverData, StarkGenericConfig, Val},
+        stark_config::KoalaBearPoseidon2,
+    },
+    cuda_adaptor::{
+        commit_main_gm::{commit_main_gpumemory_fast},
+        setup_keys_gm::BaseProvingKeyCuda,
+    },
     emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -13,14 +20,24 @@ use crate::{
         witness::ProvingWitness,
     },
 };
+
+use cudart::stream::CudaStream;
 use alloc::sync::Arc;
 use anyhow::Result;
+use cudart::memory_pools::CudaMemPool;
+use crate::cuda_adaptor::gpuacc_struct::fri_commit::MerkleTree as GPUMerkleTree;
+use crate::cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixConcrete;
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::Air;
-use p3_field::{Field, PrimeField64};
+use p3_challenger::CanObserve;
+use p3_field::{Field, FieldAlgebra, PrimeField64};
+use p3_koala_bear::{KoalaBear, KoalaBearParameters};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
-use std::time::Instant;
+use p3_monty_31::MontyField31;
+use p3_symmetric::Hash;
+use std::{mem::transmute, time::Instant};
 use tracing::{debug, instrument};
 
 /// Functions that each machine instance should implement.
@@ -86,8 +103,38 @@ where
         (pk, vk)
     }
 
+    fn setup_keys_gm(
+        &self,
+        program: &C::Program,
+        stream: &'static CudaStream,
+        mem_pool: & CudaMemPool,
+        dev_id: usize,
+    ) -> (
+        GPUMerkleTree<'static, MontyField31<KoalaBearParameters>>,
+        BaseProvingKey<SC>,
+        BaseVerifyingKey<SC>,
+        BaseProvingKeyCuda,
+        BaseVerifyingKey<SC>,
+    ) {
+        let (prep_gpumktree, pk, vk, pk_gm, vk_gm) = self.base_machine().setup_keys_gm(program, stream, mem_pool, dev_id);
+
+        (prep_gpumktree, pk, vk, pk_gm, vk_gm)
+    }
+
     /// Get the prover of the machine.
     fn prove(&self, witness: &ProvingWitness<SC, C, I>) -> MetaProof<SC>
+    where
+        C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>
+            + Air<ProverConstraintFolder<SC>>;
+
+    fn prove_cuda(
+        &self,
+        witness: &ProvingWitness<SC, C, I>,
+        pk_cuda: Option<&BaseProvingKeyCuda>,
+        stream: &'static CudaStream,
+        mem_pool: & CudaMemPool,
+        dev_id: usize,
+    ) -> MetaProof<SC>
     where
         C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>
             + Air<ProverConstraintFolder<SC>>;
@@ -225,10 +272,65 @@ where
         (pk, vk)
     }
 
-    pub fn commit(&self, record: &C::Record) -> Option<MainTraceCommitments<SC>> {
+    #[instrument(name = "setup_keys_gpumktree", level = "debug", skip_all)]
+    pub fn setup_keys_gm(
+        &self,
+        program: &C::Program,
+        stream: &'static CudaStream,
+        mem_pool: & CudaMemPool,
+        dev_id: usize,
+    ) -> (
+        GPUMerkleTree<'static, MontyField31<KoalaBearParameters>>,
+        BaseProvingKey<SC>,
+        BaseVerifyingKey<SC>,
+        BaseProvingKeyCuda,
+        BaseVerifyingKey<SC>,
+    ) {
+        use crate::cuda_adaptor::setup_keys_gm::setup_keys_gm;
+        let (pk_gm, vk_gm) = setup_keys_gm(&self.prover, &self.config(), &self.chips(), program, stream, mem_pool, dev_id);
+        let (prep_gpumktree, pk, vk) =
+            self.prover
+                .setup_keys_gpumktree(&self.config(), &self.chips(), program, stream, mem_pool);
+
+        (prep_gpumktree, pk, vk, pk_gm, vk_gm)
+    }
+
+    pub fn setup_keys_cuda(
+        &self,
+        program: &C::Program,
+        stream: &'static CudaStream,
+        mem_pool: & CudaMemPool,
+        dev_id: usize,
+    ) -> (BaseVerifyingKey<SC>, BaseProvingKeyCuda) {
+        use crate::cuda_adaptor::setup_keys_gm::setup_keys_gm;
+        let (pk_gm, vk_gm) = setup_keys_gm(&self.prover, &self.config(), &self.chips(), program, stream, mem_pool, dev_id);
+        (vk_gm, pk_gm)
+    }
+
+    pub fn commit(
+        &self,
+        record: &C::Record,
+    ) -> Option<MainTraceCommitments<SC, Arc<[RowMajorMatrix<SC::Val>]>, PcsProverData<SC>>> {
         let chips_and_main_traces = self.prover.generate_main(&self.chips(), record);
         self.prover
             .commit_main(&self.config(), record, chips_and_main_traces)
+    }
+
+    pub fn commit_gm(
+        &self,
+        record: &C::Record,
+        stream: &'static CudaStream,
+        mem_pool: & CudaMemPool,
+        dev_id: usize,
+    ) -> Option<
+        MainTraceCommitments<
+            KoalaBearPoseidon2,
+            Vec<DeviceMatrixConcrete<'static, KoalaBear>>,
+            GPUMerkleTree<'static, KoalaBear>,
+        >,
+    > {
+        let chips_and_main_traces = self.prover.generate_main(&self.chips(), record);
+        commit_main_gpumemory_fast::<SC, C>(&*self.config(), record, chips_and_main_traces, stream, mem_pool, dev_id)
     }
 
     /// prove a batch of records with a single pk
@@ -276,13 +378,84 @@ where
         proofs
     }
 
+    // /// prove a batch of records with a single pk
+    pub fn prove_ensemble_cuda(
+        &self,
+        records: &[C::Record],
+        pk_cuda: &BaseProvingKeyCuda,
+        stream: &'static CudaStream,
+        mem_pool: & CudaMemPool,
+        dev_id: usize,
+    ) -> Vec<BaseProof<SC>>
+    where
+        C: for<'c> Air<DebugConstraintFolder<'c, SC::Val, SC::Challenge>>
+            + Air<ProverConstraintFolder<SC>>,
+        SC::Val: PrimeField64,
+    {
+        let mut challenger = self.config().challenger();
+        // pk.observed_by(&mut challenger);
+        //
+        let commitment_kb = &pk_cuda.commit;
+        let commitment_sc: &Hash<SC::Val, SC::Val, 8> = unsafe { transmute(commitment_kb) };
+        for value in *commitment_sc {
+            challenger.observe(value);
+        }
+        //
+        let pc_start_sc: &SC::Val = unsafe { transmute(&pk_cuda.pc_start) };
+        challenger.observe(*pc_start_sc);
+        //
+        for x in pk_cuda.initial_global_cumulative_sum.0.x.0 {
+            let x_sc: &SC::Val = unsafe { transmute(&x) };
+            challenger.observe(*x_sc)
+        }
+        //
+        for y in pk_cuda.initial_global_cumulative_sum.0.y.0 {
+            let y_sc: &SC::Val = unsafe { transmute(&y) };
+            challenger.observe(*y_sc)
+        }
+        //
+        for _ in 0..7 {
+            challenger.observe(Val::<SC>::ZERO);
+        }
+        //
+
+        let proofs = records
+            .iter()
+            .enumerate()
+            .map(|(_, record)| {
+
+                let main_commitment_gm_some = self.commit_gm(&record, stream, mem_pool, dev_id);
+                let main_commitment_gm = main_commitment_gm_some.unwrap();
+
+                let res = crate::cuda_adaptor::fri_open::prove_impl::<SC, C>(
+                    &self.config(),
+                    &self.chips(),
+                    &mut challenger.clone(),
+                    self.num_public_values,
+                    main_commitment_gm,
+                    pk_cuda,
+                    stream,
+                    mem_pool,
+                    dev_id,
+                );
+                res
+            })
+            .collect::<Vec<_>>();
+
+        proofs
+    }
+
     /// Prove assuming that challenger has already observed pk & main commitments and pv's
     pub fn prove_plain(
         &self,
         pk: &BaseProvingKey<SC>,
         challenger: &mut SC::Challenger,
         chunk_index: usize,
-        main_commitment: MainTraceCommitments<SC>,
+        main_commitment: MainTraceCommitments<
+            SC,
+            Arc<[RowMajorMatrix<SC::Val>]>,
+            PcsProverData<SC>,
+        >,
     ) -> BaseProof<SC>
     where
         C: Air<ProverConstraintFolder<SC>>,
@@ -295,6 +468,35 @@ where
             challenger,
             chunk_index,
             self.num_public_values,
+        )
+    }
+
+    pub fn prove_plain_cuda(
+        &self,
+        challenger: &mut SC::Challenger,
+        main_commitment_gm: MainTraceCommitments<
+            KoalaBearPoseidon2,
+            Vec<DeviceMatrixConcrete<'static, KoalaBear>>,
+            GPUMerkleTree<'static, KoalaBear>,
+        >,
+        pk_gm: &BaseProvingKeyCuda,
+        stream: &'static CudaStream,
+        mem_pool: & CudaMemPool,
+        dev_id: usize,
+    ) -> BaseProof<SC>
+    where
+        C: Air<ProverConstraintFolder<SC>>,
+    {
+        crate::cuda_adaptor::fri_open::prove_impl::<SC, C>(
+            &self.config(),
+            &self.chips(),
+            challenger,
+            self.num_public_values,
+            main_commitment_gm,
+            pk_gm,
+            stream,
+            mem_pool,
+            dev_id,
         )
     }
 

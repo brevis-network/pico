@@ -21,6 +21,8 @@ use crate::{
     primitives::consts::{COMBINE_SIZE, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
 };
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
+use crate::proverchain::CudaStream;
+use cudart::memory_pools::CudaMemPool;
 
 type ConvertChips<SC> = RecursionChipType<Val<SC>>;
 pub type CombineChips<SC> = RecursionChipType<Val<SC>>;
@@ -74,7 +76,10 @@ macro_rules! impl_combine_vk_prover {
                 self.machine.base_machine()
             }
 
-            fn prove(&self, proofs: Self::Witness) -> MetaProof<$recur_sc> {
+            fn prove(
+                &self,
+                proofs: Self::Witness,
+            ) -> MetaProof<$recur_sc> {
                 let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
                 let vk_root = if vk_manager.vk_verification_enabled() {
                     vk_manager.merkle_root
@@ -104,6 +109,44 @@ macro_rules! impl_combine_vk_prover {
                     self.opts,
                 );
                 self.machine.prove(&witness)
+            }
+
+            fn prove_cuda(
+                &self,
+                proofs: Self::Witness,
+                stream: &'static CudaStream,
+                mem_pool: &CudaMemPool,
+                dev_id: usize,
+            ) -> MetaProof<$recur_sc> {
+                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+                let vk_root = if vk_manager.vk_verification_enabled() {
+                    vk_manager.merkle_root
+                } else {
+                    [Val::<$recur_sc>::ZERO; DIGEST_SIZE]
+                };
+
+                // let shape_config = self.shape_config.as_ref().unwrap();
+
+                let (stdin, last_vk, last_proof) =
+                    EmulatorStdin::setup_for_combine::<Val<$recur_sc>, $recur_cc>(
+                        vk_root,
+                        proofs.vks(),
+                        &proofs.proofs(),
+                        &self.prev_machine,
+                        COMBINE_SIZE,
+                        proofs.proofs.len() <= COMBINE_SIZE,
+                        &vk_manager,
+                        self.shape_config.as_ref(),
+                    );
+                let witness = ProvingWitness::setup_for_combine(
+                    vk_root,
+                    stdin,
+                    last_vk,
+                    last_proof,
+                    self.machine.config(),
+                    self.opts,
+                );
+                self.machine.prove_cuda(&witness, None, stream, mem_pool, dev_id)
             }
 
             fn verify(

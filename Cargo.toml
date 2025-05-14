@@ -66,6 +66,8 @@ p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", rev = 
 p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", rev = "4d2a8ae" }
 p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "4d2a8ae" }
 p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", rev = "4d2a8ae" }
+p3-monty-31 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "4d2a8ae" }
+
 
 # For local debugging
 # p3-air = { path = "../p3/air" }
@@ -91,6 +93,11 @@ p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", rev = "4d2a
 # p3-bn254-fr = { path = "../p3/bn254-fr" }
 # p3-mersenne-31 = { path = "../p3/mersenne-31" }
 # p3-circle = { path = "../p3/circle" }
+# p3-monty-31 = { path = "../p3/monty-31" }
+
+# gpu
+cudart = { git = "https://github.com/matter-labs/era-cuda.git", rev = "0ac0eeb7fdef62e3ef05c97de0c8accbc963f3bc" }
+cudart-sys = { git = "https://github.com/matter-labs/era-cuda.git", rev = "0ac0eeb7fdef62e3ef05c97de0c8accbc963f3bc" }
 
 # misc
 amcl = { package = "snowbridge-amcl", version = "1.0.2", default-features = false, features = ["bls381"] }

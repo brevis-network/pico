@@ -22,7 +22,9 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    proverchain::CudaStream,
 };
+use cudart::memory_pools::CudaMemPool;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
 type RecursionChips<SC> = RecursionChipType<Val<SC>>;
@@ -95,6 +97,35 @@ macro_rules! impl_convert_prover {
                 let witness =
                     ProvingWitness::setup_for_convert(stdin, self.machine.config(), self.opts);
                 self.machine.prove(&witness)
+            }
+
+            fn prove_cuda(
+                &self,
+                proofs: Self::Witness,
+                stream: &'static CudaStream,
+                mem_pool: &CudaMemPool,
+                dev_id: usize,
+            ) -> MetaProof<$recur_sc> {
+                assert_eq!(proofs.vks.len(), 1);
+
+                let vk_root = if self.shape_config.is_some() && vk_verification_enabled() {
+                    let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+                    vk_manager.merkle_root
+                } else {
+                    [Val::<$riscv_sc>::ZERO; DIGEST_SIZE]
+                };
+
+                let stdin = EmulatorStdin::setup_for_convert::<Val<$recur_sc>, $recur_cc>(
+                    &proofs.vks[0],
+                    vk_root,
+                    &self.prev_machine,
+                    &proofs.proofs(),
+                    &self.shape_config,
+                );
+                let witness =
+                    ProvingWitness::setup_for_convert(stdin, self.machine.config(), self.opts);
+
+                self.machine.prove_cuda(&witness, None, stream, mem_pool, dev_id)
             }
 
             fn verify(

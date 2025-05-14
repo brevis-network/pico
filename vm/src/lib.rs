@@ -1,5 +1,5 @@
 // lock deny(warnings) behind strict feature
-#![cfg_attr(feature = "strict", deny(warnings))]
+// #![cfg_attr(feature = "strict", deny(warnings))]
 #![allow(clippy::module_inception)]
 #![allow(clippy::needless_range_loop)]
 #![allow(incomplete_features)]
@@ -17,6 +17,7 @@ extern crate core;
 pub mod chips;
 pub mod compiler;
 pub mod configs;
+pub mod cuda_adaptor;
 pub mod emulator;
 pub mod instances;
 pub mod iter;
