@@ -1,0 +1,63 @@
+[package]
+name = "distributed-vm"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "coordinator"
+path = "bin/coordinator.rs"
+
+[[bin]]
+name = "worker"
+path = "bin/worker.rs"
+
+[[bin]]
+name = "single-node"
+path = "bin/single_node.rs"
+
+[[bin]]
+name = "bearer-token-gen"
+path = "bin/bearer_token_gen.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+bincode.workspace = true
+clap.workspace = true
+crossbeam.workspace = true
+dashmap.workspace = true
+derive_more.workspace = true
+dotenvy.workspace = true
+futures.workspace = true
+log.workspace = true
+num_cpus.workspace = true
+p3-air.workspace = true
+p3-baby-bear.workspace = true
+p3-commit.workspace = true
+p3-field.workspace = true
+p3-koala-bear.workspace = true
+p3-poseidon2.workspace = true
+p3-symmetric.workspace = true
+pico-perf.workspace = true
+pico-sdk.workspace = true
+pico-vm.workspace = true
+prost-types.workspace = true
+prost.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+thiserror.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true
+
+[features]
+nightly-features = ["pico-vm/nightly-features"]
+jemalloc = ["pico-vm/jemalloc"]

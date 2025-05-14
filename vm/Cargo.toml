@@ -50,6 +50,7 @@ csv.workspace = true
 curve25519-dalek.workspace = true
 dashmap.workspace = true
 dashu.workspace = true
+derive_more.workspace = true
 elf.workspace = true
 elliptic-curve.workspace = true
 eyre.workspace = true

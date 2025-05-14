@@ -1,11 +1,27 @@
+use anyhow::Error;
 use clap::Parser;
 use pico_vm::{compiler::riscv::program::Program, emulator::stdin::EmulatorStdin};
+use std::fs;
 use tracing::info;
 
 fn load_elf(elf: &str) -> &'static [u8] {
     let elf_file = format!("./vm/src/compiler/test_elf/riscv32im-pico-{}-elf", elf);
     let bytes = std::fs::read(elf_file).expect("failed to read elf");
     bytes.leak()
+}
+
+fn load_reth() -> &'static [u8] {
+    let elf_file = "./perf/bench_data/reth-elf".to_string();
+    let bytes = std::fs::read(elf_file).expect("failed to read elf");
+    bytes.leak()
+}
+
+fn load_input(n: u32) -> Result<Vec<u8>, Error> {
+    match n {
+        17106222 => Ok(fs::read("./perf/bench_data/reth-17106222.bin")?),
+        20528709 => Ok(fs::read("./perf/bench_data/reth-20528709.bin")?),
+        _ => panic!("invalid input"),
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -65,6 +81,14 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
         // pass in the expected hash value as input
         stdin.write(&args.n);
         info!("Test precompile poseidon2");
+    } else if args.elf == "fibonacci-sha" {
+        elf = load_elf("fibonacci-sha");
+        stdin.write(&args.n);
+    } else if args.elf == "reth" {
+        elf = load_reth();
+        let input = load_input(args.n).unwrap();
+        stdin.write_slice(&input);
+        info!("Test reth: {}", args.n);
     } else {
         eprintln!("Invalid test elf.\n");
         std::process::exit(1);

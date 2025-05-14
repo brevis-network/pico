@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+package grpc;
+
+enum Stage {
+  COORDINATOR_STARTED   = 0;
+  COORDINATOR_SETUP_DONE= 1;
+  RECORD_CREATED        = 2;
+  RECORD_SENDING        = 3;
+  WORKER_RECV           = 4;
+  RISCV_CONVERT_DONE    = 5;
+  COORDINATOR_RECV       = 6;
+  COMBINE_START        = 7;
+  COMBINE_SENDING       = 8;
+  COMBINE_DONE         = 9;
+  COORDINATOR_FINISHED  = 10;
+  BEFORE_RISCV          = 11;
+  AFTER_RISCV           = 12;
+  CONVERT_SETUP_DONE = 13;
+  CONVERT_DONE           = 14;
+}
+
+message StageTime {
+  Stage stage                         = 1;
+  google.protobuf.Timestamp timestamp = 2;
+}
+
+message Timeline {
+  uint64 start_index     = 1;
+  uint64 end_index       = 2;
+  repeated StageTime events = 3;
+}
+
+service Coordinator {
+  rpc CheckHealth(WorkerInfo) returns (google.protobuf.Empty);
+
+  rpc RequestTask(google.protobuf.Empty) returns (ProofTask);
+
+  rpc RespondResult(ProofResult) returns (google.protobuf.Empty);
+}
+
+enum TaskType {
+  RISCV = 0;
+  COMBINE = 1;
+}
+
+message WorkerInfo {
+  string name = 1;
+  string ip = 2;
+}
+
+message ProofTask {
+  string id = 1;
+  TaskType task_type = 2;
+  uint64 chunk_index = 3;
+  optional bytes record = 4;
+  optional bool flag_complete = 5;
+  repeated bytes proofs = 6;
+  optional Timeline timeline = 7;
+}
+
+message ProofResult {
+  string id = 1;
+  TaskType task_type = 2;
+  uint64 chunk_index = 3;
+  bytes proof = 4;
+  optional Timeline timeline = 5;
+}

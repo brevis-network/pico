@@ -26,9 +26,8 @@ use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::IndexedParallelIterator;
 use p3_symmetric::Permutation;
-use std::{any::type_name, borrow::Borrow, cmp::min, mem, thread, time::Instant};
+use std::{any::type_name, borrow::Borrow, cmp::min, fmt::Write as _, mem, thread, time::Instant};
 use tracing::{debug, debug_span, info, instrument};
-
 /// Maximum number of pending emulation record for proving
 const MAX_PENDING_PROVING_RECORDS: usize = 32;
 
@@ -177,21 +176,26 @@ where
     {
         // Complete the record.
         let chips = self.chips();
-        RiscvMachine::complement_record_static(chips.clone(), &mut record);
+        debug_span!("complement_record", chunk_index)
+            .in_scope(|| RiscvMachine::complement_record_static(chips.clone(), &mut record));
 
         // Pad the shape.
         if vk_verification_enabled() {
             if let Some(shape_config) = shape_config {
-                shape_config.padding_shape(&mut record).unwrap();
+                debug_span!("padding_shape", chunk_index)
+                    .in_scope(|| shape_config.padding_shape(&mut record).unwrap());
             }
         }
 
         // Commit the record.
-        let main_commitment = self.base_machine.commit(&record).unwrap();
+        let main_commitment = debug_span!("generate_and_commit_main_traces", chunk_index)
+            .in_scope(|| self.base_machine.commit(&record).unwrap());
 
         // Generate the proof.
-        self.base_machine
-            .prove_plain(pk, &mut challenger.clone(), chunk_index, main_commitment)
+        debug_span!("prove_plain", chunk_index).in_scope(|| {
+            self.base_machine
+                .prove_plain(pk, &mut challenger.clone(), chunk_index, main_commitment)
+        })
     }
 
     /// Generate the RiscV proofs for the emulation records.
@@ -211,41 +215,40 @@ where
                 debug_span!(parent: &tracing::Span::current(), "riscv chunks prove loop", base_chunk, record_len)
                     .entered();
 
-        let chips = self.chips();
-        let proofs = records
+        let results: Vec<(usize, BaseProof<SC>, u128)> = records
             .into_pico_iter()
             .enumerate()
-            .map(|(i, mut record)| {
+            .map(|(i, record)| {
                 let chunk_index = base_chunk + i;
-                // Complete the record.
-                debug_span!(parent: &local_span, "complement_record", chunk_index).in_scope(|| {
-                    RiscvMachine::complement_record_static(chips.clone(), &mut record)
-                });
+                let t0 = Instant::now();
+                let proof =
+                    debug_span!(parent: &local_span, "prove_record", chunk_index).in_scope(|| {
+                        self.prove_record(chunk_index, pk, challenger, shape_config, record)
+                    });
 
-                // Pad the shape.
-                if vk_verification_enabled() {
-                    if let Some(shape_config) = shape_config {
-                        debug_span!(parent: &local_span, "padding_shape", chunk_index)
-                            .in_scope(|| shape_config.padding_shape(&mut record).unwrap());
-                    }
-                }
-
-                // Commit the record.
-                let main_commitment =
-                    debug_span!(parent: &local_span, "generate_and_commit_main_traces", chunk_index)
-                        .in_scope(|| self.base_machine.commit(&record).unwrap());
-
-                // Generate the proof.
-                debug_span!(parent: &local_span, "prove_plain", chunk_index).in_scope(|| {
-                    self.base_machine.prove_plain(
-                        pk,
-                        &mut challenger.clone(),
-                        chunk_index,
-                        main_commitment,
-                    )
-                })
+                let elapsed = t0.elapsed().as_millis();
+                (chunk_index, proof, elapsed)
             })
             .collect();
+
+        let (proofs, durations): (Vec<_>, Vec<_>) = results
+            .into_iter()
+            .map(|(idx, proof, ms)| (proof, (idx, ms)))
+            .unzip();
+
+        if !durations.is_empty() {
+            let mut buf = String::new();
+            writeln!(&mut buf, "\n{:<6} │ {:>12}", "chunk", "prove_ms").unwrap();
+            writeln!(&mut buf, "{}", "─".repeat(24)).unwrap();
+
+            let total: u128 = durations.iter().map(|(_, ms)| ms).sum();
+            for (idx, ms) in &durations {
+                writeln!(&mut buf, "{:<6} │ {:>12}", idx, format!("{ms} ms")).unwrap();
+            }
+            writeln!(&mut buf, "{}", "─".repeat(24)).unwrap();
+            writeln!(&mut buf, "{:<6} │ {:>12}", "total", format!("{} ms", total)).unwrap();
+            info!("\n{}", buf);
+        }
 
         local_span.exit();
 

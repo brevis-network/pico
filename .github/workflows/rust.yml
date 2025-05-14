@@ -39,6 +39,8 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
       - name: Configure git for private repo
         run: |
           git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"

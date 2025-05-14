@@ -230,6 +230,7 @@ macro_rules! run {
             }
 
             // === Combine Phase: Combine Recursion Machine ===
+            convert_proof.split_into_individuals();
             log_section("COMBINE PHASE");
             let vk_root = get_vk_root(&vk_manager);
             let combine_machine = CombineMachine::<_, _>::new(

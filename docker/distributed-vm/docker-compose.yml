@@ -1,0 +1,40 @@
+services:
+  builder:
+    build:
+      context: ../..
+      ssh:
+        - default
+      dockerfile: docker/distributed-vm/Dockerfile
+      target: builder
+      args:
+        RUSTFLAGS: ${RUSTFLAGS}
+        JEMALLOC_SYS_WITH_MALLOC_CONF: ${JEMALLOC_SYS_WITH_MALLOC_CONF}
+    image: brevis-multi-machine-builder
+
+  coordinator:
+    build:
+      context: ../..
+      dockerfile: docker/distributed-vm/coordinator/Dockerfile
+    image: brevis-multi-machine-coordinator:latest
+    container_name: brevis-multi-machine-coordinator
+    env_file:
+      - .env
+      - .env.coordinator
+    depends_on:
+      - builder
+    ports:
+      - "50051:50051"
+    expose:
+      - "50051"
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: docker/distributed-vm/worker/Dockerfile
+    image: brevis-multi-machine-worker:latest
+    container_name: brevis-multi-machine-worker
+    env_file:
+      - .env
+      - .env.worker
+    depends_on:
+      - builder

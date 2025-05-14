@@ -2,7 +2,7 @@ use anyhow::Error;
 use pico_vm::emulator::stdin::EmulatorStdin;
 use std::fs;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BenchProgram {
     pub name: &'static str,
     pub elf: &'static str,
@@ -26,6 +26,11 @@ pub const PROGRAMS: &[BenchProgram] = &[
         input: Some("./perf/bench_data/reth-17106222.bin"),
     },
     BenchProgram {
+        name: "reth-18884864",
+        elf: "./perf/bench_data/reth-elf",
+        input: Some("./perf/bench_data/reth-18884864.bin"),
+    },
+    BenchProgram {
         name: "reth-22059900",
         elf: "./perf/bench_data/reth-elf",
         input: Some("./perf/bench_data/reth-22059900.bin"),
@@ -40,6 +45,8 @@ pub const PROGRAMS: &[BenchProgram] = &[
 fn load_input(input: &str) -> Result<Vec<u8>, Error> {
     if input == "fibonacci-300kn" {
         Ok(bincode::serialize(&300_000u32)?)
+        // Temp update to locally test
+        // Ok(bincode::serialize(&20)?)
     } else {
         Ok(fs::read(input)?)
     }
