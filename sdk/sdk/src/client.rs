@@ -148,6 +148,15 @@ macro_rules! create_sdk_prove_client {
                 Ok(())
             }
 
+            /// execute the program and return the cycles
+            pub fn execute(
+                &self,
+                stdin: EmulatorStdinBuilder<Vec<u8>>,
+            ) -> u64 {
+                let stdin = stdin.finalize();
+                self.riscv.run_tracegen(stdin)
+            }
+
             pub fn write_onchain_data(
                 &self,
                 outdir: impl AsRef<Path>,
