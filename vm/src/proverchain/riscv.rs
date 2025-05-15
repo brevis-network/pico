@@ -73,7 +73,7 @@ where
         }
     }
 
-    pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
+    pub fn emulate(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
         let witness = ProvingWitness::<SC, RiscvChips<SC>, _>::setup_for_riscv(
             self.program.clone(),
             stdin,
