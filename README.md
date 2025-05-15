@@ -9,6 +9,7 @@ Pico is an open-source zero-knowledge virtual machine (zkVM) that transforms how
 | [Examples](./examples)
 | [Telegram](https://t.me/brevisnetwork)
 | [Discord](https://discord.com/invite/QTRkjKdZ6A)
+| [X (Twitter)](https://x.com/brevis_zk)
 
 ## Getting Started
 
