@@ -125,7 +125,8 @@ macro_rules! impl_convert_prover {
                 let witness =
                     ProvingWitness::setup_for_convert(stdin, self.machine.config(), self.opts);
 
-                self.machine.prove_cuda(&witness, None, stream, mem_pool, dev_id)
+                self.machine
+                    .prove_cuda(&witness, None, stream, mem_pool, dev_id)
             }
 
             fn verify(

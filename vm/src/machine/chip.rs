@@ -54,13 +54,13 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
 #[derive(Clone, Debug)]
 pub struct MetaChip<F: Field, C> {
     /// Underlying chip
-    chip: C,
+    pub chip: C,
     /// messages for chip as looking table
     pub(crate) looking: Vec<VirtualPairLookup<F>>,
     /// messages for chip as looked table
     pub(crate) looked: Vec<VirtualPairLookup<F>>,
     /// log degree of quotient polynomial
-    log_quotient_degree: usize,
+    pub log_quotient_degree: usize,
 }
 
 impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {

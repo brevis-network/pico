@@ -11,7 +11,7 @@ use pico_perf::common::bench_field::BenchField;
 use pico_vm::{
     configs::stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     cuda_adaptor::{
-        chips_analyzer::initial_chips_load,
+        chips_analyzer::{initial_chips_2, initial_chips_load},
         resource_pool::{
             mem_pool::{create_ctx, get_global_mem_pool},
             stream_pool::{create_stream, get_global_stream_pool},
@@ -38,6 +38,7 @@ async fn main() -> Result<()> {
 
     let grpc_conn = grpc::new_channel(cfg.coordinator_grpc_addr.clone()).await;
 
+    initial_chips_2();
     initial_chips_load();
 
     match cfg.field {

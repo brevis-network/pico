@@ -1,28 +1,11 @@
-use std::mem::transmute;
-use crate::cuda_adaptor::KoalaBear;
-use crate::cuda_adaptor::BaseProver;
-use crate::cuda_adaptor::GPUMerkleTree;
-use crate::cuda_adaptor::StarkGenericConfig;
-use crate::cuda_adaptor::ChipBehavior;
-use crate::cuda_adaptor::MetaChip;
-use crate::cuda_adaptor::BaseVerifyingKey;
-use crate::cuda_adaptor::HashMap;
-use crate::cuda_adaptor::Arc;
-use crate::cuda_adaptor::SepticDigest;
-use crate::cuda_adaptor::Pcs;
-use crate::cuda_adaptor::Matrix;
-use crate::cuda_adaptor::ProgramBehavior;
-use crate::cuda_adaptor::InnerDigestHash;
-use crate::cuda_adaptor::CudaMemPool;
-use crate::cuda_adaptor::DevicePoolAllocation;
-use crate::cuda_adaptor::TwoAdicFriPcsGm;
-use crate::cuda_adaptor::Field;
-use crate::cuda_adaptor::fri_commit::fri_commit;
-use crate::cuda_adaptor::log2_strict_usize;
-use crate::cuda_adaptor::memory_copy_async;
-use crate::cuda_adaptor::pico_poseidon2kb_init_poseidon2constants;
-use cudart::device::set_device;
-use cudart::stream::CudaStream;
+use crate::cuda_adaptor::{
+    fri_commit::fri_commit, log2_strict_usize, memory_copy_async,
+    pico_poseidon2kb_init_poseidon2constants, Arc, BaseProver, BaseVerifyingKey, ChipBehavior,
+    CudaMemPool, DevicePoolAllocation, Field, GPUMerkleTree, HashMap, InnerDigestHash, KoalaBear,
+    Matrix, MetaChip, Pcs, ProgramBehavior, SepticDigest, StarkGenericConfig, TwoAdicFriPcsGm,
+};
+use cudart::{device::set_device, stream::CudaStream};
+use std::{mem::transmute, time::Instant};
 
 //
 use crate::cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixConcrete;
@@ -56,7 +39,7 @@ pub fn setup_keys_gm<SC, C>(
     mem_pool: &CudaMemPool,
     dev_id: usize,
 ) -> (BaseProvingKeyCuda, BaseVerifyingKey<SC>)
-where 
+where
     SC: StarkGenericConfig,
     C: ChipBehavior<SC::Val>,
 {
@@ -82,70 +65,79 @@ where
         let domain = pcs.natural_domain_for_degree(trace.height());
         (name, trace, domain)
     });
-    let preprocessed_info: Arc<[(String, <SC as StarkGenericConfig>::Domain, p3_matrix::Dimensions)]> = preprocessed_iter
+    let preprocessed_info: Arc<
+        [(
+            String,
+            <SC as StarkGenericConfig>::Domain,
+            p3_matrix::Dimensions,
+        )],
+    > = preprocessed_iter
         .clone()
         .map(|(name, trace, domain)| (name.to_owned(), domain, trace.dimensions()))
         .collect();
 
     let pc_start = program.pc_start();
-    let pc_start_kb: &KoalaBear = unsafe {
-        transmute(&pc_start)
-    };
-    let initial_global_cumulative_sum: SepticDigest<<SC as StarkGenericConfig>::Val> = program.initial_global_cumulative_sum();
-    let initial_global_cumulative_sum_kb: &SepticDigest<KoalaBear> = unsafe {
-        transmute(&initial_global_cumulative_sum)
-    };
-
+    let pc_start_kb: &KoalaBear = unsafe { transmute(&pc_start) };
+    let initial_global_cumulative_sum: SepticDigest<<SC as StarkGenericConfig>::Val> =
+        program.initial_global_cumulative_sum();
+    let initial_global_cumulative_sum_kb: &SepticDigest<KoalaBear> =
+        unsafe { transmute(&initial_global_cumulative_sum) };
 
     let preprocessed_trace = chips_and_preprocessed
         .into_iter()
         .map(|t| t.2)
         .collect::<Vec<_>>();
 
-    
+    let start = Instant::now();
     let device_evaluation: Vec<DeviceMatrixConcrete<SC::Val>> = preprocessed_trace
-    .iter()
-    .map(|e| {
-        let e = e.clone().transpose();
-        set_device(dev_id as _).unwrap();
-        let mut temp = DevicePoolAllocation::<SC::Val>::alloc_from_pool_async(
-            e.values.len(),
-            mem_pool,
-            stream,
-        )
-        .unwrap();
-        memory_copy_async(&mut temp, &e.values, stream).unwrap();
-        DeviceMatrixConcrete {
-            values: temp,
-            log_n: log2_strict_usize(e.width()),
-            num_poly: e.height(),
-        }
-    })
-    .collect();
+        .iter()
+        .map(|e| {
+            let e = e.clone().transpose();
+            set_device(dev_id as _).unwrap();
+            let mut temp = DevicePoolAllocation::<SC::Val>::alloc_from_pool_async(
+                e.values.len(),
+                mem_pool,
+                stream,
+            )
+            .unwrap();
+            memory_copy_async(&mut temp, &e.values, stream).unwrap();
+            DeviceMatrixConcrete {
+                values: temp,
+                log_n: log2_strict_usize(e.width()),
+                num_poly: e.height(),
+            }
+        })
+        .collect();
 
     let mut device_evaluation_kb: Vec<DeviceMatrixConcrete<KoalaBear>> =
         unsafe { transmute(device_evaluation) };
 
     //
-    let two_adic_pcs: &TwoAdicFriPcsGm =
-        unsafe { transmute(&pcs) };
+    let two_adic_pcs: &TwoAdicFriPcsGm = unsafe { transmute(&pcs) };
     let log_blow_up = two_adic_pcs.fri.log_blowup;
     let (_, poseidon2_constants) = pico_poseidon2kb_init_poseidon2constants();
 
     let preprocessed_merkle = fri_commit(
-        device_evaluation_kb.iter_mut().map(|i| (KoalaBear::GENERATOR, i.into_ref())).collect(),
+        device_evaluation_kb
+            .iter_mut()
+            .map(|i| (KoalaBear::GENERATOR, i.into_ref()))
+            .collect(),
         log_blow_up,
         stream,
         &poseidon2_constants,
         mem_pool,
     );
     let commit_gm: InnerDigestHash = preprocessed_merkle.merkle_root.into();
+    // println!("{:?}", preprocessed_merkle.merkle_root);
 
     //
-    let commit_sc: &<SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment = unsafe {
-        transmute(&commit_gm)
-    };
-    
+    let commit_sc: &<SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment =
+        unsafe { transmute(&commit_gm) };
+    println!(
+        "---- ongpu setup_keys_gm data trans & fri commit: {:?}",
+        start.elapsed()
+    );
+
     (
         BaseProvingKeyCuda {
             commit: commit_gm,
@@ -164,5 +156,4 @@ where
             preprocessed_chip_ordering,
         },
     )
-        
 }

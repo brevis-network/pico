@@ -1,4 +1,3 @@
-
 //
 #[derive(Clone, Copy)]
 #[repr(C)]

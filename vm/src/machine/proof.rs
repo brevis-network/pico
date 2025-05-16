@@ -1,11 +1,12 @@
 use crate::{
-    configs::config::{Com, PcsProof, StarkGenericConfig},
+    configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig},
     instances::compiler::shapes::ProofShape,
     machine::{keys::BaseVerifyingKey, septic::SepticDigest},
 };
 use alloc::{sync::Arc, vec::Vec};
 use hashbrown::HashMap;
 use itertools::Itertools;
+use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
 
 /// Wrapper for all proof types

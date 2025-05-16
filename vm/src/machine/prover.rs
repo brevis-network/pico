@@ -17,8 +17,7 @@ use crate::{
     },
 };
 use alloc::sync::Arc;
-use cudart::memory_pools::CudaMemPool;
-use cudart::stream::CudaStream;
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use dashmap::DashMap;
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -186,8 +185,28 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         });
 
         // Commit to the batch of traces.
+        // println!("Prep_Commit");
         let (commit, preprocessed_prover_data) = debug_span!("commit preprocessed trace")
             .in_scope(|| pcs.commit(domains_and_preprocessed.clone()));
+
+        {
+            use crate::cuda_adaptor::gpuacc_struct::poseidon::DIGEST_ELEMS;
+            use p3_koala_bear::{KoalaBear as Field, KoalaBearParameters};
+            use p3_matrix::dense::DenseMatrix;
+            use p3_merkle_tree::MerkleTree;
+            use p3_monty_31::MontyField31;
+            use std::mem::transmute;
+            let preprocessed_prover_data_root: &MerkleTree<
+                MontyField31<KoalaBearParameters>,
+                MontyField31<KoalaBearParameters>,
+                DenseMatrix<MontyField31<KoalaBearParameters>>,
+                8,
+            > = unsafe { transmute(&preprocessed_prover_data) };
+            // println!(
+            //     "{:?}",
+            //     Into::<[Field; DIGEST_ELEMS]>::into(preprocessed_prover_data_root.root())
+            // );
+        }
 
         let prep_gpumktree =
             fri_commit_from_host::<SC>(domains_and_preprocessed.clone(), pcs, stream, mem_pool);

@@ -1,10 +1,11 @@
-use std::ffi::c_void;
-use std::mem::transmute;
+use std::{ffi::c_void, mem::transmute};
 
-use cudart::memory::{memory_copy, memory_copy_async, DeviceAllocation};
-use cudart::memory_pools::{CudaMemPool, DevicePoolAllocation};
-use cudart::slice::{CudaSlice, CudaSliceMut};
-use cudart::stream::CudaStream;
+use cudart::{
+    memory::{memory_copy, memory_copy_async, DeviceAllocation},
+    memory_pools::{CudaMemPool, DevicePoolAllocation},
+    slice::{CudaSlice, CudaSliceMut},
+    stream::CudaStream,
+};
 pub struct DeviceMatrixConcrete<'stream, T: Sized> {
     pub values: DevicePoolAllocation<'stream, T>,
     pub log_n: usize,
@@ -28,7 +29,7 @@ impl<T: Sized> DeviceMatrixStatic<T> {
             num_poly,
         }
     }
-    pub fn into_ref(&mut self) -> DeviceMatrixRef<T>{
+    pub fn into_ref(&mut self) -> DeviceMatrixRef<T> {
         DeviceMatrixRef {
             ptr: self.values.as_mut_ptr(),
             log_n: self.log_n,

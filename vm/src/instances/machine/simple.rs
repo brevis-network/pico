@@ -1,5 +1,6 @@
 use crate::{
     configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
@@ -10,13 +11,10 @@ use crate::{
     },
 };
 use anyhow::Result;
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use p3_air::Air;
 use p3_field::PrimeField32;
 use std::any::type_name;
-use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
-use cudart::stream::CudaStream;
-use cudart::memory_pools::CudaMemPool;
-
 
 pub struct SimpleMachine<SC, C>
 where
@@ -65,7 +63,7 @@ where
         _witness: &ProvingWitness<SC, C, Vec<u8>>,
         _pk_cuda: Option<&BaseProvingKeyCuda>,
         _stream: &'static CudaStream,
-        _mem_pool: & CudaMemPool,
+        _mem_pool: &CudaMemPool,
         _dev_id: usize,
     ) -> MetaProof<SC>
     where

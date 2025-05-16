@@ -14,7 +14,7 @@ use std::{any::TypeId, ffi::c_void, mem::transmute, ptr::null};
 type InnerVal = KoalaBear;
 pub type InnerChallenge = BinomialExtensionField<InnerVal, 4>;
 use cudart::{
-    slice::{CudaSliceMut, CudaSlice},
+    slice::{CudaSlice, CudaSliceMut},
     stream::CudaStream,
 };
 use cudart_sys::cudaStream_t;

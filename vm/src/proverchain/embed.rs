@@ -27,11 +27,11 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::{DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    proverchain::CudaStream,
 };
 use alloc::sync::Arc;
-use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
-use crate::proverchain::CudaStream;
 use cudart::memory_pools::CudaMemPool;
+use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
 pub type EmbedChips<SC> = RecursionChipType<Val<SC>>;
 
@@ -142,7 +142,7 @@ macro_rules! impl_embedded_prover {
                 _stream: &'static CudaStream,
                 _mem_pool: &CudaMemPool,
                 _dev_id: usize,
-            ) -> MetaProof<$embed_sc>{
+            ) -> MetaProof<$embed_sc> {
                 unreachable!();
             }
 

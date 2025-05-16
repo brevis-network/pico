@@ -165,7 +165,9 @@ pub fn fri_commit_from_host<SC: StarkGenericConfig>(
         &poseidon2_constants,
         &poseidon2_constants,
         mem_pool,
-    );    
+    );
+    // println!("{:?}", merkle_result_gpu.merkle_root);
+
     merkle_result_gpu
 }
 
@@ -209,6 +211,9 @@ pub fn fri_commit_from_device<SC: StarkGenericConfig>(
         &poseidon2_constants,
         mem_pool,
     );
+
+    // println!("by from device: {:?}", merkle_result_gpu.merkle_root);
+
     merkle_result_gpu
 }
 

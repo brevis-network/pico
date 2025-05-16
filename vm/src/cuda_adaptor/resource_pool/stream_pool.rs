@@ -1,7 +1,8 @@
+use cudart::{
+    device::{get_device_count, set_device},
+    stream::CudaStream,
+};
 use std::sync::OnceLock;
-use cudart::stream::CudaStream;
-use cudart::device::get_device_count;
-use cudart::device::set_device;
 
 #[derive(Debug)]
 pub struct SyncStreamPool(pub CudaStream);
@@ -19,8 +20,10 @@ pub fn create_stream(device_id: usize) {
         println!("Check CPU DATA STRUCT");
         crate::cuda_adaptor::check_layout();
         println!("Check GPU DATA STRUCT");
-        unsafe { rustffi_check_layout(); };
-        
+        unsafe {
+            rustffi_check_layout();
+        };
+
         let count = get_device_count().unwrap() as usize;
         (0..count).map(|_| OnceLock::new()).collect()
     });

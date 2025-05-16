@@ -1,17 +1,18 @@
-use itertools::Itertools;
-use std::array;
 use cudart::stream::CudaStream;
-use std::alloc::Layout;
-use std::alloc::dealloc;
+use itertools::Itertools;
+use std::{
+    alloc::{dealloc, Layout},
+    array,
+};
 
 use crate::{
     configs::stark_config::KoalaBearPoseidon2,
     cuda_adaptor::{
         log2_strict_usize, quotient::compute_quotient_values_cuda_gm,
-        setup_keys_gm::BaseProvingKeyCuda, transmute, Arc, ChipBehavior, CudaMemPool,
-        FieldExt4, FieldExt4Mmcs, GPUMerkleTree, Hash, InnerDigestHash,
-        KoalaBear, LeavesHashType, MetaChip, MyChallenger, MyFriProof, Pcs, Poseidon2Constants,
-        StarkGenericConfig, TwoAdicMultiplicativeCoset, ValMmcs,
+        quotient_2::compute_quotient_values_cuda_gm_2, setup_keys_gm::BaseProvingKeyCuda,
+        transmute, Arc, ChipBehavior, CudaMemPool, FieldExt4, FieldExt4Mmcs, GPUMerkleTree, Hash,
+        InnerDigestHash, KoalaBear, LeavesHashType, MetaChip, MyChallenger, MyFriProof, Pcs,
+        Poseidon2Constants, StarkGenericConfig, TwoAdicMultiplicativeCoset, ValMmcs,
     },
     machine::{
         folder::ProverConstraintFolder,
@@ -21,6 +22,7 @@ use crate::{
         utils::order_chips,
     },
 };
+use std::time::Instant;
 
 use p3_air::Air;
 use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger, GrindingChallenger};
@@ -28,14 +30,12 @@ use p3_commit::PolynomialSpace;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
 use p3_fri::{BatchOpening, CommitPhaseProofStep, QueryProof};
 
-
 //
-use crate::cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixConcrete;
-use crate::cuda_adaptor::gpuacc_struct::fri_open::FriData;
-use crate::cuda_adaptor::gpuacc_struct::fri_open::OpenProof;
-use crate::cuda_adaptor::gpuacc_struct::poseidon::DIGEST_ELEMS;
-use crate::cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixStatic;
-
+use crate::cuda_adaptor::gpuacc_struct::{
+    fri_open::{FriData, OpenProof},
+    matrix::{DeviceMatrixConcrete, DeviceMatrixStatic},
+    poseidon::DIGEST_ELEMS,
+};
 
 //
 use std::ffi::c_void;
@@ -56,8 +56,6 @@ extern "C" {
         log_quotient: usize,
     ) -> *mut c_void;
 }
-
-
 
 //
 const ONE_HALF: KoalaBear = unsafe { transmute(16777215) };
@@ -181,6 +179,7 @@ pub fn prove_impl<SC: StarkGenericConfig, C>(
 where
     C: Air<ProverConstraintFolder<SC>> + ChipBehavior<SC::Val>,
 {
+    let start = Instant::now();
     // construct challenger
     let mut challenger_gm: <SC as StarkGenericConfig>::Challenger = challenger.clone();
 
@@ -210,7 +209,9 @@ where
         array::from_fn(|_| challenger_gm.sample_ext_element());
 
     let main_traces_gm: &Vec<DeviceMatrixConcrete<'_, KoalaBear>> = &main_commitment_gm.main_traces;
+    // println!("prove_impl - init for perm Duration: {:?}", start.elapsed());
 
+    let start = Instant::now();
     let preprocessed_traces = chips
         .iter()
         .map(|chip| {
@@ -251,7 +252,9 @@ where
             )
         })
         .unzip();
+    // println!("prove_impl - generate perm Duration: {:?}", start.elapsed());
 
+    let start = Instant::now();
     use crate::cuda_adaptor::fri_commit::fri_commit_from_device;
     use p3_field::Field;
     let pcs = config.pcs();
@@ -266,8 +269,11 @@ where
         stream,
         mem_pool,
     );
+    // println!("prove_impl - commit perm Duration: {:?}", start.elapsed());
 
+    let start = Instant::now();
     // Quotient
+    // println!("GPU Memory before Quotient{:?}", cudart::memory::memory_get_info());
     let log_degrees: Vec<usize> = main_traces_gm
         .iter()
         .map(|trace| trace.log_n)
@@ -317,7 +323,12 @@ where
     }
 
     let alpha: SC::Challenge = challenger_gm.sample_ext_element();
+    // println!(
+    //     "prove_impl - quotient prepare Duration: {:?}",
+    //     start.elapsed()
+    // );
 
+    let start = Instant::now();
     let quotient_values: Vec<DeviceMatrixConcrete<KoalaBear>> = quotient_domains
         .iter()
         .zip(trace_domains.iter())
@@ -345,8 +356,28 @@ where
             );
             let mut permutation_trace_on_quotient_domain =
                 perm_merkle.get_evaluations(i, trace_domain.log_n, log_quotient, stream, mem_pool);
-            
-            let res = compute_quotient_values_cuda_gm(
+
+            let start = Instant::now();
+            // println!(" *** quotient chip: {:?}", chips[i].name());
+            // let res = compute_quotient_values_cuda_gm(
+            //     chips[i],
+            //     &local_cumulative_sums[i],
+            //     &global_cumulative_sums[i],
+            //     *trace_domain,
+            //     *quotient_domain,
+            //     preprocessed_trace_on_quotient_domain
+            //         .as_mut()
+            //         .map(|i| i.into_ref()),
+            //     main_trace_on_quotient_domain.into_ref(),
+            //     permutation_trace_on_quotient_domain.into_ref(),
+            //     &regional_permutation_challenges,
+            //     alpha,
+            //     &*main_commitment_gm.public_values,
+            //     stream,
+            //     mem_pool,
+            //     dev_id,
+            // );
+            let res = compute_quotient_values_cuda_gm_2(
                 chips[i],
                 &local_cumulative_sums[i],
                 &global_cumulative_sums[i],
@@ -364,6 +395,9 @@ where
                 mem_pool,
                 dev_id,
             );
+            // todo!();
+
+            // println!(" *** quotient duration: {:?}", start.elapsed());
             drop(preprocessed_trace_on_quotient_domain);
             drop(main_trace_on_quotient_domain);
             drop(permutation_trace_on_quotient_domain);
@@ -379,8 +413,13 @@ where
         .collect::<Vec<_>>();
 
     stream.synchronize().unwrap();
+    // println!(
+    //     "prove_impl - quotient caculate Duration: {:?}",
+    //     start.elapsed()
+    // );
 
     //
+    let start = Instant::now();
     let mut quotient_domains_and_chunks = quotient_domains
         .into_iter()
         .zip(quotient_values)
@@ -388,7 +427,7 @@ where
         .flat_map(
             |((quotient_domain, mut quotient_values), &log_quotient_degree)| {
                 let ref_quotient_values = quotient_values.into_ref();
-                
+
                 let quotient_chunks = unsafe {
                     let ptr = rustffi_split_evals_impl(
                         transmute(&ref_quotient_values),
@@ -405,15 +444,19 @@ where
                     value
                 };
 
-                
                 let qc_domains = quotient_domain.split_domains(1 << log_quotient_degree);
                 qc_domains.into_iter().zip(quotient_chunks)
             },
         )
         .collect::<Vec<_>>();
     stream.synchronize().unwrap();
+    // println!(
+    //     "prove_impl - quotient domain Duration: {:?}",
+    //     start.elapsed()
+    // );
 
     //
+    let start = Instant::now();
     let pcs = config.pcs();
     let num_quotient_chunks = quotient_domains_and_chunks.len();
     assert_eq!(
@@ -432,8 +475,13 @@ where
         stream,
         mem_pool,
     );
+    // println!(
+    //     "prove_impl - quotient commit Duration: {:?}",
+    //     start.elapsed()
+    // );
 
     //
+    let start = Instant::now();
     let quotient_commit = quotient_merkle.merkle_root;
     let quotient_commit_cs: &[SC::Val; 8] = unsafe { transmute(&quotient_commit) };
     for value in *quotient_commit_cs {
@@ -461,6 +509,10 @@ where
             num_queries,
         )
     };
+    // println!("prove_impl - get fri Duration: {:?}", start.elapsed());
+
+    //
+    let start = Instant::now();
 
     //
     let preprocessed_opening_points = pk_gm
@@ -498,7 +550,13 @@ where
         .map(|_| vec![*zeta_kb])
         .collect::<Vec<_>>();
     //
+    // println!(
+    //     "prove_impl - 4 opening points Duration: {:?}",
+    //     start.elapsed()
+    // );
 
+    //
+    let start = Instant::now();
 
     let gpu_challenger_trans: &SC_Challenger = unsafe { transmute(&challenger_gm) };
     let gpu_opening_proof = unsafe {
@@ -521,6 +579,10 @@ where
         dealloc(open_proof_ptr as *mut u8, layout);
         value
     };
+    // println!("prove_impl - fri_open Duration: {:?}", start.elapsed());
+
+    //
+    let start = Instant::now();
 
     //
     let (openings, opening_proof) =
@@ -528,6 +590,13 @@ where
     let [preprocessed_values, main_values, permutation_values, mut quotient_values] =
         openings.try_into().unwrap();
     assert!(main_values.len() == chips.len());
+    // println!(
+    //     "prove_impl - convert_open_proof Duration: {:?}",
+    //     start.elapsed()
+    // );
+
+    //
+    let start = Instant::now();
 
     //
     let preprocessed_opened_values = preprocessed_values
@@ -572,6 +641,14 @@ where
         let slice = quotient_values.drain(0..*degree);
         quotient_opened_values.push(slice.map(|mut v| v.pop().unwrap()).collect::<Vec<_>>());
     }
+
+    // println!(
+    //     "prove_impl - prepare for opened value Duration: {:?}",
+    //     start.elapsed()
+    // );
+
+    //
+    let start = Instant::now();
 
     let opened_values = main_opened_values
         .into_iter()
@@ -618,7 +695,14 @@ where
             },
         )
         .collect::<Arc<[_]>>();
-    
+    // println!(
+    //     "prove_impl - compute opened value Duration: {:?}",
+    //     start.elapsed()
+    // );
+
+    //
+    let start = Instant::now();
+
     // final base proof
     let main_commit_sc: &<<SC as StarkGenericConfig>::Pcs as Pcs<
         SC::Challenge,
@@ -641,6 +725,11 @@ where
         <SC as StarkGenericConfig>::Challenge,
         <SC as StarkGenericConfig>::Challenger,
     >>::Proof = unsafe { transmute(&opening_proof) };
+
+    // println!(
+    //     "prove_impl - prepare for proof value Duration: {:?}",
+    //     start.elapsed()
+    // );
 
     BaseProof::<SC> {
         commitments: BaseCommitments {

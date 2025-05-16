@@ -1,8 +1,10 @@
 use std::ffi::c_void;
 pub const DIGEST_ELEMS: usize = 8;
 
-use cudart::memory::{memory_copy, DeviceAllocation};
-use cudart::slice::CudaSliceMut;
+use cudart::{
+    memory::{memory_copy, DeviceAllocation},
+    slice::CudaSliceMut,
+};
 use cudart_sys::{cudaFree, CudaError};
 
 #[repr(C)]

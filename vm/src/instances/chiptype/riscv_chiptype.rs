@@ -323,6 +323,69 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
         .into()
     }
 
+    pub(crate) fn get_all_riscv_chips_for_analyzer_2() -> Vec<MetaChip<F, Self>> {
+        [
+            Self::Cpu(Default::default()),
+            Self::ShaCompress(Default::default()),
+            Self::ShaExtend(Default::default()),
+            Self::AddSub(Default::default()),
+            Self::Bitwise(Default::default()),
+            Self::Mul(Default::default()),
+            Self::DivRem(Default::default()),
+            Self::SLL(Default::default()),
+            Self::SR(Default::default()),
+            Self::Lt(Default::default()),
+            Self::MemoryLocal(Default::default()),
+            Self::MemoryReadWrite(Default::default()),
+            Self::Global(Default::default()),
+            Self::SyscallRiscv(SyscallChip::riscv()),
+            Self::Poseidon2(Default::default()),
+            Self::Program(Default::default()),
+            Self::Byte(Default::default()),
+            Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
+                MemoryChipType::Initialize,
+            )),
+            Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize)),
+            Self::WsSecp256k1Add(Default::default()),
+            Self::SyscallPrecompile(SyscallChip::precompile()),
+            Self::WsDoubleSecp256k1(Default::default()),
+            Self::KeecakP(Default::default()),
+        ]
+        .map(MetaChip::new)
+        .into()
+    }
+
+    pub(crate) fn get_all_riscv_chips_for_analyzer() -> Vec<RiscvChipType<F>> {
+        [
+            Self::Cpu(Default::default()),
+            Self::ShaCompress(Default::default()),
+            Self::ShaExtend(Default::default()),
+            Self::AddSub(Default::default()),
+            Self::Bitwise(Default::default()),
+            Self::Mul(Default::default()),
+            Self::DivRem(Default::default()),
+            Self::SLL(Default::default()),
+            Self::SR(Default::default()),
+            Self::Lt(Default::default()),
+            Self::MemoryLocal(Default::default()),
+            Self::MemoryReadWrite(Default::default()),
+            Self::Global(Default::default()),
+            Self::SyscallRiscv(SyscallChip::riscv()),
+            Self::Poseidon2(Default::default()),
+            Self::Program(Default::default()),
+            Self::Byte(Default::default()),
+            Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
+                MemoryChipType::Initialize,
+            )),
+            Self::MemoryFinalize(MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize)),
+            Self::WsSecp256k1Add(Default::default()),
+            Self::SyscallPrecompile(SyscallChip::precompile()),
+            Self::WsDoubleSecp256k1(Default::default()),
+            Self::KeecakP(Default::default()),
+        ]
+        .into()
+    }
+
     pub(crate) fn memory_init_final_chips() -> Vec<MetaChip<F, Self>> {
         vec![
             MetaChip::new(Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(

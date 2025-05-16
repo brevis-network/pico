@@ -19,10 +19,10 @@ use crate::{
         witness::ProvingWitness,
     },
     primitives::consts::{COMBINE_SIZE, DIGEST_SIZE, EXTENSION_DEGREE, RECURSION_NUM_PVS},
+    proverchain::CudaStream,
 };
-use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
-use crate::proverchain::CudaStream;
 use cudart::memory_pools::CudaMemPool;
+use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
 
 type ConvertChips<SC> = RecursionChipType<Val<SC>>;
 pub type CombineChips<SC> = RecursionChipType<Val<SC>>;
@@ -76,10 +76,7 @@ macro_rules! impl_combine_vk_prover {
                 self.machine.base_machine()
             }
 
-            fn prove(
-                &self,
-                proofs: Self::Witness,
-            ) -> MetaProof<$recur_sc> {
+            fn prove(&self, proofs: Self::Witness) -> MetaProof<$recur_sc> {
                 let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
                 let vk_root = if vk_manager.vk_verification_enabled() {
                     vk_manager.merkle_root
@@ -146,7 +143,8 @@ macro_rules! impl_combine_vk_prover {
                     self.machine.config(),
                     self.opts,
                 );
-                self.machine.prove_cuda(&witness, None, stream, mem_pool, dev_id)
+                self.machine
+                    .prove_cuda(&witness, None, stream, mem_pool, dev_id)
             }
 
             fn verify(

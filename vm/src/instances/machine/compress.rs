@@ -1,6 +1,7 @@
 use crate::{
     compiler::recursion::{circuit::hash::FieldHasher, program::RecursionProgram},
     configs::config::{Com, PcsProof, PcsProverData, StarkGenericConfig, Val},
+    cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda,
     emulator::{
         record::RecordBehavior,
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
@@ -17,15 +18,12 @@ use crate::{
     },
     primitives::consts::EXTENSION_DEGREE,
 };
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
 use std::{any::type_name, borrow::Borrow};
 use tracing::{debug, debug_span, instrument};
-use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
-use cudart::stream::CudaStream;
-use cudart::memory_pools::CudaMemPool;
-
 
 pub struct CompressMachine<SC, C>
 where
@@ -122,7 +120,7 @@ where
         witness: &ProvingWitness<SC, C, RecursionStdinVariant<SC, C>>,
         pk_cuda: Option<&BaseProvingKeyCuda>,
         stream: &'static CudaStream,
-        mem_pool: & CudaMemPool,
+        mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> MetaProof<SC>
     where
@@ -144,8 +142,15 @@ where
         }
 
         let pk_cuda_unwrap = pk_cuda.unwrap();
-        let proofs = debug_span!("prove_ensemble")
-            .in_scope(|| self.base_machine.prove_ensemble_cuda(&records, pk_cuda_unwrap, stream, mem_pool, dev_id));
+        let proofs = debug_span!("prove_ensemble").in_scope(|| {
+            self.base_machine.prove_ensemble_cuda(
+                &records,
+                pk_cuda_unwrap,
+                stream,
+                mem_pool,
+                dev_id,
+            )
+        });
 
         // construct meta proof
         let vks = vec![witness.vk.clone().unwrap()].into();

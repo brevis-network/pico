@@ -3,6 +3,7 @@ use crate::{
         circuit::utils::assert_embed_public_values_valid, program::RecursionProgram,
     },
     configs::config::{Challenge, Com, PcsProverData, StarkGenericConfig, Val},
+    cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda,
     emulator::{
         record::RecordBehavior,
         recursion::{emulator::RecursionRecord, public_values::RecursionPublicValues},
@@ -17,14 +18,11 @@ use crate::{
         witness::ProvingWitness,
     },
 };
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use std::{any::type_name, borrow::Borrow, marker::PhantomData};
 use tracing::{debug, debug_span, instrument};
-use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
-use cudart::stream::CudaStream;
-use cudart::memory_pools::CudaMemPool;
-
 
 pub struct EmbedMachine<PrevSC, SC, C, I>
 where
@@ -102,7 +100,7 @@ where
         _witness: &ProvingWitness<EmbedSC, C, I>,
         _pk_cuda: Option<&BaseProvingKeyCuda>,
         _stream: &'static CudaStream,
-        _mem_pool: & CudaMemPool,
+        _mem_pool: &CudaMemPool,
         _dev_id: usize,
     ) -> MetaProof<EmbedSC>
     where

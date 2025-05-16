@@ -2,8 +2,7 @@ use crate::{
     configs::config::StarkGenericConfig,
     cuda_adaptor::{
         chips_analyzer::{insert, SELECTORS},
-        DevicePoolAllocation,
-        TwoAdicMultiplicativeCoset,
+        DevicePoolAllocation, TwoAdicMultiplicativeCoset,
     },
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -18,13 +17,13 @@ use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_koala_bear::KoalaBear;
 use std::mem::transmute;
 
-use std::{ffi::c_void, usize};
-use cudart_sys::cudaStream_t;
 use cudart::stream::CudaStream;
-
+use cudart_sys::cudaStream_t;
+use std::{ffi::c_void, time::Instant, usize};
 //
-use crate::cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixRef;
-use crate::cuda_adaptor::chips_analyzer::host_slice_2_device_vec;
+use crate::cuda_adaptor::{
+    chips_analyzer::host_slice_2_device_vec, gpuacc_struct::matrix::DeviceMatrixRef,
+};
 
 //
 extern "C" {
@@ -99,7 +98,13 @@ where
         <<SC as StarkGenericConfig>::Challenge as FieldExtensionAlgebra<SC::Val>>::D
     );
     insert(trace_size, quotient_size, dev_id);
-    let mut selectors_map = SELECTORS.get().unwrap().get(dev_id).unwrap().lock().unwrap();
+    let mut selectors_map = SELECTORS
+        .get()
+        .unwrap()
+        .get(dev_id)
+        .unwrap()
+        .lock()
+        .unwrap();
     let selector = selectors_map.get_mut(&(trace_size, quotient_size)).unwrap();
     let is_f_row = &mut selector.is_first_row;
     let is_l_row = &mut selector.is_last_row;
@@ -109,7 +114,8 @@ where
     // gpu_vec_inst
     let abstract_field_map = super::chips_analyzer::CHIPS_GPU_OP_VEC_KB.lock().unwrap();
     let Some(gpu_vec_inst) = abstract_field_map.get(&chip.name()) else {
-        todo!("airchip empty: {:?}", chip.name());
+        println!("airchip empty: {:?}", chip.name());
+        todo!("")
     };
     let inst_len = gpu_vec_inst.len() / 10;
     let mut gpu_vec_inst_gm = host_slice_2_device_vec(gpu_vec_inst);
@@ -119,7 +125,7 @@ where
     // alpha pows: D * (max_alpha_pow + 1)
     let abstract_field_map = super::chips_analyzer::CHIPS_MAX_ALPHA_POW.lock().unwrap();
     let Some(max_alpha_pow) = abstract_field_map.get(&chip.name()) else {
-        todo!("max_alpha_pow airchip empty: {:?}", chip.name())
+        todo!("max_alpha_pow airchip empty")
     };
     let powers_of_alpha = alpha.powers().take(max_alpha_pow + 1).collect::<Vec<_>>();
     let mut powers_of_alpha_clone: Vec<<SC>::Val> = Vec::new();
@@ -167,7 +173,7 @@ where
 
     //
     let mut public_value = host_slice_2_device_vec(&public_values);
-    let threads_per_block = 1024;
+    let threads_per_block = 512;
     let blocks_num = 82;
     let mut d_reg = DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(
         threads_per_block * blocks_num * 1024,

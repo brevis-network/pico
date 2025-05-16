@@ -15,7 +15,7 @@ use pico_perf::common::bench_field::BenchField;
 use pico_vm::{
     configs::stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     cuda_adaptor::{
-        chips_analyzer::initial_chips_load,
+        chips_analyzer::{initial_chips_2, initial_chips_load},
         resource_pool::{
             mem_pool::{create_ctx, get_global_mem_pool},
             stream_pool::{create_stream, get_global_stream_pool},
@@ -30,6 +30,7 @@ use tokio::signal::ctrl_c;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    initial_chips_2();
     initial_chips_load();
 
     ThreadPoolBuilder::new()
@@ -71,10 +72,26 @@ async fn main() -> Result<()> {
             let mut provers: Vec<_> = (0..cfg.prover_count)
                 .enumerate()
                 .map(|(i, _)| {
+                    create_ctx(i);
+                    let sync_pool = get_global_mem_pool(i);
+                    let mem_pool = &sync_pool.0;
+
+                    create_stream(i);
+                    let sync_stream = get_global_stream_pool(i);
+                    let stream = &sync_stream.0;
+
                     let prover_id = format!("prover-{i}");
                     let worker_endpoint = gateway_worker_channel.endpoint2().clone_inner();
-                    let prover =
-                        Prover::<BabyBearPoseidon2>::new(prover_id, cfg.program, worker_endpoint);
+                    // let prover =
+                    //     Prover::<BabyBearPoseidon2>::new(prover_id, cfg.program, worker_endpoint);
+                    let (prover, pk_gm) = Prover::<BabyBearPoseidon2>::new_cuda(
+                        prover_id,
+                        cfg.program,
+                        worker_endpoint,
+                        stream,
+                        mem_pool,
+                        i,
+                    );
                     prover.run()
                 })
                 .collect();

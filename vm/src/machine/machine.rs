@@ -4,10 +4,7 @@ use crate::{
         config::{PcsProverData, StarkGenericConfig, Val},
         stark_config::KoalaBearPoseidon2,
     },
-    cuda_adaptor::{
-        commit_main_gm::{commit_main_gpumemory_fast},
-        setup_keys_gm::BaseProvingKeyCuda,
-    },
+    cuda_adaptor::{commit_main_gm::commit_main_gpumemory_fast, setup_keys_gm::BaseProvingKeyCuda},
     emulator::record::RecordBehavior,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -21,12 +18,12 @@ use crate::{
     },
 };
 
-use cudart::stream::CudaStream;
+use crate::cuda_adaptor::gpuacc_struct::{
+    fri_commit::MerkleTree as GPUMerkleTree, matrix::DeviceMatrixConcrete,
+};
 use alloc::sync::Arc;
 use anyhow::Result;
-use cudart::memory_pools::CudaMemPool;
-use crate::cuda_adaptor::gpuacc_struct::fri_commit::MerkleTree as GPUMerkleTree;
-use crate::cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixConcrete;
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_air::Air;
@@ -107,7 +104,7 @@ where
         &self,
         program: &C::Program,
         stream: &'static CudaStream,
-        mem_pool: & CudaMemPool,
+        mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> (
         GPUMerkleTree<'static, MontyField31<KoalaBearParameters>>,
@@ -116,7 +113,9 @@ where
         BaseProvingKeyCuda,
         BaseVerifyingKey<SC>,
     ) {
-        let (prep_gpumktree, pk, vk, pk_gm, vk_gm) = self.base_machine().setup_keys_gm(program, stream, mem_pool, dev_id);
+        let (prep_gpumktree, pk, vk, pk_gm, vk_gm) = self
+            .base_machine()
+            .setup_keys_gm(program, stream, mem_pool, dev_id);
 
         (prep_gpumktree, pk, vk, pk_gm, vk_gm)
     }
@@ -132,7 +131,7 @@ where
         witness: &ProvingWitness<SC, C, I>,
         pk_cuda: Option<&BaseProvingKeyCuda>,
         stream: &'static CudaStream,
-        mem_pool: & CudaMemPool,
+        mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> MetaProof<SC>
     where
@@ -277,7 +276,7 @@ where
         &self,
         program: &C::Program,
         stream: &'static CudaStream,
-        mem_pool: & CudaMemPool,
+        mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> (
         GPUMerkleTree<'static, MontyField31<KoalaBearParameters>>,
@@ -287,10 +286,22 @@ where
         BaseVerifyingKey<SC>,
     ) {
         use crate::cuda_adaptor::setup_keys_gm::setup_keys_gm;
-        let (pk_gm, vk_gm) = setup_keys_gm(&self.prover, &self.config(), &self.chips(), program, stream, mem_pool, dev_id);
-        let (prep_gpumktree, pk, vk) =
-            self.prover
-                .setup_keys_gpumktree(&self.config(), &self.chips(), program, stream, mem_pool);
+        let (pk_gm, vk_gm) = setup_keys_gm(
+            &self.prover,
+            &self.config(),
+            &self.chips(),
+            program,
+            stream,
+            mem_pool,
+            dev_id,
+        );
+        let (prep_gpumktree, pk, vk) = self.prover.setup_keys_gpumktree(
+            &self.config(),
+            &self.chips(),
+            program,
+            stream,
+            mem_pool,
+        );
 
         (prep_gpumktree, pk, vk, pk_gm, vk_gm)
     }
@@ -299,11 +310,19 @@ where
         &self,
         program: &C::Program,
         stream: &'static CudaStream,
-        mem_pool: & CudaMemPool,
+        mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> (BaseVerifyingKey<SC>, BaseProvingKeyCuda) {
         use crate::cuda_adaptor::setup_keys_gm::setup_keys_gm;
-        let (pk_gm, vk_gm) = setup_keys_gm(&self.prover, &self.config(), &self.chips(), program, stream, mem_pool, dev_id);
+        let (pk_gm, vk_gm) = setup_keys_gm(
+            &self.prover,
+            &self.config(),
+            &self.chips(),
+            program,
+            stream,
+            mem_pool,
+            dev_id,
+        );
         (vk_gm, pk_gm)
     }
 
@@ -320,7 +339,7 @@ where
         &self,
         record: &C::Record,
         stream: &'static CudaStream,
-        mem_pool: & CudaMemPool,
+        mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> Option<
         MainTraceCommitments<
@@ -329,8 +348,20 @@ where
             GPUMerkleTree<'static, KoalaBear>,
         >,
     > {
+        let start = Instant::now();
         let chips_and_main_traces = self.prover.generate_main(&self.chips(), record);
-        commit_main_gpumemory_fast::<SC, C>(&*self.config(), record, chips_and_main_traces, stream, mem_pool, dev_id)
+        println!(
+            "---- self.prover.generate_main duration: {:?}",
+            start.elapsed()
+        );
+        commit_main_gpumemory_fast::<SC, C>(
+            &*self.config(),
+            record,
+            chips_and_main_traces,
+            stream,
+            mem_pool,
+            dev_id,
+        )
     }
 
     /// prove a batch of records with a single pk
@@ -384,7 +415,7 @@ where
         records: &[C::Record],
         pk_cuda: &BaseProvingKeyCuda,
         stream: &'static CudaStream,
-        mem_pool: & CudaMemPool,
+        mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> Vec<BaseProof<SC>>
     where
@@ -423,10 +454,12 @@ where
             .iter()
             .enumerate()
             .map(|(_, record)| {
-
+                let start = Instant::now();
                 let main_commitment_gm_some = self.commit_gm(&record, stream, mem_pool, dev_id);
                 let main_commitment_gm = main_commitment_gm_some.unwrap();
+                println!("--- Commit Main duration: {:?}", start.elapsed());
 
+                let start = Instant::now();
                 let res = crate::cuda_adaptor::fri_open::prove_impl::<SC, C>(
                     &self.config(),
                     &self.chips(),
@@ -437,6 +470,10 @@ where
                     stream,
                     mem_pool,
                     dev_id,
+                );
+                println!(
+                    "--- ongpu crate::cuda_adaptor::fri_open::prove_impl duration: {:?}",
+                    start.elapsed()
                 );
                 res
             })
@@ -481,7 +518,7 @@ where
         >,
         pk_gm: &BaseProvingKeyCuda,
         stream: &'static CudaStream,
-        mem_pool: & CudaMemPool,
+        mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> BaseProof<SC>
     where

@@ -563,6 +563,7 @@ macro_rules! impl_indexed_combine_machine {
                 let mut all_proofs = vec![meta_a.proofs[0].clone(), meta_b.proofs[0].clone()];
                 let mut all_vks = vec![meta_a.vks[0].clone(), meta_b.vks[0].clone()];
                 // Step 2: prepare recursion witness & emulator
+                // TODO: update to use VK_VERIFICATION flag
                 let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
                 let (vk_root, recursion_shape_config) = if vk_verification_enabled() {
                     (
@@ -642,6 +643,7 @@ macro_rules! impl_indexed_combine_machine {
                     >,
                 >,
             {
+                let start = Instant::now();
                 // Step 1: validate inputs & pull out inner proofs
                 assert_eq!(
                     meta_a.proofs.len(),
@@ -693,8 +695,10 @@ macro_rules! impl_indexed_combine_machine {
                     &vk_manager,
                     recursion_shape_config.as_ref(),
                 );
+                println!("-- Combine prepare: {:?}", start.elapsed());
 
                 // TODO: opts
+                let start = Instant::now();
                 let recursion_witness = ProvingWitness::setup_for_combine(
                     vk_root,
                     recursion_stdin,
@@ -707,12 +711,20 @@ macro_rules! impl_indexed_combine_machine {
                     $emul_name::setup_combine(&recursion_witness, self.base_machine());
 
                 // Step 3: generate + complete record batch
-                let (mut batch_records, batch_vks, _done, batch_pks_cuda) =
+                let (mut batch_records, batch_vks, done, batch_pks_cuda) =
                     recursion_emulator.next_record_keys_batch_cuda(stream, mem_pool, dev_id);
 
+                println!(
+                    "-- Combine next_record_keys_batch_cuda: {:?}",
+                    start.elapsed()
+                );
+
+                let start = Instant::now();
                 self.complement_record(batch_records.as_mut_slice());
+                println!("-- Combine complement_record: {:?}", start.elapsed());
 
                 // Step 4: prove the batch in parallel
+                let start = Instant::now();
                 let batch_proofs = batch_records
                     .iter()
                     .zip(batch_pks_cuda.iter())
@@ -726,6 +738,10 @@ macro_rules! impl_indexed_combine_machine {
                         )
                     })
                     .collect::<Vec<_>>();
+                println!(
+                    "-- Combine self.base_machine.prove_ensemble_cuda: {:?}",
+                    start.elapsed()
+                );
 
                 // Step 5: assemble & return the new MetaProof
                 all_proofs = batch_proofs;

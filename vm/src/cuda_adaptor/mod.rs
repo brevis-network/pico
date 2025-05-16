@@ -4,9 +4,11 @@ pub mod fri_commit;
 pub mod fri_open;
 pub mod permutation_cuda;
 pub mod quotient;
+pub mod quotient_2;
 pub mod setup_keys_gm;
 
 pub mod gpuacc_struct;
+pub mod h_poly_struct;
 pub mod resource_pool;
 
 use crate::{
@@ -139,12 +141,15 @@ type Challenger = MyChallenger;
 use crate::cuda_adaptor::{
     fri_commit::CosetLdeOutput,
     gpuacc_struct::{
+        fri_open::{FriData, OpenProof},
         matrix::{DeviceMatrixConcrete, DeviceMatrixRef, DeviceMatrixStatic},
         pico_permutation::CudaDeviceSlice,
+        pico_quotient_2::{
+            CalculationCrepr, MatrixVarCrepr, ValueSourceCrepr, ValueSourceExtCrepr,
+        },
     },
 };
-use crate::cuda_adaptor::gpuacc_struct::fri_open::FriData;
-use crate::cuda_adaptor::gpuacc_struct::fri_open::OpenProof;
+
 fn check_layout() {
     assert!(align_of::<usize>() == 8);
     assert!(size_of::<usize>() == 8);
@@ -175,7 +180,6 @@ fn check_layout() {
     assert!(offset_of!(Challenger, output_buffer) == 24);
     assert!(offset_of!(Challenger, permutation) == 48);
     assert_vec_layout::<Val>();
-
 
     // Poseidon2Constants
     assert!(align_of::<Poseidon2Constants>() == 8);
@@ -221,7 +225,6 @@ fn check_layout() {
     assert!(offset_of!(CosetLdeOutput, layer_leaves_storage) == 24);
     assert!(offset_of!(CosetLdeOutput, matrixs_output) == 0);
 
-
     // FriData
     assert!(align_of::<FriData<Val, Challenge, Challenger>>() == 8);
     assert!(size_of::<FriData<Val, Challenge, Challenger>>() == 144);
@@ -244,20 +247,45 @@ fn check_layout() {
     assert!(offset_of!(FriData<Val, Challenge, Challenger>, one_half) == 132);
     assert!(offset_of!(FriData<Val, Challenge, Challenger>, compute_half_beta) == 112);
     assert!(offset_of!(FriData<Val, Challenge, Challenger>, num_queries) == 16);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, as_base_slice) ==120);
-
+    assert!(offset_of!(FriData<Val, Challenge, Challenger>, as_base_slice) == 120);
 
     // OpenProof
     assert!(align_of::<OpenProof<Val, Challenge>>() == 8);
     assert!(size_of::<OpenProof<Val, Challenge>>() == 168);
     assert!(offset_of!(OpenProof<Val, Challenge>, all_opened_values) == 0);
-    assert!(offset_of!(OpenProof<Val, Challenge>, commit_phase_commits) ==24);
+    assert!(offset_of!(OpenProof<Val, Challenge>, commit_phase_commits) == 24);
     assert!(offset_of!(OpenProof<Val, Challenge>, final_poly) == 144);
     assert!(offset_of!(OpenProof<Val, Challenge>, pow_witness) == 160);
     assert!(offset_of!(OpenProof<Val, Challenge>, input_proof_values) == 48);
     assert!(offset_of!(OpenProof<Val, Challenge>, input_proof_paths) == 72);
     assert!(offset_of!(OpenProof<Val, Challenge>, commit_phase_sibling) == 96);
-    assert!(offset_of!(OpenProof<Val, Challenge>, commit_phase_paths) ==120);
+    assert!(offset_of!(OpenProof<Val, Challenge>, commit_phase_paths) == 120);
+
+    // ValueSourceCrepr
+    assert!(align_of::<ValueSourceCrepr>() == 4);
+    assert!(size_of::<ValueSourceCrepr>() == 16);
+    assert!(offset_of!(ValueSourceCrepr, val_type) == 0);
+    assert!(offset_of!(ValueSourceCrepr, generic) == 4);
+    assert!(offset_of!(ValueSourceCrepr, poly_index) == 8);
+    assert!(offset_of!(ValueSourceCrepr, offset) == 12);
+
+    // ValueSourceExtCrepr
+    assert!(align_of::<ValueSourceExtCrepr>() == 4);
+    assert!(size_of::<ValueSourceExtCrepr>() == 64);
+    assert!(offset_of!(ValueSourceExtCrepr, bases) == 0);
+
+    // CalculationCrepr
+    assert!(align_of::<CalculationCrepr>() == 4);
+    assert!(size_of::<CalculationCrepr>() == 36);
+    assert!(offset_of!(CalculationCrepr, op) == 0);
+    assert!(offset_of!(CalculationCrepr, v0) == 4);
+    assert!(offset_of!(CalculationCrepr, v1) == 20);
+
+    // MatrixVarCrepr
+    assert!(align_of::<MatrixVarCrepr>() == 8);
+    assert!(size_of::<MatrixVarCrepr>() == 16);
+    assert!(offset_of!(MatrixVarCrepr, ptr) == 0);
+    assert!(offset_of!(MatrixVarCrepr, num_poly) == 8);
 }
 
 #[test]

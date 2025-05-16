@@ -209,6 +209,36 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
         ]
     }
 
+    pub fn all_chips_for_analyzer_2() -> Vec<MetaChip<F, Self>> {
+        [
+            Self::MemoryConst(MemoryConstChip::default()),
+            Self::MemoryVar(MemoryVarChip::default()),
+            Self::Select(SelectChip::default()),
+            Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default()),
+            Self::BaseAlu(BaseAluChip::default()),
+            Self::ExtAlu(ExtAluChip::default()),
+            Self::BatchFRI(BatchFRIChip::default()),
+            Self::PublicValues(PublicValuesChip::default()),
+            Self::Poseidon2(FieldSpecificPoseidon2Chip::default()),
+        ]
+        .map(MetaChip::new)
+        .into()
+    }
+
+    pub fn all_chips_for_analyzer() -> Vec<RecursionChipType<F>> {
+        vec![
+            Self::MemoryConst(MemoryConstChip::default()),
+            Self::MemoryVar(MemoryVarChip::default()),
+            Self::Select(SelectChip::default()),
+            Self::ExpReverseBitsLen(ExpReverseBitsLenChip::default()),
+            Self::BaseAlu(BaseAluChip::default()),
+            Self::ExtAlu(ExtAluChip::default()),
+            Self::BatchFRI(BatchFRIChip::default()),
+            Self::PublicValues(PublicValuesChip::default()),
+            Self::Poseidon2(FieldSpecificPoseidon2Chip::default()),
+        ]
+    }
+
     pub fn convert_chips() -> Vec<MetaChip<F, Self>> {
         vec![
             MetaChip::new(Self::MemoryConst(MemoryConstChip::default())),

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crate::{
     gateway::handler::proof_tree::IndexedProof,
     messages::combine::{CombineRequest, CombineResponse},
@@ -53,11 +55,7 @@ where
 /// specialization for running prover on either babybear or koalabear
 pub trait CombineHandler<SC: StarkGenericConfig> {
     fn process(&self, req: CombineRequest<SC>) -> CombineResponse<SC>;
-    fn process_cuda(
-        &self,
-        req: CombineRequest<SC>,
-        dev_id: usize,
-    ) -> CombineResponse<SC>;
+    fn process_cuda(&self, req: CombineRequest<SC>, dev_id: usize) -> CombineResponse<SC>;
     fn verify(&self, proof: &MetaProof<SC>, riscv_vk: &dyn HashableKey<SC::Val>) -> Result<()>;
 }
 
@@ -198,11 +196,10 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
         req: CombineRequest<KoalaBearPoseidon2>,
         dev_id: usize,
     ) -> CombineResponse<KoalaBearPoseidon2> {
-
         use pico_vm::cuda_adaptor::resource_pool::mem_pool::get_global_mem_pool;
         let sync_pool = get_global_mem_pool(dev_id);
-        let mem_pool = &sync_pool.0;    
-    
+        let mem_pool = &sync_pool.0;
+
         use pico_vm::cuda_adaptor::resource_pool::stream_pool::get_global_stream_pool;
         let sync_stream = get_global_stream_pool(dev_id);
         let stream = &sync_stream.0;
@@ -236,9 +233,12 @@ impl CombineHandler<KoalaBearPoseidon2> for CombineProver<KoalaBearPoseidon2> {
         let meta_a = proofs[0].get_inner().clone();
         let meta_b = proofs[1].get_inner().clone();
 
-        let proof = self.machine.prove_two_cuda(meta_a, meta_b, flag_complete, stream, mem_pool, dev_id);
+        let start = Instant::now();
+        let proof =
+            self.machine
+                .prove_two_cuda(meta_a, meta_b, flag_complete, stream, mem_pool, dev_id);
         let proof = IndexedProof::new(proof, start_a, end_b);
-
+        println!("- self.machine.prove_two_cuda: {:?}", start.elapsed());
         CombineResponse { chunk_index, proof }
     }
 

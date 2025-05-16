@@ -1,8 +1,5 @@
-use std::ffi::c_void;
-use std::fmt::Debug;
-use crate::cuda_adaptor::LeavesHashType;
-use crate::cuda_adaptor::Poseidon2Constants;
-use crate::cuda_adaptor::DIGEST_ELEMS;
+use crate::cuda_adaptor::{LeavesHashType, Poseidon2Constants, DIGEST_ELEMS};
+use std::{ffi::c_void, fmt::Debug};
 
 #[derive(Clone)]
 pub struct FriData<

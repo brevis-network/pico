@@ -8,6 +8,7 @@ use crate::{
         field_config::{BabyBearSimple, KoalaBearSimple},
         stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
+    cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda,
     emulator::{
         recursion::emulator::{RecursionRecord, Runtime},
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
@@ -29,13 +30,11 @@ use crate::{
     },
 };
 use alloc::sync::Arc;
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, time::Instant};
 use tracing::debug_span;
-use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
-use cudart::stream::CudaStream;
-use cudart::memory_pools::CudaMemPool;
 
 // Meta emulator that encapsulates multiple emulators
 // SC and C for configs in the emulated machine
@@ -206,13 +205,33 @@ macro_rules! impl_emulator {
                 bool,
                 BaseProvingKeyCuda,
             ) {
+                let start = Instant::now();
                 let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-                let (vk_gm, pk_gm) = self.machine.unwrap().setup_keys_cuda(program, stream, mem_pool, dev_id);
+                println!(
+                    "--- next_record_keys_cuda get_program_and_input: {:?}",
+                    start.elapsed()
+                );
+
+                let start = Instant::now();
+                let (vk_gm, pk_gm) = self
+                    .machine
+                    .unwrap()
+                    .setup_keys_cuda(program, stream, mem_pool, dev_id);
+                println!(
+                    "--- next_record_keys_cuda setup_keys_cuda: {:?}",
+                    start.elapsed()
+                );
+
+                let start = Instant::now();
                 let mut emulator = RecursionEmulator::<$recur_sc> {
                     recursion_program: program.clone().into(),
                     config: self.machine.unwrap().config(),
                 };
                 let record = debug_span!("emulator run").in_scope(|| emulator.run_riscv(input));
+                println!(
+                    "--- next_record_keys_cuda get record: {:?}",
+                    start.elapsed()
+                );
                 self.pointer += 1;
                 (record, vk_gm, done, pk_gm)
             }
@@ -261,8 +280,8 @@ macro_rules! impl_emulator {
                 let mut batch_vks = vec![];
                 let mut batch_pks_cuda = vec![];
                 loop {
-                    let (record, vk, done, pk_cuda) =
-                        debug_span!("emulate record").in_scope(|| self.next_record_keys_cuda(stream, mem_pool, dev_id));
+                    let (record, vk, done, pk_cuda) = debug_span!("emulate record")
+                        .in_scope(|| self.next_record_keys_cuda(stream, mem_pool, dev_id));
                     batch_records.push(record);
                     batch_vks.push(vk);
                     batch_pks_cuda.push(pk_cuda);
@@ -351,7 +370,10 @@ macro_rules! impl_emulator {
                 BaseProvingKeyCuda,
             ) {
                 let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-                let (vk_gm, pk_gm) = self.machine.unwrap().setup_keys_cuda(program, stream, mem_pool, dev_id);
+                let (vk_gm, pk_gm) = self
+                    .machine
+                    .unwrap()
+                    .setup_keys_cuda(program, stream, mem_pool, dev_id);
                 let mut emulator = RecursionEmulator::<$recur_sc> {
                     recursion_program: program.clone().into(),
                     config: self.machine.unwrap().config(),
@@ -405,8 +427,8 @@ macro_rules! impl_emulator {
                 let mut batch_vks = vec![];
                 let mut batch_pks_cuda = vec![];
                 loop {
-                    let (record, vk, done, pk_cuda) =
-                        debug_span!("emulate record").in_scope(|| self.next_record_keys_cuda(stream, mem_pool, dev_id));
+                    let (record, vk, done, pk_cuda) = debug_span!("emulate record")
+                        .in_scope(|| self.next_record_keys_cuda(stream, mem_pool, dev_id));
                     batch_records.push(record);
                     batch_vks.push(vk);
                     batch_pks_cuda.push(pk_cuda);

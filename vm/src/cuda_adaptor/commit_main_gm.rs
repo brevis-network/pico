@@ -14,6 +14,7 @@ use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use hashbrown::HashMap;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
+use std::time::Instant;
 
 pub fn commit_main_gpumemory_fast<SC, C>(
     config: &SC,
@@ -37,8 +38,8 @@ where
     if chips_and_main.is_empty() {
         return None;
     }
+    let start = Instant::now();
     let pcs = config.pcs();
-
 
     let two_adic_pcs: &TwoAdicFriPcsGm = unsafe { transmute(&pcs) };
     let log_blow_up = two_adic_pcs.fri.log_blowup;
@@ -52,18 +53,23 @@ where
         .collect::<HashMap<_, _>>()
         .into();
 
-    //
+    // FAST
     let traces = chips_and_main
         .iter()
         .map(|(_name, trace)| trace)
         .collect::<Vec<_>>();
 
+    let start = Instant::now();
     let mut buffer = get_buffer(dev_id).lock().unwrap();
     let traces_kb: Vec<&DenseMatrix<KoalaBear>> = unsafe { transmute(traces) };
     let mut preprocessed_trace =
         host2device_fast(traces_kb.into_iter(), stream, mem_pool, &mut buffer);
+    println!(
+        "---- ongpu Commmit main device_evaluation DevicePoolAllocation duration: {:?}",
+        start.elapsed()
+    );
 
-
+    let start = Instant::now();
     let main_merkle = fri_commit(
         preprocessed_trace
             .iter_mut()
@@ -73,6 +79,10 @@ where
         stream,
         &poseidon2_constants,
         mem_pool,
+    );
+    println!(
+        "---- ongpu Commmit main fri_commit duration: {:?}",
+        start.elapsed()
     );
     let commit: InnerDigestHash = main_merkle.merkle_root.into();
 

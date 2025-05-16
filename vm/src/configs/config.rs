@@ -53,7 +53,8 @@ pub trait StarkGenericConfig: Clone + Serialize + Sync {
     /// The PCS used to commit to trace polynomials.
     // TODO: figure out how to fix the ProverData: Sync bound within the context of prove
     type Pcs: Pcs<Self::Challenge, Self::Challenger, Domain = Self::Domain, ProverData: Sync>
-        + ZeroCommitment<Self> + 'static;
+        + ZeroCommitment<Self>
+        + 'static;
 
     fn new() -> Self;
 

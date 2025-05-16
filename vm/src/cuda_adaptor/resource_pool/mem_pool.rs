@@ -1,11 +1,9 @@
 // Govern GPU's Memory
+use cudart::{
+    device::{get_device_count, set_device},
+    memory_pools::{CudaMemPoolAttributeU64, CudaOwnedMemPool},
+};
 use std::sync::{Mutex, OnceLock};
-use cudart::memory_pools::CudaOwnedMemPool;
-use cudart::device::get_device_count;
-use cudart::device::set_device;
-use cudart::memory_pools::CudaMemPoolAttributeU64;
-
-
 
 //
 extern "C" {
@@ -58,31 +56,31 @@ pub fn get_global_mem_pool(device_id: usize) -> &'static SyncMemPool {
 }
 
 //
-use cudart::memory::HostAllocation;
-use cudart::memory::CudaHostAllocFlags;
+use cudart::memory::{CudaHostAllocFlags, HostAllocation};
 use p3_koala_bear::KoalaBear;
 const PING_PONG_BUFFER_SIZE: usize = 1 << 20;
 
-static BUFFERS_FAST_H2D: OnceLock<Vec<OnceLock<Mutex<HostAllocation<KoalaBear>>>>> = OnceLock::new();
+static BUFFERS_FAST_H2D: OnceLock<Vec<OnceLock<Mutex<HostAllocation<KoalaBear>>>>> =
+    OnceLock::new();
 pub fn get_buffer(device_id: usize) -> &'static Mutex<HostAllocation<KoalaBear>> {
     let buffers = BUFFERS_FAST_H2D.get_or_init(|| {
         let device_count = get_device_count().unwrap() as usize;
-        (0..device_count)
-            .map(|_| OnceLock::new())
-            .collect()
+        (0..device_count).map(|_| OnceLock::new()).collect()
     });
-    
+
     if device_id >= buffers.len() {
-        panic!("Device ID {} exceeds available devices ({})", device_id, buffers.len());
+        panic!(
+            "Device ID {} exceeds available devices ({})",
+            device_id,
+            buffers.len()
+        );
     }
     buffers[device_id].get_or_init(|| {
         set_device(device_id as i32).unwrap();
-        
-        let alloc = HostAllocation::alloc(
-            2 * PING_PONG_BUFFER_SIZE,
-            CudaHostAllocFlags::DEFAULT
-        ).unwrap();
-        
+
+        let alloc =
+            HostAllocation::alloc(2 * PING_PONG_BUFFER_SIZE, CudaHostAllocFlags::DEFAULT).unwrap();
+
         Mutex::new(alloc)
     })
 }
