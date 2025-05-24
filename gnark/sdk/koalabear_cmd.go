@@ -3,6 +3,8 @@ package sdk
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+
 	"github.com/brevis-network/pico/gnark/koalabear_verifier"
 	"github.com/brevis-network/pico/gnark/utils"
 	"github.com/consensys/gnark-crypto/ecc"
@@ -13,7 +15,6 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/test"
 	"golang.org/x/crypto/sha3"
-	"os"
 )
 
 func KoalaBearCmd(cmd string) (err error) {
@@ -61,7 +62,7 @@ func KoalaBearCmd(cmd string) (err error) {
 	return
 }
 
-func DoKoalaBearSolve() (circuit *koalabear_verifier.Circuit, assigment *koalabear_verifier.Circuit, err error) {
+func DoKoalaBearSolve() (circuit *koalabear_verifier.Circuit, assignment *koalabear_verifier.Circuit, err error) {
 	witnessFile := os.Getenv("WITNESS_JSON")
 
 	data, err := os.ReadFile(witnessFile)
@@ -74,24 +75,24 @@ func DoKoalaBearSolve() (circuit *koalabear_verifier.Circuit, assigment *koalabe
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse witness json: %v\n", err)
 	}
-	assigment = koalabear_verifier.NewCircuit(inputs)
+	assignment = koalabear_verifier.NewCircuit(inputs)
 	circuit = koalabear_verifier.NewCircuit(inputs)
 
-	err = test.IsSolved(circuit, assigment, ecc.BN254.ScalarField())
+	err = test.IsSolved(circuit, assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to solve: %v\n", err)
 	}
 	fmt.Println("solved with success")
 
-	return circuit, assigment, nil
+	return circuit, assignment, nil
 }
 
 func KoalaBearSetup() error {
-	circuit, assigment, err := DoKoalaBearSolve()
+	circuit, assignment, err := DoKoalaBearSolve()
 	if err != nil {
 		return fmt.Errorf("fail to solve: %v\n", err)
 	}
-	fullWitness, err := frontend.NewWitness(assigment, ecc.BN254.ScalarField())
+	fullWitness, err := frontend.NewWitness(assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return fmt.Errorf("fail to gen full witness: %v", err)
 	}
@@ -167,15 +168,15 @@ func KoalaBearProve() error {
 	if err != nil {
 		return fmt.Errorf("failed to parse witness json: %v", err)
 	}
-	assigment := koalabear_verifier.NewCircuit(inputs)
+	assignment := koalabear_verifier.NewCircuit(inputs)
 	circuit := koalabear_verifier.NewCircuit(inputs)
 
-	err = test.IsSolved(circuit, assigment, ecc.BN254.ScalarField())
+	err = test.IsSolved(circuit, assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return fmt.Errorf("failed to solve: %v", err)
 	}
 
-	fullWitness, err := frontend.NewWitness(assigment, ecc.BN254.ScalarField())
+	fullWitness, err := frontend.NewWitness(assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return fmt.Errorf("failed to get full witness: %v", err)
 	}
