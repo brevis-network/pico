@@ -3,6 +3,8 @@ package sdk
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+
 	"github.com/brevis-network/pico/gnark/babybear_verifier"
 	"github.com/brevis-network/pico/gnark/utils"
 	"github.com/consensys/gnark-crypto/ecc"
@@ -13,7 +15,6 @@ import (
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/test"
 	"golang.org/x/crypto/sha3"
-	"os"
 )
 
 func BabyBearCmd(cmd string) (err error) {
@@ -61,7 +62,7 @@ func BabyBearCmd(cmd string) (err error) {
 	return
 }
 
-func DoBabyBearSolve() (circuit *babybear_verifier.Circuit, assigment *babybear_verifier.Circuit, err error) {
+func DoBabyBearSolve() (circuit *babybear_verifier.Circuit, assignment *babybear_verifier.Circuit, err error) {
 	witnessFile := os.Getenv("WITNESS_JSON")
 
 	data, err := os.ReadFile(witnessFile)
@@ -74,24 +75,24 @@ func DoBabyBearSolve() (circuit *babybear_verifier.Circuit, assigment *babybear_
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse witness json: %v\n", err)
 	}
-	assigment = babybear_verifier.NewCircuit(inputs)
+	assignment = babybear_verifier.NewCircuit(inputs)
 	circuit = babybear_verifier.NewCircuit(inputs)
 
-	err = test.IsSolved(circuit, assigment, ecc.BN254.ScalarField())
+	err = test.IsSolved(circuit, assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to solve: %v\n", err)
 	}
 	fmt.Println("solved with success")
 
-	return circuit, assigment, nil
+	return circuit, assignment, nil
 }
 
 func BabyBearSetup() error {
-	circuit, assigment, err := DoBabyBearSolve()
+	circuit, assignment, err := DoBabyBearSolve()
 	if err != nil {
 		return fmt.Errorf("fail to solve: %v\n", err)
 	}
-	fullWitness, err := frontend.NewWitness(assigment, ecc.BN254.ScalarField())
+	fullWitness, err := frontend.NewWitness(assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return fmt.Errorf("fail to gen full witness: %v", err)
 	}
@@ -166,15 +167,15 @@ func BabyBearProve() error {
 	if err != nil {
 		return fmt.Errorf("failed to parse witness json: %v", err)
 	}
-	assigment := babybear_verifier.NewCircuit(inputs)
+	assignment := babybear_verifier.NewCircuit(inputs)
 	circuit := babybear_verifier.NewCircuit(inputs)
 
-	err = test.IsSolved(circuit, assigment, ecc.BN254.ScalarField())
+	err = test.IsSolved(circuit, assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return fmt.Errorf("failed to solve: %v", err)
 	}
 
-	fullWitness, err := frontend.NewWitness(assigment, ecc.BN254.ScalarField())
+	fullWitness, err := frontend.NewWitness(assignment, ecc.BN254.ScalarField())
 	if err != nil {
 		return fmt.Errorf("failed to get full witness: %v", err)
 	}
