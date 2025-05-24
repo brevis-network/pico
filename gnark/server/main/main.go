@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+
 	"github.com/brevis-network/pico/gnark/babybear_verifier"
 	"github.com/brevis-network/pico/gnark/koalabear_verifier"
 	"github.com/brevis-network/pico/gnark/utils"
@@ -16,9 +17,10 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/labstack/echo"
 
-	"golang.org/x/crypto/sha3"
 	"net/http"
 	"sync"
+
+	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -110,9 +112,9 @@ func Prove(c echo.Context) error {
 
 func GetWitnessFromHex(inputs utils.WitnessInput) (fullWitness witness.Witness, pubWitness witness.Witness, err error) {
 	if *field == "kb" {
-		assigment := koalabear_verifier.NewCircuit(inputs)
+		assignment := koalabear_verifier.NewCircuit(inputs)
 
-		fullWitness, err = frontend.NewWitness(assigment, ecc.BN254.ScalarField())
+		fullWitness, err = frontend.NewWitness(assignment, ecc.BN254.ScalarField())
 		if err != nil {
 			return
 		}
@@ -121,9 +123,9 @@ func GetWitnessFromHex(inputs utils.WitnessInput) (fullWitness witness.Witness, 
 			return
 		}
 	} else if *field == "bb" {
-		assigment := babybear_verifier.NewCircuit(inputs)
+		assignment := babybear_verifier.NewCircuit(inputs)
 
-		fullWitness, err = frontend.NewWitness(assigment, ecc.BN254.ScalarField())
+		fullWitness, err = frontend.NewWitness(assignment, ecc.BN254.ScalarField())
 		if err != nil {
 			return
 		}
