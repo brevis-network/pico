@@ -3,6 +3,10 @@ package koalabear_verifier
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
+	"testing"
+
 	"github.com/brevis-network/pico/gnark/utils"
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend"
@@ -13,9 +17,6 @@ import (
 	"github.com/consensys/gnark/test"
 	"github.com/rs/zerolog"
 	"golang.org/x/crypto/sha3"
-	"log"
-	"os"
-	"testing"
 )
 
 func TestSolveVerifierCircuit(t *testing.T) {
@@ -38,12 +39,12 @@ func TestSetupVerifierCircuit(t *testing.T) {
 	os.Setenv("CONSTRAINTS_JSON", "./constraints.json")
 	os.Setenv("GROTH16", "1")
 
-	circuit, assigment := doSolve(assert)
+	circuit, assignment := doSolve(assert)
 
-	doSetUp(assert, circuit, assigment)
+	doSetUp(assert, circuit, assignment)
 }
 
-func doSolve(assert *test.Assert) (circuit *Circuit, assigment *Circuit) {
+func doSolve(assert *test.Assert) (circuit *Circuit, assignment *Circuit) {
 	data, err := os.ReadFile("./groth16_witness.json")
 	assert.NoError(err)
 
@@ -51,18 +52,18 @@ func doSolve(assert *test.Assert) (circuit *Circuit, assigment *Circuit) {
 	var inputs utils.WitnessInput
 	err = json.Unmarshal(data, &inputs)
 	assert.NoError(err)
-	assigment = NewCircuit(inputs)
+	assignment = NewCircuit(inputs)
 	circuit = NewCircuit(inputs)
 
-	err = test.IsSolved(circuit, assigment, ecc.BN254.ScalarField())
+	err = test.IsSolved(circuit, assignment, ecc.BN254.ScalarField())
 	assert.NoError(err)
 	fmt.Println("solve done")
 
-	return circuit, assigment
+	return circuit, assignment
 }
 
-func doSetUp(assert *test.Assert, circuit *Circuit, assigment *Circuit) {
-	fullWitness, err := frontend.NewWitness(assigment, ecc.BN254.ScalarField())
+func doSetUp(assert *test.Assert, circuit *Circuit, assignment *Circuit) {
+	fullWitness, err := frontend.NewWitness(assignment, ecc.BN254.ScalarField())
 	assert.NoError(err)
 	pubWitness, err := fullWitness.Public()
 	assert.NoError(err)
