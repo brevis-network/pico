@@ -359,7 +359,7 @@ where
 
     log_section("RISCV PHASE");
     info!("Running RISCV");
-    let (cycles, riscv_duration) = time_operation(|| riscv.run_tracegen(stdin));
+    let ((cycles, _pv_stream), riscv_duration) = time_operation(|| riscv.emulate(stdin));
 
     log_section("PERFORMANCE SUMMARY");
     info!("Time Metrics (wall time)");

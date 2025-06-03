@@ -73,7 +73,7 @@ where
         }
     }
 
-    pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
+    pub fn emulate(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (u64, Vec<u8>) {
         let witness = ProvingWitness::<SC, RiscvChips<SC>, _>::setup_for_riscv(
             self.program.clone(),
             stdin,
@@ -88,7 +88,7 @@ where
                 break;
             }
         }
-        emulator.cycles()
+        (emulator.cycles(), emulator.get_pv_stream())
     }
 
     pub fn get_program(&self) -> Arc<Program> {

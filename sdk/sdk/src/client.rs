@@ -133,6 +133,30 @@ macro_rules! create_sdk_prove_client {
                 Ok((riscv_proof, proof))
             }
 
+            /// verify the riscv and embed proof
+            pub fn verify(
+                &self,
+                proof: &(MetaProof<$sc>, MetaProof<$bn254_sc>),
+            ) -> Result<(), Error> {
+                let riscv_vk = self.riscv_vk();
+                if !self.riscv.verify(&proof.0, riscv_vk) {
+                    return Err(Error::msg("verify riscv proof failed"));
+                }
+                if !self.embed.verify(&proof.1, riscv_vk) {
+                    return Err(Error::msg("verify embed proof failed"));
+                }
+                Ok(())
+            }
+
+            /// emulate the program and return the cycles
+            pub fn emulate(
+                &self,
+                stdin: EmulatorStdinBuilder<Vec<u8>>,
+            ) -> (u64, Vec<u8>) {
+                let stdin = stdin.finalize();
+                self.riscv.emulate(stdin)
+            }
+
             pub fn write_onchain_data(
                 &self,
                 outdir: impl AsRef<Path>,
