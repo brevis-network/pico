@@ -152,7 +152,7 @@ macro_rules! create_sdk_prove_client {
             pub fn emulate(
                 &self,
                 stdin: EmulatorStdinBuilder<Vec<u8>>,
-            ) -> u64 {
+            ) -> (u64, Vec<u8>) {
                 let stdin = stdin.finalize();
                 self.riscv.emulate(stdin)
             }
