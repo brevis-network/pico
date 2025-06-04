@@ -61,6 +61,30 @@ impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
 }
 
 impl<F: Field> ByteChip<F> {
+    pub fn generate_main_new(
+        &self,
+        input: &EmulationRecord,
+        _: &mut EmulationRecord,
+    ) -> RowMajorMatrix<F> {
+        let mut values = vec![F::ZERO; NUM_BYTE_MULT_COLS * NUM_ROWS];
+
+        // Convert HashMap entries to Vec for parallel iteration
+        let lookups: Vec<_> = input.byte_lookups.iter().collect();
+
+        for (lookup, mult) in lookups.iter() {
+            let row_idx_event = (((lookup.b as u16) << 8) + lookup.c as u16) as usize;
+            if row_idx_event < NUM_ROWS {
+                let row = &mut values[row_idx_event * NUM_BYTE_MULT_COLS
+                    ..row_idx_event * NUM_BYTE_MULT_COLS + NUM_BYTE_MULT_COLS];
+                let cols: &mut ByteMultCols<F> = row.borrow_mut();
+                let index = lookup.opcode as usize;
+                cols.multiplicities[index] += F::from_canonical_usize(**mult);
+            }
+        }
+
+        RowMajorMatrix::new(values, NUM_BYTE_MULT_COLS)
+    }
+
     /// Creates the preprocessed byte trace.
     ///
     /// This function returns a `trace` which is a matrix containing all possible byte operations.
