@@ -89,22 +89,31 @@ pub(crate) mod tests {
 
     #[test]
     fn test_byte_chip_trace_benchmark() {
+        println!("creating machine");
+        let machine = RiscvMachine::new(
+            KoalaBearPoseidon2::default(),
+            RiscvChipType::all_chips(),
+            RISCV_NUM_PVS,
+        );
         println!("creating byte chip");
         let chip: ByteChip<F> = ByteChip::default();
         println!("generating chunks");
-        let chunks = generate_record(TestElf::Reth, TestInput::Reth188);
+        let mut chunks = generate_record(TestElf::Reth, TestInput::Reth188);
+        machine.complement_record(&mut chunks);
 
         let mut old_durations = vec![];
         let mut new_durations = vec![];
         for (i, chunk) in chunks.iter().enumerate() {
+            println!("chunk-{i} has {} byte lookups", chunk.byte_lookups.len());
+
             println!("old generate_main for chunk-{i}");
             let start = std::time::Instant::now();
-            let old_trace = chip.generate_main(&chunk, &mut EmulationRecord::default());
+            let old_trace = chip.generate_main(chunk, &mut EmulationRecord::default());
             old_durations.push(start.elapsed());
 
             println!("new generate_main for chunk-{i}");
             let start = std::time::Instant::now();
-            let new_trace = chip.generate_main_new(&chunk, &mut EmulationRecord::default());
+            let new_trace = chip.generate_main_new(chunk, &mut EmulationRecord::default());
             new_durations.push(start.elapsed());
 
             assert_eq!(old_trace.values.len(), new_trace.values.len());
@@ -116,7 +125,7 @@ pub(crate) mod tests {
 
         println!(
             "[byte-chip] old_total = {:?}, new_total = {:?}",
-            old_total, new_total
+            old_total, new_total,
         );
     }
 
