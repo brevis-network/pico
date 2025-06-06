@@ -202,10 +202,10 @@ macro_rules! create_sdk_prove_client {
                 field_type: &str,
             ) -> Result<(), Error> {
                 let output = output.as_ref();
-                let vk_verification = vk_verification_enabled();
-                if !vk_verification {
-                    return Err(Error::msg("VK_VERIFICATION must be set to true in evm proof"));
-                }
+                // let vk_verification = vk_verification_enabled();
+                // if !vk_verification {
+                //     return Err(Error::msg("VK_VERIFICATION must be set to true in evm proof"));
+                // }
                 let (riscv_proof, embed_proof) = self.prove(stdin)?;
                 self.write_onchain_data(output, &riscv_proof, &embed_proof)?;
                 let field_name = match field_type {
