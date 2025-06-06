@@ -22,14 +22,22 @@ use crate::{
 };
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
+use once_cell::sync::Lazy;
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::IndexedParallelIterator;
 use p3_symmetric::Permutation;
-use std::{any::type_name, borrow::Borrow, cmp::min, fmt::Write as _, mem, thread, time::Instant};
+use std::{
+    any::type_name, borrow::Borrow, cmp::min, env, fmt::Write as _, mem, thread, time::Instant,
+};
 use tracing::{debug, debug_span, info, instrument};
 /// Maximum number of pending emulation record for proving
-const MAX_PENDING_PROVING_RECORDS: usize = 32;
+pub static MAX_PENDING_PROVING_RECORDS: Lazy<usize> = Lazy::new(|| {
+    env::var("CHUNK_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(32)
+});
 
 pub struct RiscvMachine<SC, C>
 where
@@ -288,8 +296,9 @@ where
             None,
         );
 
-        let mut all_proofs = Vec::with_capacity(MAX_PENDING_PROVING_RECORDS);
-        let max_pending_num = min(num_cpus::get(), MAX_PENDING_PROVING_RECORDS);
+        let max_pending_proving_records = *MAX_PENDING_PROVING_RECORDS;
+        let mut all_proofs = Vec::with_capacity(max_pending_proving_records);
+        let max_pending_num = min(num_cpus::get(), max_pending_proving_records);
         let mut pending_records = Vec::with_capacity(max_pending_num);
 
         while let Ok(record) = record_receiver.recv() {
