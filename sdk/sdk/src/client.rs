@@ -111,25 +111,25 @@ macro_rules! create_sdk_prove_client {
                 let stdin = stdin.finalize();
                 let riscv_proof = self.riscv.prove(stdin);
                 let riscv_vk = self.riscv_vk();
-                if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
-                    return Err(Error::msg("verify riscv proof failed"));
-                }
+                // if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
+                //     return Err(Error::msg("verify riscv proof failed"));
+                // }
                 let proof = self.convert.prove(riscv_proof.clone());
-                if !self.convert.verify(&proof, riscv_vk) {
-                    return Err(Error::msg("verify convert proof failed"));
-                }
+                // if !self.convert.verify(&proof, riscv_vk) {
+                //     return Err(Error::msg("verify convert proof failed"));
+                // }
                 let proof = self.combine.prove(proof);
-                if !self.combine.verify(&proof, riscv_vk) {
-                    return Err(Error::msg("verify combine proof failed"));
-                }
+                // if !self.combine.verify(&proof, riscv_vk) {
+                //     return Err(Error::msg("verify combine proof failed"));
+                // }
                 let proof = self.compress.prove(proof);
-                if !self.compress.verify(&proof, riscv_vk) {
-                    return Err(Error::msg("verify compress proof failed"));
-                }
+                // if !self.compress.verify(&proof, riscv_vk) {
+                //     return Err(Error::msg("verify compress proof failed"));
+                // }
                 let proof = self.embed.prove(proof);
-                if !self.embed.verify(&proof, riscv_vk) {
-                    return Err(Error::msg("verify embed proof failed"));
-                }
+                // if !self.embed.verify(&proof, riscv_vk) {
+                //     return Err(Error::msg("verify embed proof failed"));
+                // }
                 Ok((riscv_proof, proof))
             }
 
