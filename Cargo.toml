@@ -104,6 +104,7 @@ cfg-if = "1.0.0"
 clap = { version = "4.5.13", features = ["derive", "env"] }
 cpu-time = "1.0.0"
 crossbeam = "0.8.4"
+core_affinity = "0.8"
 csv = "1.3"
 curve25519-dalek = { version = "4.1.2" }
 dashmap = "6.1.0"
@@ -125,7 +126,6 @@ itertools = "0.13"
 k256 = { version = "0.13.3", features = ["expose-field"] }
 lazy_static = "1.5.0"
 log = "0.4.21"
-nohash-hasher = "0.2.0"
 num = { version = "0.4.3" }
 num-bigint = "0.4.6"
 num-traits = "0.2"
@@ -163,5 +163,5 @@ tracing = "0.1.40"
 tracing-forest = { version = "0.1.6", features = ["ansi", "smallvec"] }
 tracing-subscriber = { version = "0.3.18", features = ["std", "env-filter"] }
 typenum = "1.17.0"
-vec_map = "0.8.2"
+vec_map = { version = "0.8.2", features = ["serde"] }
 zkhash = "0.2.0"

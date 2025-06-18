@@ -136,7 +136,7 @@ macro_rules! run {
                                                                 riscv_pk.clone(),
                                                                 riscv_vk.clone()
                                                             );
-            let mut emulator = MetaEmulator::setup_riscv(&riscv_witness);
+            let mut emulator = MetaEmulator::setup_riscv(&riscv_witness, None);
             let pv_stream = emulator.get_pv_stream_with_dryrun();
             debug!("Public values stream: {:?}", pv_stream);
 

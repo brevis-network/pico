@@ -1,0 +1,355 @@
+use super::{align, EmulationError, RiscvEmulator};
+use crate::{
+    chips::chips::riscv_memory::event::MemoryAccessPosition,
+    compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
+    emulator::riscv::syscalls::{syscall_context::SyscallContext, SyscallCode},
+};
+use tracing::debug;
+
+impl RiscvEmulator {
+    /// Emulate the given instruction over the current state.
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn emulate_instruction_simple(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(), EmulationError> {
+        let mut next_pc = self.state.pc.wrapping_add(4);
+
+        let rd: Register;
+        let (a, b, c): (u32, u32, u32);
+        let (addr, memory_read_value): (u32, u32);
+
+        match instruction.opcode {
+            // Arithmetic instructions.
+            Opcode::ADD => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = b.wrapping_add(c);
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::SUB => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = b.wrapping_sub(c);
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::XOR => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = b ^ c;
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::OR => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = b | c;
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::AND => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = b & c;
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::SLL => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = b.wrapping_shl(c);
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::SRL => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = b.wrapping_shr(c);
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::SRA => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = (b as i32).wrapping_shr(c) as u32;
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::SLT => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = if (b as i32) < (c as i32) { 1 } else { 0 };
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::SLTU => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = if b < c { 1 } else { 0 };
+                self.alu_rw_simple(rd, a);
+            }
+
+            // Load instructions.
+            Opcode::LB => {
+                (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
+                let value = (memory_read_value).to_le_bytes()[(addr % 4) as usize];
+                a = ((value as i8) as i32) as u32;
+                self.rw_simple(rd, a);
+            }
+            Opcode::LH => {
+                (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
+                if addr % 2 != 0 {
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LH, addr));
+                }
+                let value = match (addr >> 1) % 2 {
+                    0 => memory_read_value & 0x0000_FFFF,
+                    1 => (memory_read_value & 0xFFFF_0000) >> 16,
+                    _ => unreachable!(),
+                };
+                a = ((value as i16) as i32) as u32;
+                self.rw_simple(rd, a);
+            }
+            Opcode::LW => {
+                (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
+                if addr % 4 != 0 {
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LW, addr));
+                }
+                a = memory_read_value;
+                self.rw_simple(rd, a);
+            }
+            Opcode::LBU => {
+                (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
+                let value = (memory_read_value).to_le_bytes()[(addr % 4) as usize];
+                a = value as u32;
+                self.rw_simple(rd, a);
+            }
+            Opcode::LHU => {
+                (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
+                if addr % 2 != 0 {
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LHU, addr));
+                }
+                let value = match (addr >> 1) % 2 {
+                    0 => memory_read_value & 0x0000_FFFF,
+                    1 => (memory_read_value & 0xFFFF_0000) >> 16,
+                    _ => unreachable!(),
+                };
+                a = (value as u16) as u32;
+                self.rw_simple(rd, a);
+            }
+
+            // Store instructions.
+            Opcode::SB => {
+                (a, _, _, addr, memory_read_value) = self.store_rr_simple(instruction);
+                let value = match addr % 4 {
+                    0 => (a & 0x0000_00FF) + (memory_read_value & 0xFFFF_FF00),
+                    1 => ((a & 0x0000_00FF) << 8) + (memory_read_value & 0xFFFF_00FF),
+                    2 => ((a & 0x0000_00FF) << 16) + (memory_read_value & 0xFF00_FFFF),
+                    3 => ((a & 0x0000_00FF) << 24) + (memory_read_value & 0x00FF_FFFF),
+                    _ => unreachable!(),
+                };
+                self.mw_cpu_simple(align(addr), value, MemoryAccessPosition::Memory);
+            }
+            Opcode::SH => {
+                (a, _, _, addr, memory_read_value) = self.store_rr_simple(instruction);
+                if addr % 2 != 0 {
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::SH, addr));
+                }
+                let value = match (addr >> 1) % 2 {
+                    0 => (a & 0x0000_FFFF) + (memory_read_value & 0xFFFF_0000),
+                    1 => ((a & 0x0000_FFFF) << 16) + (memory_read_value & 0x0000_FFFF),
+                    _ => unreachable!(),
+                };
+                self.mw_cpu_simple(align(addr), value, MemoryAccessPosition::Memory);
+            }
+            Opcode::SW => {
+                (a, _, _, addr, _) = self.store_rr_simple(instruction);
+                if addr % 4 != 0 {
+                    return Err(EmulationError::InvalidMemoryAccess(Opcode::SW, addr));
+                }
+                let value = a;
+                self.mw_cpu_simple(align(addr), value, MemoryAccessPosition::Memory);
+            }
+
+            // B-type instructions.
+            Opcode::BEQ => {
+                (a, b, c) = self.branch_rr_simple(instruction);
+                if a == b {
+                    next_pc = self.state.pc.wrapping_add(c);
+                }
+            }
+            Opcode::BNE => {
+                (a, b, c) = self.branch_rr_simple(instruction);
+                if a != b {
+                    next_pc = self.state.pc.wrapping_add(c);
+                }
+            }
+            Opcode::BLT => {
+                (a, b, c) = self.branch_rr_simple(instruction);
+                if (a as i32) < (b as i32) {
+                    next_pc = self.state.pc.wrapping_add(c);
+                }
+            }
+            Opcode::BGE => {
+                (a, b, c) = self.branch_rr_simple(instruction);
+                if (a as i32) >= (b as i32) {
+                    next_pc = self.state.pc.wrapping_add(c);
+                }
+            }
+            Opcode::BLTU => {
+                (a, b, c) = self.branch_rr_simple(instruction);
+                if a < b {
+                    next_pc = self.state.pc.wrapping_add(c);
+                }
+            }
+            Opcode::BGEU => {
+                (a, b, c) = self.branch_rr_simple(instruction);
+                if a >= b {
+                    next_pc = self.state.pc.wrapping_add(c);
+                }
+            }
+
+            // Jump instructions.
+            Opcode::JAL => {
+                let (rd, imm) = instruction.j_type();
+                (_, _) = (imm, 0);
+                a = self.state.pc + 4;
+                self.rw_simple(rd, a);
+                next_pc = self.state.pc.wrapping_add(imm);
+            }
+            Opcode::JALR => {
+                let (rd, rs1, imm) = instruction.i_type();
+                (b, c) = (self.rr_simple(rs1, MemoryAccessPosition::B), imm);
+                a = self.state.pc + 4;
+                self.rw_simple(rd, a);
+                next_pc = b.wrapping_add(c);
+            }
+
+            // Upper immediate instructions.
+            Opcode::AUIPC => {
+                let (rd, imm) = instruction.u_type();
+                (b, _) = (imm, imm);
+                a = self.state.pc.wrapping_add(b);
+                self.rw_simple(rd, a);
+            }
+
+            // System instructions.
+            Opcode::ECALL => {
+                // We peek at register x5 to get the syscall id. The reason we don't `self.rr` this
+                // register is that we write to it later.
+                let t0 = Register::X5;
+                let syscall_id = self.register(t0);
+                c = self.rr_simple(Register::X11, MemoryAccessPosition::C);
+                b = self.rr_simple(Register::X10, MemoryAccessPosition::B);
+                let syscall = SyscallCode::from_u32(syscall_id);
+
+                self.mode.check_unconstrained_syscall(syscall)?;
+
+                // Update the syscall counts.
+                let syscall_for_count = syscall.count_map();
+                let syscall_count = self
+                    .state
+                    .syscall_counts
+                    .entry(syscall_for_count)
+                    .or_insert(0);
+                if self.log_syscalls {
+                    debug!(">>syscall_id: {syscall_id:?}, syscall_count: {syscall_count:?}");
+                }
+                *syscall_count += 1;
+
+                let syscall_impl = self.get_syscall(syscall).cloned();
+                // if syscall.should_send() != 0 {
+                //     self.emit_syscall(clk, syscall.syscall_id(), b, c);
+                // }
+                let mut precompile_rt = SyscallContext::new(self);
+                let (precompile_next_pc, precompile_cycles, _returned_exit_code) =
+                    if let Some(syscall_impl) = syscall_impl {
+                        // Executing a syscall optionally returns a value to write to the t0
+                        // register. If it returns None, we just keep the
+                        // syscall_id in t0.
+                        let res = syscall_impl.emulate(&mut precompile_rt, syscall, b, c);
+                        if let Some(val) = res {
+                            a = val;
+                        } else {
+                            a = syscall_id;
+                        }
+
+                        // If the syscall is `HALT` and the exit code is non-zero, return an error.
+                        if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
+                            return Err(EmulationError::HaltWithNonZeroExitCode(
+                                precompile_rt.exit_code,
+                            ));
+                        }
+
+                        (
+                            precompile_rt.next_pc,
+                            syscall_impl.num_extra_cycles(),
+                            precompile_rt.exit_code,
+                        )
+                    } else {
+                        return Err(EmulationError::UnsupportedSyscall(syscall_id));
+                    };
+
+                self.rw_simple(t0, a);
+                next_pc = precompile_next_pc;
+                self.state.clk += precompile_cycles;
+            }
+            Opcode::EBREAK => {
+                return Err(EmulationError::Breakpoint());
+            }
+
+            // Multiply instructions.
+            Opcode::MUL => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = b.wrapping_mul(c);
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::MULH => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = (((b as i32) as i64).wrapping_mul((c as i32) as i64) >> 32) as u32;
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::MULHU => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = ((b as u64).wrapping_mul(c as u64) >> 32) as u32;
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::MULHSU => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                a = (((b as i32) as i64).wrapping_mul(c as i64) >> 32) as u32;
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::DIV => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                if c == 0 {
+                    a = u32::MAX;
+                } else {
+                    a = (b as i32).wrapping_div(c as i32) as u32;
+                }
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::DIVU => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                if c == 0 {
+                    a = u32::MAX;
+                } else {
+                    a = b.wrapping_div(c);
+                }
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::REM => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                if c == 0 {
+                    a = b;
+                } else {
+                    a = (b as i32).wrapping_rem(c as i32) as u32;
+                }
+                self.alu_rw_simple(rd, a);
+            }
+            Opcode::REMU => {
+                (rd, b, c) = self.alu_rr_simple(instruction);
+                if c == 0 {
+                    a = b;
+                } else {
+                    a = b.wrapping_rem(c);
+                }
+                self.alu_rw_simple(rd, a);
+            }
+
+            // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/main/src/asm-manual.adoc#instruction-aliases
+            Opcode::UNIMP => {
+                return Err(EmulationError::Unimplemented());
+            }
+        }
+
+        // Update the program counter.
+        self.state.pc = next_pc;
+
+        // Update the clk to the next cycle.
+        self.state.clk += 4;
+
+        Ok(())
+    }
+}

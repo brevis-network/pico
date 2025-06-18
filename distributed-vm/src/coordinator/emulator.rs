@@ -113,7 +113,7 @@ impl EmulatorRunner for BabyBearPoseidon2 {
                 vk.clone(),
             );
         // Initialize the emulator.
-        let mut emulator = MetaEmulator::setup_riscv(&witness);
+        let mut emulator = MetaEmulator::setup_riscv(&witness, None);
 
         let channel_capacity = (4 * witness
             .opts
@@ -222,7 +222,7 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
                 vk.clone(),
             );
         // Initialize the emulator.
-        let mut emulator = MetaEmulator::setup_riscv(&witness);
+        let mut emulator = MetaEmulator::setup_riscv(&witness, None);
 
         let channel_capacity = (4 * witness
             .opts

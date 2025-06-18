@@ -9,7 +9,12 @@ use crate::{
         program::Program,
     },
     configs::config::{Com, Dom, PcsProverData, StarkGenericConfig, Val},
-    emulator::{emulator::MetaEmulator, opts::EmulatorOpts, stdin::EmulatorStdin},
+    emulator::{
+        emulator::MetaEmulator,
+        opts::EmulatorOpts,
+        riscv::{record::EmulationRecord, riscv_emulator::ParOptions},
+        stdin::EmulatorStdin,
+    },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
         compiler::{shapes::riscv_shape::RiscvShapeConfig, vk_merkle::vk_verification_enabled},
@@ -26,9 +31,13 @@ use crate::{
     primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
 };
 use alloc::sync::Arc;
+use core_affinity;
+use crossbeam::channel as cb;
 use p3_air::Air;
 use p3_field::PrimeField32;
+use p3_maybe_rayon::prelude::*;
 use p3_symmetric::Permutation;
+use std::{env, thread, time::Instant};
 
 pub type RiscvChips<SC> = RiscvChipType<Val<SC>>;
 
@@ -43,6 +52,13 @@ where
     shape_config: Option<RiscvShapeConfig<Val<SC>>>,
     pk: BaseProvingKey<SC>,
     vk: BaseVerifyingKey<SC>,
+}
+
+#[derive(Debug)]
+pub(crate) enum TracegenMessage {
+    #[allow(dead_code)]
+    Record(Arc<EmulationRecord>),
+    CycleCount(u64),
 }
 
 impl<SC> RiscvProver<SC, Program>
@@ -70,7 +86,7 @@ where
             .prove_with_shape_cycles(&witness, self.shape_config.as_ref())
     }
 
-    pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> u64 {
+    pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (u64, f64) {
         let witness = ProvingWitness::<SC, RiscvChips<SC>, _>::setup_for_riscv(
             self.program.clone(),
             stdin,
@@ -78,14 +94,89 @@ where
             self.pk.clone(),
             self.vk.clone(),
         );
-        let mut emulator = MetaEmulator::setup_riscv(&witness);
-        loop {
-            let done = emulator.next_record_batch(&mut |_| {});
-            if done {
-                break;
+        let (tx, rx) = cb::bounded::<TracegenMessage>(256);
+        let consumer = thread::spawn(move || {
+            let mut total_cycles = 0_u64;
+
+            for msg in rx {
+                match msg {
+                    TracegenMessage::Record(_r) => {
+                        // let stats = r.stats();
+                        // for (key, value) in &stats {
+                        //     println!("|- {:<25}: {}", key, value);
+                        // }
+                    }
+                    TracegenMessage::CycleCount(c) => total_cycles = c,
+                }
             }
+            let ret = 1;
+            (total_cycles, ret)
+        });
+
+        let num_threads = env::var("NUM_THREADS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(1);
+        println!("Emulator trace threads: {}", num_threads);
+        let start_time = Instant::now();
+
+        {
+            use std::sync::Arc;
+            let cores = core_affinity::get_core_ids().unwrap();
+            assert!(num_threads <= cores.len());
+            let tx_arc = Arc::new(tx);
+
+            (0..num_threads).into_par_iter().for_each(|tid| {
+                let core_id = cores[tid];
+                core_affinity::set_for_current(core_id);
+
+                let tx = tx_arc.clone();
+
+                let par_opts = ParOptions {
+                    num_threads: num_threads as u32,
+                    thread_id: tid as u32,
+                };
+
+                let mut emu = MetaEmulator::setup_riscv(&witness, Some(par_opts));
+
+                let thread_start = Instant::now();
+                loop {
+                    let done = emu.next_record_batch(&mut |_rec| {});
+
+                    if done {
+                        let thread_elapsed = thread_start.elapsed().as_secs_f64();
+                        let thread_cycles = emu.cycles();
+
+                        println!(
+                            "[Thread {}] Done. Cycles: {} | Time: {:.3}s | Speed: {:.3} MHz",
+                            tid,
+                            thread_cycles,
+                            thread_elapsed,
+                            thread_cycles as f64 / thread_elapsed / 1e6
+                        );
+                        if tid == 0 {
+                            tx.send(TracegenMessage::CycleCount(emu.cycles())).unwrap();
+                        }
+                        break;
+                    }
+                }
+            });
+            drop(tx_arc);
         }
-        emulator.cycles()
+
+        let (total_cycles, _all) = consumer.join().unwrap();
+        let elapsed_secs = start_time.elapsed().as_secs_f64();
+        let hz = total_cycles as f64 / elapsed_secs;
+        println!("Final Total cycles: {}", total_cycles);
+        println!("Final Elapsed time: {:.3} seconds", elapsed_secs);
+        println!(
+            "Final Effective speed: {:.3} Hz | {:.3} kHz | {:.3} MHz",
+            hz,
+            hz / 1e3,
+            hz / 1e6
+        );
+
+        (total_cycles, hz)
     }
 
     pub fn get_program(&self) -> Arc<Program> {

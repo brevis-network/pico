@@ -82,7 +82,7 @@ where
         pk.observed_by(&mut challenger);
 
         // Initialize the emulator.
-        let mut emulator = MetaEmulator::setup_riscv(witness);
+        let mut emulator = MetaEmulator::setup_riscv(witness, None);
 
         let channel_capacity = (4 * witness
             .opts
@@ -220,8 +220,8 @@ where
     {
         let record_len = records.len();
         let local_span =
-                debug_span!(parent: &tracing::Span::current(), "riscv chunks prove loop", base_chunk, record_len)
-                    .entered();
+            debug_span!(parent: &tracing::Span::current(), "riscv chunks prove loop", base_chunk, record_len)
+                .entered();
 
         let results: Vec<(usize, BaseProof<SC>, u128)> = records
             .into_pico_iter()

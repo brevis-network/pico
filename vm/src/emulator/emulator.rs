@@ -10,7 +10,7 @@ use crate::{
     },
     emulator::{
         recursion::emulator::{RecursionRecord, Runtime},
-        riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
+        riscv::{emulator::ParOptions, record::EmulationRecord, riscv_emulator::RiscvEmulator},
         stdin::EmulatorStdin,
     },
     instances::{
@@ -57,11 +57,14 @@ where
     <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
-    pub fn setup_riscv(proving_witness: &ProvingWitness<SC, C, Vec<u8>>) -> Self {
+    pub fn setup_riscv(
+        proving_witness: &ProvingWitness<SC, C, Vec<u8>>,
+        par_opts: Option<ParOptions>,
+    ) -> Self {
         // create a new emulator based on the emulator type
         let opts = proving_witness.opts.unwrap();
         let mut emulator =
-            RiscvEmulator::new::<SC::Val>(proving_witness.program.clone().unwrap(), opts);
+            RiscvEmulator::new::<SC::Val>(proving_witness.program.clone().unwrap(), opts, par_opts);
         emulator.write_stdin(proving_witness.stdin.as_ref().unwrap());
 
         Self {

@@ -52,7 +52,7 @@ macro_rules! run {
 
             info!("\n Creating emulator (at {:?})..", start.elapsed());
             let mut emulator =
-                RiscvEmulator::new::<Val<$riscv_sc>>(program, EmulatorOpts::default());
+                RiscvEmulator::new::<Val<$riscv_sc>>(program, EmulatorOpts::default(), None);
             let records = emulator.run(Some(stdin)).unwrap();
 
             // TRICKY: We copy the memory initialize and finalize events from the second (last)

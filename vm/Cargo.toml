@@ -46,6 +46,7 @@ cfg-if.workspace = true
 clap.workspace = true
 cpu-time.workspace = true
 crossbeam.workspace = true
+core_affinity.workspace = true
 csv.workspace = true
 curve25519-dalek.workspace = true
 dashmap.workspace = true
@@ -63,7 +64,6 @@ itertools.workspace = true
 k256.workspace = true
 lazy_static.workspace = true
 log.workspace = true
-nohash-hasher.workspace = true
 num-bigint.workspace = true
 num-traits.workspace = true
 num.workspace = true
@@ -91,6 +91,7 @@ tracing.workspace = true
 typenum.workspace = true
 vec_map.workspace = true
 zkhash.workspace = true
+
 
 # Set JEMALLOC_SYS_WITH_MALLOC_CONF="retain:true,background_thread:true,metadata_thp:always,dirty_decay_ms:-1,muzzy_decay_ms:-1,abort_conf:true"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
