@@ -110,7 +110,7 @@ macro_rules! create_sdk_prove_client {
             ) -> Result<(MetaProof<$sc>, MetaProof<$bn254_sc>), Error> {
                 let stdin = stdin.finalize();
                 let riscv_proof = self.riscv.prove(stdin);
-                let riscv_vk = self.riscv_vk();
+                let _riscv_vk = self.riscv_vk();
                 // if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
                 //     return Err(Error::msg("verify riscv proof failed"));
                 // }
