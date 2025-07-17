@@ -40,7 +40,7 @@ where
         + FieldSpecificPoseidon2Config,
     CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
-    SC: FieldFriConfigVariable<CC, Val = F, Domain = TwoAdicMultiplicativeCoset<F>>,
+    SC: FieldFriConfigVariable<CC, Val = F, Domain = TwoAdicMultiplicativeCoset<F>> + 'static,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
 
@@ -71,7 +71,8 @@ where
         + PrimeField32
         + BinomiallyExtendable<EXTENSION_DEGREE>
         + FieldSpecificPoseidon2Config,
-    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>
+        + 'static,
 
     RecursionChipType<Val<SC>>:
         ChipBehavior<Val<SC>> + for<'b> Air<RecursiveVerifierConstraintFolder<'b, CC>>,

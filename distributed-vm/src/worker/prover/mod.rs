@@ -36,7 +36,7 @@ type VkRoot<SC> = [<SC as StarkGenericConfig>::Val; DIGEST_SIZE];
 
 pub struct Prover<SC>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config + BinomiallyExtendable<EXTENSION_DEGREE>,
 {
     prover_id: String,
@@ -89,7 +89,7 @@ where
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
-    ) -> (Self, BaseProvingKeyCuda) {
+    ) -> (Self, BaseProvingKeyCuda<SC>) {
         // let riscv_convert = RiscvConvertProver::new(prover_id.clone(), program);
         let (riscv_convert, pk_gm) =
             RiscvConvertProver::new_cuda(prover_id.clone(), program, stream, mem_pool, dev_id);
@@ -113,18 +113,18 @@ where
 }
 
 /// specialization for running emulator on either babybear or koalabear
-pub trait ProverRunner {
+pub trait ProverRunner<SC: StarkGenericConfig> {
     fn run(self) -> JoinHandle<()>;
     fn run_cuda(
         self,
-        pk_gm: BaseProvingKeyCuda,
+        pk_gm: BaseProvingKeyCuda<SC>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> JoinHandle<()>;
 }
 
-impl<SC> ProverRunner for Prover<SC>
+impl<SC> ProverRunner<SC> for Prover<SC>
 where
     SC: StarkGenericConfig,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config + BinomiallyExtendable<EXTENSION_DEGREE>,
@@ -135,7 +135,7 @@ where
     }
     default fn run_cuda(
         self,
-        _pk_gm: BaseProvingKeyCuda,
+        _pk_gm: BaseProvingKeyCuda<SC>,
         _stream: &'static CudaStream,
         _mem_pool: &CudaMemPool,
         _dev_id: usize,
@@ -144,7 +144,7 @@ where
     }
 }
 
-impl ProverRunner for Prover<BabyBearPoseidon2> {
+impl ProverRunner<BabyBearPoseidon2> for Prover<BabyBearPoseidon2> {
     fn run(self) -> JoinHandle<()> {
         info!("[{}] : start", self.prover_id);
 
@@ -211,7 +211,7 @@ impl ProverRunner for Prover<BabyBearPoseidon2> {
     }
     fn run_cuda(
         self,
-        _pk_gm: BaseProvingKeyCuda,
+        _pk_gm: BaseProvingKeyCuda<BabyBearPoseidon2>,
         _stream: &'static CudaStream,
         _mem_pool: &CudaMemPool,
         _dev_id: usize,
@@ -220,7 +220,7 @@ impl ProverRunner for Prover<BabyBearPoseidon2> {
     }
 }
 
-impl ProverRunner for Prover<KoalaBearPoseidon2> {
+impl ProverRunner<KoalaBearPoseidon2> for Prover<KoalaBearPoseidon2> {
     fn run(self) -> JoinHandle<()> {
         info!("[{}] : start", self.prover_id);
 
@@ -303,13 +303,11 @@ impl ProverRunner for Prover<KoalaBearPoseidon2> {
 
     fn run_cuda(
         self,
-        pk_gm: BaseProvingKeyCuda,
+        pk_gm: BaseProvingKeyCuda<KoalaBearPoseidon2>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> JoinHandle<()> {
-        info!("[{}] : start", self.prover_id);
-
         info!("[{}] : start", self.prover_id);
 
         tokio::task::spawn_blocking(move || {

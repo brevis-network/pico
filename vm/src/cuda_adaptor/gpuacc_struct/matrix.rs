@@ -6,11 +6,15 @@ use cudart::{
     slice::{CudaSlice, CudaSliceMut},
     stream::CudaStream,
 };
+use p3_koala_bear::KoalaBear;
+
 pub struct DeviceMatrixConcrete<'stream, T: Sized> {
     pub values: DevicePoolAllocation<'stream, T>,
     pub log_n: usize,
     pub num_poly: usize,
 }
+
+unsafe impl Send for DeviceMatrixConcrete<'static, KoalaBear> {}
 
 pub struct DeviceMatrixStatic<T: Sized> {
     pub values: DeviceAllocation<T>,

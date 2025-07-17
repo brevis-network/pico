@@ -171,7 +171,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-        pk_gm: &BaseProvingKeyCuda,
+        pk_gm: &BaseProvingKeyCuda<SC>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
@@ -328,7 +328,7 @@ where
         challenger: &SC::Challenger,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
         mut record: EmulationRecord,
-        pk_gm: &BaseProvingKeyCuda,
+        pk_gm: &BaseProvingKeyCuda<SC>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
@@ -424,7 +424,7 @@ where
     fn prove_records_cuda(
         &self,
         base_chunk: usize,
-        pk_gm: &BaseProvingKeyCuda,
+        pk_gm: &BaseProvingKeyCuda<SC>,
         challenger: &SC::Challenger,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
         records: Vec<EmulationRecord>,
@@ -613,7 +613,7 @@ where
 
     fn prove_local_cuda(
         &self,
-        pk_gm: &BaseProvingKeyCuda,
+        pk_gm: &BaseProvingKeyCuda<SC>,
         challenger: &SC::Challenger,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
         record_receiver: Receiver<EmulationRecord>,
@@ -760,7 +760,7 @@ where
 
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for RiscvMachine<SC, C>
 where
-    SC: Send + StarkGenericConfig,
+    SC: Send + StarkGenericConfig + 'static,
     Val<SC>: PrimeField32 + Poseidon2Init,
     <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
     C: Send + ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
@@ -794,7 +794,7 @@ where
     fn prove_cuda(
         &self,
         _witness: &ProvingWitness<SC, C, Vec<u8>>,
-        _pk_cuda: Option<&BaseProvingKeyCuda>,
+        _pk_cuda: Option<&BaseProvingKeyCuda<SC>>,
         _stream: &'static CudaStream,
         _mem_pool: &CudaMemPool,
         _dev_id: usize,
@@ -973,7 +973,7 @@ fn transition_with_condition<'a, T: Copy + core::fmt::Debug + Eq>(
 
 impl<SC, C> RiscvMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<SC::Val>,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {

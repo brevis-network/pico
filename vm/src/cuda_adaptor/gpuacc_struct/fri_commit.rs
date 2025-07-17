@@ -71,13 +71,40 @@ extern "C" {
         log_quotient: u32,
         stream: cudaStream_t,
     );
+
+    fn rustffi_hash_matrix_bn254(
+        matrix: *const c_void,
+        hashs: *mut c_void,
+        log_n: u32,
+        num_poly: u32,
+        hash_stride: u32,
+        host_p: *const Poseidon2Constants,
+        stream: cudaStream_t,
+    );
+
+    fn rustffi_compress_layer_bn254(
+        hashs: *mut c_void,
+        hash_stride: u32,
+        log_next: u32,
+        host_p: *const Poseidon2Constants,
+        stream: cudaStream_t,
+    );
+
+    fn rustffi_inject_layer_bn254(
+        hashs: *mut c_void,
+        hash_stride: u32,
+        log_next: u32,
+        host_p: *const Poseidon2Constants,
+        stream: cudaStream_t,
+    );
 }
 
 //
 #[derive(Copy, Clone)]
-pub enum LeavesHashType {
-    Hash16,
-    Hash24,
+#[repr(C)]
+pub enum HashType {
+    Poseidon2KoalaBear,
+    Poseidon2Bn254,
 }
 
 pub fn uninit_vec<T: Sized>(length: usize) -> Vec<T> {
@@ -98,9 +125,8 @@ impl<'stream, T: Sized + Debug + Clone + Copy> MerkleTree<'stream, T> {
         layer_leaves_storage: HashMap<usize, DevicePoolAllocation<'stream, T>>,
         matrixs_ref: Vec<DeviceMatrixRef<T>>,
         stream: &'stream CudaStream,
-        hash_type: LeavesHashType,
-        poseidon2_constants_leaves: &Poseidon2Constants,
-        poseidon2_constants_compress: &Poseidon2Constants,
+        hash_type: HashType,
+        poseidon2_constants: &Poseidon2Constants,
         mem_pool: &CudaMemPool,
     ) -> Self {
         assert!(size_of::<T>() == size_of::<u32>());
@@ -119,8 +145,16 @@ impl<'stream, T: Sized + Debug + Clone + Copy> MerkleTree<'stream, T> {
         assert_eq!(temp_layer_num_poly << temp_log_n, temp_layer_matrixs.len());
         unsafe {
             let leaves_hasher = match hash_type {
-                LeavesHashType::Hash16 => rustffi_hash_matrix_16_8,
-                LeavesHashType::Hash24 => rustffi_hash_matrix_24_16,
+                HashType::Poseidon2KoalaBear => rustffi_hash_matrix_16_8,
+                HashType::Poseidon2Bn254 => rustffi_hash_matrix_bn254,
+            };
+            let compress_hasher = match hash_type {
+                HashType::Poseidon2KoalaBear => rustffi_compress_layer,
+                HashType::Poseidon2Bn254 => rustffi_compress_layer_bn254,
+            };
+            let inject_hasher = match hash_type {
+                HashType::Poseidon2KoalaBear => rustffi_inject_layer,
+                HashType::Poseidon2Bn254 => rustffi_inject_layer_bn254,
             };
 
             leaves_hasher(
@@ -129,17 +163,17 @@ impl<'stream, T: Sized + Debug + Clone + Copy> MerkleTree<'stream, T> {
                 temp_log_n as _,
                 temp_layer_num_poly as _,
                 hash_stride as _,
-                poseidon2_constants_leaves,
+                poseidon2_constants,
                 stream.into(),
             );
 
             while temp_log_n != 0 {
                 temp_log_n -= 1;
-                rustffi_compress_layer(
+                compress_hasher(
                     digests.as_mut_c_void_ptr(),
                     hash_stride as u32,
                     temp_log_n as u32,
-                    poseidon2_constants_compress,
+                    poseidon2_constants,
                     stream.into(),
                 );
 
@@ -152,14 +186,14 @@ impl<'stream, T: Sized + Debug + Clone + Copy> MerkleTree<'stream, T> {
                         temp_log_n as _,
                         temp_layer_num_poly as _,
                         hash_stride as _,
-                        poseidon2_constants_leaves,
+                        poseidon2_constants,
                         stream.into(),
                     );
-                    rustffi_inject_layer(
+                    inject_hasher(
                         digests.as_mut_c_void_ptr(),
                         hash_stride as u32,
                         temp_log_n as u32,
-                        poseidon2_constants_compress,
+                        poseidon2_constants,
                         stream.into(),
                     );
                 }
@@ -187,9 +221,8 @@ impl<'stream, T: Sized + Debug + Clone + Copy> MerkleTree<'stream, T> {
         input: &C,
         log_n: usize,
         stream: &'stream CudaStream,
-        hash_type: LeavesHashType,
-        poseidon2_constants_leaves: &Poseidon2Constants,
-        poseidon2_constants_compress: &Poseidon2Constants,
+        hash_type: HashType,
+        poseidon2_constants: &Poseidon2Constants,
         mem_pool: &CudaMemPool,
     ) -> Self {
         assert!(size_of::<T>() == size_of::<u32>());
@@ -220,8 +253,7 @@ impl<'stream, T: Sized + Debug + Clone + Copy> MerkleTree<'stream, T> {
             vec![matrixs_ref],
             stream,
             hash_type,
-            poseidon2_constants_leaves,
-            poseidon2_constants_compress,
+            poseidon2_constants,
             mem_pool,
         )
     }

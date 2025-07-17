@@ -3,6 +3,7 @@ pub mod commit_main_gm;
 pub mod fri_commit;
 pub mod fri_open;
 pub mod permutation_cuda;
+pub mod poseidon_constant;
 pub mod quotient;
 pub mod quotient_2;
 pub mod setup_keys_gm;
@@ -14,23 +15,19 @@ pub mod resource_pool;
 use crate::{
     compiler::program::ProgramBehavior,
     configs::config::StarkGenericConfig,
+    cuda_adaptor::fri_open::{InnerChallenge, InnerChallenger, InnerVal},
     machine::{
         chip::{ChipBehavior, MetaChip},
         keys::BaseVerifyingKey,
         prover::BaseProver,
         septic::SepticDigest,
     },
-    primitives::RC_16_30_KoalaBear,
 };
 use cudart::{
     memory::memory_copy_async,
     memory_pools::{CudaMemPool, DevicePoolAllocation},
 };
 
-use crate::primitives::{
-    consts::{KOALABEAR_NUM_EXTERNAL_ROUNDS, KOALABEAR_NUM_INTERNAL_ROUNDS},
-    PicoPoseidon2KoalaBear,
-};
 use hashbrown::HashMap;
 use p3_challenger::DuplexChallenger;
 use p3_commit::{
@@ -42,69 +39,15 @@ use p3_fri::{BatchOpening, FriProof, TwoAdicFriPcs};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_matrix::Matrix;
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
 use p3_util::log2_strict_usize;
 use std::{mem::transmute, sync::Arc};
 
 //
 use gpuacc_struct::{
-    fri_commit::{LeavesHashType, MerkleTree as GPUMerkleTree},
+    fri_commit::MerkleTree as GPUMerkleTree,
     poseidon::{Poseidon2Constants, DIGEST_ELEMS},
 };
-
-//
-const WIDTH: usize = 16;
-const RATE: usize = 8;
-const HASHTYPE: LeavesHashType = LeavesHashType::Hash16;
-pub const DIGEST_SIZE: usize = 8;
-
-pub type InnerDigestHash = Hash<KoalaBear, KoalaBear, DIGEST_SIZE>;
-pub type FieldExt4 = BinomialExtensionField<KoalaBear, 4>;
-pub type Perm = Poseidon2KoalaBear<WIDTH>;
-pub type MyHash = PaddingFreeSponge<Perm, WIDTH, RATE, DIGEST_ELEMS>;
-pub type MyCompress = TruncatedPermutation<Perm, 2, DIGEST_ELEMS, WIDTH>;
-pub type Dft = Radix2DitParallel<KoalaBear>;
-pub type ValMmcs = MerkleTreeMmcs<
-    <KoalaBear as Field>::Packing,
-    <KoalaBear as Field>::Packing,
-    MyHash,
-    MyCompress,
-    DIGEST_ELEMS,
->;
-pub type FieldExt4Mmcs = ExtensionMmcs<KoalaBear, FieldExt4, ValMmcs>;
-type MyFriProof =
-    FriProof<FieldExt4, FieldExt4Mmcs, KoalaBear, Vec<BatchOpening<KoalaBear, ValMmcs>>>;
-
-pub type TwoAdicFriPcsGm = TwoAdicFriPcs<KoalaBear, Dft, ValMmcs, FieldExt4Mmcs>;
-
-pub type Packing = <KoalaBear as Field>::Packing;
-pub type MyChallenger = DuplexChallenger<KoalaBear, Perm, WIDTH, RATE>;
-
-pub fn pico_poseidon2kb_init_poseidon2constants() -> (PicoPoseidon2KoalaBear, Poseidon2Constants) {
-    const ROUNDS_F: usize = KOALABEAR_NUM_EXTERNAL_ROUNDS;
-    const ROUNDS_P: usize = KOALABEAR_NUM_INTERNAL_ROUNDS;
-
-    let mut round_constants = RC_16_30_KoalaBear.to_vec();
-    let internal_start = ROUNDS_F / 2;
-    let internal_end = (ROUNDS_F / 2) + ROUNDS_P;
-    let internal_round_constants = round_constants
-        .drain(internal_start..internal_end)
-        .map(|vec| vec[0])
-        .collect::<Vec<_>>();
-
-    let internal_constants = internal_round_constants;
-    let initial = round_constants[..(ROUNDS_F / 2)].to_vec();
-    let terminal = round_constants[(ROUNDS_F / 2)..ROUNDS_F].to_vec();
-    let mut external_constants = initial.clone();
-    external_constants.extend(terminal.clone());
-
-    let p2constant = Poseidon2Constants::new(&external_constants, &internal_constants);
-
-    let external_layer = ExternalLayerConstants::new(initial.clone(), terminal.clone());
-    let perm = PicoPoseidon2KoalaBear::new(external_layer, internal_constants.clone());
-    (perm, p2constant)
-}
 
 // check layout
 //
@@ -115,7 +58,7 @@ use std::{
     mem::offset_of,
 };
 
-fn assert_vec_layout<T>() {
+pub fn assert_vec_layout<T>() {
     unsafe {
         assert!(size_of::<Vec<T>>() == 24);
         assert!(align_of::<Vec<T>>() == 8);
@@ -135,9 +78,9 @@ fn assert_vec_layout<T>() {
     }
 }
 
-type Val = KoalaBear;
-type Challenge = FieldExt4;
-type Challenger = MyChallenger;
+type Val = InnerVal;
+type Challenge = InnerChallenge;
+type Challenger = InnerChallenger;
 use crate::cuda_adaptor::{
     fri_commit::CosetLdeOutput,
     gpuacc_struct::{
@@ -225,29 +168,29 @@ fn check_layout() {
     assert!(offset_of!(CosetLdeOutput, layer_leaves_storage) == 24);
     assert!(offset_of!(CosetLdeOutput, matrixs_output) == 0);
 
-    // FriData
-    assert!(align_of::<FriData<Val, Challenge, Challenger>>() == 8);
-    assert!(size_of::<FriData<Val, Challenge, Challenger>>() == 144);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, sample) == 24);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, observe) == 32);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, check_witness) == 40);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, sample_bits) == 48);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, get_pow_data) == 56);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, pow_hash_type) == 136);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, poseidon2_constants_pow) == 64);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, grind) == 72);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, proof_of_work_bits) == 0);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, compute_host_scale) == 80);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, exp_u64) == 88);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, generator) == 128);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, log_blow_up) == 8);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, leave_hash_type) == 137);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, poseidon2_constants_leaves) == 96);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, poseidon2_constants_compress) == 104);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, one_half) == 132);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, compute_half_beta) == 112);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, num_queries) == 16);
-    assert!(offset_of!(FriData<Val, Challenge, Challenger>, as_base_slice) == 120);
+    // // FriData
+    // assert!(align_of::<FriData<Val, Challenge, Challenger>>() == 8);
+    // assert!(size_of::<FriData<Val, Challenge, Challenger>>() == 144);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, sample) == 24);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, observe) == 32);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, check_witness) == 40);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, sample_bits) == 48);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, get_pow_data) == 56);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, pow_hash_type) == 136);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, poseidon2_constants_pow) == 64);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, grind) == 72);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, proof_of_work_bits) == 0);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, compute_host_scale) == 80);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, exp_u64) == 88);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, generator) == 128);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, log_blow_up) == 8);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, leave_hash_type) == 137);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, poseidon2_constants_leaves) == 96);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, poseidon2_constants_compress) == 104);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, one_half) == 132);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, compute_half_beta) == 112);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, num_queries) == 16);
+    // assert!(offset_of!(FriData<Val, Challenge, Challenger>, as_base_slice) ==120);
 
     // OpenProof
     assert!(align_of::<OpenProof<Val, Challenge>>() == 8);

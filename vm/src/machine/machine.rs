@@ -4,8 +4,13 @@ use crate::{
         config::{PcsProverData, StarkGenericConfig, Val},
         stark_config::KoalaBearPoseidon2,
     },
-    cuda_adaptor::{commit_main_gm::commit_main_gpumemory_fast, setup_keys_gm::BaseProvingKeyCuda},
+    cuda_adaptor::{
+        commit_main_gm::commit_main_gpumemory_fast,
+        gpuacc_struct::{fri_commit::MerkleTree as GPUMerkleTree, matrix::DeviceMatrixConcrete},
+        setup_keys_gm::BaseProvingKeyCuda,
+    },
     emulator::record::RecordBehavior,
+    instances::configs::embed_kb_bn254_poseidon2::KoalaBearBn254Poseidon2,
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{ProverConstraintFolder, VerifierConstraintFolder},
@@ -16,10 +21,6 @@ use crate::{
         verifier::BaseVerifier,
         witness::ProvingWitness,
     },
-};
-
-use crate::cuda_adaptor::gpuacc_struct::{
-    fri_commit::MerkleTree as GPUMerkleTree, matrix::DeviceMatrixConcrete,
 };
 use alloc::sync::Arc;
 use anyhow::Result;
@@ -34,13 +35,13 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use p3_monty_31::MontyField31;
 use p3_symmetric::Hash;
-use std::{mem::transmute, time::Instant};
+use std::{any::TypeId, mem::transmute, time::Instant};
 use tracing::{debug, instrument};
 
 /// Functions that each machine instance should implement.
 pub trait MachineBehavior<SC, C, I>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<Val<SC>>,
 {
     /// Get the name of the machine.
@@ -110,7 +111,7 @@ where
         GPUMerkleTree<'static, MontyField31<KoalaBearParameters>>,
         BaseProvingKey<SC>,
         BaseVerifyingKey<SC>,
-        BaseProvingKeyCuda,
+        BaseProvingKeyCuda<SC>,
         BaseVerifyingKey<SC>,
     ) {
         let (prep_gpumktree, pk, vk, pk_gm, vk_gm) = self
@@ -129,7 +130,7 @@ where
     fn prove_cuda(
         &self,
         witness: &ProvingWitness<SC, C, I>,
-        pk_cuda: Option<&BaseProvingKeyCuda>,
+        pk_cuda: Option<&BaseProvingKeyCuda<SC>>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
@@ -212,7 +213,7 @@ where
 
 impl<SC, C> BaseMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<Val<SC>>,
 {
     /// Get the chips of the machine.
@@ -282,7 +283,7 @@ where
         GPUMerkleTree<'static, MontyField31<KoalaBearParameters>>,
         BaseProvingKey<SC>,
         BaseVerifyingKey<SC>,
-        BaseProvingKeyCuda,
+        BaseProvingKeyCuda<SC>,
         BaseVerifyingKey<SC>,
     ) {
         use crate::cuda_adaptor::setup_keys_gm::setup_keys_gm;
@@ -312,7 +313,7 @@ where
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
-    ) -> (BaseVerifyingKey<SC>, BaseProvingKeyCuda) {
+    ) -> (BaseVerifyingKey<SC>, BaseProvingKeyCuda<SC>) {
         use crate::cuda_adaptor::setup_keys_gm::setup_keys_gm;
         let (pk_gm, vk_gm) = setup_keys_gm(
             &self.prover,
@@ -343,13 +344,14 @@ where
         dev_id: usize,
     ) -> Option<
         MainTraceCommitments<
-            KoalaBearPoseidon2,
+            SC,
             Vec<DeviceMatrixConcrete<'static, KoalaBear>>,
             GPUMerkleTree<'static, KoalaBear>,
         >,
     > {
         let start = Instant::now();
         let chips_and_main_traces = self.prover.generate_main(&self.chips(), record);
+
         println!(
             "---- self.prover.generate_main duration: {:?}",
             start.elapsed()
@@ -383,7 +385,8 @@ where
             .enumerate()
             .map(|(i, record)| {
                 let data = self.commit(record).unwrap();
-                self.prover.prove(
+                let start = Instant::now();
+                let res = self.prover.prove(
                     &self.config(),
                     &self.chips(),
                     pk,
@@ -391,7 +394,13 @@ where
                     &mut challenger.clone(),
                     records[i].chunk_index(),
                     self.num_public_values,
-                )
+                );
+
+                println!(
+                    "--- oncpu crate::cuda_adaptor::fri_open::prove_impl duration: {:?}",
+                    start.elapsed()
+                );
+                res
             })
             .collect::<Vec<_>>();
 
@@ -413,7 +422,7 @@ where
     pub fn prove_ensemble_cuda(
         &self,
         records: &[C::Record],
-        pk_cuda: &BaseProvingKeyCuda,
+        pk_cuda: &BaseProvingKeyCuda<SC>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
@@ -424,13 +433,9 @@ where
         SC::Val: PrimeField64,
     {
         let mut challenger = self.config().challenger();
-        // pk.observed_by(&mut challenger);
+
         //
-        let commitment_kb = &pk_cuda.commit;
-        let commitment_sc: &Hash<SC::Val, SC::Val, 8> = unsafe { transmute(commitment_kb) };
-        for value in *commitment_sc {
-            challenger.observe(value);
-        }
+        challenger.observe(pk_cuda.commit.clone());
         //
         let pc_start_sc: &SC::Val = unsafe { transmute(&pk_cuda.pc_start) };
         challenger.observe(*pc_start_sc);
@@ -460,17 +465,35 @@ where
                 println!("--- Commit Main duration: {:?}", start.elapsed());
 
                 let start = Instant::now();
-                let res = crate::cuda_adaptor::fri_open::prove_impl::<SC, C>(
-                    &self.config(),
-                    &self.chips(),
-                    &mut challenger.clone(),
-                    self.num_public_values,
-                    main_commitment_gm,
-                    pk_cuda,
-                    stream,
-                    mem_pool,
-                    dev_id,
-                );
+
+                let res = if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
+                    crate::cuda_adaptor::fri_open::prove_impl::<SC, C, KoalaBearPoseidon2>(
+                        &self.config(),
+                        &self.chips(),
+                        &mut challenger.clone(),
+                        self.num_public_values,
+                        main_commitment_gm,
+                        pk_cuda,
+                        stream,
+                        mem_pool,
+                        dev_id,
+                    )
+                } else if TypeId::of::<SC>() == TypeId::of::<KoalaBearBn254Poseidon2>() {
+                    crate::cuda_adaptor::fri_open::prove_impl::<SC, C, KoalaBearBn254Poseidon2>(
+                        &self.config(),
+                        &self.chips(),
+                        &mut challenger.clone(),
+                        self.num_public_values,
+                        main_commitment_gm,
+                        pk_cuda,
+                        stream,
+                        mem_pool,
+                        dev_id,
+                    )
+                } else {
+                    panic!("Unexpected SC type")
+                };
+
                 println!(
                     "--- ongpu crate::cuda_adaptor::fri_open::prove_impl duration: {:?}",
                     start.elapsed()
@@ -481,7 +504,6 @@ where
 
         proofs
     }
-
     /// Prove assuming that challenger has already observed pk & main commitments and pv's
     pub fn prove_plain(
         &self,
@@ -512,29 +534,47 @@ where
         &self,
         challenger: &mut SC::Challenger,
         main_commitment_gm: MainTraceCommitments<
-            KoalaBearPoseidon2,
+            SC,
             Vec<DeviceMatrixConcrete<'static, KoalaBear>>,
             GPUMerkleTree<'static, KoalaBear>,
         >,
-        pk_gm: &BaseProvingKeyCuda,
+        pk_gm: &BaseProvingKeyCuda<SC>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
     ) -> BaseProof<SC>
     where
+        SC: StarkGenericConfig + 'static,
         C: Air<ProverConstraintFolder<SC>>,
     {
-        crate::cuda_adaptor::fri_open::prove_impl::<SC, C>(
-            &self.config(),
-            &self.chips(),
-            challenger,
-            self.num_public_values,
-            main_commitment_gm,
-            pk_gm,
-            stream,
-            mem_pool,
-            dev_id,
-        )
+        let res = if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
+            crate::cuda_adaptor::fri_open::prove_impl::<SC, C, KoalaBearPoseidon2>(
+                &self.config(),
+                &self.chips(),
+                &mut challenger.clone(),
+                self.num_public_values,
+                main_commitment_gm,
+                pk_gm,
+                stream,
+                mem_pool,
+                dev_id,
+            )
+        } else if TypeId::of::<SC>() == TypeId::of::<KoalaBearBn254Poseidon2>() {
+            crate::cuda_adaptor::fri_open::prove_impl::<SC, C, KoalaBearBn254Poseidon2>(
+                &self.config(),
+                &self.chips(),
+                &mut challenger.clone(),
+                self.num_public_values,
+                main_commitment_gm,
+                pk_gm,
+                stream,
+                mem_pool,
+                dev_id,
+            )
+        } else {
+            panic!("Unexpected SC type")
+        };
+        res
     }
 
     pub fn verify_riscv(&self, vk: &BaseVerifyingKey<SC>, proofs: &[BaseProof<SC>]) -> Result<()>

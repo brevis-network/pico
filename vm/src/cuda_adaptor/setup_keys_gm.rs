@@ -1,19 +1,26 @@
-use crate::cuda_adaptor::{
-    fri_commit::fri_commit, log2_strict_usize, memory_copy_async,
-    pico_poseidon2kb_init_poseidon2constants, Arc, BaseProver, BaseVerifyingKey, ChipBehavior,
-    CudaMemPool, DevicePoolAllocation, Field, GPUMerkleTree, HashMap, InnerDigestHash, KoalaBear,
-    Matrix, MetaChip, Pcs, ProgramBehavior, SepticDigest, StarkGenericConfig, TwoAdicFriPcsGm,
+use crate::{
+    configs::stark_config::{KoalaBearBn254Poseidon2, KoalaBearPoseidon2},
+    cuda_adaptor::{
+        fri_commit::fri_commit,
+        fri_open::{InnerPcs, KoalaBearSC, OuterPcs},
+        gpuacc_struct::fri_commit::HashType,
+        log2_strict_usize, memory_copy_async, Arc, BaseProver, BaseVerifyingKey, ChipBehavior,
+        CudaMemPool, DevicePoolAllocation, GPUMerkleTree, HashMap, KoalaBear, Matrix, MetaChip,
+        Pcs, ProgramBehavior, SepticDigest, StarkGenericConfig,
+    },
 };
 use cudart::{device::set_device, stream::CudaStream};
+use p3_field::Field;
 use std::{mem::transmute, time::Instant};
-
 //
-use crate::cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixConcrete;
-
+use crate::{configs::config::Com, cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixConcrete};
 //
-pub struct BaseProvingKeyCuda {
+
+use std::any::TypeId;
+//
+pub struct BaseProvingKeyCuda<SC: StarkGenericConfig> {
     /// The commitment to the named traces.
-    pub commit: InnerDigestHash,
+    pub commit: Com<SC>,
     /// start pc of program
     pub pc_start: KoalaBear,
     /// named preprocessed traces.
@@ -27,8 +34,8 @@ pub struct BaseProvingKeyCuda {
     /// The preprocessed chip local only information.
     pub local_only: Vec<bool>,
 }
-unsafe impl Sync for BaseProvingKeyCuda {}
-unsafe impl Send for BaseProvingKeyCuda {}
+unsafe impl<SC: StarkGenericConfig> Sync for BaseProvingKeyCuda<SC> {}
+unsafe impl<SC: StarkGenericConfig> Send for BaseProvingKeyCuda<SC> {}
 
 pub fn setup_keys_gm<SC, C>(
     baseprover: &BaseProver<SC, C>,
@@ -38,9 +45,9 @@ pub fn setup_keys_gm<SC, C>(
     stream: &'static CudaStream,
     mem_pool: &CudaMemPool,
     dev_id: usize,
-) -> (BaseProvingKeyCuda, BaseVerifyingKey<SC>)
+) -> (BaseProvingKeyCuda<SC>, BaseVerifyingKey<SC>)
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<SC::Val>,
 {
     let chips_and_preprocessed = baseprover.generate_preprocessed(chips, program);
@@ -113,10 +120,18 @@ where
         unsafe { transmute(device_evaluation) };
 
     //
-    let two_adic_pcs: &TwoAdicFriPcsGm = unsafe { transmute(&pcs) };
-    let log_blow_up = two_adic_pcs.fri.log_blowup;
-    let (_, poseidon2_constants) = pico_poseidon2kb_init_poseidon2constants();
+    let (hash_type, log_blow_up) = if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
+        let two_adic_pcs: &InnerPcs = unsafe { transmute(&pcs) };
+        (HashType::Poseidon2KoalaBear, two_adic_pcs.fri.log_blowup)
+    } else if TypeId::of::<SC>() == TypeId::of::<KoalaBearBn254Poseidon2>() {
+        let two_adic_pcs: &OuterPcs = unsafe { transmute(&pcs) };
+        (HashType::Poseidon2Bn254, two_adic_pcs.fri.log_blowup)
+    } else {
+        panic!("Unexpected SC type")
+    };
+    //
 
+    //
     let preprocessed_merkle = fri_commit(
         device_evaluation_kb
             .iter_mut()
@@ -124,23 +139,19 @@ where
             .collect(),
         log_blow_up,
         stream,
-        &poseidon2_constants,
         mem_pool,
+        hash_type,
     );
-    let commit_gm: InnerDigestHash = preprocessed_merkle.merkle_root.into();
-    // println!("{:?}", preprocessed_merkle.merkle_root);
-
-    //
-    let commit_sc: &<SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment =
-        unsafe { transmute(&commit_gm) };
+    let commit: &Com<SC> = unsafe { transmute(&preprocessed_merkle.merkle_root) };
+    println!("setup_keys_gm {:?}", preprocessed_merkle.merkle_root);
     println!(
         "---- ongpu setup_keys_gm data trans & fri commit: {:?}",
         start.elapsed()
     );
 
     (
-        BaseProvingKeyCuda {
-            commit: commit_gm,
+        BaseProvingKeyCuda::<SC> {
+            commit: commit.clone(),
             pc_start: *pc_start_kb,
             preprocessed_trace: device_evaluation_kb,
             preprocessed_prover_data: preprocessed_merkle,
@@ -148,8 +159,8 @@ where
             initial_global_cumulative_sum: *initial_global_cumulative_sum_kb,
             local_only,
         },
-        BaseVerifyingKey {
-            commit: commit_sc.clone(),
+        BaseVerifyingKey::<SC> {
+            commit: commit.clone(),
             pc_start,
             initial_global_cumulative_sum,
             preprocessed_info,

@@ -144,7 +144,7 @@ impl EmulatorStdinBuilder<Vec<u8>> {
 // for convert stdin, converting riscv proofs to recursion proofs
 impl<SC> EmulatorStdin<RecursionProgram<Val<SC>>, ConvertStdin<SC, RiscvChipType<Val<SC>>>>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config,
 {
     /// Construct the recursion stdin for riscv_compress.
@@ -351,7 +351,8 @@ where
                 Domain = TwoAdicMultiplicativeCoset<F>,
                 FriChallengerVariable = DuplexChallengerVariable<CC>,
                 DigestVariable = [Felt<F>; DIGEST_SIZE],
-            > + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZE]>,
+            > + FieldHasher<Val<SC>, Digest = [Val<SC>; DIGEST_SIZE]>
+            + 'static,
         CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug,
         Challenge<SC>: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
         Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,

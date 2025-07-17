@@ -18,6 +18,7 @@ use std::fmt::Display;
 ///
 /// Refer to the "RV32I Reference Card" [here](https://github.com/johnwinans/rvalp/releases) for
 /// more details.
+#[repr(u32)]
 #[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum Opcode {

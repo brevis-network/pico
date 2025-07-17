@@ -1,11 +1,17 @@
 use crate::{
-    configs::config::StarkGenericConfig,
+    configs::{
+        config::StarkGenericConfig,
+        stark_config::{KoalaBearBn254Poseidon2, KoalaBearPoseidon2},
+    },
     cuda_adaptor::{
+        fri_open::{InnerPcs, OuterPcs},
         gpuacc_struct::{
-            fri_commit::{LeavesHashType, MerkleTree as GPUMerkleTree},
-            matrix::DeviceMatrixRef,
+            fri_commit::{HashType, MerkleTree as GPUMerkleTree},
+            matrix::{DeviceMatrixConcrete, DeviceMatrixRef},
         },
-        log2_strict_usize, KoalaBear,
+        log2_strict_usize,
+        poseidon_constant::get_poseidon2_constants,
+        KoalaBear,
     },
 };
 use cudart::{
@@ -15,6 +21,8 @@ use cudart::{
     stream::CudaStream,
 };
 use cudart_sys::cudaStream_t;
+use p3_commit::TwoAdicMultiplicativeCoset;
+use p3_field::Field as FieldTrait;
 use p3_koala_bear::KoalaBear as Field;
 use p3_matrix::{
     dense::{DenseMatrix, RowMajorMatrix},
@@ -22,48 +30,13 @@ use p3_matrix::{
 };
 use std::{
     alloc::{dealloc, Layout},
+    any::TypeId,
     collections::HashMap,
     ffi::c_void,
     mem::transmute,
+    time::Instant,
 };
 
-//
-use crate::cuda_adaptor::gpuacc_struct::{
-    matrix::DeviceMatrixConcrete,
-    poseidon::{Poseidon2Constants, DIGEST_ELEMS},
-};
-
-//
-use p3_field::Field as FieldTrait;
-use p3_fri::TwoAdicFriPcs;
-use p3_symmetric::PaddingFreeSponge;
-
-use p3_commit::{ExtensionMmcs, TwoAdicMultiplicativeCoset};
-use p3_dft::Radix2DitParallel;
-use p3_field::extension::BinomialExtensionField;
-use p3_koala_bear::Poseidon2KoalaBear;
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::TruncatedPermutation;
-
-const WIDTH: usize = 16;
-const RATE: usize = 8;
-const HASHTYPE: LeavesHashType = LeavesHashType::Hash16;
-
-type FieldExt4 = BinomialExtensionField<Field, 4>;
-pub type Perm = Poseidon2KoalaBear<WIDTH>;
-pub type MyHash = PaddingFreeSponge<Perm, WIDTH, RATE, DIGEST_ELEMS>;
-pub type MyCompress = TruncatedPermutation<Perm, 2, DIGEST_ELEMS, WIDTH>;
-pub type Dft = Radix2DitParallel<Field>;
-pub type ValMmcs = MerkleTreeMmcs<
-    <Field as FieldTrait>::Packing,
-    <Field as FieldTrait>::Packing,
-    MyHash,
-    MyCompress,
-    DIGEST_ELEMS,
->;
-type FieldExt4Mmcs = ExtensionMmcs<Field, FieldExt4, ValMmcs>;
-
-//
 pub struct CosetLdeOutput<'stream> {
     pub layer_leaves_storage: HashMap<usize, DevicePoolAllocation<'stream, KoalaBear>>,
     pub matrixs_output: Vec<DeviceMatrixRef<KoalaBear>>,
@@ -84,7 +57,7 @@ extern "C" {
         stream: cudaStream_t,
     );
 
-    fn rustffi_memcpy_with_overlapping_u2d(
+    pub fn rustffi_memcpy_with_overlapping_u2d(
         dst: *mut c_void,
         src: *const c_void,
         size: usize,
@@ -94,19 +67,23 @@ extern "C" {
 }
 
 //
-pub fn fri_commit_from_host<SC: StarkGenericConfig>(
+pub fn fri_commit_from_host<SC: StarkGenericConfig + 'static>(
     domains_and_traces: Vec<(SC::Domain, DenseMatrix<<SC>::Val>)>,
     pcs: SC::Pcs,
     stream: &'static CudaStream,
     mem_pool: &CudaMemPool,
 ) -> GPUMerkleTree<'static, Field> {
-    let two_adic_pcs: &TwoAdicFriPcs<Field, Dft, ValMmcs, FieldExt4Mmcs> =
-        unsafe { transmute(&pcs) };
+    //
+    let (hash_type, log_blow_up) = if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
+        let two_adic_pcs: &InnerPcs = unsafe { transmute(&pcs) };
+        (HashType::Poseidon2KoalaBear, two_adic_pcs.fri.log_blowup)
+    } else if TypeId::of::<SC>() == TypeId::of::<KoalaBearBn254Poseidon2>() {
+        let two_adic_pcs: &OuterPcs = unsafe { transmute(&pcs) };
+        (HashType::Poseidon2Bn254, two_adic_pcs.fri.log_blowup)
+    } else {
+        panic!("Unexpected SC type")
+    };
 
-    assert!(
-        std::any::TypeId::of::<SC::Pcs>()
-            == std::any::TypeId::of::<TwoAdicFriPcs<Field, Dft, ValMmcs, FieldExt4Mmcs>>()
-    );
     let mut device_evaluation: Vec<DeviceMatrixConcrete<SC::Val>> = domains_and_traces
         .iter()
         .map(|(_, e)| {
@@ -141,77 +118,34 @@ pub fn fri_commit_from_host<SC: StarkGenericConfig>(
     let matrixs_input_field: &Vec<(Field, DeviceMatrixRef<Field>)> =
         unsafe { transmute(&matrixs_input) };
 
-    let (layer_leaves_storage, matrixs_output) = unsafe {
-        let ptr = rustffi_coset_lde(
-            transmute(matrixs_input_field),
-            two_adic_pcs.fri.log_blowup,
-            transmute(stream),
-            transmute(mem_pool),
-        ) as *mut CosetLdeOutput;
-        let value: CosetLdeOutput = std::ptr::read(ptr);
-        let layout = Layout::new::<CosetLdeOutput>();
-        dealloc(ptr as *mut u8, layout);
-        (value.layer_leaves_storage, value.matrixs_output)
-    };
-
-    use crate::cuda_adaptor::pico_poseidon2kb_init_poseidon2constants;
-    let (_, poseidon2_constants) = pico_poseidon2kb_init_poseidon2constants();
-
-    let merkle_result_gpu = GPUMerkleTree::<Field>::new_from_lde(
-        layer_leaves_storage,
-        matrixs_output,
+    let merkle_result_gpu = fri_commit(
+        matrixs_input_field.clone(),
+        log_blow_up,
         stream,
-        HASHTYPE,
-        &poseidon2_constants,
-        &poseidon2_constants,
         mem_pool,
+        hash_type,
     );
-    // println!("{:?}", merkle_result_gpu.merkle_root);
-
     merkle_result_gpu
 }
 
-pub fn fri_commit_from_device<SC: StarkGenericConfig>(
+pub fn fri_commit_from_device<SC: StarkGenericConfig + 'static>(
     matrixs_input: Vec<(Field, DeviceMatrixRef<Field>)>,
     pcs: SC::Pcs,
     stream: &'static CudaStream,
     mem_pool: &CudaMemPool,
 ) -> GPUMerkleTree<'static, Field> {
-    assert!(
-        std::any::TypeId::of::<SC::Pcs>()
-            == std::any::TypeId::of::<TwoAdicFriPcs<Field, Dft, ValMmcs, FieldExt4Mmcs>>()
-    );
-
-    use crate::cuda_adaptor::pico_poseidon2kb_init_poseidon2constants;
-    let (_, poseidon2_constants) = pico_poseidon2kb_init_poseidon2constants();
-
     //
-    let two_adic_pcs: &TwoAdicFriPcs<Field, Dft, ValMmcs, FieldExt4Mmcs> =
-        unsafe { transmute(&pcs) };
-    let log_blow_up = two_adic_pcs.fri.log_blowup;
-
-    let (layer_leaves_storage, matrixs_output) = unsafe {
-        let ptr = rustffi_coset_lde(
-            transmute(&matrixs_input),
-            log_blow_up,
-            transmute(stream),
-            transmute(mem_pool),
-        ) as *mut CosetLdeOutput;
-        let value: CosetLdeOutput = std::ptr::read(ptr);
-        let layout = Layout::new::<CosetLdeOutput>();
-        dealloc(ptr as *mut u8, layout);
-        (value.layer_leaves_storage, value.matrixs_output)
+    let (hash_type, log_blow_up) = if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
+        let two_adic_pcs: &InnerPcs = unsafe { transmute(&pcs) };
+        (HashType::Poseidon2KoalaBear, two_adic_pcs.fri.log_blowup)
+    } else if TypeId::of::<SC>() == TypeId::of::<KoalaBearBn254Poseidon2>() {
+        let two_adic_pcs: &OuterPcs = unsafe { transmute(&pcs) };
+        (HashType::Poseidon2Bn254, two_adic_pcs.fri.log_blowup)
+    } else {
+        panic!("Unexpected SC type")
     };
-    let merkle_result_gpu = GPUMerkleTree::<Field>::new_from_lde(
-        layer_leaves_storage,
-        matrixs_output,
-        stream,
-        LeavesHashType::Hash16,
-        &poseidon2_constants,
-        &poseidon2_constants,
-        mem_pool,
-    );
 
+    let merkle_result_gpu = fri_commit(matrixs_input, log_blow_up, stream, mem_pool, hash_type);
     // println!("by from device: {:?}", merkle_result_gpu.merkle_root);
 
     merkle_result_gpu
@@ -221,9 +155,12 @@ pub fn fri_commit(
     matrixs_input: Vec<(KoalaBear, DeviceMatrixRef<KoalaBear>)>,
     log_blow_up: usize,
     stream: &'static CudaStream,
-    poseidon2_constants: &Poseidon2Constants,
     mem_pool: &CudaMemPool,
+    hash_type: HashType,
 ) -> GPUMerkleTree<'static, KoalaBear> {
+    let poseidon2_constants = get_poseidon2_constants(hash_type);
+
+    let start = Instant::now();
     let (layer_leaves_storage, matrixs_output) = unsafe {
         let ptr = rustffi_coset_lde(
             transmute(&matrixs_input),
@@ -236,15 +173,18 @@ pub fn fri_commit(
         dealloc(ptr as *mut u8, layout);
         (value.layer_leaves_storage, value.matrixs_output)
     };
+    println!("rustffi_coset_lde duration: {:?}", start.elapsed());
+
+    let start = Instant::now();
     let merkle_result_gpu = GPUMerkleTree::<KoalaBear>::new_from_lde(
         layer_leaves_storage,
         matrixs_output,
         stream,
-        LeavesHashType::Hash16,
-        poseidon2_constants,
-        poseidon2_constants,
+        hash_type,
+        &poseidon2_constants,
         mem_pool,
     );
+    println!("new_from_lde duration: {:?}", start.elapsed());
     merkle_result_gpu
 }
 

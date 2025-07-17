@@ -88,7 +88,8 @@ impl<CC, SC, A> StarkVerifier<CC, SC, A>
 where
     CC: CircuitConfig,
     CC::F: TwoAdicField,
-    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>
+        + 'static,
     SC::ValMmcs: Clone,
     A: ChipBehavior<Val<SC>>,
 {

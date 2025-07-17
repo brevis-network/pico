@@ -1,11 +1,21 @@
 use crate::{
+    configs::config::Com,
+    cuda_adaptor::{
+        fri_open::{InnerPcs, OuterPcs},
+        gpuacc_struct::fri_commit::HashType,
+    },
+    instances::configs::embed_kb_bn254_poseidon2::KoalaBearBn254Poseidon2,
+};
+use crate::{
     configs::{config::StarkGenericConfig, stark_config::KoalaBearPoseidon2},
     cuda_adaptor::{
         fri_commit::{fri_commit, host2device_fast},
+        fri_open::{InnerChallenger, KoalaBearSC, OuterChallenger},
+        // generate_main::MatrixMixed,
         gpuacc_struct::{fri_commit::MerkleTree as GPUMerkleTree, matrix::DeviceMatrixConcrete},
-        pico_poseidon2kb_init_poseidon2constants,
         resource_pool::mem_pool::get_buffer,
-        transmute, Field, InnerDigestHash, TwoAdicFriPcsGm,
+        transmute,
+        Field,
     },
     emulator::record::RecordBehavior,
     machine::{chip::ChipBehavior, proof::MainTraceCommitments},
@@ -14,7 +24,7 @@ use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use hashbrown::HashMap;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
-use std::time::Instant;
+use std::{any::TypeId, time::Instant};
 
 pub fn commit_main_gpumemory_fast<SC, C>(
     config: &SC,
@@ -25,25 +35,31 @@ pub fn commit_main_gpumemory_fast<SC, C>(
     dev_id: usize,
 ) -> Option<
     MainTraceCommitments<
-        KoalaBearPoseidon2,
+        SC,
         Vec<DeviceMatrixConcrete<'static, KoalaBear>>,
         GPUMerkleTree<'static, KoalaBear>,
     >,
 >
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<SC::Val>,
     C::Record: RecordBehavior,
 {
     if chips_and_main.is_empty() {
         return None;
     }
-    let start = Instant::now();
     let pcs = config.pcs();
 
-    let two_adic_pcs: &TwoAdicFriPcsGm = unsafe { transmute(&pcs) };
-    let log_blow_up = two_adic_pcs.fri.log_blowup;
-    let (_, poseidon2_constants) = pico_poseidon2kb_init_poseidon2constants();
+    //
+    let (hash_type, log_blow_up) = if TypeId::of::<SC>() == TypeId::of::<KoalaBearPoseidon2>() {
+        let two_adic_pcs: &InnerPcs = unsafe { transmute(&pcs) };
+        (HashType::Poseidon2KoalaBear, two_adic_pcs.fri.log_blowup)
+    } else if TypeId::of::<SC>() == TypeId::of::<KoalaBearBn254Poseidon2>() {
+        let two_adic_pcs: &OuterPcs = unsafe { transmute(&pcs) };
+        (HashType::Poseidon2Bn254, two_adic_pcs.fri.log_blowup)
+    } else {
+        panic!("Unexpected SC type")
+    };
 
     //
     let main_chip_ordering = chips_and_main
@@ -77,19 +93,20 @@ where
             .collect(),
         log_blow_up,
         stream,
-        &poseidon2_constants,
         mem_pool,
+        hash_type,
     );
     println!(
         "---- ongpu Commmit main fri_commit duration: {:?}",
         start.elapsed()
     );
-    let commit: InnerDigestHash = main_merkle.merkle_root.into();
+
+    let commit: &Com<SC> = unsafe { transmute(&main_merkle.merkle_root) };
 
     Some(MainTraceCommitments {
         main_traces: preprocessed_trace,
         main_chip_ordering,
-        commitment: commit,
+        commitment: commit.clone(),
         data: main_merkle,
         public_values: record.public_values().into(),
     })

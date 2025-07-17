@@ -1,18 +1,10 @@
-use cudart::stream::CudaStream;
-use itertools::Itertools;
-use std::{
-    alloc::{dealloc, Layout},
-    array,
-};
-
 use crate::{
-    configs::stark_config::KoalaBearPoseidon2,
     cuda_adaptor::{
-        log2_strict_usize, quotient::compute_quotient_values_cuda_gm,
-        quotient_2::compute_quotient_values_cuda_gm_2, setup_keys_gm::BaseProvingKeyCuda,
-        transmute, Arc, ChipBehavior, CudaMemPool, FieldExt4, FieldExt4Mmcs, GPUMerkleTree, Hash,
-        InnerDigestHash, KoalaBear, LeavesHashType, MetaChip, MyChallenger, MyFriProof, Pcs,
-        Poseidon2Constants, StarkGenericConfig, TwoAdicMultiplicativeCoset, ValMmcs,
+        log2_strict_usize, poseidon_constant::get_poseidon2_constants,
+        quotient::compute_quotient_values_cuda_gm, quotient_2::compute_quotient_values_cuda_gm_2,
+        setup_keys_gm::BaseProvingKeyCuda, transmute, Arc, ChipBehavior, CudaMemPool,
+        GPUMerkleTree, Hash, KoalaBear, MetaChip, Poseidon2Constants, StarkGenericConfig,
+        TwoAdicMultiplicativeCoset,
     },
     machine::{
         folder::ProverConstraintFolder,
@@ -22,13 +14,20 @@ use crate::{
         utils::order_chips,
     },
 };
-use std::time::Instant;
+use cudart::stream::CudaStream;
+use itertools::Itertools;
+use p3_commit::Pcs;
+use std::{
+    alloc::{dealloc, Layout},
+    any::TypeId,
+    array,
+    time::Instant,
+};
 
 use p3_air::Air;
 use p3_challenger::{CanObserve, CanSample, CanSampleBits, FieldChallenger, GrindingChallenger};
 use p3_commit::PolynomialSpace;
 use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
-use p3_fri::{BatchOpening, CommitPhaseProofStep, QueryProof};
 
 //
 use crate::cuda_adaptor::gpuacc_struct::{
@@ -47,6 +46,7 @@ extern "C" {
         fri_data: *mut c_void,
         cuda_stream: *const c_void,
         mem_pool: *const c_void,
+        hash_type: HashType,
     ) -> *mut c_void;
 
     fn rustffi_split_evals_impl(
@@ -60,123 +60,328 @@ extern "C" {
 //
 const ONE_HALF: KoalaBear = unsafe { transmute(16777215) };
 
-pub unsafe fn get_default_fri_data<'a>(
-    poseidon2_constants: &'a Poseidon2Constants,
-    proof_of_work_bits: usize,
-    log_blow_up: usize,
-    num_queries: usize,
-) -> FriData<'a, KoalaBear, FieldExt4, MyChallenger> {
-    FriData {
-        sample: MyChallenger::sample,
-        observe: MyChallenger::observe_slice,
-        check_witness: MyChallenger::check_witness,
-        sample_bits: MyChallenger::sample_bits,
-        get_pow_data: |c| {
-            Some((
-                transmute(c.sponge_state.as_ptr()),
-                transmute(c.input_buffer.as_ptr()),
-                c.input_buffer.len(),
-            ))
-        },
-        pow_hash_type: LeavesHashType::Hash16,
-        poseidon2_constants_pow: poseidon2_constants,
-        grind: MyChallenger::grind,
-        proof_of_work_bits,
-        compute_host_scale: |z, log_n| {
-            let n = 1 << log_n;
-            let shift = KoalaBear::GENERATOR;
-            let zerofier = p3_field::two_adic_coset_zerofier::<FieldExt4>(
-                log_n,
-                FieldExt4::from_base(shift),
-                z,
-            );
-            let denominator = KoalaBear::from_canonical_usize(n) * shift.exp_u64(n as u64 - 1);
-            zerofier * denominator.inverse()
-        },
-        exp_u64: |x, e| x.exp_u64(e),
-        generator: KoalaBear::GENERATOR,
-        log_blow_up,
-        leave_hash_type: LeavesHashType::Hash16,
-        poseidon2_constants_leaves: poseidon2_constants,
-        poseidon2_constants_compress: poseidon2_constants,
-        one_half: ONE_HALF,
-        compute_half_beta: |beta| beta * ONE_HALF,
-        num_queries,
-        as_base_slice: FieldExt4::as_base_slice,
-    }
+//
+use crate::{
+    configs::config::{Com, PcsProof},
+    cuda_adaptor::gpuacc_struct::fri_commit::HashType,
+};
+use p3_field::extension::BinomialExtensionField;
+type Val = KoalaBear;
+type Challenge = BinomialExtensionField<Val, 4>;
+
+//
+pub trait KoalaBearSC:
+    StarkGenericConfig<Val = Val, Challenge = Challenge, Domain = TwoAdicMultiplicativeCoset<Val>>
+{
+    const HASH_TYPE: HashType;
+    fn get_log_blow_up(pcs: &Self::Pcs) -> usize;
+    fn get_num_queries(pcs: &Self::Pcs) -> usize;
+    fn get_proof_of_work_bits(pcs: &Self::Pcs) -> usize;
+    fn to_commit(a: [Val; DIGEST_ELEMS]) -> Com<Self>;
+    fn get_default_fri_data<'a>(
+        poseidon2_constants: &'a Poseidon2Constants,
+        log_blow_up: usize,
+        num_queries: usize,
+        proof_of_work_bits: usize,
+    ) -> FriData<'a, Val, Challenge, Self::Challenger>;
+    fn convert_open_proof(
+        gpu_proof: &OpenProof<Val, Challenge>,
+    ) -> (Vec<Vec<Vec<Vec<Challenge>>>>, PcsProof<Self>);
 }
 
 //
-pub fn convert_open_proof(
-    gpu_proof: &OpenProof<KoalaBear, FieldExt4>,
-) -> (Vec<Vec<Vec<Vec<FieldExt4>>>>, MyFriProof) {
-    let all_opend_values = gpu_proof.all_opened_values.clone();
-    let commit_phase_commits: Vec<Hash<KoalaBear, KoalaBear, DIGEST_ELEMS>> = gpu_proof
-        .commit_phase_commits
-        .iter()
-        .map(|i| i.clone().into())
-        .collect();
-    let final_poly = gpu_proof.final_poly;
-    let pow_witness = gpu_proof.pow_witness;
-    let query_proofs: Vec<_> = gpu_proof
-        .input_proof_values
-        .iter()
-        .zip(gpu_proof.input_proof_paths.iter())
-        .zip(gpu_proof.commit_phase_sibling.iter())
-        .zip(gpu_proof.commit_phase_paths.iter())
-        .map(
-            |(((input_proof_value, input_proof_path), commit_phase_sibling), commit_phase_path)| {
-                let input_proof: Vec<BatchOpening<KoalaBear, ValMmcs>> = input_proof_value
-                    .into_iter()
-                    .zip(input_proof_path.into_iter())
-                    .map(|(v, p)| BatchOpening {
-                        opened_values: v.clone(),
-                        opening_proof: p.clone(),
-                    })
-                    .collect();
-                let commit_phase_openings: Vec<CommitPhaseProofStep<FieldExt4, FieldExt4Mmcs>> =
-                    commit_phase_sibling
+use p3_fri::{BatchOpening, CommitPhaseProofStep, FriProof, QueryProof};
+
+pub type InnerVal = crate::configs::stark_config::kb_poseidon2::SC_Val;
+pub type InnerValMmcs = crate::configs::stark_config::kb_poseidon2::SC_ValMmcs;
+pub type InnerPcs = crate::configs::stark_config::kb_poseidon2::SC_Pcs;
+pub type InnerChallenge = crate::configs::stark_config::kb_poseidon2::SC_Challenge;
+pub type InnerChallenger = crate::configs::stark_config::kb_poseidon2::SC_Challenger;
+pub type InnerChallengeMmcs = crate::configs::stark_config::kb_poseidon2::SC_ChallengeMmcs;
+pub type InnerDigestHash = crate::configs::stark_config::kb_poseidon2::SC_DigestHash;
+
+pub type InnerQueryProof = QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof>;
+pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
+pub type InnerInputProof = Vec<BatchOpening<InnerVal, InnerValMmcs>>;
+pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, InnerInputProof>;
+pub type InnerCommitPhaseStep = CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>;
+
+use crate::configs::stark_config::KoalaBearPoseidon2;
+//
+impl KoalaBearSC for KoalaBearPoseidon2 {
+    const HASH_TYPE: HashType = HashType::Poseidon2KoalaBear;
+    fn get_log_blow_up(pcs: &InnerPcs) -> usize {
+        pcs.fri.log_blowup
+    }
+    fn get_num_queries(pcs: &InnerPcs) -> usize {
+        pcs.fri.num_queries
+    }
+    fn get_proof_of_work_bits(pcs: &InnerPcs) -> usize {
+        pcs.fri.proof_of_work_bits
+    }
+    fn to_commit(a: [Val; DIGEST_ELEMS]) -> InnerDigestHash {
+        a.into()
+    }
+    fn get_default_fri_data<'a>(
+        poseidon2_constants: &'a Poseidon2Constants,
+        log_blow_up: usize,
+        num_queries: usize,
+        proof_of_work_bits: usize,
+    ) -> FriData<'a, Val, Challenge, InnerChallenger> {
+        FriData {
+            sample: InnerChallenger::sample,
+            observe_hash: |c, i| {
+                c.observe(Self::to_commit(i));
+            },
+            observe_ext: InnerChallenger::observe_ext_element,
+            check_witness: InnerChallenger::check_witness,
+            sample_bits: InnerChallenger::sample_bits,
+            get_pow_data: |c| {
+                Some((
+                    unsafe { transmute(c.sponge_state.as_ptr()) },
+                    unsafe { transmute(c.input_buffer.as_ptr()) },
+                    c.input_buffer.len(),
+                ))
+            },
+            hash_type: Self::HASH_TYPE,
+            poseidon2_constants,
+            grind: InnerChallenger::grind,
+            proof_of_work_bits,
+            compute_host_scale: |z, log_n| {
+                let n = 1 << log_n;
+                let shift = Val::GENERATOR;
+                let zerofier = p3_field::two_adic_coset_zerofier::<Challenge>(
+                    log_n,
+                    Challenge::from_base(shift),
+                    z,
+                );
+                let denominator = Val::from_canonical_usize(n) * shift.exp_u64(n as u64 - 1);
+                zerofier * denominator.inverse()
+            },
+            exp_u64: |x, e| x.exp_u64(e),
+            generator: Val::GENERATOR,
+            log_blow_up,
+            one_half: ONE_HALF,
+            compute_half_beta: |beta| beta * ONE_HALF,
+            num_queries,
+        }
+    }
+    fn convert_open_proof(
+        gpu_proof: &OpenProof<Val, Challenge>,
+    ) -> (Vec<Vec<Vec<Vec<Challenge>>>>, InnerFriProof) {
+        let all_opend_values = gpu_proof.all_opened_values.clone();
+        let commit_phase_commits: Vec<InnerDigestHash> = gpu_proof
+            .commit_phase_commits
+            .iter()
+            .map(|i| Self::to_commit(i.clone()))
+            .collect();
+        let final_poly = gpu_proof.final_poly;
+        let pow_witness = gpu_proof.pow_witness;
+        let query_proofs: Vec<_> = gpu_proof
+            .input_proof_values
+            .iter()
+            .zip(gpu_proof.input_proof_paths.iter())
+            .zip(gpu_proof.commit_phase_sibling.iter())
+            .zip(gpu_proof.commit_phase_paths.iter())
+            .map(
+                |(
+                    ((input_proof_value, input_proof_path), commit_phase_sibling),
+                    commit_phase_path,
+                )| {
+                    let input_proof: Vec<InnerBatchOpening> = input_proof_value
+                        .into_iter()
+                        .zip(input_proof_path.into_iter())
+                        .map(|(v, p)| InnerBatchOpening {
+                            opened_values: v.clone(),
+                            opening_proof: p.clone(),
+                        })
+                        .collect();
+                    let commit_phase_openings: Vec<InnerCommitPhaseStep> = commit_phase_sibling
                         .into_iter()
                         .zip(commit_phase_path.into_iter())
-                        .map(|(s, p)| CommitPhaseProofStep {
+                        .map(|(s, p)| InnerCommitPhaseStep {
                             sibling_value: s.clone(),
                             opening_proof: p.clone(),
                         })
                         .collect();
-                QueryProof::<FieldExt4, FieldExt4Mmcs, Vec<BatchOpening<KoalaBear, ValMmcs>>> {
-                    input_proof,
-                    commit_phase_openings,
-                }
+                    InnerQueryProof {
+                        input_proof,
+                        commit_phase_openings,
+                    }
+                },
+            )
+            .collect();
+        (
+            all_opend_values,
+            InnerFriProof {
+                commit_phase_commits,
+                query_proofs,
+                final_poly,
+                pow_witness,
             },
         )
-        .collect();
-    (
-        all_opend_values,
-        MyFriProof {
-            commit_phase_commits,
-            query_proofs,
-            final_poly,
-            pow_witness,
-        },
-    )
+    }
 }
 
-pub fn prove_impl<SC: StarkGenericConfig, C>(
+//
+use crate::instances::configs::embed_kb_bn254_poseidon2::KoalaBearBn254Poseidon2;
+pub type OuterVal = crate::instances::configs::embed_kb_bn254_poseidon2::SC_Val;
+pub type OuterPcs = crate::instances::configs::embed_kb_bn254_poseidon2::SC_Pcs;
+pub type OuterDigestHash = crate::instances::configs::embed_kb_bn254_poseidon2::SC_DigestHash;
+pub type OuterChallenge = crate::instances::configs::embed_kb_bn254_poseidon2::SC_Challenge;
+pub type OuterChallenger = crate::instances::configs::embed_kb_bn254_poseidon2::SC_Challenger;
+pub type OuterChallengeMmcs = crate::instances::configs::embed_kb_bn254_poseidon2::SC_ChallengeMmcs;
+pub type OuterInputProof = crate::instances::configs::embed_kb_bn254_poseidon2::SC_InputProof;
+pub type OuterBatchOpening = crate::instances::configs::embed_kb_bn254_poseidon2::SC_BatchOpening;
+pub type OuterCommitPhaseStep =
+    crate::instances::configs::embed_kb_bn254_poseidon2::SC_CommitPhaseStep;
+pub type OuterQueryProof = crate::instances::configs::embed_kb_bn254_poseidon2::SC_QueryProof;
+
+pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal, OuterInputProof>;
+
+use p3_bn254_fr::Bn254Fr;
+//
+impl KoalaBearSC for KoalaBearBn254Poseidon2 {
+    const HASH_TYPE: HashType = HashType::Poseidon2Bn254;
+    fn get_log_blow_up(pcs: &OuterPcs) -> usize {
+        pcs.fri.log_blowup
+    }
+    fn get_num_queries(pcs: &OuterPcs) -> usize {
+        pcs.fri.num_queries
+    }
+    fn get_proof_of_work_bits(pcs: &OuterPcs) -> usize {
+        pcs.fri.proof_of_work_bits
+    }
+    fn to_commit(a: [Val; DIGEST_ELEMS]) -> OuterDigestHash {
+        unsafe { transmute(a) }
+    }
+    fn get_default_fri_data<'a>(
+        poseidon2_constants: &'a Poseidon2Constants,
+        log_blow_up: usize,
+        num_queries: usize,
+        proof_of_work_bits: usize,
+    ) -> FriData<'a, Val, Challenge, OuterChallenger> {
+        FriData {
+            sample: OuterChallenger::sample,
+            observe_hash: |c, i| {
+                c.observe(Self::to_commit(i));
+            },
+            observe_ext: OuterChallenger::observe_ext_element,
+            check_witness: OuterChallenger::check_witness,
+            sample_bits: OuterChallenger::sample_bits,
+            get_pow_data: |c| {
+                Some((
+                    unsafe { transmute(c.sponge_state.as_ptr()) },
+                    unsafe { transmute(c.input_buffer.as_ptr()) },
+                    c.input_buffer.len(),
+                ))
+            },
+            hash_type: Self::HASH_TYPE,
+            poseidon2_constants,
+            grind: OuterChallenger::grind,
+            proof_of_work_bits,
+            compute_host_scale: |z, log_n| {
+                let n = 1 << log_n;
+                let shift = Val::GENERATOR;
+                let zerofier = p3_field::two_adic_coset_zerofier::<Challenge>(
+                    log_n,
+                    Challenge::from_base(shift),
+                    z,
+                );
+                let denominator = Val::from_canonical_usize(n) * shift.exp_u64(n as u64 - 1);
+                zerofier * denominator.inverse()
+            },
+            exp_u64: |x, e| x.exp_u64(e),
+            generator: Field::GENERATOR,
+            log_blow_up,
+            one_half: ONE_HALF,
+            compute_half_beta: |beta| beta * ONE_HALF,
+            num_queries,
+        }
+    }
+    fn convert_open_proof(
+        gpu_proof: &OpenProof<Val, Challenge>,
+    ) -> (Vec<Vec<Vec<Vec<Challenge>>>>, OuterFriProof) {
+        let all_opend_values = gpu_proof.all_opened_values.clone();
+        let commit_phase_commits: Vec<OuterDigestHash> = gpu_proof
+            .commit_phase_commits
+            .iter()
+            .map(|i| Self::to_commit(i.clone()))
+            .collect();
+        let final_poly = gpu_proof.final_poly;
+        let pow_witness = gpu_proof.pow_witness;
+
+        let transmute_hash = |a: &Vec<[Val; DIGEST_ELEMS]>| -> Vec<[Bn254Fr; 1]> {
+            a.into_iter()
+                .map(|i| unsafe { transmute::<_, [Bn254Fr; 1]>(i.clone()) })
+                .collect()
+        };
+        let query_proofs: Vec<_> = gpu_proof
+            .input_proof_values
+            .iter()
+            .zip(gpu_proof.input_proof_paths.iter())
+            .zip(gpu_proof.commit_phase_sibling.iter())
+            .zip(gpu_proof.commit_phase_paths.iter())
+            .map(
+                |(
+                    ((input_proof_value, input_proof_path), commit_phase_sibling),
+                    commit_phase_path,
+                )| {
+                    let input_proof: Vec<OuterBatchOpening> = input_proof_value
+                        .into_iter()
+                        .zip(input_proof_path.into_iter())
+                        .map(|(v, p)| OuterBatchOpening {
+                            opened_values: v.clone(),
+                            opening_proof: transmute_hash(p),
+                        })
+                        .collect();
+                    let commit_phase_openings: Vec<OuterCommitPhaseStep> = commit_phase_sibling
+                        .into_iter()
+                        .zip(commit_phase_path.into_iter())
+                        .map(|(s, p)| OuterCommitPhaseStep {
+                            sibling_value: s.clone(),
+                            opening_proof: transmute_hash(p),
+                        })
+                        .collect();
+                    OuterQueryProof {
+                        input_proof,
+                        commit_phase_openings,
+                    }
+                },
+            )
+            .collect();
+        (
+            all_opend_values,
+            OuterFriProof {
+                commit_phase_commits,
+                query_proofs,
+                final_poly,
+                pow_witness,
+            },
+        )
+    }
+}
+
+//
+//
+//
+pub fn prove_impl<SC: StarkGenericConfig, C, KSC: KoalaBearSC>(
     config: &SC,
     chips: &[MetaChip<SC::Val, C>],
     challenger: &mut SC::Challenger,
     num_public_values: usize,
     main_commitment_gm: MainTraceCommitments<
-        KoalaBearPoseidon2,
+        SC,
         Vec<DeviceMatrixConcrete<'static, KoalaBear>>,
         GPUMerkleTree<'static, KoalaBear>,
     >,
-    pk_gm: &BaseProvingKeyCuda,
+    pk_gm: &BaseProvingKeyCuda<SC>,
     stream: &'static CudaStream,
     mem_pool: &CudaMemPool,
     dev_id: usize,
 ) -> BaseProof<SC>
 where
+    SC: StarkGenericConfig + 'static,
     C: Air<ProverConstraintFolder<SC>> + ChipBehavior<SC::Val>,
 {
     let start = Instant::now();
@@ -200,8 +405,7 @@ where
     challenger_gm.observe_slice(public_values_sc);
 
     let commitment_kb = &main_commitment_gm.commitment;
-    let commitment_sc: &<SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment =
-        unsafe { transmute(commitment_kb) };
+    let commitment_sc: &Com<SC> = unsafe { transmute(commitment_kb) };
     challenger_gm.observe(commitment_sc.clone());
 
     // Obtain the challenges used for the regional permutation argument.
@@ -209,7 +413,7 @@ where
         array::from_fn(|_| challenger_gm.sample_ext_element());
 
     let main_traces_gm: &Vec<DeviceMatrixConcrete<'_, KoalaBear>> = &main_commitment_gm.main_traces;
-    // println!("prove_impl - init for perm Duration: {:?}", start.elapsed());
+    println!("prove_impl - init for perm Duration: {:?}", start.elapsed());
 
     let start = Instant::now();
     let preprocessed_traces = chips
@@ -252,7 +456,7 @@ where
             )
         })
         .unzip();
-    // println!("prove_impl - generate perm Duration: {:?}", start.elapsed());
+    println!("prove_impl - generate perm Duration: {:?}", start.elapsed());
 
     let start = Instant::now();
     use crate::cuda_adaptor::fri_commit::fri_commit_from_device;
@@ -269,11 +473,15 @@ where
         stream,
         mem_pool,
     );
-    // println!("prove_impl - commit perm Duration: {:?}", start.elapsed());
+    stream.synchronize().unwrap();
+    println!("prove_impl - commit perm Duration: {:?}", start.elapsed());
 
     let start = Instant::now();
     // Quotient
-    // println!("GPU Memory before Quotient{:?}", cudart::memory::memory_get_info());
+    println!(
+        "GPU Memory before Quotient{:?}",
+        cudart::memory::memory_get_info()
+    );
     let log_degrees: Vec<usize> = main_traces_gm
         .iter()
         .map(|trace| trace.log_n)
@@ -307,12 +515,9 @@ where
         .collect::<Vec<_>>();
 
     // Observe the permutation commitment and cumulative sums.
-    let permutation_commit: InnerDigestHash = perm_merkle.merkle_root.clone().into();
-    let permutation_commit_sc: &Hash<SC::Val, SC::Val, 8> =
-        unsafe { transmute(&permutation_commit) };
-    for value in *permutation_commit_sc {
-        challenger_gm.observe(value);
-    }
+    let permutation_commit_ref: &Com<SC> = unsafe { transmute(&perm_merkle.merkle_root) };
+    let permutation_commit = permutation_commit_ref.clone();
+    challenger_gm.observe(permutation_commit.clone());
     for (regional_sum, global_sum) in local_cumulative_sums
         .iter()
         .zip(global_cumulative_sums.iter())
@@ -323,10 +528,10 @@ where
     }
 
     let alpha: SC::Challenge = challenger_gm.sample_ext_element();
-    // println!(
-    //     "prove_impl - quotient prepare Duration: {:?}",
-    //     start.elapsed()
-    // );
+    println!(
+        "prove_impl - quotient prepare Duration: {:?}",
+        start.elapsed()
+    );
 
     let start = Instant::now();
     let quotient_values: Vec<DeviceMatrixConcrete<KoalaBear>> = quotient_domains
@@ -413,10 +618,10 @@ where
         .collect::<Vec<_>>();
 
     stream.synchronize().unwrap();
-    // println!(
-    //     "prove_impl - quotient caculate Duration: {:?}",
-    //     start.elapsed()
-    // );
+    println!(
+        "prove_impl - quotient caculate Duration: {:?}",
+        start.elapsed()
+    );
 
     //
     let start = Instant::now();
@@ -450,10 +655,10 @@ where
         )
         .collect::<Vec<_>>();
     stream.synchronize().unwrap();
-    // println!(
-    //     "prove_impl - quotient domain Duration: {:?}",
-    //     start.elapsed()
-    // );
+    println!(
+        "prove_impl - quotient domain Duration: {:?}",
+        start.elapsed()
+    );
 
     //
     let start = Instant::now();
@@ -475,41 +680,38 @@ where
         stream,
         mem_pool,
     );
-    // println!(
-    //     "prove_impl - quotient commit Duration: {:?}",
-    //     start.elapsed()
-    // );
+    stream.synchronize().unwrap();
+    println!(
+        "prove_impl - quotient commit Duration: {:?}",
+        start.elapsed()
+    );
 
     //
     let start = Instant::now();
-    let quotient_commit = quotient_merkle.merkle_root;
-    let quotient_commit_cs: &[SC::Val; 8] = unsafe { transmute(&quotient_commit) };
-    for value in *quotient_commit_cs {
-        challenger_gm.observe(value);
-    }
+    let quotient_commit_ref: &Com<SC> = unsafe { transmute(&quotient_merkle.merkle_root) };
+    let quotient_commit = quotient_commit_ref.clone();
+    challenger_gm.observe(quotient_commit.clone());
 
-    use crate::configs::stark_config::kb_poseidon2::{SC_Challenge, SC_Challenger};
     let zeta: SC::Challenge = challenger_gm.sample_ext_element();
-    let zeta_kb: &SC_Challenge = unsafe { transmute(&zeta) };
+    let zeta_kb: &InnerChallenge = unsafe { transmute(&zeta) };
 
     // get_default_fri_data
-    let (_, poseidon2_constants) = crate::cuda_adaptor::pico_poseidon2kb_init_poseidon2constants();
-    use crate::cuda_adaptor::TwoAdicFriPcsGm;
-    let pcs = config.pcs();
-    let two_adic_pcs: &TwoAdicFriPcsGm = unsafe { transmute(&pcs) };
-    let proof_of_work_bits = two_adic_pcs.fri.proof_of_work_bits;
-    let log_blow_up = two_adic_pcs.fri.log_blowup;
-    let num_queries = two_adic_pcs.fri.num_queries;
+    let hash_type = KSC::HASH_TYPE;
+    let poseidon2_constants = get_poseidon2_constants(hash_type);
 
-    let fri_data = unsafe {
-        crate::cuda_adaptor::fri_open::get_default_fri_data(
-            &poseidon2_constants,
-            proof_of_work_bits,
-            log_blow_up,
-            num_queries,
-        )
-    };
-    // println!("prove_impl - get fri Duration: {:?}", start.elapsed());
+    let pcs = config.pcs();
+    let two_adic_pcs: &KSC::Pcs = unsafe { transmute(&pcs) };
+    let log_blow_up = KSC::get_log_blow_up(two_adic_pcs);
+    let num_queries = KSC::get_num_queries(two_adic_pcs);
+    let proof_of_work_bits = KSC::get_proof_of_work_bits(two_adic_pcs);
+    let fri_data = KSC::get_default_fri_data(
+        &poseidon2_constants,
+        log_blow_up,
+        num_queries,
+        proof_of_work_bits,
+    );
+    stream.synchronize().unwrap();
+    println!("prove_impl - get fri Duration: {:?}", start.elapsed());
 
     //
     let start = Instant::now();
@@ -520,7 +722,7 @@ where
         .iter()
         .zip(pk_gm.local_only.iter())
         .map(|(trace, local_only)| {
-            let domain = Pcs::<SC_Challenge, SC_Challenger>::natural_domain_for_degree(
+            let domain = Pcs::<Challenge, KSC::Challenger>::natural_domain_for_degree(
                 two_adic_pcs,
                 1 << trace.log_n,
             );
@@ -550,15 +752,14 @@ where
         .map(|_| vec![*zeta_kb])
         .collect::<Vec<_>>();
     //
-    // println!(
-    //     "prove_impl - 4 opening points Duration: {:?}",
-    //     start.elapsed()
-    // );
+    println!(
+        "prove_impl - 4 opening points Duration: {:?}",
+        start.elapsed()
+    );
 
     //
     let start = Instant::now();
 
-    let gpu_challenger_trans: &SC_Challenger = unsafe { transmute(&challenger_gm) };
     let gpu_opening_proof = unsafe {
         let ptr = rustffi_fri_open(
             transmute(&vec![
@@ -567,33 +768,34 @@ where
                 (&perm_merkle, permutation_trace_opening_points.clone()),
                 (&quotient_merkle, quotient_opening_points),
             ]),
-            transmute(&gpu_challenger_trans.clone()),
+            transmute(&challenger_gm.clone()),
             transmute(&fri_data),
             transmute(stream),
             transmute(mem_pool),
+            KSC::HASH_TYPE,
         );
-        let open_proof_ptr: *mut OpenProof<KoalaBear, FieldExt4> = transmute(ptr);
+        let open_proof_ptr: *mut OpenProof<Val, Challenge> = transmute(ptr);
 
-        let value: OpenProof<KoalaBear, FieldExt4> = std::ptr::read(open_proof_ptr);
-        let layout = Layout::new::<OpenProof<KoalaBear, FieldExt4>>();
+        let value: OpenProof<Val, Challenge> = std::ptr::read(open_proof_ptr);
+        let layout = Layout::new::<OpenProof<Val, Challenge>>();
         dealloc(open_proof_ptr as *mut u8, layout);
         value
     };
-    // println!("prove_impl - fri_open Duration: {:?}", start.elapsed());
+    stream.synchronize().unwrap();
+    println!("prove_impl - fri_open Duration: {:?}", start.elapsed());
 
     //
     let start = Instant::now();
 
     //
-    let (openings, opening_proof) =
-        crate::cuda_adaptor::fri_open::convert_open_proof(&gpu_opening_proof);
+    let (openings, opening_proof) = KSC::convert_open_proof(&gpu_opening_proof);
     let [preprocessed_values, main_values, permutation_values, mut quotient_values] =
         openings.try_into().unwrap();
     assert!(main_values.len() == chips.len());
-    // println!(
-    //     "prove_impl - convert_open_proof Duration: {:?}",
-    //     start.elapsed()
-    // );
+    println!(
+        "prove_impl - convert_open_proof Duration: {:?}",
+        start.elapsed()
+    );
 
     //
     let start = Instant::now();
@@ -609,7 +811,7 @@ where
             } else {
                 let [local] = op.try_into().unwrap();
                 let width = local.len();
-                (local, vec![SC_Challenge::ZERO; width])
+                (local, vec![Challenge::ZERO; width])
             }
         })
         .collect_vec();
@@ -624,7 +826,7 @@ where
             } else {
                 let [local] = op.try_into().unwrap();
                 let width = local.len();
-                (local, vec![SC_Challenge::ZERO; width])
+                (local, vec![Challenge::ZERO; width])
             }
         })
         .collect_vec();
@@ -642,10 +844,10 @@ where
         quotient_opened_values.push(slice.map(|mut v| v.pop().unwrap()).collect::<Vec<_>>());
     }
 
-    // println!(
-    //     "prove_impl - prepare for opened value Duration: {:?}",
-    //     start.elapsed()
-    // );
+    println!(
+        "prove_impl - prepare for opened value Duration: {:?}",
+        start.elapsed()
+    );
 
     //
     let start = Instant::now();
@@ -678,7 +880,7 @@ where
                 let (preprocessed_local, preprocessed_next) = preprocessed;
                 let (main_local, main_next) = main;
                 let (permutation_local, permutation_next) = permutation;
-                let regional_cumulative_sum_kb: &SC_Challenge =
+                let regional_cumulative_sum_kb: &Challenge =
                     unsafe { transmute(&regional_cumulative_sum) };
                 Arc::new(ChipOpenedValues {
                     preprocessed_local,
@@ -695,10 +897,10 @@ where
             },
         )
         .collect::<Arc<[_]>>();
-    // println!(
-    //     "prove_impl - compute opened value Duration: {:?}",
-    //     start.elapsed()
-    // );
+    println!(
+        "prove_impl - compute opened value Duration: {:?}",
+        start.elapsed()
+    );
 
     //
     let start = Instant::now();
@@ -726,10 +928,10 @@ where
         <SC as StarkGenericConfig>::Challenger,
     >>::Proof = unsafe { transmute(&opening_proof) };
 
-    // println!(
-    //     "prove_impl - prepare for proof value Duration: {:?}",
-    //     start.elapsed()
-    // );
+    println!(
+        "prove_impl - prepare for proof value Duration: {:?}",
+        start.elapsed()
+    );
 
     BaseProof::<SC> {
         commitments: BaseCommitments {

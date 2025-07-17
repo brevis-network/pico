@@ -75,7 +75,7 @@ where
     pub fn prove_cycles_cuda(
         &self,
         stdin: EmulatorStdin<Program, Vec<u8>>,
-        pk_cuda: &BaseProvingKeyCuda,
+        pk_cuda: &BaseProvingKeyCuda<SC>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
@@ -134,7 +134,7 @@ where
 
 impl<SC> InitialProverSetup for RiscvProver<SC, Program>
 where
-    SC: Send + StarkGenericConfig,
+    SC: Send + StarkGenericConfig + 'static,
     Com<SC>: Send + Sync,
     Dom<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync,

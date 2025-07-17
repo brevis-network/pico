@@ -54,7 +54,7 @@ where
         + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
     CC: CircuitConfig<N = F, F = F, EF = Challenge<SC>, Bit = Felt<F>> + Debug,
     CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
-    SC: FieldFriConfigVariable<CC, Val = F, Domain = TwoAdicMultiplicativeCoset<F>>,
+    SC: FieldFriConfigVariable<CC, Val = F, Domain = TwoAdicMultiplicativeCoset<F>> + 'static,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     C: ChipBehavior<
@@ -85,11 +85,11 @@ where
     CC: CircuitConfig,
     CC::F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + TwoAdicField,
     SC: FieldFriConfigVariable<
-        CC,
-        Val = CC::F,
-        Challenge = CC::EF,
-        Domain = TwoAdicMultiplicativeCoset<Val<SC>>,
-    >,
+            CC,
+            Val = CC::F,
+            Challenge = CC::EF,
+            Domain = TwoAdicMultiplicativeCoset<Val<SC>>,
+        > + 'static,
     C: ChipBehavior<
             Val<SC>,
             Program = RecursionProgram<Val<SC>>,

@@ -118,7 +118,7 @@ where
     fn prove_cuda(
         &self,
         witness: &ProvingWitness<SC, C, RecursionStdinVariant<SC, C>>,
-        pk_cuda: Option<&BaseProvingKeyCuda>,
+        pk_cuda: Option<&BaseProvingKeyCuda<SC>>,
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
@@ -211,7 +211,7 @@ where
 
 impl<SC, C> CompressMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<
         Val<SC>,
         Program = RecursionProgram<Val<SC>>,

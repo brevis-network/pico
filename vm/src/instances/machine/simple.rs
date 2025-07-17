@@ -27,7 +27,7 @@ where
 
 impl<SC, C> MachineBehavior<SC, C, Vec<u8>> for SimpleMachine<SC, C>
 where
-    SC: StarkGenericConfig + Send + Sync,
+    SC: StarkGenericConfig + Send + Sync + 'static,
     C: ChipBehavior<Val<SC>>,
     Val<SC>: PrimeField32,
     Com<SC>: Send + Sync,
@@ -61,7 +61,7 @@ where
     fn prove_cuda(
         &self,
         _witness: &ProvingWitness<SC, C, Vec<u8>>,
-        _pk_cuda: Option<&BaseProvingKeyCuda>,
+        _pk_cuda: Option<&BaseProvingKeyCuda<SC>>,
         _stream: &'static CudaStream,
         _mem_pool: &CudaMemPool,
         _dev_id: usize,
@@ -99,7 +99,7 @@ where
 
 impl<SC, C> SimpleMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<SC::Val>,
 {
     pub fn new(config: SC, chips: Vec<MetaChip<SC::Val, C>>, num_public_values: usize) -> Self {

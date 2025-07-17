@@ -57,7 +57,7 @@ use tracing::info;
 
 pub struct RiscvConvertProver<SC>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     SC::Val: FieldSpecificPoseidon2Config + PrimeField32,
 {
     prover_id: String,
@@ -136,7 +136,7 @@ where
         stream: &'static CudaStream,
         mem_pool: &CudaMemPool,
         dev_id: usize,
-    ) -> (Self, BaseProvingKeyCuda) {
+    ) -> (Self, BaseProvingKeyCuda<SC>) {
         // opts and setups
         let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
         let vk_enabled = vk_manager.vk_verification_enabled();
@@ -203,7 +203,7 @@ pub trait RiscvConvertHandler<SC: StarkGenericConfig> {
         &self,
         req: RiscvRequest,
         vk_root: &VkRoot<SC>,
-        pk_gm: &BaseProvingKeyCuda,
+        pk_gm: &BaseProvingKeyCuda<SC>,
     ) -> RiscvResponse<SC>;
 }
 
@@ -225,7 +225,7 @@ where
         &self,
         _req: RiscvRequest,
         _vk_root: &VkRoot<SC>,
-        _pk_gm: &BaseProvingKeyCuda,
+        _pk_gm: &BaseProvingKeyCuda<SC>,
     ) -> RiscvResponse<SC> {
         panic!("unsupported");
     }
@@ -310,7 +310,7 @@ impl RiscvConvertHandler<BabyBearPoseidon2> for RiscvConvertProver<BabyBearPosei
         &self,
         _req: RiscvRequest,
         _vk_root: &VkRoot<BabyBearPoseidon2>,
-        _pk_gm: &BaseProvingKeyCuda,
+        _pk_gm: &BaseProvingKeyCuda<BabyBearPoseidon2>,
     ) -> RiscvResponse<BabyBearPoseidon2> {
         panic!("unsupported");
     }
@@ -394,7 +394,7 @@ impl RiscvConvertHandler<KoalaBearPoseidon2> for RiscvConvertProver<KoalaBearPos
         &self,
         req: RiscvRequest,
         vk_root: &VkRoot<KoalaBearPoseidon2>,
-        pk_gm: &BaseProvingKeyCuda,
+        pk_gm: &BaseProvingKeyCuda<KoalaBearPoseidon2>,
     ) -> RiscvResponse<KoalaBearPoseidon2> {
         log_section("RISCV PHASE");
 

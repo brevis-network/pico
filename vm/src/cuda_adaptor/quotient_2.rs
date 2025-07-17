@@ -138,11 +138,11 @@ pub fn compute_quotient_values_cuda_gm_2<'stream, SC, C>(
     trace_domain: TwoAdicMultiplicativeCoset<KoalaBear>,
     quotient_domain: TwoAdicMultiplicativeCoset<KoalaBear>,
     prep: Option<DeviceMatrixRef<KoalaBear>>,
-    mut main: DeviceMatrixRef<KoalaBear>,
-    mut perm: DeviceMatrixRef<KoalaBear>,
+    main: DeviceMatrixRef<KoalaBear>,
+    perm: DeviceMatrixRef<KoalaBear>,
     perm_challenges: &[<SC as StarkGenericConfig>::Challenge; 2],
     alpha: <SC as StarkGenericConfig>::Challenge,
-    public_values: &[KoalaBear],
+    public_values: &[SC::Val],
     cuda_stream: &'stream CudaStream,
     mem_pool: &CudaMemPool,
     dev_id: usize,
@@ -154,6 +154,7 @@ where
     // + ChipBehavior<KoalaBear>
     // + Air<SymbolicAirBuilder<KoalaBear, 4>>,
 {
+    let start = Instant::now();
     assert!(perm_challenges.len() == 2);
     let log_n = trace_domain.log_n;
     let log_quotient = quotient_domain.log_n;
@@ -188,7 +189,12 @@ where
     let chip_instruction_map = crate::cuda_adaptor::chips_analyzer::CHIPS_INSTRUCTIONS
         .lock()
         .unwrap();
-    let chip_instruction = chip_instruction_map.get(&chip.name()).unwrap();
+    let chip_instruction = chip_instruction_map.get(&chip.name()).unwrap_or_else(|| {
+        panic!(
+            "Aborting due to missing instruction for chip '{}'",
+            chip.name()
+        );
+    });
 
     //
     let perm_challenges_kb: &[BinomialExtensionField<KoalaBear, 4>; 2] =
@@ -198,10 +204,13 @@ where
     let global_cumulative_sum_kb: &SepticDigest<KoalaBear> =
         unsafe { transmute(global_cumulative_sum) };
 
-    let mut public_values = public_values.to_vec();
-    public_values.resize(207, KoalaBear::ZERO);
+    //
+    let public_values = public_values.to_vec();
+    let mut public_values_kb: Vec<KoalaBear> = unsafe { transmute(public_values) };
+    public_values_kb.resize(207, KoalaBear::ZERO);
+
     let scalars = crate::cuda_adaptor::h_poly_struct::prepare_scalars(
-        &public_values,
+        &public_values_kb,
         perm_challenges_kb,
         local_cumulative_sum_kb.clone(),
         global_cumulative_sum_kb.clone(),
@@ -304,5 +313,6 @@ where
             itmds_map.as_ptr(),
         );
     }
+    cuda_stream.synchronize().unwrap();
     gpu_result
 }

@@ -267,7 +267,7 @@ macro_rules! impl_combine_machine {
             fn prove_cuda(
                 &self,
                 proving_witness: &ProvingWitness<$recur_sc, C, RecursionStdinVariant<$recur_sc, C>>,
-                _pk_cuda: Option<&BaseProvingKeyCuda>,
+                _pk_cuda: Option<&BaseProvingKeyCuda<$recur_sc>>,
                 stream: &'static CudaStream,
                 mem_pool: & CudaMemPool,
                 dev_id: usize,
@@ -492,7 +492,7 @@ impl_combine_machine!(KoalaBearMetaEmulator, KoalaBearSimple, KoalaBearPoseidon2
 
 impl<SC, C> CombineMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<
         Val<SC>,
         Program = RecursionProgram<Val<SC>>,

@@ -72,7 +72,11 @@ impl FieldSpecificPoseidon2Config for Mersenne31 {
 
 // Check if the type T is a specified field F.
 // NOTE: This function could not work for trait types with `'static`.
-pub const fn same_field<T: Any, F: Field + BinomiallyExtendable<D>, const D: usize>() -> bool {
+pub const fn same_field<
+    T: Any,
+    F: Field + BinomiallyExtendable<D> + std::cmp::PartialOrd,
+    const D: usize,
+>() -> bool {
     // NOTE: removing this unsafe is impossible so we have to allow the warning here
     #[allow(unused_unsafe)]
     unsafe {
@@ -84,6 +88,8 @@ pub const fn same_field<T: Any, F: Field + BinomiallyExtendable<D>, const D: usi
         let binomial = type_id::<BinomialExtensionField<F, D>>();
         let ext = type_id::<SymbolicExt<F, BinomialExtensionField<F, D>>>();
         let felt = type_id::<SymbolicFelt<F>>();
+        // let analyezer_variable = type_id::<crate::air_analyzer::SymbolicExpression<F>>();
+        let analyezer_variable_2 = type_id::<crate::cuda_adaptor::h_poly_struct::Expression<F>>();
 
         typ == field
             || typ == expr
@@ -91,5 +97,7 @@ pub const fn same_field<T: Any, F: Field + BinomiallyExtendable<D>, const D: usi
             || typ == binomial
             || typ == ext
             || typ == felt
+            // || typ == analyezer_variable
+            || typ == analyezer_variable_2
     }
 }

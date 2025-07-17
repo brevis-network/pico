@@ -32,7 +32,7 @@ use tracing::{debug, debug_span, info, instrument};
 
 pub struct ConvertMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
 {
     base_machine: BaseMachine<SC, C>,
 }
@@ -191,7 +191,7 @@ macro_rules! impl_convert_machine {
                     C,
                     ConvertStdin<$riscv_sc, RiscvChipType<Val<$riscv_sc>>>,
                 >,
-                _pk_cuda: Option<&BaseProvingKeyCuda>,
+                _pk_cuda: Option<&BaseProvingKeyCuda<$recur_sc>>,
                 stream: &'static CudaStream,
                 mem_pool: & CudaMemPool,
                 dev_id: usize,

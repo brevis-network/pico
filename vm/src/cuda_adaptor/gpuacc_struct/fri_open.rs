@@ -1,4 +1,4 @@
-use crate::cuda_adaptor::{LeavesHashType, Poseidon2Constants, DIGEST_ELEMS};
+use crate::cuda_adaptor::{gpuacc_struct::fri_commit::HashType, Poseidon2Constants, DIGEST_ELEMS};
 use std::{ffi::c_void, fmt::Debug};
 
 #[derive(Clone)]
@@ -9,25 +9,22 @@ pub struct FriData<
     Challenger,
 > {
     pub sample: fn(&mut Challenger) -> ET,
-    pub observe: fn(&mut Challenger, &[T]),
+    pub observe_hash: fn(&mut Challenger, [T; DIGEST_ELEMS]),
+    pub observe_ext: fn(&mut Challenger, ET),
     pub check_witness: fn(&mut Challenger, usize, T) -> bool,
     pub sample_bits: fn(&mut Challenger, usize) -> usize,
     pub get_pow_data: fn(&Challenger) -> Option<(*const c_void, *const c_void, usize)>, // state_ptr, input_ptr, input_length
-    pub pow_hash_type: LeavesHashType,
-    pub poseidon2_constants_pow: &'a Poseidon2Constants,
+    pub hash_type: HashType,
+    pub poseidon2_constants: &'a Poseidon2Constants,
     pub grind: fn(&mut Challenger, usize) -> T,
     pub proof_of_work_bits: usize,
     pub compute_host_scale: fn(ET, usize) -> ET,
     pub exp_u64: fn(ET, u64) -> ET,
     pub generator: T,
     pub log_blow_up: usize,
-    pub leave_hash_type: LeavesHashType,
-    pub poseidon2_constants_leaves: &'a Poseidon2Constants,
-    pub poseidon2_constants_compress: &'a Poseidon2Constants,
     pub one_half: T,
     pub compute_half_beta: fn(ET) -> ET,
     pub num_queries: usize,
-    pub as_base_slice: fn(&ET) -> &[T],
 }
 #[derive(Debug, Clone)]
 pub struct OpenProof<T: Sized + Debug + Clone + Copy, ET: Sized + Debug + Clone + Copy> {

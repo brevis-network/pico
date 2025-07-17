@@ -37,7 +37,7 @@ where
 
 impl<SC> CombineProver<SC>
 where
-    SC: Default + StarkGenericConfig,
+    SC: Default + StarkGenericConfig + 'static,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config + BinomiallyExtendable<EXTENSION_DEGREE>,
     <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::ProverData: Send,
 {

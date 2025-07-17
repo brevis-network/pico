@@ -64,7 +64,10 @@ impl<SC, C> BaseProver<SC, C> {
     }
 }
 
-impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
+impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C>
+where
+    SC: StarkGenericConfig + 'static,
+{
     pub fn setup_keys(
         &self,
         config: &SC,

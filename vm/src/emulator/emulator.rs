@@ -203,7 +203,7 @@ macro_rules! impl_emulator {
                 RecursionRecord<Val<$recur_sc>>,
                 BaseVerifyingKey<$recur_sc>,
                 bool,
-                BaseProvingKeyCuda,
+                BaseProvingKeyCuda<$recur_sc>,
             ) {
                 let start = Instant::now();
                 let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
@@ -274,7 +274,7 @@ macro_rules! impl_emulator {
                 Vec<RecursionRecord<Val<$recur_sc>>>,
                 Vec<BaseVerifyingKey<$recur_sc>>,
                 bool,
-                Vec<BaseProvingKeyCuda>,
+                Vec<BaseProvingKeyCuda<$recur_sc>>,
             ) {
                 let mut batch_records = vec![];
                 let mut batch_vks = vec![];
@@ -367,7 +367,7 @@ macro_rules! impl_emulator {
                 RecursionRecord<Val<$recur_sc>>,
                 BaseVerifyingKey<$recur_sc>,
                 bool,
-                BaseProvingKeyCuda,
+                BaseProvingKeyCuda<$recur_sc>,
             ) {
                 let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
                 let (vk_gm, pk_gm) = self
@@ -421,7 +421,7 @@ macro_rules! impl_emulator {
                 Vec<RecursionRecord<Val<$recur_sc>>>,
                 Vec<BaseVerifyingKey<$recur_sc>>,
                 bool,
-                Vec<BaseProvingKeyCuda>,
+                Vec<BaseProvingKeyCuda<$recur_sc>>,
             ) {
                 let mut batch_records = vec![];
                 let mut batch_vks = vec![];

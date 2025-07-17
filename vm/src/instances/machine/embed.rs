@@ -36,7 +36,7 @@ where
 impl<PrevSC, EmbedSC, C, I> MachineBehavior<EmbedSC, C, I> for EmbedMachine<PrevSC, EmbedSC, C, I>
 where
     PrevSC: StarkGenericConfig,
-    EmbedSC: StarkGenericConfig<Val = PrevSC::Val>,
+    EmbedSC: StarkGenericConfig<Val = PrevSC::Val> + 'static,
     Val<EmbedSC>: PrimeField32,
     Com<EmbedSC>: Send + Sync,
     PcsProverData<EmbedSC>: Send + Sync,
@@ -97,11 +97,11 @@ where
 
     fn prove_cuda(
         &self,
-        _witness: &ProvingWitness<EmbedSC, C, I>,
-        _pk_cuda: Option<&BaseProvingKeyCuda>,
-        _stream: &'static CudaStream,
-        _mem_pool: &CudaMemPool,
-        _dev_id: usize,
+        witness: &ProvingWitness<EmbedSC, C, I>,
+        pk_cuda: Option<&BaseProvingKeyCuda<EmbedSC>>,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
     ) -> MetaProof<EmbedSC>
     where
         C: for<'a> Air<
@@ -112,7 +112,43 @@ where
                 >,
             > + Air<ProverConstraintFolder<EmbedSC>>,
     {
-        unreachable!();
+        let mut records = witness.records().to_vec();
+        debug_span!("complement record").in_scope(|| self.complement_record(&mut records));
+
+        debug!("EMBED record stats");
+        let stats = records[0].stats();
+        for (key, value) in &stats {
+            debug!("   |- {:<28}: {}", key, value);
+        }
+
+        let proofs = debug_span!("prove_ensemble").in_scope(|| {
+            self.base_machine.prove_ensemble_cuda(
+                &records,
+                pk_cuda.unwrap(),
+                stream,
+                mem_pool,
+                dev_id,
+            )
+        });
+
+        // construct meta proof
+        let vks = vec![witness.vk.clone().unwrap()].into();
+
+        debug!("EMBED chip log degrees:");
+        proofs.iter().enumerate().for_each(|(i, proof)| {
+            debug!("Proof {}", i);
+            proof
+                .main_chip_ordering
+                .iter()
+                .for_each(|(chip_name, idx)| {
+                    debug!(
+                        "   |- {:<20} main: {:<8}",
+                        chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
+                    );
+                });
+        });
+
+        MetaProof::new(proofs.into(), vks, None)
     }
 
     /// Verify the proof.
@@ -150,7 +186,7 @@ where
 impl<PrevSC, SC, C, I> EmbedMachine<PrevSC, SC, C, I>
 where
     PrevSC: StarkGenericConfig,
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<
         Val<SC>,
         Program = RecursionProgram<Val<SC>>,

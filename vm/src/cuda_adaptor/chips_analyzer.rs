@@ -6,7 +6,9 @@ use bincode::{deserialize, serialize};
 use cudart::{
     device::get_device_count,
     memory::{memory_copy, DeviceAllocation},
+    memory_pools::{CudaMemPool, DevicePoolAllocation},
     slice::CudaSlice,
+    stream::CudaStream,
 };
 use p3_air::BaseAir;
 use p3_field::Field;
@@ -46,6 +48,20 @@ pub fn host_slice_2_device_vec<T: Sized, C: CudaSlice<T> + ?Sized>(a: &C) -> Dev
 }
 pub fn device_slice_2_host_vec<T: Sized, C: CudaSlice<T> + ?Sized>(a: &C) -> Vec<T> {
     let mut ret: Vec<T> = uninit_vec(a.len());
+    memory_copy(&mut ret, a).unwrap();
+    ret
+}
+
+//
+pub fn host_slice_2_device_vec_mempool<'stream, T: Sized, C: CudaSlice<T> + ?Sized>(
+    a: &C,
+    cuda_stream: &'stream CudaStream,
+    mem_pool: &CudaMemPool,
+) -> DevicePoolAllocation<'stream, T> {
+    let length = a.len();
+    let mut ret =
+        DevicePoolAllocation::<'stream, T>::alloc_from_pool_async(length, mem_pool, cuda_stream)
+            .unwrap();
     memory_copy(&mut ret, a).unwrap();
     ret
 }
@@ -164,6 +180,4 @@ fn load_from_file_2() {
     let wrapper: StorageWrapperHashStringCalculate = serde_json::from_slice(&data).unwrap();
     let mut guard = CHIPS_INSTRUCTIONS.lock().unwrap();
     *guard = wrapper.data;
-
-    let _ = guard.get("MemoryConst").unwrap();
 }

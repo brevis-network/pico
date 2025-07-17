@@ -394,7 +394,7 @@ fn pico_poseidon2m31_init() -> PicoPoseidon2Mersenne31 {
 Poseidon2 on Bn254
  */
 
-fn bn254_from_ark_ff(input: ark_FpBN256) -> Bn254Fr {
+pub fn bn254_from_ark_ff(input: ark_FpBN256) -> Bn254Fr {
     let bytes = input.into_bigint().to_bytes_le();
 
     let mut res = <FFBn254Fr as PrimeField>::Repr::default();
