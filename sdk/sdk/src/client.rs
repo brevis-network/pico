@@ -1,5 +1,5 @@
 use crate::command::execute_command;
-use anyhow::{Error, Ok, Result};
+use anyhow::{Error, Result};
 use log::{debug, info};
 use p3_baby_bear::BabyBear;
 use p3_koala_bear::KoalaBear;
