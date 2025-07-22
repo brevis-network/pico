@@ -265,7 +265,6 @@ macro_rules! impl_combine_machine {
                 assert_eq!(proof.proofs().len(), 1);
 
                 // assert completion
-
                 let public_values: &RecursionPublicValues<_> =
                     proof.proofs[0].public_values.as_ref().borrow();
 
@@ -282,9 +281,9 @@ macro_rules! impl_combine_machine {
                 let combine_vk = proof.vks().first().unwrap();
                 if vk_manager.vk_verification_enabled(){
                     assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
+                    assert_eq!(public_values.vk_root, vk_manager.merkle_root, "Recursion circuit vk_root mismatch!")
                 }
-
-
+                
                 // verify
                 self.base_machine
                     .verify_ensemble(combine_vk, &proof.proofs())?;
