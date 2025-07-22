@@ -70,7 +70,7 @@ pub fn parse_args<SC: StarkGenericConfig>() -> (&'static [u8], EmulatorStdin<Pro
     } else if args.elf == "reth" {
         elf = load_elf("reth");
         let input_bytes = fs::read("./vm/src/compiler/test_elf/reth-18884864.bin").unwrap();
-        stdin.write(&input_bytes);
+        stdin.write_slice(&input_bytes);
     } else if args.elf == "keccak" || args.elf == "k" {
         elf = load_elf("keccak");
         let input_str = (0..args.n).map(|_| "x").collect::<String>();
