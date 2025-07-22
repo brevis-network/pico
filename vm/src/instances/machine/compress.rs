@@ -140,7 +140,10 @@ where
                 vk_manager.is_vk_allowed(vk.hash_field()),
                 "Recursion Vk Verification failed"
             );
-            assert_eq!(public_values.vk_root, vk_manager.merkle_root, "Recursion circuit vk_root mismatch!")
+            assert_eq!(
+                public_values.vk_root, vk_manager.merkle_root,
+                "Recursion circuit vk_root mismatch!"
+            )
         }
 
         // verify

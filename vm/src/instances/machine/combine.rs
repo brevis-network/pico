@@ -283,7 +283,7 @@ macro_rules! impl_combine_machine {
                     assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
                     assert_eq!(public_values.vk_root, vk_manager.merkle_root, "Recursion circuit vk_root mismatch!")
                 }
-                
+
                 // verify
                 self.base_machine
                     .verify_ensemble(combine_vk, &proof.proofs())?;
