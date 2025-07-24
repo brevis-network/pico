@@ -23,16 +23,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: nightly-2024-11-27
-          override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
   lint:
     if: true
@@ -44,19 +40,14 @@ jobs:
           git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
       - name: Checkout sources
         uses: actions/checkout@v4
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: nightly-2024-11-27
-          override: true
-      - run: rustup component add clippy
+          components: clippy
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
-      - uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --workspace --lib --examples --tests --benches --all-features --locked -- -D warnings
+      - name: Run clippy
+        run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked -- -D warnings
 
   test:
     if: true
@@ -68,12 +59,9 @@ jobs:
           git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
       - name: Checkout sources
         uses: actions/checkout@v4
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: nightly-2024-11-27
-          override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
       - name: Cargo run examples
@@ -95,12 +83,9 @@ jobs:
           git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
       - name: Checkout sources
         uses: actions/checkout@v4
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: nightly-2024-11-27
-          override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
       - name: Cargo run examples
@@ -137,12 +122,9 @@ jobs:
           git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
       - name: Checkout sources
         uses: actions/checkout@v4
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: nightly-2024-11-27
-          override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
       - name: Cargo run examples
@@ -179,12 +161,9 @@ jobs:
           git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
       - name: Checkout sources
         uses: actions/checkout@v4
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: nightly-2024-11-27
-          override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
       - name: Cargo run examples
