@@ -11,7 +11,7 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryLocalEvent,
     emulator::riscv::syscalls::{SyscallCode, SyscallEvent},
 };
-use hashbrown::HashMap;
+use hashbrown::{hash_map::IterMut, HashMap};
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
 
@@ -161,6 +161,19 @@ impl Default for PrecompileEvents {
 }
 
 impl PrecompileEvents {
+    pub fn iter_mut(&mut self) -> IterMut<'_, SyscallCode, Vec<(SyscallEvent, PrecompileEvent)>> {
+        self.events.iter_mut()
+    }
+
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&SyscallCode, &mut Vec<(SyscallEvent, PrecompileEvent)>) -> bool,
+    {
+        self.events.retain(f);
+    }
+}
+
+impl PrecompileEvents {
     pub(crate) fn append(&mut self, other: &mut PrecompileEvents) {
         for (syscall, events) in other.events.iter_mut() {
             if !events.is_empty() {
@@ -214,6 +227,7 @@ impl PrecompileEvents {
         self.events.len()
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn into_iter(
         self,

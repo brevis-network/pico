@@ -62,6 +62,7 @@ use pico_vm::{
         MachineProver, ProverChain, RiscvProver,
     },
 };
+use pprof::{protos::Message, ProfilerGuard};
 use std::{
     path::PathBuf,
     str::FromStr,
@@ -79,6 +80,12 @@ struct Args {
 
     #[clap(long, default_value = "false")]
     noprove: bool,
+
+    #[clap(long, default_value = "false")]
+    snapshot: bool,
+
+    #[clap(long, default_value = "false")]
+    simple: bool,
 }
 
 fn time_operation<T, F: FnOnce() -> T>(operation: F) -> (T, Duration) {
@@ -381,6 +388,117 @@ where
     })
 }
 
+fn bench_tracegen_snapshot<SC>(bench_program: &BenchProgram) -> Result<PerformanceReport>
+where
+    SC: Send + StarkGenericConfig + 'static,
+    Com<SC>: Send + Sync,
+    Dom<SC>: Send + Sync,
+    PcsProverData<SC>: Clone + Send + Sync,
+    BaseProof<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config + Poseidon2Init,
+    <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
+    FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
+    FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
+{
+    let (elf, stdin) = load(bench_program)?;
+    let riscv_opts = EmulatorOpts::bench_riscv_ops();
+
+    info!(
+        "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
+        riscv_opts.chunk_size, riscv_opts.chunk_batch_size
+    );
+
+    let riscv = RiscvProver::new_initial_prover((SC::new(), &elf), riscv_opts, None);
+
+    log_section("RISCV PHASE");
+    info!("Running RISCV");
+    let ((cycles, _hz), riscv_duration) = time_operation(|| riscv.run_tracegen_snapshot(stdin));
+
+    log_section("PERFORMANCE SUMMARY");
+    info!("Time Metrics (wall time)");
+    info!("----------------------------------------");
+    info!("RISCV:     {}", format_duration(riscv_duration));
+
+    Ok(PerformanceReport {
+        program: bench_program.name.to_string(),
+        cycles,
+        riscv_duration,
+        convert_duration: Duration::default(),
+        combine_duration: Duration::default(),
+        compress_duration: Duration::default(),
+        embed_duration: Duration::default(),
+        recursion_duration: Duration::default(),
+        evm_duration: Duration::default(),
+        total_duration: riscv_duration,
+        success: true,
+    })
+}
+
+fn bench_tracegen_simple<SC>(bench_program: &BenchProgram) -> Result<PerformanceReport>
+where
+    SC: Send + StarkGenericConfig + 'static,
+    Com<SC>: Send + Sync,
+    Dom<SC>: Send + Sync,
+    PcsProverData<SC>: Clone + Send + Sync,
+    BaseProof<SC>: Send + Sync,
+    BaseVerifyingKey<SC>: HashableKey<Val<SC>>,
+    Val<SC>: PrimeField32 + FieldSpecificPoseidon2Config + Poseidon2Init,
+    <Val<SC> as Poseidon2Init>::Poseidon2: Permutation<[Val<SC>; 16]>,
+    FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
+    FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
+{
+    let (elf, stdin) = load(bench_program)?;
+    let riscv_opts = EmulatorOpts::bench_riscv_ops();
+
+    info!(
+        "RISCV Chunk Size: {}, RISCV Chunk Batch Size: {}",
+        riscv_opts.chunk_size, riscv_opts.chunk_batch_size
+    );
+
+    let riscv = RiscvProver::new_initial_prover((SC::new(), &elf), riscv_opts, None);
+
+    log_section("RISCV PHASE");
+    info!("Running RISCV");
+    // let ((cycles, _hz), riscv_duration) = time_operation(|| riscv.run_tracegen_simple(stdin));
+
+    let (cycles, riscv_duration) = {
+        let guard = ProfilerGuard::new(2500)?;
+        let ((cycles, _hz), riscv_duration) = time_operation(|| riscv.run_tracegen_simple(stdin));
+
+        if let Ok(report) = guard.report().build() {
+            report.flamegraph(std::fs::File::create("flamegraph.svg")?)?;
+
+            let profile = report.pprof()?;
+            let mut buf = Vec::new();
+            profile.write_to_vec(&mut buf)?;
+            std::fs::write("profile.pb.gz", &buf)?;
+
+            // report.flamegraph_with_options(...) run.folded
+        }
+        (cycles, riscv_duration)
+    };
+
+    log_section("PERFORMANCE SUMMARY");
+    info!("Time Metrics (wall time)");
+    info!("----------------------------------------");
+    info!("RISCV:     {}", format_duration(riscv_duration));
+
+    Ok(PerformanceReport {
+        program: bench_program.name.to_string(),
+        cycles,
+        riscv_duration,
+        convert_duration: Duration::default(),
+        combine_duration: Duration::default(),
+        compress_duration: Duration::default(),
+        embed_duration: Duration::default(),
+        recursion_duration: Duration::default(),
+        evm_duration: Duration::default(),
+        total_duration: riscv_duration,
+        success: true,
+    })
+}
+
 fn run_benchmark(
     bench_program: &BenchProgram,
     bench_field: BenchField,
@@ -398,6 +516,26 @@ fn run_tracegen_benchmark(
     match bench_type {
         BenchField::BabyBear => bench_tracegen::<RiscvBBSC>(bench_program),
         BenchField::KoalaBear => bench_tracegen::<RiscvKBSC>(bench_program),
+    }
+}
+
+fn run_tracegen_benchmark_snapshot(
+    bench_program: &BenchProgram,
+    bench_type: BenchField,
+) -> Result<PerformanceReport> {
+    match bench_type {
+        BenchField::BabyBear => bench_tracegen_snapshot::<RiscvBBSC>(bench_program),
+        BenchField::KoalaBear => bench_tracegen_snapshot::<RiscvKBSC>(bench_program),
+    }
+}
+
+fn run_tracegen_benchmark_simple(
+    bench_program: &BenchProgram,
+    bench_type: BenchField,
+) -> Result<PerformanceReport> {
+    match bench_type {
+        BenchField::BabyBear => bench_tracegen_simple::<RiscvBBSC>(bench_program),
+        BenchField::KoalaBear => bench_tracegen_simple::<RiscvKBSC>(bench_program),
     }
 }
 
@@ -421,8 +559,18 @@ fn main() -> Result<()> {
     let mut results = Vec::with_capacity(programs.len());
 
     if args.noprove {
-        for bench_program in &programs {
-            results.push(run_tracegen_benchmark(bench_program, bench_type)?);
+        if args.snapshot {
+            for bench_program in &programs {
+                results.push(run_tracegen_benchmark_snapshot(bench_program, bench_type)?);
+            }
+        } else if args.simple {
+            for bench_program in &programs {
+                results.push(run_tracegen_benchmark_simple(bench_program, bench_type)?);
+            }
+        } else {
+            for bench_program in &programs {
+                results.push(run_tracegen_benchmark(bench_program, bench_type)?);
+            }
         }
     } else {
         for bench_program in programs {

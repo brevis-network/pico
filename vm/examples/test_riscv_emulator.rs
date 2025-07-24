@@ -34,7 +34,7 @@ where
     let pc_start = program.pc_start;
 
     info!("Creating emulator (at {:?})..", start.elapsed());
-    let mut emulator = RiscvEmulator::new::<F>(program, EmulatorOpts::test_opts(), None);
+    let mut emulator = RiscvEmulator::new_single::<F>(program, EmulatorOpts::test_opts(), None);
     info!(
         "Running with chunk size: {}, batch size: {}",
         emulator.opts.chunk_size, emulator.opts.chunk_batch_size

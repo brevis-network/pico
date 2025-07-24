@@ -10,6 +10,16 @@ keywords = ["zkvm", "plonky3", "stark", "FRI"]
 categories = ["cryptography"]
 repository = "https://github.com/brevis-network/brevis-vm"
 
+
+[profile.flamegraph]                # Custom profile for flamegraph generation
+inherits = "release"                # Inherit all settings from the 'release' profile
+debug = true                        # Enable full debug info (DWARF) for symbol resolution
+split-debuginfo = "unpacked"        # On macOS, place DWARF info next to binary (for browser UI like pprof/speedscope)
+codegen-units = 1                   # Merge all codegen units for more coherent stack traces
+lto = "off"                         # Disable Link Time Optimization to avoid symbol folding across crates
+incremental = false                # Disable incremental compilation to ensure reproducibility
+strip = "none"                      # Prevent release build from stripping debug symbol
+
 # Run the benchmarks in perf folder.
 [profile.perf]
 inherits = "release"

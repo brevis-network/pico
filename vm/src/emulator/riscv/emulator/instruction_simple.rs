@@ -271,8 +271,13 @@ impl RiscvEmulator {
                     } else {
                         return Err(EmulationError::UnsupportedSyscall(syscall_id));
                     };
-
-                self.rw_simple(t0, a);
+                // TODO: this debug syscall somehow improves fibonacci-emulator performance by 10%
+                // The reason is unclear.
+                // debug!("syscall: {:?}", syscall);
+                match syscall {
+                    SyscallCode::ENTER_UNCONSTRAINED => self.rw_unconstrained(t0, a),
+                    _ => self.rw_simple(t0, a),
+                }
                 next_pc = precompile_next_pc;
                 self.state.clk += precompile_cycles;
             }

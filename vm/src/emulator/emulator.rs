@@ -10,7 +10,12 @@ use crate::{
     },
     emulator::{
         recursion::emulator::{RecursionRecord, Runtime},
-        riscv::{emulator::ParOptions, record::EmulationRecord, riscv_emulator::RiscvEmulator},
+        riscv::{
+            emulator::{ParOptions, SharedDeferredState},
+            record::EmulationRecord,
+            riscv_emulator::{EmulationError, RiscvEmulator},
+            state::RiscvEmulationState,
+        },
         stdin::EmulatorStdin,
     },
     instances::{
@@ -63,8 +68,11 @@ where
     ) -> Self {
         // create a new emulator based on the emulator type
         let opts = proving_witness.opts.unwrap();
-        let mut emulator =
-            RiscvEmulator::new::<SC::Val>(proving_witness.program.clone().unwrap(), opts, par_opts);
+        let mut emulator = RiscvEmulator::new_single::<SC::Val>(
+            proving_witness.program.clone().unwrap(),
+            opts,
+            par_opts,
+        );
         emulator.write_stdin(proving_witness.stdin.as_ref().unwrap());
 
         Self {
@@ -75,12 +83,39 @@ where
         }
     }
 
+    pub fn recover_riscv(
+        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        state: RiscvEmulationState,
+        par_opts: Option<ParOptions>,
+        shared_ds: SharedDeferredState,
+    ) -> Self {
+        let mut me = MetaEmulator::setup_riscv(witness, par_opts);
+        let opts = me.emulator.as_ref().unwrap().opts;
+        let prog = me.emulator.as_ref().unwrap().program.clone();
+        me.emulator = Some(RiscvEmulator::recover::<SC::Val>(
+            prog, state, opts, shared_ds,
+        ));
+        me
+    }
+
     pub fn next_record_batch<F>(&mut self, record_callback: &mut F) -> bool
     where
         F: FnMut(EmulationRecord),
     {
         let emulator = self.emulator.as_mut().unwrap();
         emulator.emulate_batch(record_callback).unwrap()
+    }
+
+    pub fn next_state_batch<F>(
+        &mut self,
+        emit_events: bool,
+        record_cb: &mut F,
+    ) -> Result<(RiscvEmulationState, bool), EmulationError>
+    where
+        F: FnMut(EmulationRecord),
+    {
+        let emu = self.emulator.as_mut().unwrap();
+        emu.emulate_state(emit_events, record_cb)
     }
 
     pub fn cycles(&self) -> u64 {

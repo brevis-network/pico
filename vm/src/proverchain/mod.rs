@@ -2,7 +2,7 @@ mod combine;
 mod compress;
 mod convert;
 mod embed;
-mod riscv;
+pub(crate) mod riscv;
 
 use crate::{
     configs::config::{StarkGenericConfig, Val},

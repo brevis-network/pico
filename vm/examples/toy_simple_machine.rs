@@ -124,7 +124,8 @@ fn main() {
     */
     info!("\n *********** Testing for KoalaBear ***********");
     let program = compiler.compile();
-    let mut runtime = RiscvEmulator::new::<KoalaBear>(program, EmulatorOpts::default(), None);
+    let mut runtime =
+        RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     let batch_records = runtime.run(None).unwrap();
 
@@ -162,7 +163,7 @@ fn main() {
     */
     info!("\n *********** Testing for BabyBear ***********");
     let program = compiler.compile();
-    let mut runtime = RiscvEmulator::new::<BabyBear>(program, EmulatorOpts::default(), None);
+    let mut runtime = RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     let batch_records = runtime.run(None).unwrap();
 
@@ -200,7 +201,8 @@ fn main() {
     */
     info!("\n *********** Testing for Mersenne31 ***********");
     let program = compiler.compile();
-    let mut runtime = RiscvEmulator::new::<Mersenne31>(program, EmulatorOpts::default(), None);
+    let mut runtime =
+        RiscvEmulator::new_single::<Mersenne31>(program, EmulatorOpts::default(), None);
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
     let batch_records = runtime.run(None).unwrap();
 
