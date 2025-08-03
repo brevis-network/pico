@@ -580,9 +580,15 @@ impl<FC: FieldGenericConfig> ExtOperations<FC::F, FC::EF> for UnsafeCell<InnerBu
     }
 
     fn sub_base_ext(ptr: *mut (), lhs: Felt<FC::F>, rhs: Ext<FC::F, FC::EF>) -> Ext<FC::F, FC::EF> {
-        // TODO: optimize to one opcode.
-        let rhs = Self::neg_ext(ptr, rhs);
-        Self::add_ext_base(ptr, rhs, lhs)
+        let mut inner = unsafe { ManuallyDrop::new(Box::from_raw(ptr as *mut Self)) };
+        let inner = inner.get_mut();
+        let idx = inner.variable_count;
+        let res = Ext::new(idx, rhs.handle);
+        inner.variable_count += 1;
+
+        inner.operations.push(DslIr::SubEF(res, rhs, lhs));
+
+        res
     }
 
     fn neg_ext(ptr: *mut (), lhs: Ext<FC::F, FC::EF>) -> Ext<FC::F, FC::EF> {
