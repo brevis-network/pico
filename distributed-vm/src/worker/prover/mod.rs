@@ -36,7 +36,7 @@ type VkRoot<SC> = [<SC as StarkGenericConfig>::Val; DIGEST_SIZE];
 
 pub struct Prover<SC>
 where
-    SC: StarkGenericConfig + 'static,
+    SC: StarkGenericConfig,
     SC::Val: PrimeField32 + FieldSpecificPoseidon2Config + BinomiallyExtendable<EXTENSION_DEGREE>,
 {
     prover_id: String,

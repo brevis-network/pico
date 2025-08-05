@@ -1,23 +1,36 @@
 use crate::{
-    configs::stark_config::{KoalaBearBn254Poseidon2, KoalaBearPoseidon2},
+    configs::{
+        config::Com,
+        stark_config::{KoalaBearBn254Poseidon2, KoalaBearPoseidon2},
+    },
     cuda_adaptor::{
         fri_commit::fri_commit,
         fri_open::{InnerPcs, KoalaBearSC, OuterPcs},
-        gpuacc_struct::fri_commit::HashType,
+        gpuacc_struct::{fri_commit::HashType, matrix::DeviceMatrixConcrete},
         log2_strict_usize, memory_copy_async, Arc, BaseProver, BaseVerifyingKey, ChipBehavior,
         CudaMemPool, DevicePoolAllocation, GPUMerkleTree, HashMap, KoalaBear, Matrix, MetaChip,
         Pcs, ProgramBehavior, SepticDigest, StarkGenericConfig,
     },
 };
-use cudart::{device::set_device, stream::CudaStream};
+use cudart::{
+    device::set_device,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::CudaStream,
+};
+use cudart_sys::cudaStream_t;
 use p3_field::Field;
-use std::{mem::transmute, time::Instant};
-//
-use crate::{configs::config::Com, cuda_adaptor::gpuacc_struct::matrix::DeviceMatrixConcrete};
-//
+use std::{any::TypeId, ffi::c_void, mem::transmute, time::Instant};
 
-use std::any::TypeId;
-//
+extern "C" {
+    fn rustffi_transpose_outplace(
+        input: *const c_void,
+        output: *mut c_void,
+        num_rows: usize,
+        num_cols: usize,
+        stream: cudaStream_t,
+    );
+}
+
 pub struct BaseProvingKeyCuda<SC: StarkGenericConfig> {
     /// The commitment to the named traces.
     pub commit: Com<SC>,
@@ -34,6 +47,7 @@ pub struct BaseProvingKeyCuda<SC: StarkGenericConfig> {
     /// The preprocessed chip local only information.
     pub local_only: Vec<bool>,
 }
+
 unsafe impl<SC: StarkGenericConfig> Sync for BaseProvingKeyCuda<SC> {}
 unsafe impl<SC: StarkGenericConfig> Send for BaseProvingKeyCuda<SC> {}
 
@@ -96,22 +110,59 @@ where
         .collect::<Vec<_>>();
 
     let start = Instant::now();
+    // let device_evaluation: Vec<DeviceMatrixConcrete<SC::Val>> = preprocessed_trace
+    //     .iter()
+    //     .map(|e| {
+    //         let e = e.clone().transpose();
+    //         set_device(dev_id as _).unwrap();
+    //         let mut temp = DevicePoolAllocation::<SC::Val>::alloc_from_pool_async(
+    //             e.values.len(),
+    //             mem_pool,
+    //             stream,
+    //         )
+    //         .unwrap();
+    //         memory_copy_async(&mut temp, &e.values, stream).unwrap();
+    //         DeviceMatrixConcrete {
+    //             values: temp,
+    //             log_n: log2_strict_usize(e.width()),
+    //             num_poly: e.height(),
+    //         }
+    //     })
+    //     .collect();
+
     let device_evaluation: Vec<DeviceMatrixConcrete<SC::Val>> = preprocessed_trace
         .iter()
         .map(|e| {
-            let e = e.clone().transpose();
-            set_device(dev_id as _).unwrap();
+            let mut input = DevicePoolAllocation::<SC::Val>::alloc_from_pool_async(
+                e.values.len(),
+                mem_pool,
+                stream,
+            )
+            .unwrap();
             let mut temp = DevicePoolAllocation::<SC::Val>::alloc_from_pool_async(
                 e.values.len(),
                 mem_pool,
                 stream,
             )
             .unwrap();
-            memory_copy_async(&mut temp, &e.values, stream).unwrap();
+
+            memory_copy_async(&mut input, &e.values, stream).unwrap();
+
+            unsafe {
+                rustffi_transpose_outplace(
+                    input.as_c_void_ptr(),
+                    temp.as_mut_c_void_ptr(),
+                    e.height() as _,
+                    e.width() as _,
+                    stream.into(),
+                )
+            };
+            drop(input);
+
             DeviceMatrixConcrete {
                 values: temp,
-                log_n: log2_strict_usize(e.width()),
-                num_poly: e.height(),
+                log_n: log2_strict_usize(e.height()),
+                num_poly: e.width(),
             }
         })
         .collect();
@@ -143,7 +194,7 @@ where
         hash_type,
     );
     let commit: &Com<SC> = unsafe { transmute(&preprocessed_merkle.merkle_root) };
-    println!("setup_keys_gm {:?}", preprocessed_merkle.merkle_root);
+    // println!("setup_keys_gm {:?}", preprocessed_merkle.merkle_root);
     println!(
         "---- ongpu setup_keys_gm data trans & fri commit: {:?}",
         start.elapsed()

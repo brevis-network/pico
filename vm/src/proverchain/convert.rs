@@ -33,7 +33,7 @@ pub struct ConvertProver<RiscvSC, SC>
 where
     RiscvSC: StarkGenericConfig,
     Val<RiscvSC>: PrimeField32 + FieldSpecificPoseidon2Config,
-    SC: StarkGenericConfig + 'static,
+    SC: StarkGenericConfig,
     Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
 {
     machine: ConvertMachine<SC, RecursionChips<SC>>,

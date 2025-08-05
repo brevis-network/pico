@@ -1,8 +1,12 @@
 use crate::{
     compiler::program::ProgramBehavior,
     configs::config::{PackedChallenge, PcsProverData, StarkGenericConfig},
-    cuda_adaptor::fri_commit::fri_commit_from_host,
-    emulator::record::RecordBehavior,
+    cuda_adaptor::{
+        fri_commit::fri_commit_from_host,
+        gpuacc_struct::{fri_commit::MerkleTree as GPUMerkleTree, matrix::DeviceMatrixConcrete},
+        setup_keys_gm::BaseProvingKeyCuda,
+    },
+    emulator::{record::RecordBehavior, riscv::record::EmulationRecord},
     iter::ThreadPoolBuilder,
     machine::{
         chip::{ChipBehavior, MetaChip},
@@ -25,16 +29,16 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
-use p3_koala_bear::KoalaBearParameters;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_koala_bear::{KoalaBear, KoalaBearParameters};
+use p3_matrix::{
+    dense::{DenseMatrix, RowMajorMatrix},
+    Matrix,
+};
 use p3_maybe_rayon::prelude::*;
 use p3_monty_31::MontyField31;
 use p3_util::log2_strict_usize;
-use std::{array, cmp::Reverse, time::Instant};
+use std::{array, cmp::Reverse, mem::transmute, thread, time::Instant};
 use tracing::{debug, debug_span, instrument, Span};
-
-//
-use crate::cuda_adaptor::gpuacc_struct::fri_commit::MerkleTree as GPUMerkleTree;
 
 pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
@@ -192,24 +196,24 @@ where
         let (commit, preprocessed_prover_data) = debug_span!("commit preprocessed trace")
             .in_scope(|| pcs.commit(domains_and_preprocessed.clone()));
 
-        {
-            use crate::cuda_adaptor::gpuacc_struct::poseidon::DIGEST_ELEMS;
-            use p3_koala_bear::{KoalaBear as Field, KoalaBearParameters};
-            use p3_matrix::dense::DenseMatrix;
-            use p3_merkle_tree::MerkleTree;
-            use p3_monty_31::MontyField31;
-            use std::mem::transmute;
-            let preprocessed_prover_data_root: &MerkleTree<
-                MontyField31<KoalaBearParameters>,
-                MontyField31<KoalaBearParameters>,
-                DenseMatrix<MontyField31<KoalaBearParameters>>,
-                8,
-            > = unsafe { transmute(&preprocessed_prover_data) };
-            // println!(
-            //     "{:?}",
-            //     Into::<[Field; DIGEST_ELEMS]>::into(preprocessed_prover_data_root.root())
-            // );
-        }
+        // {
+        //     use crate::cuda_adaptor::gpuacc_struct::poseidon::DIGEST_ELEMS;
+        //     use p3_koala_bear::{KoalaBear as Field, KoalaBearParameters};
+        //     use p3_matrix::dense::DenseMatrix;
+        //     use p3_merkle_tree::MerkleTree;
+        //     use p3_monty_31::MontyField31;
+        //     use std::mem::transmute;
+        //     let preprocessed_prover_data_root: &MerkleTree<
+        //         MontyField31<KoalaBearParameters>,
+        //         MontyField31<KoalaBearParameters>,
+        //         DenseMatrix<MontyField31<KoalaBearParameters>>,
+        //         8,
+        //     > = unsafe { transmute(&preprocessed_prover_data) };
+        //     println!(
+        //         "{:?}",
+        //         Into::<[Field; DIGEST_ELEMS]>::into(preprocessed_prover_data_root.root())
+        //     );
+        // }
 
         let prep_gpumktree =
             fri_commit_from_host::<SC>(domains_and_preprocessed.clone(), pcs, stream, mem_pool);

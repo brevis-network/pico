@@ -57,7 +57,7 @@ use tracing::info;
 
 pub struct RiscvConvertProver<SC>
 where
-    SC: StarkGenericConfig + 'static,
+    SC: StarkGenericConfig,
     SC::Val: FieldSpecificPoseidon2Config + PrimeField32,
 {
     prover_id: String,

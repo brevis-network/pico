@@ -32,14 +32,14 @@ use tracing::{debug, debug_span, info, instrument};
 
 pub struct ConvertMachine<SC, C>
 where
-    SC: StarkGenericConfig + 'static,
+    SC: StarkGenericConfig,
 {
     base_machine: BaseMachine<SC, C>,
 }
 
 impl<SC, C> ConvertMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<
         Val<SC>,
         Program = RecursionProgram<Val<SC>>,
