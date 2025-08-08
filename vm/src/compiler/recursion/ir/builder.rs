@@ -318,7 +318,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
-    ) -> IfBuilder<FC> {
+    ) -> IfBuilder<'_, FC> {
         IfBuilder {
             lhs: lhs.into(),
             rhs: rhs.into(),
@@ -332,7 +332,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         &mut self,
         lhs: LhsExpr,
         rhs: RhsExpr,
-    ) -> IfBuilder<FC> {
+    ) -> IfBuilder<'_, FC> {
         IfBuilder {
             lhs: lhs.into(),
             rhs: rhs.into(),
@@ -346,7 +346,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         &mut self,
         start: impl Into<Usize<FC::N>>,
         end: impl Into<Usize<FC::N>>,
-    ) -> RangeBuilder<FC> {
+    ) -> RangeBuilder<'_, FC> {
         RangeBuilder {
             start: start.into(),
             end: end.into(),

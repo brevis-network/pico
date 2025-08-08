@@ -7,6 +7,7 @@ use pico_vm::configs::config::StarkGenericConfig;
 type IpAddr = String;
 type TaskId = String;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum GatewayMsg<SC: StarkGenericConfig> {
     // identify the emulator complete

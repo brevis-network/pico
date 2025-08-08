@@ -1362,7 +1362,7 @@ impl RiscvEmulator {
         for reg in 1..32 {
             let addr = reg as u32;
             let record = self.state.memory.registers.get(addr);
-            if record.is_some() {
+            if let Some(record) = record {
                 if !self.record.program.memory_image.contains_key(&addr) {
                     let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
                     memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
@@ -1371,9 +1371,8 @@ impl RiscvEmulator {
                         true,
                     ));
                 }
-                let record = *record.unwrap();
                 memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
-                    addr, &record,
+                    addr, record,
                 ));
             }
         }

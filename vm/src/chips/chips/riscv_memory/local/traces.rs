@@ -34,7 +34,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         _output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
         let events = input.get_local_mem_events().collect::<Vec<_>>();
-        let nb_rows = (events.len() + 3) / 4;
+        let nb_rows = events.len().div_ceil(4);
         let log_rows = input.shape_chip_size(&self.name());
         let padded_nb_rows = next_power_of_two(nb_rows, log_rows);
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MEMORY_LOCAL_INIT_COLS);
@@ -70,7 +70,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
         let local_mem_events = input.get_local_mem_events().collect::<Vec<_>>();
-        let nb_rows = (local_mem_events.len() + 3) / 4;
+        let nb_rows = local_mem_events.len().div_ceil(4);
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);
 
         let global_events: Vec<_> = local_mem_events

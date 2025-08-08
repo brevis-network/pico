@@ -95,9 +95,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
             .checked_sub(1)
             .map(|x| x / CONST_MEM_DATAPAR + 1)
             .unwrap_or_default();
-        let rows = std::iter::repeat([F::ZERO; NUM_MEM_INIT_COLS])
-            .take(num_rows)
-            .collect_vec();
+        let rows = std::iter::repeat_n([F::ZERO; NUM_MEM_INIT_COLS], num_rows).collect_vec();
 
         // Convert the trace to a row major matrix.
         let mut trace =

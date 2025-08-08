@@ -40,7 +40,7 @@ pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(
     values: &mut Vec<T>,
     log_size: Option<usize>,
 ) {
-    debug_assert!(values.len() % N == 0);
+    debug_assert!(values.len().is_multiple_of(N));
     let mut n_real_rows = values.len() / N;
     if n_real_rows < 16 {
         n_real_rows = 16;
@@ -67,7 +67,7 @@ pub fn pad_to_power_of_two_noconst<T: Clone + Default>(
     values: &mut Vec<T>,
     log_size: Option<usize>,
 ) {
-    debug_assert!(values.len() % n == 0);
+    debug_assert!(values.len().is_multiple_of(n));
     let mut n_real_rows = values.len() / n;
     if n_real_rows < 16 {
         n_real_rows = 16;

@@ -13,6 +13,7 @@ use hashbrown::HashMap;
 
 /// RiscV emulator running mode
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum RiscvEmulatorMode {
     /// Simple mode for only executing the instructions without trace generation
     Simple,

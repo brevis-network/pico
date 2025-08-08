@@ -198,8 +198,7 @@ fn save_vk_map_bb(
     vk_map: &BTreeMap<[BabyBear; DIGEST_SIZE], usize>,
 ) -> std::io::Result<()> {
     let mut file = File::create(filename)?;
-    bincode::serialize_into(&mut file, vk_map)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    bincode::serialize_into(&mut file, vk_map).map_err(io::Error::other)
 }
 
 #[allow(dead_code)]
@@ -219,8 +218,7 @@ fn save_vk_map_kb(
     vk_map: &BTreeMap<[KoalaBear; DIGEST_SIZE], usize>,
 ) -> std::io::Result<()> {
     let mut file = File::create(filename)?;
-    bincode::serialize_into(&mut file, vk_map)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    bincode::serialize_into(&mut file, vk_map).map_err(io::Error::other)
 }
 
 /// Load `(ProofShape -> vk_digest)` map from a file.
@@ -244,7 +242,7 @@ pub fn save_riscv_proofshape_map_bb(
     map: &HashMap<ProofShape, [BabyBear; DIGEST_SIZE]>,
 ) -> io::Result<()> {
     let file = File::create(filename)?;
-    bincode::serialize_into(&file, map).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    bincode::serialize_into(&file, map).map_err(io::Error::other)
 }
 
 /// Load `(ProofShape -> vk_digest)` map from a file.
@@ -268,7 +266,7 @@ pub fn save_riscv_proofshape_map_kb(
     map: &HashMap<ProofShape, [KoalaBear; DIGEST_SIZE]>,
 ) -> io::Result<()> {
     let file = File::create(filename)?;
-    bincode::serialize_into(&file, map).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    bincode::serialize_into(&file, map).map_err(io::Error::other)
 }
 
 macro_rules! define_generate_all_shapes {
