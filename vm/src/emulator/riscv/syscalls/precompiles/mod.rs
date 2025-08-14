@@ -11,16 +11,16 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryLocalEvent,
     emulator::riscv::syscalls::{SyscallCode, SyscallEvent},
 };
-use hashbrown::{hash_map::IterMut, HashMap};
-use serde::{Deserialize, Serialize};
-use strum::{EnumIter, IntoEnumIterator};
-
 pub use ec::event::{EllipticCurveDecompressEvent, EllipticCurveDoubleEvent};
 pub use edwards::event::{EdDecompressEvent, EllipticCurveAddEvent};
 pub use fptower::event::{Fp2AddSubEvent, Fp2MulEvent, FpEvent};
+use hashbrown::{hash_map::IterMut, HashMap};
 pub use keccak256::event::KeccakPermuteEvent;
 pub use poseidon2::event::Poseidon2PermuteEvent;
+use serde::{Deserialize, Serialize};
 pub use sha256::event::{ShaCompressEvent, ShaExtendEvent};
+use strum::{EnumIter, IntoEnumIterator};
+use tracing::info;
 pub use uint256::event::Uint256MulEvent;
 
 #[derive(Clone, Debug, Serialize, Deserialize, EnumIter)]
@@ -177,6 +177,11 @@ impl PrecompileEvents {
     pub(crate) fn append(&mut self, other: &mut PrecompileEvents) {
         for (syscall, events) in other.events.iter_mut() {
             if !events.is_empty() {
+                info!(
+                    "Deferred {:<20} → {} precompile event(s)",
+                    format!("{:?}", syscall),
+                    events.len()
+                );
                 self.events.entry(*syscall).or_default().append(events);
             }
         }

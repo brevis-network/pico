@@ -102,6 +102,13 @@ pub trait HashableKey<F> {
     /// Hash the key into a digest of BabyBear elements.
     fn hash_field(&self) -> [F; DIGEST_SIZE];
 
+    fn hash_u32(&self) -> [u32; 8]
+    where
+        F: Copy + PrimeField32,
+    {
+        self.hash_field().map(|x| x.as_canonical_u32())
+    }
+
     fn hash_bn254(&self) -> Bn254Fr
     where
         F: PrimeField32,

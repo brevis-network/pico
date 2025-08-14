@@ -55,10 +55,18 @@ jobs:
       - run: rustup component add clippy
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
-      - uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --workspace --lib --examples --tests --benches --all-features --locked -- -D warnings
+      - name: Clippy (workspace, exclude pico-sdk)
+        run: |
+          cargo clippy --workspace --lib --examples --tests --benches --all-features --locked --exclude pico-sdk -- -D warnings
+      - name: Clippy pico-sdk
+        run: |
+          set -eux
+          for FIELD in bb kb m31; do
+            cargo clippy -p pico-sdk \
+              --no-default-features \
+              --features "$FIELD,prover,libm,coprocessor" \
+              --locked -- -D warnings
+          done
 
   test:
     if: true

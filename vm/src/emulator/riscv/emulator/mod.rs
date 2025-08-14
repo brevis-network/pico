@@ -160,9 +160,15 @@ impl EmulationDeferredState {
             self.pvs.next_pc = record.cpu_events.last().unwrap().next_pc;
             self.pvs.exit_code = record.cpu_events.last().unwrap().exit_code;
             self.pvs.committed_value_digest = record.public_values.committed_value_digest;
+            self.pvs.deferred_proofs_digest = record.public_values.deferred_proofs_digest;
         }
 
         record.public_values = self.pvs;
+        debug!(
+            "riscv record index: {:?}, record.public_values.deferred_proofs_digest: {:?}",
+            record.chunk_index(),
+            record.public_values.deferred_proofs_digest
+        );
     }
 
     fn update_public_values_non_cpu_chunk(
@@ -187,6 +193,11 @@ impl EmulationDeferredState {
         self.pvs.last_finalize_addr_bits = record.public_values.last_finalize_addr_bits;
 
         record.public_values = self.pvs;
+        debug!(
+            "riscv record index: {:?}, record.public_values.deferred_proofs_digest: {:?}",
+            record.chunk_index(),
+            record.public_values.deferred_proofs_digest
+        );
     }
 
     #[allow(dead_code)]
@@ -202,6 +213,7 @@ impl EmulationDeferredState {
             self.pvs.next_pc = record.cpu_events.last().unwrap().next_pc;
             self.pvs.exit_code = record.cpu_events.last().unwrap().exit_code;
             self.pvs.committed_value_digest = record.public_values.committed_value_digest;
+            self.pvs.deferred_proofs_digest = record.public_values.deferred_proofs_digest;
         } else {
             // Make execution chunk consistent.
             if self.flag_active && !emulation_done {
@@ -218,6 +230,11 @@ impl EmulationDeferredState {
         }
 
         record.public_values = self.pvs;
+        debug!(
+            "riscv record index: {:?}, record.public_values.deferred_proofs_digest: {:?}",
+            record.chunk_index(),
+            record.public_values.deferred_proofs_digest
+        );
     }
 }
 
@@ -1408,6 +1425,7 @@ mod tests {
     use super::{Program, RiscvEmulator};
     use crate::{
         compiler::riscv::compiler::{Compiler, SourceType},
+        configs::stark_config::KoalaBearPoseidon2,
         emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     };
     use alloc::sync::Arc;
@@ -1439,11 +1457,12 @@ mod tests {
     fn test_simple_fib() {
         // just run a simple elf file in the compiler folder(test_elf)
         let program = simple_fibo_program();
-        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder();
+        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
         stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);
         let mut emulator =
             RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
-        emulator.run(Some(stdin.finalize())).unwrap();
+        let (stdin, _) = stdin.finalize();
+        emulator.run(Some(stdin)).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
 
@@ -1451,11 +1470,12 @@ mod tests {
     fn test_simple_keccak() {
         let program = simple_keccak_program();
         let n = "a"; // do keccak(b"abcdefg")
-        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder();
+        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
         stdin.write(&n);
         let mut emulator =
             RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
-        emulator.run(Some(stdin.finalize())).unwrap();
+        let (stdin, _) = stdin.finalize();
+        emulator.run(Some(stdin)).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
 }

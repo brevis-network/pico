@@ -6,6 +6,7 @@ use crate::{
                 dummy_hash, dummy_pcs_proof_bb, dummy_pcs_proof_kb, PolynomialBatchShape,
                 PolynomialShape,
             },
+            hash::FieldHasher,
             stark::BaseProofVariable,
             types::{BaseVerifyingKeyVariable, FriProofVariable},
             witness::{witnessable::Witnessable, WitnessWriter},
@@ -16,16 +17,23 @@ use crate::{
         config::{Challenger, Com, PcsProof, StarkGenericConfig},
         stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
-    instances::compiler::shapes::ProofShape,
+    instances::{
+        chiptype::recursion_chiptype::RecursionChipType,
+        compiler::{
+            shapes::{recursion_shape::RecursionVkShape, ProofShape},
+            vk_merkle::stdin::{MerkleProofStdin, MerkleProofStdinVariable, RecursionVkStdin},
+        },
+        machine::{combine::CombineMachine, deferred::DeferredMachine},
+    },
     machine::{
         chip::{ChipBehavior, MetaChip},
         keys::BaseVerifyingKey,
-        machine::BaseMachine,
+        machine::{BaseMachine, MachineBehavior},
         proof::{BaseCommitments, BaseOpenedValues, BaseProof, ChipOpenedValues},
         septic::SepticDigest,
         utils::order_chips,
     },
-    primitives::consts::{DIGEST_SIZE, MAX_NUM_PVS},
+    primitives::consts::{DIGEST_SIZE, MAX_NUM_PVS, RECURSION_NUM_PVS},
 };
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -51,6 +59,36 @@ where
     pub flag_complete: bool,
     pub flag_first_chunk: bool,
     pub vk_root: [SC::Val; DIGEST_SIZE],
+    pub deferred_digest: [SC::Val; DIGEST_SIZE],
+}
+
+#[derive(Clone)]
+pub struct DeferredStdin<SC, C>
+where
+    SC: StarkGenericConfig + FieldHasher<SC::Val>,
+    C: ChipBehavior<SC::Val>,
+{
+    pub machine: BaseMachine<SC, C>,
+    pub proof: BaseProof<SC>,
+    pub recursion_vk: BaseVerifyingKey<SC>,
+    pub recursion_vk_merkle_data: MerkleProofStdin<SC>,
+    pub start_reconstruct_deferred_digest: [SC::Val; DIGEST_SIZE],
+    pub riscv_vk_digest: [SC::Val; DIGEST_SIZE],
+    pub end_pc: SC::Val,
+}
+
+pub struct DeferredStdinVariable<CC, SC>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField,
+    SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
+{
+    pub proof: BaseProofVariable<CC, SC>,
+    pub recursion_vk: BaseVerifyingKeyVariable<CC, SC>,
+    pub recursion_vk_merkle_data: MerkleProofStdinVariable<CC, SC>,
+    pub start_reconstruct_deferred_digest: [Felt<CC::F>; DIGEST_SIZE],
+    pub riscv_vk_digest: [Felt<CC::F>; DIGEST_SIZE],
+    pub end_pc: Felt<CC::F>,
 }
 
 pub struct ConvertStdinVariable<CC, SC>
@@ -64,6 +102,7 @@ where
     pub flag_complete: Felt<CC::F>,
     pub flag_first_chunk: Felt<CC::F>,
     pub vk_root: [Felt<CC::F>; DIGEST_SIZE],
+    pub deferred_digest: [Felt<CC::F>; DIGEST_SIZE],
 }
 
 impl<F, SC, C> ConvertStdin<SC, C>
@@ -82,6 +121,7 @@ where
         flag_complete: bool,
         flag_first_chunk: bool,
         vk_root: [SC::Val; DIGEST_SIZE],
+        deferred_digest: [SC::Val; DIGEST_SIZE],
     ) -> Self {
         Self {
             machine: machine.clone(),
@@ -92,6 +132,7 @@ where
             flag_complete,
             flag_first_chunk,
             vk_root,
+            deferred_digest,
         }
     }
 }
@@ -120,6 +161,7 @@ where
         let flag_complete = CC::F::from_bool(self.flag_complete).read(builder);
         let flag_first_chunk = CC::F::from_bool(self.flag_first_chunk).read(builder);
         let vk_root = self.vk_root.read(builder);
+        let deferred_digest = self.deferred_digest.read(builder);
 
         ConvertStdinVariable {
             riscv_vk,
@@ -127,6 +169,7 @@ where
             flag_complete,
             flag_first_chunk,
             vk_root,
+            deferred_digest,
         }
     }
 
@@ -136,6 +179,55 @@ where
         self.flag_complete.write(witness);
         self.flag_first_chunk.write(witness);
         self.vk_root.write(witness);
+        self.deferred_digest.write(witness);
+    }
+}
+
+impl<CC, SC, C> Witnessable<CC> for DeferredStdin<SC, C>
+where
+    CC: CircuitConfig,
+    CC::F: TwoAdicField + Witnessable<CC, WitnessVariable = Felt<CC::F>>,
+    CC::EF: Witnessable<CC, WitnessVariable = Ext<CC::F, CC::EF>>,
+    SC: FieldFriConfigVariable<
+            CC,
+            Val = CC::F,
+            Challenge = CC::EF,
+            Domain = TwoAdicMultiplicativeCoset<CC::F>,
+        > + FieldHasher<CC::F>,
+    SC::Digest: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable>,
+    PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
+    Challenger<SC>: Witnessable<CC, WitnessVariable = SC::FriChallengerVariable>,
+    C: ChipBehavior<CC::F>,
+{
+    type WitnessVariable = DeferredStdinVariable<CC, SC>;
+
+    fn read(&self, builder: &mut Builder<CC>) -> Self::WitnessVariable {
+        let proof = self.proof.read(builder);
+        let recursion_vk = self.recursion_vk.read(builder);
+        let recursion_vk_merkle_data = self.recursion_vk_merkle_data.read(builder);
+        let start_reconstruct_deferred_digest =
+            self.start_reconstruct_deferred_digest.read(builder);
+        let riscv_vk_digest = self.riscv_vk_digest.read(builder);
+        let end_pc = self.end_pc.read(builder);
+
+        DeferredStdinVariable {
+            proof,
+            recursion_vk,
+            recursion_vk_merkle_data,
+            start_reconstruct_deferred_digest,
+            riscv_vk_digest,
+            end_pc,
+        }
+    }
+
+    fn write(&self, witness: &mut impl WitnessWriter<CC>) {
+        self.proof.write(witness);
+        self.recursion_vk.write(witness);
+        self.recursion_vk_merkle_data.write(witness);
+        self.start_reconstruct_deferred_digest.write(witness);
+        self.riscv_vk_digest.write(witness);
+        self.end_pc.write(witness);
     }
 }
 
@@ -350,5 +442,69 @@ fn dummy_opened_values<F: Field, EF: ExtensionField<F>, CB: ChipBehavior<F>>(
         global_cumulative_sum: SepticDigest::<F>::zero(),
         regional_cumulative_sum: EF::ZERO,
         log_main_degree,
+    }
+}
+
+impl DeferredStdin<KoalaBearPoseidon2, RecursionChipType<KoalaBear>> {
+    pub fn dummy(shape: &RecursionVkShape) -> Self {
+        let deferred_machine = DeferredMachine::new(
+            KoalaBearPoseidon2::new(),
+            RecursionChipType::combine_chips(),
+            RECURSION_NUM_PVS,
+        );
+        let combine_machine = CombineMachine::new(
+            <KoalaBearPoseidon2>::new(),
+            RecursionChipType::combine_chips(),
+            RECURSION_NUM_PVS,
+        );
+        let recursion_vk_stdin =
+            RecursionVkStdin::<KoalaBearPoseidon2, RecursionChipType<KoalaBear>>::dummy(
+                combine_machine.base_machine(),
+                shape,
+            );
+
+        assert_eq!(recursion_vk_stdin.recursion_stdin.proofs.len(), 1);
+        assert_eq!(recursion_vk_stdin.recursion_stdin.vks.len(), 1);
+        Self {
+            machine: deferred_machine.base_machine().clone(),
+            proof: recursion_vk_stdin.recursion_stdin.proofs[0].clone(),
+            recursion_vk: recursion_vk_stdin.recursion_stdin.vks[0].clone(),
+            recursion_vk_merkle_data: recursion_vk_stdin.merkle_proof_stdin,
+            start_reconstruct_deferred_digest: [KoalaBear::ZERO; DIGEST_SIZE],
+            riscv_vk_digest: [KoalaBear::ZERO; DIGEST_SIZE],
+            end_pc: KoalaBear::ZERO,
+        }
+    }
+}
+
+impl DeferredStdin<BabyBearPoseidon2, RecursionChipType<BabyBear>> {
+    pub fn dummy(shape: &RecursionVkShape) -> Self {
+        let deferred_machine = DeferredMachine::new(
+            BabyBearPoseidon2::new(),
+            RecursionChipType::combine_chips(),
+            RECURSION_NUM_PVS,
+        );
+        let combine_machine = CombineMachine::new(
+            <BabyBearPoseidon2>::new(),
+            RecursionChipType::combine_chips(),
+            RECURSION_NUM_PVS,
+        );
+        let recursion_vk_stdin =
+            RecursionVkStdin::<BabyBearPoseidon2, RecursionChipType<BabyBear>>::dummy(
+                combine_machine.base_machine(),
+                shape,
+            );
+
+        assert_eq!(recursion_vk_stdin.recursion_stdin.proofs.len(), 1);
+        assert_eq!(recursion_vk_stdin.recursion_stdin.vks.len(), 1);
+        Self {
+            machine: deferred_machine.base_machine().clone(),
+            proof: recursion_vk_stdin.recursion_stdin.proofs[0].clone(),
+            recursion_vk: recursion_vk_stdin.recursion_stdin.vks[0].clone(),
+            recursion_vk_merkle_data: recursion_vk_stdin.merkle_proof_stdin,
+            start_reconstruct_deferred_digest: [BabyBear::ZERO; DIGEST_SIZE],
+            riscv_vk_digest: [BabyBear::ZERO; DIGEST_SIZE],
+            end_pc: BabyBear::ZERO,
+        }
     }
 }

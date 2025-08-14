@@ -14,7 +14,11 @@ use pico_vm::{
         compiler::{
             riscv_circuit::{
                 convert::builder::ConvertVerifierCircuit,
-                stdin::{dummy_vk_and_chunk_proof, dummy_vk_and_chunk_proof_kb, ConvertStdin},
+                deferred::builder::DeferredVerifierCircuit,
+                stdin::{
+                    dummy_vk_and_chunk_proof, dummy_vk_and_chunk_proof_kb, ConvertStdin,
+                    DeferredStdin,
+                },
             },
             shapes::{
                 recursion_shape::{RecursionShapeConfig, RecursionVkShape},
@@ -34,7 +38,7 @@ use pico_vm::{
         },
         machine::{
             combine::CombineMachine, compress::CompressMachine, convert::ConvertMachine,
-            riscv::RiscvMachine,
+            deferred::DeferredMachine, riscv::RiscvMachine,
         },
     },
     machine::{keys::HashableKey, machine::MachineBehavior},
@@ -79,6 +83,7 @@ macro_rules! define_vk_digest_from_shape {
                         reconstruct_challenger,
                         flag_complete: shape.is_complete,
                         vk_root: [<$F>::ZERO; DIGEST_SIZE],
+                        deferred_digest: [<$F>::ZERO; DIGEST_SIZE],
                         flag_first_chunk: false,
                     };
 
@@ -94,6 +99,25 @@ macro_rules! define_vk_digest_from_shape {
                         RecursionChipType::<$F>::convert_chips(),
                         RECURSION_NUM_PVS,
                     );
+
+                    let (_pk, vk) = machine.setup_keys(&program);
+                    vk.hash_field()
+                }
+                PicoRecursionProgramShape::Deferred(shape) => {
+                    let machine = DeferredMachine::new(
+                        <$RecursionSC>::new(),
+                        RecursionChipType::<$F>::combine_chips(),
+                        RECURSION_NUM_PVS,
+                    );
+                    let base_machine = machine.base_machine();
+                    let stdin =
+                        DeferredStdin::<$poseidon_type, RecursionChipType<$F>>::dummy(&shape);
+                    let mut program = DeferredVerifierCircuit::<$RecursionFC, $RecursionSC>::build(
+                        base_machine,
+                        &stdin,
+                    );
+
+                    recursion_shape_config.padding_shape(&mut program);
 
                     let (_pk, vk) = machine.setup_keys(&program);
                     vk.hash_field()
@@ -280,6 +304,16 @@ macro_rules! define_generate_all_shapes {
                 .generate_all_allowed_shapes()
                 .map(|shape| PicoRecursionProgramShape::Convert(shape.into()));
 
+            let deferred_shapes =
+                recursion_shape_config
+                    .get_all_shape_combinations(1)
+                    .map(|shape| {
+                        PicoRecursionProgramShape::Deferred(RecursionVkShape::from_proof_shapes(
+                            shape,
+                            merkle_tree_height,
+                        ))
+                    });
+
             let combine_shapes_2 =
                 recursion_shape_config
                     .get_all_shape_combinations(2)
@@ -311,6 +345,7 @@ macro_rules! define_generate_all_shapes {
                     });
 
             let all_shapes: Vec<_> = riscv_recursion_shapes
+                .chain(deferred_shapes)
                 .chain(combine_shapes_2)
                 .chain(combine_shapes_1)
                 .chain(compress_shape)

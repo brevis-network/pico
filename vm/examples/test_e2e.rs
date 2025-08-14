@@ -199,6 +199,7 @@ macro_rules! run {
                 >(
                     &riscv_vk,
                     vk_root,
+                    [Val::<$recur_sc>::ZERO; DIGEST_SIZE],
                     riscv_machine.base_machine(),
                     &riscv_proof.proofs(),
                     &recursion_shape_config,
@@ -497,7 +498,7 @@ run!(
 fn main() {
     setup_logger();
 
-    let (elf, riscv_stdin, args) = parse_args();
+    let (elf, riscv_stdin, args) = parse_args::<KoalaBearPoseidon2>();
     match args.field.as_str() {
         "bb" => run_babybear(elf, riscv_stdin, args.step, args.bench),
         "kb" => run_koalabear(elf, riscv_stdin, args.step, args.bench),

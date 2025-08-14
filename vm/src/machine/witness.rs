@@ -9,7 +9,8 @@ use crate::{
         stdin::EmulatorStdin,
     },
     instances::compiler::{
-        riscv_circuit::stdin::ConvertStdin, vk_merkle::stdin::RecursionStdinVariant,
+        riscv_circuit::stdin::{ConvertStdin, DeferredStdin},
+        vk_merkle::stdin::RecursionStdinVariant,
     },
     machine::{
         chip::ChipBehavior,
@@ -140,6 +141,40 @@ where
 {
     pub fn setup_for_convert(
         stdin: EmulatorStdin<C::Program, ConvertStdin<SC, PrevC>>,
+        config: Arc<SC>,
+        opts: EmulatorOpts,
+    ) -> Self {
+        Self {
+            program: None,
+            pk: None,
+            vk: None,
+            proof: None,
+            vk_root: None,
+            stdin: Some(stdin),
+            flag_empty_stdin: false,
+            opts: Some(opts),
+            config: Some(config),
+            records: vec![],
+        }
+    }
+}
+
+impl<C, PrevC, SC> ProvingWitness<SC, C, DeferredStdin<SC, PrevC>>
+where
+    SC: StarkGenericConfig + FieldHasher<Val<SC>>,
+    PrevC: ChipBehavior<
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
+    C: ChipBehavior<
+        Val<SC>,
+        Program = RecursionProgram<Val<SC>>,
+        Record = RecursionRecord<Val<SC>>,
+    >,
+{
+    pub fn setup_for_deferred(
+        stdin: EmulatorStdin<C::Program, DeferredStdin<SC, PrevC>>,
         config: Arc<SC>,
         opts: EmulatorOpts,
     ) -> Self {

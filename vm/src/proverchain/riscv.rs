@@ -341,12 +341,34 @@ where
         (0, 0 as f64)
     }
 
+    pub fn emulate(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (u64, Vec<u8>) {
+        let witness = ProvingWitness::<SC, RiscvChips<SC>, _>::setup_for_riscv(
+            self.program.clone(),
+            stdin,
+            self.opts,
+            self.pk.clone(),
+            self.vk.clone(),
+        );
+        let mut emulator = MetaEmulator::setup_riscv(&witness, None);
+        loop {
+            let done = emulator.next_record_batch(&mut |_| {});
+            if done {
+                break;
+            }
+        }
+        (emulator.cycles(), emulator.get_pv_stream())
+    }
+
     pub fn get_program(&self) -> Arc<Program> {
         self.program.clone()
     }
 
     pub fn vk(&self) -> &BaseVerifyingKey<SC> {
         &self.vk
+    }
+
+    pub fn pk(&self) -> &BaseProvingKey<SC> {
+        &self.pk
     }
 }
 

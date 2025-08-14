@@ -10,7 +10,7 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
-    configs::config::StarkGenericConfig,
+    configs::{config::StarkGenericConfig, stark_config::KoalaBearPoseidon2},
     emulator::{
         opts::EmulatorOpts,
         riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
@@ -28,12 +28,11 @@ use pico_vm::{
         chip::{ChipBehavior, MetaChip},
         logger::setup_logger,
         machine::MachineBehavior,
+        witness::ProvingWitness,
     },
     primitives::consts::RISCV_NUM_PVS,
 };
 use tracing::info;
-
-use pico_vm::machine::witness::ProvingWitness;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
@@ -116,7 +115,7 @@ fn main() {
     setup_logger();
 
     info!("Setting-up..");
-    let (elf, _, _) = parse_args::parse_args();
+    let (elf, _, _) = parse_args::parse_args::<KoalaBearPoseidon2>();
     let compiler = Compiler::new(SourceType::RISCV, elf);
 
     /*

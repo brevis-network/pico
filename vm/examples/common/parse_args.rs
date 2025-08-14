@@ -1,6 +1,9 @@
 use anyhow::Error;
 use clap::Parser;
-use pico_vm::{compiler::riscv::program::Program, emulator::stdin::EmulatorStdin};
+use pico_vm::{
+    compiler::riscv::program::Program, configs::config::StarkGenericConfig,
+    emulator::stdin::EmulatorStdin,
+};
 use std::fs;
 use tracing::info;
 
@@ -51,9 +54,10 @@ pub struct Args {
     pub bench: bool,
 }
 
-pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
+pub fn parse_args<SC: StarkGenericConfig>() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args)
+{
     let args = Args::parse();
-    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder();
+    let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<SC>();
 
     let elf: &[u8];
     if args.elf == "fibonacci" || args.elf == "fib" || args.elf == "f" {
@@ -94,5 +98,6 @@ pub fn parse_args() -> (&'static [u8], EmulatorStdin<Program, Vec<u8>>, Args) {
         std::process::exit(1);
     }
 
-    (elf, stdin.finalize(), args)
+    let (stdin, _) = stdin.finalize();
+    (elf, stdin, args)
 }

@@ -10,7 +10,10 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    configs::{
+        config::{Com, PcsProverData, StarkGenericConfig, Val},
+        stark_config::KoalaBearPoseidon2,
+    },
     emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -96,7 +99,7 @@ where
 
 fn main() {
     setup_logger();
-    let (elf, riscv_stdin, args) = parse_args::parse_args();
+    let (elf, riscv_stdin, args) = parse_args::parse_args::<KoalaBearPoseidon2>();
 
     // -------- Riscv Machine --------
     match args.field.as_str() {

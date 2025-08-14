@@ -10,6 +10,7 @@ use pico_vm::{
     },
 };
 
+use pico_vm::configs::stark_config::KoalaBearPoseidon2;
 use tracing::info;
 
 #[path = "common/parse_args.rs"]
@@ -21,7 +22,7 @@ use print_utils::log_section;
 #[allow(clippy::unit_arg)]
 fn main() {
     setup_logger();
-    let (elf, riscv_stdin, _) = parse_args::parse_args();
+    let (elf, riscv_stdin, _) = parse_args::parse_args::<KoalaBearPoseidon2>();
 
     log_section("KB PROVER CHAIN");
     let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), elf), Default::default(), None);

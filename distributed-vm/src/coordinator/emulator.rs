@@ -88,7 +88,7 @@ impl EmulatorRunner for BabyBearPoseidon2 {
     ) -> Result<()> {
         // Setups
         let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
-        let (elf, stdin) = load::<Program>(bench_program)?;
+        let (elf, stdin) = load::<Program, BabyBearPoseidon2>(bench_program)?;
         println!("bench program: {}", bench_program.name);
 
         let riscv_machine =
@@ -197,7 +197,7 @@ impl EmulatorRunner for KoalaBearPoseidon2 {
     ) -> Result<()> {
         // Setups
         let vk_manager = <KoalaBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
-        let (elf, stdin) = load::<Program>(bench_program)?;
+        let (elf, stdin) = load::<Program, KoalaBearPoseidon2>(bench_program)?;
         println!("bench program: {}", bench_program.name);
 
         let riscv_machine =

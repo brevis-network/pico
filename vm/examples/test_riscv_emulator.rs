@@ -8,6 +8,7 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
+    configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator,
         stdin::EmulatorStdin,
@@ -103,7 +104,7 @@ where
 fn main() {
     setup_logger();
 
-    let (elf, stdin, args) = parse_args::parse_args();
+    let (elf, stdin, args) = parse_args::parse_args::<KoalaBearPoseidon2>();
     match args.field.as_str() {
         "bb" => run::<BabyBear>(elf, stdin),
         "kb" => run::<KoalaBear>(elf, stdin),

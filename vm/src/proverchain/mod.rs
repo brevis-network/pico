@@ -4,6 +4,8 @@ mod convert;
 mod embed;
 pub(crate) mod riscv;
 
+mod deferred;
+
 use crate::{
     configs::config::{StarkGenericConfig, Val},
     machine::{chip::ChipBehavior, keys::HashableKey, machine::BaseMachine, proof::MetaProof},
@@ -13,6 +15,7 @@ use crate::{
 pub use combine::CombineProver;
 pub use compress::CompressProver;
 pub use convert::ConvertProver;
+pub use deferred::DeferredProver;
 pub use embed::EmbedProver;
 pub use riscv::RiscvProver;
 

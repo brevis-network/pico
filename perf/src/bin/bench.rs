@@ -99,7 +99,7 @@ fn bench_bb(bench_program: &BenchProgram) -> Result<PerformanceReport> {
     let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
     let vk_enabled = vk_manager.vk_verification_enabled();
 
-    let (elf, stdin) = load(bench_program)?;
+    let (elf, stdin) = load::<_, BabyBearPoseidon2>(bench_program)?;
     let riscv_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
@@ -222,7 +222,7 @@ fn bench_kb(bench_program: &BenchProgram) -> Result<PerformanceReport> {
     let vk_manager = <KoalaBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
     let vk_enabled = vk_manager.vk_verification_enabled();
 
-    let (elf, stdin) = load(bench_program)?;
+    let (elf, stdin) = load::<_, KoalaBearPoseidon2>(bench_program)?;
     let riscv_opts = EmulatorOpts::bench_riscv_ops();
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
@@ -354,7 +354,7 @@ where
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
     FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
-    let (elf, stdin) = load(bench_program)?;
+    let (elf, stdin) = load::<_, SC>(bench_program)?;
     let riscv_opts = EmulatorOpts::bench_riscv_ops();
 
     info!(
@@ -401,7 +401,7 @@ where
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
     FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
-    let (elf, stdin) = load(bench_program)?;
+    let (elf, stdin) = load::<_, SC>(bench_program)?;
     let riscv_opts = EmulatorOpts::bench_riscv_ops();
 
     info!(
@@ -448,7 +448,7 @@ where
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
     FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
-    let (elf, stdin) = load(bench_program)?;
+    let (elf, stdin) = load::<_, SC>(bench_program)?;
     let riscv_opts = EmulatorOpts::bench_riscv_ops();
 
     info!(
