@@ -3,12 +3,12 @@ members = ["derive", "vm", "sdk/*", "scripts", "gnark/field-ffi", "perf", "distr
 resolver = "2"
 
 [workspace.package]
-version = "1.0.1"
+version = "1.1.6"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 keywords = ["zkvm", "plonky3", "stark", "FRI"]
 categories = ["cryptography"]
-repository = "https://github.com/brevis-network/brevis-vm"
+repository = "https://github.com/brevis-network/pico"
 
 
 [profile.flamegraph]                # Custom profile for flamegraph generation
@@ -48,7 +48,6 @@ pico-perf = { path = "perf" }
 # p3
 
 # NOTE: Pin to known a "good" commit without recent API changes
-# Head of Plonky3 `multi-machine-base` branch
 p3-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
 p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
 p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }

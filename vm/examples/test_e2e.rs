@@ -50,7 +50,7 @@ use pico_vm::{
         RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
 };
-use std::{fs::File, io::Write, path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 use tracing::{debug, info};
 
 #[path = "common/parse_args.rs"]
@@ -442,9 +442,9 @@ macro_rules! run {
             });
             let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
 
-            let serialized_proofs = bincode::serialize(&embed_proof.proofs()).unwrap();
-            let mut file = File::create("embed_proof_proofs.bin").expect("cannot create file");
-            file.write_all(&serialized_proofs).expect("failed to write to file");
+            // let serialized_proofs = bincode::serialize(&embed_proof.proofs()).unwrap();
+            // let mut file = File::create("embed_proof_proofs.bin").expect("cannot create file");
+            // file.write_all(&serialized_proofs).expect("failed to write to file");
 
             info!("Verifying EMBED proof (at {:?})..", start.elapsed());
             let embed_result = embed_machine.verify(&embed_proof, &riscv_vk);

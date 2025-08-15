@@ -126,29 +126,28 @@ macro_rules! create_sdk_prove_client {
             ) -> Result<(MetaProof<$sc>, MetaProof<$bn254_sc>), Error> {
                 let (stdin, _) = stdin.finalize();
                 let riscv_proof = self.riscv.prove(stdin);
-                let riscv_vk = self.riscv_vk();
-                if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
-                    return Err(Error::msg("verify riscv proof failed"));
-                }
+                let _riscv_vk = self.riscv_vk();
+                // if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
+                //     return Err(Error::msg("verify riscv proof failed"));
+                // }
                 let proof = self.convert.prove(riscv_proof.clone());
-                if !self.convert.verify(&proof, riscv_vk) {
-                    return Err(Error::msg("verify convert proof failed"));
-                }
+                // if !self.convert.verify(&proof, riscv_vk) {
+                //     return Err(Error::msg("verify convert proof failed"));
+                // }
                 let proof = self.combine.prove(proof);
-                if !self.combine.verify(&proof, riscv_vk) {
-                    return Err(Error::msg("verify combine proof failed"));
-                }
+                // if !self.combine.verify(&proof, riscv_vk) {
+                //     return Err(Error::msg("verify combine proof failed"));
+                // }
                 let proof = self.compress.prove(proof);
-                if !self.compress.verify(&proof, riscv_vk) {
-                    return Err(Error::msg("verify compress proof failed"));
-                }
+                // if !self.compress.verify(&proof, riscv_vk) {
+                //     return Err(Error::msg("verify compress proof failed"));
+                // }
                 let proof = self.embed.prove(proof);
-                if !self.embed.verify(&proof, riscv_vk) {
-                    return Err(Error::msg("verify embed proof failed"));
-                }
+                // if !self.embed.verify(&proof, riscv_vk) {
+                //     return Err(Error::msg("verify embed proof failed"));
+                // }
                 Ok((riscv_proof, proof))
             }
-
 
             /// Generates proofs through the combine phase.
             pub fn prove_combine(
@@ -184,6 +183,21 @@ macro_rules! create_sdk_prove_client {
                 }
 
                 Ok((riscv_proof, proof))
+            }
+
+            /// verify the riscv and embed proof
+            pub fn verify(
+                &self,
+                proof: &(MetaProof<$sc>, MetaProof<$bn254_sc>),
+            ) -> Result<(), Error> {
+                let riscv_vk = self.riscv_vk();
+                if !self.riscv.verify(&proof.0, riscv_vk) {
+                    return Err(Error::msg("verify riscv proof failed"));
+                }
+                if !self.embed.verify(&proof.1, riscv_vk) {
+                    return Err(Error::msg("verify embed proof failed"));
+                }
+                Ok(())
             }
 
             pub fn write_onchain_data(
@@ -240,10 +254,10 @@ macro_rules! create_sdk_prove_client {
                 field_type: &str,
             ) -> Result<(), Error> {
                 let output = output.as_ref();
-                let vk_verification = vk_verification_enabled();
-                if !vk_verification {
-                    return Err(Error::msg("VK_VERIFICATION must be set to true in evm proof"));
-                }
+                // let vk_verification = vk_verification_enabled();
+                // if !vk_verification {
+                //     return Err(Error::msg("VK_VERIFICATION must be set to true in evm proof"));
+                // }
                 let (riscv_proof, embed_proof) = self.prove(stdin)?;
                 self.write_onchain_data(output, &riscv_proof, &embed_proof)?;
                 let field_name = match field_type {
