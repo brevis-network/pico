@@ -26,7 +26,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2024-11-27
+          toolchain: nightly-2025-08-04
           override: true
       - run: rustup component add rustfmt
       - uses: actions-rs/cargo@v1
@@ -48,7 +48,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2024-11-27
+          toolchain: nightly-2025-08-04
           override: true
       - run: rustup component add clippy
       - name: Rust cache
@@ -72,7 +72,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2024-11-27
+          toolchain: nightly-2025-08-04
           override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -99,7 +99,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2024-11-27
+          toolchain: nightly-2025-08-04
           override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -141,7 +141,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2024-11-27
+          toolchain: nightly-2025-08-04
           override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -183,7 +183,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly-2024-11-27
+          toolchain: nightly-2025-08-04
           override: true
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
