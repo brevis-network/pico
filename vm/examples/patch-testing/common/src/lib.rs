@@ -24,12 +24,12 @@ macro_rules! run_proof {
         let client = $crate::pico_sdk::client::DefaultProverClient::new(&elf);
 
         // Write any provided inputs to the stdin builder.
-        let stdin_builder = client.get_stdin_builder();
+        let mut stdin_builder = client.new_stdin_builder();
         $(
-            stdin_builder.borrow_mut().write(&$input);
+            stdin_builder.write(&$input);
         )*
 
         // Generate proof
-        client.prove_fast().expect("Failed to generate proof");
+        client.prove_fast(stdin_builder).expect("Failed to generate proof");
     }};
 }

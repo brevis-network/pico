@@ -46,9 +46,20 @@ impl<F: Field> CpuChip<F> {
                 syscall_id - F::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
             );
 
+            // Populate `is_commit_deferred_proofs`.
+            ecall_cols
+                .is_commit_deferred_proofs
+                .populate_from_field_element(
+                    syscall_id
+                        - F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()),
+                );
+
             // If the syscall is `COMMIT` or `COMMIT_DEFERRED_PROOFS`, set the index bitmap and
             // digest word.
-            if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT.syscall_id()) {
+            if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT.syscall_id())
+                || syscall_id
+                    == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
+            {
                 let digest_idx = cols.op_b_access.value().to_u32() as usize;
                 ecall_cols.index_bitmap[digest_idx] = F::ONE;
             }
@@ -60,6 +71,13 @@ impl<F: Field> CpuChip<F> {
             if is_halt {
                 ecall_cols.operand_to_check = event.b.into();
                 ecall_cols.operand_range_check_cols.populate(event.b);
+                cols.ecall_range_check_operand = F::ONE;
+            }
+
+            if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
+            {
+                ecall_cols.operand_to_check = event.c.into();
+                ecall_cols.operand_range_check_cols.populate(event.c);
                 cols.ecall_range_check_operand = F::ONE;
             }
         }

@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 pico-sdk.workspace = true
 bincode = "1.3.3"
-rsp-client-executor = { git = "https://github.com/brevis-network/rsp.git", rev="01bee94adb32975d5af0cdd8c088a813c2068e1a" }
+rsp-client-executor = { git = "https://github.com/brevis-network/rsp.git", rev="8c24ce6f9b8dc036c05ca6aef4b227fb660157f2" }

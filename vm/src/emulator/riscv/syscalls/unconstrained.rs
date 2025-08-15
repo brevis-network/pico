@@ -8,6 +8,7 @@ impl Syscall for EnterUnconstrainedSyscall {
         // Panic if the previous mode is wrong.
         let state = UnconstrainedState::new(ctx.rt);
         ctx.rt.mode = RiscvEmulatorMode::Unconstrained(state);
+        ctx.rt.update_mode_deps();
 
         Some(1)
     }
@@ -19,6 +20,7 @@ impl Syscall for ExitUnconstrainedSyscall {
     fn emulate(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
         // The emulator state is restored in this function if the previous mode is unconstrained.
         let state = ctx.rt.mode.exit_unconstrained();
+        ctx.rt.update_mode_deps();
 
         // Reset the state of the emulator.
         if let Some(mut state) = state {
@@ -32,7 +34,7 @@ impl Syscall for ExitUnconstrainedSyscall {
                         ctx.rt.state.memory.insert(addr, value);
                     }
                     None => {
-                        ctx.rt.state.memory.remove(&addr);
+                        ctx.rt.state.memory.remove(addr);
                     }
                 }
             }

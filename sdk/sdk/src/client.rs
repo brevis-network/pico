@@ -24,10 +24,14 @@ use pico_vm::{
         },
         configs::{embed_config::BabyBearBn254Poseidon2, embed_kb_config::KoalaBearBn254Poseidon2},
     },
-    machine::{keys::BaseVerifyingKey, machine::MachineBehavior, proof::MetaProof},
+    machine::{
+        keys::{BaseProvingKey, BaseVerifyingKey},
+        machine::MachineBehavior,
+        proof::{merge_meta_proofs, MetaProof},
+    },
     proverchain::{
-        CombineProver, CompressProver, ConvertProver, EmbedProver, InitialProverSetup,
-        MachineProver, ProverChain, RiscvProver,
+        CombineProver, CompressProver, ConvertProver, DeferredProver, EmbedProver,
+        InitialProverSetup, MachineProver, ProverChain, RiscvProver,
     },
 };
 use std::{path::Path, process::Command};
@@ -38,6 +42,7 @@ macro_rules! create_sdk_prove_client {
         pub struct $client_name {
             riscv: RiscvProver<$sc, Program>,
             convert: ConvertProver<$sc, $sc>,
+            deferred: DeferredProver<$sc>,
             combine: CombineProver<$sc, $sc>,
             compress: CompressProver<$sc, $sc>,
             embed: EmbedProver<$sc, $bn254_sc, Vec<u8>>,
@@ -47,7 +52,7 @@ macro_rules! create_sdk_prove_client {
             pub fn new(elf: &[u8]) -> Self {
                 let vk_verification = vk_verification_enabled();
                 debug!("VK_VERIFICATION in prover client: {}", vk_verification);
-                let (riscv, convert, combine, compress, embed) = if vk_verification {
+                let (riscv, deferred, convert, combine, compress, embed) = if vk_verification {
                     let riscv_shape_config = RiscvShapeConfig::<$field_type>::default();
                     let recursion_shape_config = RecursionShapeConfig::<
                         $field_type,
@@ -67,6 +72,11 @@ macro_rules! create_sdk_prove_client {
                         $field_type,
                         RecursionChipType<$field_type>,
                     >::default();
+                    let deferred = DeferredProver::<$sc>::new(Default::default(), Some(recursion_shape_config));
+                    let recursion_shape_config = RecursionShapeConfig::<
+                        $field_type,
+                        RecursionChipType<$field_type>,
+                    >::default();
                     let combine = CombineProver::new_with_prev(
                         &convert,
                         Default::default(),
@@ -74,27 +84,29 @@ macro_rules! create_sdk_prove_client {
                     );
                     let compress = CompressProver::new_with_prev(&combine, (), None);
                     let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
-                    (riscv, convert, combine, compress, embed)
+                    (riscv, deferred, convert, combine, compress, embed)
                 } else {
                     let riscv =
                         RiscvProver::new_initial_prover((<$sc>::new(), elf), Default::default(), None);
                     let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
+                    let deferred = DeferredProver::<$sc>::new(Default::default(), None);
                     let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
                     let compress = CompressProver::new_with_prev(&combine, (), None);
                     let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
-                    (riscv, convert, combine, compress, embed)
+                    (riscv, deferred, convert, combine, compress, embed)
                 };
 
                 Self {
                     riscv,
                     convert,
+                    deferred,
                     combine,
                     compress,
                     embed,
                 }
             }
 
-            pub fn new_stdin_builder(&self) -> EmulatorStdinBuilder<Vec<u8>> {
+            pub fn new_stdin_builder(&self) -> EmulatorStdinBuilder<Vec<u8>, $sc> {
                 EmulatorStdinBuilder::default()
             }
 
@@ -102,13 +114,17 @@ macro_rules! create_sdk_prove_client {
                 self.riscv.vk()
             }
 
+            pub fn riscv_pk_vk(&self) -> (&BaseProvingKey<$sc>, &BaseVerifyingKey<$sc>) {
+                (self.riscv.pk(), self.riscv.vk())
+            }
+
             /// prove and serialize embed proof, which provided to next step gnark verifier.
             /// the constraints.json and groth16_witness.json will be generated in output dir.
             pub fn prove(
                 &self,
-                stdin: EmulatorStdinBuilder<Vec<u8>>,
+                stdin: EmulatorStdinBuilder<Vec<u8>, $sc>,
             ) -> Result<(MetaProof<$sc>, MetaProof<$bn254_sc>), Error> {
-                let stdin = stdin.finalize();
+                let (stdin, _) = stdin.finalize();
                 let riscv_proof = self.riscv.prove(stdin);
                 let _riscv_vk = self.riscv_vk();
                 // if !self.riscv.verify(&riscv_proof.clone(), riscv_vk) {
@@ -133,6 +149,42 @@ macro_rules! create_sdk_prove_client {
                 Ok((riscv_proof, proof))
             }
 
+            /// Generates proofs through the combine phase.
+            pub fn prove_combine(
+                &self,
+                stdin: EmulatorStdinBuilder<Vec<u8>, $sc>,
+            ) -> Result<(MetaProof<$sc>, MetaProof<$sc>), Error> {
+                let (stdin, deferred_proofs) = stdin.finalize();
+                let riscv_proof = self.riscv.prove(stdin.clone());
+                let riscv_vk = self.riscv_vk();
+                if !self.riscv.verify(&riscv_proof, riscv_vk) {
+                    return Err(Error::msg("verify riscv proof failed"));
+                }
+                let mut convert_proofs: Vec<MetaProof<$sc>> = Vec::with_capacity(2);
+                if !deferred_proofs.is_empty() {
+                    let (convert_deferred_proof, digest) = self.deferred.prove_with_deferred(&riscv_proof.vks[0], deferred_proofs);
+                    self.convert.set_final_deferred_digest(digest);
+                    convert_proofs.push(convert_deferred_proof);
+                }
+
+                let proof = self.convert.prove(riscv_proof.clone());
+                if !self.convert.verify(&proof, riscv_vk) {
+                    return Err(Error::msg("verify convert proof failed"));
+                }
+                convert_proofs.push(proof);
+
+                let proof = merge_meta_proofs(convert_proofs).unwrap();
+                debug!("COMBINE proofs len: {}", proof.proofs.len());
+                debug!("COMBINE vks len: {}", proof.vks.len());
+
+                let proof = self.combine.prove(proof);
+                if !self.combine.verify(&proof, riscv_vk) {
+                    return Err(Error::msg("verify combine proof failed"));
+                }
+
+                Ok((riscv_proof, proof))
+            }
+
             /// verify the riscv and embed proof
             pub fn verify(
                 &self,
@@ -146,15 +198,6 @@ macro_rules! create_sdk_prove_client {
                     return Err(Error::msg("verify embed proof failed"));
                 }
                 Ok(())
-            }
-
-            /// emulate the program and return the cycles
-            pub fn emulate(
-                &self,
-                stdin: EmulatorStdinBuilder<Vec<u8>>,
-            ) -> (u64, Vec<u8>) {
-                let stdin = stdin.finalize();
-                self.riscv.emulate(stdin)
             }
 
             pub fn write_onchain_data(
@@ -176,12 +219,21 @@ macro_rules! create_sdk_prove_client {
                 Ok(())
             }
 
+            /// emulate the program and return the cycles
+            pub fn emulate(
+                &self,
+                stdin: EmulatorStdinBuilder<Vec<u8>, $sc>,
+            ) -> (u64, Vec<u8>) {
+                let (stdin, _) = stdin.finalize();
+                self.riscv.emulate(stdin)
+            }
+
             /// prove and verify riscv program. default not include convert, combine, compress, embed
             pub fn prove_fast(
                 &self,
-                stdin: EmulatorStdinBuilder<Vec<u8>>,
+                stdin: EmulatorStdinBuilder<Vec<u8>, $sc>,
             ) -> Result<MetaProof<$sc>, Error> {
-                let stdin = stdin.finalize();
+                let (stdin, _) = stdin.finalize();
                 info!("stdin length: {}", stdin.inputs.len());
                 let proof = self.riscv.prove(stdin);
                 let riscv_vk = self.riscv_vk();
@@ -196,7 +248,7 @@ macro_rules! create_sdk_prove_client {
             /// prove and generate gnark proof and contract inputs. must install docker first
             pub fn prove_evm(
                 &self,
-                stdin: EmulatorStdinBuilder<Vec<u8>>,
+                stdin: EmulatorStdinBuilder<Vec<u8>, $sc>,
                 need_setup: bool,
                 output: impl AsRef<Path>,
                 field_type: &str,

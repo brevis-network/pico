@@ -2,11 +2,13 @@
 
 pub mod code;
 mod commit;
+mod deferred;
 mod halt;
 mod hint;
 pub mod precompiles;
 pub mod syscall_context;
 mod unconstrained;
+mod verify;
 mod write;
 
 use crate::{
@@ -18,7 +20,8 @@ use crate::{
         field::field_op::FieldOperation,
     },
     emulator::riscv::syscalls::{
-        commit::CommitSyscall, halt::HaltSyscall, syscall_context::SyscallContext,
+        commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall,
+        syscall_context::SyscallContext, verify::VerifySyscall,
     },
     primitives::Poseidon2Init,
 };
@@ -99,6 +102,13 @@ where
     syscall_map.insert(SyscallCode::HINT_READ, Arc::new(HintReadSyscall));
 
     syscall_map.insert(SyscallCode::COMMIT, Arc::new(CommitSyscall));
+
+    syscall_map.insert(
+        SyscallCode::COMMIT_DEFERRED_PROOFS,
+        Arc::new(CommitDeferredSyscall),
+    );
+
+    syscall_map.insert(SyscallCode::VERIFY_PICO_PROOF, Arc::new(VerifySyscall));
 
     syscall_map.insert(SyscallCode::SHA_EXTEND, Arc::new(Sha256ExtendSyscall));
 

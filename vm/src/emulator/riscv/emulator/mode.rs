@@ -6,14 +6,14 @@ use crate::{
     },
     compiler::riscv::{instruction::Instruction, opcode::Opcode},
     emulator::riscv::{
-        emulator::EmulationError, record::MemoryAccessRecord, syscalls::SyscallCode,
+        emulator::EmulationError, memory::Entry, record::MemoryAccessRecord, syscalls::SyscallCode,
     },
 };
-use hashbrown::{hash_map::Entry, HashMap};
-use nohash_hasher::BuildNoHashHasher;
+use hashbrown::HashMap;
 
 /// RiscV emulator running mode
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum RiscvEmulatorMode {
     /// Simple mode for only executing the instructions without trace generation
     Simple,
@@ -67,7 +67,8 @@ impl RiscvEmulatorMode {
         memory_store_value: Option<u32>,
         events: &mut Vec<CpuEvent>,
     ) {
-        if let Self::Trace = self {
+        // TODO: Remove Self::Simple
+        if matches!(self, Self::Trace | Self::Simple) {
             let event = CpuEvent::new(
                 chunk,
                 clk,
@@ -116,7 +117,8 @@ impl RiscvEmulatorMode {
         prev_record: MemoryRecord,
         events: &mut HashMap<u32, MemoryLocalEvent>,
     ) {
-        if let Self::Trace = self {
+        // Self::Simple matching only for syscall emulate in simple mode
+        if matches!(self, Self::Trace | Self::Simple) {
             events
                 .entry(addr)
                 .and_modify(|e| {
@@ -131,12 +133,15 @@ impl RiscvEmulatorMode {
     }
 
     /// Copy the local memory events.
+    ///
+    /// After exiting unconstrained mode, we need to restore the correct memory events.
+    /// Since the previous mode could be either `Trace` or `Simple`, both cases must be handled here.
     pub fn copy_local_memory_events(
         &self,
         from: &mut HashMap<u32, MemoryLocalEvent>,
         to: &mut Vec<MemoryLocalEvent>,
     ) {
-        if let Self::Trace = self {
+        if matches!(self, Self::Trace | Self::Simple) {
             for (_, event) in from.drain() {
                 to.push(event);
             }
@@ -168,11 +173,7 @@ impl RiscvEmulatorMode {
     }
 
     /// Add an unconstrained memory record.
-    pub fn add_unconstrained_memory_record(
-        &mut self,
-        addr: u32,
-        entry: &Entry<u32, MemoryRecord, BuildNoHashHasher<u32>>,
-    ) {
+    pub fn add_unconstrained_memory_record(&mut self, addr: u32, entry: &Entry<MemoryRecord>) {
         if let Self::Unconstrained(state) = self {
             let record = match &entry {
                 Entry::Occupied(entry) => Some(entry.get()),

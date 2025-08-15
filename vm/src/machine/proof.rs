@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 /// Wrapper for all proof types
 /// The top layer of abstraction (the most abstract layer)
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct MetaProof<SC>
 where
     SC: StarkGenericConfig,
@@ -61,6 +62,72 @@ where
     pub fn num_proofs(&self) -> usize {
         self.proofs.len()
     }
+
+    pub fn split_into_individuals(&self) -> Vec<Self> {
+        assert_eq!(self.proofs.len(), self.vks.len());
+        self.proofs
+            .iter()
+            .cloned()
+            .zip(self.vks.iter().cloned())
+            .map(|(proof, vk)| MetaProof {
+                proofs: Arc::from([proof]),
+                vks: Arc::from([vk]),
+                pv_stream: self.pv_stream.clone(),
+            })
+            .collect()
+    }
+}
+
+pub fn merge_meta_proofs<I, SC>(meta_list: I) -> Option<MetaProof<SC>>
+where
+    I: IntoIterator<Item = MetaProof<SC>>,
+    SC: StarkGenericConfig,
+{
+    let metas: Vec<MetaProof<SC>> = meta_list.into_iter().collect();
+    if metas.is_empty() {
+        return None;
+    }
+
+    let (mut proofs_cap, mut vks_cap, mut pv_cap) = (0, 0, 0);
+    for m in &metas {
+        proofs_cap += m.proofs.len();
+        vks_cap += m.vks.len();
+        pv_cap += m.pv_stream.as_ref().map_or(0, |s| s.len());
+    }
+
+    let combined_proofs: Arc<[BaseProof<SC>]> = {
+        let mut vec = Vec::with_capacity(proofs_cap);
+        for m in &metas {
+            vec.extend_from_slice(&m.proofs);
+        }
+        Arc::from(vec)
+    };
+
+    let combined_vks: Arc<[BaseVerifyingKey<SC>]> = {
+        let mut vec = Vec::with_capacity(vks_cap);
+        for m in &metas {
+            vec.extend_from_slice(&m.vks);
+        }
+        Arc::from(vec)
+    };
+
+    let mut pv_stream_buf = Vec::with_capacity(pv_cap);
+    for mut m in metas {
+        if let Some(mut s) = m.pv_stream.take() {
+            pv_stream_buf.append(&mut s);
+        }
+    }
+    let combined_pv_stream = if pv_stream_buf.is_empty() {
+        None
+    } else {
+        Some(pv_stream_buf)
+    };
+
+    Some(MetaProof {
+        proofs: combined_proofs,
+        vks: combined_vks,
+        pv_stream: combined_pv_stream,
+    })
 }
 
 /// Base proof produced by base prover

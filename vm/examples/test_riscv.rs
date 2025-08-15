@@ -10,7 +10,10 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
-    configs::config::{Com, PcsProverData, StarkGenericConfig, Val},
+    configs::{
+        config::{Com, PcsProverData, StarkGenericConfig, Val},
+        stark_config::KoalaBearPoseidon2,
+    },
     emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
     instances::{
         chiptype::riscv_chiptype::RiscvChipType,
@@ -79,7 +82,9 @@ where
 
     // Generate the proof.
     info!("Generating RISCV proof (at {:?})..", start.elapsed());
-    let riscv_proof = riscv_machine.prove_cycles(&riscv_witness).0;
+    let riscv_proof = riscv_machine
+        .prove_with_shape_cycles(&riscv_witness, None)
+        .0;
 
     // Verify the proof.
     info!("Verifying RISCV proof (at {:?})..", start.elapsed());
@@ -94,7 +99,7 @@ where
 
 fn main() {
     setup_logger();
-    let (elf, riscv_stdin, args) = parse_args::parse_args();
+    let (elf, riscv_stdin, args) = parse_args::parse_args::<KoalaBearPoseidon2>();
 
     // -------- Riscv Machine --------
     match args.field.as_str() {

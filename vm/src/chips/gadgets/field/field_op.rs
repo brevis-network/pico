@@ -220,6 +220,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             }
             // a / b = result is equivalent to a = result * b.
             FieldOperation::Div => {
+                // TODO: bigint-rug
                 // As modulus is prime, we can use Fermat's little theorem to compute the
                 // inverse.
                 let result =

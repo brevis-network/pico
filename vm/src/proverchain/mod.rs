@@ -2,7 +2,9 @@ mod combine;
 mod compress;
 mod convert;
 mod embed;
-mod riscv;
+pub(crate) mod riscv;
+
+mod deferred;
 
 use crate::{
     configs::config::{StarkGenericConfig, Val},
@@ -13,6 +15,7 @@ use crate::{
 pub use combine::CombineProver;
 pub use compress::CompressProver;
 pub use convert::ConvertProver;
+pub use deferred::DeferredProver;
 pub use embed::EmbedProver;
 pub use riscv::RiscvProver;
 

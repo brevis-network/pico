@@ -48,6 +48,7 @@ pub fn setup_logger() {
             "flat" => {
                 tracing_subscriber::fmt::Subscriber::builder()
                     .compact()
+                    .with_ansi(false)
                     .with_file(false)
                     .with_target(false)
                     .with_thread_names(false)

@@ -17,7 +17,9 @@ use crate::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
             shapes::recursion_shape::RecursionShapeConfig,
-            vk_merkle::{stdin::RecursionStdinVariant, HasStaticVkManager},
+            vk_merkle::{
+                stdin::RecursionStdinVariant, vk_verification_enabled, HasStaticVkManager,
+            },
         },
     },
     machine::{
@@ -29,14 +31,14 @@ use crate::{
         utils::{assert_recursion_public_values_valid, assert_riscv_vk_digest},
         witness::ProvingWitness,
     },
-    primitives::consts::COMBINE_SIZE,
+    primitives::consts::{COMBINE_SIZE, DIGEST_SIZE},
 };
 use anyhow::Result;
 use p3_air::Air;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
-use std::{any::type_name, borrow::Borrow, time::Instant};
-use tracing::{debug, debug_span, instrument};
+use std::{any::type_name, borrow::Borrow, sync::Arc, time::Instant};
+use tracing::{debug, debug_span, info, instrument};
 
 pub struct CombineMachine<SC, C>
 where
@@ -241,14 +243,14 @@ macro_rules! impl_combine_machine {
                 }
 
                 // proof stats
-                debug!("COMBINE chip log degrees:");
+                info!("COMBINE chip log degrees:");
                 all_proofs
                     .iter()
                     .enumerate()
                     .for_each(|(i, proof)| {
-                        debug!("Proof {}", i);
+                        info!("Proof {}", i);
                         proof.main_chip_ordering.iter().for_each(|(chip_name, idx)| {
-                            debug!(
+                            info!(
                                 "   |- {:<20} main: {:<8}",
                                 chip_name,
                                 proof.opened_values.chips_opened_values[*idx].log_main_degree,
@@ -265,7 +267,6 @@ macro_rules! impl_combine_machine {
                 assert_eq!(proof.proofs().len(), 1);
 
                 // assert completion
-
                 let public_values: &RecursionPublicValues<_> =
                     proof.proofs[0].public_values.as_ref().borrow();
 
@@ -282,8 +283,12 @@ macro_rules! impl_combine_machine {
                 let combine_vk = proof.vks().first().unwrap();
                 if vk_manager.vk_verification_enabled(){
                     assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
+                    assert_eq!(public_values.vk_root, vk_manager.merkle_root, "Recursion circuit vk_root mismatch!")
                 }
 
+                // Defer Proofs Digest Verification
+                assert_eq!(public_values.start_reconstruct_deferred_digest, [Val::<$recur_sc>::ZERO; DIGEST_SIZE]);
+                assert_eq!(public_values.deferred_proofs_digest, public_values.end_reconstruct_deferred_digest);
 
                 // verify
                 self.base_machine
@@ -315,3 +320,125 @@ where
         }
     }
 }
+
+macro_rules! impl_indexed_combine_machine {
+    ($emul_name:ident, $recur_cc:ident, $recur_sc:ident) => {
+        impl<C> CombineMachine<$recur_sc, C>
+        where
+            C: Send
+                + Sync
+                + ChipBehavior<
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                > + Air<ProverConstraintFolder<$recur_sc>>
+                + for<'b> Air<VerifierConstraintFolder<'b, $recur_sc>>
+                + for<'b> Air<RecursiveVerifierConstraintFolder<'b, $recur_cc>>,
+        {
+            // TODO: rename
+            #[instrument(name = "PROVE TWO META PROOFS", level = "debug", skip_all)]
+            pub fn prove_two(
+                &self,
+                meta_a: Arc<MetaProof<$recur_sc>>,
+                meta_b: Arc<MetaProof<$recur_sc>>,
+                is_complete: bool,
+            ) -> MetaProof<$recur_sc>
+            where
+                C: for<'c> Air<
+                    DebugConstraintFolder<
+                        'c,
+                        <$recur_sc as StarkGenericConfig>::Val,
+                        <$recur_sc as StarkGenericConfig>::Challenge,
+                    >,
+                >,
+            {
+                // Step 1: validate inputs & pull out inner proofs
+                assert_eq!(
+                    meta_a.proofs.len(),
+                    1,
+                    "The first MetaProof must wrap exactly one BaseProof",
+                );
+                assert_eq!(
+                    meta_b.proofs.len(),
+                    1,
+                    "The second MetaProof must wrap exactly one BaseProof",
+                );
+                assert_eq!(
+                    meta_a.vks.len(),
+                    1,
+                    "The first MetaProof must wrap exactly one VK",
+                );
+                assert_eq!(
+                    meta_b.vks.len(),
+                    1,
+                    "The second MetaProof must wrap exactly one VK",
+                );
+                let mut all_proofs = vec![meta_a.proofs[0].clone(), meta_b.proofs[0].clone()];
+                let mut all_vks = vec![meta_a.vks[0].clone(), meta_b.vks[0].clone()];
+                // Step 2: prepare recursion witness & emulator
+                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+                let (vk_root, recursion_shape_config) = if vk_verification_enabled() {
+                    (
+                        vk_manager.merkle_root,
+                        Some(RecursionShapeConfig::<
+                            Val<$recur_sc>,
+                            RecursionChipType<Val<$recur_sc>>,
+                        >::default()),
+                    )
+                } else {
+                    ([Val::<$recur_sc>::ZERO; DIGEST_SIZE], None)
+                };
+
+                let (recursion_stdin, last_vk, last_proof) = EmulatorStdin::setup_for_combine::<
+                    <$recur_cc as FieldGenericConfig>::F,
+                    $recur_cc,
+                >(
+                    vk_root,
+                    &all_vks,
+                    &all_proofs,
+                    self.base_machine(),
+                    COMBINE_SIZE,
+                    is_complete,
+                    &vk_manager,
+                    recursion_shape_config.as_ref(),
+                );
+
+                // TODO: opts
+                let recursion_witness = ProvingWitness::setup_for_combine(
+                    vk_root,
+                    recursion_stdin,
+                    last_vk,
+                    last_proof,
+                    self.config(),
+                    Default::default(),
+                );
+                let mut recursion_emulator =
+                    $emul_name::setup_combine(&recursion_witness, self.base_machine());
+
+                // Step 3: generate + complete record batch
+                let (mut batch_records, batch_pks, batch_vks, _done) =
+                    recursion_emulator.next_record_keys_batch();
+                self.complement_record(batch_records.as_mut_slice());
+
+                // Step 4: prove the batch in parallel
+                let batch_proofs = batch_records
+                    .par_iter()
+                    .zip(batch_pks.par_iter())
+                    .flat_map(|(record, pk)| {
+                        self.base_machine
+                            .prove_ensemble(pk, std::slice::from_ref(record))
+                    })
+                    .collect::<Vec<_>>();
+
+                // Step 5: assemble & return the new MetaProof
+                all_proofs = batch_proofs;
+                all_vks = batch_vks;
+
+                MetaProof::new(all_proofs.into(), all_vks.into(), None)
+            }
+        }
+    };
+}
+
+impl_indexed_combine_machine!(BabyBearMetaEmulator, BabyBearSimple, BabyBearPoseidon2);
+impl_indexed_combine_machine!(KoalaBearMetaEmulator, KoalaBearSimple, KoalaBearPoseidon2);

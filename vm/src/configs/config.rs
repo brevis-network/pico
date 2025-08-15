@@ -4,7 +4,7 @@ use hybrid_array::ArraySize;
 use p3_challenger::{CanObserve, CanSample, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{ExtensionField, Field, PrimeField, TwoAdicField};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
 use typenum::Same;
 // Resembling Plonky3: https://github.com/Plonky3/Plonky3/blob/main/uni-stark/src/config.rs
 
@@ -38,7 +38,7 @@ pub type Challenger<SC> = <SC as StarkGenericConfig>::Challenger;
 pub trait StarkGenericConfig: Clone + Serialize + Sync {
     type Val: Field;
 
-    type Domain: PolynomialSpace<Val = Self::Val> + Copy + Sync;
+    type Domain: PolynomialSpace<Val = Self::Val> + Copy + Sync + Serialize + DeserializeOwned;
 
     /// The field from which most random challenges are drawn.
     type Challenge: ExtensionField<Self::Val>;

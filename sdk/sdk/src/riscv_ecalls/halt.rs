@@ -4,6 +4,7 @@ cfg_if::cfg_if! {
         use sha2::Digest;
         use crate::zkvm;
         use crate::{PV_DIGEST_NUM_WORDS, POSEIDON_NUM_WORDS};
+        use p3_field::PrimeField32;
     }
 }
 
@@ -59,6 +60,13 @@ pub extern "C" fn syscall_halt(exit_code: u8) -> ! {
         for i in 0..PV_DIGEST_NUM_WORDS {
             let word = u32::from_le_bytes(pv_digest_bytes[i * 4..(i + 1) * 4].try_into().unwrap());
             asm!("ecall", in("t0") crate::riscv_ecalls::COMMIT, in("a0") i, in("a1") word);
+        }
+
+        let deferred_proofs_digest = zkvm::DEFERRED_PROOFS_DIGEST.as_mut().unwrap();
+
+        for i in 0..POSEIDON_NUM_WORDS {
+            let word = deferred_proofs_digest[i].as_canonical_u32();
+            asm!("ecall", in("t0") crate::riscv_ecalls::COMMIT_DEFERRED_PROOFS, in("a0") i, in("a1") word);
         }
 
         asm!(
