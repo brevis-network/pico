@@ -8,6 +8,7 @@ use pico_vm::{
         compiler::{Compiler, SourceType},
         program::Program,
     },
+    configs::stark_config::KoalaBearPoseidon2,
     emulator::{
         opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator,
         stdin::EmulatorStdin,
@@ -34,7 +35,7 @@ where
     let pc_start = program.pc_start;
 
     info!("Creating emulator (at {:?})..", start.elapsed());
-    let mut emulator = RiscvEmulator::new::<F>(program, EmulatorOpts::test_opts());
+    let mut emulator = RiscvEmulator::new_single::<F>(program, EmulatorOpts::test_opts(), None);
     info!(
         "Running with chunk size: {}, batch size: {}",
         emulator.opts.chunk_size, emulator.opts.chunk_batch_size
@@ -103,7 +104,7 @@ where
 fn main() {
     setup_logger();
 
-    let (elf, stdin, args) = parse_args::parse_args();
+    let (elf, stdin, args) = parse_args::parse_args::<KoalaBearPoseidon2>();
     match args.field.as_str() {
         "bb" => run::<BabyBear>(elf, stdin),
         "kb" => run::<KoalaBear>(elf, stdin),

@@ -3,7 +3,7 @@ members = ["derive", "vm", "sdk/*", "scripts", "gnark/field-ffi", "perf"]
 resolver = "2"
 
 [workspace.package]
-version = "1.1.5"
+version = "1.1.6"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 keywords = ["zkvm", "plonky3", "stark", "FRI"]
@@ -33,37 +33,38 @@ pico-vm = { path = "vm" }
 pico-sdk = { path = "sdk/sdk" }
 pico-cli = { path = "sdk/cli" }
 pico-patch-libs = { path = "sdk/patch-libs" }
+pico-perf = { path = "perf" }
+
 # p3
 
 # NOTE: Pin to known a "good" commit without recent API changes
-# Head of `pico-v1.0` branch
-p3-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
+p3-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-commit = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-matrix = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
 p3-baby-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
   "nightly-features",
-], rev = "476cff48" }
+], rev = "a4d376b" }
 p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
   "nightly-features",
-], rev = "476cff48" }
-p3-util = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
-p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", rev = "476cff48" }
+], rev = "a4d376b" }
+p3-util = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-challenger = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-dft = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-fri = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-goldilocks = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-keccak = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-keccak-air = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-blake3 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-mds = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-merkle-tree = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-poseidon2 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-symmetric = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-uni-stark = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-maybe-rayon = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-bn254-fr = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-mersenne-31 = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
+p3-circle = { git = "https://github.com/brevis-network/Plonky3.git", rev = "a4d376b" }
 
 # For local debugging
 # p3-air = { path = "../p3/air" }
@@ -101,16 +102,17 @@ cfg-if = "1.0.0"
 clap = { version = "4.5.13", features = ["derive", "env"] }
 cpu-time = "1.0.0"
 crossbeam = "0.8.4"
+core_affinity = "0.8"
 csv = "1.3"
 curve25519-dalek = { version = "4.1.2" }
 dashmap = "6.1.0"
 dashu = "0.4.2"
+derive_more = { version = "2.0", features = ["constructor"] }
 elf = "0.7.4"
 elliptic-curve = "0.13.8"
 env_logger = "0.11.6"
 eyre = "0.6.12"
 ff = { version = "0.13", features = ["derive", "derive_bits"] }
-generic-array = { version = "1.1.0", features = ["alloc", "serde"] }
 halo2curves = "0.7.0"
 hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
 hex = "0.4.3"
@@ -119,7 +121,6 @@ itertools = "0.13"
 k256 = { version = "0.13.3", features = ["expose-field"] }
 lazy_static = "1.5.0"
 log = "0.4.21"
-nohash-hasher = "0.2.0"
 num = { version = "0.4.3" }
 num-bigint = "0.4.6"
 num-traits = "0.2"
@@ -150,5 +151,5 @@ tracing = "0.1.40"
 tracing-forest = { version = "0.1.6", features = ["ansi", "smallvec"] }
 tracing-subscriber = { version = "0.3.18", features = ["std", "env-filter"] }
 typenum = "1.17.0"
-vec_map = "0.8.2"
+vec_map = { version = "0.8.2", features = ["serde"] }
 zkhash = "0.2.0"

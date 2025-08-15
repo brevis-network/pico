@@ -1,10 +1,10 @@
 use hashbrown::HashMap;
-use nohash_hasher::BuildNoHashHasher;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 use crate::{
-    chips::chips::riscv_memory::event::MemoryRecord, emulator::riscv::syscalls::SyscallCode,
+    chips::chips::riscv_memory::event::MemoryRecord,
+    emulator::riscv::{memory::Memory, syscalls::SyscallCode},
 };
 
 /// Holds data describing the current state of a program's emulation.
@@ -36,7 +36,7 @@ pub struct RiscvEmulationState {
     //     serialize_with = "serialize_hashmap_as_vec",
     //     deserialize_with = "deserialize_hashmap_as_vec"
     // )]
-    pub uninitialized_memory: HashMap<u32, u32, BuildNoHashHasher<u32>>,
+    pub uninitialized_memory: Memory<u32>,
 
     /// A stream of input values (global to the entire program).
     pub input_stream: Vec<Vec<u8>>,
@@ -51,7 +51,7 @@ pub struct RiscvEmulationState {
     /// public_values_stream.
     pub public_values_stream_ptr: usize,
 
-    pub memory: HashMap<u32, MemoryRecord, BuildNoHashHasher<u32>>,
+    pub memory: Memory<MemoryRecord>,
 
     /// Keeps track of how many times a certain syscall has been called.
     pub syscall_counts: HashMap<SyscallCode, u64>,

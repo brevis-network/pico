@@ -100,6 +100,7 @@ where
             .iter()
             .map(|vk| {
                 let vk_digest = vk.hash_field(); // Compute the vk digest
+                debug!("vk digest in add_vk_merkle_proof: {:?}", vk_digest);
                 let index = self
                     .allowed_vk_map
                     .get(&vk_digest)

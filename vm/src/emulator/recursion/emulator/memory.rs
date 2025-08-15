@@ -1,5 +1,3 @@
-use std::iter::repeat;
-
 use crate::compiler::recursion::{ir::Block, types::Address};
 use p3_field::PrimeField64;
 use vec_map::{Entry, VecMap};
@@ -67,45 +65,6 @@ impl<F: PrimeField64> Memory<F> for MemVecMap<F> {
                 )
             }
             Entry::Vacant(entry) => entry.insert(MemoryEntry { val, mult }),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct MemVec<F>(pub Vec<Option<MemoryEntry<F>>>);
-
-impl<F: PrimeField64> Memory<F> for MemVec<F> {
-    fn with_capacity(capacity: usize) -> Self {
-        Self(Vec::with_capacity(capacity))
-    }
-
-    fn mr(&mut self, addr: Address<F>) -> &mut MemoryEntry<F> {
-        self.mr_mult(addr, F::ONE)
-    }
-
-    fn mr_mult(&mut self, addr: Address<F>, mult: F) -> &mut MemoryEntry<F> {
-        match self.0.get_mut(addr.as_usize()) {
-            Some(Some(entry)) => {
-                entry.mult -= mult;
-                entry
-            }
-            _ => panic!(
-                "tried to read from unassigned address: {addr:?}\nbacktrace: {:?}",
-                backtrace::Backtrace::new()
-            ),
-        }
-    }
-
-    fn mw(&mut self, addr: Address<F>, val: Block<F>, mult: F) -> &mut MemoryEntry<F> {
-        let addr_usize = addr.as_usize();
-        self.0
-            .extend(repeat(None).take((addr_usize + 1).saturating_sub(self.0.len())));
-        match &mut self.0[addr_usize] {
-            Some(entry) => panic!(
-                "tried to write to assigned address: {entry:?}\nbacktrace: {:?}",
-                backtrace::Backtrace::new()
-            ),
-            entry @ None => entry.insert(MemoryEntry { val, mult }),
         }
     }
 }

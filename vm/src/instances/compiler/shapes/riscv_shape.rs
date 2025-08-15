@@ -1097,8 +1097,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
         ]);
 
         let mut precompile_allowed_log_heights = HashMap::new();
-        // let precompile_heights = (4..21).collect::<Vec<_>>();
-        let precompile_heights = vec![20];
+        let precompile_heights = (4..21).collect::<Vec<_>>();
         for (chip_name, mem_events_per_row) in RiscvChipType::<F>::get_all_precompile_chips() {
             precompile_allowed_log_heights
                 .insert(chip_name, (mem_events_per_row, precompile_heights.clone()));
