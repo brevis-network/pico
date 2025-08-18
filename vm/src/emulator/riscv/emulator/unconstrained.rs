@@ -14,6 +14,8 @@ pub struct UnconstrainedState {
     pub(crate) global_clk: u64,
     pub(crate) clk: u32,
     pub(crate) pc: u32,
+    // Only memory_diff needs to be updated in the unconstrained mode
+    // others are just reverted when exiting uncontrained mode
     pub(crate) memory_diff: HashMap<u32, Option<MemoryRecord>>,
     pub(crate) op_record: MemoryAccessRecord,
     pub(crate) record: EmulationRecord,

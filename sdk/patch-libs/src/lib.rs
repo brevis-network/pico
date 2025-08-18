@@ -6,7 +6,7 @@ pub mod io;
 pub mod secp256k1;
 pub mod unconstrained;
 pub mod utils;
-
+pub mod verify;
 /// Enum representing the different Precompile Poseidon2 permutation syscall types.
 #[repr(u32)]
 pub enum SyscallType {

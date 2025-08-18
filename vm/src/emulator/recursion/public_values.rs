@@ -16,7 +16,7 @@ use crate::{
 use core::fmt::Debug;
 use itertools::Itertools;
 use p3_challenger::DuplexChallenger;
-use p3_field::PrimeField32;
+use p3_field::{FieldAlgebra, PrimeField32};
 use p3_symmetric::CryptographicPermutation;
 use pico_derive::AlignedBorrow;
 use serde::{Deserialize, Serialize};
@@ -86,6 +86,15 @@ impl<T: Clone> ChallengerPublicValues<T> {
 pub struct RecursionPublicValues<T> {
     /// The hash of all the bytes that the program has written to public values.
     pub committed_value_digest: [Word<T>; PV_DIGEST_NUM_WORDS],
+
+    /// The hash of all deferred proofs that have been witnessed in the VM.
+    pub deferred_proofs_digest: [T; DIGEST_SIZE],
+
+    /// Start state of reconstruct_deferred_digest.
+    pub start_reconstruct_deferred_digest: [T; DIGEST_SIZE],
+
+    /// End state of reconstruct_deferred_digest.
+    pub end_reconstruct_deferred_digest: [T; DIGEST_SIZE],
 
     /// The start pc of chunks being proven.
     pub start_pc: T,
@@ -230,6 +239,28 @@ where
 {
     let pv_slice = public_values.as_array();
     H::poseidon2_hash(builder, &pv_slice[..NUM_PV_ELMS_TO_HASH])
+}
+
+pub(crate) fn assert_deferred_digest_complete<C>(
+    builder: &mut Builder<C>,
+    public_values: &RecursionPublicValues<Felt<C::F>>,
+    flag_complete: Felt<C::F>,
+) where
+    C: CircuitConfig,
+{
+    let zero: Felt<_> = builder.eval(C::F::ZERO);
+
+    for start_digest in public_values.start_reconstruct_deferred_digest.into_iter() {
+        builder.assert_felt_eq(flag_complete * start_digest, zero);
+    }
+
+    for (end_digest, expected_digest) in public_values
+        .end_reconstruct_deferred_digest
+        .into_iter()
+        .zip_eq(public_values.deferred_proofs_digest.into_iter())
+    {
+        builder.assert_felt_eq(flag_complete * (end_digest - expected_digest), zero);
+    }
 }
 
 /// Verifies the digest of a recursive public values struct.

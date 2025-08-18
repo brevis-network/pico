@@ -136,7 +136,7 @@ macro_rules! run {
                                                                 riscv_pk.clone(),
                                                                 riscv_vk.clone()
                                                             );
-            let mut emulator = MetaEmulator::setup_riscv(&riscv_witness);
+            let mut emulator = MetaEmulator::setup_riscv(&riscv_witness, None);
             let pv_stream = emulator.get_pv_stream_with_dryrun();
             debug!("Public values stream: {:?}", pv_stream);
 
@@ -150,14 +150,9 @@ macro_rules! run {
                     riscv_vk.clone(),
                 );
 
-                match &riscv_shape_config {
-                    Some(shape_config) => {
-                        riscv_machine
-                            .prove_with_shape(&riscv_witness, Some(shape_config))
-                            .0
-                    }
-                    None => riscv_machine.prove_cycles(&riscv_witness).0,
-                }
+                riscv_machine
+                .prove_with_shape_cycles(&riscv_witness, riscv_shape_config.as_ref())
+                .0
             });
 
             // Assert pv_stream is the same as dryrun.
@@ -204,6 +199,7 @@ macro_rules! run {
                 >(
                     &riscv_vk,
                     vk_root,
+                    [Val::<$recur_sc>::ZERO; DIGEST_SIZE],
                     riscv_machine.base_machine(),
                     &riscv_proof.proofs(),
                     &recursion_shape_config,
@@ -235,6 +231,7 @@ macro_rules! run {
             }
 
             // === Combine Phase: Combine Recursion Machine ===
+            convert_proof.split_into_individuals();
             log_section("COMBINE PHASE");
             let vk_root = get_vk_root(&vk_manager);
             let combine_machine = CombineMachine::<_, _>::new(
@@ -445,6 +442,10 @@ macro_rules! run {
             });
             let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
 
+            // let serialized_proofs = bincode::serialize(&embed_proof.proofs()).unwrap();
+            // let mut file = File::create("embed_proof_proofs.bin").expect("cannot create file");
+            // file.write_all(&serialized_proofs).expect("failed to write to file");
+
             info!("Verifying EMBED proof (at {:?})..", start.elapsed());
             let embed_result = embed_machine.verify(&embed_proof, &riscv_vk);
             info!(
@@ -497,7 +498,7 @@ run!(
 fn main() {
     setup_logger();
 
-    let (elf, riscv_stdin, args) = parse_args();
+    let (elf, riscv_stdin, args) = parse_args::<KoalaBearPoseidon2>();
     match args.field.as_str() {
         "bb" => run_babybear(elf, riscv_stdin, args.step, args.bench),
         "kb" => run_koalabear(elf, riscv_stdin, args.step, args.bench),

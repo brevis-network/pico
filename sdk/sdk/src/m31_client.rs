@@ -21,16 +21,16 @@ impl M31RiscvProverClient {
         Self { riscv }
     }
 
-    pub fn new_stdin_builder(&self) -> EmulatorStdinBuilder<Vec<u8>> {
+    pub fn new_stdin_builder(&self) -> EmulatorStdinBuilder<Vec<u8>, M31Poseidon2> {
         EmulatorStdinBuilder::default()
     }
 
     /// prove and verify riscv program. default not include convert, combine, compress, embed
     pub fn prove_fast(
         &self,
-        stdin: EmulatorStdinBuilder<Vec<u8>>,
+        stdin: EmulatorStdinBuilder<Vec<u8>, M31Poseidon2>,
     ) -> Result<MetaProof<M31Poseidon2>, Error> {
-        let stdin = stdin.finalize();
+        let (stdin, _) = stdin.finalize();
         info!("stdin length: {}", stdin.inputs.len());
         let proof = self.riscv.prove(stdin);
         let riscv_vk = self.riscv.vk();

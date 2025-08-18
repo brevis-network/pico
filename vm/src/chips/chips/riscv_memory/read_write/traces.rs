@@ -171,7 +171,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         cols.addr_aligned = F::from_canonical_u32(aligned_addr);
 
         // Populate the aa_least_sig_byte_decomp columns.
-        assert!(aligned_addr % 4 == 0);
+        assert!(aligned_addr.is_multiple_of(4));
         let aligned_addr_ls_byte = (aligned_addr & 0x000000FF) as u8;
         let bits: [bool; 8] = array::from_fn(|i| aligned_addr_ls_byte & (1 << i) != 0);
         cols.aa_least_sig_byte_decomp = array::from_fn(|i| F::from_bool(bits[i + 2]));

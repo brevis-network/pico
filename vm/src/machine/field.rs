@@ -75,21 +75,23 @@ impl FieldSpecificPoseidon2Config for Mersenne31 {
 pub const fn same_field<T: Any, F: Field + BinomiallyExtendable<D>, const D: usize>() -> bool {
     // NOTE: removing this unsafe is impossible so we have to allow the warning here
     #[allow(unused_unsafe)]
-    unsafe {
-        let typ = std::intrinsics::type_id::<T>();
+    const {
+        unsafe {
+            let typ = std::intrinsics::type_id::<T>();
 
-        let field = type_id::<F>();
-        let expr = type_id::<SymbolicExpression<F>>();
-        let packing = type_id::<<F as Field>::Packing>();
-        let binomial = type_id::<BinomialExtensionField<F, D>>();
-        let ext = type_id::<SymbolicExt<F, BinomialExtensionField<F, D>>>();
-        let felt = type_id::<SymbolicFelt<F>>();
+            let field = type_id::<F>();
+            let expr = type_id::<SymbolicExpression<F>>();
+            let packing = type_id::<<F as Field>::Packing>();
+            let binomial = type_id::<BinomialExtensionField<F, D>>();
+            let ext = type_id::<SymbolicExt<F, BinomialExtensionField<F, D>>>();
+            let felt = type_id::<SymbolicFelt<F>>();
 
-        typ == field
-            || typ == expr
-            || typ == packing
-            || typ == binomial
-            || typ == ext
-            || typ == felt
+            typ == field
+                || typ == expr
+                || typ == packing
+                || typ == binomial
+                || typ == ext
+                || typ == felt
+        }
     }
 }

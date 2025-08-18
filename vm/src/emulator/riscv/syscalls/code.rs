@@ -68,7 +68,10 @@ pub enum SyscallCode {
     /// Executes the `COMMIT` precompile.
     COMMIT = 0x00_00_00_10,
 
-    /// Executes the `VERIFY_PICO_PROOF` precompile.
+    /// Executes the `COMMIT_DEFERRED_PROOFS` syscall.
+    COMMIT_DEFERRED_PROOFS = 0x00_00_00_1A,
+
+    /// Executes the `VERIFY_PICO_PROOF` syscall.
     VERIFY_PICO_PROOF = 0x00_00_00_1B,
 
     /// Executes the `BLS12381_DECOMPRESS` precompile.
@@ -160,6 +163,7 @@ impl SyscallCode {
             0x00_01_01_1E => SyscallCode::BLS12381_ADD,
             0x00_00_01_1F => SyscallCode::BLS12381_DOUBLE,
             0x00_00_00_10 => SyscallCode::COMMIT,
+            0x00_00_00_1A => SyscallCode::COMMIT_DEFERRED_PROOFS,
             0x00_00_00_1B => SyscallCode::VERIFY_PICO_PROOF,
             0x00_00_00_F0 => SyscallCode::HINT_LEN,
             0x00_00_00_F1 => SyscallCode::HINT_READ,

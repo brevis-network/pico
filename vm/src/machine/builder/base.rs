@@ -9,7 +9,7 @@ use std::array;
 
 pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
     /// Returns a sub-builder whose constraints are enforced only when `condition` is not one.
-    fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<Self> {
+    fn when_not<I: Into<Self::Expr>>(&mut self, condition: I) -> FilteredAirBuilder<'_, Self> {
         self.when_ne(condition, Self::F::ONE)
     }
 
