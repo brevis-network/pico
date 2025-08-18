@@ -97,6 +97,9 @@ pub fn build_gnark_config_with_str<EmbedFC: FieldGenericConfig>(
     serde_json::to_string(&gnark_witness).unwrap()
 }
 
+const DOCKER_ERROR_HINT: &str =
+    "The preceding Docker step likely failed to write outputs (commonly due to insufficient Docker memory). Check the `docker` logs or increase Docker's memory limit.";
+
 pub fn generate_contract_inputs<EmbedFC: FieldGenericConfig>(
     pico_out_dir: impl AsRef<Path>,
 ) -> Result<impl AsRef<Path>, Error> {
@@ -105,16 +108,18 @@ pub fn generate_contract_inputs<EmbedFC: FieldGenericConfig>(
     let proof_path = pico_out_dir.join(PROOF_FILE);
     if !proof_path.exists() {
         return Err(anyhow::anyhow!(
-            "the proof file is not exists in {}",
-            proof_path.display()
+            "the proof file is not exists in {}. {}",
+            proof_path.display(),
+            DOCKER_ERROR_HINT
         ));
     }
 
     let witness_path = pico_out_dir.join(GROTH16_JSON_FILE);
     if !witness_path.exists() {
         return Err(anyhow::anyhow!(
-            "the witness file is not exists in {}",
-            witness_path.display()
+            "the witness file is not exists in {}. {}",
+            witness_path.display(),
+            DOCKER_ERROR_HINT
         ));
     }
 
@@ -134,8 +139,9 @@ pub fn generate_contract_inputs<EmbedFC: FieldGenericConfig>(
     let proof_file = pico_out_dir.join(PROOF_FILE);
     if !proof_file.exists() {
         return Err(anyhow::anyhow!(
-            "the proof.data is not exists in {}",
-            pico_out_dir.display()
+            "the proof.data is not exists in {}. {}",
+            pico_out_dir.display(),
+            DOCKER_ERROR_HINT
         ));
     }
     let proof_data = fs::read_to_string(proof_file)?;
@@ -146,8 +152,9 @@ pub fn generate_contract_inputs<EmbedFC: FieldGenericConfig>(
     let pv_file_path = pico_out_dir.join(PV_FILE);
     if !pv_file_path.exists() {
         return Err(anyhow::anyhow!(
-            "The pv_file is not exists in {}",
-            pv_file_path.display()
+            "The pv_file is not exists in {}. {}",
+            pv_file_path.display(),
+            DOCKER_ERROR_HINT
         ));
     }
     let pv_file_content = fs::read_to_string(pv_file_path)?;
