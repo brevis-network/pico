@@ -206,7 +206,7 @@ where
         pk.observed_by(&mut challenger);
 
         // Initialize the emulator.
-        let mut emulator = MetaEmulator::setup_riscv(witness);
+        let mut emulator = MetaEmulator::setup_riscv(witness, None);
 
         let channel_capacity = (4 * witness
             .opts
@@ -660,8 +660,8 @@ where
             None,
         );
 
-        let mut all_proofs = Vec::with_capacity(MAX_PENDING_PROVING_RECORDS);
-        let max_pending_num = min(num_cpus::get(), MAX_PENDING_PROVING_RECORDS);
+        let mut all_proofs = Vec::with_capacity(*MAX_PENDING_PROVING_RECORDS);
+        let max_pending_num = min(num_cpus::get(), *MAX_PENDING_PROVING_RECORDS);
         let mut pending_records = Vec::with_capacity(max_pending_num);
 
         while let Ok(record) = record_receiver.recv() {

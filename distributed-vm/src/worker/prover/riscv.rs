@@ -152,7 +152,7 @@ where
         } else {
             None
         };
-        let (elf, _) = load::<Program>(&program).unwrap();
+        let (elf, _) = load::<Program, SC>(&program).unwrap();
 
         let riscv_machine =
             RiscvMachine::new(SC::default(), RiscvChipType::all_chips(), RISCV_NUM_PVS);

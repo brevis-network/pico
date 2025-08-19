@@ -123,7 +123,7 @@ macro_rules! impl_convert_prover {
                     &proofs.vks[0],
                     vk_root,
                     // TODO: temp use zero
-                    [Val::<$recur_sc>::ZERO; DIGEST_SIZE]
+                    [Val::<$recur_sc>::ZERO; DIGEST_SIZE],
                     &self.prev_machine,
                     &proofs.proofs(),
                     &self.shape_config,

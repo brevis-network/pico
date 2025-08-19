@@ -23,6 +23,7 @@ use crate::{
     },
     primitives::consts::EXTENSION_DEGREE,
 };
+use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
@@ -100,9 +101,17 @@ where
         unreachable!("use prove_with_deferred instead");
     }
 
-    fn prove_cuda(&self, witness: &ProvingWitness<SC, C, DeferredStdin<SC, C>>, pk_cuda: Option<&BaseProvingKeyCuda<SC>>, stream: &'static CudaStream, mem_pool: &CudaMemPool, dev_id: usize) -> MetaProof<SC>
+    fn prove_cuda(
+        &self,
+        witness: &ProvingWitness<SC, C, DeferredStdin<SC, C>>,
+        pk_cuda: Option<&BaseProvingKeyCuda<SC>>,
+        stream: &'static CudaStream,
+        mem_pool: &CudaMemPool,
+        dev_id: usize,
+    ) -> MetaProof<SC>
     where
-        C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>> + Air<ProverConstraintFolder<SC>>
+        C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>>
+            + Air<ProverConstraintFolder<SC>>,
     {
         todo!()
     }
@@ -127,10 +136,10 @@ where
 use crate::{
     compiler::recursion::circuit::constraints::RecursiveVerifierConstraintFolder,
     configs::{field_config::BabyBearSimple, stark_config::BabyBearPoseidon2},
+    cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda,
     emulator::emulator::BabyBearMetaEmulator,
 };
 use std::time::Instant;
-use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
 
 macro_rules! impl_deferred_machine {
     ($emul_name:ident, $recur_cc:ident, $recur_sc:ident) => {
