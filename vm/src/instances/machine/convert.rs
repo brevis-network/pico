@@ -166,14 +166,14 @@ macro_rules! impl_convert_machine {
                 }
 
                 // construct meta proof
-                debug!("CONVERT chip log degrees:");
+                info!("CONVERT chip log degrees:");
                 all_proofs.iter().enumerate().for_each(|(i, proof)| {
-                    debug!("Proof {}", i);
+                    info!("Proof {}", i);
                     proof
                         .main_chip_ordering
                         .iter()
                         .for_each(|(chip_name, idx)| {
-                            debug!(
+                            info!(
                                 "   |- {:<20} main: {:<8}",
                                 chip_name,
                                 proof.opened_values.chips_opened_values[*idx].log_main_degree,

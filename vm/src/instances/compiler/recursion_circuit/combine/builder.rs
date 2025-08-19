@@ -21,8 +21,8 @@ use crate::{
     emulator::recursion::{
         emulator::RecursionRecord,
         public_values::{
-            assert_recursion_public_values_valid, recursion_public_values_digest,
-            RecursionPublicValues,
+            assert_deferred_digest_complete, assert_recursion_public_values_valid,
+            recursion_public_values_digest, RecursionPublicValues,
         },
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
@@ -128,7 +128,11 @@ where
         // Digests
         let mut committed_value_digest: [Word<Felt<_>>; PV_DIGEST_NUM_WORDS] =
             array::from_fn(|_| Word(array::from_fn(|_| builder.uninit())));
+        let mut deferred_proofs_digest: [Felt<_>; DIGEST_SIZE] =
+            array::from_fn(|_| builder.uninit());
         let mut riscv_vk_digest: [Felt<_>; DIGEST_SIZE] = array::from_fn(|_| builder.uninit());
+        let mut reconstruct_deferred_digest: [Felt<_>; DIGEST_SIZE] =
+            array::from_fn(|_| builder.uninit());
 
         // PC and chunk values
         let mut current_pc: Felt<_> = builder.uninit();
@@ -212,6 +216,13 @@ where
                     // Digests
                     riscv_vk_digest[..DIGEST_SIZE]
                         .copy_from_slice(&current_public_values.riscv_vk_digest[..DIGEST_SIZE]);
+                    // Initialize the start of deferred digests.
+                    for i in 0..DIGEST_SIZE {
+                        reconstruct_deferred_digest[i] =
+                            current_public_values.start_reconstruct_deferred_digest[i];
+                        compress_public_values.start_reconstruct_deferred_digest[i] =
+                            current_public_values.start_reconstruct_deferred_digest[i];
+                    }
 
                     for (word, current_word) in committed_value_digest
                         .iter_mut()
@@ -221,6 +232,12 @@ where
                         {
                             *byte = *current_byte;
                         }
+                    }
+                    for (digest, current_digest) in deferred_proofs_digest
+                        .iter_mut()
+                        .zip_eq(current_public_values.deferred_proofs_digest.iter())
+                    {
+                        *digest = *current_digest;
                     }
                 } else {
                     /*
@@ -338,6 +355,50 @@ where
                             *byte = *current_byte;
                         }
                     }
+
+                    //  If `deferred_proofs_digest` is not zero, then the current value should be
+                    // `public_values.deferred_proofs_digest`. We will use a similar approach as above.
+                    let mut is_non_zero_flags = vec![];
+                    for element in deferred_proofs_digest {
+                        is_non_zero_flags.push(element);
+                    }
+
+                    for is_non_zero in is_non_zero_flags {
+                        for (digest_current, digest_public) in deferred_proofs_digest
+                            .into_iter()
+                            .zip(current_public_values.deferred_proofs_digest)
+                        {
+                            builder.assert_felt_eq(
+                                is_non_zero * (digest_current - digest_public),
+                                zero,
+                            );
+                        }
+                    }
+
+                    // Update the deferred proofs digest.
+                    for (digest, current_digest) in deferred_proofs_digest
+                        .iter_mut()
+                        .zip_eq(current_public_values.deferred_proofs_digest.iter())
+                    {
+                        *digest = *current_digest;
+                    }
+
+                    // Assert that the start deferred digest is equal to the current deferred digest.
+                    for (digest, current_digest) in reconstruct_deferred_digest.iter().zip_eq(
+                        current_public_values
+                            .start_reconstruct_deferred_digest
+                            .iter(),
+                    ) {
+                        builder.assert_felt_eq(*digest, *current_digest);
+                    }
+
+                    // Update the reconstruct deferred proof digest.
+                    for (digest, current_digest) in reconstruct_deferred_digest
+                        .iter_mut()
+                        .zip_eq(current_public_values.end_reconstruct_deferred_digest.iter())
+                    {
+                        *digest = *current_digest;
+                    }
                 }
 
                 /*
@@ -416,7 +477,12 @@ where
         compress_public_values.global_cumulative_sum = global_cumulative_sum;
 
         compress_public_values.committed_value_digest = committed_value_digest;
+        compress_public_values.deferred_proofs_digest = deferred_proofs_digest;
+        compress_public_values.end_reconstruct_deferred_digest = reconstruct_deferred_digest;
         compress_public_values.riscv_vk_digest = riscv_vk_digest;
+
+        // Deferred Proof Digest Completeness Verification
+        assert_deferred_digest_complete(builder, compress_public_values, flag_complete);
         compress_public_values.digest =
             recursion_public_values_digest::<CC, SC>(builder, compress_public_values);
 

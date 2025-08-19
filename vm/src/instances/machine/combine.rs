@@ -40,7 +40,7 @@ use p3_air::Air;
 use p3_field::FieldAlgebra;
 use p3_maybe_rayon::prelude::*;
 use std::{any::type_name, borrow::Borrow, sync::Arc, time::Instant};
-use tracing::{debug, debug_span, instrument};
+use tracing::{debug, debug_span, info, instrument};
 
 pub struct CombineMachine<SC, C>
 where
@@ -245,14 +245,14 @@ macro_rules! impl_combine_machine {
                 }
 
                 // proof stats
-                debug!("COMBINE chip log degrees:");
+                info!("COMBINE chip log degrees:");
                 all_proofs
                     .iter()
                     .enumerate()
                     .for_each(|(i, proof)| {
-                        debug!("Proof {}", i);
+                        info!("Proof {}", i);
                         proof.main_chip_ordering.iter().for_each(|(chip_name, idx)| {
-                            debug!(
+                            info!(
                                 "   |- {:<20} main: {:<8}",
                                 chip_name,
                                 proof.opened_values.chips_opened_values[*idx].log_main_degree,
@@ -457,7 +457,6 @@ macro_rules! impl_combine_machine {
                 assert_eq!(proof.proofs().len(), 1);
 
                 // assert completion
-
                 let public_values: &RecursionPublicValues<_> =
                     proof.proofs[0].public_values.as_ref().borrow();
 
@@ -474,8 +473,12 @@ macro_rules! impl_combine_machine {
                 let combine_vk = proof.vks().first().unwrap();
                 if vk_manager.vk_verification_enabled(){
                     assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
+                    assert_eq!(public_values.vk_root, vk_manager.merkle_root, "Recursion circuit vk_root mismatch!")
                 }
 
+                // Defer Proofs Digest Verification
+                assert_eq!(public_values.start_reconstruct_deferred_digest, [Val::<$recur_sc>::ZERO; DIGEST_SIZE]);
+                assert_eq!(public_values.deferred_proofs_digest, public_values.end_reconstruct_deferred_digest);
 
                 // verify
                 self.base_machine

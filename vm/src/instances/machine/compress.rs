@@ -179,16 +179,6 @@ where
         riscv_vk: &dyn HashableKey<SC::Val>,
     ) -> anyhow::Result<()> {
         let vk = proof.vks().first().unwrap();
-
-        let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
-
-        if vk_manager.vk_verification_enabled() {
-            assert!(
-                vk_manager.is_vk_allowed(vk.hash_field()),
-                "Recursion Vk Verification failed"
-            );
-        }
-
         assert_eq!(proof.num_proofs(), 1);
 
         let public_values: &RecursionPublicValues<_> =
@@ -201,6 +191,19 @@ where
 
         assert_recursion_public_values_valid(self.config().as_ref(), public_values);
         assert_riscv_vk_digest(proof, riscv_vk);
+
+        // Recursion Vk Verification
+        let vk_manager = <SC as HasStaticVkManager>::static_vk_manager();
+        if vk_manager.vk_verification_enabled() {
+            assert!(
+                vk_manager.is_vk_allowed(vk.hash_field()),
+                "Recursion Vk Verification failed"
+            );
+            assert_eq!(
+                public_values.vk_root, vk_manager.merkle_root,
+                "Recursion circuit vk_root mismatch!"
+            )
+        }
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;

@@ -11,12 +11,20 @@ use crate::{
     cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda,
     emulator::{
         recursion::emulator::{RecursionRecord, Runtime},
-        riscv::{record::EmulationRecord, riscv_emulator::RiscvEmulator},
+        riscv::{
+            emulator::{ParOptions, SharedDeferredState},
+            record::EmulationRecord,
+            riscv_emulator::{EmulationError, RiscvEmulator},
+            state::RiscvEmulationState,
+        },
         stdin::EmulatorStdin,
     },
     instances::{
-        chiptype::riscv_chiptype::RiscvChipType,
-        compiler::{riscv_circuit::stdin::ConvertStdin, vk_merkle::stdin::RecursionStdinVariant},
+        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
+        compiler::{
+            riscv_circuit::stdin::{ConvertStdin, DeferredStdin},
+            vk_merkle::stdin::RecursionStdinVariant,
+        },
     },
     machine::{
         chip::ChipBehavior,
@@ -59,11 +67,17 @@ where
     <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
-    pub fn setup_riscv(proving_witness: &ProvingWitness<SC, C, Vec<u8>>) -> Self {
+    pub fn setup_riscv(
+        proving_witness: &ProvingWitness<SC, C, Vec<u8>>,
+        par_opts: Option<ParOptions>,
+    ) -> Self {
         // create a new emulator based on the emulator type
         let opts = proving_witness.opts.unwrap();
-        let mut emulator =
-            RiscvEmulator::new::<SC::Val>(proving_witness.program.clone().unwrap(), opts);
+        let mut emulator = RiscvEmulator::new_single::<SC::Val>(
+            proving_witness.program.clone().unwrap(),
+            opts,
+            par_opts,
+        );
         emulator.write_stdin(proving_witness.stdin.as_ref().unwrap());
 
         Self {
@@ -74,12 +88,39 @@ where
         }
     }
 
+    pub fn recover_riscv(
+        witness: &ProvingWitness<SC, C, Vec<u8>>,
+        state: RiscvEmulationState,
+        par_opts: Option<ParOptions>,
+        shared_ds: SharedDeferredState,
+    ) -> Self {
+        let mut me = MetaEmulator::setup_riscv(witness, par_opts);
+        let opts = me.emulator.as_ref().unwrap().opts;
+        let prog = me.emulator.as_ref().unwrap().program.clone();
+        me.emulator = Some(RiscvEmulator::recover::<SC::Val>(
+            prog, state, opts, shared_ds,
+        ));
+        me
+    }
+
     pub fn next_record_batch<F>(&mut self, record_callback: &mut F) -> bool
     where
         F: FnMut(EmulationRecord),
     {
         let emulator = self.emulator.as_mut().unwrap();
         emulator.emulate_batch(record_callback).unwrap()
+    }
+
+    pub fn next_state_batch<F>(
+        &mut self,
+        emit_events: bool,
+        record_cb: &mut F,
+    ) -> Result<(RiscvEmulationState, bool), EmulationError>
+    where
+        F: FnMut(EmulationRecord),
+    {
+        let emu = self.emulator.as_mut().unwrap();
+        emu.emulate_state(emit_events, record_cb)
     }
 
     pub fn cycles(&self) -> u64 {
@@ -296,6 +337,92 @@ macro_rules! impl_emulator {
             }
         }
 
+        // MetaEmulator for deferred
+        impl<'a, C>
+            $emul_name<
+                'a,
+                C,
+                RecursionProgram<Val<$recur_sc>>,
+                DeferredStdin<$recur_sc, RecursionChipType<Val<$riscv_sc>>>,
+                RecursionEmulator<$recur_sc>,
+            >
+        where
+            C: ChipBehavior<
+                Val<$recur_sc>,
+                Program = RecursionProgram<Val<$recur_sc>>,
+                Record = RecursionRecord<Val<$recur_sc>>,
+            >,
+        {
+            pub fn setup_deferred(
+                proving_witness: &'a ProvingWitness<
+                    $recur_sc,
+                    C,
+                    DeferredStdin<$recur_sc, RecursionChipType<Val<$recur_sc>>>,
+                >,
+                machine: &'a BaseMachine<$recur_sc, C>,
+            ) -> Self {
+                let batch_size = match proving_witness.opts {
+                    Some(opts) => opts.chunk_batch_size,
+                    None => 0,
+                };
+                Self {
+                    stdin: proving_witness.stdin.as_ref().unwrap(),
+                    emulator: None,
+                    batch_size,
+                    pointer: 0,
+                    machine: Some(machine),
+                }
+            }
+
+            #[allow(clippy::should_implement_trait)]
+            pub fn next_record_keys(
+                &mut self,
+            ) -> (
+                RecursionRecord<Val<$recur_sc>>,
+                BaseProvingKey<$recur_sc>,
+                BaseVerifyingKey<$recur_sc>,
+                bool,
+            ) {
+                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
+                let (pk, vk) = self.machine.unwrap().setup_keys(program);
+                let mut emulator = RecursionEmulator::<$recur_sc> {
+                    recursion_program: program.clone().into(),
+                    config: self.machine.unwrap().config(),
+                };
+                let record = debug_span!("emulator run").in_scope(|| emulator.run_deferred(input));
+                self.pointer += 1;
+                (record, pk, vk, done)
+            }
+
+            #[allow(clippy::type_complexity)]
+            pub fn next_record_keys_batch(
+                &mut self,
+            ) -> (
+                Vec<RecursionRecord<Val<$recur_sc>>>,
+                Vec<BaseProvingKey<$recur_sc>>,
+                Vec<BaseVerifyingKey<$recur_sc>>,
+                bool,
+            ) {
+                let mut batch_records = vec![];
+                let mut batch_pks = vec![];
+                let mut batch_vks = vec![];
+                loop {
+                    let (record, pk, vk, done) =
+                        debug_span!("emulate record").in_scope(|| self.next_record_keys());
+                    batch_records.push(record);
+                    batch_pks.push(pk);
+                    batch_vks.push(vk);
+                    if done {
+                        return (batch_records, batch_pks, batch_vks, true);
+                    }
+                    if batch_records.len() >= self.batch_size as usize {
+                        break;
+                    }
+                }
+                (batch_records, batch_pks, batch_vks, false)
+            }
+        }
+
         // MetaEmulator for recursion combine
         impl<'a, C, PrevC>
             $emul_name<
@@ -450,6 +577,31 @@ macro_rules! impl_emulator {
             ) -> RecursionRecord<Val<$recur_sc>>
             where
                 RiscvC: ChipBehavior<Val<$riscv_sc>, Program = Program, Record = EmulationRecord>,
+            {
+                let mut witness_stream = Vec::new();
+                Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
+
+                let mut runtime =
+                    Runtime::<Val<$recur_sc>, Challenge<$recur_sc>, _, _, $s_box_degree>::new(
+                        self.recursion_program.clone(),
+                        self.config.perm.clone(),
+                    );
+
+                runtime.witness_stream = witness_stream.into();
+                runtime.run().unwrap();
+                runtime.record
+            }
+
+            pub fn run_deferred<RecursionC>(
+                &mut self,
+                stdin: &DeferredStdin<$recur_sc, RecursionC>,
+            ) -> RecursionRecord<Val<$recur_sc>>
+            where
+                RecursionC: ChipBehavior<
+                    Val<$recur_sc>,
+                    Program = RecursionProgram<Val<$recur_sc>>,
+                    Record = RecursionRecord<Val<$recur_sc>>,
+                >,
             {
                 let mut witness_stream = Vec::new();
                 Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);

@@ -6,6 +6,7 @@ use pico_vm::{
 };
 
 // TODO: rename
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum RiscvMsg<SC: StarkGenericConfig> {
     Request(RiscvRequest),

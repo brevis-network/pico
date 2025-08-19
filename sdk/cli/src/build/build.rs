@@ -13,7 +13,7 @@ use crate::{
 
 use super::{execute_command, find_target_file};
 
-const RUSTUP_TOOLCHAIN_NAME: &str = "nightly-2024-11-27";
+const RUSTUP_TOOLCHAIN_NAME: &str = "nightly-2025-08-04";
 const TARGET_ELF: &str = "riscv32im-pico-zkvm-elf";
 
 pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<PathBuf, Error> {

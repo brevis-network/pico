@@ -72,7 +72,7 @@ where
             .map(|&n| &pk.preprocessed_trace[n]);
 
         let lookup_filter = |l: &VirtualPairLookup<F>| {
-            l.scope == scope && types.map_or(true, |types| types.contains(&l.kind))
+            l.scope == scope && types.is_none_or(|types| types.contains(&l.kind))
         };
         let looking = chip
             .looking

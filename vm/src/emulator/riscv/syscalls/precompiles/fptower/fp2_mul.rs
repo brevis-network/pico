@@ -30,8 +30,8 @@ impl<P: FpOpField> Syscall for Fp2MulSyscall<P> {
         y_ptr: u32,
     ) -> Option<u32> {
         let clk = rt.clk;
-        assert!(x_ptr % 4 == 0, "x_ptr is unaligned");
-        assert!(y_ptr % 4 == 0, "y_ptr is unaligned");
+        assert!(x_ptr.is_multiple_of(4), "x_ptr is unaligned");
+        assert!(y_ptr.is_multiple_of(4), "y_ptr is unaligned");
 
         let num_words = <P as NumWords>::WordsCurvePoint::USIZE;
 

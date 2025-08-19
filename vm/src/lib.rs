@@ -8,8 +8,9 @@
 #![cfg_attr(all(not(feature = "rayon"), feature = "strict"), allow(unused_imports))]
 #![feature(const_type_id)]
 #![feature(core_intrinsics)]
-#![feature(generic_arg_infer)]
 #![feature(generic_const_items)]
+#![feature(const_cmp)]
+#![feature(const_trait_impl)]
 
 extern crate alloc;
 extern crate core;

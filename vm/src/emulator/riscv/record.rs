@@ -195,9 +195,7 @@ impl EmulationRecord {
     pub fn split(&mut self, last: bool, opts: SplitOpts) -> Vec<EmulationRecord> {
         let mut chunk_records = Vec::new();
 
-        let precompile_events = take(&mut self.precompile_events);
-
-        for (syscall_code, events) in precompile_events.into_iter() {
+        for (syscall_code, events) in self.precompile_events.iter_mut() {
             let threshold = match syscall_code {
                 // TODO: refactor to remove magic number
                 SyscallCode::KECCAK_PERMUTE => (THRESHOLD_2POW20 / 26).min(opts.keccak),
@@ -225,30 +223,19 @@ impl EmulationRecord {
                 _ => opts.deferred,
             };
 
-            let precompile_event_chunks = events.chunks_exact(threshold);
-            if last {
-                let remainder = precompile_event_chunks.remainder().to_vec();
-                if !remainder.is_empty() {
-                    let mut emulation_record = EmulationRecord::new(self.program.clone());
-                    emulation_record
-                        .precompile_events
-                        .insert(syscall_code, remainder);
-                    chunk_records.push(emulation_record);
-                }
-            } else {
-                self.precompile_events
-                    .insert(syscall_code, precompile_event_chunks.remainder().to_vec());
+            while events.len() > threshold {
+                let chunk: Vec<_> = events.drain(..threshold).collect();
+                let mut rec = EmulationRecord::new(self.program.clone());
+                rec.precompile_events.insert(*syscall_code, chunk);
+                chunk_records.push(rec);
             }
-            let mut records = precompile_event_chunks
-                .map(|event_chunk| {
-                    let mut emulation_record = EmulationRecord::new(self.program.clone());
-                    emulation_record
-                        .precompile_events
-                        .insert(syscall_code, event_chunk.to_vec());
-                    emulation_record
-                })
-                .collect::<Vec<_>>();
-            chunk_records.append(&mut records);
+
+            if last && !events.is_empty() {
+                let remainder = take(events);
+                let mut rec = EmulationRecord::new(self.program.clone());
+                rec.precompile_events.insert(*syscall_code, remainder);
+                chunk_records.push(rec);
+            }
         }
 
         if last {

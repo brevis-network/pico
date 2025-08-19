@@ -1,0 +1,11 @@
+[package]
+name = "pico-example-aggregator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+pico-sdk = { path = "../../../sdk/sdk" , default-features = false, features = ["bb"] }
+sha2 = { git = "https://github.com/brevis-network/hashes.git", package = "sha2", branch = "sha2-0.10.8-v1.0.0"}

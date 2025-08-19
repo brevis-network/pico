@@ -26,6 +26,7 @@ use crate::{
 };
 use cudart::memory_pools::CudaMemPool;
 use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
+use std::cell::Cell;
 
 type RecursionChips<SC> = RecursionChipType<Val<SC>>;
 
@@ -40,6 +41,7 @@ where
     opts: EmulatorOpts,
     shape_config: Option<RecursionShapeConfig<Val<SC>, RecursionChips<SC>>>,
     prev_machine: BaseMachine<RiscvSC, RiscvChips<RiscvSC>>,
+    final_deferred_digest: Cell<[Val<SC>; DIGEST_SIZE]>,
 }
 
 macro_rules! impl_convert_prover {
@@ -65,6 +67,7 @@ macro_rules! impl_convert_prover {
                     opts,
                     shape_config,
                     prev_machine: prev_prover.machine().clone(),
+                    final_deferred_digest: Cell::new([Val::<$recur_sc>::ZERO; DIGEST_SIZE]),
                 }
             }
         }
@@ -90,6 +93,7 @@ macro_rules! impl_convert_prover {
                 let stdin = EmulatorStdin::setup_for_convert::<Val<$recur_sc>, $recur_cc>(
                     &proofs.vks[0],
                     vk_root,
+                    self.final_deferred_digest.get(),
                     &self.prev_machine,
                     &proofs.proofs(),
                     &self.shape_config,
@@ -135,6 +139,16 @@ macro_rules! impl_convert_prover {
                 riscv_vk: &dyn HashableKey<Val<$recur_sc>>,
             ) -> bool {
                 self.machine.verify(proof, riscv_vk).is_ok()
+            }
+        }
+
+        impl ConvertProver<$riscv_sc, $recur_sc> {
+            pub fn set_final_deferred_digest(&self, d: [Val<$recur_sc>; DIGEST_SIZE]) {
+                self.final_deferred_digest.set(d);
+            }
+
+            pub fn final_deferred_digest(&self) -> [Val<$recur_sc>; DIGEST_SIZE] {
+                self.final_deferred_digest.get()
             }
         }
     };

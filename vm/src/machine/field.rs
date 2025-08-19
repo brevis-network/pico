@@ -79,25 +79,27 @@ pub const fn same_field<
 >() -> bool {
     // NOTE: removing this unsafe is impossible so we have to allow the warning here
     #[allow(unused_unsafe)]
-    unsafe {
-        let typ = std::intrinsics::type_id::<T>();
+    const {
+        unsafe {
+            let typ = std::intrinsics::type_id::<T>();
 
-        let field = type_id::<F>();
-        let expr = type_id::<SymbolicExpression<F>>();
-        let packing = type_id::<<F as Field>::Packing>();
-        let binomial = type_id::<BinomialExtensionField<F, D>>();
-        let ext = type_id::<SymbolicExt<F, BinomialExtensionField<F, D>>>();
-        let felt = type_id::<SymbolicFelt<F>>();
-        // let analyezer_variable = type_id::<crate::air_analyzer::SymbolicExpression<F>>();
-        let analyezer_variable_2 = type_id::<crate::cuda_adaptor::h_poly_struct::Expression<F>>();
+            let field = type_id::<F>();
+            let expr = type_id::<SymbolicExpression<F>>();
+            let packing = type_id::<<F as Field>::Packing>();
+            let binomial = type_id::<BinomialExtensionField<F, D>>();
+            let ext = type_id::<SymbolicExt<F, BinomialExtensionField<F, D>>>();
+            let felt = type_id::<SymbolicFelt<F>>();
+            // let analyezer_variable = type_id::<crate::air_analyzer::SymbolicExpression<F>>();
+            let analyezer_variable_2 = type_id::<crate::cuda_adaptor::h_poly_struct::Expression<F>>();
 
-        typ == field
-            || typ == expr
-            || typ == packing
-            || typ == binomial
-            || typ == ext
-            || typ == felt
-            // || typ == analyezer_variable
-            || typ == analyezer_variable_2
+            typ == field
+                || typ == expr
+                || typ == packing
+                || typ == binomial
+                || typ == ext
+                || typ == felt
+                // || typ == analyezer_variable
+                || typ == analyezer_variable_2
+        }
     }
 }

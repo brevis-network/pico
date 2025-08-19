@@ -7,7 +7,7 @@ use crate::{
     compiler::word::Word,
     emulator::riscv::{public_values::PublicValues, syscalls::SyscallCode},
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
-    primitives::consts::PV_DIGEST_NUM_WORDS,
+    primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
@@ -96,7 +96,8 @@ impl<F: Field> CpuChip<F> {
         // Verify value of ecall_range_check_operand column.
         builder.assert_eq(
             local.ecall_range_check_operand,
-            is_ecall_instruction * ecall_cols.is_halt.result,
+            is_ecall_instruction
+                * (ecall_cols.is_halt.result + ecall_cols.is_commit_deferred_proofs.result),
         );
 
         // Range check the operand_to_check word.
@@ -114,8 +115,10 @@ impl<F: Field> CpuChip<F> {
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
         commit_digest: [Word<CB::Expr>; PV_DIGEST_NUM_WORDS],
+        deferred_proofs_digest: [CB::Expr; DIGEST_SIZE],
     ) {
-        let is_commit = self.get_is_commit_related_syscall(builder, local);
+        let (is_commit, is_commit_deferred_proofs) =
+            self.get_is_commit_related_syscall(builder, local);
 
         // Get the ecall specific columns.
         let ecall_columns = local.opcode_specific.ecall();
@@ -131,11 +134,17 @@ impl<F: Field> CpuChip<F> {
         }
         // When the syscall is COMMIT, there should be one set bit.
         builder
-            .when(local.opcode_selector.is_ecall * is_commit.clone())
+            .when(
+                local.opcode_selector.is_ecall
+                    * (is_commit.clone() + is_commit_deferred_proofs.clone()),
+            )
             .assert_one(bitmap_sum.clone());
         // When it's some other syscall, there should be no set bits.
         builder
-            .when(local.opcode_selector.is_ecall * (CB::Expr::ONE - is_commit.clone()))
+            .when(
+                local.opcode_selector.is_ecall
+                    * (CB::Expr::ONE - (is_commit.clone() + is_commit_deferred_proofs.clone())),
+            )
             .assert_zero(bitmap_sum);
 
         // Verify that word_idx corresponds to the set bit in index bitmap.
@@ -151,7 +160,10 @@ impl<F: Field> CpuChip<F> {
         // Verify that the 3 upper bytes of the word_idx are 0.
         for i in 0..3 {
             builder
-                .when(local.opcode_selector.is_ecall * is_commit.clone())
+                .when(
+                    local.opcode_selector.is_ecall
+                        * (is_commit.clone() + is_commit_deferred_proofs.clone()),
+                )
                 .assert_eq(
                     local.op_b_access.prev_value()[i + 1],
                     CB::Expr::from_canonical_u32(0),
@@ -172,6 +184,21 @@ impl<F: Field> CpuChip<F> {
         builder
             .when(local.opcode_selector.is_ecall * is_commit)
             .assert_word_eq(expected_pv_digest_word, *digest_word);
+
+        let expected_deferred_proofs_digest_element =
+            builder.index_array(&deferred_proofs_digest, &ecall_columns.index_bitmap);
+
+        // Verify that the operand that was range checked is digest_word.
+        builder
+            .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs.clone())
+            .assert_word_eq(*digest_word, ecall_columns.operand_to_check);
+
+        builder
+            .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs)
+            .assert_eq(
+                expected_deferred_proofs_digest_element,
+                digest_word.reduce::<CB>(),
+            );
     }
 
     /// Constraint related to the halt and unimpl instruction.
@@ -237,7 +264,7 @@ impl<F: Field> CpuChip<F> {
         &self,
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
-    ) -> CB::Expr {
+    ) -> (CB::Expr, CB::Expr) {
         let ecall_cols = local.opcode_specific.ecall();
 
         let is_ecall_instruction = self.is_ecall_instruction::<CB>(&local.opcode_selector);
@@ -258,7 +285,21 @@ impl<F: Field> CpuChip<F> {
             ecall_cols.is_commit.result
         };
 
-        is_commit.into()
+        // Compute whether this ecall is COMMIT_DEFERRED_PROOFS.
+        let is_commit_deferred_proofs = {
+            IsZeroGadget::<CB::F>::eval(
+                builder,
+                syscall_id
+                    - CB::Expr::from_canonical_u32(
+                        SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id(),
+                    ),
+                ecall_cols.is_commit_deferred_proofs,
+                is_ecall_instruction.clone(),
+            );
+            ecall_cols.is_commit_deferred_proofs.result
+        };
+
+        (is_commit.into(), is_commit_deferred_proofs.into())
     }
 
     /// Returns the number of extra cycles from an ECALL instruction.

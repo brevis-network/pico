@@ -50,7 +50,7 @@ use pico_vm::{
         RECURSION_NUM_PVS, RISCV_NUM_PVS,
     },
 };
-use std::{fs::File, io::Write, path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, sync::Arc, time::Instant};
 use tracing::{debug, info};
 
 #[path = "common/parse_args.rs"]
@@ -136,7 +136,7 @@ macro_rules! run {
                                                                 riscv_pk.clone(),
                                                                 riscv_vk.clone()
                                                             );
-            let mut emulator = MetaEmulator::setup_riscv(&riscv_witness);
+            let mut emulator = MetaEmulator::setup_riscv(&riscv_witness, None);
             let pv_stream = emulator.get_pv_stream_with_dryrun();
             debug!("Public values stream: {:?}", pv_stream);
 
@@ -199,6 +199,7 @@ macro_rules! run {
                 >(
                     &riscv_vk,
                     vk_root,
+                    [Val::<$recur_sc>::ZERO; DIGEST_SIZE],
                     riscv_machine.base_machine(),
                     &riscv_proof.proofs(),
                     &recursion_shape_config,
@@ -441,9 +442,9 @@ macro_rules! run {
             });
             let embed_proof_size = bincode::serialize(&embed_proof.proofs()).unwrap().len();
 
-            let serialized_proofs = bincode::serialize(&embed_proof.proofs()).unwrap();
-            let mut file = File::create("embed_proof_proofs.bin").expect("cannot create file");
-            file.write_all(&serialized_proofs).expect("failed to write to file");
+            // let serialized_proofs = bincode::serialize(&embed_proof.proofs()).unwrap();
+            // let mut file = File::create("embed_proof_proofs.bin").expect("cannot create file");
+            // file.write_all(&serialized_proofs).expect("failed to write to file");
 
             info!("Verifying EMBED proof (at {:?})..", start.elapsed());
             let embed_result = embed_machine.verify(&embed_proof, &riscv_vk);
@@ -497,7 +498,7 @@ run!(
 fn main() {
     setup_logger();
 
-    let (elf, riscv_stdin, args) = parse_args();
+    let (elf, riscv_stdin, args) = parse_args::<KoalaBearPoseidon2>();
     match args.field.as_str() {
         "bb" => run_babybear(elf, riscv_stdin, args.step, args.bench),
         "kb" => run_koalabear(elf, riscv_stdin, args.step, args.bench),

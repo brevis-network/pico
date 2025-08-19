@@ -3,7 +3,9 @@ pub mod poseidon2;
 
 use crate::{
     configs::stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2, M31Poseidon2},
-    primitives::consts::{MERSENNE31_NUM_EXTERNAL_ROUNDS, MERSENNE31_NUM_INTERNAL_ROUNDS},
+    primitives::consts::{
+        DIGEST_SIZE, MERSENNE31_NUM_EXTERNAL_ROUNDS, MERSENNE31_NUM_INTERNAL_ROUNDS,
+    },
 };
 use consts::{
     BABYBEAR_NUM_EXTERNAL_ROUNDS, BABYBEAR_NUM_INTERNAL_ROUNDS, KOALABEAR_NUM_EXTERNAL_ROUNDS,
@@ -18,7 +20,7 @@ use p3_field::FieldAlgebra;
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_mersenne_31::{Mersenne31, Poseidon2Mersenne31};
 use p3_poseidon2::ExternalLayerConstants;
-use p3_symmetric::PaddingFreeSponge;
+use p3_symmetric::{CryptographicHasher, PaddingFreeSponge};
 use zkhash::{
     ark_ff::{BigInteger, PrimeField as ark_PrimeField},
     fields::bn256::FpBN256 as ark_FpBN256,
@@ -443,4 +445,39 @@ pub fn pico_poseidon2bn254_init() -> PicoPoseidon2Bn254 {
     );
     // Pico Poseidon2 implementation.
     PicoPoseidon2Bn254::new(external_round_constants, internal_round_constants)
+}
+
+pub fn hash_deferred_proof<F>(
+    prev_digest: &[F; DIGEST_SIZE],
+    vk_digest: &[F; DIGEST_SIZE],
+    pv_digest: &[F; 32],
+) -> [F; DIGEST_SIZE]
+where
+    F: Poseidon2HashField + Copy,
+{
+    let mut inputs = Vec::with_capacity(DIGEST_SIZE * 2 + 32);
+    inputs.extend_from_slice(prev_digest);
+    inputs.extend_from_slice(vk_digest);
+    inputs.extend_from_slice(pv_digest);
+    F::poseidon2_hash_iter(inputs)
+}
+
+pub trait Poseidon2HashField: p3_field::Field + Sized {
+    fn poseidon2_hash_iter(inputs: Vec<Self>) -> [Self; DIGEST_SIZE];
+}
+
+impl Poseidon2HashField for BabyBear {
+    fn poseidon2_hash_iter(inputs: Vec<Self>) -> [Self; DIGEST_SIZE] {
+        POSEIDON2_BB_HASHER.hash_iter(inputs)
+    }
+}
+impl Poseidon2HashField for KoalaBear {
+    fn poseidon2_hash_iter(inputs: Vec<Self>) -> [Self; DIGEST_SIZE] {
+        POSEIDON2_KB_HASHER.hash_iter(inputs)
+    }
+}
+impl Poseidon2HashField for Mersenne31 {
+    fn poseidon2_hash_iter(inputs: Vec<Self>) -> [Self; DIGEST_SIZE] {
+        POSEIDON2_M31_HASHER.hash_iter(inputs)
+    }
 }

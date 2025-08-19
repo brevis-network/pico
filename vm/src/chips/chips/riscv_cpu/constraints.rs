@@ -84,7 +84,12 @@ where
         self.eval_ecall(builder, local);
 
         // COMMIT ecall instruction.
-        self.eval_commit(builder, local, public_values.committed_value_digest.clone());
+        self.eval_commit(
+            builder,
+            local,
+            public_values.committed_value_digest.clone(),
+            public_values.deferred_proofs_digest.clone(),
+        );
 
         // HALT ecall and UNIMPL instruction.
         self.eval_halt_unimpl(builder, local, next, public_values);

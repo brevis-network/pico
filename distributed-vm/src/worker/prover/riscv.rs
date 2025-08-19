@@ -9,7 +9,9 @@ use crate::{
     worker::prover::{CudaMemPool, CudaStream},
 };
 use log::debug;
-use p3_field::{extension::BinomiallyExtendable, PrimeField32};
+use p3_baby_bear::BabyBear;
+use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_symmetric::Permutation;
 use pico_perf::common::{
     bench_program::{load, BenchProgram},
@@ -98,7 +100,7 @@ where
         } else {
             None
         };
-        let (elf, _) = load::<Program>(&program).unwrap();
+        let (elf, _) = load::<Program, SC>(&program).unwrap();
 
         let riscv_machine =
             RiscvMachine::new(SC::default(), RiscvChipType::all_chips(), RISCV_NUM_PVS);
@@ -277,6 +279,7 @@ impl RiscvConvertHandler<BabyBearPoseidon2> for RiscvConvertProver<BabyBearPosei
         >(
             &self.riscv_vk,
             *vk_root,
+            [BabyBear::ZERO; DIGEST_SIZE],
             self.riscv_machine.base_machine(),
             &proof,
             &self.recursion_shape_config,
@@ -362,6 +365,7 @@ impl RiscvConvertHandler<KoalaBearPoseidon2> for RiscvConvertProver<KoalaBearPos
         >(
             &self.riscv_vk,
             *vk_root,
+            [KoalaBear::ZERO; DIGEST_SIZE],
             self.riscv_machine.base_machine(),
             &proof,
             &self.recursion_shape_config,

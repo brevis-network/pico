@@ -31,7 +31,10 @@ hex.workspace = true
 serde_json.workspace = true
 
 [features]
-default = []
+default = ["kb"]
 prover = ["pico-vm/jemalloc", "pico-vm/nightly-features"]
 libm = ["dep:libm"]
 coprocessor = ["coprocessor-sdk"]
+bb = []     # BabyBear
+kb = []     # KoalaBear
+m31 = []    # Mersenne31

@@ -19,20 +19,31 @@ use crate::{
         proof::{BaseProof, MetaProof},
         witness::ProvingWitness,
     },
-    primitives::{consts::MAX_LOG_CHUNK_SIZE, Poseidon2Init},
+    primitives::{
+        consts::{DIGEST_SIZE, MAX_LOG_CHUNK_SIZE},
+        Poseidon2Init,
+    },
 };
 use anyhow::Result;
 use crossbeam::channel::{bounded, Receiver, Sender};
 use cudart::{memory_pools::CudaMemPool, stream::CudaStream};
+use once_cell::sync::Lazy;
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
 use p3_maybe_rayon::prelude::IndexedParallelIterator;
 use p3_symmetric::Permutation;
-use std::{any::type_name, borrow::Borrow, cmp::min, fmt::Write, mem, thread, time::Instant};
+use std::{
+    any::type_name, borrow::Borrow, cmp::min, env, fmt::Write as _, mem, thread, time::Instant,
+};
 use tracing::{debug, debug_span, info, instrument};
 
 /// Maximum number of pending emulation record for proving
-const MAX_PENDING_PROVING_RECORDS: usize = 32;
+pub static MAX_PENDING_PROVING_RECORDS: Lazy<usize> = Lazy::new(|| {
+    env::var("CHUNK_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(32)
+});
 
 pub struct RiscvMachine<SC, C>
 where
@@ -66,6 +77,7 @@ where
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             > + Air<ProverConstraintFolder<SC>>,
+        <SC as StarkGenericConfig>::Domain: Send,
     {
         let start_global = Instant::now();
 
@@ -77,7 +89,7 @@ where
         pk.observed_by(&mut challenger);
 
         // Initialize the emulator.
-        let mut emulator = MetaEmulator::setup_riscv(witness);
+        let mut emulator = MetaEmulator::setup_riscv(witness, None);
 
         let channel_capacity = (4 * witness
             .opts
@@ -253,14 +265,14 @@ where
 
         let vks = vec![witness.vk.clone().unwrap()];
 
-        debug!("RISCV chip log degrees:");
+        info!("RISCV chip log degrees:");
         all_proofs.iter().enumerate().for_each(|(i, proof)| {
-            debug!("Proof {}", i);
+            info!("Proof {}", i);
             proof
                 .main_chip_ordering
                 .iter()
                 .for_each(|(chip_name, idx)| {
-                    debug!(
+                    info!(
                         "   |- {:<20} main: {:<8}",
                         chip_name, proof.opened_values.chips_opened_values[*idx].log_main_degree,
                     );
@@ -378,8 +390,8 @@ where
     {
         let record_len = records.len();
         let local_span =
-                debug_span!(parent: &tracing::Span::current(), "riscv chunks prove loop", base_chunk, record_len)
-                    .entered();
+            debug_span!(parent: &tracing::Span::current(), "riscv chunks prove loop", base_chunk, record_len)
+                .entered();
 
         let results: Vec<(usize, BaseProof<SC>, u128)> = records
             .into_pico_iter()
@@ -517,8 +529,9 @@ where
             None,
         );
 
-        let mut all_proofs = Vec::with_capacity(MAX_PENDING_PROVING_RECORDS);
-        let max_pending_num = min(num_cpus::get(), MAX_PENDING_PROVING_RECORDS);
+        let max_pending_proving_records = *MAX_PENDING_PROVING_RECORDS;
+        let mut all_proofs = Vec::with_capacity(max_pending_proving_records);
+        let max_pending_num = min(num_cpus::get(), max_pending_proving_records);
         let mut pending_records = Vec::with_capacity(max_pending_num);
 
         while let Ok(record) = record_receiver.recv() {
@@ -832,7 +845,9 @@ where
 
         // let mut flag_extra = true;
         let mut committed_value_digest_prev = Default::default();
+        let mut deferred_proofs_digest_prev = [<Val<SC>>::ZERO; DIGEST_SIZE];
         let zero_cvd = Default::default();
+        let zero_deferred_proofs_digest = [<Val<SC>>::ZERO; DIGEST_SIZE];
 
         for (i, each_proof) in proof.proofs().iter().enumerate() {
             let public_values: &PublicValues<Word<_>, _> =
@@ -922,6 +937,16 @@ where
                 &zero_cvd,
                 each_proof.includes_chip("Cpu"),
                 "committed_value_digest",
+                i,
+            );
+
+            // committed_value_digest checks
+            transition_with_condition(
+                &mut deferred_proofs_digest_prev,
+                &public_values.deferred_proofs_digest,
+                &zero_deferred_proofs_digest,
+                each_proof.includes_chip("Cpu"),
+                "deferred_proofs_digest",
                 i,
             );
         }

@@ -115,6 +115,7 @@ where
             flag_complete,
             flag_first_chunk,
             vk_root,
+            deferred_digest,
         } = input;
 
         // Assert that the number of proofs is one.
@@ -291,6 +292,8 @@ where
 
             // Update recursion public values
             recursion_public_values.committed_value_digest = public_values.committed_value_digest;
+            // Note: no transition_with_condition here, just use hint value for deferred_proofs_digest
+            recursion_public_values.deferred_proofs_digest = public_values.deferred_proofs_digest;
             recursion_public_values.start_pc = public_values.start_pc;
             recursion_public_values.next_pc = public_values.next_pc;
             recursion_public_values.start_chunk = public_values.chunk;
@@ -300,6 +303,8 @@ where
             recursion_public_values.contains_execution_chunk =
                 builder.eval(CC::F::from_bool(flag_cpu));
 
+            recursion_public_values.start_reconstruct_deferred_digest = deferred_digest;
+            recursion_public_values.end_reconstruct_deferred_digest = deferred_digest;
             recursion_public_values.previous_initialize_addr_bits =
                 public_values.previous_initialize_addr_bits;
             recursion_public_values.last_initialize_addr_bits =

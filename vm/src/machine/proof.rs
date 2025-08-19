@@ -78,6 +78,58 @@ where
     }
 }
 
+pub fn merge_meta_proofs<I, SC>(meta_list: I) -> Option<MetaProof<SC>>
+where
+    I: IntoIterator<Item = MetaProof<SC>>,
+    SC: StarkGenericConfig,
+{
+    let metas: Vec<MetaProof<SC>> = meta_list.into_iter().collect();
+    if metas.is_empty() {
+        return None;
+    }
+
+    let (mut proofs_cap, mut vks_cap, mut pv_cap) = (0, 0, 0);
+    for m in &metas {
+        proofs_cap += m.proofs.len();
+        vks_cap += m.vks.len();
+        pv_cap += m.pv_stream.as_ref().map_or(0, |s| s.len());
+    }
+
+    let combined_proofs: Arc<[BaseProof<SC>]> = {
+        let mut vec = Vec::with_capacity(proofs_cap);
+        for m in &metas {
+            vec.extend_from_slice(&m.proofs);
+        }
+        Arc::from(vec)
+    };
+
+    let combined_vks: Arc<[BaseVerifyingKey<SC>]> = {
+        let mut vec = Vec::with_capacity(vks_cap);
+        for m in &metas {
+            vec.extend_from_slice(&m.vks);
+        }
+        Arc::from(vec)
+    };
+
+    let mut pv_stream_buf = Vec::with_capacity(pv_cap);
+    for mut m in metas {
+        if let Some(mut s) = m.pv_stream.take() {
+            pv_stream_buf.append(&mut s);
+        }
+    }
+    let combined_pv_stream = if pv_stream_buf.is_empty() {
+        None
+    } else {
+        Some(pv_stream_buf)
+    };
+
+    Some(MetaProof {
+        proofs: combined_proofs,
+        vks: combined_vks,
+        pv_stream: combined_pv_stream,
+    })
+}
+
 /// Base proof produced by base prover
 /// Represents the bottom layer of abstraction (the most concrete layer)
 #[derive(Serialize, Deserialize, Clone)]
