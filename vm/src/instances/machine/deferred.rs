@@ -32,7 +32,7 @@ use tracing::{debug, debug_span, instrument};
 
 pub struct DeferredMachine<SC, C>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     C: ChipBehavior<
         Val<SC>,
         Program = RecursionProgram<Val<SC>>,
@@ -99,6 +99,13 @@ where
     ) -> anyhow::Result<()> {
         unreachable!("use prove_with_deferred instead");
     }
+
+    fn prove_cuda(&self, witness: &ProvingWitness<SC, C, DeferredStdin<SC, C>>, pk_cuda: Option<&BaseProvingKeyCuda<SC>>, stream: &'static CudaStream, mem_pool: &CudaMemPool, dev_id: usize) -> MetaProof<SC>
+    where
+        C: for<'a> Air<DebugConstraintFolder<'a, SC::Val, SC::Challenge>> + Air<ProverConstraintFolder<SC>>
+    {
+        todo!()
+    }
 }
 
 impl<SC, C> DeferredMachine<SC, C>
@@ -123,6 +130,7 @@ use crate::{
     emulator::emulator::BabyBearMetaEmulator,
 };
 use std::time::Instant;
+use crate::cuda_adaptor::setup_keys_gm::BaseProvingKeyCuda;
 
 macro_rules! impl_deferred_machine {
     ($emul_name:ident, $recur_cc:ident, $recur_sc:ident) => {

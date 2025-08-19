@@ -452,6 +452,7 @@ impl RiscvConvertHandler<KoalaBearPoseidon2> for RiscvConvertProver<KoalaBearPos
         >(
             &self.riscv_vk,
             *vk_root,
+            [KoalaBear::ZERO; DIGEST_SIZE],
             self.riscv_machine.base_machine(),
             &proof,
             &self.recursion_shape_config,

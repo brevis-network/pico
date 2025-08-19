@@ -122,6 +122,8 @@ macro_rules! impl_convert_prover {
                 let stdin = EmulatorStdin::setup_for_convert::<Val<$recur_sc>, $recur_cc>(
                     &proofs.vks[0],
                     vk_root,
+                    // TODO: temp use zero
+                    [Val::<$recur_sc>::ZERO; DIGEST_SIZE]
                     &self.prev_machine,
                     &proofs.proofs(),
                     &self.shape_config,

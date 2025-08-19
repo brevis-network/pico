@@ -30,7 +30,7 @@ pub type DeferredChips<SC> = RecursionChipType<Val<SC>>;
 
 pub struct DeferredProver<SC>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + 'static,
     Val<SC>: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config,
 {
     machine: DeferredMachine<SC, DeferredChips<SC>>,

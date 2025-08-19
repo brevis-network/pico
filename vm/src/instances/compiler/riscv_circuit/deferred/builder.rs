@@ -53,7 +53,7 @@ where
         Domain = TwoAdicMultiplicativeCoset<F>,
         FriChallengerVariable = DuplexChallengerVariable<CC>,
         DigestVariable = [Felt<F>; DIGEST_SIZE],
-    >,
+    > + 'static,
     RecursionChipType<Val<SC>>:
         ChipBehavior<Val<SC>> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
     DeferredStdin<SC, RecursionChipType<Val<SC>>>:
@@ -165,7 +165,7 @@ where
         Domain = TwoAdicMultiplicativeCoset<CC::F>,
         FriChallengerVariable = DuplexChallengerVariable<CC>,
         DigestVariable = [Felt<CC::F>; DIGEST_SIZE],
-    >,
+    > + 'static,
     RecursionChipType<Val<SC>>:
         ChipBehavior<Val<SC>> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, CC>>,
 {

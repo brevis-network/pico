@@ -207,7 +207,7 @@ where
     //
     let public_values = public_values.to_vec();
     let mut public_values_kb: Vec<KoalaBear> = unsafe { transmute(public_values) };
-    public_values_kb.resize(207, KoalaBear::ZERO);
+    public_values_kb.resize(231, KoalaBear::ZERO);
 
     let scalars = crate::cuda_adaptor::h_poly_struct::prepare_scalars(
         &public_values_kb,
