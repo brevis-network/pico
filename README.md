@@ -58,3 +58,6 @@ Pico draws inspiration from the following projects, each representing cutting-ed
 - [Valida](https://github.com/valida-xyz/valida): Pico's implementation of cross-table lookups is inspired by Valida's pioneering work in this area.
 - [RISC0](https://github.com/risc0/risc0): Pico's Rust toolchain is based on the one originally developed by RISC0.
 
+## Audit
+
+This branch is for auditing. 
