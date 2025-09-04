@@ -25,7 +25,7 @@ env_logger.workspace = true
 lazy_static.workspace = true
 getrandom = { version = "0.2.15", features = ["custom"] }
 libm = { version = "0.2.8", optional = true }
-sha2 = { version = "0.10.8" }
+sha2 = { version = "0.10.9" }
 coprocessor-sdk = { git = "https://github.com/brevis-network/Pico-zkCoprocessor", optional = true }
 hex.workspace = true
 serde_json.workspace = true
