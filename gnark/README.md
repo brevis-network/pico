@@ -37,7 +37,7 @@ go test -timeout 300000s -run TestPoseidon2KoalaBear
 ```
 
 #### Verify Pico EMBED Proof on BabyBear
-You need copy the `groth16_witness.json` and `constraints.json` into the dir first.
+You need to copy the `groth16_witness.json` and `constraints.json` into the dir first.
 ```
 cd gnark/babybear_verifier/
 
@@ -45,7 +45,7 @@ go test -timeout 300000s -run TestSolveVerifierCircuit
 ```
 
 #### Verify Pico EMBED Proof on KoalaBear
-You need copy the `groth16_witness.json` and `constraints.json` into the dir first.
+You need to copy the `groth16_witness.json` and `constraints.json` into the dir first.
 ```
 cd gnark/koalabear_verifier/
 
