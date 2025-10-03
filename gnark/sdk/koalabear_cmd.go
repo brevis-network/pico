@@ -83,11 +83,11 @@ func DoKoalaBearSolve() (circuit *koalabear_verifier.Circuit, assigment *koalabe
 	}
 	fmt.Println("solved with success")
 
-	return circuit, assigment, nil
+	return circuit, assignment, nil
 }
 
 func KoalaBearSetup() error {
-	circuit, assigment, err := DoKoalaBearSolve()
+	circuit, assignment, err := DoKoalaBearSolve()
 	if err != nil {
 		return fmt.Errorf("fail to solve: %v\n", err)
 	}
