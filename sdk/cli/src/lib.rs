@@ -25,7 +25,7 @@ pub fn log_command(command: &Command) {
     println!("Command: {:?}", command_string);
 }
 
-/// get the targe directory by the manifest file
+/// get the target directory by the manifest file
 pub fn get_target_directory(manifest_path: &Path) -> Result<PathBuf, Error> {
     Ok(MetadataCommand::new()
         .manifest_path(manifest_path)
