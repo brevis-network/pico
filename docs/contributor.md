@@ -7,7 +7,7 @@ Thank you for your interest in contributing to Pico! Your contributions—whethe
 - Report: If it doesn't, open an issue with a clear title, description, and steps to reproduce.
 
 ## Suggesting Enhancements
-- Feature Requests: Open an issue tagged as enhancement with details on the proposed feature and its benefits.
+- Feature Requests: Open an issue tagged as an enhancement with details on the proposed feature and its benefits.
 
 ## Pull Requests
 - Fork & Clone: Fork the repository and clone it locally.
