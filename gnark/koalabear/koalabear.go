@@ -387,17 +387,17 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 	// Check that the hint is correct.
 	p.api.AssertIsEqual(
 		p.api.Add(
-			p.api.Mul(highLimb, frontend.Variable(uint64(math.Pow(2, 27)))),
+			p.api.Mul(highLimb, frontend.Variable(uint64(math.Pow(2, 24)))),
 			lowLimb,
 		),
 		remainder,
 	)
 	if os.Getenv("GROTH16") != "1" {
-		p.RangeChecker.Check(highLimb, 4)
-		p.RangeChecker.Check(lowLimb, 27)
+		p.RangeChecker.Check(highLimb, 7)
+		p.RangeChecker.Check(lowLimb, 24)
 	} else {
-		p.api.ToBinary(highLimb, 4)
-		p.api.ToBinary(lowLimb, 27)
+		p.api.ToBinary(highLimb, 7)
+		p.api.ToBinary(lowLimb, 24)
 	}
 
 	//fmt.Printf("reminder: %x \n", remainder)
@@ -406,7 +406,7 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 	// If the most significant bits are all 1, then we need to check that the least significant bits
 	// are all zero in order for element to be less than the KoalaBear modulus. Otherwise, we don't
 	// need to do any checks, since we already know that the element is less than the KoalaBear modulus.
-	/*shouldCheck := p.api.IsZero(p.api.Sub(highLimb, uint64(math.Pow(2, 4))-1))
+	shouldCheck := p.api.IsZero(p.api.Sub(highLimb, uint64(math.Pow(2, 7))-1))
 	fmt.Printf("reduceWithMaxBits shouldCheck: %d\n", shouldCheck)
 	p.api.AssertIsEqual(
 		p.api.Mul(
@@ -414,7 +414,7 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 			lowLimb,
 		),
 		frontend.Variable(0),
-	)*/
+	)
 
 	p.api.AssertIsEqual(x, p.api.Add(p.api.Mul(quotient, modulus), remainder))
 
@@ -448,8 +448,8 @@ func InvFHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
 	return nil
 }
 
-// The hint used to split a KoalaBear Variable into a 4 bit limb (the most significant bits) and a
-// 27 bit limb.
+// The hint used to split a KoalaBear Variable into a 7 bit limb (the most significant bits) and a
+// 24 bit limb.
 func SplitLimbsHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
 	if len(inputs) != 1 {
 		panic("SplitLimbsHint expects 1 input operand")
@@ -462,12 +462,12 @@ func SplitLimbsHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
 		return fmt.Errorf("input is not in the field")
 	}
 
-	two_27 := big.NewInt(int64(math.Pow(2, 27)))
+	two_24 := big.NewInt(int64(math.Pow(2, 24)))
 
 	// The least significant bits
-	results[0] = new(big.Int).Rem(input, two_27)
+	results[0] = new(big.Int).Rem(input, two_24)
 	// The most significant bits
-	results[1] = new(big.Int).Quo(input, two_27)
+	results[1] = new(big.Int).Quo(input, two_24)
 
 	return nil
 }
