@@ -1418,6 +1418,24 @@ impl RiscvEmulator {
             ));
         }
     }
+    
+    /// Collect signatures from memory between the given begin and end addresses
+    pub fn collect_signatures(&mut self, begin: u32, end: u32) -> Vec<u32> {
+        if begin >= end {
+            return Vec::new();
+        }
+
+        let size = (end - begin) as usize;
+        let mut signatures = Vec::with_capacity(size / 4);
+
+        for offset in (0..size).step_by(4) {
+            let addr = begin + offset as u32;
+            let word = self.word(addr);
+            signatures.push(word);
+        }
+
+        signatures
+    }
 }
 
 #[cfg(test)]
