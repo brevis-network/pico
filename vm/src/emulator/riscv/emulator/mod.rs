@@ -1540,7 +1540,7 @@ impl RiscvEmulator {
             ));
         }
     }
-    
+
     /// Collect signatures from memory between the given begin and end addresses
     pub fn collect_signatures(&mut self, begin: u32, end: u32) -> Vec<u32> {
         if begin >= end {
