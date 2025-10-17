@@ -5,7 +5,11 @@
 
 use pico_vm::machine::logger::setup_logger;
 
-pub use pico_vm::machine::keys::HashableKey;
+pub use p3_field::FieldAlgebra;
+pub use pico_vm::{
+    machine::keys::HashableKey,
+    primitives::{consts::DIGEST_SIZE, hash_deferred_proof},
+};
 
 extern crate alloc;
 
