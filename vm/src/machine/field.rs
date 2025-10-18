@@ -86,11 +86,15 @@ pub const fn same_field<T: Any, F: Field + BinomiallyExtendable<D>, const D: usi
     unsafe {
        let typ = std::intrinsics::type_id::<T>();
         
-        typ == FIELD
-            || typ == EXPR
-            || typ == PACKING
-            || typ == BINOMIAL
-            || typ == EXT
-            || typ == FELT
+        typ_eq(typ, FIELD)
+            || typ_eq(typ, EXPR)
+            || typ_eq(typ, PACKING)
+            || typ_eq(typ, BINOMIAL)
+            || typ_eq(typ, EXT)
+            || typ_eq(typ, FELT)
     }
+}
+
+const fn typ_eq(a: usize, b: usize) -> bool {
+    a == b
 }
