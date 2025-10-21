@@ -201,3 +201,54 @@ jobs:
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --field m31
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf precompile --field m31
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf poseidon2 --field m31 --n 2118082624
+
+  riscof:
+    if: true
+    name: RISCOF Arch Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure git for private repo
+        run: |
+          git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
+      - name: Checkout pico sources
+        uses: actions/checkout@v4
+        with:
+          path: pico
+      - name: Install toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: nightly-2025-08-04
+          override: true
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pico
+      - name: Build pico-cli
+        run: |
+          cd pico
+          cargo build --release -p pico-cli
+      - name: Checkout zkevm-test-monitor
+        uses: actions/checkout@v4
+        with:
+          repository: eth-act/zkevm-test-monitor
+          path: zkevm-test-monitor
+      - name: Setup pico binary for RISCOF
+        run: |
+          mkdir -p zkevm-test-monitor/binaries
+          cp pico/target/release/cargo-pico zkevm-test-monitor/binaries/pico-binary
+          chmod +x zkevm-test-monitor/binaries/pico-binary
+      - name: Run RISCOF arch tests
+        run: |
+          cd zkevm-test-monitor
+          ./src/test.sh --arch pico
+      - name: Display test results
+        if: always()
+        run: |
+          cd zkevm-test-monitor
+          if [ -f "test-results/pico/summary-arch.json" ]; then
+            echo "📊 RISCOF Test Results:"
+            cat test-results/pico/summary-arch.json | jq '.'
+          else
+            echo "⚠️ No test results found"
+          fi
