@@ -521,6 +521,7 @@ impl RiscvEmulator {
             self.memory_accesses,
             memory_store_value,
             &mut self.record.cpu_events,
+            &mut self.record.memory_read_write_event_indices,
         );
 
         // Update the program counter.

@@ -38,6 +38,8 @@ pub struct EmulationRecord {
 
     pub cpu_events: Vec<CpuEvent>,
 
+    pub memory_read_write_event_indices: Vec<usize>,
+
     /// A trace of the ADD, and ADDI events.
     pub add_events: Vec<AluEvent>,
     /// A trace of the MUL events.
@@ -162,7 +164,7 @@ impl EmulationRecord {
 
     /// Return the number of rows needed for a chip, according to the proof shape specified in the
     /// struct.
-    pub fn shape_chip_size(&self, chip_name: &String) -> Option<usize> {
+    pub fn shape_chip_size(&self, chip_name: &str) -> Option<usize> {
         self.shape
             .as_ref()
             .map(|shape| {
@@ -362,6 +364,8 @@ impl RecordBehavior for EmulationRecord {
 
     fn append(&mut self, extra: &mut EmulationRecord) {
         self.cpu_events.append(&mut extra.cpu_events);
+        self.memory_read_write_event_indices
+            .append(&mut extra.memory_read_write_event_indices);
         self.add_events.append(&mut extra.add_events);
         self.mul_events.append(&mut extra.mul_events);
         self.sub_events.append(&mut extra.sub_events);

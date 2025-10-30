@@ -59,6 +59,10 @@ use tracing::{debug, instrument, warn};
 pub type PicoProofPair<SC> = (MetaProof<SC>, BaseVerifyingKey<SC>);
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "I: Serialize, PicoProofPair<SC>: Serialize",
+    deserialize = "I: Deserialize<'de>, PicoProofPair<SC>: Deserialize<'de>"
+))]
 pub struct EmulatorStdinBuilder<I, SC: StarkGenericConfig> {
     pub buffer: Vec<I>,
     pub pico_proofs: Vec<PicoProofPair<SC>>,

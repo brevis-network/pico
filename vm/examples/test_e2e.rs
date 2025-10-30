@@ -116,7 +116,7 @@ macro_rules! run {
                 info!("use benchmark options");
                 EmulatorOpts::bench_riscv_ops()
             } else {
-                EmulatorOpts::default()
+                EmulatorOpts::default().with_cycle_tracker()
             };
             debug!("riscv_opts: {:?}", riscv_opts);
 
@@ -151,7 +151,7 @@ macro_rules! run {
                 );
 
                 riscv_machine
-                .prove_with_shape_cycles(&riscv_witness, riscv_shape_config.as_ref())
+                .prove_with_shape_report(&riscv_witness, riscv_shape_config.as_ref())
                 .0
             });
 

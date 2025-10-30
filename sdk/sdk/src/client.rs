@@ -28,6 +28,7 @@ use pico_vm::{
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::MachineBehavior,
         proof::{merge_meta_proofs, MetaProof},
+        report::EmulationReport,
     },
     proverchain::{
         CombineProver, CompressProver, ConvertProver, DeferredProver, EmbedProver,
@@ -223,7 +224,7 @@ macro_rules! create_sdk_prove_client {
             pub fn emulate(
                 &self,
                 stdin: EmulatorStdinBuilder<Vec<u8>, $sc>,
-            ) -> (u64, Vec<u8>) {
+            ) -> (EmulationReport, Vec<u8>) {
                 let (stdin, _) = stdin.finalize();
                 self.riscv.emulate(stdin)
             }

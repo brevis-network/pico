@@ -1,6 +1,7 @@
 pub mod builder;
 pub mod chip;
 pub mod debug;
+pub mod estimator;
 pub mod extension;
 pub mod field;
 pub mod folder;
@@ -11,6 +12,7 @@ pub mod machine;
 pub mod permutation;
 pub mod proof;
 pub mod prover;
+pub mod report;
 pub mod septic;
 pub mod utils;
 pub mod verifier;

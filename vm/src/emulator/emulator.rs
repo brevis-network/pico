@@ -29,6 +29,7 @@ use crate::{
         chip::ChipBehavior,
         keys::{BaseProvingKey, BaseVerifyingKey},
         machine::BaseMachine,
+        report::EmulationReport,
         witness::ProvingWitness,
     },
     primitives::{
@@ -101,7 +102,7 @@ where
         me
     }
 
-    pub fn next_record_batch<F>(&mut self, record_callback: &mut F) -> bool
+    pub fn next_record_batch<F>(&mut self, record_callback: &mut F) -> Option<EmulationReport>
     where
         F: FnMut(EmulationRecord),
     {
@@ -127,8 +128,8 @@ where
 
     pub fn get_pv_stream_with_dryrun(&mut self) -> Vec<u8> {
         loop {
-            let done = self.next_record_batch(&mut |_| {});
-            if done {
+            let report = self.next_record_batch(&mut |_| {});
+            if report.is_some() {
                 break;
             }
         }

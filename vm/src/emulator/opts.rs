@@ -19,6 +19,10 @@ pub struct EmulatorOpts {
     pub split_opts: SplitOpts,
     /// The maximum number of cpu cycles to use for emulation.
     pub max_cycles: Option<u64>,
+    /// Whether or not to honor vm cycle tracking requests
+    pub cycle_tracker: bool,
+    /// Whether or not to track cycle prediction information
+    pub cost_estimator: bool,
 }
 
 impl Default for EmulatorOpts {
@@ -48,6 +52,8 @@ impl Default for EmulatorOpts {
             chunk_batch_size: default_chunk_batch_size,
             split_opts: SplitOpts::new(split_threshold),
             max_cycles: default_max_cycles.into(),
+            cycle_tracker: false,
+            cost_estimator: false,
         }
     }
 }
@@ -110,6 +116,20 @@ impl EmulatorOpts {
             ),
             split_opts: SplitOpts::new(split_threshold),
             ..Default::default()
+        }
+    }
+
+    pub fn with_cycle_tracker(self) -> Self {
+        Self {
+            cycle_tracker: true,
+            ..self
+        }
+    }
+
+    pub fn with_cost_estimator(self) -> Self {
+        Self {
+            cost_estimator: true,
+            ..self
         }
     }
 }

@@ -20,6 +20,7 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
         lookup::LookupScope,
         septic::{SepticBlock, SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
     },
@@ -171,5 +172,11 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
 
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Global
+    }
+}
+
+impl<F> EventCapture for GlobalChip<F> {
+    fn count_extra_records(_record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_poseidon2_events += event_counter.num_global_lookup_events;
     }
 }
