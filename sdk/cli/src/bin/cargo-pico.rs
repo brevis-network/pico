@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::{crate_version, Parser, Subcommand};
-use pico_cli::subcommand::{build::BuildCmd, new::NewCmd, prove::ProveCmd};
+use pico_cli::subcommand::{
+    build::BuildCmd, new::NewCmd, prove::ProveCmd, test_emulator::TestEmulatorCmd,
+};
 use pico_sdk::init_logger;
 
 #[derive(Parser)]
@@ -21,6 +23,7 @@ pub enum SubCommands {
     Build(BuildCmd),
     Prove(ProveCmd),
     New(NewCmd),
+    TestEmulator(TestEmulatorCmd),
 }
 
 fn main() -> Result<()> {
@@ -32,5 +35,6 @@ fn main() -> Result<()> {
         SubCommands::Build(cmd) => cmd.run(),
         SubCommands::Prove(cmd) => cmd.run(),
         SubCommands::New(cmd) => cmd.run(),
+        SubCommands::TestEmulator(cmd) => cmd.run(),
     }
 }
