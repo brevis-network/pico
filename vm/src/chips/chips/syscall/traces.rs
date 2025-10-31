@@ -11,6 +11,7 @@ use crate::{
     iter::{IntoPicoIterator, IntoPicoRefIterator, PicoBridge, PicoIterator, PicoSlice},
     machine::{
         chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
         lookup::{LookupScope, LookupType},
     },
 };
@@ -123,5 +124,19 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
 
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Regional
+    }
+}
+
+impl<F> EventCapture for SyscallChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_syscall_events += record.syscall_events.len();
+        event_counter.num_global_lookup_events += event_counter.num_syscall_events;
+        event_counter.num_precompile_syscall_events += record
+            .precompile_events
+            .events
+            .iter()
+            .map(|(_, v)| v.len())
+            .sum::<usize>();
+        event_counter.num_global_lookup_events += event_counter.num_precompile_syscall_events;
     }
 }

@@ -32,6 +32,7 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
+        report::EmulationReport,
         witness::ProvingWitness,
     },
     primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
@@ -84,7 +85,10 @@ where
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
     FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
-    pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
+    pub fn prove_report(
+        &self,
+        stdin: EmulatorStdin<Program, Vec<u8>>,
+    ) -> (MetaProof<SC>, EmulationReport) {
         let witness = ProvingWitness::setup_for_riscv(
             self.program.clone(),
             stdin,
@@ -93,7 +97,12 @@ where
             self.vk.clone(),
         );
         self.machine
-            .prove_with_shape_cycles(&witness, self.shape_config.as_ref())
+            .prove_with_shape_report(&witness, self.shape_config.as_ref())
+    }
+
+    pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
+        let (proof, EmulationReport { total_cycles, .. }) = self.prove_report(stdin);
+        (proof, total_cycles)
     }
 
     pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (u64, f64) {
@@ -152,9 +161,9 @@ where
 
                 let thread_start = Instant::now();
                 loop {
-                    let done = emu.next_record_batch(&mut |_rec| {});
+                    let report = emu.next_record_batch(&mut |_rec| {});
 
-                    if done {
+                    if report.is_some() {
                         let thread_elapsed = thread_start.elapsed().as_secs_f64();
                         let thread_cycles = emu.cycles();
 
@@ -341,7 +350,7 @@ where
         (0, 0 as f64)
     }
 
-    pub fn emulate(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (u64, Vec<u8>) {
+    pub fn emulate(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (EmulationReport, Vec<u8>) {
         let witness = ProvingWitness::<SC, RiscvChips<SC>, _>::setup_for_riscv(
             self.program.clone(),
             stdin,
@@ -350,13 +359,14 @@ where
             self.vk.clone(),
         );
         let mut emulator = MetaEmulator::setup_riscv(&witness, None);
-        loop {
-            let done = emulator.next_record_batch(&mut |_| {});
-            if done {
-                break;
+        let report = loop {
+            let report = emulator.next_record_batch(&mut |_| {});
+            if let Some(report) = report {
+                break report;
             }
-        }
-        (emulator.cycles(), emulator.get_pv_stream())
+        };
+        let pv_stream = emulator.get_pv_stream();
+        (report, pv_stream)
     }
 
     pub fn get_program(&self) -> Arc<Program> {

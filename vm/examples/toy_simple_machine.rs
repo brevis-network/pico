@@ -126,7 +126,7 @@ fn main() {
     let mut runtime =
         RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
-    let batch_records = runtime.run(None).unwrap();
+    let batch_records = runtime.run(None).unwrap().0;
 
     let record = &batch_records[0];
     let mut records = vec![record.clone(), record.clone()];
@@ -164,7 +164,7 @@ fn main() {
     let program = compiler.compile();
     let mut runtime = RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
-    let batch_records = runtime.run(None).unwrap();
+    let batch_records = runtime.run(None).unwrap().0;
 
     let record = &batch_records[0];
     let mut records = vec![record.clone(), record.clone()];
@@ -203,7 +203,7 @@ fn main() {
     let mut runtime =
         RiscvEmulator::new_single::<Mersenne31>(program, EmulatorOpts::default(), None);
     runtime.state.input_stream.push(vec![2, 0, 0, 0]);
-    let batch_records = runtime.run(None).unwrap();
+    let batch_records = runtime.run(None).unwrap().0;
 
     let record = &batch_records[0];
     let mut records = vec![record.clone(), record.clone()];

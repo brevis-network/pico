@@ -43,7 +43,7 @@ use thiserror::Error;
 use tracing::{debug, warn};
 
 /// The shape of a riscv proof.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Eq, PartialEq)]
 pub struct RiscvPadShape {
     /// Keys are the chip names and values are the log-heights of the chips.
     pub inner: HashMap<String, usize>,

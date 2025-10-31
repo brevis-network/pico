@@ -51,7 +51,7 @@ where
 
     loop {
         let mut batch_records = vec![];
-        let done = emulator
+        let report = emulator
             .emulate_batch(&mut |record| batch_records.push(record))
             .unwrap();
 
@@ -94,7 +94,7 @@ where
             prev_next_pc = record.public_values.next_pc;
         }
 
-        if done {
+        if report.is_some() {
             assert_eq!(batch_records.last().unwrap().public_values.next_pc, 0);
             break;
         }

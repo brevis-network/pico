@@ -21,7 +21,11 @@ use crate::{
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
-    machine::chip::ChipBehavior,
+    iter::{PicoIterator, PicoSlice},
+    machine::{
+        chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
+    },
     primitives::consts::{BYTE_SIZE, DIVREM_DATAPAR, LONG_WORD_SIZE, WORD_SIZE},
 };
 use core::borrow::BorrowMut;
@@ -303,5 +307,65 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
 
     fn local_only(&self) -> bool {
         true
+    }
+}
+
+impl<F> EventCapture for DivRemChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_divrem_events += record.divrem_events.len();
+        if event_counter.num_divrem_events == 0 {
+            return;
+        }
+
+        event_counter.num_mul_events += 2 * record.divrem_events.len();
+        let chunk_size = std::cmp::max(record.divrem_events.len() / num_cpus::get(), 1);
+        let divrem_counts: Vec<(usize, usize)> = record
+            .divrem_events
+            .as_slice()
+            .pico_chunks(chunk_size)
+            .flat_map_iter(|chunk| chunk.iter().map(|e| Self::count_event(e)))
+            .collect();
+        let (divrem_add, divrem_lt) = divrem_counts
+            .as_slice()
+            .pico_chunks(chunk_size)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .fold((0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1))
+            })
+            .pico_reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
+        event_counter.num_add_events += divrem_add;
+        event_counter.num_lt_events += divrem_lt;
+    }
+}
+
+impl<F> DivRemChip<F> {
+    fn count_event(event: &AluEvent) -> (usize, usize) {
+        let mut add_events = 0;
+        let mut lt_events = 0;
+        let is_real = 1;
+        let mut c_neg = 0;
+        let (_, remainder) = get_quotient_and_remainder(event.b, event.c, event.opcode);
+        let mut rem_neg = 0;
+        if is_signed_operation(event.opcode) {
+            c_neg = get_msb(event.c);
+            rem_neg = get_msb(remainder);
+        }
+        let abs_c_alu_event = c_neg * is_real;
+        if abs_c_alu_event == 1 {
+            add_events += 1;
+        }
+
+        let abs_rem_alu_event = rem_neg * is_real;
+        if abs_rem_alu_event == 1 {
+            add_events += 1;
+        }
+        let is_c_0 = event.c == 0;
+        let remainder_check_multiplicity = is_real * (1 - (is_c_0 as u8));
+        if remainder_check_multiplicity == 1 {
+            lt_events += 1;
+        }
+
+        (add_events, lt_events)
     }
 }

@@ -70,6 +70,16 @@ impl<F: Field> Word<F> {
     }
 }
 
+impl Word<u8> {
+    pub fn bytes_to_u32(&self) -> u32 {
+        u32::from_le_bytes(self.0)
+    }
+
+    pub fn from_u32(value: u32) -> Self {
+        Self(value.to_le_bytes())
+    }
+}
+
 impl<V: Copy> Word<V> {
     /// Reduces a word to a single variable.
     pub fn reduce<AB: AirBuilder<Var = V>>(&self) -> AB::Expr {

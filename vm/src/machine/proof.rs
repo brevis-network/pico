@@ -8,6 +8,11 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_matrix::dense::RowMajorMatrix;
 use serde::{Deserialize, Serialize};
+use std::{
+    fs::File,
+    io::{BufReader, BufWriter},
+    path::Path,
+};
 
 /// Wrapper for all proof types
 /// The top layer of abstraction (the most abstract layer)
@@ -75,6 +80,24 @@ where
                 pv_stream: self.pv_stream.clone(),
             })
             .collect()
+    }
+
+    /// Serialize and write the MetaProof to a binary file
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let file = File::create(path)?;
+        let writer = BufWriter::new(file);
+        bincode::serialize_into(writer, self)?;
+
+        Ok(())
+    }
+
+    /// Read a binary file and deserialize into a MetaProof
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let meta = bincode::deserialize_from(reader)?;
+
+        Ok(meta)
     }
 }
 

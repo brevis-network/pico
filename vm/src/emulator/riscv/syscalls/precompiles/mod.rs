@@ -144,7 +144,7 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
 /// A record of all the precompile events.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrecompileEvents {
-    events: HashMap<SyscallCode, Vec<(SyscallEvent, PrecompileEvent)>>,
+    pub(crate) events: HashMap<SyscallCode, Vec<(SyscallEvent, PrecompileEvent)>>,
 }
 
 impl Default for PrecompileEvents {
