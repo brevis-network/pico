@@ -287,6 +287,58 @@ macro_rules! create_sdk_prove_client {
                 generate_contract_inputs::<$fc>(output.clone())?;
                 Ok(())
             }
+
+            /// Prove and generate gnark proof with deferred proof support (for aggregation).
+            /// Use this instead of prove_evm when your program calls verify_pico_proof.
+            pub fn prove_evm_with_deferred(
+                &self,
+                stdin: EmulatorStdinBuilder<Vec<u8>, $sc>,
+                need_setup: bool,
+                output: impl AsRef<Path>,
+                field_type: &str,
+            ) -> Result<(), Error> {
+                let output = output.as_ref();
+                let (riscv_proof, combine_proof) = self.prove_combine(stdin)?;
+
+                // Continue the proving chain: compress then embed
+                let riscv_vk = self.riscv_vk();
+                let compress_proof = self.compress.prove(combine_proof);
+                if !self.compress.verify(&compress_proof, riscv_vk) {
+                    return Err(Error::msg("verify compress proof failed"));
+                }
+
+                let embed_proof = self.embed.prove(compress_proof);
+                if !self.embed.verify(&embed_proof, riscv_vk) {
+                    return Err(Error::msg("verify embed proof failed"));
+                }
+
+                self.write_onchain_data(output, &riscv_proof, &embed_proof)?;
+                let field_name = match field_type {
+                    "kb" => {
+                        "koalabear"
+                    }
+                    "bb" => {
+                        "babybear"
+                    }
+                    _ => {
+                        return Err(Error::msg("field type not supported"));
+                    }
+                };
+                if need_setup {
+                    let mut setup_cmd = Command::new("sh");
+                    setup_cmd.arg("-c")
+                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd setup -sol ./data/Groth16Verifier.sol", output.display(), field_name));
+                    execute_command(setup_cmd);
+                }
+
+                let mut prove_cmd = Command::new("sh");
+                prove_cmd.arg("-c")
+                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd prove -sol ./data/Groth16Verifier.sol", output.display(), field_name));
+
+                execute_command(prove_cmd);
+                generate_contract_inputs::<$fc>(output.clone())?;
+                Ok(())
+            }
         }
     };
 }
