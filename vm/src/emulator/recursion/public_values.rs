@@ -1,7 +1,7 @@
 use crate::{
     chips::utils::indices_arr,
     compiler::{
-        recursion::{circuit, prelude::*},
+        recursion::{circuit, circuit::CircuitBuilder, prelude::*},
         word::Word,
     },
     emulator::recursion::public_values::circuit::{
@@ -241,26 +241,67 @@ where
     H::poseidon2_hash(builder, &pv_slice[..NUM_PV_ELMS_TO_HASH])
 }
 
-pub(crate) fn assert_deferred_digest_complete<C>(
+pub(crate) fn assert_complete<C>(
     builder: &mut Builder<C>,
     public_values: &RecursionPublicValues<Felt<C::F>>,
     flag_complete: Felt<C::F>,
 ) where
     C: CircuitConfig,
 {
-    let zero: Felt<_> = builder.eval(C::F::ZERO);
+    let RecursionPublicValues {
+        deferred_proofs_digest,
+        next_pc,
+        start_chunk,
+        next_chunk,
+        start_execution_chunk,
+        start_reconstruct_deferred_digest,
+        end_reconstruct_deferred_digest,
+        global_cumulative_sum,
+        contains_execution_chunk,
+        ..
+    } = public_values;
 
-    for start_digest in public_values.start_reconstruct_deferred_digest.into_iter() {
-        builder.assert_felt_eq(flag_complete * start_digest, zero);
+    // Assert that the `flag_complete` flag is boolean.
+    builder.assert_felt_eq(flag_complete * (flag_complete - C::F::ONE), C::F::ZERO);
+
+    // Assert that `next_pc` is equal to zero (so program execution has completed)
+    builder.assert_felt_eq(flag_complete * *next_pc, C::F::ZERO);
+
+    // Assert that start chunk is equal to 1.
+    builder.assert_felt_eq(flag_complete * (*start_chunk - C::F::ONE), C::F::ZERO);
+
+    // Assert that the next chunk is not equal to one. This guarantees that there is at least one
+    // chunk that contains CPU.
+    builder.assert_felt_ne(flag_complete * *next_chunk, C::F::ONE);
+
+    // Assert that that an execution chunk is present.
+    builder.assert_felt_eq(
+        flag_complete * (*contains_execution_chunk - C::F::ONE),
+        C::F::ZERO,
+    );
+    // Assert that the start execution chunk is equal to 1.
+    builder.assert_felt_eq(
+        flag_complete * (*start_execution_chunk - C::F::ONE),
+        C::F::ZERO,
+    );
+
+    // The start reconstruct deferred digest should be zero.
+    for start_digest_word in start_reconstruct_deferred_digest {
+        builder.assert_felt_eq(flag_complete * *start_digest_word, C::F::ZERO);
     }
-
-    for (end_digest, expected_digest) in public_values
-        .end_reconstruct_deferred_digest
-        .into_iter()
-        .zip_eq(public_values.deferred_proofs_digest.into_iter())
+    // The end reconstruct deferred digest should be equal to the deferred proofs digest.
+    for (end_digest_word, deferred_digest_word) in end_reconstruct_deferred_digest
+        .iter()
+        .zip_eq(deferred_proofs_digest.iter())
     {
-        builder.assert_felt_eq(flag_complete * (end_digest - expected_digest), zero);
+        builder.assert_felt_eq(
+            flag_complete * (*end_digest_word - *deferred_digest_word),
+            C::F::ZERO,
+        );
     }
+
+    // The global cumulative sum should sum be equal to the zero digest.
+    builder.assert_digest_zero(flag_complete, *global_cumulative_sum);
 }
 
 /// Verifies the digest of a recursive public values struct.
