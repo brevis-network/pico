@@ -69,12 +69,20 @@ where
             opened_values,
             opening_proof,
             log_main_degrees,
-            log_quotient_degrees,
             main_chip_ordering,
             public_values,
+            ..
         } = proof;
 
+        // do some sanity checks
+        assert!(chips.len() == opened_values.chips_opened_values.len());
+
         let chips = order_chips::<SC, C>(chips, main_chip_ordering).collect::<Vec<_>>();
+
+        let log_quotient_degrees = chips
+            .iter()
+            .map(|chip| chip.get_log_quotient_degree())
+            .collect::<Box<[_]>>();
 
         let pcs = config.pcs();
 
