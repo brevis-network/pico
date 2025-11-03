@@ -55,7 +55,7 @@ where
     pub fn verify(
         &self,
         config: &SC,
-        chips: &[MetaChip<SC::Val, C>],
+        original_chips: &[MetaChip<SC::Val, C>],
         vk: &BaseVerifyingKey<SC>,
         challenger: &mut SC::Challenger,
         proof: &BaseProof<SC>,
@@ -75,9 +75,9 @@ where
         } = proof;
 
         // do some sanity checks
-        assert!(chips.len() == opened_values.chips_opened_values.len());
+        assert!(original_chips.len() == opened_values.chips_opened_values.len());
 
-        let chips = order_chips::<SC, C>(chips, main_chip_ordering).collect::<Vec<_>>();
+        let chips = order_chips::<SC, C>(original_chips, main_chip_ordering).collect::<Vec<_>>();
 
         let log_quotient_degrees = chips
             .iter()
@@ -154,6 +154,11 @@ where
             .iter()
             .map(|(name, domain, _)| {
                 let i = main_chip_ordering[name];
+
+                // check that the proof's chip ordering agrees with the vk ordering
+                assert!(i < chips.len());
+                assert_eq!(name, &original_chips[i].name());
+
                 let values = opened_values.chips_opened_values[i].clone();
                 if !chips[i].local_only() {
                     (
