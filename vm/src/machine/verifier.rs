@@ -4,7 +4,7 @@ use crate::{
         chip::{ChipBehavior, MetaChip},
         folder::VerifierConstraintFolder,
         keys::BaseVerifyingKey,
-        lookup::LookupScope,
+        lookup::{LookupScope, LookupType},
         proof::{BaseCommitments, BaseProof},
         utils::order_chips,
     },
@@ -83,6 +83,17 @@ where
             .iter()
             .map(|chip| chip.get_log_quotient_degree())
             .collect::<Box<[_]>>();
+
+        // sanity check the lookup multiplicities
+        for ty in LookupType::all_types() {
+            let mut max_mult = 0u64;
+            for (chip, val) in original_chips.iter().zip(opened_values.chips_opened_values.iter()) {
+                let count = chip.looking.iter().filter(|x| x.kind == ty).count()
+                    .saturating_add(chip.looked.iter().filter(|x| x.kind == ty).count());
+                max_mult = max_mult.saturating_add(count.saturating_mul(1 << val.log_main_degree) as u64);
+            }
+            assert!(num::BigUint::from(max_mult) < SC::Val::order());
+        }
 
         let pcs = config.pcs();
 
