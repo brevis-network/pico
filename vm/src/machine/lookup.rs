@@ -69,17 +69,19 @@ pub enum LookupType {
 
 impl LookupType {
     pub fn all_types() -> impl Iterator<Item = Self> {
-        [ Self::Memory
-        , Self::Program
-        , Self::Instruction
-        , Self::Alu
-        , Self::Byte
-        , Self::Range
-        , Self::Field
-        , Self::Syscall
-        , Self::Poseidon2
-        , Self::Global
-        ].into_iter()
+        [
+            Self::Memory,
+            Self::Program,
+            Self::Instruction,
+            Self::Alu,
+            Self::Byte,
+            Self::Range,
+            Self::Field,
+            Self::Syscall,
+            Self::Poseidon2,
+            Self::Global,
+        ]
+        .into_iter()
     }
 }
 

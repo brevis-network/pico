@@ -88,10 +88,19 @@ where
         // sanity check the lookup multiplicities
         for ty in LookupType::all_types() {
             let mut max_mult = 0u64;
-            for (chip, val) in original_chips.iter().zip(opened_values.chips_opened_values.iter()) {
-                let count = chip.looking.iter().filter(|x| x.kind == ty).count()
+            for (chip, val) in original_chips
+                .iter()
+                .zip(opened_values.chips_opened_values.iter())
+            {
+                let count = chip
+                    .looking
+                    .iter()
+                    .filter(|x| x.kind == ty)
+                    .count()
                     .saturating_add(chip.looked.iter().filter(|x| x.kind == ty).count());
-                max_mult = max_mult.saturating_add(count.saturating_mul(2usize.saturating_pow(val.log_main_degree as u32)) as u64);
+                max_mult = max_mult.saturating_add(
+                    count.saturating_mul(2usize.saturating_pow(val.log_main_degree as u32)) as u64,
+                );
             }
 
             // if the order overflows, fail the check by default
