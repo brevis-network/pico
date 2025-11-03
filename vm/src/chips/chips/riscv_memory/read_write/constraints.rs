@@ -190,6 +190,9 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // of the most significant byte to get it's sign.
         self.eval_most_sig_byte_bit_decomp(builder, local, &local.unsigned_mem_val);
 
+        // sanity check op_a_0
+        builder.assert_bool(local.instruction.op_a_0);
+
         // Assert that correct value of `mem_value_is_neg_not_x0`.
         builder.assert_eq(
             local.mem_value_is_neg_not_x0,
