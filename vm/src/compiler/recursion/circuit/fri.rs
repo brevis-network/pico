@@ -241,6 +241,7 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVar
                     }
                 }
             }
+            builder.assert_ext_eq(ro[config.log_blowup], SymbolicExt::ZERO);
             ro
         })
         .collect::<Vec<_>>();
