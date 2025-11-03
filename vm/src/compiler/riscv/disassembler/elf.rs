@@ -130,7 +130,9 @@ impl Elf {
                 let mut word = 0;
                 let len = min(file_size - i, WORD_SIZE as u32);
                 for j in 0..len {
-                    let offset = (offset + i + j) as usize;
+                    let offset = offset.checked_add(i).ok_or_else(|| eyre::eyre!("offset overflow"))?;
+                    let offset = offset.checked_add(j).ok_or_else(|| eyre::eyre!("offset overflow"))?;
+                    let offset = offset as usize;
                     let byte = source_code
                         .get(offset)
                         .ok_or_else(|| eyre::eyre!("failed to read segment offset"))?;
