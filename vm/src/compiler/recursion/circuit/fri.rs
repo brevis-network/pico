@@ -81,6 +81,21 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVar
 ) where
     CC::F: TwoAdicField,
 {
+    // observe polynomial evals to avoid a security loophole
+    // see: https://github.com/succinctlabs/sp1/security/advisories/GHSA-c873-wfhp-wx5m
+    for round in &rounds {
+        for mat in &round.domains_points_and_opens {
+            for point in &mat.values {
+                for coord in point {
+                    let point_felts = CC::ext2felt(builder, *coord);
+                    point_felts.iter().for_each(|felt| {
+                        challenger.observe(builder, *felt);
+                    });
+                }
+            }
+        }
+    }
+
     let alpha = challenger.sample_ext(builder);
 
     let fri_challenges =
