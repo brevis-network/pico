@@ -407,7 +407,7 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 	// are all zero in order for element to be less than the KoalaBear modulus. Otherwise, we don't
 	// need to do any checks, since we already know that the element is less than the KoalaBear modulus.
 	shouldCheck := p.api.IsZero(p.api.Sub(highLimb, uint64(math.Pow(2, 7))-1))
-	fmt.Printf("reduceWithMaxBits shouldCheck: %d\n", shouldCheck)
+	// fmt.Printf("reduceWithMaxBits shouldCheck: %d\n", shouldCheck)
 	p.api.AssertIsEqual(
 		p.api.Mul(
 			shouldCheck,
