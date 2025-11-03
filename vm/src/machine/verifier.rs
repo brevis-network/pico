@@ -90,9 +90,11 @@ where
             for (chip, val) in original_chips.iter().zip(opened_values.chips_opened_values.iter()) {
                 let count = chip.looking.iter().filter(|x| x.kind == ty).count()
                     .saturating_add(chip.looked.iter().filter(|x| x.kind == ty).count());
-                max_mult = max_mult.saturating_add(count.saturating_mul(1 << val.log_main_degree) as u64);
+                max_mult = max_mult.saturating_add(count.saturating_mul(2usize.saturating_pow(val.log_main_degree as u32)) as u64);
             }
-            assert!(num::BigUint::from(max_mult) < SC::Val::order());
+
+            // if the order overflows, fail the check by default
+            assert!(max_mult < SC::Val::order().to_u64().unwrap_or_default());
         }
 
         let pcs = config.pcs();

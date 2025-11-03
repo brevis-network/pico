@@ -21,7 +21,7 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
-        lookup::LookupScope,
+        lookup::{LookupScope, LookupType},
         machine::BaseMachine,
         proof::{BaseCommitments, ChipOpenedValues},
         utils::order_chips,
@@ -31,10 +31,11 @@ use crate::{
 use alloc::sync::Arc;
 use hashbrown::HashMap;
 use itertools::{izip, Itertools};
+use num::ToPrimitive;
 use p3_air::{Air, BaseAir};
 use p3_baby_bear::BabyBear;
 use p3_commit::{Pcs, PolynomialSpace, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
+use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 
 type F<FC> = <FC as FieldGenericConfig>::F;
@@ -121,6 +122,19 @@ where
             public_values,
             ..
         } = proof;
+
+        // sanity check lookup multiplicites
+        for ty in LookupType::all_types() {
+            let mut max_mult = 0u64;
+            for (chip, val) in chips.iter().zip(opened_values.iter()) {
+                let count = chip.looking.iter().filter(|x| x.kind == ty).count()
+                    .saturating_add(chip.looked.iter().filter(|x| x.kind == ty).count());
+                max_mult = max_mult.saturating_add(count.saturating_mul(2usize.saturating_pow(val.log_main_degree as u32)) as u64);
+            }
+
+            // if the order overflows, fail the check by default
+            assert!(max_mult < SC::Val::order().to_u64().unwrap_or_default());
+        }
 
         let log_degrees = opened_values
             .iter()
