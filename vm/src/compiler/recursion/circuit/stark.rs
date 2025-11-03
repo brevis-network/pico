@@ -197,6 +197,7 @@ where
             .iter()
             .map(|(name, domain, _)| {
                 let i = main_chip_ordering[name];
+                assert_eq!(name, &chips[i].name());
                 if !chips[i].local_only() {
                     TwoAdicPcsMatsVariable::<CC, SC::Domain> {
                         domain: *domain,

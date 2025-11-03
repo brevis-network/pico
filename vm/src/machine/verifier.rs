@@ -11,6 +11,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Result};
 use itertools::{izip, Itertools};
+use num::ToPrimitive;
 use p3_air::{Air, BaseAir};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
@@ -170,7 +171,7 @@ where
 
                 // check that the proof's chip ordering agrees with the vk ordering
                 assert!(i < chips.len());
-                assert_eq!(name, &original_chips[i].name());
+                assert_eq!(name, &chips[i].name());
 
                 let values = opened_values.chips_opened_values[i].clone();
                 if !chips[i].local_only() {
