@@ -181,7 +181,7 @@ pub fn download_files(field: BenchField) -> Result<(), Error> {
             continue;
         }
         let url = format!(
-            "https://picobench.s3.us-west-2.amazonaws.com/{}/{}",
+            "https://picobench.s3.us-west-2.amazonaws.com/{}/gpu/{}",
             url_path, file
         );
         let cmd = format!("curl -o {} {}", output, url);
