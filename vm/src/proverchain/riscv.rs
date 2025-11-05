@@ -660,11 +660,5 @@ where
         drop(snapshot_msg_tx);
     });
 
-    (
-        reports
-            .into_inner()
-            .expect("ok"),
-        total_cycles,
-        pv_stream,
-    )
+    (reports.into_inner().expect("ok"), total_cycles, pv_stream)
 }
