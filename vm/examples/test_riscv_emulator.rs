@@ -94,7 +94,7 @@ where
             prev_next_pc = record.public_values.next_pc;
         }
 
-        if report.is_some() {
+        if report.done {
             assert_eq!(batch_records.last().unwrap().public_values.next_pc, 0);
             break;
         }

@@ -88,7 +88,7 @@ where
     pub fn prove_report(
         &self,
         stdin: EmulatorStdin<Program, Vec<u8>>,
-    ) -> (MetaProof<SC>, EmulationReport) {
+    ) -> (MetaProof<SC>, Vec<EmulationReport>) {
         let witness = ProvingWitness::setup_for_riscv(
             self.program.clone(),
             stdin,
@@ -101,8 +101,8 @@ where
     }
 
     pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
-        let (proof, EmulationReport { total_cycles, .. }) = self.prove_report(stdin);
-        (proof, total_cycles)
+        let (proof, reports) = self.prove_report(stdin);
+        (proof, reports.last().unwrap().current_cycle)
     }
 
     pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (u64, f64) {
@@ -163,7 +163,7 @@ where
                 loop {
                     let report = emu.next_record_batch(&mut |_rec| {});
 
-                    if report.is_some() {
+                    if report.done {
                         let thread_elapsed = thread_start.elapsed().as_secs_f64();
                         let thread_cycles = emu.cycles();
 
@@ -229,13 +229,14 @@ where
         });
 
         let record_tx = tx.clone();
-        let (cycles, _pv_stream) = emulate_snapshot_pipeline(&witness, move |rec, _done| {
-            record_tx
-                .send(TracegenMessage::Record(Arc::new(rec)))
-                .unwrap();
-        });
+        let (_, total_cycles, _pv_stream) =
+            emulate_snapshot_pipeline(&witness, move |rec, _done| {
+                record_tx
+                    .send(TracegenMessage::Record(Arc::new(rec)))
+                    .unwrap();
+            });
 
-        tx.send(TracegenMessage::CycleCount(cycles)).unwrap();
+        tx.send(TracegenMessage::CycleCount(total_cycles)).unwrap();
 
         drop(tx);
 
@@ -321,7 +322,7 @@ where
         let thread_start = Instant::now();
         loop {
             let t_batch_start = Instant::now();
-            let (_snapshot, done) = emu.next_state_batch(true, &mut |_rec| {}).unwrap();
+            let (_snapshot, report) = emu.next_state_batch(true, &mut |_rec| {}).unwrap();
             let batch_dur = t_batch_start.elapsed();
             batch_index += 1;
 
@@ -332,7 +333,7 @@ where
                 "Snapshot mode batch finished"
             );
 
-            if done {
+            if report.done {
                 let thread_elapsed = thread_start.elapsed().as_secs_f64();
                 let thread_cycles = emu.cycles();
 
@@ -350,7 +351,10 @@ where
         (0, 0 as f64)
     }
 
-    pub fn emulate(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (EmulationReport, Vec<u8>) {
+    pub fn emulate(
+        &self,
+        stdin: EmulatorStdin<Program, Vec<u8>>,
+    ) -> (Vec<EmulationReport>, Vec<u8>) {
         let witness = ProvingWitness::<SC, RiscvChips<SC>, _>::setup_for_riscv(
             self.program.clone(),
             stdin,
@@ -359,14 +363,17 @@ where
             self.vk.clone(),
         );
         let mut emulator = MetaEmulator::setup_riscv(&witness, None);
-        let report = loop {
+        let mut reports = Vec::new();
+        loop {
             let report = emulator.next_record_batch(&mut |_| {});
-            if let Some(report) = report {
-                break report;
+            let done = report.done;
+            reports.push(report);
+            if done {
+                break;
             }
-        };
+        }
         let pv_stream = emulator.get_pv_stream();
-        (report, pv_stream)
+        (reports, pv_stream)
     }
 
     pub fn get_program(&self) -> Arc<Program> {
@@ -477,7 +484,7 @@ pub struct Bucket {
 pub fn emulate_snapshot_pipeline<SC, C, F>(
     witness: &ProvingWitness<SC, C, Vec<u8>>,
     handle_record: F,
-) -> (u64, Vec<u8>)
+) -> (Vec<EmulationReport>, u64, Vec<u8>)
 where
     SC: 'static + StarkGenericConfig + Send + Sync,
     SC::Val: PrimeField32 + Poseidon2Init,
@@ -505,10 +512,10 @@ where
     let shared_ds: SharedDeferredState =
         Arc::new(Mutex::new(EmulationDeferredState::new(program.clone())));
 
-    // let total_cycles = Arc::new(AtomicU64::new(0));
     let mut total_cycles = 0u64;
-    // let cycles_for_snapshot = total_cycles.clone();
     let mut pv_stream: Vec<u8> = Vec::new();
+    let reports = Arc::new(Mutex::new(Vec::new()));
+    let other_reports = reports.clone();
 
     thread::scope(|s| {
         // sequencer
@@ -574,7 +581,8 @@ where
                 let mut batch_idx = 0;
                 loop {
                     let t_batch_start = Instant::now();
-                    let (snapshot, done) = emu.next_state_batch(true, &mut |_| {}).unwrap();
+                    let (snapshot, report) = emu.next_state_batch(true, &mut |_| {}).unwrap();
+                    let done = report.done;
                     let batch_dur = t_batch_start.elapsed();
 
                     let t_send_start = Instant::now();
@@ -619,7 +627,7 @@ where
                 let t_recover_and_emu = Instant::now();
                 let mut emu =
                     MetaEmulator::recover_riscv(witness, snapshot, None, shared_ds.clone());
-                let _ = emu.next_record_batch(&mut |rec| {
+                let report = emu.next_record_batch(&mut |rec| {
                     snapshot_msg_tx
                         .send(Msg::Record {
                             chunk: batch_idx as u32,
@@ -628,6 +636,11 @@ where
                         })
                         .unwrap();
                 });
+                {
+                    // thread safe append reports
+                    let mut lock = other_reports.lock().expect("ok");
+                    lock.push(report);
+                }
                 snapshot_msg_tx
                     .send(Msg::SnapShotDone {
                         chunk: batch_idx as u32,
@@ -644,6 +657,12 @@ where
         drop(snapshot_msg_tx);
     });
 
-    // total_cycles.load(Ordering::Relaxed)
-    (total_cycles, pv_stream)
+    (
+        Arc::into_inner(reports)
+            .expect("ok")
+            .into_inner()
+            .expect("ok"),
+        total_cycles,
+        pv_stream,
+    )
 }
