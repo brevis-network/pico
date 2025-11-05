@@ -514,8 +514,7 @@ where
 
     let mut total_cycles = 0u64;
     let mut pv_stream: Vec<u8> = Vec::new();
-    let reports = Arc::new(Mutex::new(Vec::new()));
-    let other_reports = reports.clone();
+    let reports = Mutex::new(Vec::new());
 
     thread::scope(|s| {
         // sequencer
@@ -577,6 +576,10 @@ where
         s.spawn({
             || {
                 let mut emu = MetaEmulator::setup_riscv(witness, None);
+                // disable cost estimation if it is enabled on the snapshotter, only need it for the trace generator
+                if let Some(e) = &mut emu.emulator {
+                    e.opts.cost_estimator = false;
+                }
                 let t_snapshot_main = Instant::now();
                 let mut batch_idx = 0;
                 loop {
@@ -638,7 +641,7 @@ where
                 });
                 {
                     // thread safe append reports
-                    let mut lock = other_reports.lock().expect("ok");
+                    let mut lock = reports.lock().expect("ok");
                     lock.push(report);
                 }
                 snapshot_msg_tx
@@ -658,8 +661,7 @@ where
     });
 
     (
-        Arc::into_inner(reports)
-            .expect("ok")
+        reports
             .into_inner()
             .expect("ok"),
         total_cycles,
