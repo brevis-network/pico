@@ -132,6 +132,13 @@ impl EmulatorOpts {
             ..self
         }
     }
+
+    pub fn with_max_cycles(self, max_cycles: u64) -> Self {
+        Self {
+            max_cycles: Some(max_cycles),
+            ..self
+        }
+    }
 }
 
 /// Options for splitting deferred events.
