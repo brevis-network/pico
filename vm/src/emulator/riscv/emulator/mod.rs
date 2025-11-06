@@ -553,8 +553,9 @@ impl RiscvEmulator {
         self.state.global_clk += 1;
 
         if let Some(max_cycles) = self.opts.max_cycles {
-            if self.state.global_clk >= max_cycles {
-                panic!("exceeded cycle limit of {}", max_cycles);
+            let current_cycles = self.state.global_clk;
+            if current_cycles >= max_cycles {
+                return Err(EmulationError::ExceededCycleLimit(current_cycles));
             }
         }
 
