@@ -17,7 +17,7 @@ pub use compress::CompressProver;
 pub use convert::ConvertProver;
 pub use deferred::DeferredProver;
 pub use embed::EmbedProver;
-pub use riscv::RiscvProver;
+pub use riscv::{emulate_snapshot_pipeline, RiscvProver};
 
 /// Trait to assist with inline proving
 pub trait ProverChain<PrevSC, PrevC, SC>

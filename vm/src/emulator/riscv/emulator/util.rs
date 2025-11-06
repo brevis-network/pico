@@ -26,16 +26,19 @@ impl RiscvEmulator {
     pub fn run_fast(
         &mut self,
         stdin: Option<Stdin>,
-    ) -> Result<(Vec<EmulationRecord>, EmulationReport), EmulationError> {
+    ) -> Result<(Vec<EmulationRecord>, Vec<EmulationReport>), EmulationError> {
         if let Some(stdin) = stdin {
             self.write_stdin(&stdin);
         }
         self.mode = RiscvEmulatorMode::Simple;
         let mut all_records = vec![];
+        let mut all_reports = vec![];
         loop {
             let report = self.emulate_batch(&mut |record| all_records.push(record))?;
-            if let Some(report) = report {
-                return Ok((all_records, report));
+            let done = report.done;
+            all_reports.push(report);
+            if done {
+                return Ok((all_records, all_reports));
             }
         }
     }
@@ -48,15 +51,18 @@ impl RiscvEmulator {
     pub fn run(
         &mut self,
         stdin: Option<Stdin>,
-    ) -> Result<(Vec<EmulationRecord>, EmulationReport), EmulationError> {
+    ) -> Result<(Vec<EmulationRecord>, Vec<EmulationReport>), EmulationError> {
         if let Some(stdin) = stdin {
             self.write_stdin(&stdin);
         }
         let mut all_records = vec![];
+        let mut all_reports = vec![];
         loop {
             let report = self.emulate_batch(&mut |record| all_records.push(record))?;
-            if let Some(report) = report {
-                return Ok((all_records, report));
+            let done = report.done;
+            all_reports.push(report);
+            if done {
+                return Ok((all_records, all_reports));
             }
         }
     }

@@ -102,7 +102,7 @@ where
         me
     }
 
-    pub fn next_record_batch<F>(&mut self, record_callback: &mut F) -> Option<EmulationReport>
+    pub fn next_record_batch<F>(&mut self, record_callback: &mut F) -> EmulationReport
     where
         F: FnMut(EmulationRecord),
     {
@@ -114,7 +114,7 @@ where
         &mut self,
         emit_events: bool,
         record_cb: &mut F,
-    ) -> Result<(RiscvEmulationState, bool), EmulationError>
+    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError>
     where
         F: FnMut(EmulationRecord),
     {
@@ -129,7 +129,7 @@ where
     pub fn get_pv_stream_with_dryrun(&mut self) -> Vec<u8> {
         loop {
             let report = self.next_record_batch(&mut |_| {});
-            if report.is_some() {
+            if report.done {
                 break;
             }
         }

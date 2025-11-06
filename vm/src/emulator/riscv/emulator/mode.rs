@@ -23,6 +23,15 @@ pub enum RiscvEmulatorMode {
     Unconstrained(UnconstrainedState),
 }
 
+impl PartialEq for RiscvEmulatorMode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Unconstrained(_), Self::Unconstrained(_)) => false,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
 impl RiscvEmulatorMode {
     /// Identify if it's the unconstrained mode.
     pub fn is_unconstrained(&self) -> bool {
