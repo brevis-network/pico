@@ -67,7 +67,7 @@ where
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-    ) -> (MetaProof<SC>, EmulationReport)
+    ) -> (MetaProof<SC>, Vec<EmulationReport>)
     where
         C: for<'a> Air<
                 DebugConstraintFolder<
@@ -101,7 +101,8 @@ where
         // Start the emulator thread.
         let emulator_handle = thread::spawn(move || {
             let mut batch_num = 1;
-            let report = loop {
+            let mut all_reports = Vec::new();
+            loop {
                 let start_local = Instant::now();
 
                 let report = emulator.next_record_batch(&mut |record| {
@@ -109,6 +110,8 @@ where
                         "Failed to send an emulation record from emulator thread to prover thread",
                     )
                 });
+                let done = report.done;
+                all_reports.push(report);
 
                 debug!(
                     "--- Generate riscv records for batch-{} in {:?}",
@@ -116,15 +119,15 @@ where
                     start_local.elapsed(),
                 );
 
-                if let Some(report) = report {
-                    break report;
+                if done {
+                    break;
                 }
 
                 batch_num += 1;
-            };
+            }
 
             // Move and return the emulator for futher usage.
-            (emulator, report)
+            (emulator, all_reports)
 
             // `record_sender` will be dropped when the emulator thread completes.
         });
@@ -137,7 +140,7 @@ where
             &start_global,
         );
 
-        let (mut emulator, report) = emulator_handle.join().unwrap();
+        let (mut emulator, all_reports) = emulator_handle.join().unwrap();
 
         debug!("--- Finish riscv in {:?}", start_global.elapsed());
 
@@ -171,7 +174,7 @@ where
 
         (
             MetaProof::new(all_proofs.into(), vks.into(), Some(pv_stream)),
-            report,
+            all_reports,
         )
     }
 

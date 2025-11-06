@@ -8,7 +8,9 @@ use hashbrown::HashMap;
 /// counts when asked.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct EmulationReport {
-    pub total_cycles: u64,
+    pub current_cycle: u64,
+    pub start_chunk: u32,
+    pub done: bool,
     pub cycle_tracker: Option<HashMap<String, Vec<u64>>>,
     pub host_cycle_estimator: Option<Vec<CycleEstimator>>,
 }
