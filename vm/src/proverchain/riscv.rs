@@ -13,7 +13,7 @@ use crate::{
         emulator::MetaEmulator,
         opts::EmulatorOpts,
         riscv::{
-            emulator::{EmulationDeferredState, SharedDeferredState},
+            emulator::{EmulationDeferredState, EmulationError, SharedDeferredState},
             record::EmulationRecord,
             riscv_emulator::ParOptions,
             state::RiscvEmulationState,
@@ -234,7 +234,8 @@ where
                 record_tx
                     .send(TracegenMessage::Record(Arc::new(rec)))
                     .unwrap();
-            });
+            })
+            .unwrap();
 
         tx.send(TracegenMessage::CycleCount(total_cycles)).unwrap();
 
@@ -484,7 +485,7 @@ pub struct Bucket {
 pub fn emulate_snapshot_pipeline<SC, C, F>(
     witness: &ProvingWitness<SC, C, Vec<u8>>,
     handle_record: F,
-) -> (Vec<EmulationReport>, u64, Vec<u8>)
+) -> Result<(Vec<EmulationReport>, u64, Vec<u8>), EmulationError>
 where
     SC: 'static + StarkGenericConfig + Send + Sync,
     SC::Val: PrimeField32 + Poseidon2Init,
@@ -512,6 +513,7 @@ where
     let shared_ds: SharedDeferredState =
         Arc::new(Mutex::new(EmulationDeferredState::new(program.clone())));
 
+    let mut emu_result = Ok(());
     let mut total_cycles = 0u64;
     let mut pv_stream: Vec<u8> = Vec::new();
     let reports = Mutex::new(Vec::new());
@@ -584,7 +586,13 @@ where
                 let mut batch_idx = 0;
                 loop {
                     let t_batch_start = Instant::now();
-                    let (snapshot, report) = emu.next_state_batch(true, &mut |_| {}).unwrap();
+                    let (snapshot, report) = match emu.next_state_batch(true, &mut |_| {}) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            emu_result = Err(err);
+                            break;
+                        }
+                    };
                     let done = report.done;
                     let batch_dur = t_batch_start.elapsed();
 
@@ -660,5 +668,5 @@ where
         drop(snapshot_msg_tx);
     });
 
-    (reports.into_inner().expect("ok"), total_cycles, pv_stream)
+    emu_result.map(|_| (reports.into_inner().expect("ok"), total_cycles, pv_stream))
 }
