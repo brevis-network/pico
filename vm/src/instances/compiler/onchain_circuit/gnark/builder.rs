@@ -63,6 +63,7 @@ where
         DigestVariable = [Var<Bn254Fr>; MULTI_FIELD_CHALLENGER_DIGEST_SIZE],
     >,
     Com<SC>: Witnessable<CC, WitnessVariable = SC::DigestVariable> + Send + Sync,
+    Com<SC>: Into<[Bn254Fr; 1]>,
     PcsProof<SC>: Witnessable<CC, WitnessVariable = FriProofVariable<CC, SC>>,
     PcsProverData<SC>: Send + Sync,
     BaseProof<SC>: Witnessable<CC, WitnessVariable = BaseProofVariable<CC, SC>>,
@@ -80,9 +81,23 @@ where
         let constraints = {
             let mut builder = Builder::<CC>::default();
 
+            let template_vk = input.vk.clone();
+
+            let expected_commitment: [Bn254Fr; 1] = template_vk.commit.into();
+            let expected_commitment = expected_commitment.map(|x| builder.eval(x));
+
             let input_var = input.read(&mut builder);
 
-            Self::build_verifier(&mut builder, &input.machine, &input_var);
+            // for (exp, act) in expected_commitment
+            //     .iter()
+            //     .zip(input_var.vk.commitment.iter())
+            // {
+            //     builder.assert_felt_eq(*act, *exp);
+            // }
+
+            // builder.assert_felt_eq(input_var.vk.pc_start, builder.eval(template_vk.pc_start));
+
+            Self::build_verifier(&mut builder, &input.machine, &input_var, expected_commitment);
 
             let mut backend = ConstraintCompiler::<CC>::default();
             backend.emit(builder.into_operations())
@@ -115,9 +130,13 @@ where
         builder: &mut Builder<CC>,
         machine: &BaseMachine<SC, RecursionChipType<Val<SC>>>,
         input: &OnchainStdinVariable<CC, SC>,
+        expected_commitment: [Var<Bn254Fr>; 1],
     ) {
         let OnchainStdinVariable { vk, proof, .. } = input;
 
+        for (exp, act) in expected_commitment.iter().zip(vk.commit.iter()) {
+            builder.assert_var_eq(*act, *exp);
+        }
         /*
         Verify chunk proof
          */
