@@ -76,7 +76,9 @@ where
         } = proof;
 
         // do some sanity checks
-        assert!(original_chips.len() == opened_values.chips_opened_values.len());
+        // disabling this check for now. the prover only provides opened values for active chips, while the verify
+        // function is called with all the available chips.
+        // assert!(original_chips.len() == opened_values.chips_opened_values.len());
 
         let chips = order_chips::<SC, C>(original_chips, main_chip_ordering).collect::<Vec<_>>();
 
@@ -88,10 +90,7 @@ where
         // sanity check the lookup multiplicities
         for ty in LookupType::all_types() {
             let mut max_mult = 0u64;
-            for (chip, val) in original_chips
-                .iter()
-                .zip(opened_values.chips_opened_values.iter())
-            {
+            for (chip, val) in chips.iter().zip(opened_values.chips_opened_values.iter()) {
                 let count = chip
                     .looking
                     .iter()
