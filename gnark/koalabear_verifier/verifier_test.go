@@ -88,4 +88,7 @@ func doSetUp(assert *test.Assert, circuit *Circuit, assigment *Circuit) {
 
 	err = utils.WriteVerifyingKey("vm_vk", vk)
 	assert.NoError(err)
+
+	err = utils.WriteCcs("vm_ccs", ccs)
+    assert.NoError(err)
 }
