@@ -13,7 +13,8 @@ use crate::{
     },
     configs::config::Val,
     emulator::recursion::public_values::{
-        assert_recursion_public_values_valid, recursion_public_values_digest, RecursionPublicValues,
+        assert_complete, assert_recursion_public_values_valid, recursion_public_values_digest,
+        RecursionPublicValues,
     },
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
@@ -198,16 +199,12 @@ where
             // Flag must be complete.
             builder.assert_felt_eq(deferred_public_values.flag_complete, one);
 
-            // Assert that `next_pc` is equal to zero (so program execution has completed)
-            builder.assert_felt_eq(deferred_public_values.next_pc, zero);
+            assert_complete(builder, deferred_public_values, one);
 
-            // Assert that start chunk is equal to 1.
-            builder.assert_felt_eq(deferred_public_values.start_chunk, one);
-
-            // Should contain execution chunk
-            builder.assert_felt_eq(deferred_public_values.contains_execution_chunk, one);
-            // Start execution chunk is one
-            builder.assert_felt_eq(deferred_public_values.start_execution_chunk, one);
+            // Nested deferred proofs are not allowed.
+            for deferred_digest_word in deferred_public_values.deferred_proofs_digest.iter() {
+                builder.assert_felt_eq(*deferred_digest_word, zero);
+            }
         }
 
         // Recursion_VK Merkle Verification

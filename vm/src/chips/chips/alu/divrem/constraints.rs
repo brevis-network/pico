@@ -321,7 +321,6 @@ where
                 for i in 0..WORD_SIZE {
                     builder
                         .when(local_is_c_0.result)
-                        .when(local_is_divu + local_is_div)
                         .assert_eq(local_quotient[i], CB::F::from_canonical_u8(u8::MAX));
                 }
             }

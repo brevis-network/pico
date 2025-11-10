@@ -387,7 +387,7 @@ where
     ///
     /// Ensures that `addr` has already been assigned a `mult`.
     pub fn read_ghost_addr(&mut self, addr: Address<FC::F>) -> &mut FC::F {
-        self.read_addr_internal(addr, true)
+        self.read_addr_internal(addr, false)
     }
 
     fn read_addr_internal(&mut self, addr: Address<FC::F>, increment_mult: bool) -> &mut FC::F {

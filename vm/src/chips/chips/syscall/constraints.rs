@@ -21,6 +21,9 @@ where
         let local = main.row_slice(0);
         let local: &SyscallCols<CB::Var> = (*local).borrow();
 
+        // ensure is_real is boolean
+        builder.assert_bool(local.is_real);
+
         // dummy constraints to normalize degree
         builder.assert_eq(
             local.is_real * local.is_real * local.is_real,

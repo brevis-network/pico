@@ -54,13 +54,26 @@ where
         self.eval_registers::<CB>(builder, local, is_branch_instruction.clone());
 
         // Memory instructions.
-        builder.looking_instruction(
-            local.instruction.opcode,
-            local.op_a_val(),
-            local.op_b_val(),
-            local.op_c_val(),
+        let values = once(local.instruction.opcode)
+            .chain(local.op_a_val())
+            .chain(local.op_b_val())
+            .chain(local.op_c_val())
+            .chain(once(local.instruction.op_a_0))
+            .chain(once(local.opcode_selector.is_lb))
+            .chain(once(local.opcode_selector.is_lbu))
+            .chain(once(local.opcode_selector.is_lh))
+            .chain(once(local.opcode_selector.is_lhu))
+            .chain(once(local.opcode_selector.is_lw))
+            .chain(once(local.opcode_selector.is_sb))
+            .chain(once(local.opcode_selector.is_sh))
+            .chain(once(local.opcode_selector.is_sw))
+            .map(Into::into);
+        builder.looking(SymbolicLookup::new(
+            values.collect(),
             is_memory_instruction,
-        );
+            LookupType::Memory,
+            LookupScope::Regional,
+        ));
 
         // ALU instructions.
         builder.looking_alu(

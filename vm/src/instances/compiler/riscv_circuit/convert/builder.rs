@@ -132,7 +132,8 @@ where
         Initializations
         */
         // chunk numbers
-        let mut current_chunk = public_values.chunk;
+        let current_chunk = public_values.chunk;
+        let next_chunk;
         let mut current_execution_chunk = public_values.execution_chunk;
 
         // flags
@@ -204,7 +205,7 @@ where
             CC::range_check_felt(builder, public_values.chunk, MAX_LOG_NUMBER_OF_CHUNKS);
 
             // current chunk is incremented by 1
-            current_chunk = builder.eval(current_chunk + CC::F::ONE);
+            next_chunk = builder.eval(current_chunk + CC::F::ONE);
 
             // If the chunk has a "CPU" chip, then the execution chunk should be incremented by 1.
             if flag_cpu {
@@ -298,7 +299,7 @@ where
             recursion_public_values.start_pc = public_values.start_pc;
             recursion_public_values.next_pc = public_values.next_pc;
             recursion_public_values.start_chunk = public_values.chunk;
-            recursion_public_values.next_chunk = current_chunk;
+            recursion_public_values.next_chunk = next_chunk;
             recursion_public_values.start_execution_chunk = public_values.execution_chunk;
             recursion_public_values.next_execution_chunk = current_execution_chunk;
             recursion_public_values.contains_execution_chunk =

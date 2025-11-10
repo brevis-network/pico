@@ -9,8 +9,11 @@ use crate::{
         gadgets::field_range_check::word_range::FieldWordRangeChecker,
     },
     compiler::{riscv::opcode::Opcode, word::Word},
-    machine::builder::{
-        ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+    machine::{
+        builder::{
+            ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+        },
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
 use core::borrow::Borrow;
@@ -38,13 +41,29 @@ where
             let is_memory_instruction: CB::Expr =
                 self.is_memory_instruction::<CB>(&local_memory_chip_value_cols.instruction);
 
-            builder.looked_instruction(
-                local_memory_chip_value_cols.instruction.opcode,
-                local_memory_chip_value_cols.op_a_val(),
-                local_memory_chip_value_cols.op_b_val(),
-                local_memory_chip_value_cols.op_c_val(),
+            // build a custom memory lookup to fully constrain the used columns
+            use core::iter::once;
+            let values = once(local_memory_chip_value_cols.instruction.opcode) // opcode
+                .chain(local_memory_chip_value_cols.instruction.op_a_val()) // instr.op_a
+                .chain(local_memory_chip_value_cols.instruction.op_b_val()) // instr.op_b
+                .chain(local_memory_chip_value_cols.instruction.op_c_val()) // instr.op_c
+                .chain(once(local_memory_chip_value_cols.instruction.op_a_0)) // instr.op_a_0
+                .chain(once(local_memory_chip_value_cols.instruction.is_lb)) // selectors.is_lb
+                .chain(once(local_memory_chip_value_cols.instruction.is_lbu)) // selectors.is_lbu
+                .chain(once(local_memory_chip_value_cols.instruction.is_lh)) // selectors.is_lh
+                .chain(once(local_memory_chip_value_cols.instruction.is_lhu)) // selectors.is_lhu
+                .chain(once(local_memory_chip_value_cols.instruction.is_lw)) // selectors.is_lw
+                .chain(once(local_memory_chip_value_cols.instruction.is_sb)) // selectors.is_sb
+                .chain(once(local_memory_chip_value_cols.instruction.is_sh)) // selectors.is_sh
+                .chain(once(local_memory_chip_value_cols.instruction.is_sw)) // selectors.is_sw
+                .map(Into::into);
+
+            builder.looked(SymbolicLookup::new(
+                values.collect(),
                 is_memory_instruction.clone(),
-            );
+                LookupType::Memory,
+                LookupScope::Regional,
+            ));
 
             self.eval_memory_address_and_access::<CB>(
                 builder,
@@ -189,6 +208,9 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // If it's a signed operation (such as LB or LH), then we need verify the bit decomposition
         // of the most significant byte to get it's sign.
         self.eval_most_sig_byte_bit_decomp(builder, local, &local.unsigned_mem_val);
+
+        // sanity check op_a_0
+        builder.assert_bool(local.instruction.op_a_0);
 
         // Assert that correct value of `mem_value_is_neg_not_x0`.
         builder.assert_eq(

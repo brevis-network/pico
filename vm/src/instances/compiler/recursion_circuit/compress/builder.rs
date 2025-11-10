@@ -15,7 +15,8 @@ use crate::{
     },
     configs::config::{Challenge, Com, FieldGenericConfig, PcsProof, StarkGenericConfig, Val},
     emulator::recursion::public_values::{
-        assert_recursion_public_values_valid, recursion_public_values_digest, RecursionPublicValues,
+        assert_complete, assert_recursion_public_values_valid, recursion_public_values_digest,
+        RecursionPublicValues,
     },
     instances::chiptype::recursion_chiptype::RecursionChipType,
     machine::{chip::ChipBehavior, field::FieldSpecificPoseidon2Config, machine::BaseMachine},
@@ -138,6 +139,8 @@ where
         compress_public_values.digest =
             recursion_public_values_digest::<CC, SC>(builder, compress_public_values);
 
+        // Completeness Verification
+        assert_complete(builder, compress_public_values, flag_complete);
         /*
         Commit public values
          */

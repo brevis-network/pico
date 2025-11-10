@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use hybrid_array::Array;
-use num::{BigUint, Num, One};
+use num::{BigUint, Num, One, Zero};
 use serde::{Deserialize, Serialize};
 use typenum::{U32, U62};
 
@@ -138,13 +138,19 @@ pub fn decompress(compressed_point: &CompressedEdwardsY) -> Option<AffinePoint<E
 
     let mut x = ed25519_sqrt(&u_div_v)?;
 
-    // sqrt always returns the nonnegative square root,
-    // so we negate according to the supplied sign bit.
-    if sign {
-        x = modulus - &x;
-    }
+    // check some weird cases
+    if x.is_zero() && sign {
+        // this is requesting x = mod - 0 = mod, which is not good
+        None
+    } else {
+        // sqrt always returns the nonnegative square root,
+        // so we negate according to the supplied sign bit.
+        if sign {
+            x = modulus - &x;
+        }
 
-    Some(AffinePoint::new(x, y.clone()))
+        Some(AffinePoint::new(x, y.clone()))
+    }
 }
 
 #[cfg(test)]
