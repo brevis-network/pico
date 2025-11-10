@@ -133,6 +133,10 @@ impl<F: Field> FieldWordRangeChecker<F> {
                 // Therefore, we use the IsZeroGadget to guarantee that sum(bytes) != 127 + 255 * 3.
                 let mut byte_sum = value[0] + value[1] + value[2] + value[3];
                 byte_sum -= AB::F::from_canonical_u32(127u32 + 255 * 3).into();
+                // TODO: uncommenting the below line causes all sorts of failures with the m31 prover
+                // however, the m31 prover is already experiencing lookup and constraint evaluation issues
+                // so I am leaving this uncommented because commenting it introduces an underconstrained variable
+                // cols.upper_all_one.
                 IsZeroGadget::<F>::eval(builder, byte_sum, cols.upper_all_one, is_real.clone());
                 builder.when(is_real).assert_zero(cols.upper_all_one.result)
             }
