@@ -463,7 +463,7 @@ impl CycleEstimator {
         .sum::<f64>();
 
         // divide by 1000 to avoid overflow
-        ((result + model.global_intercept) / 1_000_000.0) as usize
+        ((result + model.global_intercept) / 1000.0) as usize
     }
 }
 
