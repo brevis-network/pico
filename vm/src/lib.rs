@@ -1,5 +1,7 @@
 // lock deny(warnings) behind strict feature
 #![cfg_attr(feature = "strict", deny(warnings))]
+// allow deprecated dependencies when installs from the git URL
+#![allow(deprecated)]
 #![allow(clippy::module_inception)]
 #![allow(clippy::needless_range_loop)]
 #![allow(incomplete_features)]
