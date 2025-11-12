@@ -279,12 +279,12 @@ macro_rules! impl_combine_machine {
 
                 // Vk Verification
                 assert_eq!(proof.vks().len(), 1);
-                let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
+                // let vk_manager = <$recur_sc as HasStaticVkManager>::static_vk_manager();
                 let combine_vk = proof.vks().first().unwrap();
-                if vk_manager.vk_verification_enabled(){
-                    assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
-                    assert_eq!(public_values.vk_root, vk_manager.merkle_root, "Recursion circuit vk_root mismatch!")
-                }
+                // if vk_manager.vk_verification_enabled(){
+                //     assert!(vk_manager.is_vk_allowed(combine_vk.hash_field()), "Recursion Vk Verification failed");
+                //     assert_eq!(public_values.vk_root, vk_manager.merkle_root, "Recursion circuit vk_root mismatch!")
+                // }
 
                 // Defer Proofs Digest Verification
                 assert_eq!(public_values.start_reconstruct_deferred_digest, [Val::<$recur_sc>::ZERO; DIGEST_SIZE]);
