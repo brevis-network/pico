@@ -112,10 +112,14 @@ impl KoalaBearPoseidon2 {
         let perm = Self::init();
         let num_queries = match std::env::var("FRI_QUERIES") {
             Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 28,
+            // fix from log_blowup=3 and num_queries=28 to log_blowup=4 and num_queries=21 to
+            // reduce the compress proof size
+            // Err(_) => 28,
+            Err(_) => 21,
         };
 
-        let log_blowup = 3;
+        // let log_blowup = 3;
+        let log_blowup = 4;
         let simple_fri_config = SimpleFriConfig {
             log_blowup,
             num_queries,
