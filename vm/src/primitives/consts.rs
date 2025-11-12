@@ -222,13 +222,13 @@ pub const BN254_S_BOX_DEGREE: u64 = 5;
 /*
 Chip Data Parallelism
  */
-pub const ADD_SUB_DATAPAR: usize = 8;
-pub const MUL_DATAPAR: usize = 2;
-pub const DIVREM_DATAPAR: usize = 2;
-pub const LT_DATAPAR: usize = 2;
-pub const SLL_DATAPAR: usize = 4;
-pub const SR_DATAPAR: usize = 2;
-pub const BITWISE_DATAPAR: usize = 2;
+pub const ADD_SUB_DATAPAR: usize = 1;
+pub const MUL_DATAPAR: usize = 1;
+pub const DIVREM_DATAPAR: usize = 1;
+pub const LT_DATAPAR: usize = 1;
+pub const SLL_DATAPAR: usize = 1;
+pub const SR_DATAPAR: usize = 1;
+pub const BITWISE_DATAPAR: usize = 1;
 pub const MEMORY_RW_DATAPAR: usize = 1;
 pub const LOCAL_MEMORY_DATAPAR: usize = 4;
 pub const RISCV_POSEIDON2_DATAPAR: usize = 4;

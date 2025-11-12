@@ -21,7 +21,7 @@ hex.workspace = true
 pico-sdk.workspace = true
 log.workspace = true
 env_logger.workspace = true
-pico-vm.workspace = true
+pico-vm = { workspace = true, default-features = false, features = ["rayon", "nightly-features"] }
 yansi = "1.0.1"
 cargo_metadata = "0.18.1"
 serde_json.workspace = true

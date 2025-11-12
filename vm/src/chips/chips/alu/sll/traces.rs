@@ -13,7 +13,10 @@ use crate::{
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
-    machine::chip::ChipBehavior,
+    machine::{
+        chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
+    },
     primitives::consts::{BYTE_SIZE, SLL_DATAPAR, WORD_SIZE},
 };
 use p3_air::BaseAir;
@@ -159,5 +162,11 @@ impl<F: Field> SLLChip<F> {
                 F::from_canonical_u8(a[i])
             );
         }
+    }
+}
+
+impl<F> EventCapture for SLLChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_shift_left_events += record.shift_left_events.len();
     }
 }
