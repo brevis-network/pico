@@ -6,6 +6,7 @@ require (
 	github.com/celer-network/goutils v0.2.0
 	github.com/consensys/gnark v0.10.0
 	github.com/consensys/gnark-crypto v0.12.2-0.20240215234832-d72fcb379d3e
+	github.com/ethereum/go-ethereum v1.11.5
 	github.com/labstack/echo v3.3.10+incompatible
 	github.com/labstack/gommon v0.4.2
 	github.com/rs/zerolog v1.30.0
