@@ -13,7 +13,7 @@ use crate::{
         ir::{Builder, Ext, Felt, Var, Witness},
     },
     configs::config::{Com, FieldGenericConfig, PcsProof, PcsProverData, StarkGenericConfig, Val},
-    emulator::recursion::public_values::{assert_embed_public_values_valid, RecursionPublicValues},
+    emulator::recursion::public_values::{assert_complete, assert_embed_public_values_valid, RecursionPublicValues},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::onchain_circuit::stdin::{OnchainStdin, OnchainStdinVariable},
@@ -31,7 +31,7 @@ use p3_air::Air;
 use p3_bn254_fr::{Bn254Fr, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{extension::BinomiallyExtendable, PrimeField32, TwoAdicField};
+use p3_field::{extension::BinomiallyExtendable, FieldAlgebra, PrimeField32, TwoAdicField};
 use std::{borrow::Borrow, fmt::Debug, marker::PhantomData};
 
 #[derive(Debug, Clone, Copy)]
@@ -80,13 +80,12 @@ where
         tracing::info!("building gnark constraints");
         let constraints = {
             let mut builder = Builder::<CC>::default();
+            let input_var = input.read(&mut builder);
 
             let template_vk = input.vk.clone();
-
             let expected_commitment: [Bn254Fr; 1] = template_vk.commit.into();
             let expected_commitment = expected_commitment.map(|x| builder.eval(x));
 
-            let input_var = input.read(&mut builder);
 
             // for (exp, act) in expected_commitment
             //     .iter()
@@ -97,7 +96,7 @@ where
 
             // builder.assert_felt_eq(input_var.vk.pc_start, builder.eval(template_vk.pc_start));
 
-            Self::build_verifier(&mut builder, &input.machine, &input_var, expected_commitment);
+            Self::build_verifier(&mut builder, &input.machine, &input_var, expected_commitment,template_vk.pc_start);
 
             let mut backend = ConstraintCompiler::<CC>::default();
             backend.emit(builder.into_operations())
@@ -131,12 +130,15 @@ where
         machine: &BaseMachine<SC, RecursionChipType<Val<SC>>>,
         input: &OnchainStdinVariable<CC, SC>,
         expected_commitment: [Var<Bn254Fr>; 1],
+        expected_pc_start: SC::Val,
     ) {
-        let OnchainStdinVariable { vk, proof, .. } = input;
+        let OnchainStdinVariable { vk, proof, flag_complete } = input;
 
         for (exp, act) in expected_commitment.iter().zip(vk.commit.iter()) {
             builder.assert_var_eq(*act, *exp);
         }
+        builder.assert_felt_eq(vk.pc_start, expected_pc_start);
+
         /*
         Verify chunk proof
          */
@@ -161,6 +163,9 @@ where
         let embed_public_values = proof.public_values.as_slice().borrow();
 
         assert_embed_public_values_valid::<CC, SC>(builder, embed_public_values);
+        assert_complete(builder, embed_public_values, *flag_complete);
+        builder.assert_felt_eq(*flag_complete, CC::F::ONE);
+
 
         // Reflect the public values to the next level.
         SC::commit_recursion_public_values(builder, *embed_public_values);
