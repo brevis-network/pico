@@ -7,6 +7,8 @@ use pico_vm::machine::logger::setup_logger;
 
 pub use p3_field::FieldAlgebra;
 pub use pico_vm::{
+    configs::stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
+    emulator::stdin::EmulatorStdinBuilder,
     machine::keys::HashableKey,
     primitives::{consts::DIGEST_SIZE, hash_deferred_proof},
 };
