@@ -27,7 +27,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
 use std::{array, cmp::Reverse, time::Instant};
-use tracing::{debug, debug_span, instrument, Span};
+use tracing::{debug, debug_span, info, instrument, Span};
 
 pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
@@ -400,6 +400,18 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
                 chunk_index,
             );
 
+        // ------- soundness calculator -------
+        // Total number of columns across all traces
+        let num_pre_cols: usize = pk
+            .preprocessed_trace
+            .iter()
+            .map(|m| m.width())
+            .sum();
+        let num_main_cols: usize = traces.iter().map(|m| m.width()).sum();
+        let num_perm_cols: usize = permutation_traces.iter().map(|m| m.width()).sum();
+
+        let num_columns: usize = num_pre_cols + num_main_cols + num_perm_cols;
+
         // commit permutation traces on main domain
         let perm_domain = permutation_traces
             .into_iter()
@@ -436,6 +448,28 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             .iter()
             .map(|log_degree| 1 << log_degree)
             .collect::<Vec<_>>();
+
+        // ------- soundness calculator -------
+        // AIR_max_degree among all chips
+        let max_q_deg = quotient_degrees.iter().copied().max().unwrap();
+        let air_max_degree_upper_bound = max_q_deg + 1;
+
+        // count quotient polys and total FRI polys
+        let num_quotient_polys: usize = quotient_degrees.iter().copied().sum();
+        let num_polys: usize = num_columns + num_quotient_polys;
+
+        info!(
+            "soundness_stats: chunk {:<2} | num_pre_cols={} num_main_cols={} num_perm_cols={} \
+             num_columns={} num_quotient_polys={} num_polys={} AIR_max_degree_upper_bound={}",
+            chunk_index,
+            num_pre_cols,
+            num_main_cols,
+            num_perm_cols,
+            num_columns,
+            num_quotient_polys,
+            num_polys,
+            air_max_degree_upper_bound
+        );
 
         // Compute quotient values
         let quotient_domains = main_domains
