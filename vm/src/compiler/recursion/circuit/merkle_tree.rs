@@ -7,6 +7,7 @@ use crate::{
     compiler::recursion::ir::Builder,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice},
 };
+#[cfg(feature = "rayon")]
 use itertools::Itertools;
 use p3_field::Field;
 use p3_util::{log2_strict_usize, reverse_bits_len, reverse_slice_index_bits};
