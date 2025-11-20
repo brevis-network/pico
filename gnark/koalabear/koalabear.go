@@ -374,8 +374,8 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 		p.api.ToBinary(quotient, int(maxNbBits-30))
 	}
 
-	// Check that the remainder has size less than the KoalaBear modulus, by decomposing it into a 27
-	// bit limb and a 4 bit limb.
+	// Check that the remainder has size less than the KoalaBear modulus, by decomposing it into a 24
+	// bit limb and a 7 bit limb.
 	new_result, new_err := p.api.Compiler().NewHint(SplitLimbsHint, 2, remainder)
 	if new_err != nil {
 		panic(new_err)
