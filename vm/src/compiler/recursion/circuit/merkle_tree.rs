@@ -7,6 +7,7 @@ use crate::{
     compiler::recursion::ir::Builder,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice},
 };
+use itertools::Itertools;
 use p3_field::Field;
 use p3_util::{log2_strict_usize, reverse_bits_len, reverse_slice_index_bits};
 use serde::{Deserialize, Serialize};
@@ -147,7 +148,7 @@ pub fn merkle_verify<CC: CircuitConfig, HV: FieldHasherVariable<CC>>(
     commitment: HV::DigestVariable,
 ) {
     let mut value = value;
-    for (sibling, bit) in proof.path.iter().zip(proof.index.iter().rev()) {
+    for (sibling, bit) in proof.path.iter().zip_eq(proof.index.iter().rev()) {
         let sibling = *sibling;
 
         // If the index is odd, swap the order of [value, sibling].

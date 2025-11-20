@@ -31,6 +31,7 @@ use crate::{
         ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS,
     },
 };
+use itertools::Itertools;
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
@@ -271,7 +272,7 @@ where
         let chips = machine
             .chunk_ordered_chips(&proofs[0].main_chip_ordering)
             .collect::<Vec<_>>();
-        for (chip, values) in chips.iter().zip(proofs[0].opened_values.iter()) {
+        for (chip, values) in chips.iter().zip_eq(proofs[0].opened_values.iter()) {
             if chip.lookup_scope() == LookupScope::Global {
                 global_cumulative_sums.push(values.global_cumulative_sum);
             }

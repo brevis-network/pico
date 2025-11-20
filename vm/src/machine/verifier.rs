@@ -90,7 +90,10 @@ where
         // sanity check the lookup multiplicities
         for ty in LookupType::all_types() {
             let mut max_mult = 0u64;
-            for (chip, val) in chips.iter().zip(opened_values.chips_opened_values.iter()) {
+            for (chip, val) in chips
+                .iter()
+                .zip_eq(opened_values.chips_opened_values.iter())
+            {
                 let count = chip
                     .looking
                     .iter()
