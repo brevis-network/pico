@@ -17,7 +17,10 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     instances::compiler::shapes::riscv_shape::RiscvPadShape,
     iter::{IntoPicoRefMutIterator, PicoBridge, PicoIterator, PicoSlice},
-    machine::chip::ChipBehavior,
+    machine::{
+        chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
+    },
 };
 use hashbrown::HashMap;
 use p3_air::BaseAir;
@@ -103,6 +106,77 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
 
     fn is_active(&self, record: &Self::Record) -> bool {
         !record.cpu_events.is_empty()
+    }
+}
+
+impl<F> EventCapture for CpuChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_cpu_events += record.cpu_events.len();
+        if event_counter.num_cpu_events == 0 {
+            return;
+        }
+
+        let chunk_size = std::cmp::max(event_counter.num_cpu_events / num_cpus::get(), 1);
+        let cpu_counts: Vec<(usize, usize)> = record
+            .cpu_events
+            .as_slice()
+            .pico_chunks(chunk_size)
+            .flat_map_iter(|chunk| chunk.iter().map(|e| Self::count_cpu_event(e)))
+            .collect();
+        let (cpu_add, cpu_lt) = cpu_counts
+            .as_slice()
+            .pico_chunks(chunk_size)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .fold((0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1))
+            })
+            .pico_reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
+        event_counter.num_add_events += cpu_add;
+        event_counter.num_lt_events += cpu_lt;
+    }
+}
+
+impl<F> CpuChip<F> {
+    fn count_cpu_event(event: &CpuEvent) -> (usize, usize) {
+        let mut add_events = 0;
+        let mut lt_events = 0;
+
+        if event.instruction.is_branch_instruction() {
+            lt_events += 2;
+
+            let a_eq_b = event.a == event.b;
+            let use_signed_comparison =
+                matches!(event.instruction.opcode, Opcode::BLT | Opcode::BGE);
+            let a_lt_b = if use_signed_comparison {
+                (event.a as i32) < (event.b as i32)
+            } else {
+                event.a < event.b
+            };
+            let a_gt_b = if use_signed_comparison {
+                (event.a as i32) > (event.b as i32)
+            } else {
+                event.a > event.b
+            };
+            let branching = match event.instruction.opcode {
+                Opcode::BEQ => a_eq_b,
+                Opcode::BNE => !a_eq_b,
+                Opcode::BLT | Opcode::BLTU => a_lt_b,
+                Opcode::BGE | Opcode::BGEU => a_eq_b || a_gt_b,
+                _ => unreachable!(),
+            };
+            if branching {
+                add_events += 1;
+            }
+        }
+        if event.instruction.is_jump_instruction() {
+            add_events += 1;
+        }
+        if matches!(event.instruction.opcode, Opcode::AUIPC) {
+            add_events += 1;
+        }
+
+        (add_events, lt_events)
     }
 }
 

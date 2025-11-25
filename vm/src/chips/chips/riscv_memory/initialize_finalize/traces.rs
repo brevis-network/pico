@@ -12,6 +12,7 @@ use crate::{
     iter::{IntoPicoIterator, PicoIterator},
     machine::{
         chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
         lookup::{LookupScope, LookupType},
         utils::pad_to_power_of_two,
     },
@@ -156,5 +157,14 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
 
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Regional
+    }
+}
+
+impl<F> EventCapture for MemoryInitializeFinalizeChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_memory_initialize_events += record.memory_initialize_events.len();
+        event_counter.num_memory_finalize_events += record.memory_finalize_events.len();
+        event_counter.num_global_lookup_events += record.memory_initialize_events.len();
+        event_counter.num_global_lookup_events += record.memory_finalize_events.len();
     }
 }

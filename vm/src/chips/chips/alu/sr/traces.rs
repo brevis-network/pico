@@ -19,7 +19,10 @@ use crate::{
     },
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
-    machine::chip::ChipBehavior,
+    machine::{
+        chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
+    },
     primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, SR_DATAPAR, WORD_SIZE},
 };
 use p3_air::BaseAir;
@@ -208,5 +211,11 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             blu.add_u8_range_checks(shr_carry_output_carry);
             blu.add_u8_range_checks(shr_carry_output_shifted_byte);
         }
+    }
+}
+
+impl<F> EventCapture for ShiftRightChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_shift_right_events += record.shift_right_events.len();
     }
 }

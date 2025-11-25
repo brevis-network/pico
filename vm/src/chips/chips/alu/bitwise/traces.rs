@@ -19,7 +19,10 @@ use crate::{
     },
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
-    machine::chip::ChipBehavior,
+    machine::{
+        chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
+    },
     primitives::consts::BITWISE_DATAPAR,
 };
 use core::borrow::BorrowMut;
@@ -117,5 +120,11 @@ impl<F: Field> BitwiseChip<F> {
             };
             blu.add_byte_lookup_event(byte_event);
         }
+    }
+}
+
+impl<F> EventCapture for BitwiseChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_bitwise_events += record.bitwise_events.len();
     }
 }

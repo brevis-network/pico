@@ -19,10 +19,10 @@ use itertools::Itertools;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use p3_util::log2_ceil_usize;
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
+use std::{fmt, marker::PhantomData};
 use tracing::{debug, warn};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RiscvRecursionShape {
     pub proof_shapes: Vec<ProofShape>,
     pub is_complete: bool,
@@ -38,7 +38,7 @@ impl From<ProofShape> for RiscvRecursionShape {
 }
 
 /// The shape of the compress proof with vk validation proofs.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RecursionVkShape {
     pub recursion_shape: RecursionShape,
     pub merkle_tree_height: usize,
@@ -53,7 +53,7 @@ impl RecursionVkShape {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct RecursionShape {
     pub proof_shapes: Vec<ProofShape>,
 }
@@ -69,6 +69,13 @@ pub struct RecursionShapeConfig<F, A> {
     _marker: PhantomData<(F, A)>,
 }
 
+impl<F, A> fmt::Debug for RecursionShapeConfig<F, A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RecursionShapeConfig")
+            .field("allowed_shapes", &self.allowed_shapes)
+            .finish()
+    }
+}
 impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPoseidon2Config>
     Default for RecursionShapeConfig<F, RecursionChipType<F>>
 where
@@ -109,6 +116,54 @@ where
                 (mem_var.clone(), 17),
                 (base_alu.clone(), 17),
                 (ext_alu.clone(), 16),
+                (poseidon2.clone(), 16),
+                (batch_fri.clone(), 18),
+                (select.clone(), 18),
+                (exp_reverse_bits_len.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // combine shape
+            [
+                (mem_const.clone(), 18),
+                (mem_var.clone(), 18),
+                (base_alu.clone(), 17),
+                (ext_alu.clone(), 16),
+                (poseidon2.clone(), 16),
+                (batch_fri.clone(), 18),
+                (select.clone(), 18),
+                (exp_reverse_bits_len.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // combine shape
+            [
+                (mem_const.clone(), 18),
+                (mem_var.clone(), 17),
+                (base_alu.clone(), 17),
+                (ext_alu.clone(), 16),
+                (poseidon2.clone(), 17),
+                (batch_fri.clone(), 18),
+                (select.clone(), 18),
+                (exp_reverse_bits_len.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // combine shape
+            [
+                (mem_const.clone(), 18),
+                (mem_var.clone(), 18),
+                (base_alu.clone(), 17),
+                (ext_alu.clone(), 16),
+                (poseidon2.clone(), 17),
+                (batch_fri.clone(), 18),
+                (select.clone(), 18),
+                (exp_reverse_bits_len.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // combine shape
+            [
+                (mem_const.clone(), 18),
+                (mem_var.clone(), 17),
+                (base_alu.clone(), 17),
+                (ext_alu.clone(), 16),
                 (poseidon2.clone(), 17),
                 (batch_fri.clone(), 18),
                 (select.clone(), 18),
@@ -125,6 +180,66 @@ where
                 (batch_fri.clone(), 18),
                 (select.clone(), 18),
                 (exp_reverse_bits_len.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // convert shape max
+            [
+                (ext_alu.clone(), 16),
+                (base_alu.clone(), 16),
+                (mem_var.clone(), 18),
+                (poseidon2.clone(), 17),
+                (mem_const.clone(), 18),
+                (batch_fri.clone(), 20),
+                (exp_reverse_bits_len.clone(), 17),
+                (select.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // convert shape mode
+            [
+                (ext_alu.clone(), 15),
+                (base_alu.clone(), 16),
+                (mem_var.clone(), 17),
+                (poseidon2.clone(), 16),
+                (mem_const.clone(), 17),
+                (batch_fri.clone(), 18),
+                (exp_reverse_bits_len.clone(), 17),
+                (select.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // convert shape second mode
+            [
+                (ext_alu.clone(), 15),
+                (base_alu.clone(), 16),
+                (mem_var.clone(), 17),
+                (poseidon2.clone(), 16),
+                (mem_const.clone(), 17),
+                (batch_fri.clone(), 18),
+                (exp_reverse_bits_len.clone(), 16),
+                (select.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // convert shape third mode
+            [
+                (ext_alu.clone(), 15),
+                (base_alu.clone(), 16),
+                (mem_var.clone(), 17),
+                (poseidon2.clone(), 16),
+                (mem_const.clone(), 18),
+                (batch_fri.clone(), 18),
+                (exp_reverse_bits_len.clone(), 17),
+                (select.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // convert shape fourth mode
+            [
+                (ext_alu.clone(), 15),
+                (base_alu.clone(), 16),
+                (mem_var.clone(), 17),
+                (poseidon2.clone(), 16),
+                (mem_const.clone(), 18),
+                (batch_fri.clone(), 18),
+                (exp_reverse_bits_len.clone(), 16),
+                (select.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // convert shape
