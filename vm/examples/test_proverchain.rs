@@ -36,6 +36,24 @@ fn main() {
     info!("Proving RISCV..");
     let proof = riscv.prove(riscv_stdin.clone());
     assert!(riscv.verify(&proof, riscv_vk));
+
+    let kb_meta_bytes =
+        bincode::serialize(&proof).expect("serialize KB RISCV MetaProof");
+    info!(
+        "KB RISCV MetaProof total size = {} bytes (~{:.2} KiB)",
+        kb_meta_bytes.len(),
+        kb_meta_bytes.len() as f64 / 1024.0
+    );
+    for (i, base_proof) in proof.proofs.iter().enumerate() {
+        let bytes = bincode::serialize(base_proof)
+            .expect("serialize KB RISCV BaseProof");
+        info!(
+            "KB RISCV BaseProof[{}] size = {} bytes (~{:.2} KiB)",
+            i,
+            bytes.len(),
+            bytes.len() as f64 / 1024.0,
+        );
+    }
     info!("Proving RECURSION..");
     let proof = convert.prove(proof);
     assert!(convert.verify(&proof, riscv_vk));
