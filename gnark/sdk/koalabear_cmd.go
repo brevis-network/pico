@@ -138,7 +138,6 @@ func KoalaBearSetup() error {
 		return fmt.Errorf("fail to write vk: %v", err)
 	}
 	return nil
-	return nil
 }
 
 func KoalaBearProve() error {
