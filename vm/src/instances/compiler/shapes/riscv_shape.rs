@@ -1209,7 +1209,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
 
     pub fn test_only() -> Self {
         // Preprocessed chip heights.
-        let program_heights = vec![Some(18), Some(19), Some(20)];
+        let program_heights = vec![Some(16)];
 
         let allowed_preprocessed_log_heights = HashMap::from([
             (
@@ -1224,94 +1224,19 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
 
         let mut riscv_shapes = [
             RiscvShapeSpec {
-                cpu_height: vec![Some(21)],
-                add_sub_height: vec![Some(21)],
-                lt_height: vec![Some(21)],
-                bitwise_height: vec![Some(19)],
-                shift_right_height: vec![Some(17)],
-                shift_left_height: vec![Some(18)],
+                cpu_height: vec![Some(16)],
+                add_sub_height: vec![Some(16)],
+                lt_height: vec![Some(16)],
+                bitwise_height: vec![Some(16)],
+                shift_right_height: vec![Some(16)],
+                shift_left_height: vec![Some(16)],
                 syscall_riscv_height: vec![Some(16)],
-                memory_local_height: vec![Some(17)],
+                memory_local_height: vec![Some(16)],
                 mul_height: vec![Some(16)],
                 divrem_height: vec![Some(16)],
-                memory_read_write_height: vec![Some(21)],
-                global_height: vec![Some(19)],
-                riscv_poseidon2_height: vec![Some(17)],
-            },
-            RiscvShapeSpec {
-                cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
-                lt_height: vec![Some(19)],
-                bitwise_height: vec![Some(19)],
-                shift_right_height: vec![Some(17)],
-                shift_left_height: vec![Some(18)],
-                syscall_riscv_height: vec![Some(14)],
-                memory_local_height: vec![Some(17)],
-                mul_height: vec![Some(16)],
-                divrem_height: vec![Some(12)],
-                memory_read_write_height: vec![Some(21)],
-                global_height: vec![Some(20)],
-                riscv_poseidon2_height: vec![Some(18)],
-            },
-            RiscvShapeSpec {
-                cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
-                lt_height: vec![Some(21)],
-                bitwise_height: vec![Some(19)],
-                shift_right_height: vec![Some(18)],
-                shift_left_height: vec![Some(18)],
-                syscall_riscv_height: vec![Some(14)],
-                memory_local_height: vec![Some(18)],
-                mul_height: vec![Some(16)],
-                divrem_height: vec![Some(12)],
-                memory_read_write_height: vec![Some(21)],
-                global_height: vec![Some(20)],
-                riscv_poseidon2_height: vec![Some(18)],
-            },
-            RiscvShapeSpec {
-                cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
-                lt_height: vec![Some(22)],
-                bitwise_height: vec![Some(19)],
-                shift_right_height: vec![Some(18)],
-                shift_left_height: vec![Some(19)],
-                syscall_riscv_height: vec![Some(14)],
-                memory_local_height: vec![Some(18)],
-                mul_height: vec![Some(16)],
-                divrem_height: vec![Some(12)],
-                memory_read_write_height: vec![Some(21)],
-                global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
-            },
-            RiscvShapeSpec {
-                cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
-                lt_height: vec![Some(22)],
-                bitwise_height: vec![Some(20)],
-                shift_right_height: vec![Some(19)],
-                shift_left_height: vec![Some(20)],
-                syscall_riscv_height: vec![Some(14)],
-                memory_local_height: vec![Some(19)],
-                mul_height: vec![Some(17)],
-                divrem_height: vec![Some(13)],
-                memory_read_write_height: vec![Some(22)],
-                global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
-            },
-            RiscvShapeSpec {
-                cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
-                lt_height: vec![Some(22)],
-                bitwise_height: vec![Some(20)],
-                shift_right_height: vec![Some(19)],
-                shift_left_height: vec![Some(20)],
-                syscall_riscv_height: vec![Some(16)],
-                memory_local_height: vec![Some(19)],
-                mul_height: vec![Some(19)],
-                divrem_height: vec![Some(13), Some(17)],
-                memory_read_write_height: vec![Some(22)],
-                global_height: vec![Some(21)],
-                riscv_poseidon2_height: vec![Some(19)],
+                memory_read_write_height: vec![Some(16)],
+                global_height: vec![Some(16)],
+                riscv_poseidon2_height: vec![Some(16)],
             },
         ];
 
@@ -1379,25 +1304,11 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
         // Set the memory init and finalize heights.
         let memory_init_heights = vec![
             None,
-            Some(10),
             Some(16),
-            Some(18),
-            Some(19),
-            Some(20),
-            Some(21),
-            Some(22),
-            Some(23),
         ];
         let memory_finalize_heights = vec![
             None,
-            Some(10),
             Some(16),
-            Some(18),
-            Some(19),
-            Some(20),
-            Some(21),
-            Some(22),
-            Some(23),
         ];
 
         let memory_allowed_log_heights = HashMap::from([
@@ -1415,24 +1326,14 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 RiscvChipType::<F>::Global(GlobalChip::default()).name(),
                 vec![
                     None,
-                    Some(11),
-                    Some(17),
-                    Some(20),
-                    Some(21),
-                    Some(22),
-                    Some(23),
+                    Some(16),
                 ],
             ),
             (
                 <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
                 vec![
                     None,
-                    Some(9),
-                    Some(15),
-                    Some(18),
-                    Some(19),
-                    Some(20),
-                    Some(21),
+                    Some(14),
                 ],
             ),
         ]);
