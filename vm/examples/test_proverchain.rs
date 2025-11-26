@@ -1,3 +1,4 @@
+use p3_koala_bear::KoalaBear;
 use pico_vm::{
     configs::config::StarkGenericConfig,
     instances::configs::{
@@ -12,6 +13,7 @@ use pico_vm::{
 
 use pico_vm::configs::stark_config::KoalaBearPoseidon2;
 use tracing::info;
+use pico_vm::instances::compiler::shapes::riscv_shape::RiscvShapeConfig;
 
 #[path = "common/parse_args.rs"]
 mod parse_args;
@@ -25,7 +27,7 @@ fn main() {
     let (elf, riscv_stdin, _) = parse_args::parse_args::<KoalaBearPoseidon2>();
 
     log_section("KB PROVER CHAIN");
-    let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), elf), Default::default(), None);
+    let riscv = RiscvProver::new_initial_prover((RiscvKBSC::new(), elf), Default::default(), Some(RiscvShapeConfig::<KoalaBear>::test_only()));
     let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
     let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
     let compress = CompressProver::new_with_prev(&combine, Default::default(), None);
