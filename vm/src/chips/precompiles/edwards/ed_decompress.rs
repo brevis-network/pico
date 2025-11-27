@@ -236,7 +236,7 @@ impl<V: Copy> EdDecompressCols<V> {
             .result
             .0
             .iter()
-            .fold(CB::Expr::ZERO, |acc, limb| acc + limb.clone().into());
+            .fold(CB::Expr::ZERO, |acc, limb| acc + (*limb).into());
         IsZeroGadget::<CB::F>::eval(builder, x_sum, self.x_is_zero, self.is_real.into());
         // If sign = 1, then x_is_zero.result must be 0 (i.e., x != 0)
         builder
