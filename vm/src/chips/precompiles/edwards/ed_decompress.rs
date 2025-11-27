@@ -131,10 +131,13 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         // Check if x is zero by checking if all limbs sum to zero.
         // Since all limbs are non-negative (range checked), if their sum is zero, all limbs are zero.
         // self.x.multiplication.result already contains the sqrt as field elements after populate.
-        let x_limbs_sum = self.x.multiplication.result.0.iter().fold(
-            F::ZERO,
-            |acc, limb| acc + *limb,
-        );
+        let x_limbs_sum = self
+            .x
+            .multiplication
+            .result
+            .0
+            .iter()
+            .fold(F::ZERO, |acc, limb| acc + *limb);
         self.x_is_zero.populate_from_field_element(x_limbs_sum);
     }
 }
@@ -227,16 +230,14 @@ impl<V: Copy> EdDecompressCols<V> {
         // Constraint: if x is zero, then sign must be 0.
         // This prevents the case where x = 0 and sign = 1, which would result in x = mod - 0 = mod.
         // This is equivalent to: if sign = 1, then x != 0.
-        let x_sum: CB::Expr = self.x.multiplication.result.0.iter().fold(
-            CB::Expr::ZERO,
-            |acc, limb| acc + limb.clone().into(),
-        );
-        IsZeroGadget::<CB::F>::eval(
-            builder,
-            x_sum,
-            self.x_is_zero,
-            self.is_real.into(),
-        );
+        let x_sum: CB::Expr = self
+            .x
+            .multiplication
+            .result
+            .0
+            .iter()
+            .fold(CB::Expr::ZERO, |acc, limb| acc + limb.clone().into());
+        IsZeroGadget::<CB::F>::eval(builder, x_sum, self.x_is_zero, self.is_real.into());
         // If sign = 1, then x_is_zero.result must be 0 (i.e., x != 0)
         builder
             .when(self.x_is_zero.result) // x == 0
