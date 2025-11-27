@@ -13,7 +13,9 @@ use crate::{
         ir::{Builder, Ext, Felt, Var, Witness},
     },
     configs::config::{Com, FieldGenericConfig, PcsProof, PcsProverData, StarkGenericConfig, Val},
-    emulator::recursion::public_values::{assert_complete, assert_embed_public_values_valid, RecursionPublicValues},
+    emulator::recursion::public_values::{
+        assert_complete, assert_embed_public_values_valid, RecursionPublicValues,
+    },
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::onchain_circuit::stdin::{OnchainStdin, OnchainStdinVariable},
@@ -86,17 +88,13 @@ where
             let expected_commitment: [Bn254Fr; 1] = template_vk.commit.into();
             let expected_commitment = expected_commitment.map(|x| builder.eval(x));
 
-
-            // for (exp, act) in expected_commitment
-            //     .iter()
-            //     .zip(input_var.vk.commitment.iter())
-            // {
-            //     builder.assert_felt_eq(*act, *exp);
-            // }
-
-            // builder.assert_felt_eq(input_var.vk.pc_start, builder.eval(template_vk.pc_start));
-
-            Self::build_verifier(&mut builder, &input.machine, &input_var, expected_commitment,template_vk.pc_start);
+            Self::build_verifier(
+                &mut builder,
+                &input.machine,
+                &input_var,
+                expected_commitment,
+                template_vk.pc_start,
+            );
 
             let mut backend = ConstraintCompiler::<CC>::default();
             backend.emit(builder.into_operations())
@@ -132,7 +130,11 @@ where
         expected_commitment: [Var<Bn254Fr>; 1],
         expected_pc_start: SC::Val,
     ) {
-        let OnchainStdinVariable { vk, proof, flag_complete } = input;
+        let OnchainStdinVariable {
+            vk,
+            proof,
+            flag_complete,
+        } = input;
 
         for (exp, act) in expected_commitment.iter().zip(vk.commit.iter()) {
             builder.assert_var_eq(*act, *exp);
@@ -165,7 +167,6 @@ where
         assert_embed_public_values_valid::<CC, SC>(builder, embed_public_values);
         assert_complete(builder, embed_public_values, *flag_complete);
         builder.assert_felt_eq(*flag_complete, CC::F::ONE);
-
 
         // Reflect the public values to the next level.
         SC::commit_recursion_public_values(builder, *embed_public_values);
