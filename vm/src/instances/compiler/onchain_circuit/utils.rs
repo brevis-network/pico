@@ -145,8 +145,22 @@ pub fn generate_contract_inputs<EmbedFC: FieldGenericConfig>(
         ));
     }
     let proof_data = fs::read_to_string(proof_file)?;
-    let proof_slice: Vec<String> = proof_data.split(",").map(|s| s.to_string()).collect();
-    let proof = &proof_slice[0..8];
+    // Normalize each element to 0x + 64 hex chars (32 bytes)
+    let proof: Vec<String> = proof_data
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            let s = s
+                .strip_prefix("0x")
+                .or_else(|| s.strip_prefix("0X"))
+                .unwrap_or(s);
+
+            // Left-pad with zeros to 64 hex chars and re-add 0x prefix
+            format!("0x{:0>64}", s)
+        })
+        .take(8)
+        .collect();
 
     // get pv stream from pv file
     let pv_file_path = pico_out_dir.join(PV_FILE);
