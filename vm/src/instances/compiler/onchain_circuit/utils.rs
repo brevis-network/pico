@@ -93,8 +93,11 @@ pub fn build_gnark_config_with_str<EmbedFC: FieldGenericConfig>(
     // Write witness.
     let witness_path = build_dir.join(GROTH16_JSON_FILE);
     let gnark_witness = GnarkWitness::new(witness);
-    let mut file = File::create(witness_path).unwrap();
-    serde_json::to_string(&gnark_witness).unwrap()
+    let mut witness_file = File::create(witness_path).unwrap();
+    let witness_json = serde_json::to_string(&gnark_witness).unwrap();
+    witness_file.write_all(witness_json.as_bytes()).unwrap();
+
+    witness_json
 }
 
 const DOCKER_ERROR_HINT: &str =
