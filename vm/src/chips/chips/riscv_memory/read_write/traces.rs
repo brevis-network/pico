@@ -19,14 +19,20 @@ use crate::{
         },
         utils::next_power_of_two,
     },
-    compiler::riscv::{
-        opcode::{ByteOpcode, Opcode},
-        program::Program,
-        register::Register::X0,
+    compiler::{
+        riscv::{
+            opcode::{ByteOpcode, Opcode},
+            program::Program,
+            register::Register::X0,
+        },
+        word::Word,
     },
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice, PicoSliceMut},
-    machine::chip::ChipBehavior,
+    machine::{
+        chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
+    },
     primitives::consts::{MEMORY_RW_DATAPAR, WORD_SIZE},
 };
 use hashbrown::HashMap;
@@ -403,5 +409,85 @@ impl<F: Field> MemoryAccessCols<F> {
         output.add_u16_range_check(diff_16bit_limb);
         // Add a range table lookup with the U8 op.
         output.add_u8_range_check(diff_8bit_limb as u8, 0);
+    }
+}
+
+impl<F> EventCapture for MemoryReadWriteChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        let num_memory_rw_events = record.memory_read_write_event_indices.len();
+        if num_memory_rw_events == 0 {
+            return;
+        }
+        event_counter.num_memory_read_writes += num_memory_rw_events;
+        // Use references to avoid copying CpuEvent values
+        let memory_rw_events: Vec<&CpuEvent> = record
+            .memory_read_write_event_indices
+            .iter()
+            .copied()
+            .map(|i| &record.cpu_events[i])
+            .collect();
+
+        // Use efficient parallel processing similar to CPU chip
+        let chunk_size = std::cmp::max(num_memory_rw_events / num_cpus::get(), 1);
+        let memory_rw_counts: Vec<usize> = memory_rw_events
+            .pico_chunks(chunk_size)
+            .flat_map_iter(|chunk| {
+                chunk
+                    .iter()
+                    .map(|event| Self::count_memory_read_write_events(event))
+            })
+            .collect();
+
+        // Sum sub events efficiently
+        let num_add_sub = memory_rw_counts.iter().sum::<usize>();
+        event_counter.num_add_events += num_add_sub;
+    }
+}
+
+impl<F> MemoryReadWriteChip<F> {
+    fn count_memory_read_write_events(event: &CpuEvent) -> usize {
+        let mut add_sub_events = 1;
+
+        if matches!(event.instruction.opcode, Opcode::LB | Opcode::LH) {
+            let mem_value = if let Some(record) = event.memory_record {
+                record.value()
+            } else {
+                unreachable!("memory_record should be Some for memory instructions")
+            };
+            let memory_addr = event.b.wrapping_add(event.c);
+            let addr_offset = (memory_addr % WORD_SIZE as u32) as u8;
+            let unsigned_mem_val = match event.instruction.opcode {
+                Opcode::LB | Opcode::LBU => {
+                    Word::from_u32(mem_value.to_le_bytes()[addr_offset as usize] as u32)
+                }
+                Opcode::LH | Opcode::LHU => {
+                    let value = match (addr_offset >> 1) % 2 {
+                        0 => mem_value & 0x0000FFFF,
+                        1 => (mem_value & 0xFFFF0000) >> 16,
+                        _ => unreachable!(),
+                    };
+                    Word::from_u32(value)
+                }
+                Opcode::LW => Word::from_u32(mem_value),
+                _ => unreachable!(),
+            };
+
+            let most_sig_mem_value_byte = if matches!(event.instruction.opcode, Opcode::LB) {
+                unsigned_mem_val.0[0]
+            } else {
+                // LHU case
+                unsigned_mem_val.0[1]
+            };
+
+            let mut most_sig_byte_decomp: [u8; 8] = [0; 8];
+            for i in (0..8).rev() {
+                most_sig_byte_decomp[i] = (most_sig_mem_value_byte >> i) & 0x01;
+            }
+            if most_sig_byte_decomp[7] == 1 {
+                add_sub_events += 1;
+            }
+        }
+
+        add_sub_events
     }
 }

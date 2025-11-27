@@ -13,7 +13,7 @@ use crate::{
         emulator::MetaEmulator,
         opts::EmulatorOpts,
         riscv::{
-            emulator::{EmulationDeferredState, SharedDeferredState},
+            emulator::{EmulationDeferredState, EmulationError, SharedDeferredState},
             record::EmulationRecord,
             riscv_emulator::ParOptions,
             state::RiscvEmulationState,
@@ -32,6 +32,7 @@ use crate::{
         keys::{BaseProvingKey, BaseVerifyingKey, HashableKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
+        report::EmulationReport,
         witness::ProvingWitness,
     },
     primitives::{consts::RISCV_NUM_PVS, Poseidon2Init},
@@ -84,7 +85,10 @@ where
     FieldSpecificPoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
     FieldSpecificPrecompilePoseidon2Chip<Val<SC>>: Air<ProverConstraintFolder<SC>>,
 {
-    pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
+    pub fn prove_report(
+        &self,
+        stdin: EmulatorStdin<Program, Vec<u8>>,
+    ) -> (MetaProof<SC>, Vec<EmulationReport>) {
         let witness = ProvingWitness::setup_for_riscv(
             self.program.clone(),
             stdin,
@@ -93,7 +97,12 @@ where
             self.vk.clone(),
         );
         self.machine
-            .prove_with_shape_cycles(&witness, self.shape_config.as_ref())
+            .prove_with_shape_report(&witness, self.shape_config.as_ref())
+    }
+
+    pub fn prove_cycles(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (MetaProof<SC>, u64) {
+        let (proof, reports) = self.prove_report(stdin);
+        (proof, reports.last().unwrap().current_cycle)
     }
 
     pub fn run_tracegen(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (u64, f64) {
@@ -152,9 +161,9 @@ where
 
                 let thread_start = Instant::now();
                 loop {
-                    let done = emu.next_record_batch(&mut |_rec| {});
+                    let report = emu.next_record_batch(&mut |_rec| {});
 
-                    if done {
+                    if report.done {
                         let thread_elapsed = thread_start.elapsed().as_secs_f64();
                         let thread_cycles = emu.cycles();
 
@@ -220,13 +229,15 @@ where
         });
 
         let record_tx = tx.clone();
-        let (cycles, _pv_stream) = emulate_snapshot_pipeline(&witness, move |rec, _done| {
-            record_tx
-                .send(TracegenMessage::Record(Arc::new(rec)))
-                .unwrap();
-        });
+        let (_, total_cycles, _pv_stream) =
+            emulate_snapshot_pipeline(&witness, move |rec, _done| {
+                record_tx
+                    .send(TracegenMessage::Record(Arc::new(rec)))
+                    .unwrap();
+            })
+            .unwrap();
 
-        tx.send(TracegenMessage::CycleCount(cycles)).unwrap();
+        tx.send(TracegenMessage::CycleCount(total_cycles)).unwrap();
 
         drop(tx);
 
@@ -312,7 +323,7 @@ where
         let thread_start = Instant::now();
         loop {
             let t_batch_start = Instant::now();
-            let (_snapshot, done) = emu.next_state_batch(true, &mut |_rec| {}).unwrap();
+            let (_snapshot, report) = emu.next_state_batch(true, &mut |_rec| {}).unwrap();
             let batch_dur = t_batch_start.elapsed();
             batch_index += 1;
 
@@ -323,7 +334,7 @@ where
                 "Snapshot mode batch finished"
             );
 
-            if done {
+            if report.done {
                 let thread_elapsed = thread_start.elapsed().as_secs_f64();
                 let thread_cycles = emu.cycles();
 
@@ -341,7 +352,10 @@ where
         (0, 0 as f64)
     }
 
-    pub fn emulate(&self, stdin: EmulatorStdin<Program, Vec<u8>>) -> (u64, Vec<u8>) {
+    pub fn emulate(
+        &self,
+        stdin: EmulatorStdin<Program, Vec<u8>>,
+    ) -> (Vec<EmulationReport>, Vec<u8>) {
         let witness = ProvingWitness::<SC, RiscvChips<SC>, _>::setup_for_riscv(
             self.program.clone(),
             stdin,
@@ -350,13 +364,17 @@ where
             self.vk.clone(),
         );
         let mut emulator = MetaEmulator::setup_riscv(&witness, None);
+        let mut reports = Vec::new();
         loop {
-            let done = emulator.next_record_batch(&mut |_| {});
+            let report = emulator.next_record_batch(&mut |_| {});
+            let done = report.done;
+            reports.push(report);
             if done {
                 break;
             }
         }
-        (emulator.cycles(), emulator.get_pv_stream())
+        let pv_stream = emulator.get_pv_stream();
+        (reports, pv_stream)
     }
 
     pub fn get_program(&self) -> Arc<Program> {
@@ -467,7 +485,7 @@ pub struct Bucket {
 pub fn emulate_snapshot_pipeline<SC, C, F>(
     witness: &ProvingWitness<SC, C, Vec<u8>>,
     handle_record: F,
-) -> (u64, Vec<u8>)
+) -> Result<(Vec<EmulationReport>, u64, Vec<u8>), EmulationError>
 where
     SC: 'static + StarkGenericConfig + Send + Sync,
     SC::Val: PrimeField32 + Poseidon2Init,
@@ -495,10 +513,10 @@ where
     let shared_ds: SharedDeferredState =
         Arc::new(Mutex::new(EmulationDeferredState::new(program.clone())));
 
-    // let total_cycles = Arc::new(AtomicU64::new(0));
+    let mut emu_result = Ok(());
     let mut total_cycles = 0u64;
-    // let cycles_for_snapshot = total_cycles.clone();
     let mut pv_stream: Vec<u8> = Vec::new();
+    let reports = Mutex::new(Vec::new());
 
     thread::scope(|s| {
         // sequencer
@@ -560,11 +578,22 @@ where
         s.spawn({
             || {
                 let mut emu = MetaEmulator::setup_riscv(witness, None);
+                // disable cost estimation if it is enabled on the snapshotter, only need it for the trace generator
+                if let Some(e) = &mut emu.emulator {
+                    e.opts.cost_estimator = false;
+                }
                 let t_snapshot_main = Instant::now();
                 let mut batch_idx = 0;
                 loop {
                     let t_batch_start = Instant::now();
-                    let (snapshot, done) = emu.next_state_batch(true, &mut |_| {}).unwrap();
+                    let (snapshot, report) = match emu.next_state_batch(true, &mut |_| {}) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            emu_result = Err(err);
+                            break;
+                        }
+                    };
+                    let done = report.done;
                     let batch_dur = t_batch_start.elapsed();
 
                     let t_send_start = Instant::now();
@@ -609,7 +638,7 @@ where
                 let t_recover_and_emu = Instant::now();
                 let mut emu =
                     MetaEmulator::recover_riscv(witness, snapshot, None, shared_ds.clone());
-                let _ = emu.next_record_batch(&mut |rec| {
+                let report = emu.next_record_batch(&mut |rec| {
                     snapshot_msg_tx
                         .send(Msg::Record {
                             chunk: batch_idx as u32,
@@ -618,6 +647,11 @@ where
                         })
                         .unwrap();
                 });
+                {
+                    // thread safe append reports
+                    let mut lock = reports.lock().expect("ok");
+                    lock.push(report);
+                }
                 snapshot_msg_tx
                     .send(Msg::SnapShotDone {
                         chunk: batch_idx as u32,
@@ -634,6 +668,5 @@ where
         drop(snapshot_msg_tx);
     });
 
-    // total_cycles.load(Ordering::Relaxed)
-    (total_cycles, pv_stream)
+    emu_result.map(|_| (reports.into_inner().expect("ok"), total_cycles, pv_stream))
 }

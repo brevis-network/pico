@@ -22,11 +22,19 @@ use crate::{
             syscalls::{default_syscall_map, Syscall, SyscallCode},
         },
     },
+    machine::{
+        estimator::{CycleEstimator, EventSizeCapture},
+        field::same_field,
+        report::EmulationReport,
+    },
     primitives::Poseidon2Init,
 };
 use alloc::sync::Arc;
 use hashbrown::HashMap;
+use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
+use p3_mersenne_31::Mersenne31;
 use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, time::Instant};
@@ -285,6 +293,18 @@ pub struct RiscvEmulator {
     /// Local memory access events.
     pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
 
+    /// Stdout buffer
+    pub stdout: String,
+
+    /// Stderr buffer
+    pub stderr: String,
+
+    /// Tracked cycles
+    pub cycle_tracker: HashMap<String, Vec<u64>>,
+
+    /// Cycle tracker requests "cycle-tracker-start: "
+    pub cycle_tracker_requests: HashMap<String, u64>,
+
     /// The state for saving the deferred information
     deferred_state: SharedDeferredState,
 
@@ -295,6 +315,9 @@ pub struct RiscvEmulator {
 
     /// emulate_instruction, emulate_instruction_simple
     emu_fn: EmuFn,
+
+    /// keep track of the field name
+    field: &'static str,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -413,11 +436,24 @@ impl RiscvEmulator {
             max_syscall_cycles,
             local_memory_access: Default::default(),
             mode: RiscvEmulatorMode::Trace,
+            stdout: Default::default(),
+            stderr: Default::default(),
+            cycle_tracker: Default::default(),
+            cycle_tracker_requests: Default::default(),
             deferred_state,
             defer_only,
             log_syscalls,
             par_opts,
             emu_fn: RiscvEmulator::emulate_instruction,
+            field: if same_field::<F, BabyBear, 4>() {
+                "BabyBear"
+            } else if same_field::<F, KoalaBear, 4>() {
+                "KoalaBear"
+            } else if same_field::<F, Mersenne31, 3>() {
+                "Mersenne31"
+            } else {
+                panic!("Unsupported field type");
+            },
         };
 
         emu.update_mode_deps();
@@ -467,6 +503,36 @@ impl RiscvEmulator {
         };
     }
 
+    #[inline(always)]
+    fn flush(&mut self) {
+        if !self.stdout.is_empty() {
+            log::info!("stdout (remaining)> {}", &self.stdout);
+            self.stdout.clear();
+        }
+        if !self.stderr.is_empty() {
+            log::info!("stderr (remaining)> {}", &self.stderr);
+            self.stderr.clear();
+        }
+    }
+
+    fn generate_report(
+        &mut self,
+        estimators: Option<Vec<CycleEstimator>>,
+        done: bool,
+        start_chunk: u32,
+    ) -> EmulationReport {
+        EmulationReport {
+            current_cycle: self.state.global_clk,
+            done,
+            start_chunk,
+            cycle_tracker: self
+                .opts
+                .cycle_tracker
+                .then_some(core::mem::take(&mut self.cycle_tracker)),
+            host_cycle_estimator: estimators,
+        }
+    }
+
     /// Emulates one cycle of the program, returning whether the program has finished.
     #[inline]
     fn emulate_cycle<F>(
@@ -487,8 +553,9 @@ impl RiscvEmulator {
         self.state.global_clk += 1;
 
         if let Some(max_cycles) = self.opts.max_cycles {
-            if self.state.global_clk >= max_cycles {
-                panic!("exceeded cycle limit of {}", max_cycles);
+            let current_cycles = self.state.global_clk;
+            if current_cycles >= max_cycles {
+                return Err(EmulationError::ExceededCycleLimit(current_cycles));
             }
         }
 
@@ -531,7 +598,10 @@ impl RiscvEmulator {
     /// `record_callback` is used to return the EmulationRecord in function or closure.
     /// Return the emulation complete flag if success.
     #[instrument(name = "emulate_batch_records", level = "debug", skip_all)]
-    pub fn emulate_batch<F>(&mut self, record_callback: &mut F) -> Result<bool, EmulationError>
+    pub fn emulate_batch<F>(
+        &mut self,
+        record_callback: &mut F,
+    ) -> Result<EmulationReport, EmulationError>
     where
         F: FnMut(EmulationRecord),
     {
@@ -542,6 +612,18 @@ impl RiscvEmulator {
         // And since self cannot be invoked in a closure created by self.
         let deferred_state = Arc::clone(&self.deferred_state);
         let defer_only = self.defer_only;
+
+        let mut estimators = self.opts.cost_estimator.then_some(Vec::new());
+        let start_chunk = self.state.current_chunk;
+
+        // create the real callback that will be used, maybe making additions
+        // to the cycle estimator
+        let mut real_callback = |record| {
+            if let Some(ref mut estimators) = &mut estimators {
+                estimators.push(EventSizeCapture::snapshot(&record, self.field).estimate());
+            }
+            record_callback(record)
+        };
 
         let mut done = false;
         let mut num_chunks_emulated = 0;
@@ -568,7 +650,7 @@ impl RiscvEmulator {
                         new_record,
                         is_trace_mode,
                         defer_only,
-                        record_callback,
+                        &mut real_callback,
                     );
                 },
                 &mut last_record_time,
@@ -600,7 +682,7 @@ impl RiscvEmulator {
                     new_record,
                     is_trace,
                     defer_only,
-                    record_callback,
+                    &mut real_callback,
                 );
             });
         }
@@ -615,6 +697,9 @@ impl RiscvEmulator {
                     deferred_state.lock().unwrap().defer_record(&mut new_record);
                 });
             }
+
+            // output any remaining information
+            self.flush();
         } else {
             self.state.current_batch += 1;
         }
@@ -627,12 +712,12 @@ impl RiscvEmulator {
                     done,
                     self.opts.split_opts,
                     is_trace,
-                    record_callback,
+                    &mut real_callback,
                     self.state.pc,
                 );
         }
 
-        Ok(done)
+        Ok(self.generate_report(estimators, done, start_chunk))
     }
 
     // TODO: may remove all the deferred_events in snapshot_main mode
@@ -640,11 +725,23 @@ impl RiscvEmulator {
     pub fn emulate_batch_snapshot_main<F>(
         &mut self,
         record_callback: &mut F,
-    ) -> Result<bool, EmulationError>
+    ) -> Result<EmulationReport, EmulationError>
     where
         F: FnMut(EmulationRecord),
     {
         self.initialize_if_needed();
+
+        let mut estimators = self.opts.cost_estimator.then_some(Vec::new());
+        let start_chunk = self.state.current_chunk;
+
+        // create the real callback that will be used, maybe making additions
+        // to the cycle estimator
+        let mut real_callback = |record| {
+            if let Some(ref mut estimators) = &mut estimators {
+                estimators.push(EventSizeCapture::snapshot(&record, self.field).estimate());
+            }
+            record_callback(record)
+        };
 
         // Temporarily take out the deferred state during emulation.
         // Will set it back before finishing this function.
@@ -672,7 +769,7 @@ impl RiscvEmulator {
                         new_record,
                         false,
                         defer_only,
-                        record_callback,
+                        &mut real_callback,
                     );
                 },
                 &mut last_record_time,
@@ -699,23 +796,48 @@ impl RiscvEmulator {
                     new_record,
                     false,
                     defer_only,
-                    record_callback,
+                    &mut real_callback,
                 );
             });
         }
 
         if done {
+            self.flush();
+
+            // we must get the real traces if cost_estimator = true
+            if self.opts.cost_estimator {
+                self.postprocess();
+
+                // Push the remaining emulation record with memory initialize & finalize events.
+                self.bump_record(done, |_done, mut new_record| {
+                    // Unnecessary to prove this record, since it's an empty record after deferring the memory events.
+                    deferred_state.lock().unwrap().defer_record(&mut new_record);
+                });
+                if !self.defer_only {
+                    deferred_state
+                        .lock()
+                        .unwrap()
+                        .split_and_return_deferred_records(
+                            done,
+                            self.opts.split_opts,
+                            self.mode == RiscvEmulatorMode::Trace,
+                            &mut real_callback,
+                            self.state.pc,
+                        );
+                }
+            }
         } else {
             self.state.current_batch += 1;
         }
-        Ok(done)
+
+        Ok(self.generate_report(estimators, done, start_chunk))
     }
 
     pub fn emulate_state<F>(
         &mut self,
         _emit_global_memory_events: bool,
         record_callback: &mut F,
-    ) -> Result<(RiscvEmulationState, bool), EmulationError>
+    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError>
     // ) -> Result<(RiscvEmulationState, PublicValues<u32, u32>, bool), EmulationError>
     where
         F: FnMut(EmulationRecord),
@@ -743,7 +865,7 @@ impl RiscvEmulator {
         );
 
         let t_emu_snapshot = Instant::now();
-        let done = self.emulate_batch_snapshot_main(record_callback)?;
+        let report = self.emulate_batch_snapshot_main(record_callback)?;
         println!(
             "t_emu_snapshot: {:?}ms",
             t_emu_snapshot.elapsed().as_secs_f64() * 1000.0
@@ -761,7 +883,7 @@ impl RiscvEmulator {
         );
 
         // if done && !self.emit_global_memory_events {
-        if done {
+        if report.done {
             snapshot.memory.clone_from(&self.state.memory);
             for (addr, old) in mem_snap {
                 match old {
@@ -806,7 +928,7 @@ impl RiscvEmulator {
         //     self.records.clear();
         // }
 
-        Ok((snapshot, done))
+        Ok((snapshot, report))
     }
 
     /// Read a word from memory and create an access record.

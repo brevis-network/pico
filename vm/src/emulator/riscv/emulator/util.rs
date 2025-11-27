@@ -9,6 +9,7 @@ use crate::{
         },
         stdin::EmulatorStdin,
     },
+    machine::report::EmulationReport,
 };
 use alloc::sync::Arc;
 
@@ -25,16 +26,19 @@ impl RiscvEmulator {
     pub fn run_fast(
         &mut self,
         stdin: Option<Stdin>,
-    ) -> Result<Vec<EmulationRecord>, EmulationError> {
+    ) -> Result<(Vec<EmulationRecord>, Vec<EmulationReport>), EmulationError> {
         if let Some(stdin) = stdin {
             self.write_stdin(&stdin);
         }
         self.mode = RiscvEmulatorMode::Simple;
         let mut all_records = vec![];
+        let mut all_reports = vec![];
         loop {
-            let done = self.emulate_batch(&mut |record| all_records.push(record))?;
+            let report = self.emulate_batch(&mut |record| all_records.push(record))?;
+            let done = report.done;
+            all_reports.push(report);
             if done {
-                return Ok(all_records);
+                return Ok((all_records, all_reports));
             }
         }
     }
@@ -44,15 +48,21 @@ impl RiscvEmulator {
     /// # Errors
     ///
     /// This function will return an error if the program emulation fails.
-    pub fn run(&mut self, stdin: Option<Stdin>) -> Result<Vec<EmulationRecord>, EmulationError> {
+    pub fn run(
+        &mut self,
+        stdin: Option<Stdin>,
+    ) -> Result<(Vec<EmulationRecord>, Vec<EmulationReport>), EmulationError> {
         if let Some(stdin) = stdin {
             self.write_stdin(&stdin);
         }
         let mut all_records = vec![];
+        let mut all_reports = vec![];
         loop {
-            let done = self.emulate_batch(&mut |record| all_records.push(record))?;
+            let report = self.emulate_batch(&mut |record| all_records.push(record))?;
+            let done = report.done;
+            all_reports.push(report);
             if done {
-                return Ok(all_records);
+                return Ok((all_records, all_reports));
             }
         }
     }

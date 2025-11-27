@@ -11,6 +11,7 @@ use crate::{
     emulator::riscv::record::EmulationRecord,
     machine::{
         chip::ChipBehavior,
+        estimator::{EventCapture, EventSizeCapture},
         lookup::{LookupScope, LookupType},
     },
     primitives::consts::LOCAL_MEMORY_DATAPAR,
@@ -34,7 +35,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
         _output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
         let events = input.get_local_mem_events().collect::<Vec<_>>();
-        let nb_rows = events.len().div_ceil(4);
+        let nb_rows = events.len().div_ceil(LOCAL_MEMORY_DATAPAR);
         let log_rows = input.shape_chip_size(&self.name());
         let padded_nb_rows = next_power_of_two(nb_rows, log_rows);
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MEMORY_LOCAL_INIT_COLS);
@@ -124,5 +125,12 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryLocalChip<F> {
 
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Regional
+    }
+}
+
+impl<F> EventCapture for MemoryLocalChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_cpu_local_memory_access += record.cpu_local_memory_access.len();
+        event_counter.num_global_lookup_events += 2 * record.cpu_local_memory_access.len();
     }
 }

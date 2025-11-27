@@ -16,6 +16,7 @@ use crate::{
         keys::{BaseProvingKey, HashableKey},
         machine::{BaseMachine, MachineBehavior},
         proof::{BaseProof, MetaProof},
+        report::EmulationReport,
         witness::ProvingWitness,
     },
     primitives::{
@@ -62,11 +63,11 @@ where
 {
     /// Prove with shape config
     #[instrument(name = "RISCV MACHINE PROVE", level = "debug", skip_all)]
-    pub fn prove_with_shape_cycles(
+    pub fn prove_with_shape_report(
         &self,
         witness: &ProvingWitness<SC, C, Vec<u8>>,
         shape_config: Option<&RiscvShapeConfig<SC::Val>>,
-    ) -> (MetaProof<SC>, u64)
+    ) -> (MetaProof<SC>, Vec<EmulationReport>)
     where
         C: for<'a> Air<
                 DebugConstraintFolder<
@@ -100,14 +101,17 @@ where
         // Start the emulator thread.
         let emulator_handle = thread::spawn(move || {
             let mut batch_num = 1;
+            let mut all_reports = Vec::new();
             loop {
                 let start_local = Instant::now();
 
-                let done = emulator.next_record_batch(&mut |record| {
+                let report = emulator.next_record_batch(&mut |record| {
                     record_sender.send(record).expect(
                         "Failed to send an emulation record from emulator thread to prover thread",
                     )
                 });
+                let done = report.done;
+                all_reports.push(report);
 
                 debug!(
                     "--- Generate riscv records for batch-{} in {:?}",
@@ -123,7 +127,7 @@ where
             }
 
             // Move and return the emulator for futher usage.
-            emulator
+            (emulator, all_reports)
 
             // `record_sender` will be dropped when the emulator thread completes.
         });
@@ -136,8 +140,7 @@ where
             &start_global,
         );
 
-        let mut emulator = emulator_handle.join().unwrap();
-        let cycles = emulator.cycles();
+        let (mut emulator, all_reports) = emulator_handle.join().unwrap();
 
         debug!("--- Finish riscv in {:?}", start_global.elapsed());
 
@@ -171,7 +174,7 @@ where
 
         (
             MetaProof::new(all_proofs.into(), vks.into(), Some(pv_stream)),
-            cycles,
+            all_reports,
         )
     }
 

@@ -23,6 +23,15 @@ pub enum RiscvEmulatorMode {
     Unconstrained(UnconstrainedState),
 }
 
+impl PartialEq for RiscvEmulatorMode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Unconstrained(_), Self::Unconstrained(_)) => false,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
 impl RiscvEmulatorMode {
     /// Identify if it's the unconstrained mode.
     pub fn is_unconstrained(&self) -> bool {
@@ -66,6 +75,7 @@ impl RiscvEmulatorMode {
         memory_record: MemoryAccessRecord,
         memory_store_value: Option<u32>,
         events: &mut Vec<CpuEvent>,
+        mem_read_write: &mut Vec<usize>,
     ) {
         // TODO: Remove Self::Simple
         if matches!(self, Self::Trace | Self::Simple) {
@@ -83,6 +93,9 @@ impl RiscvEmulatorMode {
                 exit_code,
             );
 
+            if instruction.is_memory_instruction() {
+                mem_read_write.push(events.len());
+            }
             events.push(event);
         }
     }

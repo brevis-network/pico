@@ -268,7 +268,7 @@ pub fn verify_challenges<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVaria
     for ((index_bits, query_proof), ro) in challenges
         .query_indices
         .iter()
-        .zip(proof.query_proofs)
+        .zip_eq(proof.query_proofs)
         .zip(reduced_openings)
     {
         let folded_eval = verify_query::<CC, SC>(
