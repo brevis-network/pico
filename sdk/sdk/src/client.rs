@@ -275,13 +275,13 @@ macro_rules! create_sdk_prove_client {
                 if need_setup {
                     let mut setup_cmd = Command::new("sh");
                     setup_cmd.arg("-c")
-                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd setup -sol ./data/Groth16Verifier.sol", output.display(), field_name));
+                        .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.2 /pico_gnark_cli -field {} -cmd setup -sol ./data/Groth16Verifier.sol", output.display(), field_name));
                     execute_command(setup_cmd);
                 }
 
                 let mut prove_cmd = Command::new("sh");
                 prove_cmd.arg("-c")
-                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.1 /pico_gnark_cli -field {} -cmd prove -sol ./data/Groth16Verifier.sol", output.display(), field_name));
+                    .arg(format!("docker run --rm -v {}:/data brevishub/pico_gnark_cli:1.2 /pico_gnark_cli -field {} -cmd prove -sol ./data/Groth16Verifier.sol", output.display(), field_name));
 
                 execute_command(prove_cmd);
                 generate_contract_inputs::<$fc>(output.clone())?;

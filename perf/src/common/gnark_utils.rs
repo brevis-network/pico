@@ -52,7 +52,7 @@ pub fn create_gnark_prover(field: BenchField, download_path: &str) -> Result<(),
     let abs_download_path = current_dir.join(download_path).canonicalize()?;
 
     let docker_cmd = format!(
-        "docker run -d -v {}:/data -p 9099:9099 --name pico_bench brevishub/pico_gnark_server:1.1 -field {}",
+        "docker run -d -v {}:/data -p 9099:9099 --name pico_bench brevishub/pico_gnark_server:1.2 -field {}",
         abs_download_path.display(),
         field.to_str(),
     );
