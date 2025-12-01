@@ -1067,7 +1067,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
 impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
     pub fn maximal_only() -> Self {
         // Preprocessed chip heights.
-        // let program_heights = vec![Some(19)];
         let program_heights = vec![Some(22)];
 
         let allowed_preprocessed_log_heights = HashMap::from([
@@ -1085,15 +1084,15 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             // maximal riscv shape (22 divide by DATAPAR)
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(19)],
-                lt_height: vec![Some(21)],
+                add_sub_height: vec![Some(22)],
+                lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(22)],
-                shift_right_height: vec![Some(21)],
-                shift_left_height: vec![Some(20)],
+                shift_right_height: vec![Some(22)],
+                shift_left_height: vec![Some(22)],
                 syscall_riscv_height: vec![Some(20)],
                 memory_local_height: vec![Some(20)],
-                mul_height: vec![Some(21)],
-                divrem_height: vec![Some(21)],
+                mul_height: vec![Some(22)],
+                divrem_height: vec![Some(22)],
                 memory_read_write_height: vec![Some(22)],
                 global_height: vec![Some(23)],
                 riscv_poseidon2_height: vec![Some(21)],
@@ -1192,10 +1191,6 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             precompile_allowed_log_heights
                 .insert(chip_name, (mem_events_per_row, precompile_heights.clone()));
         }
-        debug!(
-            "precompile_allowed_log_heights: {:?}",
-            precompile_allowed_log_heights
-        );
 
         Self {
             included_shapes: vec![],
