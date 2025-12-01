@@ -170,9 +170,15 @@ pub fn gnark_prover_running() -> bool {
 }
 
 pub fn download_files(field: BenchField) -> Result<(), Error> {
-    let url_path = field.url_path();
     let download_dir = get_download_path(field);
     run_shell_command(&format!("mkdir -p {}", download_dir))?;
+
+    let base_url = match field {
+        BenchField::KoalaBear =>
+            "https://pico-proofs.s3.us-west-2.amazonaws.com/vk-true-gnarkfiles-kb",
+        BenchField::BabyBear =>
+            "https://pico-proofs.s3.us-west-2.amazonaws.com/vk-true-gnarkfiles-bb",
+    };
 
     for file in &["vm_pk", "vm_vk", "vm_ccs"] {
         let output = format!("{}/{}", download_dir, file);
@@ -180,10 +186,8 @@ pub fn download_files(field: BenchField) -> Result<(), Error> {
             println!("File {} already exists. Skipping download.", output);
             continue;
         }
-        let url = format!(
-            "https://picobench.s3.us-west-2.amazonaws.com/{}/gpu/{}",
-            url_path, file
-        );
+
+        let url = format!("{}/{}", base_url, file);
         let cmd = format!("curl -o {} {}", output, url);
         run_shell_command(&cmd)?;
     }
