@@ -174,10 +174,12 @@ pub fn download_files(field: BenchField) -> Result<(), Error> {
     run_shell_command(&format!("mkdir -p {}", download_dir))?;
 
     let base_url = match field {
-        BenchField::KoalaBear =>
-            "https://pico-proofs.s3.us-west-2.amazonaws.com/vk-true-gnarkfiles-kb",
-        BenchField::BabyBear =>
-            "https://pico-proofs.s3.us-west-2.amazonaws.com/vk-true-gnarkfiles-bb",
+        BenchField::KoalaBear => {
+            "https://pico-proofs.s3.us-west-2.amazonaws.com/vk-true-gnarkfiles-kb"
+        }
+        BenchField::BabyBear => {
+            "https://pico-proofs.s3.us-west-2.amazonaws.com/vk-true-gnarkfiles-bb"
+        }
     };
 
     for file in &["vm_pk", "vm_vk", "vm_ccs"] {
