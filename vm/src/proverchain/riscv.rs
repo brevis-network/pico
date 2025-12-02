@@ -389,9 +389,22 @@ where
             let result = emulator.emulate_batch(&mut |record| batch_records.push(record));
 
             match result {
-                Ok(true) => break,     // Normal completion
-                Ok(false) => continue, // Continue execution
-                Err(_) => break,       // Error - still try to collect signatures
+                Ok(report) => {
+                    if report.done {
+                        // Normal completion
+                        break;
+                    } else {
+                        // Continue execution
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    tracing::error!(
+                        ?err,
+                        "test_emulator: emulate_batch failed, will still try to collect signatures"
+                    );
+                    break;
+                }
             }
         }
 
