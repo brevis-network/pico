@@ -377,6 +377,40 @@ where
         (reports, pv_stream)
     }
 
+    /// Emulate and collect RISCOF signatures from memory between the given addresses
+    pub fn test_emulator(&self, begin: u32, end: u32) -> Vec<u32> {
+        use crate::emulator::riscv::riscv_emulator::RiscvEmulator;
+
+        let mut emulator =
+            RiscvEmulator::new_single::<Val<SC>>(self.program.clone(), self.opts, None);
+
+        loop {
+            let mut batch_records = vec![];
+            let result = emulator.emulate_batch(&mut |record| batch_records.push(record));
+
+            match result {
+                Ok(report) => {
+                    if report.done {
+                        // Normal completion
+                        break;
+                    } else {
+                        // Continue execution
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    tracing::error!(
+                        ?err,
+                        "test_emulator: emulate_batch failed, will still try to collect signatures"
+                    );
+                    break;
+                }
+            }
+        }
+
+        emulator.collect_signatures(begin, end)
+    }
+
     pub fn get_program(&self) -> Arc<Program> {
         self.program.clone()
     }
