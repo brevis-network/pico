@@ -619,6 +619,7 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             (&quotient_data, quotient_opening_points),
         ];
 
+        // opened_values[round][matrix][point][poly]
         let (opened_values, opening_proof) = debug_span!(parent: &Span::current(), "FRI open")
             .in_scope(|| pcs.open(rounds, challenger));
 
@@ -715,15 +716,19 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
 
         // final base proof
         BaseProof::<SC> {
+            // LDE commitment
             commitments: BaseCommitments {
                 main_commit: data.commitment,
                 permutation_commit,
                 quotient_commit,
             },
+            // Reorganize PCS opening values according to the VM AIR semantics.
             opened_values: BaseOpenedValues {
                 chips_opened_values: opened_values,
             },
+            // PCS opening proof
             opening_proof,
+            // helpers
             log_main_degrees,
             log_quotient_degrees,
             main_chip_ordering: data.main_chip_ordering,
