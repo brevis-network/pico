@@ -77,7 +77,7 @@ func NewFConst(value string) Variable {
 func NewF(value string) Variable {
 	return Variable{
 		Value:      frontend.Variable(value),
-		UpperBound: new(big.Int).SetUint64(uint64(math.Pow(2, 32))),
+		UpperBound: new(big.Int).SetUint64(4294967296), // 2^32
 	}
 }
 
@@ -387,7 +387,7 @@ func (p *Chip) reduceWithMaxBits(x frontend.Variable, maxNbBits uint64) frontend
 	// Check that the hint is correct.
 	p.api.AssertIsEqual(
 		p.api.Add(
-			p.api.Mul(highLimb, frontend.Variable(uint64(math.Pow(2, 27)))),
+			p.api.Mul(highLimb, frontend.Variable(134217728)), // 2^27
 			lowLimb,
 		),
 		remainder,
@@ -462,7 +462,7 @@ func SplitLimbsHint(_ *big.Int, inputs []*big.Int, results []*big.Int) error {
 		return fmt.Errorf("input is not in the field")
 	}
 
-	two_27 := big.NewInt(int64(math.Pow(2, 27)))
+	two_27 := big.NewInt(1).Lsh(big.NewInt(1), 27) // 2^27
 
 	// The least significant bits
 	results[0] = new(big.Int).Rem(input, two_27)
