@@ -354,6 +354,8 @@ macro_rules! run {
                 compress_machine.prove(&compress_witness)
             });
 
+            let shape = compress_proof.proofs()[0].shape();
+            println!("Compress Proof Shape: {:?}", shape);
             let compress_proof_size = bincode::serialize(&compress_proof.proofs()).unwrap().len();
 
             // Compress proof verificaiton.
@@ -445,6 +447,8 @@ macro_rules! run {
             // let serialized_proofs = bincode::serialize(&embed_proof.proofs()).unwrap();
             // let mut file = File::create("embed_proof_proofs.bin").expect("cannot create file");
             // file.write_all(&serialized_proofs).expect("failed to write to file");
+            let shape = embed_proof.proofs()[0].shape();
+            println!("Embed Proof Shape: {:?}", shape);
 
             info!("Verifying EMBED proof (at {:?})..", start.elapsed());
             let embed_result = embed_machine.verify(&embed_proof, &riscv_vk);
