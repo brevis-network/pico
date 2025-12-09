@@ -34,6 +34,32 @@ pub struct Elf {
     pub(crate) memory_image: Arc<BTreeMap<u32, u32>>,
 }
 
+/// Parse symbol table from ELF to extract signature region boundary for RISCOF testing.
+pub fn find_signature_region(elf_bytes: &[u8]) -> eyre::Result<(u32, u32)> {
+    let mut begin_signature = None;
+    let mut end_signature = None;
+
+    let file = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes)?;
+
+    if let Some((symbol_table, string_table)) = file.symbol_table()? {
+        for sym in symbol_table.iter() {
+            if let Ok(name) = string_table.get(sym.st_name as usize) {
+                match name {
+                    "begin_signature" => begin_signature = Some(sym.st_value as u32),
+                    "end_signature" => end_signature = Some(sym.st_value as u32),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let begin =
+        begin_signature.ok_or_else(|| eyre::eyre!("Missing begin_signature symbol in ELF"))?;
+    let end = end_signature.ok_or_else(|| eyre::eyre!("Missing end_signature symbol in ELF"))?;
+
+    Ok((begin, end))
+}
+
 impl Elf {
     /// Create a new [Elf].
     ///
