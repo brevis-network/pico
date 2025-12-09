@@ -13,14 +13,14 @@ fn main() {
 
     // Initialize the prover client
     let client = DefaultProverClient::new(&elf);
-    let stdin_builder = client.get_stdin_builder(); // Shared instance
+    let mut stdin_builder = client.new_stdin_builder();
 
     // Set up input and generate proof
     let n = 100u32;
-    stdin_builder.borrow_mut().write(&n);
+    stdin_builder.write(&n);
 
     // Generate proof
-    let proof = client.prove_fast().expect("Failed to generate proof");
+    let proof = client.prove_fast(stdin_builder).expect("Failed to generate proof");
 
     // Decodes public values from the proof's public value stream.
     let public_buffer = proof.pv_stream.unwrap();
