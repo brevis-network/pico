@@ -21,8 +21,8 @@ use crate::{
     emulator::recursion::{
         emulator::RecursionRecord,
         public_values::{
-            assert_deferred_digest_complete, assert_recursion_public_values_valid,
-            recursion_public_values_digest, RecursionPublicValues,
+            assert_complete, assert_recursion_public_values_valid, recursion_public_values_digest,
+            RecursionPublicValues,
         },
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
@@ -436,29 +436,6 @@ where
                 global_cumulative_sums.push(current_public_values.global_cumulative_sum);
             });
 
-        /*
-        Completeness check
-         */
-        // Flag is boolean.
-        builder.assert_felt_eq(flag_complete * (flag_complete - one), zero);
-
-        // Assert that `next_pc` is equal to zero (so program execution has completed)
-        builder.assert_felt_eq(flag_complete * current_pc, zero);
-
-        // Assert that start chunk is equal to 1.
-        builder.assert_felt_eq(
-            flag_complete * (compress_public_values.start_chunk - one),
-            zero,
-        );
-
-        // Should contain execution chunk
-        builder.assert_felt_eq(flag_complete * (contains_execution_chunk - one), zero);
-        // Start execution chunk is one
-        builder.assert_felt_eq(
-            flag_complete * (compress_public_values.start_execution_chunk - one),
-            zero,
-        );
-
         let global_cumulative_sum = builder.sum_digest(global_cumulative_sums);
 
         /*
@@ -481,11 +458,11 @@ where
         compress_public_values.end_reconstruct_deferred_digest = reconstruct_deferred_digest;
         compress_public_values.riscv_vk_digest = riscv_vk_digest;
 
-        // Deferred Proof Digest Completeness Verification
-        assert_deferred_digest_complete(builder, compress_public_values, flag_complete);
         compress_public_values.digest =
             recursion_public_values_digest::<CC, SC>(builder, compress_public_values);
 
+        // Completeness Verification
+        assert_complete(builder, compress_public_values, flag_complete);
         /*
         Commit public values
          */

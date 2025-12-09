@@ -31,6 +31,7 @@ use crate::{
         ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS,
     },
 };
+use itertools::Itertools;
 use p3_air::Air;
 use p3_commit::TwoAdicMultiplicativeCoset;
 use p3_field::{FieldAlgebra, PrimeField32, TwoAdicField};
@@ -132,7 +133,8 @@ where
         Initializations
         */
         // chunk numbers
-        let mut current_chunk = public_values.chunk;
+        let current_chunk = public_values.chunk;
+        let next_chunk;
         let mut current_execution_chunk = public_values.execution_chunk;
 
         // flags
@@ -204,7 +206,7 @@ where
             CC::range_check_felt(builder, public_values.chunk, MAX_LOG_NUMBER_OF_CHUNKS);
 
             // current chunk is incremented by 1
-            current_chunk = builder.eval(current_chunk + CC::F::ONE);
+            next_chunk = builder.eval(current_chunk + CC::F::ONE);
 
             // If the chunk has a "CPU" chip, then the execution chunk should be incremented by 1.
             if flag_cpu {
@@ -270,7 +272,7 @@ where
         let chips = machine
             .chunk_ordered_chips(&proofs[0].main_chip_ordering)
             .collect::<Vec<_>>();
-        for (chip, values) in chips.iter().zip(proofs[0].opened_values.iter()) {
+        for (chip, values) in chips.iter().zip_eq(proofs[0].opened_values.iter()) {
             if chip.lookup_scope() == LookupScope::Global {
                 global_cumulative_sums.push(values.global_cumulative_sum);
             }
@@ -298,7 +300,7 @@ where
             recursion_public_values.start_pc = public_values.start_pc;
             recursion_public_values.next_pc = public_values.next_pc;
             recursion_public_values.start_chunk = public_values.chunk;
-            recursion_public_values.next_chunk = current_chunk;
+            recursion_public_values.next_chunk = next_chunk;
             recursion_public_values.start_execution_chunk = public_values.execution_chunk;
             recursion_public_values.next_execution_chunk = current_execution_chunk;
             recursion_public_values.contains_execution_chunk =

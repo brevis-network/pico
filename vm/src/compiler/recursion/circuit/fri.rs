@@ -81,6 +81,21 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVar
 ) where
     CC::F: TwoAdicField,
 {
+    // observe polynomial evals to avoid a security loophole
+    // see: https://github.com/succinctlabs/sp1/security/advisories/GHSA-c873-wfhp-wx5m
+    for round in &rounds {
+        for mat in &round.domains_points_and_opens {
+            for point in &mat.values {
+                for coord in point {
+                    let point_felts = CC::ext2felt(builder, *coord);
+                    point_felts.iter().for_each(|felt| {
+                        challenger.observe(builder, *felt);
+                    });
+                }
+            }
+        }
+    }
+
     let alpha = challenger.sample_ext(builder);
 
     let fri_challenges =
@@ -226,6 +241,7 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVar
                     }
                 }
             }
+            builder.assert_ext_eq(ro[config.log_blowup], SymbolicExt::ZERO);
             ro
         })
         .collect::<Vec<_>>();
@@ -252,7 +268,7 @@ pub fn verify_challenges<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVaria
     for ((index_bits, query_proof), ro) in challenges
         .query_indices
         .iter()
-        .zip(proof.query_proofs)
+        .zip_eq(proof.query_proofs)
         .zip(reduced_openings)
     {
         let folded_eval = verify_query::<CC, SC>(

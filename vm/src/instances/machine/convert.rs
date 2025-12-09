@@ -23,6 +23,8 @@ use crate::{
     },
 };
 use anyhow::Result;
+#[cfg(not(feature = "rayon"))]
+use itertools::Itertools;
 use p3_air::Air;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::{any::type_name, borrow::Borrow, time::Instant};
@@ -196,7 +198,7 @@ macro_rules! impl_convert_machine {
                 proof
                     .proofs()
                     .par_iter()
-                    .zip(proof.vks().par_iter())
+                    .zip_eq(proof.vks().par_iter())
                     .try_for_each(|(p, vk)| {
                         let public_values: &RecursionPublicValues<_> =
                             p.public_values.as_ref().borrow();
