@@ -17,6 +17,13 @@ use crate::chips::gadgets::utils::conversions::{biguint_to_rug, rug_to_biguint};
 pub mod bls381;
 pub mod bn254;
 pub mod secp256k1;
+pub mod secp256r1;
+
+// re-export names
+pub use bls381::Bls12381;
+pub use bn254::Bn254;
+pub use secp256k1::Secp256k1;
+pub use secp256r1::Secp256r1;
 
 /// Parameters that specify a short Weierstrass curve : y^2 = x^3 + ax + b.
 pub trait WeierstrassParameters: EllipticCurveParameters {

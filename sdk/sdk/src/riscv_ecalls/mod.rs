@@ -9,6 +9,7 @@ mod keccak_permute;
 mod memory;
 mod poseidon2;
 mod secp256k1;
+mod secp256r1;
 mod sha_compress;
 mod sha_extend;
 mod sys;
@@ -59,6 +60,16 @@ pub const SECP256K1_DOUBLE: u32 = 0x00_00_01_0B;
 
 /// Executes `K256_DECOMPRESS`.
 pub const SECP256K1_DECOMPRESS: u32 = 0x00_00_01_0C;
+
+/// Executes `SECP256R1_ADD`.
+pub const SECP256R1_ADD: u32 = 0x00_01_01_30;
+
+/// Executes `SECP256R1_DOUBLE`.
+pub const SECP256R1_DOUBLE: u32 = 0x00_00_01_31;
+
+/// Executes `R256_DECOMPRESS`.
+#[allow(clippy::mistyped_literal_suffixes)]
+pub const SECP256R1_DECOMPRESS: u32 = 0x00_00_01_32;
 
 /// Executes `BN254_ADD`.
 pub const BN254_ADD: u32 = 0x00_01_01_0E;

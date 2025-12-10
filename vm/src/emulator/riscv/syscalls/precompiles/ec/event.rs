@@ -3,7 +3,10 @@ use crate::{
         chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
         gadgets::{
             curves::{
-                weierstrass::{bls381::bls12381_decompress, secp256k1::secp256k1_decompress},
+                weierstrass::{
+                    bls381::bls12381_decompress, secp256k1::secp256k1_decompress,
+                    secp256r1::secp256r1_decompress,
+                },
                 AffinePoint, CurveType, EllipticCurve,
             },
             utils::{
@@ -127,6 +130,7 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
     let decompress_fn = match E::CURVE_TYPE {
         CurveType::Bls12381 => bls12381_decompress::<E>,
         CurveType::Secp256k1 => secp256k1_decompress::<E>,
+        CurveType::Secp256r1 => secp256r1_decompress::<E>,
         _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
     };
 
