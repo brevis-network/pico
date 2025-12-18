@@ -4,6 +4,9 @@ pub mod columns;
 pub mod constraints;
 pub mod traces;
 
+#[cfg(test)]
+mod tests;
+
 /// A chip that implements addition for the opcode ADD and SUB.
 ///
 /// SUB is basically an ADD with a re-arrangment of the operands and result.
