@@ -263,7 +263,7 @@ macro_rules! create_sdk_prove_client {
                 self.write_onchain_data(output, &riscv_proof, &embed_proof)?;
                 let field_name = match field_type {
                     "kb" => {
-                        "koalabear"
+                        "kb"
                     }
                     "bb" => {
                         "babybear"
