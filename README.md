@@ -35,7 +35,7 @@ For CircleSTARK on Mersenne31, Pico currently supports the RISCV-Phase, with REC
   - [x] RISCV-Phase
   - [x] RECURSION-Phase
   - [x] EVM-Phase
-- CircleSTARK on Mersenne31 where $p = 2^{31} - 1$). Supports generating proofs for
+- CircleSTARK on Mersenne31 (prime field $p = 2^{31} - 1$). Supports generating proofs for
   - [x] RISCV-Phase
   - [ ] RECURSION-Phase
   - [ ] EVM-Phase
