@@ -4,6 +4,7 @@ pub mod bn254;
 pub mod ed25519;
 pub mod io;
 pub mod secp256k1;
+pub mod secp256r1;
 pub mod unconstrained;
 pub mod utils;
 pub mod verify;
@@ -37,7 +38,7 @@ extern "C" {
     /// Executes an Ed25519 curve decompression on the given point.
     pub fn syscall_ed_decompress(point: &mut [u8; 64]);
 
-    /// Executes an Sepc256k1 curve addition on the given points.
+    /// Executes an Secp256k1 curve addition on the given points.
     pub fn syscall_secp256k1_add(p: *mut [u32; 16], q: *const [u32; 16]);
 
     /// Executes an Secp256k1 curve doubling on the given point.
@@ -45,6 +46,15 @@ extern "C" {
 
     /// Executes an Secp256k1 curve decompression on the given point.
     pub fn syscall_secp256k1_decompress(point: &mut [u8; 64], is_odd: bool);
+
+    /// Executes an Secp256r1 curve addition on the given points.
+    pub fn syscall_secp256r1_add(p: *mut [u32; 16], q: *const [u32; 16]);
+
+    /// Executes an Secp256r1 curve doubling on the given point.
+    pub fn syscall_secp256r1_double(p: *mut [u32; 16]);
+
+    /// Executes an Secp256r1 curve decompression on the given point.
+    pub fn syscall_secp256r1_decompress(point: &mut [u8; 64], is_odd: bool);
 
     /// Executes a Bn254 curve addition on the given points.
     pub fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]);

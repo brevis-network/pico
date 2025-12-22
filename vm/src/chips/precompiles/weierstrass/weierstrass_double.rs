@@ -173,6 +173,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
     fn name(&self) -> String {
         match E::CURVE_TYPE {
             CurveType::Secp256k1 => "Secp256k1DoubleAssign".to_string(),
+            CurveType::Secp256r1 => "Secp256r1DoubleAssign".to_string(),
             CurveType::Bn254 => "Bn254DoubleAssign".to_string(),
             CurveType::Bls12381 => "Bls12381DoubleAssign".to_string(),
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
@@ -192,6 +193,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
 
         let events = match E::CURVE_TYPE {
             CurveType::Secp256k1 => input.get_precompile_events(SyscallCode::SECP256K1_DOUBLE),
+            CurveType::Secp256r1 => input.get_precompile_events(SyscallCode::SECP256R1_DOUBLE),
             CurveType::Bn254 => input.get_precompile_events(SyscallCode::BN254_DOUBLE),
             CurveType::Bls12381 => input.get_precompile_events(SyscallCode::BLS12381_DOUBLE),
             _ => panic!("Unsupported curve"),
@@ -211,6 +213,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                         let (_syscall_event, precompile_event) = event_pair;
                         let event = match precompile_event {
                             PrecompileEvent::Secp256k1Double(event)
+                            | PrecompileEvent::Secp256r1Double(event)
                             | PrecompileEvent::Bn254Double(event)
                             | PrecompileEvent::Bls12381Double(event) => event,
                             _ => unreachable!(),
@@ -280,6 +283,9 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
             match E::CURVE_TYPE {
                 CurveType::Secp256k1 => !chunk
                     .get_precompile_events(SyscallCode::SECP256K1_DOUBLE)
+                    .is_empty(),
+                CurveType::Secp256r1 => !chunk
+                    .get_precompile_events(SyscallCode::SECP256R1_DOUBLE)
                     .is_empty(),
                 CurveType::Bn254 => !chunk
                     .get_precompile_events(SyscallCode::BN254_DOUBLE)
@@ -430,6 +436,9 @@ where
         let syscall_id_felt = match E::CURVE_TYPE {
             CurveType::Secp256k1 => {
                 CB::F::from_canonical_u32(SyscallCode::SECP256K1_DOUBLE.syscall_id())
+            }
+            CurveType::Secp256r1 => {
+                CB::F::from_canonical_u32(SyscallCode::SECP256R1_DOUBLE.syscall_id())
             }
             CurveType::Bn254 => CB::F::from_canonical_u32(SyscallCode::BN254_DOUBLE.syscall_id()),
             CurveType::Bls12381 => {

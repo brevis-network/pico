@@ -30,9 +30,8 @@ use crate::{
             curves::{
                 edwards::ed25519::{Ed25519, Ed25519Parameters},
                 weierstrass::{
-                    bls381::{Bls12381, Bls381BaseField},
-                    bn254::{Bn254, Bn254BaseField},
-                    secp256k1::Secp256k1,
+                    bls381::Bls381BaseField, bn254::Bn254BaseField, Bls12381, Bn254, Secp256k1,
+                    Secp256r1,
                 },
             },
             field::secp256k1::Secp256k1BaseField,
@@ -79,11 +78,14 @@ type FpOpSecp256k1<F> = FpOpChip<F, Secp256k1BaseField>;
 type WsBn254Add<F> = WeierstrassAddAssignChip<F, Bn254>;
 type WsBls381Add<F> = WeierstrassAddAssignChip<F, Bls12381>;
 type WsSecp256k1Add<F> = WeierstrassAddAssignChip<F, Secp256k1>;
+type WsSecp256r1Add<F> = WeierstrassAddAssignChip<F, Secp256r1>;
 type WsDecompressBls381<F> = WeierstrassDecompressChip<F, Bls12381>;
 type WsDecompressSecp256k1<F> = WeierstrassDecompressChip<F, Secp256k1>;
+type WsDecompressSecp256r1<F> = WeierstrassDecompressChip<F, Secp256r1>;
 type WsDoubleBn254<F> = WeierstrassDoubleAssignChip<F, Bn254>;
 type WsDoubleBls381<F> = WeierstrassDoubleAssignChip<F, Bls12381>;
 type WsDoubleSecp256k1<F> = WeierstrassDoubleAssignChip<F, Secp256k1>;
+type WsDoubleSecp256r1<F> = WeierstrassDoubleAssignChip<F, Secp256r1>;
 
 define_chip_type!(
     RiscvChipType<F>,
@@ -96,11 +98,14 @@ define_chip_type!(
         (WsBn254Add, WsBn254Add),
         (WsBls381Add, WsBls381Add),
         (WsSecp256k1Add, WsSecp256k1Add),
+        (WsSecp256r1Add, WsSecp256r1Add),
         (WsDecompressBls381, WsDecompressBls381),
         (WsDecompressSecp256k1, WsDecompressSecp256k1),
+        (WsDecompressSecp256r1, WsDecompressSecp256r1),
         (WsDoubleBn254, WsDoubleBn254),
         (WsDoubleBls381, WsDoubleBls381),
         (WsDoubleSecp256k1, WsDoubleSecp256k1),
+        (WsDoubleSecp256r1, WsDoubleSecp256r1),
         (ShaExtend, ShaExtendChip),
         (MemoryInitialize, MemoryInitializeFinalizeChip),
         (MemoryFinalize, MemoryInitializeFinalizeChip),
@@ -142,11 +147,14 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::WsBn254Add(Default::default()),
             Self::WsBls381Add(Default::default()),
             Self::WsSecp256k1Add(Default::default()),
+            Self::WsSecp256r1Add(Default::default()),
             Self::WsDecompressBls381(Default::default()),
             Self::WsDecompressSecp256k1(Default::default()),
+            Self::WsDecompressSecp256r1(Default::default()),
             Self::WsDoubleBn254(Default::default()),
             Self::WsDoubleBls381(Default::default()),
             Self::WsDoubleSecp256k1(Default::default()),
+            Self::WsDoubleSecp256r1(Default::default()),
             Self::ShaExtend(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Initialize,
