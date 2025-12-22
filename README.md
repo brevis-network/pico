@@ -41,7 +41,7 @@ For CircleSTARK on Mersenne31, Pico currently supports the RISCV-Phase, with REC
   - [ ] EVM-Phase
 
 ## Security
-As of February 2025, Pico has not been audited and is not recommended for production use. 
+Pico has undergone a security review from [Sherlock](https://sherlock.xyz/) and is recommended for production use. The audit report is available [here](./audits).
 
 ## For Contributors
 
@@ -57,7 +57,3 @@ Pico draws inspiration from the following projects, each representing cutting-ed
 - [SP1](https://github.com/succinctlabs/sp1): Pico derives significant inspiration from SP1's chip design and their constraints. Its recursion compiler and precompiles originate from SP1.
 - [Valida](https://github.com/valida-xyz/valida): Pico's implementation of cross-table lookups is inspired by Valida's pioneering work in this area.
 - [RISC0](https://github.com/risc0/risc0): Pico's Rust toolchain is based on the one originally developed by RISC0.
-
-## Audit
-
-This branch is for auditing. 
