@@ -175,10 +175,10 @@ pub fn download_files(field: BenchField) -> Result<(), Error> {
 
     let base_url = match field {
         BenchField::KoalaBear => {
-            "https://pico-proofs.s3.us-west-2.amazonaws.com/vk-true-gnarkfiles-kb"
+            "https://pico-proofs.s3.us-west-2.amazonaws.com/gnarkfiles/v1-2-1/vk-true"
         }
         BenchField::BabyBear => {
-            "https://pico-proofs.s3.us-west-2.amazonaws.com/vk-true-gnarkfiles-bb"
+            todo!()
         }
     };
 
