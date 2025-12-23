@@ -6,6 +6,9 @@ pub mod columns;
 pub mod constraints;
 pub mod traces;
 
+#[cfg(test)]
+mod tests;
+
 /// The number of digits in the product is at most the sum of the number of digits in the
 /// multiplicands.
 const PRODUCT_SIZE: usize = 2 * WORD_SIZE;
