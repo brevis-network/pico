@@ -29,12 +29,12 @@ use std::{
 // SymbolicConstraintFolder for lookup-related variables and constraints
 // It also impls functions for SymbolicAirBuilder, thus replacing it
 pub struct SymbolicConstraintFolder<F: Field> {
-    preprocessed: RowMajorMatrix<SymbolicVariable<F>>,
-    main: RowMajorMatrix<SymbolicVariable<F>>,
-    looking: Vec<VirtualPairLookup<F>>,
-    looked: Vec<VirtualPairLookup<F>>,
-    constraints: Vec<SymbolicExpression<F>>,
-    public_values: Vec<SymbolicVariable<F>>,
+    pub(crate) preprocessed: RowMajorMatrix<SymbolicVariable<F>>,
+    pub(crate) main: RowMajorMatrix<SymbolicVariable<F>>,
+    pub(crate) looking: Vec<VirtualPairLookup<F>>,
+    pub(crate) looked: Vec<VirtualPairLookup<F>>,
+    pub(crate) constraints: Vec<SymbolicExpression<F>>,
+    pub(crate) public_values: Vec<SymbolicVariable<F>>,
 }
 
 impl<F: Field> SymbolicConstraintFolder<F> {

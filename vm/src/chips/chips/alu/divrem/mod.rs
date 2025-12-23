@@ -5,6 +5,9 @@ pub mod constraints;
 pub mod traces;
 mod utils;
 
+#[cfg(test)]
+mod tests;
+
 /// A chip that implements addition for the opcodes DIV/REM.
 #[derive(Default)]
 pub struct DivRemChip<F>(PhantomData<F>);
