@@ -214,14 +214,17 @@ impl EmulationRecord {
                 SyscallCode::BN254_DOUBLE => THRESHOLD_2POW16.min(opts.deferred),
                 SyscallCode::BLS12381_DECOMPRESS => THRESHOLD_2POW16.min(opts.deferred),
                 SyscallCode::SECP256K1_DECOMPRESS => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::SECP256R1_DECOMPRESS => THRESHOLD_2POW16.min(opts.deferred),
                 SyscallCode::ED_ADD => THRESHOLD_2POW15.min(opts.deferred),
                 SyscallCode::BN254_ADD => THRESHOLD_2POW15.min(opts.deferred),
                 SyscallCode::SECP256K1_FP_ADD => THRESHOLD_2POW16.min(opts.deferred),
                 SyscallCode::BN254_FP_ADD => THRESHOLD_2POW16.min(opts.deferred),
                 SyscallCode::SECP256K1_ADD => THRESHOLD_2POW15.min(opts.deferred),
+                SyscallCode::SECP256R1_ADD => THRESHOLD_2POW15.min(opts.deferred),
                 SyscallCode::BLS12381_FP2_ADD => THRESHOLD_2POW15.min(opts.deferred),
                 SyscallCode::BN254_FP2_ADD => THRESHOLD_2POW15.min(opts.deferred),
                 SyscallCode::SECP256K1_DOUBLE => THRESHOLD_2POW16.min(opts.deferred),
+                SyscallCode::SECP256R1_DOUBLE => THRESHOLD_2POW16.min(opts.deferred),
                 _ => opts.deferred,
             };
 

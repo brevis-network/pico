@@ -66,7 +66,7 @@ impl Display for CurveType {
 pub struct AffinePoint<E> {
     pub x: BigUint,
     pub y: BigUint,
-    _marker: std::marker::PhantomData<E>,
+    _marker: std::marker::PhantomData<fn(E) -> E>,
 }
 
 impl<E: EllipticCurveParameters> AffinePoint<E> {

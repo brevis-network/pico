@@ -15,7 +15,7 @@ use crate::{
     chips::gadgets::{
         curves::{
             edwards::ed25519::{Ed25519, Ed25519Parameters},
-            weierstrass::{bls381::Bls12381, bn254::Bn254, secp256k1::Secp256k1},
+            weierstrass::{Bls12381, Bn254, Secp256k1, Secp256r1},
         },
         field::field_op::FieldOperation,
     },
@@ -208,6 +208,10 @@ where
         Arc::new(WeierstrassAddAssignSyscall::<Secp256k1>::new()),
     );
     syscall_map.insert(
+        SyscallCode::SECP256R1_ADD,
+        Arc::new(WeierstrassAddAssignSyscall::<Secp256r1>::new()),
+    );
+    syscall_map.insert(
         SyscallCode::BN254_ADD,
         Arc::new(WeierstrassAddAssignSyscall::<Bn254>::new()),
     );
@@ -219,6 +223,10 @@ where
     syscall_map.insert(
         SyscallCode::SECP256K1_DOUBLE,
         Arc::new(WeierstrassDoubleAssignSyscall::<Secp256k1>::new()),
+    );
+    syscall_map.insert(
+        SyscallCode::SECP256R1_DOUBLE,
+        Arc::new(WeierstrassDoubleAssignSyscall::<Secp256r1>::new()),
     );
     syscall_map.insert(
         SyscallCode::BN254_DOUBLE,
@@ -236,6 +244,10 @@ where
     syscall_map.insert(
         SyscallCode::SECP256K1_DECOMPRESS,
         Arc::new(WeierstrassDecompressSyscall::<Secp256k1>::new()),
+    );
+    syscall_map.insert(
+        SyscallCode::SECP256R1_DECOMPRESS,
+        Arc::new(WeierstrassDecompressSyscall::<Secp256r1>::new()),
     );
 
     syscall_map.insert(

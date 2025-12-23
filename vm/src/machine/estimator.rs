@@ -115,6 +115,7 @@ pub struct EventSizeCapture<'a> {
     bls381_add: PrecompileEstimator,
     bls381_double: PrecompileEstimator,
     bls381_decompress: PrecompileEstimator,
+    // TODO: add secp256r1 for estimate-cost
 
     // Field operations
     fp_bn254: PrecompileEstimator,

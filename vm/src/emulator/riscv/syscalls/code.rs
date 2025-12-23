@@ -20,8 +20,11 @@ use strum_macros::EnumIter;
 #[derive(
     Debug, Copy, Clone, PartialEq, Eq, Hash, EnumIter, Ord, PartialOrd, Serialize, Deserialize,
 )]
-#[allow(non_camel_case_types)]
-#[allow(clippy::upper_case_acronyms)]
+#[allow(
+    clippy::mistyped_literal_suffixes,
+    clippy::upper_case_acronyms,
+    non_camel_case_types
+)]
 pub enum SyscallCode {
     /// Halts the program.
     HALT = 0x00_00_00_00,
@@ -139,6 +142,15 @@ pub enum SyscallCode {
 
     /// Executes the `POSEIDON2_PERMUTE` precompile.
     POSEIDON2_PERMUTE = 0x00_01_01_2F,
+
+    /// Executes the `SECP256R1_ADD` precompile.
+    SECP256R1_ADD = 0x00_01_01_30,
+
+    /// Executes the `SECP256R1_DOUBLE` precompile.
+    SECP256R1_DOUBLE = 0x00_00_01_31,
+
+    /// Executes the `SECP256R1_DECOMPRESS` precompile.
+    SECP256R1_DECOMPRESS = 0x00_00_01_32,
 }
 
 impl SyscallCode {
@@ -185,6 +197,9 @@ impl SyscallCode {
             0x00_01_01_2E => SyscallCode::SECP256K1_FP_MUL,
             0x00_00_01_1C => SyscallCode::BLS12381_DECOMPRESS,
             0x00_01_01_2F => SyscallCode::POSEIDON2_PERMUTE,
+            0x00_01_01_30 => SyscallCode::SECP256R1_ADD,
+            0x00_00_01_31 => SyscallCode::SECP256R1_DOUBLE,
+            0x00_00_01_32_u32 => SyscallCode::SECP256R1_DECOMPRESS,
             _ => panic!("invalid syscall number: {}", value),
         }
     }

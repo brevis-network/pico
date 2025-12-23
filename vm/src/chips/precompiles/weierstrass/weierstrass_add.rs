@@ -156,6 +156,7 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
     fn name(&self) -> String {
         match E::CURVE_TYPE {
             CurveType::Secp256k1 => "Secp256k1AddAssign".to_string(),
+            CurveType::Secp256r1 => "Secp256r1AddAssign".to_string(),
             CurveType::Bn254 => "Bn254AddAssign".to_string(),
             CurveType::Bls12381 => "Bls12381AddAssign".to_string(),
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
@@ -169,6 +170,7 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
     ) -> RowMajorMatrix<F> {
         let events = match E::CURVE_TYPE {
             CurveType::Secp256k1 => &input.get_precompile_events(SyscallCode::SECP256K1_ADD),
+            CurveType::Secp256r1 => &input.get_precompile_events(SyscallCode::SECP256R1_ADD),
             CurveType::Bn254 => &input.get_precompile_events(SyscallCode::BN254_ADD),
             CurveType::Bls12381 => &input.get_precompile_events(SyscallCode::BLS12381_ADD),
             _ => panic!("Unsupported curve"),
@@ -185,6 +187,7 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
 
             let event = match precompile_event {
                 PrecompileEvent::Secp256k1Add(event)
+                | PrecompileEvent::Secp256r1Add(event)
                 | PrecompileEvent::Bn254Add(event)
                 | PrecompileEvent::Bls12381Add(event) => event,
                 _ => unreachable!(),
@@ -263,6 +266,9 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
             match E::CURVE_TYPE {
                 CurveType::Secp256k1 => !chunk
                     .get_precompile_events(SyscallCode::SECP256K1_ADD)
+                    .is_empty(),
+                CurveType::Secp256r1 => !chunk
+                    .get_precompile_events(SyscallCode::SECP256R1_ADD)
                     .is_empty(),
                 CurveType::Bn254 => !chunk
                     .get_precompile_events(SyscallCode::BN254_ADD)
@@ -402,6 +408,9 @@ where
         let syscall_id_felt = match E::CURVE_TYPE {
             CurveType::Secp256k1 => {
                 CB::F::from_canonical_u32(SyscallCode::SECP256K1_ADD.syscall_id())
+            }
+            CurveType::Secp256r1 => {
+                CB::F::from_canonical_u32(SyscallCode::SECP256R1_ADD.syscall_id())
             }
             CurveType::Bn254 => CB::F::from_canonical_u32(SyscallCode::BN254_ADD.syscall_id()),
             CurveType::Bls12381 => {

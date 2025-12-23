@@ -107,8 +107,8 @@ pub fn secp256k1_sqrt(n: &BigUint) -> BigUint {
     let mut bytes = [0_u8; 32];
     bytes[32 - be_bytes.len()..].copy_from_slice(&be_bytes);
     let fe = FieldElement::from_bytes(&bytes.into()).unwrap();
-    let result_bytes = fe.sqrt().unwrap().normalize().to_bytes();
-    BigUint::from_be_bytes(&result_bytes as &[u8])
+    let result_bytes = fe.sqrt().expect("bad sqrt").normalize().to_bytes();
+    BigUint::from_be_bytes(&result_bytes)
 }
 
 #[cfg(test)]
@@ -118,7 +118,7 @@ mod tests {
     use rand::thread_rng;
 
     #[test]
-    fn test_secp256k_sqrt() {
+    fn test_secp256k1_sqrt() {
         let mut rng = thread_rng();
         for _ in 0..10 {
             // Check that sqrt(x^2)^2 == x^2
