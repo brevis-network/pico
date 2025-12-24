@@ -300,12 +300,21 @@ where
     let mut folded_eval: Ext<_, _> = builder.constant(CC::EF::ZERO);
     let two_adic_generator: Felt<_> = builder.constant(CC::F::two_adic_generator(log_max_height));
 
-    // TODO: fix expreversebits address bug to avoid needing to allocate a new variable.
-    let mut x = CC::exp_reverse_bits(
-        builder,
-        two_adic_generator,
-        index_bits[..log_max_height].to_vec(),
-    );
+    // Initialize x with the two-adic generator and compute the reverse bits exponentiation
+    // directly to avoid allocating a new variable.
+    let mut x = two_adic_generator;
+    let power_bits = &index_bits[..log_max_height];
+    let bit_len = power_bits.len();
+    
+    // Implement exp_reverse_bits logic directly to reuse the x variable
+    for i in 1..=bit_len {
+        let index = bit_len - i;
+        let bit = power_bits[index];
+        let x_squared = builder.eval(x * x);
+        // Use select_chain_f to choose between x_squared and x based on bit
+        let selected = CC::select_chain_f(builder, bit, [x_squared], [x]);
+        x = selected[0];
+    }
 
     for (offset, log_folded_height, commit, step, beta) in izip!(
         0..,
