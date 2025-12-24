@@ -337,7 +337,7 @@ pub enum EmulatorMode {
 }
 
 /// save the *old* value (or a `None` marker) into `memory_snapshot`.
-// TODO: may manually diff registers and page_table
+/// Only snapshot during Simple mode (used by emulate_state() to build diffs).
 #[inline(always)]
 fn snapshot_addr_if_needed(
     _mode: &RiscvEmulatorMode,
@@ -345,7 +345,9 @@ fn snapshot_addr_if_needed(
     addr: u32,
     entry: &Entry<MemoryRecord>,
 ) {
-    // if !matches!(mode, RiscvEmulatorMode::Snapshot) { return; }
+    if !matches!(_mode, RiscvEmulatorMode::Simple) {
+        return;
+    }
 
     snapshot.entry(addr).or_insert_with(|| match entry {
         Entry::Occupied(e) => Some(*e.get()),
