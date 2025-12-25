@@ -785,6 +785,38 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                 global_height: vec![Some(19)],
                 riscv_poseidon2_height: vec![Some(17)],
             },
+            // maximal riscv shape for CHUNK_SIZE=2^20
+            RiscvShapeSpec {
+                cpu_height: vec![Some(20)],
+                add_sub_height: vec![Some(20)],
+                lt_height: vec![Some(20)],
+                bitwise_height: vec![Some(20)],
+                shift_right_height: vec![Some(20)],
+                shift_left_height: vec![Some(20)],
+                syscall_riscv_height: vec![Some(15), Some(20)],
+                memory_local_height: vec![Some(18)],
+                mul_height: vec![Some(20)],
+                divrem_height: vec![Some(20)],
+                memory_read_write_height: vec![Some(20)],
+                global_height: vec![Some(20)],
+                riscv_poseidon2_height: vec![Some(18)],
+            },
+            // maximal riscv shape for CHUNK_SIZE=2^21
+            RiscvShapeSpec {
+                cpu_height: vec![Some(21)],
+                add_sub_height: vec![Some(21)],
+                lt_height: vec![Some(21)],
+                bitwise_height: vec![Some(21)],
+                shift_right_height: vec![Some(21)],
+                shift_left_height: vec![Some(21)],
+                syscall_riscv_height: vec![Some(16), Some(20)],
+                memory_local_height: vec![Some(19)],
+                mul_height: vec![Some(21)],
+                divrem_height: vec![Some(21)],
+                memory_read_write_height: vec![Some(21)],
+                global_height: vec![Some(21)],
+                riscv_poseidon2_height: vec![Some(19)],
+            },
             // fibonacci
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],

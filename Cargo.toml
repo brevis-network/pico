@@ -3,7 +3,7 @@ members = ["derive", "vm", "sdk/*", "scripts", "gnark/field-ffi", "perf"]
 resolver = "2"
 
 [workspace.package]
-version = "1.2.1"
+version = "1.2.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 keywords = ["zkvm", "plonky3", "stark", "FRI"]
