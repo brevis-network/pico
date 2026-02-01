@@ -11,3 +11,4 @@ categories = { workspace = true }
 pico-sdk = { path = "../../../sdk/sdk", default-features = false, features = ["bb"] }
 alloy-sol-types = "0.8.0"
 fibonacci-lib ={ path = "../lib"}
+alloy-primitives = { version = "1.5.4", default-features = false }

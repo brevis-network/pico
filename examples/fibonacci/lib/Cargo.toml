@@ -9,3 +9,4 @@ categories = { workspace = true }
 
 [dependencies]
 alloy-sol-types = "0.8.0"
+alloy-primitives = { version = "1.5.4", default-features = false }

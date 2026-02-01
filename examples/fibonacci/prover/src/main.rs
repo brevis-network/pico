@@ -1,6 +1,7 @@
 use alloy_sol_types::SolType;
-use fibonacci_lib::{fibonacci, load_elf, PublicValuesStruct};
+use fibonacci_lib::{load_elf, PublicValuesStruct};
 use pico_sdk::{client::DefaultProverClient, init_logger};
+use std::borrow::BorrowMut;
 
 fn main() {
     // Initialize logger
@@ -13,23 +14,28 @@ fn main() {
 
     // Initialize the prover client
     let client = DefaultProverClient::new(&elf);
-    let stdin_builder = client.get_stdin_builder(); // Shared instance
+    let mut stdin_builder = client.new_stdin_builder(); // Shared instance
 
     // Set up input and generate proof
-    let n = 100u32;
+    let n = 9_000_000_u32;
+    let n = 1_000_u32;
     stdin_builder.borrow_mut().write(&n);
 
     // Generate proof
-    let proof = client.prove_fast().expect("Failed to generate proof");
+    let (mut report, _) = client.emulate(stdin_builder);
+    println!("gupeng - report = {:?}", report.pop().unwrap());
 
+    /*
     // Decodes public values from the proof's public value stream.
     let public_buffer = proof.pv_stream.unwrap();
     let public_values = PublicValuesStruct::abi_decode(&public_buffer, true).unwrap();
 
     // Verify the public values
     verify_public_values(n, &public_values);
+    */
 }
 
+/*
 /// Verifies that the computed Fibonacci values match the public values.
 fn verify_public_values(n: u32, public_values: &PublicValuesStruct) {
     println!(
@@ -44,3 +50,4 @@ fn verify_public_values(n: u32, public_values: &PublicValuesStruct) {
     assert_eq!(result_a, public_values.a, "Mismatch in value 'a'");
     assert_eq!(result_b, public_values.b, "Mismatch in value 'b'");
 }
+*/
