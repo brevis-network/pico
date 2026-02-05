@@ -225,3 +225,52 @@ impl<F: Field> GlobalInteractionOperation<F> {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_koala_bear::KoalaBear;
+    use p3_uni_stark::{Entry, SymbolicVariable};
+
+    #[test]
+    fn test_global_interaction_gadget_simple_eval() {
+        let var = SymbolicVariable::new(Entry::Main { offset: 0 }, 0);
+        let values = [var; 7];
+
+        // create a new gadget
+        let gadget = GlobalInteractionOperation {
+            offset_bits: [var; 8],
+            x_coordinate: SepticBlock([var; 7]),
+            y_coordinate: SepticBlock([var; 7]),
+            y6_bit_decomp: [var; 30],
+            range_check_witness: var,
+            poseidon2_input: [var; 16],
+            poseidon2_output: [var; 16],
+        };
+
+        // create a constraint builder
+        let mut builder =
+            SymbolicConstraintFolder::new(0, size_of::<GlobalInteractionOperation<u8>>());
+
+        // evaluate with this gadget
+        GlobalInteractionOperation::<KoalaBear>::eval_single_digest(
+            &mut builder,
+            values.map(|v| v.into()),
+            gadget,
+            Default::default(),
+            Default::default(),
+            var,
+            var,
+        );
+
+        // check the constraints and public values
+        assert_eq!(builder.constraints.len(), 72);
+        assert_eq!(builder.public_values.len(), 231);
+
+        // check the looking (sending) and looked (receiving) lookups
+        let (looking, looked) = builder.lookups();
+        assert_eq!(looking.len(), 2);
+        assert_eq!(looked.len(), 0);
+    }
+}

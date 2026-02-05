@@ -160,3 +160,47 @@ impl<F: Field> Add5Operation<F> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_koala_bear::KoalaBear;
+    use p3_uni_stark::{Entry, SymbolicVariable};
+
+    #[test]
+    fn test_add5_gadget_simple_eval() {
+        let var = SymbolicVariable::new(Entry::Main { offset: 0 }, 0);
+        let word = Word([var; 4]);
+
+        // create a new gadget
+        let gadget = Add5Operation {
+            value: word,
+            is_carry_0: word,
+            is_carry_1: word,
+            is_carry_2: word,
+            is_carry_3: word,
+            is_carry_4: word,
+            carry: word,
+        };
+        // create a constraint builder
+        let mut builder = SymbolicConstraintFolder::new(0, size_of::<Add5Operation<u8>>());
+
+        // evaluate with this gadget
+        Add5Operation::<KoalaBear>::eval(
+            &mut builder,
+            &[word, word, word, word, word],
+            var,
+            gadget,
+        );
+
+        // check the constraints and public values
+        assert_eq!(builder.constraints.len(), 33);
+        assert_eq!(builder.public_values.len(), 231);
+
+        // check the looking (sending) and looked (receiving) lookups
+        let (looking, looked) = builder.lookups();
+        assert_eq!(looking.len(), 12);
+        assert_eq!(looked.len(), 0);
+    }
+}

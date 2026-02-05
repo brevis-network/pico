@@ -236,3 +236,60 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             .assert_septic_ext_eq(final_digest.y, next_initial_digest.y);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{machine::folder::SymbolicConstraintFolder, primitives::consts::PERMUTATION_WIDTH};
+    use p3_koala_bear::KoalaBear;
+    use p3_uni_stark::{Entry, SymbolicVariable};
+    use std::mem::size_of;
+
+    #[test]
+    fn test_eval_accumulation_simple_eval() {
+        let var = SymbolicVariable::new(Entry::Main { offset: 0 }, 0);
+
+        // create a interaction gadget
+        let interaction_gadget = GlobalInteractionOperation::<SymbolicVariable<KoalaBear>> {
+            offset_bits: [var; 8],
+            x_coordinate: SepticBlock([var; 7]),
+            y_coordinate: SepticBlock([var; 7]),
+            y6_bit_decomp: [var; 30],
+            range_check_witness: var,
+            poseidon2_input: [var; PERMUTATION_WIDTH],
+            poseidon2_output: [var; PERMUTATION_WIDTH],
+        };
+
+        // create an accumulation gadget
+        let accumulation_gadget = GlobalAccumulationOperation::<SymbolicVariable<KoalaBear>, 1> {
+            initial_digest: [SepticBlock([var; 7]); 2],
+            sum_checker: [SepticBlock([var; 7])],
+            cumulative_sum: [[SepticBlock([var; 7]); 2]],
+        };
+
+        // create a constraint builder
+        let mut builder = SymbolicConstraintFolder::new(
+            0,
+            size_of::<GlobalAccumulationOperation<KoalaBear, 1>>(),
+        );
+
+        // evaluate with this gadget
+        GlobalAccumulationOperation::<KoalaBear, 1>::eval_accumulation(
+            &mut builder,
+            [interaction_gadget],
+            [var],
+            [var],
+            accumulation_gadget,
+            accumulation_gadget,
+        );
+
+        // check the constraints and public values
+        assert_eq!(builder.constraints.len(), 65);
+        assert_eq!(builder.public_values.len(), 231);
+
+        // check the looking (sending) and looked (receiving) lookups
+        let (looking, looked) = builder.lookups();
+        assert_eq!(looking.len(), 0);
+        assert_eq!(looked.len(), 0);
+    }
+}

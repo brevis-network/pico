@@ -68,3 +68,37 @@ impl<F: Field> IsZeroGadget<F> {
             .assert_zero(a.clone());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_koala_bear::KoalaBear;
+    use p3_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
+
+    #[test]
+    fn test_is_zero_gadget_simple_eval() {
+        let expr = SymbolicExpression::Constant(KoalaBear::ZERO);
+        let var = SymbolicVariable::new(Entry::Main { offset: 0 }, 0);
+
+        // create a new gadget
+        let gadget = IsZeroGadget {
+            inverse: var,
+            result: var,
+        };
+        // create a constraint builder
+        let mut builder = SymbolicConstraintFolder::new(0, size_of::<IsZeroGadget<u8>>());
+
+        // evaluate with this gadget
+        IsZeroGadget::<KoalaBear>::eval(&mut builder, expr, gadget, Default::default());
+
+        // check the constraints and public values
+        assert_eq!(builder.constraints.len(), 3);
+        assert_eq!(builder.public_values.len(), 231);
+
+        // check the looking (sending) and looked (receiving) lookups
+        let (looking, looked) = builder.lookups();
+        assert_eq!(looking.len(), 0);
+        assert_eq!(looked.len(), 0);
+    }
+}
