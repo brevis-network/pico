@@ -116,7 +116,7 @@ mod tests {
         let mut builder = SymbolicConstraintFolder::new(0, size_of::<IsZeroWordGadget<u8>>());
 
         // evaluate with this gadget
-        IsZeroWordGadget::<KoalaBear>::eval(&mut builder, word.into(), gadget, Default::default());
+        IsZeroWordGadget::<KoalaBear>::eval(&mut builder, word, gadget, Default::default());
 
         // check the constraints and public values
         assert_eq!(builder.constraints.len(), 19);
