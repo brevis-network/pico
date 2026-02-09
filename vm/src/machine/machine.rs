@@ -226,9 +226,22 @@ where
     }
 
     pub fn commit(&self, record: &C::Record) -> Option<MainTraceCommitments<SC>> {
+        self.commit_with_jagged(record, false)
+    }
+
+    /// Commit with optional Jagged trace optimization
+    pub fn commit_with_jagged(
+        &self,
+        record: &C::Record,
+        use_jagged: bool,
+    ) -> Option<MainTraceCommitments<SC>> {
         let chips_and_main_traces = self.prover.generate_main(&self.chips(), record);
-        self.prover
-            .commit_main(&self.config(), record, chips_and_main_traces)
+        self.prover.commit_main_with_jagged(
+            &self.config(),
+            record,
+            chips_and_main_traces,
+            use_jagged,
+        )
     }
 
     /// prove a batch of records with a single pk

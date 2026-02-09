@@ -5,6 +5,8 @@ pub mod estimator;
 pub mod extension;
 pub mod field;
 pub mod folder;
+pub mod jagged_test;
+pub mod jagged_trace;
 pub mod keys;
 pub mod logger;
 pub mod lookup;

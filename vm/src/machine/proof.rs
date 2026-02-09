@@ -213,11 +213,26 @@ pub struct BaseCommitments<Com> {
 }
 
 pub struct MainTraceCommitments<SC: StarkGenericConfig> {
-    pub main_traces: Arc<[RowMajorMatrix<SC::Val>]>,
+    /// The mode of commitment: traditional or jagged
+    pub mode: CommitmentMode,
+    /// The jagged trace data, if using Jagged mode
+    pub jagged_traces: Option<crate::machine::jagged_trace::JaggedTraceMle<SC::Val>>,
+    /// The traditional trace data, kept for backwards compatibility
+    pub main_traces: Option<Arc<[RowMajorMatrix<SC::Val>]>>,
     pub main_chip_ordering: Arc<HashMap<String, usize>>,
     pub commitment: Com<SC>,
-    pub data: PcsProverData<SC>,
+    pub data: Option<PcsProverData<SC>>,
     pub public_values: Arc<[SC::Val]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitmentMode {
+    /// Use traditional trace commitments
+    Traditional,
+    /// Use jagged trace commitments
+    Jagged,
+    /// Use hybrid approach (both traditional and jagged)
+    Hybrid,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -229,19 +229,40 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         record: &C::Record,
         chips_and_main: Vec<(String, RowMajorMatrix<SC::Val>)>,
     ) -> Option<MainTraceCommitments<SC>> {
+        self.commit_main_with_jagged(config, record, chips_and_main, false)
+    }
+
+    /// Commit main traces with optional Jagged support
+    pub fn commit_main_with_jagged(
+        &self,
+        config: &SC,
+        record: &C::Record,
+        chips_and_main: Vec<(String, RowMajorMatrix<SC::Val>)>,
+        use_jagged: bool,
+    ) -> Option<MainTraceCommitments<SC>> {
         if chips_and_main.is_empty() {
             return None;
         }
 
-        let pcs = config.pcs();
-        // todo optimize: parallel
-        let domains_and_traces = chips_and_main
-            .clone()
-            .into_iter()
-            .map(|(_name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
-            .collect::<Vec<_>>();
+        // Extract traces for potential Jagged conversion
+        let traces_only: Vec<RowMajorMatrix<SC::Val>> = chips_and_main
+            .iter()
+            .map(|(_name, trace)| trace.clone())
+            .collect();
 
-        let (commitment, data) = pcs.commit(domains_and_traces);
+        // Try to convert to Jagged if requested
+        let (jagged_traces, _metadata) = if use_jagged {
+            if let Some((jagged, meta)) = crate::machine::jagged_trace::convert_traces_to_jagged(
+                &traces_only,
+                0.8, // Use Jagged if compression ratio < 80%
+            ) {
+                (Some(jagged), Some(meta))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
 
         let main_chip_ordering = chips_and_main
             .iter()
@@ -250,18 +271,53 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             .collect::<HashMap<_, _>>()
             .into();
 
-        let main_traces = chips_and_main
-            .into_iter()
-            .map(|(_, trace)| trace)
-            .collect::<Arc<[_]>>();
+        // Determine commitment mode based on Jagged conversion success
+        if let Some(jagged) = jagged_traces {
+            // Successfully converted to Jagged - create a dummy commitment for now
+            // In a real implementation, this would be the Jagged PCS commitment
+            let pcs = config.pcs();
+            let domains_and_traces = chips_and_main
+                .clone()
+                .into_iter()
+                .map(|(_name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
+                .collect::<Vec<_>>();
+            let (commitment, _) = pcs.commit(domains_and_traces);
 
-        Some(MainTraceCommitments {
-            main_traces,
-            main_chip_ordering,
-            commitment,
-            data,
-            public_values: record.public_values().into(),
-        })
+            Some(MainTraceCommitments {
+                mode: crate::machine::proof::CommitmentMode::Jagged,
+                jagged_traces: Some(jagged),
+                main_traces: None,
+                main_chip_ordering,
+                commitment, // Use traditional commitment as placeholder for now
+                data: None,
+                public_values: record.public_values().into(),
+            })
+        } else {
+            // Use traditional approach
+            let pcs = config.pcs();
+            let domains_and_traces = chips_and_main
+                .clone()
+                .into_iter()
+                .map(|(_name, trace)| (pcs.natural_domain_for_degree(trace.height()), trace))
+                .collect::<Vec<_>>();
+
+            let (commitment, data) = pcs.commit(domains_and_traces);
+
+            let main_traces = chips_and_main
+                .into_iter()
+                .map(|(_, trace)| trace)
+                .collect::<Arc<[_]>>();
+
+            Some(MainTraceCommitments {
+                mode: crate::machine::proof::CommitmentMode::Traditional,
+                jagged_traces: None,
+                main_traces: Some(main_traces),
+                main_chip_ordering,
+                commitment,
+                data: Some(data),
+                public_values: record.public_values().into(),
+            })
+        }
     }
 
     /// generate chips permutation traces and cumulative sums
@@ -364,7 +420,10 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         C: Air<ProverConstraintFolder<SC>>,
     {
         let chips = order_chips::<SC, C>(chips, &data.main_chip_ordering).collect_vec();
-        let traces = data.main_traces;
+        let traces = data
+            .main_traces
+            .as_ref()
+            .expect("Main traces required for proving");
         assert_eq!(chips.len(), traces.len());
 
         let main_degrees = traces.iter().map(|t| t.height()).collect_vec();
@@ -395,7 +454,7 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             .generate_permutation(
                 &chips,
                 pk,
-                &traces,
+                traces.as_ref(),
                 &regional_permutation_challenges,
                 chunk_index,
             );
@@ -451,7 +510,7 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
         // have to be thread-safe
         let preprocessed_chip_ordering = &pk.preprocessed_chip_ordering;
         let preprocessed_prover_data = &pk.preprocessed_prover_data;
-        let data_data = &data.data;
+        let data_data = data.data.as_ref().expect("Main trace data required");
         let perm_data = &permutation_data;
 
         let quotient_values = {
@@ -580,7 +639,10 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
 
         let rounds = vec![
             (&pk.preprocessed_prover_data, preprocessed_opening_points),
-            (&data.data, main_opening_points),
+            (
+                data.data.as_ref().expect("Main trace data required"),
+                main_opening_points,
+            ),
             (&permutation_data, permutation_opening_points),
             (&quotient_data, quotient_opening_points),
         ];
