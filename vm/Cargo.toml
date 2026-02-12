@@ -101,6 +101,11 @@ tikv-jemallocator = { workspace = true, optional = true }
 num = { workspace = true, features = ["rand"] }
 rand.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+memmap2 = { version = "0.9", optional = true }
+libc = { version = "0.2", optional = true }
+
+
 [features]
 default = ["rayon", "nightly-features", "strict"]
 bigint-rug = ["rug"] # curves
@@ -115,3 +120,6 @@ nightly-features = [
     "p3-poseidon2/nightly-features",
 ]
 strict = []
+# Use memory-mapped storage for ContiguousRiscvMemory (Unix only)
+# Enables fast reset via madvise(MADV_DONTNEED)
+mmap-memory = ["dep:memmap2", "dep:libc"]

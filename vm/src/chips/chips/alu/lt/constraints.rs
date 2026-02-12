@@ -1,3 +1,5 @@
+#![allow(clippy::assign_op_pattern)]
+
 use super::{columns::LtCols, traces::LtChip, LtValueCols};
 use crate::{
     compiler::{
@@ -106,10 +108,10 @@ where
             ) {
                 // Once the byte flag was set to one, we turn off the quality check flag.
                 // We can do this by calculating the sum of the flags since only `1` is set to `1`.
-                is_not_equal += flag.into();
+                is_not_equal = is_not_equal + flag.into();
 
-                b_cmp_byte += b_byte.clone() * flag;
-                c_cmp_byte += c_byte.clone() * flag;
+                b_cmp_byte = b_cmp_byte + b_byte.clone() * flag;
+                c_cmp_byte = c_cmp_byte + c_byte.clone() * flag;
 
                 // If inequality is not visited, assert that the bytes are equal.
                 builder

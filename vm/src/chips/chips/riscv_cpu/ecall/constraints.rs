@@ -130,7 +130,7 @@ impl<F: Field> CpuChip<F> {
             builder
                 .when(local.opcode_selector.is_ecall)
                 .assert_bool(*bit);
-            bitmap_sum += (*bit).into();
+            bitmap_sum = bitmap_sum.clone() + (*bit).into();
         }
         // When the syscall is COMMIT, there should be one set bit.
         builder

@@ -8,3 +8,4 @@ categories = { workspace = true }
 
 [dependencies]
 pico-sdk = { workspace = true }
+bincode = { workspace = true }

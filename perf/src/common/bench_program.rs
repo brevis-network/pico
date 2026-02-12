@@ -21,6 +21,16 @@ pub const PROGRAMS: &[BenchProgram] = &[
         input: Some("pure-fibonacci"),
     },
     BenchProgram {
+        name: "bn",
+        elf: "./perf/bench_data/bn-elf",
+        input: None,
+    },
+    BenchProgram {
+        name: "bls12381",
+        elf: "./perf/bench_data/bls12381-elf",
+        input: None,
+    },
+    BenchProgram {
         name: "tendermint",
         elf: "./perf/bench_data/tendermint-elf",
         input: None,
@@ -60,13 +70,23 @@ pub const PROGRAMS: &[BenchProgram] = &[
         elf: "./perf/bench_data/reth-elf",
         input: Some("./perf/bench_data/reth-22745330.bin"),
     },
+    BenchProgram {
+        name: "reth-23993050",
+        elf: "./perf/bench_data/reth-elf",
+        input: Some("./perf/bench_data/reth-23993050.bin"),
+    },
+    BenchProgram {
+        name: "simple-fib",
+        elf: "./examples/fibonacci/app/elf/riscv32im-pico-zkvm-elf",
+        input: None,
+    },
 ];
 
 fn load_input(input: &str) -> Result<Vec<u8>, Error> {
     if input == "fibonacci-300kn" {
         Ok(bincode::serialize(&300_000u32)?)
     } else if input == "pure-fibonacci" {
-        Ok(bincode::serialize(&20u32)?)
+        Ok(bincode::serialize(&0u32)?)
     } else {
         Ok(fs::read(input)?)
     }

@@ -97,7 +97,8 @@ impl<F: Field> FieldWordRangeChecker<F> {
                 for bit in cols.most_sig_byte_decomp[one_start_idx..7].iter() {
                     upper_bits_sum = upper_bits_sum + *bit;
                 }
-                upper_bits_sum -= AB::F::from_canonical_u32(7 - one_start_idx as u32).into();
+                upper_bits_sum =
+                    upper_bits_sum.clone() - AB::Expr::from_canonical_u32(7 - one_start_idx as u32);
                 IsZeroGadget::<F>::eval(
                     builder,
                     upper_bits_sum,

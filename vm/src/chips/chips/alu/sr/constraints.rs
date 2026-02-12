@@ -1,3 +1,5 @@
+#![allow(clippy::assign_op_pattern)]
+
 use super::{columns::ShiftRightCols, traces::ShiftRightChip};
 use crate::{
     chips::chips::alu::sr::columns::ShiftRightValueCols,
@@ -52,7 +54,7 @@ where
                 let mut c_byte_sum = zero.clone();
                 for i in 0..BYTE_SIZE {
                     let val: CB::Expr = CB::F::from_canonical_u32(1 << i).into();
-                    c_byte_sum += val * c_least_sig_byte[i];
+                    c_byte_sum = c_byte_sum.clone() + val * c_least_sig_byte[i];
                 }
                 builder.assert_eq(c_byte_sum, c[0]);
 
@@ -62,7 +64,8 @@ where
                 // of bits to shift.
                 let mut num_bits_to_shift = zero.clone();
                 for i in 0..3 {
-                    num_bits_to_shift += c_least_sig_byte[i] * CB::F::from_canonical_u32(1 << i);
+                    num_bits_to_shift = num_bits_to_shift.clone()
+                        + c_least_sig_byte[i] * CB::F::from_canonical_u32(1 << i);
                 }
                 for i in 0..BYTE_SIZE {
                     builder
@@ -129,14 +132,15 @@ where
                 for i in 0..BYTE_SIZE {
                     let val: CB::Expr = F::from_canonical_u32(1u32 << (8 - i)).into();
 
-                    carry_multiplier += val * shift_by_n_bits[i];
+                    carry_multiplier = carry_multiplier + val * shift_by_n_bits[i];
                 }
 
                 // The 3-bit number represented by the 3 least significant bits of c equals the number
                 // of bits to shift.
                 let mut num_bits_to_shift = zero.clone();
                 for i in 0..3 {
-                    num_bits_to_shift += c_least_sig_byte[i] * CB::F::from_canonical_u32(1 << i);
+                    num_bits_to_shift = num_bits_to_shift.clone()
+                        + c_least_sig_byte[i] * CB::F::from_canonical_u32(1 << i);
                 }
 
                 // Calculate ShrCarry.
@@ -155,7 +159,7 @@ where
                 for i in (0..LONG_WORD_SIZE).rev() {
                     let mut v: CB::Expr = shr_carry_output_shifted_byte[i].into();
                     if i + 1 < LONG_WORD_SIZE {
-                        v += shr_carry_output_carry[i + 1] * carry_multiplier.clone();
+                        v = v.clone() + shr_carry_output_carry[i + 1] * carry_multiplier.clone();
                     }
                     builder.assert_eq(v, bit_shift_result[i]);
                 }

@@ -226,16 +226,22 @@ where
 
                             // Add remainder.
                             if i < WORD_SIZE {
-                                *quotient_plus_remainder_times += local_remainder[i].into();
+                                *quotient_plus_remainder_times = quotient_plus_remainder_times
+                                    .clone()
+                                    + local_remainder[i].into();
                             } else {
                                 // If rem is negative, add 0xff to the upper 4 bytes.
-                                *quotient_plus_remainder_times += sign_extension.clone();
+                                *quotient_plus_remainder_times =
+                                    quotient_plus_remainder_times.clone() + sign_extension.clone();
                             }
 
                             // Propagate carry.
-                            *quotient_plus_remainder_times -= local_carry[i] * base;
+                            *quotient_plus_remainder_times =
+                                quotient_plus_remainder_times.clone() - local_carry[i] * base;
                             if i > 0 {
-                                *quotient_plus_remainder_times += local_carry[i - 1].into();
+                                *quotient_plus_remainder_times = quotient_plus_remainder_times
+                                    .clone()
+                                    + local_carry[i - 1].into();
                             }
                         }
 
@@ -291,8 +297,8 @@ where
                 let mut rem_byte_sum = zero.clone();
                 let mut b_byte_sum = zero.clone();
                 for i in 0..WORD_SIZE {
-                    rem_byte_sum += local_remainder[i].into();
-                    b_byte_sum += local_b[i].into();
+                    rem_byte_sum = rem_byte_sum.clone() + local_remainder[i].into();
+                    b_byte_sum = b_byte_sum.clone() + local_b[i].into();
                 }
 
                 // 1. If remainder < 0, then b < 0.

@@ -15,7 +15,6 @@ use crate::{
         riscv::{
             emulator::{EmulationDeferredState, EmulationError, SharedDeferredState},
             record::EmulationRecord,
-            riscv_emulator::ParOptions,
             state::RiscvEmulationState,
         },
         stdin::EmulatorStdin,
@@ -39,16 +38,13 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core_affinity;
-use crossbeam::{
-    channel as cb,
-    channel::{bounded, unbounded},
-};
+use crossbeam::channel::{bounded, unbounded};
 use p3_air::Air;
 use p3_field::PrimeField32;
 use p3_maybe_rayon::prelude::*;
 use p3_symmetric::Permutation;
-use std::{collections::BTreeMap, env, sync::Mutex, thread, time::Instant};
-use tracing::info;
+use std::{collections::BTreeMap, sync::Mutex, thread, time::Instant};
+use tracing::{debug, info};
 
 pub type RiscvChips<SC> = RiscvChipType<Val<SC>>;
 
@@ -113,79 +109,33 @@ where
             self.pk.clone(),
             self.vk.clone(),
         );
-        let (tx, rx) = cb::bounded::<TracegenMessage>(256);
-        let consumer = thread::spawn(move || {
-            let mut total_cycles = 0_u64;
+        let setup_time = Instant::now();
+        let mut emulator = MetaEmulator::setup_riscv(&witness, None);
+        println!("Emulator Setup time: {:?}", setup_time.elapsed());
+        let mut batch_num = 1;
+        let mut all_reports = Vec::new();
+        let start_time_total = Instant::now();
+        let total_cycles = loop {
+            let start_local = Instant::now();
 
-            for msg in rx {
-                match msg {
-                    TracegenMessage::Record(_r) => {
-                        // let stats = r.stats();
-                        // for (key, value) in &stats {
-                        //     println!("|- {:<25}: {}", key, value);
-                        // }
-                    }
-                    TracegenMessage::CycleCount(c) => total_cycles = c,
-                }
+            let report = emulator.next_record_batch(&mut |_record| {});
+            let done = report.done;
+            all_reports.push(report);
+
+            debug!(
+                "--- Generate riscv records for batch-{} in {:?}",
+                batch_num,
+                start_local.elapsed(),
+            );
+
+            if done {
+                break emulator.cycles();
             }
-            let ret = 1;
-            (total_cycles, ret)
-        });
 
-        let num_threads = env::var("NUM_THREADS")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(1);
-        println!("Emulator trace threads: {}", num_threads);
-        let start_time = Instant::now();
+            batch_num += 1;
+        };
 
-        {
-            use std::sync::Arc;
-            let cores = core_affinity::get_core_ids().unwrap();
-            assert!(num_threads <= cores.len());
-            let tx_arc = Arc::new(tx);
-
-            (0..num_threads).into_par_iter().for_each(|tid| {
-                // Note: Assigning specific CPU cores to emulators can lead to reduced performance.
-                // let core_id = cores[tid];
-                // core_affinity::set_for_current(core_id);
-
-                let tx = tx_arc.clone();
-
-                let par_opts = ParOptions {
-                    num_threads: num_threads as u32,
-                    thread_id: tid as u32,
-                };
-
-                let mut emu = MetaEmulator::setup_riscv(&witness, Some(par_opts));
-
-                let thread_start = Instant::now();
-                loop {
-                    let report = emu.next_record_batch(&mut |_rec| {});
-
-                    if report.done {
-                        let thread_elapsed = thread_start.elapsed().as_secs_f64();
-                        let thread_cycles = emu.cycles();
-
-                        println!(
-                            "[Thread {}] Done. Cycles: {} | Time: {:.3}s | Speed: {:.3} MHz",
-                            tid,
-                            thread_cycles,
-                            thread_elapsed,
-                            thread_cycles as f64 / thread_elapsed / 1e6
-                        );
-                        if tid == 0 {
-                            tx.send(TracegenMessage::CycleCount(emu.cycles())).unwrap();
-                        }
-                        break;
-                    }
-                }
-            });
-            drop(tx_arc);
-        }
-
-        let (total_cycles, _all) = consumer.join().unwrap();
-        let elapsed_secs = start_time.elapsed().as_secs_f64();
+        let elapsed_secs = start_time_total.elapsed().as_secs_f64();
         let hz = total_cycles as f64 / elapsed_secs;
         println!("Final Total cycles: {}", total_cycles);
         println!("Final Elapsed time: {:.3} seconds", elapsed_secs);

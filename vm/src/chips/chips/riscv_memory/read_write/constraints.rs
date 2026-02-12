@@ -1,3 +1,5 @@
+#![allow(clippy::assign_op_pattern)]
+
 use super::{
     super::event::MemoryAccessPosition,
     columns::{MemoryChipCols, MemoryInstructionCols, NUM_MEMORY_CHIP_COLS},
@@ -387,7 +389,8 @@ impl<F: Field> MemoryReadWriteChip<F> {
             builder
                 .when(is_mem.clone())
                 .assert_bool(local.most_sig_byte_decomp[i]);
-            recomposed_byte += local.most_sig_byte_decomp[i] * CB::Expr::from_canonical_u8(1 << i);
+            recomposed_byte = recomposed_byte
+                + local.most_sig_byte_decomp[i] * CB::Expr::from_canonical_u8(1 << i);
         }
         builder
             .when(local.instruction.is_lb)

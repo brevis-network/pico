@@ -66,7 +66,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         // Verify that exactly one of the octet columns is true.
         let mut octet_sum = CB::Expr::ZERO;
         for i in 0..8 {
-            octet_sum += local.octet[i].into();
+            octet_sum = octet_sum.clone() + local.octet[i].into();
         }
         builder.assert_one(octet_sum);
 
@@ -89,7 +89,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         // Verify that exactly one of the octet_num columns is true.
         let mut octet_num_sum = CB::Expr::ZERO;
         for i in 0..10 {
-            octet_num_sum += local.octet_num[i].into();
+            octet_num_sum = octet_num_sum.clone() + local.octet_num[i].into();
         }
         builder.assert_one(octet_num_sum);
 
@@ -216,13 +216,13 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         // Calculate the current cycle_num.
         let mut cycle_num = CB::Expr::ZERO;
         for i in 0..10 {
-            cycle_num += local.octet_num[i] * CB::Expr::from_canonical_usize(i);
+            cycle_num = cycle_num.clone() + local.octet_num[i] * CB::Expr::from_canonical_usize(i);
         }
 
         // Calculate the current step of the cycle 8.
         let mut cycle_step = CB::Expr::ZERO;
         for i in 0..8 {
-            cycle_step += local.octet[i] * CB::Expr::from_canonical_usize(i);
+            cycle_step = cycle_step.clone() + local.octet[i] * CB::Expr::from_canonical_usize(i);
         }
 
         // Verify correct mem address for initialize phase
@@ -541,7 +541,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         let mut filtered_operand = Word([zero.clone(), zero.clone(), zero.clone(), zero]);
         for (i, operand) in local.octet.iter().zip(add_operands.iter()) {
             for j in 0..4 {
-                filtered_operand.0[j] += *i * operand.0[j];
+                filtered_operand.0[j] = filtered_operand.0[j].clone() + *i * operand.0[j];
             }
         }
 

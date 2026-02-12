@@ -1,5 +1,6 @@
 pub use pico_sdk;
 use std::fs;
+pub use bincode;
 
 /// Loads an ELF file from the given path.
 pub fn load_elf(path: &str) -> Vec<u8> {
@@ -28,6 +29,10 @@ macro_rules! run_proof {
         $(
             stdin_builder.write(&$input);
         )*
+
+        // Generate stdin
+        let mut output_file = std::fs::File::create("stdin.bin").unwrap();
+        $crate::bincode::serialize_into(&mut output_file, &stdin_builder).unwrap();
 
         // Generate proof
         client.prove_fast(stdin_builder).expect("Failed to generate proof");

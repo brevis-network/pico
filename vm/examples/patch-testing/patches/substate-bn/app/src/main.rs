@@ -1,9 +1,43 @@
 #![no_main]
 pico_sdk::entrypoint!(main);
 
-use substrate_bn::{pairing, pairing_batch, Fq, Fq2, Fr, Group, G1, G2};
+use substrate_bn::{pairing, pairing_batch, AffineG1, Fq, Fq2, Fr, Group, G1, G2};
+use pico_sdk::io::commit_bytes;
+
+const ITERATIONS: usize = 6000;
 
 pub fn main() {
+    // ==========================================================
+    // 1. Affine ADD Operation Loop (P + Q)
+    // ==========================================================
+    {
+        let mut val = AffineG1::one();
+        let step = AffineG1::one();
+
+        for _ in 0..ITERATIONS {
+            val = val + step;
+        }
+
+        let mut bytes = [0u8; 32];
+        val.x().to_big_endian(&mut bytes).expect("Serialization failed");
+        commit_bytes(&bytes);
+    }
+
+    // ==========================================================
+    // 2. Affine DOUBLE Operation Loop (P + P)
+    // ==========================================================
+    {
+        let mut val = AffineG1::one();
+
+        for _ in 0..ITERATIONS {
+            val = val + val;
+        }
+
+        let mut bytes = [0u8; 32];
+        val.x().to_big_endian(&mut bytes).expect("Serialization failed");
+        commit_bytes(&bytes);
+    }
+
     // Fq operations
     {
         let lhs = Fq::one();

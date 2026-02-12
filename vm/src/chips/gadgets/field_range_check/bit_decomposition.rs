@@ -1,3 +1,5 @@
+#![allow(clippy::assign_op_pattern)]
+
 use p3_air::AirBuilder;
 use p3_baby_bear::BabyBear;
 use p3_field::{Field, FieldAlgebra};
@@ -56,7 +58,8 @@ impl<F: Field> FieldBitDecomposition<F> {
         let mut reconstructed_value = AB::Expr::ZERO;
         for (i, bit) in cols.bits.iter().enumerate() {
             builder.when(is_real.clone()).assert_bool(*bit);
-            reconstructed_value += AB::Expr::from_wrapped_u32(1 << i) * *bit;
+            reconstructed_value =
+                reconstructed_value.clone() + AB::Expr::from_wrapped_u32(1 << i) * *bit;
         }
 
         // Assert that bits2num(bits) == value.
@@ -95,7 +98,8 @@ impl<F: Field> FieldBitDecomposition<F> {
                 for bit in most_sig_byte_decomp[one_start_idx..7].iter() {
                     upper_bits_sum = upper_bits_sum + *bit;
                 }
-                upper_bits_sum -= AB::F::from_canonical_u32(7 - one_start_idx as u32).into();
+                upper_bits_sum =
+                    upper_bits_sum - AB::Expr::from_canonical_u32(7 - one_start_idx as u32);
                 IsZeroGadget::<F>::eval(
                     builder,
                     upper_bits_sum,
