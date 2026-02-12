@@ -241,7 +241,7 @@ version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79947af37f4177cfead1110013d678905c37501914fba0efea834c3fe9a8d60c"
 dependencies = [
- "windows-sys",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -252,7 +252,7 @@ checksum = "ca3534e77181a9cc07539ad51f2141fe32f6c3ffd4df76db8ad92346b003ae4e"
 dependencies = [
  "anstyle",
  "once_cell",
- "windows-sys",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -260,6 +260,58 @@ name = "anyhow"
 version = "1.0.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
+
+[[package]]
+name = "aot-common"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-dispatch",
+ "pico-vm",
+]
+
+[[package]]
+name = "ark-bls12-381"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3df4dcc01ff89867cd86b0da835f23c3f02738353aaee7dde7495af71363b8d5"
+dependencies = [
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+]
+
+[[package]]
+name = "ark-bn254"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d69eab57e8d2663efa5c63135b2af4f396d66424f88954c21104125ab6b3e6bc"
+dependencies = [
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-std 0.5.0",
+]
+
+[[package]]
+name = "ark-ec"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43d68f2d516162846c1238e755a7c4d131b892b70cc70c471a8e3ca3ed818fce"
+dependencies = [
+ "ahash",
+ "ark-ff 0.5.0",
+ "ark-poly",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "educe",
+ "fnv",
+ "hashbrown 0.15.2",
+ "itertools 0.13.0",
+ "num-bigint 0.4.6",
+ "num-integer",
+ "num-traits",
+ "zeroize",
+]
 
 [[package]]
 name = "ark-ff"
@@ -300,6 +352,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-ff"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a177aba0ed1e0fbb62aa9f6d0502e9b46dad8c2eab04c14258a1212d2557ea70"
+dependencies = [
+ "ark-ff-asm 0.5.0",
+ "ark-ff-macros 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "arrayvec",
+ "digest 0.10.7",
+ "educe",
+ "itertools 0.13.0",
+ "num-bigint 0.4.6",
+ "num-traits",
+ "paste",
+ "zeroize",
+]
+
+[[package]]
 name = "ark-ff-asm"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,6 +389,16 @@ checksum = "3ed4aa4fe255d0bc6d79373f7e31d2ea147bcf486cba1be5ba7ea85abdb92348"
 dependencies = [
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "ark-ff-asm"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62945a2f7e6de02a31fe400aa489f0e0f5b2502e69f95f853adb82a96c7a6b60"
+dependencies = [
+ "quote",
+ "syn 2.0.96",
 ]
 
 [[package]]
@@ -345,6 +427,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-ff-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09be120733ee33f7693ceaa202ca41accd5653b779563608f1234f78ae07c4b3"
+dependencies = [
+ "num-bigint 0.4.6",
+ "num-traits",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
+]
+
+[[package]]
+name = "ark-poly"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "579305839da207f02b89cd1679e50e67b4331e2f9294a57693e5051b7703fe27"
+dependencies = [
+ "ahash",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "ark-std 0.5.0",
+ "educe",
+ "fnv",
+ "hashbrown 0.15.2",
+]
+
+[[package]]
+name = "ark-secp256k1"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8bd211c48debd3037b48873a7aa22c3aba034e83388aa4124795c9f220b88c7"
+dependencies = [
+ "ark-ec",
+ "ark-ff 0.5.0",
+ "ark-std 0.5.0",
+]
+
+[[package]]
 name = "ark-serialize"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -366,6 +487,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "ark-serialize"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f4d068aaf107ebcd7dfb52bc748f8030e0fc930ac8e360146ca54c1203088f7"
+dependencies = [
+ "ark-serialize-derive",
+ "ark-std 0.5.0",
+ "arrayvec",
+ "digest 0.10.7",
+ "num-bigint 0.4.6",
+]
+
+[[package]]
+name = "ark-serialize-derive"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "213888f660fddcca0d257e88e54ac05bca01885f258ccdf695bafd77031bb69d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
+]
+
+[[package]]
 name = "ark-std"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -380,6 +525,16 @@ name = "ark-std"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
+dependencies = [
+ "num-traits",
+ "rand",
+]
+
+[[package]]
+name = "ark-std"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "246a225cc6131e9ee4f24619af0f19d67761fff15d7ccc22e42b80846e69449a"
 dependencies = [
  "num-traits",
  "rand",
@@ -415,6 +570,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
+name = "az"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be5eb007b7cacc6c660343e96f650fedf4b5a77512399eb952ca6642cf8d13f7"
+
+[[package]]
 name = "backtrace"
 version = "0.3.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -426,7 +587,7 @@ dependencies = [
  "miniz_oxide",
  "object",
  "rustc-demangle",
- "windows-targets",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -611,7 +772,7 @@ dependencies = [
  "iana-time-zone",
  "num-traits",
  "serde",
- "windows-targets",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -1147,6 +1308,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "educe"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d7bc049e1bd8cdeb31b68bbd586a9464ecf9f3944af3958a7a9d0f8b9799417"
+dependencies = [
+ "enum-ordinalize",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
+]
+
+[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1176,6 +1349,26 @@ dependencies = [
  "sec1",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "enum-ordinalize"
+version = "4.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a1091a7bb1f8f2c4b28f1fe2cef4980ca2d410a3d727d67ecc3178c9b0800f0"
+dependencies = [
+ "enum-ordinalize-derive",
+]
+
+[[package]]
+name = "enum-ordinalize-derive"
+version = "4.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ca9601fb2d62598ee17836250842873a413586e5d7ed88b356e38ddbb0ec631"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
 ]
 
 [[package]]
@@ -1214,7 +1407,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1456,7 +1649,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi 0.13.3+wasi-0.2.2",
- "windows-targets",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -1464,6 +1657,16 @@ name = "gimli"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
+
+[[package]]
+name = "gmp-mpfr-sys"
+version = "1.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60f8970a75c006bb2f8ae79c6768a116dd215fa8346a87aed99bf9d82ca43394"
+dependencies = [
+ "libc",
+ "windows-sys 0.60.2",
+]
 
 [[package]]
 name = "group"
@@ -1584,6 +1787,7 @@ version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf151400ff0baff5465007dd2f3e717f3fe502074ca563069ce3a6629d07b289"
 dependencies = [
+ "allocator-api2",
  "foldhash",
  "serde",
 ]
@@ -1850,6 +2054,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"
 
 [[package]]
+name = "manual-aot"
+version = "0.1.0"
+dependencies = [
+ "aot-common",
+ "bincode",
+ "hashbrown 0.14.5",
+ "pico-aot-dispatch",
+ "pico-vm",
+]
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1863,6 +2078,15 @@ name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
+
+[[package]]
+name = "memmap2"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "744133e4a0e0a658e1374cf3bf8e415c4052a15a111acd372764c55b4177d490"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "memuse"
@@ -2101,7 +2325,7 @@ dependencies = [
 [[package]]
 name = "p3-air"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -2110,7 +2334,7 @@ dependencies = [
 [[package]]
 name = "p3-baby-bear"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -2124,7 +2348,7 @@ dependencies = [
 [[package]]
 name = "p3-blake3"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "blake3",
  "p3-symmetric",
@@ -2134,7 +2358,7 @@ dependencies = [
 [[package]]
 name = "p3-bn254-fr"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "ff 0.13.0",
  "halo2curves",
@@ -2149,7 +2373,7 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -2161,7 +2385,7 @@ dependencies = [
 [[package]]
 name = "p3-circle"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -2179,7 +2403,7 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -2193,7 +2417,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -2206,7 +2430,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -2223,7 +2447,7 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-challenger",
@@ -2242,7 +2466,7 @@ dependencies = [
 [[package]]
 name = "p3-goldilocks"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "num-bigint 0.4.6",
  "p3-dft",
@@ -2258,7 +2482,7 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -2269,7 +2493,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -2281,7 +2505,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak-air"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -2294,7 +2518,7 @@ dependencies = [
 [[package]]
 name = "p3-koala-bear"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -2308,7 +2532,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -2323,7 +2547,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "rayon",
 ]
@@ -2331,7 +2555,7 @@ dependencies = [
 [[package]]
 name = "p3-mds"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-dft",
@@ -2345,7 +2569,7 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-commit",
@@ -2362,7 +2586,7 @@ dependencies = [
 [[package]]
 name = "p3-mersenne-31"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -2381,7 +2605,7 @@ dependencies = [
 [[package]]
 name = "p3-monty-31"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "num-bigint 0.4.6",
@@ -2402,7 +2626,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "gcd",
  "p3-field",
@@ -2414,7 +2638,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -2424,7 +2648,7 @@ dependencies = [
 [[package]]
 name = "p3-uni-stark"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "itertools 0.13.0",
  "p3-air",
@@ -2442,7 +2666,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.1.0"
-source = "git+https://github.com/brevis-network/Plonky3.git?rev=4d2a8ae#4d2a8ae4a341049ed59ad7fa194cc247d9264b0d"
+source = "git+https://github.com/brevis-network/Plonky3.git?rev=f5056c9#f5056c94a97c673d1dc05958ea9df048cd3f2fda"
 dependencies = [
  "serde",
 ]
@@ -2501,7 +2725,7 @@ dependencies = [
  "libc",
  "redox_syscall",
  "smallvec",
- "windows-targets",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -2563,8 +2787,2051 @@ dependencies = [
 ]
 
 [[package]]
-name = "pico-derive"
+name = "pico-aot-chunk-000"
 version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-001"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-002"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-003"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-004"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-005"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-006"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-007"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-008"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-009"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-010"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-011"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-012"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-013"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-014"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-015"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-016"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-017"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-018"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-019"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-020"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-021"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-022"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-023"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-024"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-025"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-026"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-027"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-028"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-029"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-030"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-031"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-032"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-033"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-034"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-035"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-036"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-037"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-038"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-039"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-040"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-041"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-042"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-043"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-044"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-045"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-046"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-047"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-048"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-049"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-050"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-051"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-052"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-053"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-054"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-055"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-056"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-057"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-058"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-059"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-060"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-061"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-062"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-063"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-064"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-065"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-066"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-067"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-068"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-069"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-070"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-071"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-072"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-073"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-074"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-075"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-076"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-077"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-078"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-079"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-080"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-081"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-082"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-083"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-084"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-085"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-086"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-087"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-088"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-089"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-090"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-091"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-092"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-093"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-094"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-095"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-096"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-097"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-098"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-099"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-100"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-101"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-102"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-103"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-104"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-105"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-106"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-107"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-108"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-109"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-110"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-111"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-112"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-113"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-114"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-115"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-116"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-117"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-118"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-119"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-120"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-121"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-122"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-123"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-124"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-125"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-126"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-127"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-128"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-129"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-130"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-131"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-132"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-133"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-134"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-135"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-136"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-137"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-138"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-139"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-140"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-141"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-142"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-143"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-144"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-145"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-146"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-147"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-148"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-149"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-150"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-151"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-152"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-153"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-154"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-155"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-156"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-157"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-158"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-159"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-160"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-161"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-162"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-163"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-164"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-165"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-166"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-167"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-168"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-169"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-170"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-171"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-172"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-173"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-174"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-175"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-176"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-177"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-178"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-179"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-180"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-181"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-182"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-183"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-184"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-185"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-186"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-187"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-188"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-189"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-190"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-191"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-192"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-193"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-194"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-195"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-196"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-197"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-198"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-199"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-200"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-201"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-202"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-203"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-204"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-205"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-206"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-207"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-208"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-209"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-210"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-211"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-212"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-213"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-214"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-215"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-216"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-217"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-218"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-219"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-220"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-221"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-222"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-223"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-224"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-225"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-226"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-227"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-228"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-229"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-230"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-231"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-232"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-233"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-234"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-235"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-236"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-237"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-238"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-239"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-240"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-241"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-242"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-243"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-244"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-245"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-246"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-247"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-248"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-249"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-chunk-250"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-dispatch"
+version = "0.1.0"
+dependencies = [
+ "pico-aot-chunk-000",
+ "pico-aot-chunk-001",
+ "pico-aot-chunk-002",
+ "pico-aot-chunk-003",
+ "pico-aot-chunk-004",
+ "pico-aot-chunk-005",
+ "pico-aot-chunk-006",
+ "pico-aot-chunk-007",
+ "pico-aot-chunk-008",
+ "pico-aot-chunk-009",
+ "pico-aot-chunk-010",
+ "pico-aot-chunk-011",
+ "pico-aot-chunk-012",
+ "pico-aot-chunk-013",
+ "pico-aot-chunk-014",
+ "pico-aot-chunk-015",
+ "pico-aot-chunk-016",
+ "pico-aot-chunk-017",
+ "pico-aot-chunk-018",
+ "pico-aot-chunk-019",
+ "pico-aot-chunk-020",
+ "pico-aot-chunk-021",
+ "pico-aot-chunk-022",
+ "pico-aot-chunk-023",
+ "pico-aot-chunk-024",
+ "pico-aot-chunk-025",
+ "pico-aot-chunk-026",
+ "pico-aot-chunk-027",
+ "pico-aot-chunk-028",
+ "pico-aot-chunk-029",
+ "pico-aot-chunk-030",
+ "pico-aot-chunk-031",
+ "pico-aot-chunk-032",
+ "pico-aot-chunk-033",
+ "pico-aot-chunk-034",
+ "pico-aot-chunk-035",
+ "pico-aot-chunk-036",
+ "pico-aot-chunk-037",
+ "pico-aot-chunk-038",
+ "pico-aot-chunk-039",
+ "pico-aot-chunk-040",
+ "pico-aot-chunk-041",
+ "pico-aot-chunk-042",
+ "pico-aot-chunk-043",
+ "pico-aot-chunk-044",
+ "pico-aot-chunk-045",
+ "pico-aot-chunk-046",
+ "pico-aot-chunk-047",
+ "pico-aot-chunk-048",
+ "pico-aot-chunk-049",
+ "pico-aot-chunk-050",
+ "pico-aot-chunk-051",
+ "pico-aot-chunk-052",
+ "pico-aot-chunk-053",
+ "pico-aot-chunk-054",
+ "pico-aot-chunk-055",
+ "pico-aot-chunk-056",
+ "pico-aot-chunk-057",
+ "pico-aot-chunk-058",
+ "pico-aot-chunk-059",
+ "pico-aot-chunk-060",
+ "pico-aot-chunk-061",
+ "pico-aot-chunk-062",
+ "pico-aot-chunk-063",
+ "pico-aot-chunk-064",
+ "pico-aot-chunk-065",
+ "pico-aot-chunk-066",
+ "pico-aot-chunk-067",
+ "pico-aot-chunk-068",
+ "pico-aot-chunk-069",
+ "pico-aot-chunk-070",
+ "pico-aot-chunk-071",
+ "pico-aot-chunk-072",
+ "pico-aot-chunk-073",
+ "pico-aot-chunk-074",
+ "pico-aot-chunk-075",
+ "pico-aot-chunk-076",
+ "pico-aot-chunk-077",
+ "pico-aot-chunk-078",
+ "pico-aot-chunk-079",
+ "pico-aot-chunk-080",
+ "pico-aot-chunk-081",
+ "pico-aot-chunk-082",
+ "pico-aot-chunk-083",
+ "pico-aot-chunk-084",
+ "pico-aot-chunk-085",
+ "pico-aot-chunk-086",
+ "pico-aot-chunk-087",
+ "pico-aot-chunk-088",
+ "pico-aot-chunk-089",
+ "pico-aot-chunk-090",
+ "pico-aot-chunk-091",
+ "pico-aot-chunk-092",
+ "pico-aot-chunk-093",
+ "pico-aot-chunk-094",
+ "pico-aot-chunk-095",
+ "pico-aot-chunk-096",
+ "pico-aot-chunk-097",
+ "pico-aot-chunk-098",
+ "pico-aot-chunk-099",
+ "pico-aot-chunk-100",
+ "pico-aot-chunk-101",
+ "pico-aot-chunk-102",
+ "pico-aot-chunk-103",
+ "pico-aot-chunk-104",
+ "pico-aot-chunk-105",
+ "pico-aot-chunk-106",
+ "pico-aot-chunk-107",
+ "pico-aot-chunk-108",
+ "pico-aot-chunk-109",
+ "pico-aot-chunk-110",
+ "pico-aot-chunk-111",
+ "pico-aot-chunk-112",
+ "pico-aot-chunk-113",
+ "pico-aot-chunk-114",
+ "pico-aot-chunk-115",
+ "pico-aot-chunk-116",
+ "pico-aot-chunk-117",
+ "pico-aot-chunk-118",
+ "pico-aot-chunk-119",
+ "pico-aot-chunk-120",
+ "pico-aot-chunk-121",
+ "pico-aot-chunk-122",
+ "pico-aot-chunk-123",
+ "pico-aot-chunk-124",
+ "pico-aot-chunk-125",
+ "pico-aot-chunk-126",
+ "pico-aot-chunk-127",
+ "pico-aot-chunk-128",
+ "pico-aot-chunk-129",
+ "pico-aot-chunk-130",
+ "pico-aot-chunk-131",
+ "pico-aot-chunk-132",
+ "pico-aot-chunk-133",
+ "pico-aot-chunk-134",
+ "pico-aot-chunk-135",
+ "pico-aot-chunk-136",
+ "pico-aot-chunk-137",
+ "pico-aot-chunk-138",
+ "pico-aot-chunk-139",
+ "pico-aot-chunk-140",
+ "pico-aot-chunk-141",
+ "pico-aot-chunk-142",
+ "pico-aot-chunk-143",
+ "pico-aot-chunk-144",
+ "pico-aot-chunk-145",
+ "pico-aot-chunk-146",
+ "pico-aot-chunk-147",
+ "pico-aot-chunk-148",
+ "pico-aot-chunk-149",
+ "pico-aot-chunk-150",
+ "pico-aot-chunk-151",
+ "pico-aot-chunk-152",
+ "pico-aot-chunk-153",
+ "pico-aot-chunk-154",
+ "pico-aot-chunk-155",
+ "pico-aot-chunk-156",
+ "pico-aot-chunk-157",
+ "pico-aot-chunk-158",
+ "pico-aot-chunk-159",
+ "pico-aot-chunk-160",
+ "pico-aot-chunk-161",
+ "pico-aot-chunk-162",
+ "pico-aot-chunk-163",
+ "pico-aot-chunk-164",
+ "pico-aot-chunk-165",
+ "pico-aot-chunk-166",
+ "pico-aot-chunk-167",
+ "pico-aot-chunk-168",
+ "pico-aot-chunk-169",
+ "pico-aot-chunk-170",
+ "pico-aot-chunk-171",
+ "pico-aot-chunk-172",
+ "pico-aot-chunk-173",
+ "pico-aot-chunk-174",
+ "pico-aot-chunk-175",
+ "pico-aot-chunk-176",
+ "pico-aot-chunk-177",
+ "pico-aot-chunk-178",
+ "pico-aot-chunk-179",
+ "pico-aot-chunk-180",
+ "pico-aot-chunk-181",
+ "pico-aot-chunk-182",
+ "pico-aot-chunk-183",
+ "pico-aot-chunk-184",
+ "pico-aot-chunk-185",
+ "pico-aot-chunk-186",
+ "pico-aot-chunk-187",
+ "pico-aot-chunk-188",
+ "pico-aot-chunk-189",
+ "pico-aot-chunk-190",
+ "pico-aot-chunk-191",
+ "pico-aot-chunk-192",
+ "pico-aot-chunk-193",
+ "pico-aot-chunk-194",
+ "pico-aot-chunk-195",
+ "pico-aot-chunk-196",
+ "pico-aot-chunk-197",
+ "pico-aot-chunk-198",
+ "pico-aot-chunk-199",
+ "pico-aot-chunk-200",
+ "pico-aot-chunk-201",
+ "pico-aot-chunk-202",
+ "pico-aot-chunk-203",
+ "pico-aot-chunk-204",
+ "pico-aot-chunk-205",
+ "pico-aot-chunk-206",
+ "pico-aot-chunk-207",
+ "pico-aot-chunk-208",
+ "pico-aot-chunk-209",
+ "pico-aot-chunk-210",
+ "pico-aot-chunk-211",
+ "pico-aot-chunk-212",
+ "pico-aot-chunk-213",
+ "pico-aot-chunk-214",
+ "pico-aot-chunk-215",
+ "pico-aot-chunk-216",
+ "pico-aot-chunk-217",
+ "pico-aot-chunk-218",
+ "pico-aot-chunk-219",
+ "pico-aot-chunk-220",
+ "pico-aot-chunk-221",
+ "pico-aot-chunk-222",
+ "pico-aot-chunk-223",
+ "pico-aot-chunk-224",
+ "pico-aot-chunk-225",
+ "pico-aot-chunk-226",
+ "pico-aot-chunk-227",
+ "pico-aot-chunk-228",
+ "pico-aot-chunk-229",
+ "pico-aot-chunk-230",
+ "pico-aot-chunk-231",
+ "pico-aot-chunk-232",
+ "pico-aot-chunk-233",
+ "pico-aot-chunk-234",
+ "pico-aot-chunk-235",
+ "pico-aot-chunk-236",
+ "pico-aot-chunk-237",
+ "pico-aot-chunk-238",
+ "pico-aot-chunk-239",
+ "pico-aot-chunk-240",
+ "pico-aot-chunk-241",
+ "pico-aot-chunk-242",
+ "pico-aot-chunk-243",
+ "pico-aot-chunk-244",
+ "pico-aot-chunk-245",
+ "pico-aot-chunk-246",
+ "pico-aot-chunk-247",
+ "pico-aot-chunk-248",
+ "pico-aot-chunk-249",
+ "pico-aot-chunk-250",
+ "pico-aot-runtime",
+]
+
+[[package]]
+name = "pico-aot-runtime"
+version = "1.2.2"
+dependencies = [
+ "ark-bls12-381",
+ "ark-bn254",
+ "ark-ff 0.5.0",
+ "ark-secp256k1",
+ "bls12_381",
+ "curve25519-dalek",
+ "halo2curves",
+ "hashbrown 0.14.5",
+ "hybrid-array",
+ "k256",
+ "log",
+ "num",
+ "num-bigint 0.4.6",
+ "num-traits",
+ "once_cell",
+ "p256",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-symmetric",
+ "pico-vm",
+ "tiny-keccak",
+ "typenum",
+]
+
+[[package]]
+name = "pico-derive"
+version = "1.2.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2590,7 +4857,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "1.0.1"
+version = "1.2.2"
 dependencies = [
  "bincode",
  "serde",
@@ -2598,7 +4865,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "1.0.1"
+version = "1.2.2"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2623,7 +4890,7 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "1.0.1"
+version = "1.2.2"
 dependencies = [
  "anyhow",
  "arrayref",
@@ -2651,7 +4918,9 @@ dependencies = [
  "itertools 0.13.0",
  "k256",
  "lazy_static",
+ "libc",
  "log",
+ "memmap2",
  "num",
  "num-bigint 0.4.6",
  "num-traits",
@@ -2687,6 +4956,7 @@ dependencies = [
  "rayon",
  "rayon-scan",
  "rrs-succinct",
+ "rug",
  "serde",
  "serde_json",
  "serde_with",
@@ -2696,6 +4966,7 @@ dependencies = [
  "strum_macros",
  "sysinfo",
  "thiserror 1.0.69",
+ "tikv-jemallocator",
  "tiny-keccak",
  "tracing",
  "tracing-forest",
@@ -3008,6 +5279,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "reth-aot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aot-common",
+ "bincode",
+ "clap",
+ "hashbrown 0.14.5",
+ "pico-aot-dispatch",
+ "pico-vm",
+ "rayon",
+ "reth-lib",
+]
+
+[[package]]
+name = "reth-lib"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "pico-vm",
+]
+
+[[package]]
 name = "rfc6979"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3036,6 +5330,18 @@ dependencies = [
  "downcast-rs",
  "num_enum",
  "paste",
+]
+
+[[package]]
+name = "rug"
+version = "1.28.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de190ec858987c79cad4da30e19e546139b3339331282832af004d0ea7829639"
+dependencies = [
+ "az",
+ "gmp-mpfr-sys",
+ "libc",
+ "libm",
 ]
 
 [[package]]
@@ -3116,7 +5422,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3550,7 +5856,7 @@ dependencies = [
  "getrandom 0.3.1",
  "once_cell",
  "rustix",
- "windows-sys",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3680,6 +5986,26 @@ checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
 dependencies = [
  "cfg-if",
  "once_cell",
+]
+
+[[package]]
+name = "tikv-jemalloc-sys"
+version = "0.6.1+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd8aa5b2ab86a2cefa406d889139c162cbb230092f7d1d7cbc1716405d852a3b"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0359b4327f954e0567e69fb191cf1436617748813819c94b8cd4a431422d053a"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]
@@ -4024,7 +6350,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e48a53791691ab099e5e2ad123536d0fff50652600abaf43bbf952894110d0be"
 dependencies = [
  "windows-core",
- "windows-targets",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -4033,8 +6359,14 @@ version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ab640c8d7e35bf8ba19b884ba838ceb4fba93a4e8c65a9059d08afcfc683d9"
 dependencies = [
- "windows-targets",
+ "windows-targets 0.52.6",
 ]
+
+[[package]]
+name = "windows-link"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
 name = "windows-sys"
@@ -4042,7 +6374,16 @@ version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
- "windows-targets",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.60.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb"
+dependencies = [
+ "windows-targets 0.53.5",
 ]
 
 [[package]]
@@ -4051,14 +6392,31 @@ version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b724f72796e036ab90c1021d4780d4d3d648aca59e491e6b98e725b84e99973"
 dependencies = [
- "windows_aarch64_gnullvm",
- "windows_aarch64_msvc",
- "windows_i686_gnu",
- "windows_i686_gnullvm",
- "windows_i686_msvc",
- "windows_x86_64_gnu",
- "windows_x86_64_gnullvm",
- "windows_x86_64_msvc",
+ "windows_aarch64_gnullvm 0.52.6",
+ "windows_aarch64_msvc 0.52.6",
+ "windows_i686_gnu 0.52.6",
+ "windows_i686_gnullvm 0.52.6",
+ "windows_i686_msvc 0.52.6",
+ "windows_x86_64_gnu 0.52.6",
+ "windows_x86_64_gnullvm 0.52.6",
+ "windows_x86_64_msvc 0.52.6",
+]
+
+[[package]]
+name = "windows-targets"
+version = "0.53.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4945f9f551b88e0d65f3db0bc25c33b8acea4d9e41163edf90dcd0b19f9069f3"
+dependencies = [
+ "windows-link",
+ "windows_aarch64_gnullvm 0.53.1",
+ "windows_aarch64_msvc 0.53.1",
+ "windows_i686_gnu 0.53.1",
+ "windows_i686_gnullvm 0.53.1",
+ "windows_i686_msvc 0.53.1",
+ "windows_x86_64_gnu 0.53.1",
+ "windows_x86_64_gnullvm 0.53.1",
+ "windows_x86_64_msvc 0.53.1",
 ]
 
 [[package]]
@@ -4068,10 +6426,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a4622180e7a0ec044bb555404c800bc9fd9ec262ec147edd5989ccd0c02cd3"
 
 [[package]]
+name = "windows_aarch64_gnullvm"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9d8416fa8b42f5c947f8482c43e7d89e73a173cead56d044f6a56104a6d1b53"
+
+[[package]]
 name = "windows_aarch64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469"
+
+[[package]]
+name = "windows_aarch64_msvc"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9d782e804c2f632e395708e99a94275910eb9100b2114651e04744e9b125006"
 
 [[package]]
 name = "windows_i686_gnu"
@@ -4080,10 +6450,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e9b5ad5ab802e97eb8e295ac6720e509ee4c243f69d781394014ebfe8bbfa0b"
 
 [[package]]
+name = "windows_i686_gnu"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "960e6da069d81e09becb0ca57a65220ddff016ff2d6af6a223cf372a506593a3"
+
+[[package]]
 name = "windows_i686_gnullvm"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0eee52d38c090b3caa76c563b86c3a4bd71ef1a819287c19d586d7334ae8ed66"
+
+[[package]]
+name = "windows_i686_gnullvm"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa7359d10048f68ab8b09fa71c3daccfb0e9b559aed648a8f95469c27057180c"
 
 [[package]]
 name = "windows_i686_msvc"
@@ -4092,10 +6474,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "240948bc05c5e7c6dabba28bf89d89ffce3e303022809e73deaefe4f6ec56c66"
 
 [[package]]
+name = "windows_i686_msvc"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e7ac75179f18232fe9c285163565a57ef8d3c89254a30685b57d83a38d326c2"
+
+[[package]]
 name = "windows_x86_64_gnu"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "147a5c80aabfbf0c7d901cb5895d1de30ef2907eb21fbbab29ca94c5b08b1a78"
+
+[[package]]
+name = "windows_x86_64_gnu"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c3842cdd74a865a8066ab39c8a7a473c0778a3f29370b5fd6b4b9aa7df4a499"
 
 [[package]]
 name = "windows_x86_64_gnullvm"
@@ -4104,10 +6498,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24d5b23dc417412679681396f2b49f3de8c1473deb516bd34410872eff51ed0d"
 
 [[package]]
+name = "windows_x86_64_gnullvm"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ffa179e2d07eee8ad8f57493436566c7cc30ac536a3379fdf008f47f6bb7ae1"
+
+[[package]]
 name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "windows_x86_64_msvc"
+version = "0.53.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "winnow"

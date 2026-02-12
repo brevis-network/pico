@@ -6,3 +6,18 @@
 tmp
 /logs
 /examples/target
+
+# AOT generated dispatch crate:
+# Track only the minimal bootstrap skeleton needed after fresh clone.
+/aot-generated/*
+!/aot-generated/Cargo.toml
+!/aot-generated/src/
+/aot-generated/src/*
+!/aot-generated/src/lib.rs
+
+# AOT related
+examples/Cargo.lock
+vm/examples/patch-testing/Cargo.lock
+vm/examples/patch-testing/aot/Cargo.lock
+
+docs/archive/

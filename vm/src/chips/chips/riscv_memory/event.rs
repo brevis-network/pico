@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// This object encapsulates the information needed to prove a memory access operation. This
 /// includes the chunk, timestamp, and value of the memory address.
-#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MemoryRecord {
     /// The chunk number.
     pub chunk: u32,

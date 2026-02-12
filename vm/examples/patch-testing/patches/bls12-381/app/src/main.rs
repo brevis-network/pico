@@ -5,8 +5,45 @@ use bls12_381::{
     fp::Fp, fp2::Fp2, multi_miller_loop, pairing, G1Projective, G2Affine, G2Prepared, G2Projective,
     Scalar,
 };
+use pico_sdk::io::{commit_bytes};
 
 pub fn main() {
+    // Add
+    const ITERATIONS: usize = 6000;
+    use bls12_381::g1::G1Affine;
+
+    let mut val_affine = G1Affine::generator();
+    let val2_affine = G1Affine::generator();
+
+    for _ in 0..ITERATIONS {
+        val_affine = val_affine.add_affine(&val2_affine);
+    }
+    let final_bytes = val_affine.to_uncompressed();
+    commit_bytes(&final_bytes);
+
+    // Double
+    let mut val_affine = G1Affine::generator();
+    for _ in 0..ITERATIONS {
+        val_affine = val_affine.add_affine(&val_affine);
+    }
+    let final_bytes = val_affine.to_uncompressed();
+    commit_bytes(&final_bytes);
+
+    // Decompress
+    let mut compressed_bytes = G1Affine::generator().to_compressed();
+    let step_point = G1Affine::generator();
+    for _ in 0..ITERATIONS {
+        // Step A: Decompress
+        let point = G1Affine::from_compressed(&compressed_bytes).unwrap();
+
+        // Step B: Add(just to change data)
+        let next_point = point.add_affine(&step_point);
+
+        // Step C: Compress (for next round)
+        compressed_bytes = next_point.to_compressed();
+    }
+    commit_bytes(&compressed_bytes);
+
     // Fp operations
     {
         let lhs = Fp::one();

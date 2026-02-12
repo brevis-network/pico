@@ -1,3 +1,5 @@
+#![allow(clippy::assign_op_pattern)]
+
 use crate::{
     chips::chips::byte::event::ByteRecordBehavior,
     compiler::word::Word,
@@ -148,12 +150,12 @@ impl<F: Field> Add5Operation<F> {
             for i in 0..WORD_SIZE {
                 let mut overflow: CB::Expr = CB::F::ZERO.into();
                 for word in words {
-                    overflow += word[i].into();
+                    overflow = overflow + word[i].into();
                 }
-                overflow -= cols.value[i].into();
+                overflow = overflow - cols.value[i].into();
 
                 if i > 0 {
-                    overflow += cols.carry[i - 1].into();
+                    overflow = overflow + cols.carry[i - 1].into();
                 }
                 builder_is_real.assert_eq(cols.carry[i] * base, overflow.clone());
             }

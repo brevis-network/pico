@@ -1,0 +1,45 @@
+[package]
+name = "reth-aot"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "reth_aot"
+path = "src/lib.rs"
+
+[dependencies]
+# Core Pico types.
+pico-vm = { path = "../../../vm" }
+pico-aot-dispatch = { path = "../../../aot-generated", optional = true }
+aot-common = { path = "../../aot_common", optional = true, features = [] }
+
+# Shared library for reth helpers
+reth-lib = { path = "../lib" }
+
+# Convenience
+hashbrown = { version = "0.14.5", features = ["serde", "inline-more"] }
+bincode = "1.3"
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+
+[[bin]]
+name = "run"
+path = "src/bin/run.rs"
+
+[[bin]]
+name = "run_baseline"
+path = "src/bin/run_baseline.rs"
+
+[[bin]]
+name = "compare"
+path = "src/bin/compare.rs"
+
+[features]
+default = ["aot"]
+aot = ["pico-aot-dispatch", "aot-common/aot"]
+bigint-rug = ["pico-vm/bigint-rug"]
+jemalloc = ["pico-vm/jemalloc"]
+mmap-memory = ["pico-vm/mmap-memory"]
+
+[dev-dependencies]
+rayon = "1.10"

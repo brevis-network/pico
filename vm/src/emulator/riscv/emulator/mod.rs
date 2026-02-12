@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, time::Instant};
 use tracing::{debug, error, instrument};
 
-use crate::emulator::riscv::memory::{Entry, Memory};
+use crate::emulator::riscv::memory::ContiguousRiscvMemory;
 pub use error::EmulationError;
 pub use mode::RiscvEmulatorMode;
 pub use unconstrained::UnconstrainedState;
@@ -268,12 +268,10 @@ pub struct RiscvEmulator {
     pub state: RiscvEmulationState,
 
     /// Memory addresses that were touched in this batch of chunks. Used to minimize the size of snapshots.
-    pub memory_snapshot: Memory<Option<MemoryRecord>>,
+    pub memory_snapshot: ContiguousRiscvMemory,
 
-    /// Memory addresses that were initialized in this batch of chunks. Used to minimize the size
-    /// of snapshots. The value stored is whether or not it had a value at the beginning of
-    /// the batch.
-    pub uninitialized_memory_snapshot: Memory<bool>,
+    /// Bitmap of registers (0-31) that were snapshotted.
+    pub snapshot_registers_bitmap: u32,
 
     /// The current trace of the emulation that is being collected.
     pub record: EmulationRecord,
@@ -336,37 +334,67 @@ pub enum EmulatorMode {
     Trace,
 }
 
-/// save the *old* value (or a `None` marker) into `memory_snapshot`.
+/// save the *old* value into `memory_snapshot`.
+/// The worker (Trace Mode RiscvEmulator) will need the full list of accessed addrs
+/// i.e all the addresses touched in the Simple -> Unconstrained -> Simple emulation
 // TODO: may manually diff registers and page_table
 #[inline(always)]
 fn snapshot_addr_if_needed(
     _mode: &RiscvEmulatorMode,
-    snapshot: &mut Memory<Option<MemoryRecord>>,
+    snapshot: &mut ContiguousRiscvMemory,
+    snapshot_regs: &mut u32,
     addr: u32,
-    entry: &Entry<MemoryRecord>,
+    current_record: Option<&MemoryRecord>,
 ) {
-    // if !matches!(mode, RiscvEmulatorMode::Snapshot) { return; }
-
-    snapshot.entry(addr).or_insert_with(|| match entry {
-        Entry::Occupied(e) => Some(*e.get()),
-        Entry::Vacant(_) => None,
-    });
+    // Check if we've already recorded a snapshot for this address.
+    if addr < 32 {
+        if (*snapshot_regs & (1 << addr)) == 0 {
+            // Not yet snapshotted
+            let rec = current_record.copied().unwrap_or_default();
+            // Since ContiguousRiscvMemory registers (0-31) don't use accessed_bitmap,
+            // we use insert to store the value.
+            // Note: insert uses 0-31 for registers if addr < 32.
+            snapshot.insert(addr, rec);
+            *snapshot_regs |= 1 << addr;
+        }
+    } else {
+        // Main memory
+        if !snapshot.has_accessed(addr) {
+            let rec = current_record.copied().unwrap_or_default();
+            // This marks accessed and stores the value
+            snapshot.insert(addr, rec);
+        }
+    }
 }
 
 #[inline(always)]
 fn snapshot_record_if_needed(
     mode: &RiscvEmulatorMode,
-    snapshot: &mut Memory<Option<MemoryRecord>>,
+    snapshot: &mut ContiguousRiscvMemory,
+    snapshot_regs: &mut u32,
     addr: u32,
     maybe_rec: Option<&MemoryRecord>,
 ) {
-    if !matches!(mode, RiscvEmulatorMode::Simple) {
-        return;
-    }
-    snapshot.entry(addr).or_insert_with(|| maybe_rec.copied());
+    snapshot_addr_if_needed(mode, snapshot, snapshot_regs, addr, maybe_rec);
 }
 
 impl RiscvEmulator {
+    /// Capture a snapshot for a hint address (which should be uninitialized/zero).
+    pub fn capture_snapshot_for_hint(&mut self, addr: u32) {
+        let zero_record = MemoryRecord {
+            value: 0,
+            chunk: 0,
+            timestamp: 0,
+        };
+        snapshot_addr_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&zero_record),
+        );
+    }
+
     /// Convenience: build a single-thread emulator with its own shared_ds.
     #[must_use]
     pub fn new_single<F>(
@@ -429,8 +457,8 @@ impl RiscvEmulator {
             memory_accesses: Default::default(),
             record,
             state: RiscvEmulationState::new(program.pc_start),
-            memory_snapshot: Memory::default(),
-            uninitialized_memory_snapshot: Memory::default(),
+            memory_snapshot: ContiguousRiscvMemory::new(),
+            snapshot_registers_bitmap: 0,
             program,
             opts,
             max_syscall_cycles,
@@ -843,21 +871,14 @@ impl RiscvEmulator {
         F: FnMut(EmulationRecord),
     {
         let t_clone = Instant::now();
-        self.memory_snapshot.clear();
-        self.uninitialized_memory_snapshot.clear();
         self.mode = RiscvEmulatorMode::Simple;
         self.update_mode_deps();
         // TODO: add flag to choose whether emit global_memory_events in postprocess()
         // TODO: clone, then emulate_batch
         // self.emit_global_memory_events = emit_global_memory_events;
 
-        let mem = std::mem::take(&mut self.state.memory);
-        // let uninit_mem = std::mem::take(&mut self.state.uninitialized_memory);
-        // let proof      = std::mem::take(&mut self.state.proof_stream);
-        let mut snapshot = self.state.clone();
-        self.state.memory = mem;
-        // self.state.uninitialized_memory = uninit_mem;
-        // self.state.proof_stream        = proof;
+        // Fast clone: uses vec![0; size] for memory instead of copying 12GB
+        let mut snapshot = self.state.clone_without_memory();
 
         println!(
             "state clone duration: {:?}ms",
@@ -873,46 +894,58 @@ impl RiscvEmulator {
 
         let t_rollback = Instant::now();
 
-        // let next_pc = self.state.pc;
-
-        let mem_snap =
-            std::mem::replace(&mut self.memory_snapshot, Memory::<_>::new_preallocated());
-        let _uninit_snap = std::mem::replace(
-            &mut self.uninitialized_memory_snapshot,
-            Memory::<_>::new_preallocated(),
-        );
+        // Use mem::take to avoid allocating a new 12GB memory
+        // self.memory_snapshot will be Default (zeroed) after take
+        // The reset logic is handled here as well.
+        let mut mem_snap = std::mem::take(&mut self.memory_snapshot);
+        // let _snap_regs = self.snapshot_registers_bitmap;
+        self.snapshot_registers_bitmap = 0;
 
         // if done && !self.emit_global_memory_events {
+        // trick: no need to rollback the bitmap in snapshot.memory
         if report.done {
-            snapshot.memory.clone_from(&self.state.memory);
-            for (addr, old) in mem_snap {
-                match old {
-                    Some(rec) => {
-                        snapshot.memory.insert(addr, rec);
-                    }
-                    None => {
-                        snapshot.memory.remove(addr);
-                    }
-                }
-            }
-            // snapshot.uninitialized_memory = self.state.uninitialized_memory.clone();
-            // for (addr, existed) in uninit_snap {
-            //     if !existed {
-            //         snapshot.uninitialized_memory.remove(addr);
+            // Use swap instead of clone_from to avoid copying 12GB
+            // After swap:
+            //   - snapshot.memory = the final (live) state memory
+            //   - self.state.memory = the zeroed snapshot memory (fine since done=true)
+            std::mem::swap(&mut snapshot.memory, &mut self.state.memory);
+            std::mem::swap(
+                &mut snapshot.uninitialized_memory,
+                &mut self.state.uninitialized_memory,
+            );
+
+            // Restore from snapshot: apply the pre-batch values to the rollback addresses
+            // Registers (addresses 0-31)
+
+            // Main memory (addresses >= 32)
+            snapshot.memory.par_restore_from(&mem_snap);
+
+            // TODO: remove registers handling here
+            // for i in 0..32 {
+            //     if (snap_regs & (1 << i)) != 0 {
+            //         let rec = mem_snap.get(i as u32);
+            //         snapshot.memory.insert(i as u32, rec);
             //     }
             // }
-        } else {
-            snapshot.memory = mem_snap
-                .into_iter()
-                .filter_map(|(a, r)| r.map(|rec| (a, rec)))
-                .collect();
 
-            // snapshot.uninitialized_memory = uninit_snap
-            //     .into_iter()
-            //     .filter(|&(_, existed)| existed)
-            //     .map(|(a, _)| (a,
-            //                    *self.state.uninitialized_memory.get(a).unwrap()))
-            //     .collect();
+            // Recycle dirty mem_snap with reset=true
+            let _ = crate::emulator::riscv::memory::GLOBAL_MEMORY_RECYCLER.send((mem_snap, true));
+        } else {
+            // Reconstruct partial memory from snapshot
+            // snapshot.memory was zeroed from clone_without_memory().
+
+            // As per user request: just swap memory and uninitialized_memory
+            // Use mem_snap directly as snapshot.memory.
+            // After swap:
+            //   - snapshot.memory = mem_snap (The snapshot state)
+            //   - mem_snap = zeroed pooled memory (to be recycled)
+            std::mem::swap(&mut snapshot.memory, &mut mem_snap);
+
+            // No restore_from call here.
+
+            // ELSE case: mem_snap is implicitly ZEROED (it came from snapshot.memory which was new/pooled).
+            // Recycle it.
+            let _ = crate::emulator::riscv::memory::GLOBAL_MEMORY_RECYCLER.send((mem_snap, false));
         }
 
         println!(
@@ -920,18 +953,10 @@ impl RiscvEmulator {
             t_rollback.elapsed().as_secs_f64() * 1000.0
         );
         // TODO: handle public values properly (COMMIT syscall across chunks )
-        // let mut pv = self.records.last().as_ref().unwrap().public_values;
-        // pv.start_pc = next_pc;
-        // pv.next_pc  = next_pc;
-
-        // if !done {
-        //     self.records.clear();
-        // }
 
         Ok((snapshot, report))
     }
 
-    /// Read a word from memory and create an access record.
     pub fn mr(
         &mut self,
         addr: u32,
@@ -939,38 +964,46 @@ impl RiscvEmulator {
         timestamp: u32,
         local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
+        // Check unconstrained status first to avoid borrow conflict
+        let is_unconstrained = self.is_unconstrained();
+
         // Use local accessor or fallback to default one
         let local_access = local_memory_access.unwrap_or(&mut self.local_memory_access);
 
-        // Get the memory record entry.
-        let entry = self.state.memory.entry(addr);
-        snapshot_addr_if_needed(&self.mode, &mut self.memory_snapshot, addr, &entry);
-
-        self.mode.add_unconstrained_memory_record(addr, &entry);
-
-        // If it's the first time accessing this address, initialize previous values.
-        let record: &mut MemoryRecord = match entry {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
-                let value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    chunk: 0,
-                    timestamp: 0,
-                })
-            }
+        // Use no_mark version in unconstrained mode to avoid bitmap side effects
+        let (value, prev_chunk, prev_timestamp) = if is_unconstrained {
+            self.state
+                .memory
+                .read_and_update_metadata_no_mark(addr, chunk, timestamp)
+        } else {
+            self.state
+                .memory
+                .read_and_update_metadata(addr, chunk, timestamp)
         };
-        let value = record.value;
-        let prev_chunk = record.chunk;
-        let prev_timestamp = record.timestamp;
+        let prev_record = MemoryRecord {
+            value,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
+        };
 
-        let prev_record = *record;
-        record.chunk = chunk;
-        record.timestamp = timestamp;
+        snapshot_addr_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&prev_record),
+        );
+        self.mode
+            .add_unconstrained_memory_record(addr, Some(&prev_record));
+
+        let final_record = MemoryRecord {
+            value,
+            chunk,
+            timestamp,
+        };
 
         self.mode
-            .add_memory_local_event(addr, *record, prev_record, local_access);
+            .add_memory_local_event(addr, final_record, prev_record, local_access);
 
         // Construct the memory read record.
         MemoryReadRecord::new(value, chunk, timestamp, prev_chunk, prev_timestamp)
@@ -984,38 +1017,23 @@ impl RiscvEmulator {
         timestamp: u32,
         _local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
-        // Use local accessor or fallback to default one
-        // let local_access = local_memory_access.unwrap_or(&mut self.local_memory_access);
-
-        // ---- Address refers to general memory ----
-        // Get the memory record entry.
-        let entry = self.state.memory.entry(addr);
-
-        snapshot_addr_if_needed(&self.mode, &mut self.memory_snapshot, addr, &entry);
-
-        // If it's the first time accessing this address, initialize previous values.
-        let record: &mut MemoryRecord = match entry {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
-                let value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    chunk: 0,
-                    timestamp: 0,
-                })
-            }
+        // Get the current record for snapshotting
+        let (value, prev_chunk, prev_timestamp) = self
+            .state
+            .memory
+            .read_and_update_metadata(addr, chunk, timestamp);
+        let prev_record = MemoryRecord {
+            value,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
         };
-        let value = record.value;
-        let prev_chunk = record.chunk;
-        let prev_timestamp = record.timestamp;
-
-        // let prev_record = *record;
-        record.chunk = chunk;
-        record.timestamp = timestamp;
-
-        // self.mode
-        //     .add_memory_local_event(addr, *record, prev_record, local_access);
+        snapshot_addr_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&prev_record),
+        );
 
         // Construct the memory read record.
         MemoryReadRecord::new(value, chunk, timestamp, prev_chunk, prev_timestamp)
@@ -1030,41 +1048,50 @@ impl RiscvEmulator {
         timestamp: u32,
         local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
+        // Check unconstrained status first to avoid borrow conflict
+        let is_unconstrained = self.is_unconstrained();
+
         let local_access = local_memory_access.unwrap_or(&mut self.local_memory_access);
 
-        // Get the memory record entry.
-        let entry = self.state.memory.entry(addr);
-        snapshot_addr_if_needed(&self.mode, &mut self.memory_snapshot, addr, &entry);
-
-        self.mode.add_unconstrained_memory_record(addr, &entry);
-
-        // If it's the first time accessing this address, initialize previous values.
-        let record: &mut MemoryRecord = match entry {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
-                let value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    chunk: 0,
-                    timestamp: 0,
-                })
-            }
+        // Use no_mark version in unconstrained mode to avoid bitmap side effects
+        let (prev_value, prev_chunk, prev_timestamp) = if is_unconstrained {
+            self.state
+                .memory
+                .write_and_capture_prev_no_mark(addr, value, chunk, timestamp)
+        } else {
+            self.state
+                .memory
+                .write_and_capture_prev(addr, value, chunk, timestamp)
         };
-        let prev_value = record.value;
-        let prev_chunk = record.chunk;
-        let prev_timestamp = record.timestamp;
 
-        let prev_record = *record;
-        record.value = value;
-        record.chunk = chunk;
-        record.timestamp = timestamp;
+        // Reconstruct previous record for snapshot/events
+        let prev_record = MemoryRecord {
+            value: prev_value,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
+        };
+
+        // Snapshot logic (using the captured previous state)
+        snapshot_addr_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&prev_record),
+        );
+        self.mode
+            .add_unconstrained_memory_record(addr, Some(&prev_record));
+
+        // Construct final record for events
+        let final_record = MemoryRecord {
+            value,
+            chunk,
+            timestamp,
+        };
 
         self.mode
-            .add_memory_local_event(addr, *record, prev_record, local_access);
+            .add_memory_local_event(addr, final_record, prev_record, local_access);
 
-        // Construct the memory write record.
         MemoryWriteRecord::new(
             value,
             chunk,
@@ -1084,34 +1111,24 @@ impl RiscvEmulator {
         timestamp: u32,
         _local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
     ) {
-        // Get the memory record entry.
-        let entry = self.state.memory.entry(addr);
+        let (prev_value, prev_chunk, prev_timestamp) = self
+            .state
+            .memory
+            .write_and_capture_prev(addr, value, chunk, timestamp);
 
-        snapshot_addr_if_needed(&self.mode, &mut self.memory_snapshot, addr, &entry);
-
-        // If it's the first time accessing this address, initialize previous values.
-        let record: &mut MemoryRecord = match entry {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
-                let value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    chunk: 0,
-                    timestamp: 0,
-                })
-            }
+        let prev_record = MemoryRecord {
+            value: prev_value,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
         };
 
-        // let prev_record = *record;
-
-        record.value = value;
-        record.chunk = chunk;
-        record.timestamp = timestamp;
-
-        // self.mode
-        //     .add_memory_local_event(addr, *record, prev_record, local_access);
+        snapshot_addr_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&prev_record),
+        );
     }
 
     /// Read from memory, assuming that all addresses are aligned.
@@ -1189,31 +1206,30 @@ impl RiscvEmulator {
         let chunk = self.chunk();
         let timestamp = self.timestamp(&MemoryAccessPosition::A);
 
-        let entry = self.state.memory.entry(addr);
-        snapshot_addr_if_needed(&self.mode, &mut self.memory_snapshot, addr, &entry);
+        // Always use no_mark version for unconstrained syscall
+        let (prev_value, prev_chunk, prev_timestamp) = self
+            .state
+            .memory
+            .write_and_capture_prev_no_mark(addr, value, chunk, timestamp);
+
+        // Reconstruct previous record for snapshotting/tracking
+        let prev_record = MemoryRecord {
+            value: prev_value,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
+        };
+
+        snapshot_addr_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&prev_record),
+        );
 
         // TODO: no conditional check here
-        self.mode.add_unconstrained_memory_record(addr, &entry);
-
-        // If it's the first time accessing this address, initialize previous values.
-        let record: &mut MemoryRecord = match entry {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
-                let value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    chunk: 0,
-                    timestamp: 0,
-                })
-            }
-        };
-        record.value = value;
-        record.chunk = chunk;
-        record.timestamp = timestamp;
-
-        // self.mw_cpu_simple(register as u32, value, MemoryAccessPosition::A);
+        self.mode
+            .add_unconstrained_memory_record(addr, Some(&prev_record));
     }
 
     /// Fetch the destination register and input operand values for an ALU instruction.
@@ -1270,39 +1286,27 @@ impl RiscvEmulator {
     /// Read a register.
     #[inline]
     pub fn rr_simple(&mut self, register: Register, position: MemoryAccessPosition) -> u32 {
-        // Read the address from memory and create a memory read record if in trace mode.
-        // self.rr_new(register, self.chunk(), self.timestamp(&position))
-        let addr = register as u32;
+        let addr = register as u32; // Register index 0-31
         let chunk = self.chunk();
         let timestamp = self.timestamp(&position);
-        let entry = self.state.memory.registers.entry(addr);
-        snapshot_addr_if_needed(&self.mode, &mut self.memory_snapshot, addr, &entry);
 
-        let record: &mut MemoryRecord = match entry {
-            Entry::Occupied(entry) => entry.into_mut(),
-            Entry::Vacant(entry) => {
-                // If addr has a specific value to be initialized with, use that, otherwise 0.
-                let value = self
-                    .state
-                    .uninitialized_memory
-                    .registers
-                    .get(addr)
-                    .unwrap_or(&0);
-                // self.uninitialized_memory_checkpoint
-                //     .registers
-                //     .entry(addr)
-                //     .or_insert_with(|| *value != 0);
-                entry.insert(MemoryRecord {
-                    value: *value,
-                    chunk: 0,
-                    timestamp: 0,
-                })
-            }
+        let (value, prev_chunk, prev_timestamp) = self
+            .state
+            .memory
+            .read_and_update_metadata(addr, chunk, timestamp);
+        let prev_record = MemoryRecord {
+            value,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
         };
-
-        record.chunk = chunk;
-        record.timestamp = timestamp;
-        record.value
+        snapshot_addr_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&prev_record),
+        );
+        value
     }
 
     /// Set the destination register with the result and emit an ALU event.
@@ -1401,12 +1405,14 @@ impl RiscvEmulator {
             let addr = Register::from_u32(i as u32) as u32;
             let record = self.state.memory.get(addr);
 
-            snapshot_record_if_needed(&self.mode, &mut self.memory_snapshot, addr, record);
-
-            registers[i] = match record {
-                Some(record) => record.value,
-                None => 0,
-            };
+            snapshot_record_if_needed(
+                &self.mode,
+                &mut self.memory_snapshot,
+                &mut self.snapshot_registers_bitmap,
+                addr,
+                Some(record).as_ref(),
+            );
+            registers[i] = record.value;
         }
         registers
     }
@@ -1416,13 +1422,14 @@ impl RiscvEmulator {
     pub fn register(&mut self, register: Register) -> u32 {
         let addr = register as u32;
         let record = self.state.memory.get(addr);
-
-        snapshot_record_if_needed(&self.mode, &mut self.memory_snapshot, addr, record);
-
-        match record {
-            Some(record) => record.value,
-            None => 0,
-        }
+        snapshot_record_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&record),
+        );
+        record.value
     }
 
     /// Get the current value of a word.
@@ -1431,12 +1438,14 @@ impl RiscvEmulator {
         #[allow(clippy::single_match_else)]
         let record = self.state.memory.get(addr);
 
-        snapshot_record_if_needed(&self.mode, &mut self.memory_snapshot, addr, record);
-
-        match record {
-            Some(record) => record.value,
-            None => 0,
-        }
+        snapshot_record_if_needed(
+            &self.mode,
+            &mut self.memory_snapshot,
+            &mut self.snapshot_registers_bitmap,
+            addr,
+            Some(&record),
+        );
+        record.value
     }
 
     /// Bump the record.
@@ -1460,31 +1469,30 @@ impl RiscvEmulator {
     }
 
     fn postprocess(&mut self) {
-        // Ensure that all proofs and input bytes were read, otherwise warn the user.
-        // if self.state.proof_stream_ptr != self.state.proof_stream.len() {
-        //     panic!(
-        //         "Not all proofs were read. Proving will fail during recursion. Did you pass too
-        // many proofs in or forget to call verify_pico_proof?"     );
-        // }
+        // Ensure that all proofs and input bytes were read...
         if self.state.input_stream_ptr != self.state.input_stream.len() {
             tracing::warn!("Not all input bytes were read.");
         }
+        // helper
+        // For registers, the timestamp cannot be 0
+        let is_used = |rec: &MemoryRecord| rec.value != 0 || rec.timestamp != 0 || rec.chunk != 0;
 
-        // SECTION: Set up all MemoryInitializeFinalizeEvents needed for memory argument.
         let memory_finalize_events = &mut self.record.memory_finalize_events;
+        let memory_initialize_events = &mut self.record.memory_initialize_events;
 
-        // TODO: default timestamp to 0?
         // We handle the addr = 0 case separately, as we constrain it to be 0 in the first row
         // of the memory finalize table so it must be first in the array of events.
         let addr_0_record = self.state.memory.get(0u32);
+        let default_0_rec = MemoryRecord {
+            value: 0,
+            chunk: 0,
+            timestamp: 1,
+        };
 
-        let addr_0_final_record = match addr_0_record {
-            Some(record) => record,
-            None => &MemoryRecord {
-                value: 0,
-                chunk: 0,
-                timestamp: 1,
-            },
+        let (addr_0_final_record, used_0) = if is_used(&addr_0_record) {
+            (&addr_0_record, true)
+        } else {
+            (&default_0_rec, false)
         };
 
         memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
@@ -1492,41 +1500,53 @@ impl RiscvEmulator {
             addr_0_final_record,
         ));
 
-        let memory_initialize_events = &mut self.record.memory_initialize_events;
-        let addr_0_initialize_event =
-            MemoryInitializeFinalizeEvent::initialize(0, 0, addr_0_record.is_some());
+        let addr_0_initialize_event = MemoryInitializeFinalizeEvent::initialize(0, 0, used_0);
         memory_initialize_events.push(addr_0_initialize_event);
 
-        // Step 1: Handle registers[1..32]
-        for reg in 1..32 {
-            let addr = reg as u32;
-            let record = self.state.memory.registers.get(addr);
-            if let Some(record) = record {
-                if !self.record.program.memory_image.contains_key(&addr) {
-                    let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-                    memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
-                        addr,
-                        *initial_value,
-                        true,
-                    ));
-                }
-                memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
-                    addr, record,
-                ));
-            }
-        }
+        // // =========================================================
+        // // Handle registers[1..32]
+        // for reg in 1..32 {
+        //     let addr = reg as u32;
+        //     let record = self.state.memory.get(addr);
+        //
+        //     if is_used(&record) {
+        //         if !self.record.program.memory_image.contains_key(&addr) {
+        //             let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
+        //             memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
+        //                 addr,
+        //                 *initial_value,
+        //                 true,
+        //             ));
+        //         }
+        //         memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
+        //             addr, &record,
+        //         ));
+        //     }
+        // }
 
-        // Step 2: Handle other memory
-        for addr in self.state.memory.page_table.keys() {
+        // =========================================================
+        // Handle other memory + registers
+        // =========================================================
+        // accessed_addrs = the union set of (memory_image_addrs, global_accessed_addrs)
+        let accessed_addrs: Vec<u32> = self.state.memory.accessed_keys().collect();
+        println!(
+            "[DEBUG] postprocess: accessed_addrs len: {}",
+            accessed_addrs.len()
+        );
+        if accessed_addrs.is_empty() {
+            panic!("Empty Bitmap!!")
+        }
+        for addr in accessed_addrs {
             if addr == 0 {
-                // Handled above.
                 continue;
             }
 
+            let is_in_image = self.record.program.memory_image.contains_key(&addr);
             // Program memory is initialized in the MemoryProgram chip and doesn't require any
             // events, so we only send init events for other memory addresses.
-            if !self.record.program.memory_image.contains_key(&addr) {
+            if !is_in_image {
                 let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
+                // With immediate loading, initial value is 0 for addresses not in memory_image
                 memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
                     addr,
                     *initial_value,
@@ -1534,10 +1554,122 @@ impl RiscvEmulator {
                 ));
             }
 
-            let record = *self.state.memory.page_table.get(addr).unwrap();
+            let record = self.state.memory.get(addr);
             memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
                 addr, &record,
             ));
+        }
+
+        // =========================================================
+        // DEBUG: Print all memory events for comparison
+        // Enable with: DEBUG_MEMORY_EVENTS=1
+        // =========================================================
+        if std::env::var("DEBUG_MEMORY_EVENTS").is_ok() {
+            let mut sorted_program_memory: Vec<_> =
+                self.record.program.memory_image.iter().collect();
+            sorted_program_memory.sort_by_key(|(addr, _)| **addr);
+            eprintln!(
+                "\n========== PROGRAM MEMORY IMAGE ({}) ==========",
+                sorted_program_memory.len()
+            );
+            for (i, (addr, value)) in sorted_program_memory.iter().enumerate() {
+                eprintln!(
+                    "[PROG {:4}] addr=0x{:08x} ({:10}), value=0x{:08x}",
+                    i, addr, addr, value
+                );
+            }
+
+            eprintln!(
+                "\n========== MEMORY INITIALIZE EVENTS ({}) ==========",
+                memory_initialize_events.len()
+            );
+            for (i, evt) in memory_initialize_events.iter().enumerate() {
+                eprintln!(
+                    "[INIT {:4}] addr=0x{:08x} ({:10}), value=0x{:08x}, chunk={}, ts={}, used={}",
+                    i, evt.addr, evt.addr, evt.value, evt.chunk, evt.timestamp, evt.used
+                );
+            }
+
+            eprintln!(
+                "\n========== MEMORY FINALIZE EVENTS ({}) ==========",
+                memory_finalize_events.len()
+            );
+            for (i, evt) in memory_finalize_events.iter().enumerate() {
+                eprintln!(
+                    "[FINAL {:4}] addr=0x{:08x} ({:10}), value=0x{:08x}, chunk={}, ts={}, used={}",
+                    i, evt.addr, evt.addr, evt.value, evt.chunk, evt.timestamp, evt.used
+                );
+            }
+
+            eprintln!("\n========== ALIGNMENT CHECK ==========");
+            let prog_set: std::collections::HashSet<u32> =
+                sorted_program_memory.into_iter().map(|(k, _)| *k).collect();
+            let init_set: std::collections::HashSet<u32> =
+                memory_initialize_events.iter().map(|e| e.addr).collect();
+            let final_set: std::collections::HashSet<u32> =
+                memory_finalize_events.iter().map(|e| e.addr).collect();
+
+            let mut all_addrs: Vec<u32> = final_set.iter().cloned().collect();
+            all_addrs.extend(prog_set.iter());
+            all_addrs.extend(init_set.iter());
+            all_addrs.sort();
+            all_addrs.dedup();
+
+            for addr in all_addrs {
+                let p = prog_set.contains(&addr);
+                let i = init_set.contains(&addr);
+                let f = final_set.contains(&addr);
+
+                if p && i {
+                    eprintln!(
+                        "WARN: Addr 0x{:08x} is in BOTH Program Image and Init Events",
+                        addr
+                    );
+                }
+                if f && !p && !i {
+                    eprintln!(
+                        "WARN: Addr 0x{:08x} is in Finalize but NEITHER Program nor Init",
+                        addr
+                    );
+                }
+                if i && !f {
+                    eprintln!("WARN: Addr 0x{:08x} is in Init but NOT Finalize (might be 0 or unaccessed?)", addr);
+                }
+                if p && !f {
+                    eprintln!("WARN: Addr 0x{:08x} is in Program Image but NOT Finalize (Should imply accessed!)", addr);
+                }
+            }
+            eprintln!("========== END MEMORY EVENTS ==========\n");
+
+            // DEBUG: Compare MemoryLocal initial_mem_access with MemoryInitialize
+            if std::env::var("DEBUG_LOCAL_MEMORY").is_ok() {
+                eprintln!(
+                    "\n========== MEMORY LOCAL EVENTS (checking initial_mem_access) =========="
+                );
+                let local_events = self.record.cpu_local_memory_access.iter();
+                for evt in local_events {
+                    let is_in_image = self.record.program.memory_image.contains_key(&evt.addr);
+                    let actual_init = (
+                        evt.initial_mem_access.chunk,
+                        evt.initial_mem_access.timestamp,
+                    );
+
+                    // For non-program-memory addresses, MemoryInitialize sends (0,0)
+                    // For program-memory addresses, MemoryProgram chip handles it (also sends 0,0)
+                    // So initial should ALWAYS be (0,0) for the FIRST access in a chunk
+                    if actual_init != (0, 0) {
+                        eprintln!(
+                            "NON-ZERO INIT: addr=0x{:08x}, initial=({}, {}), value={}, in_image={}",
+                            evt.addr,
+                            actual_init.0,
+                            actual_init.1,
+                            evt.initial_mem_access.value,
+                            is_in_image
+                        );
+                    }
+                }
+                eprintln!("========== END MEMORY LOCAL CHECK ==========\n");
+            }
         }
     }
 

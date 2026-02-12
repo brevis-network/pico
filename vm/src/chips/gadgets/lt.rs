@@ -1,5 +1,7 @@
 //! Bytes less than gadget
 
+#![allow(clippy::assign_op_pattern)]
+
 use crate::{
     chips::chips::byte::event::{ByteLookupEvent, ByteRecordBehavior},
     compiler::riscv::opcode::ByteOpcode,
@@ -194,7 +196,7 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
             // Assert that the flag is boolean.
             builder.assert_bool(flag);
             // Add the flag to the sum.
-            sum_flags += flag.into();
+            sum_flags = sum_flags + flag.into();
         }
         // Assert that the sum is equal to one.
         builder.when(is_real.clone()).assert_one(sum_flags);
@@ -217,10 +219,10 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
         {
             // Once the bit flag was set to one, we turn off the quality check flag.
             // We can do this by calculating the sum of the flags since only `1` is set to `1`.
-            is_inequality_visited += flag.into();
+            is_inequality_visited = is_inequality_visited + flag.into();
 
-            a_comparison_bit += a_bit.clone() * flag;
-            b_comparison_bit += b_bit.clone() * flag;
+            a_comparison_bit = a_comparison_bit + a_bit.clone() * flag;
+            b_comparison_bit = b_comparison_bit + b_bit.clone() * flag;
 
             builder
                 .when(is_real.clone())
@@ -230,9 +232,9 @@ impl<V: Copy, const N: usize> AssertLtColsBits<V, N> {
 
         builder
             .when(is_real.clone())
-            .assert_eq(a_comparison_bit, CB::F::ZERO);
+            .assert_eq(a_comparison_bit, CB::Expr::ZERO);
         builder
             .when(is_real.clone())
-            .assert_eq(b_comparison_bit, CB::F::ONE);
+            .assert_eq(b_comparison_bit, CB::Expr::ONE);
     }
 }

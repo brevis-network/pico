@@ -2,10 +2,10 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::{
-    chips::chips::riscv_memory::event::MemoryRecord,
-    emulator::riscv::{memory::Memory, syscalls::SyscallCode},
-};
+use crate::emulator::riscv::{memory::Memory, syscalls::SyscallCode};
+
+// Re-export ContiguousRiscvMemory for use in other modules
+pub use crate::emulator::riscv::memory::ContiguousRiscvMemory;
 
 /// Holds data describing the current state of a program's emulation.
 #[serde_as]
@@ -32,10 +32,6 @@ pub struct RiscvEmulationState {
 
     /// Uninitialized memory addresses that have a specific value they should be initialized with.
     /// SyscallHintRead uses this to write hint data into uninitialized memory.
-    // #[serde(
-    //     serialize_with = "serialize_hashmap_as_vec",
-    //     deserialize_with = "deserialize_hashmap_as_vec"
-    // )]
     pub uninitialized_memory: Memory<u32>,
 
     /// A stream of input values (global to the entire program).
@@ -51,7 +47,10 @@ pub struct RiscvEmulationState {
     /// public_values_stream.
     pub public_values_stream_ptr: usize,
 
-    pub memory: Memory<MemoryRecord>,
+    /// The main memory using the new contiguous memory model.
+    /// Registers are stored at addresses 0-127 (32 registers × 4 bytes).
+    /// Main memory starts at address 128.
+    pub memory: ContiguousRiscvMemory,
 
     /// Keeps track of how many times a certain syscall has been called.
     pub syscall_counts: HashMap<SyscallCode, u64>,
@@ -69,7 +68,46 @@ impl RiscvEmulationState {
             current_execution_chunk: 1,
             clk: 0,
             pc: pc_start,
+            memory: ContiguousRiscvMemory::new(),
             ..Default::default()
+        }
+    }
+
+    /// Clone the state without copying memory data (fast, ~1ms).
+    ///
+    /// The `memory` field will be a fresh zeroed memory (using `new()`)
+    /// instead of copying the full memory data from the original.
+    ///
+    /// This is useful for snapshot states where memory will be populated
+    /// separately from a snapshot or rolled back.
+    pub fn clone_without_memory(&self) -> Self {
+        let uninitialized_memory = Default::default();
+        let input_stream = self.input_stream.clone();
+        let public_values_stream = self.public_values_stream.clone();
+        let syscall_counts = self.syscall_counts.clone();
+
+        // Get a pre-allocated memory from the pool (blocking wait).
+        // This will block if the pool is empty (e.g. all items in use).
+        let memory = crate::emulator::riscv::memory::GLOBAL_MEMORY_POOL
+            .1
+            .recv()
+            .expect("Global memory pool channel closed");
+
+        Self {
+            global_clk: self.global_clk,
+            current_batch: self.current_batch,
+            current_chunk: self.current_chunk,
+            current_execution_chunk: self.current_execution_chunk,
+            clk: self.clk,
+            pc: self.pc,
+            uninitialized_memory,
+            input_stream,
+            input_stream_ptr: self.input_stream_ptr,
+            public_values_stream,
+            public_values_stream_ptr: self.public_values_stream_ptr,
+            // Use pooled memory or new() for fast zeroed allocation
+            memory,
+            syscall_counts,
         }
     }
 }

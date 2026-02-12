@@ -260,11 +260,12 @@ pub fn eval_permutation_constraints<F, AB>(
                 let mut rlc = alpha.clone();
                 let mut betas = beta.powers();
 
-                rlc +=
-                    betas.next().unwrap() * AB::ExprEF::from_canonical_usize(message.kind as usize);
+                rlc = rlc.clone()
+                    + betas.next().unwrap()
+                        * AB::ExprEF::from_canonical_usize(message.kind as usize);
                 for (field, beta) in message.values.iter().zip(betas.clone()) {
                     let elem = field.apply::<AB::Expr, AB::Var>(&preprocessed_local, main_local);
-                    rlc += beta * elem;
+                    rlc = rlc.clone() + beta * elem;
                 }
                 rlcs.push(rlc);
 

@@ -1,0 +1,12 @@
+[package]
+name = "aot-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pico-vm = { path = "../../vm" }
+pico-aot-dispatch = { path = "../../aot-generated", optional = true }
+
+[features]
+default = []
+aot = ["pico-aot-dispatch"]

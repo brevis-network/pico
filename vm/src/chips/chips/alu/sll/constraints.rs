@@ -40,7 +40,7 @@ where
             let mut c_byte_sum = zero.clone();
             for i in 0..BYTE_SIZE {
                 let val: CB::Expr = F::from_canonical_u32(1 << i).into();
-                c_byte_sum += val * c_lsb[i];
+                c_byte_sum = c_byte_sum.clone() + val * c_lsb[i];
             }
             builder.assert_eq(c_byte_sum, c[0]);
 
@@ -49,7 +49,8 @@ where
 
             //  num_bits_to_shift = event.c as usize % BYTE_SIZE, so the maximum value of num_bits_to_shift is 7, just need 3 bits to calculate this.
             for i in 0..3 {
-                num_bits_to_shift += c_lsb[i] * F::from_canonical_u32(1 << i);
+                num_bits_to_shift =
+                    num_bits_to_shift.clone() + c_lsb[i] * F::from_canonical_u32(1 << i);
             }
             // check num_bits_to_shift i'th is 1
             for i in 0..BYTE_SIZE {
@@ -70,7 +71,7 @@ where
             for i in 0..WORD_SIZE {
                 let mut v = b[i] * bit_shift_multiplier - shift_result_carry[i] * base.clone();
                 if i > 0 {
-                    v += shift_result_carry[i - 1].into();
+                    v = v.clone() + shift_result_carry[i - 1].into();
                 }
                 builder.assert_eq(shift_result[i], v);
             }

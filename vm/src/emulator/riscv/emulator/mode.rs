@@ -6,7 +6,7 @@ use crate::{
     },
     compiler::riscv::{instruction::Instruction, opcode::Opcode},
     emulator::riscv::{
-        emulator::EmulationError, memory::Entry, record::MemoryAccessRecord, syscalls::SyscallCode,
+        emulator::EmulationError, record::MemoryAccessRecord, syscalls::SyscallCode,
     },
 };
 use hashbrown::HashMap;
@@ -186,13 +186,8 @@ impl RiscvEmulatorMode {
     }
 
     /// Add an unconstrained memory record.
-    pub fn add_unconstrained_memory_record(&mut self, addr: u32, entry: &Entry<MemoryRecord>) {
+    pub fn add_unconstrained_memory_record(&mut self, addr: u32, record: Option<&MemoryRecord>) {
         if let Self::Unconstrained(state) = self {
-            let record = match &entry {
-                Entry::Occupied(entry) => Some(entry.get()),
-                Entry::Vacant(_) => None,
-            };
-
             state.memory_diff.entry(addr).or_insert(record.copied());
         }
     }

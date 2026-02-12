@@ -51,7 +51,7 @@ pub trait ChipBaseBuilder<F: Field>: AirBuilder<F = F> {
         let mut result = Self::Expr::ZERO;
 
         for (value, i) in array.iter().zip_eq(index_bitmap) {
-            result += value.clone().into() * i.clone().into();
+            result = result.clone() + value.clone().into() * i.clone().into();
         }
 
         result

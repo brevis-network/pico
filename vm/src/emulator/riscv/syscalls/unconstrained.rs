@@ -1,5 +1,10 @@
+use tracing::debug;
+
 use super::{Syscall, SyscallCode, SyscallContext};
-use crate::emulator::riscv::emulator::{RiscvEmulatorMode, UnconstrainedState};
+use crate::{
+    chips::chips::riscv_memory::event::MemoryRecord,
+    emulator::riscv::emulator::{RiscvEmulatorMode, UnconstrainedState},
+};
 
 pub(crate) struct EnterUnconstrainedSyscall;
 
@@ -7,6 +12,10 @@ impl Syscall for EnterUnconstrainedSyscall {
     fn emulate(&self, ctx: &mut SyscallContext, _: SyscallCode, _: u32, _: u32) -> Option<u32> {
         // Panic if the previous mode is wrong.
         let state = UnconstrainedState::new(ctx.rt);
+        debug!(
+            "[Unconstrained] Entering at PC={} clk={} global_clk={}",
+            ctx.rt.state.pc, ctx.rt.state.clk, ctx.rt.state.global_clk
+        );
         ctx.rt.mode = RiscvEmulatorMode::Unconstrained(state);
         ctx.rt.update_mode_deps();
 
@@ -34,7 +43,8 @@ impl Syscall for ExitUnconstrainedSyscall {
                         ctx.rt.state.memory.insert(addr, value);
                     }
                     None => {
-                        ctx.rt.state.memory.remove(addr);
+                        // Reset to default (uninitialized state)
+                        ctx.rt.state.memory.insert(addr, MemoryRecord::default());
                     }
                 }
             }
