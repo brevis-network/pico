@@ -175,7 +175,7 @@ macro_rules! define_vk_digest_from_shape {
                             &stdin_with_vk,
                         );
                     let compress_pad_shape = RecursionChipType::<$F>::compress_shape();
-                    program_with_vk.shape = Some(compress_pad_shape);
+                    recursion_shape_config.padding_shape(&mut program_with_vk);
                     let (_pk, vk) = machine.setup_keys(&program_with_vk);
                     vk.hash_field()
                 }
