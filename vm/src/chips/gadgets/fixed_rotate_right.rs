@@ -152,3 +152,39 @@ impl<F: Field> FixedRotateRightOperation<F> {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_koala_bear::KoalaBear;
+    use p3_uni_stark::{Entry, SymbolicVariable};
+
+    #[test]
+    fn test_fixed_rotate_right_gadget_simple_eval() {
+        let var = SymbolicVariable::new(Entry::Main { offset: 0 }, 0);
+        let word = Word([var; 4]);
+
+        // create a new gadget
+        let gadget = FixedRotateRightOperation {
+            value: word,
+            shift: word,
+            carry: word,
+        };
+        // create a constraint builder
+        let mut builder =
+            SymbolicConstraintFolder::new(0, size_of::<FixedRotateRightOperation<u8>>());
+
+        // evaluate with this gadget
+        FixedRotateRightOperation::<KoalaBear>::eval(&mut builder, word, 1, gadget, var);
+
+        // check the constraints and public values
+        assert_eq!(builder.constraints.len(), 4);
+        assert_eq!(builder.public_values.len(), 231);
+
+        // check the looking (sending) and looked (receiving) lookups
+        let (looking, looked) = builder.lookups();
+        assert_eq!(looking.len(), 4);
+        assert_eq!(looked.len(), 0);
+    }
+}
