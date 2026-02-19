@@ -189,6 +189,7 @@ pub struct ProverConstraintFolder<SC: StarkGenericConfig> {
     pub is_transition: PackedVal<SC>,
     pub alpha: SC::Challenge,
     pub accumulator: PackedChallenge<SC>,
+    pub num_constraints: usize,
 }
 
 impl<SC: StarkGenericConfig> ScopedBuilder for ProverConstraintFolder<SC> {}
@@ -223,6 +224,7 @@ impl<SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<SC> {
         let x: PackedVal<SC> = x.into();
         self.accumulator *= PackedChallenge::<SC>::from_f(self.alpha);
         self.accumulator += x;
+        self.num_constraints += 1;
     }
 }
 
@@ -270,6 +272,7 @@ impl<SC: StarkGenericConfig> ExtensionBuilder for ProverConstraintFolder<SC> {
         let x: PackedChallenge<SC> = x.into();
         self.accumulator *= PackedChallenge::<SC>::from_f(self.alpha);
         self.accumulator += x;
+        self.num_constraints += 1;
     }
 }
 
@@ -302,6 +305,7 @@ pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
     pub is_transition: SC::Challenge,
     pub alpha: SC::Challenge,
     pub accumulator: SC::Challenge,
+    pub num_constraints: usize,
 }
 
 impl<SC: StarkGenericConfig> ScopedBuilder for VerifierConstraintFolder<'_, SC> {}
@@ -336,6 +340,7 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC>
         let x: SC::Challenge = x.into();
         self.accumulator *= self.alpha;
         self.accumulator += x;
+        self.num_constraints += 1;
     }
 }
 
@@ -351,6 +356,7 @@ impl<SC: StarkGenericConfig> ExtensionBuilder for VerifierConstraintFolder<'_, S
         let x: SC::Challenge = x.into();
         self.accumulator *= self.alpha;
         self.accumulator += x;
+        self.num_constraints += 1;
     }
 }
 

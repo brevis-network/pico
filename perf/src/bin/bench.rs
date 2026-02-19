@@ -305,11 +305,12 @@ fn bench_kb(bench_program: &BenchProgram) -> Result<PerformanceReport> {
             >::build(&onchain_stdin);
             let gnark_witness =
                 build_gnark_config_with_str(constraints, witness, PathBuf::from("./"));
-            let gnark_proof_data = send_gnark_prove_task(gnark_witness);
-            info!(
-                "gnark prove success with proof data {}",
-                gnark_proof_data.unwrap_or_else(|e| format!("Error: {}", e))
-            );
+            // Soundcalc: No need for gnark proof
+            // let gnark_proof_data = send_gnark_prove_task(gnark_witness);
+            // info!(
+            //     "gnark prove success with proof data {}",
+            //     gnark_proof_data.unwrap_or_else(|e| format!("Error: {}", e))
+            // );
 
             1_u32
         });

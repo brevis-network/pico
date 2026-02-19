@@ -275,6 +275,7 @@ where
         pcs.verify(rounds, opening_proof, challenger)
             .map_err(|e| anyhow!("{e:?}"))?;
 
+        let mut total_constraints = 0;
         for (chip, main_domain, quotient_chunk_domain, log_quotient_degree, values) in izip!(
             chips.iter(),
             main_domains,
@@ -374,9 +375,11 @@ where
                 is_transition: sels.is_transition,
                 alpha,
                 accumulator: SC::Challenge::ZERO,
+                num_constraints: 0,
             };
 
             chip.eval(&mut folder);
+            total_constraints += folder.num_constraints;
             let folded_constraints = folder.accumulator;
 
             // todo: properly handle errors
@@ -384,6 +387,8 @@ where
                 panic!("Constraint verification failed");
             }
         }
+
+        log::info!("num_constraints: {total_constraints}");
 
         // Verify that the regional cumulative sum is zero.
         let regional_cumulative_sum = proof.regional_cumulative_sum();

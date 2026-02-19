@@ -321,9 +321,12 @@ where
                     is_transition,
                     alpha,
                     accumulator,
+                    num_constraints: 0,
                 };
 
                 chip.eval(&mut folder);
+
+                // log::info!("{} num_constraints: {}", chip.name(), folder.num_constraints);
 
                 let quotient = folder.accumulator * inv_zerofier;
 

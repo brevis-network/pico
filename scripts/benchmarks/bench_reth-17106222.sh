@@ -9,11 +9,11 @@ set -e
 LOG_DIR="logs/$(date +'%Y%m%d-%H%M%S')"
 mkdir -p "$LOG_DIR"
 
-cargo build --release --bin gnarkctl
-cp target/release/gnarkctl gnarkctl
+# cargo build --release --bin gnarkctl
+# cp target/release/gnarkctl gnarkctl
 
 export CHUNK_SIZE=4194304
-export CHUNK_BATCH_SIZE=32
+export CHUNK_BATCH_SIZE=1
 export SPLIT_THRESHOLD=1048576
 export RUST_LOG=info
 export RUSTFLAGS="-C target-cpu=native -C target-feature=+avx512f,+avx512ifma,+avx512vl"
@@ -23,17 +23,17 @@ export VK_VERIFICATION=true
 PROG="reth-17106222"
 FIELD="kb"
 
-RUNS=5
+RUNS=1
 
-./gnarkctl setup --field $FIELD
+# ./gnarkctl setup --field $FIELD
 
 for i in $(seq 1 $RUNS); do
   echo "===== Run #$i ====="
   LOG_FILE="bench_reth171_${i}.log"
-  cargo run --profile perf --bin bench --features jemalloc,nightly-features -- --programs $PROG --field $FIELD | tee "$LOG_DIR/$LOG_FILE"
+  cargo run --release --bin bench --features jemalloc,nightly-features -- --programs $PROG --field $FIELD | tee "$LOG_DIR/$LOG_FILE"
 done
 
-./gnarkctl teardown
-rm gnarkctl
+# ./gnarkctl teardown
+# rm gnarkctl
 
 echo "pico benchmark reth-17106222 (kb) completed!"

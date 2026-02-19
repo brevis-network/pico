@@ -26,8 +26,8 @@ use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_util::log2_strict_usize;
-use std::{array, cmp::Reverse, time::Instant};
-use tracing::{debug, debug_span, instrument, Span};
+use std::{array, cmp::Reverse, fmt::Write, time::Instant};
+use tracing::{debug, debug_span, info, instrument, Span};
 
 pub struct BaseProver<SC, C> {
     _phantom: std::marker::PhantomData<(SC, C)>,
@@ -372,6 +372,140 @@ impl<SC: StarkGenericConfig, C: ChipBehavior<SC::Val>> BaseProver<SC, C> {
             .iter()
             .map(|degree| log2_strict_usize(*degree))
             .collect::<Arc<[_]>>();
+
+        // Soundcalc LogUp parameter summary — per (LookupType, LookupScope) breakdown
+        {
+            use std::collections::BTreeMap;
+
+            // Per (LookupType, LookupScope) stats
+            struct TypeStats {
+                looking_rows: usize,     // Σ(H_i) for chips with looking of this type
+                looked_rows: usize,      // Σ(H_i) for chips with looked of this type
+                looking_count: usize,    // total looking interactions of this type
+                looked_count: usize,     // total looked interactions of this type
+                max_s: usize,            // max column count for this type
+                weighted_looking: usize, // Σ(H_i × looking_count_i) for this type
+                weighted_looked: usize,  // Σ(H_i × looked_count_i) for this type
+            }
+
+            let mut type_stats: BTreeMap<String, TypeStats> = BTreeMap::new();
+            let mut buffer = String::new();
+
+            // Per-chip info
+            for (chip, height) in chips.iter().zip(main_degrees.iter()) {
+                let chip_scope = chip.lookup_scope();
+
+                // Count looking per (LookupType, scope) for this chip
+                let mut chip_looking_by_type: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+                for lk in chip.get_looking().iter() {
+                    let key = format!("{:?}/{}", lk.kind, lk.scope);
+                    let s = 1 + lk.values.len();
+                    let entry = chip_looking_by_type.entry(key).or_insert((0, 0));
+                    entry.0 += 1;
+                    entry.1 = entry.1.max(s);
+                }
+
+                // Count looked per (LookupType, scope) for this chip
+                let mut chip_looked_by_type: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+                for lk in chip.get_looked().iter() {
+                    let key = format!("{:?}/{}", lk.kind, lk.scope);
+                    let s = 1 + lk.values.len();
+                    let entry = chip_looked_by_type.entry(key).or_insert((0, 0));
+                    entry.0 += 1;
+                    entry.1 = entry.1.max(s);
+                }
+
+                // Build per-chip detail string and accumulate into type_stats
+                let mut chip_details = Vec::new();
+                for (ty, (count, max_s)) in &chip_looking_by_type {
+                    chip_details.push(format!("looking:{}×{}", ty, count));
+                    let ts = type_stats.entry(ty.clone()).or_insert(TypeStats {
+                        looking_rows: 0,
+                        looked_rows: 0,
+                        looking_count: 0,
+                        looked_count: 0,
+                        max_s: 0,
+                        weighted_looking: 0,
+                        weighted_looked: 0,
+                    });
+                    ts.looking_rows += height;
+                    ts.looking_count += count;
+                    ts.max_s = ts.max_s.max(*max_s);
+                    ts.weighted_looking += height * count;
+                }
+                for (ty, (count, max_s)) in &chip_looked_by_type {
+                    chip_details.push(format!("looked:{}×{}", ty, count));
+                    let ts = type_stats.entry(ty.clone()).or_insert(TypeStats {
+                        looking_rows: 0,
+                        looked_rows: 0,
+                        looking_count: 0,
+                        looked_count: 0,
+                        max_s: 0,
+                        weighted_looking: 0,
+                        weighted_looked: 0,
+                    });
+                    ts.looked_rows += height;
+                    ts.looked_count += count;
+                    ts.max_s = ts.max_s.max(*max_s);
+                    ts.weighted_looked += height * count;
+                }
+
+                let total_k = chip.get_looking().len() + chip.get_looked().len();
+                writeln!(
+                    &mut buffer,
+                    "soundcalc_lookup: chunk {:>2} chip {:<21} | scope={:<8} height={:<8} k={:<3} | {}",
+                    chunk_index,
+                    chip.name(),
+                    format!("{}", chip_scope),
+                    height,
+                    total_k,
+                    chip_details.join(", ")
+                )
+                    .unwrap();
+            }
+
+            // Per-(LookupType, scope) summary
+            writeln!(
+                &mut buffer,
+                "soundcalc_lookup: chunk {:>2} ---- PER LOOKUP TYPE/SCOPE SUMMARY ----",
+                chunk_index
+            )
+                .unwrap();
+            let mut grand_total_looking = 0usize;
+            let mut grand_total_looked = 0usize;
+            let mut grand_weighted = 0usize;
+            for (ty, ts) in &type_stats {
+                writeln!(
+                    &mut buffer,
+                    "soundcalc_lookup: chunk {:>2} type {:<20} | S={:<2} looking: count={:<3} Σ(Hi)={:<9} Σ(Hi×ki)={:<10} | looked: count={:<3} Σ(Hi)={:<9} Σ(Hi×ki)={:<10}",
+                    chunk_index, ty, ts.max_s,
+                    ts.looking_count, ts.looking_rows, ts.weighted_looking,
+                    ts.looked_count, ts.looked_rows, ts.weighted_looked,
+                )
+                    .unwrap();
+                grand_total_looking += ts.looking_count;
+                grand_total_looked += ts.looked_count;
+                grand_weighted += ts.weighted_looking + ts.weighted_looked;
+            }
+
+            let global_max_s = type_stats.values().map(|ts| ts.max_s).max().unwrap_or(0);
+            let max_trace_height = main_degrees.iter().max().copied().unwrap_or(0);
+            writeln!(
+                &mut buffer,
+                "soundcalc_lookup: chunk {:>2} TOTAL | num_chips={} total_looking={} total_looked={} total_interactions={} max_height={} max_S={} Σ(Hi×ki)={}",
+                chunk_index,
+                chips.len(),
+                grand_total_looking,
+                grand_total_looked,
+                grand_total_looking + grand_total_looked,
+                max_trace_height,
+                global_max_s,
+                grand_weighted
+            )
+                .unwrap();
+
+            info!("{}", buffer);
+        }
 
         let pcs = config.pcs();
         let main_domains = main_degrees

@@ -12,7 +12,8 @@ use crate::{
 use p3_air::{Air, BaseAir};
 use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
-use tracing::debug;
+use std::fmt::Write;
+use tracing::{debug, info};
 
 /// Chip behavior
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
@@ -87,6 +88,49 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
             looking.len(),
             looked.len()
         );
+
+        // Detailed lookup statistics for soundcalc integration
+        let mut buffer = String::new();
+        let mut max_s: usize = 0;
+        for (i, lk) in looking.iter().enumerate() {
+            let s = 1 + lk.values.len(); // 1 for kind + values.len()
+            max_s = max_s.max(s);
+            writeln!(
+                &mut buffer,
+                "soundcalc: chip {:<21} looking[{:>2}] kind={:?} scope={} S={}",
+                chip.name(),
+                i,
+                lk.kind,
+                lk.scope,
+                s
+            )
+                .unwrap();
+        }
+        for (i, lk) in looked.iter().enumerate() {
+            let s = 1 + lk.values.len();
+            max_s = max_s.max(s);
+            writeln!(
+                &mut buffer,
+                "soundcalc: chip {:<21} looked [{:>2}] kind={:?} scope={} S={}",
+                chip.name(),
+                i,
+                lk.kind,
+                lk.scope,
+                s
+            )
+                .unwrap();
+        }
+        writeln!(
+            &mut buffer,
+            "soundcalc: chip {:<21} SUMMARY: total_interactions={} max_S={}",
+            chip.name(),
+            looking.len() + looked.len(),
+            max_s
+        )
+            .unwrap();
+
+        info!("{}", buffer);
+
         Self {
             chip,
             looking,
