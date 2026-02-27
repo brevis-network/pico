@@ -11,7 +11,7 @@ use core::arch::asm;
 /// byte boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
+pub extern "C" fn syscall_bn254_add(p: *mut [u64; 8], q: *const [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
@@ -36,7 +36,7 @@ pub extern "C" fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]) {
 /// boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_bn254_double(p: *mut [u32; 16]) {
+pub extern "C" fn syscall_bn254_double(p: *mut [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(

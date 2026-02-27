@@ -9,7 +9,7 @@ use core::arch::asm;
 /// boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_sha256_extend(w: *mut [u32; 64]) {
+pub extern "C" fn syscall_sha256_extend(w: *mut [u64; 64]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(

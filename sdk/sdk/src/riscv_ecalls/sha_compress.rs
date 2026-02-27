@@ -9,7 +9,7 @@ use core::arch::asm;
 /// four byte boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_sha256_compress(w: *mut [u32; 64], state: *mut [u32; 8]) {
+pub extern "C" fn syscall_sha256_compress(w: *mut [u64; 64], state: *mut [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
