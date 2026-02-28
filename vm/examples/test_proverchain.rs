@@ -14,8 +14,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use pico_vm::configs::stark_config::KoalaBearPoseidon2;
-use pico_vm::machine::keys::BaseVerifyingKey;
+use pico_vm::{configs::stark_config::KoalaBearPoseidon2, machine::keys::BaseVerifyingKey};
 use tracing::info;
 
 #[path = "common/parse_args.rs"]
@@ -75,6 +74,7 @@ fn main() {
     assert!(convert.verify(&proof, &riscv_vk));
     let proof = combine.prove(proof);
     assert!(combine.verify(&proof, &riscv_vk));
+    proof.save_to_file("combine_proof_kb.bin").unwrap();
     let proof = compress.prove(proof);
     assert!(compress.verify(&proof, &riscv_vk));
     let proof = embed.prove(proof);
