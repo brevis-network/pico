@@ -9,4 +9,5 @@ categories = { workspace = true }
 
 [dependencies]
 bincode.workspace = true
+elliptic-curve.workspace = true
 serde.workspace = true

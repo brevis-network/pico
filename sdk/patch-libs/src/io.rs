@@ -24,6 +24,18 @@ pub const FD_EDDECOMPRESS: u32 = 8;
 /// The file descriptor for brevis coprocessor outputs.
 pub const FD_COPROCESSOR_OUTPUTS: u32 = 9;
 
+/// The file descriptor through which to access `hook_fp_sqrt`.
+pub const FD_FP_SQRT: u32 = 10;
+
+/// The file descriptor through which to access `hook_fp_inverse`.
+pub const FD_FP_INV: u32 = 11;
+
+/// The file descriptor through which to access `hook_bls12_381_sqrt`.
+pub const FD_BLS12_381_SQRT: u32 = 12;
+
+/// The file descriptor through which to access `hook_bls12_381_inverse`.
+pub const FD_BLS12_381_INVERSE: u32 = 13;
+
 /// A writer that writes to a file descriptor inside the zkVM.
 pub struct SyscallWriter {
     pub fd: u32,

@@ -1,6 +1,7 @@
 //! Wrapper syscall API for the Pico patches.
 pub mod bls12381;
 pub mod bn254;
+pub mod ecdsa;
 pub mod ed25519;
 pub mod io;
 pub mod secp256k1;
