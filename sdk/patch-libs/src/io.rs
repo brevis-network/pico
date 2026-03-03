@@ -66,8 +66,7 @@ pub struct ReadVecResult {
 /// Read a buffer from the input stream.
 ///
 /// The buffer is read into uninitialized memory.
-#[no_mangle]
-pub extern "C" fn read_vec_raw() -> ReadVecResult {
+fn read_vec_raw() -> ReadVecResult {
     // Get the length of the input buffer.
     let len = unsafe { syscall_hint_len() };
 
