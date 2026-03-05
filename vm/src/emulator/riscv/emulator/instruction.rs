@@ -3,6 +3,7 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
     emulator::riscv::syscalls::{syscall_context::SyscallContext, SyscallCode},
+    primitives::consts::MAX_PC,
 };
 use tracing::debug;
 
@@ -16,6 +17,7 @@ impl RiscvEmulator {
         let mut exit_code = 0u32;
         let mut clk = self.state.clk;
         let mut next_pc = self.state.pc.wrapping_add(4);
+        assert!(next_pc < MAX_PC);
 
         let rd: Register;
         let (a, b, c): (u32, u32, u32);

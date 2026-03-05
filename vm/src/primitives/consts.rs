@@ -66,6 +66,7 @@ pub const BENCH_RECURSION_MAX_CHUNK_SIZE: u32 = 1 << 22;
 For RiscV
  */
 pub const MAX_LOG_NUMBER_OF_CHUNKS: usize = 16;
+pub const MAX_PC: u32 = 1 << 30;
 
 /*
 For recursion
