@@ -30,7 +30,7 @@ fn main() {
     println!("elf length: {}", elf.len());
 
     let client = DefaultProverClient::new(&elf);
-    let stdin_builder = client.get_stdin_builder(); // Shared instance
+    let stdin_builder = client.new_stdin_builder(); // Shared instance
 
     // Load light blocks from the `files` subdirectory
     let (light_block_1, light_block_2) = get_light_blocks();
