@@ -2,6 +2,7 @@ use crate::command::execute_command;
 use anyhow::{Error, Ok, Result};
 use log::{debug, info};
 use p3_baby_bear::BabyBear;
+use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
 use pico_vm::{
     compiler::riscv::program::Program,
@@ -10,7 +11,7 @@ use pico_vm::{
         field_config::{BabyBearBn254, KoalaBearBn254},
         stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
-    emulator::stdin::EmulatorStdinBuilder,
+    emulator::{recursion::public_values::RecursionPublicValues, stdin::EmulatorStdinBuilder},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
@@ -218,6 +219,42 @@ macro_rules! create_sdk_prove_client {
                 save_embed_proof_data(&riscv_proof, &embed_proof, &outdir)?;
                 build_gnark_config(constraints, witness, &outdir);
                 Ok(())
+            }
+
+            /// Verify an embed proof standalone (without the riscv proof).
+            ///
+            /// Returns the 32-byte `committed_value_digest` — the SHA-256 hash of
+            /// all bytes the guest wrote via `pico_sdk::io::commit()`. Callers
+            /// should compare this against `SHA-256(expected_public_values_bytes)`
+            /// to confirm the proof commits to the expected public outputs.
+            pub fn verify_embed(
+                elf: &[u8],
+                embed_proof: &MetaProof<$bn254_sc>,
+            ) -> Result<[u8; 32], Error> {
+                let riscv = RiscvProver::new_initial_prover(
+                    (<$sc>::new(), elf), Default::default(), None,
+                );
+                let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
+                let combine = CombineProver::new_with_prev(&convert, Default::default(), None);
+                let compress = CompressProver::new_with_prev(&combine, (), None);
+                let embed = EmbedProver::<_, _, Vec<u8>>::new_with_prev(&compress, (), None);
+                if !embed.verify(embed_proof, riscv.vk()) {
+                    return Err(Error::msg("verify embed proof failed"));
+                }
+
+                // Extract committed_value_digest from the verified proof's
+                // public values. This is [Word<F>; 8] = 32 field elements,
+                // each holding one byte of the SHA-256 digest.
+                use std::borrow::Borrow;
+                let public_values: &RecursionPublicValues<_> =
+                    embed_proof.proofs[0].public_values.as_ref().borrow();
+                let mut digest = [0u8; 32];
+                for (i, word) in public_values.committed_value_digest.iter().enumerate() {
+                    for (j, &field_elem) in word.0.iter().enumerate() {
+                        digest[i * 4 + j] = field_elem.as_canonical_u32() as u8;
+                    }
+                }
+                Ok(digest)
             }
 
             /// emulate the program and return the cycles
