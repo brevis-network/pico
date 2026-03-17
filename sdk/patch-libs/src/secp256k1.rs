@@ -64,13 +64,6 @@ impl AffinePoint<N> for Secp256k1Point {
     }
 
     fn add_assign(&mut self, other: &Self) {
-        // Guard: if x-coordinates match, delegate to complete addition
-        // (handles doubling when y1==y2, or point-at-infinity when y1!=y2).
-        // This prevents division-by-zero in the Add chip's slope computation.
-        if self.limbs_ref()[..N / 2] == other.limbs_ref()[..N / 2] {
-            self.weierstrass_add_assign(other);
-            return;
-        }
         let a = self.limbs_mut();
         let b = other.limbs_ref();
         unsafe {
