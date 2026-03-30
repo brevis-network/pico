@@ -1,4 +1,5 @@
 pub mod add;
+pub mod add_sub;
 pub mod addw;
 pub mod bitwise;
 pub mod divrem;

@@ -2,6 +2,8 @@ use std::marker::PhantomData;
 
 pub mod columns;
 pub mod constraints;
+#[cfg(test)]
+mod tests;
 pub mod traces;
 
 /// A chip that implements addition for the opcode ADD and SUB.

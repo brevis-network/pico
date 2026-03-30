@@ -29,17 +29,14 @@ where
         let local = main.row_slice(0);
         let local: &AddSubCols<CB::Var> = (*local).borrow();
 
-        for (
-            i,
-            AddSubValueCols {
+        for (i, cols) in local.values.iter().enumerate() {
+            let AddSubValueCols {
                 add_operation,
                 operand_1,
                 operand_2,
                 is_add,
                 is_sub,
-            },
-        ) in local.values.into_iter().enumerate()
-        {
+            } = *cols;
             let scope = format!("AddSubValueCols[{}]", i);
             builder.with_scope(scope, |builder| {
                 // Evaluate the addition operation.

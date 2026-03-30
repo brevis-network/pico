@@ -37,12 +37,12 @@ impl<F: Field> AddGadget<F> {
         a: Word<AB::Var>,
         b: Word<AB::Var>,
         cols: AddGadget<AB::Var>,
-        is_real: AB::Var,
+        is_real: AB::Expr,
     ) {
-        builder.assert_bool(is_real);
+        builder.assert_bool(is_real.clone());
 
         let base = AB::F::from_canonical_u32(1 << 16);
-        let mut builder_is_real = builder.when(is_real);
+        let mut builder_is_real = builder.when(is_real.clone());
         let mut carry = AB::Expr::ZERO;
 
         // The set of constraints are

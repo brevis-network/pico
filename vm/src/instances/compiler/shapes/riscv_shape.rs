@@ -12,7 +12,7 @@ use crate::{
     chips::chips::{
         alu::{
             add::AddChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip, mul::MulChip,
-            sll::SLLChip, sr::traces::ShiftRightChip, sub::SubChip,
+            sll::SLLChip, sr::ShiftRightChip, sub::SubChip,
         },
         byte::ByteChip,
         riscv_cpu::CpuChip,

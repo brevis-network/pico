@@ -82,6 +82,14 @@ impl<F: Field> SymbolicConstraintFolder<F> {
     pub fn constraints(self) -> Vec<SymbolicExpression<F>> {
         self.constraints
     }
+
+    pub fn num_constraints(&self) -> usize {
+        self.constraints.len()
+    }
+
+    pub fn num_lookups(&self) -> usize {
+        self.looking.len() + self.looked.len()
+    }
 }
 
 impl<F: Field> ScopedBuilder for SymbolicConstraintFolder<F> {}
