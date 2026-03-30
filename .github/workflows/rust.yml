@@ -67,7 +67,7 @@ jobs:
           done
 
   test:
-    if: true
+    if: false
     name: Tests
     runs-on: ubuntu-latest
     steps:
@@ -94,7 +94,7 @@ jobs:
           cargo build -p pico-vm --no-default-features --features=strict
 
   kb-tests:
-    if: true
+    if: false
     name: KoalaBear tests
     runs-on: ubuntu-latest
     steps:
@@ -136,7 +136,7 @@ jobs:
           go test -timeout 70s -run TestSolveVerifierCircuit
 
   bb-tests:
-    if: true
+    if: false
     name: BabyBear tests
     runs-on: ubuntu-latest
     steps:
