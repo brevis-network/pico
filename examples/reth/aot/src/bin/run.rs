@@ -43,7 +43,7 @@ fn main() {
         }
     };
 
-    let compiler = Compiler::new(SourceType::RISCV, &elf_bytes);
+    let compiler = Compiler::new(SourceType::RISCV, &elf_bytes).expect("Failed to create compiler");
     let program = compiler.compile();
 
     println!("Loaded program:");

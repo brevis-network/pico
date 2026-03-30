@@ -81,7 +81,8 @@ fn run_baseline_bench(elf_bytes: &[u8]) -> (u64, std::time::Duration) {
 /// Run AOT emulator in batch mode.
 #[cfg(feature = "aot")]
 fn run_aot_bench(elf_bytes: &[u8]) -> (u64, std::time::Duration, u32) {
-    let compiler = Compiler::new(SourceType::RISCV, elf_bytes);
+    let compiler =
+        Compiler::new(SourceType::RISCV, elf_bytes).expect("Failed to create RISC-V compiler");
     let program = compiler.compile();
 
     let n = INPUT_VALUE;
@@ -138,7 +139,7 @@ fn main() {
 
     let elf_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../app/elf/riscv32im-pico-zkvm-elf"
+        "/../app/elf/riscv64im-pico-zkvm-elf"
     );
     let elf_bytes = std::fs::read(elf_path).expect("Failed to read ELF file");
 

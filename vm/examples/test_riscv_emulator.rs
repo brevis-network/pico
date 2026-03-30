@@ -10,7 +10,11 @@ use pico_vm::{
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
-        opts::EmulatorOpts, record::RecordBehavior, riscv::riscv_emulator::RiscvEmulator,
+        opts::EmulatorOpts,
+        record::RecordBehavior,
+        riscv::{
+            public_values_compat::encode_public_value_pc_limbs, riscv_emulator::RiscvEmulator,
+        },
         stdin::EmulatorStdin,
     },
     machine::logger::setup_logger,
@@ -30,7 +34,7 @@ where
     let start = Instant::now();
 
     info!("Creating Program..");
-    let compiler = Compiler::new(SourceType::RISCV, elf);
+    let compiler = Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
     let program = compiler.compile();
     let pc_start = program.pc_start;
 
@@ -47,7 +51,7 @@ where
 
     let mut record_count = 0;
     let mut execution_record_count = 0;
-    let mut prev_next_pc = pc_start;
+    let mut prev_next_pc = encode_public_value_pc_limbs(pc_start);
 
     loop {
         let mut batch_records = vec![];
@@ -79,7 +83,7 @@ where
                 assert_eq!(record.public_values.start_pc, prev_next_pc);
             }
             if !record.cpu_events.is_empty() {
-                assert_ne!(record.public_values.start_pc, 0);
+                assert_ne!(record.public_values.start_pc, [0u32; 3]);
             } else {
                 assert_eq!(record.public_values.start_pc, record.public_values.next_pc);
             }
@@ -95,7 +99,10 @@ where
         }
 
         if report.done {
-            assert_eq!(batch_records.last().unwrap().public_values.next_pc, 0);
+            assert_eq!(
+                batch_records.last().unwrap().public_values.next_pc,
+                [0u32; 3]
+            );
             break;
         }
     }

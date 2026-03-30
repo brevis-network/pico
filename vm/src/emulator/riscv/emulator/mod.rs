@@ -15,10 +15,14 @@ use crate::{
         opts::{EmulatorOpts, SplitOpts},
         record::RecordBehavior,
         riscv::{
+            event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
             hook::{default_hook_map, Hook},
             public_values::PublicValues,
+            public_values_compat::{
+                encode_public_value_chunk_counter, encode_public_value_pc_limbs,
+            },
             record::{EmulationRecord, MemoryAccessRecord},
-            state::RiscvEmulationState,
+            state::{RiscvEmulationState, RuntimeRegisterRecord},
             syscalls::{default_syscall_map, Syscall, SyscallCode},
         },
     },
@@ -44,7 +48,9 @@ use crate::emulator::riscv::memory::ContiguousRiscvMemory;
 pub use error::EmulationError;
 pub use mode::RiscvEmulatorMode;
 pub use unconstrained::UnconstrainedState;
-pub use util::align;
+pub use util::align_u64;
+
+pub const MIN_MAIN_MEMORY_ADDR: u64 = 0x100;
 
 // TODO: try parking_lot
 pub type SharedDeferredState = Arc<Mutex<EmulationDeferredState>>;
@@ -104,7 +110,7 @@ impl EmulationDeferredState {
         opts: SplitOpts,
         is_trace: bool,
         callback: &mut F,
-        pc: u32,
+        pc: u64,
     ) where
         F: FnMut(EmulationRecord),
     {
@@ -156,16 +162,18 @@ impl EmulationDeferredState {
         _emulation_done: bool,
         record: &mut EmulationRecord,
     ) {
-        self.pvs.chunk += 1;
+        self.pvs.chunk = encode_public_value_chunk_counter(self.pvs.chunk + 1);
         if !self.flag_active {
             self.flag_active = true;
         } else {
-            self.pvs.execution_chunk += 1;
+            self.pvs.execution_chunk =
+                encode_public_value_chunk_counter(self.pvs.execution_chunk + 1);
         }
         // cpu chunk in Simple Mode has no cpu_events
         if !record.cpu_events.is_empty() {
-            self.pvs.start_pc = record.cpu_events[0].pc;
-            self.pvs.next_pc = record.cpu_events.last().unwrap().next_pc;
+            self.pvs.start_pc = encode_public_value_pc_limbs(record.cpu_events.first().unwrap().pc);
+            self.pvs.next_pc =
+                encode_public_value_pc_limbs(record.cpu_events.last().unwrap().next_pc);
             self.pvs.exit_code = record.cpu_events.last().unwrap().exit_code;
             self.pvs.committed_value_digest = record.public_values.committed_value_digest;
             self.pvs.deferred_proofs_digest = record.public_values.deferred_proofs_digest;
@@ -183,22 +191,26 @@ impl EmulationDeferredState {
         &mut self,
         emulation_done: bool,
         record: &mut EmulationRecord,
-        pc: u32,
+        pc: u64,
     ) {
-        self.pvs.chunk += 1;
+        // Stage 8 keeps the frozen 48-bit proof/public-value PC contract explicit; full-width
+        // proof-side PC widening remains deferred outside this tranche.
+        let pc_limbs = encode_public_value_pc_limbs(pc);
+        self.pvs.chunk = encode_public_value_chunk_counter(self.pvs.chunk + 1);
 
         // Make execution chunk consistent.
         if self.flag_active && !emulation_done {
-            self.pvs.execution_chunk += 1;
+            self.pvs.execution_chunk =
+                encode_public_value_chunk_counter(self.pvs.execution_chunk + 1);
             self.flag_active = false;
         }
 
-        self.pvs.start_pc = pc;
-        self.pvs.next_pc = pc;
-        self.pvs.previous_initialize_addr_bits = record.public_values.previous_initialize_addr_bits;
-        self.pvs.last_initialize_addr_bits = record.public_values.last_initialize_addr_bits;
-        self.pvs.previous_finalize_addr_bits = record.public_values.previous_finalize_addr_bits;
-        self.pvs.last_finalize_addr_bits = record.public_values.last_finalize_addr_bits;
+        self.pvs.start_pc = pc_limbs;
+        self.pvs.next_pc = pc_limbs;
+        self.pvs.previous_init_addr_limbs = record.public_values.previous_init_addr_limbs;
+        self.pvs.last_init_addr_limbs = record.public_values.last_init_addr_limbs;
+        self.pvs.previous_finalize_addr_limbs = record.public_values.previous_finalize_addr_limbs;
+        self.pvs.last_finalize_addr_limbs = record.public_values.last_finalize_addr_limbs;
 
         record.public_values = self.pvs;
         debug!(
@@ -210,31 +222,34 @@ impl EmulationDeferredState {
 
     #[allow(dead_code)]
     pub fn update_public_values(&mut self, emulation_done: bool, record: &mut EmulationRecord) {
-        self.pvs.chunk += 1;
+        self.pvs.chunk = encode_public_value_chunk_counter(self.pvs.chunk + 1);
         if !record.cpu_events.is_empty() {
             if !self.flag_active {
                 self.flag_active = true;
             } else {
-                self.pvs.execution_chunk += 1;
+                self.pvs.execution_chunk =
+                    encode_public_value_chunk_counter(self.pvs.execution_chunk + 1);
             }
-            self.pvs.start_pc = record.cpu_events[0].pc;
-            self.pvs.next_pc = record.cpu_events.last().unwrap().next_pc;
+            self.pvs.start_pc = encode_public_value_pc_limbs(record.cpu_events.first().unwrap().pc);
+            self.pvs.next_pc =
+                encode_public_value_pc_limbs(record.cpu_events.last().unwrap().next_pc);
             self.pvs.exit_code = record.cpu_events.last().unwrap().exit_code;
             self.pvs.committed_value_digest = record.public_values.committed_value_digest;
             self.pvs.deferred_proofs_digest = record.public_values.deferred_proofs_digest;
         } else {
             // Make execution chunk consistent.
             if self.flag_active && !emulation_done {
-                self.pvs.execution_chunk += 1;
+                self.pvs.execution_chunk =
+                    encode_public_value_chunk_counter(self.pvs.execution_chunk + 1);
                 self.flag_active = false;
             }
 
             self.pvs.start_pc = self.pvs.next_pc;
-            self.pvs.previous_initialize_addr_bits =
-                record.public_values.previous_initialize_addr_bits;
-            self.pvs.last_initialize_addr_bits = record.public_values.last_initialize_addr_bits;
-            self.pvs.previous_finalize_addr_bits = record.public_values.previous_finalize_addr_bits;
-            self.pvs.last_finalize_addr_bits = record.public_values.last_finalize_addr_bits;
+            self.pvs.previous_init_addr_limbs = record.public_values.previous_init_addr_limbs;
+            self.pvs.last_init_addr_limbs = record.public_values.last_init_addr_limbs;
+            self.pvs.previous_finalize_addr_limbs =
+                record.public_values.previous_finalize_addr_limbs;
+            self.pvs.last_finalize_addr_limbs = record.public_values.last_finalize_addr_limbs;
         }
 
         record.public_values = self.pvs;
@@ -270,8 +285,11 @@ pub struct RiscvEmulator {
     /// Memory addresses that were touched in this batch of chunks. Used to minimize the size of snapshots.
     pub memory_snapshot: ContiguousRiscvMemory,
 
+    /// Previous register records touched in this batch of chunks.
+    pub register_snapshot: [RuntimeRegisterRecord; 32],
+
     /// Bitmap of registers (0-31) that were snapshotted.
-    pub snapshot_registers_bitmap: u32,
+    pub register_snapshot_bitmap: u32,
 
     /// The current trace of the emulation that is being collected.
     pub record: EmulationRecord,
@@ -286,10 +304,10 @@ pub struct RiscvEmulator {
     pub memory_accesses: MemoryAccessRecord,
 
     /// The maximum number of cycles for a syscall.
-    pub max_syscall_cycles: u32,
+    pub max_syscall_cycles: RvClk,
 
     /// Local memory access events.
-    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
+    pub local_memory_access: HashMap<u64, MemoryLocalEvent>,
 
     /// Stdout buffer
     pub stdout: String,
@@ -302,6 +320,9 @@ pub struct RiscvEmulator {
 
     /// Cycle tracker requests "cycle-tracker-start: "
     pub cycle_tracker_requests: HashMap<String, u64>,
+
+    /// Snapshot workers stop exactly at this global clock when set.
+    pub target_global_clk: Option<u64>,
 
     /// The state for saving the deferred information
     deferred_state: SharedDeferredState,
@@ -334,65 +355,36 @@ pub enum EmulatorMode {
     Trace,
 }
 
-/// save the *old* value into `memory_snapshot`.
-/// The worker (Trace Mode RiscvEmulator) will need the full list of accessed addrs
-/// i.e all the addresses touched in the Simple -> Unconstrained -> Simple emulation
-// TODO: may manually diff registers and page_table
+/// Save the old value into memory snapshot once per touched memory address.
 #[inline(always)]
-fn snapshot_addr_if_needed(
-    _mode: &RiscvEmulatorMode,
+fn snapshot_memory_if_needed(
     snapshot: &mut ContiguousRiscvMemory,
-    snapshot_regs: &mut u32,
-    addr: u32,
+    addr: RvAddr,
     current_record: Option<&MemoryRecord>,
 ) {
-    // Check if we've already recorded a snapshot for this address.
-    if addr < 32 {
-        if (*snapshot_regs & (1 << addr)) == 0 {
-            // Not yet snapshotted
-            let rec = current_record.copied().unwrap_or_default();
-            // Since ContiguousRiscvMemory registers (0-31) don't use accessed_bitmap,
-            // we use insert to store the value.
-            // Note: insert uses 0-31 for registers if addr < 32.
-            snapshot.insert(addr, rec);
-            *snapshot_regs |= 1 << addr;
-        }
-    } else {
-        // Main memory
-        if !snapshot.has_accessed(addr) {
-            let rec = current_record.copied().unwrap_or_default();
-            // This marks accessed and stores the value
-            snapshot.insert(addr, rec);
-        }
+    if !snapshot.has_accessed(addr) {
+        let rec = current_record.copied().unwrap_or_default();
+        snapshot.insert_u64(addr, rec);
     }
 }
 
 #[inline(always)]
-fn snapshot_record_if_needed(
-    mode: &RiscvEmulatorMode,
-    snapshot: &mut ContiguousRiscvMemory,
-    snapshot_regs: &mut u32,
-    addr: u32,
-    maybe_rec: Option<&MemoryRecord>,
-) {
-    snapshot_addr_if_needed(mode, snapshot, snapshot_regs, addr, maybe_rec);
+fn compat_register_addr_u32(register: Register) -> u32 {
+    // Register addresses remain an intentional narrow event/public-value boundary in the current
+    // non-AOT proof pipeline because architectural registers are indexed 0..31.
+    register as u32
 }
 
 impl RiscvEmulator {
     /// Capture a snapshot for a hint address (which should be uninitialized/zero).
-    pub fn capture_snapshot_for_hint(&mut self, addr: u32) {
+    pub fn capture_snapshot_for_hint(&mut self, addr: u64) {
+        self.validate_main_memory_addr(addr);
         let zero_record = MemoryRecord {
             value: 0,
             chunk: 0,
             timestamp: 0,
         };
-        snapshot_addr_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&zero_record),
-        );
+        snapshot_memory_if_needed(&mut self.memory_snapshot, addr, Some(&zero_record));
     }
 
     /// Convenience: build a single-thread emulator with its own shared_ds.
@@ -444,6 +436,7 @@ impl RiscvEmulator {
         let max_syscall_cycles = syscall_map
             .values()
             .map(|syscall| syscall.num_extra_cycles())
+            .map(u64::from)
             .max()
             .unwrap_or_default();
 
@@ -458,7 +451,8 @@ impl RiscvEmulator {
             record,
             state: RiscvEmulationState::new(program.pc_start),
             memory_snapshot: ContiguousRiscvMemory::new(),
-            snapshot_registers_bitmap: 0,
+            register_snapshot: [RuntimeRegisterRecord::default(); 32],
+            register_snapshot_bitmap: 0,
             program,
             opts,
             max_syscall_cycles,
@@ -468,6 +462,7 @@ impl RiscvEmulator {
             stderr: Default::default(),
             cycle_tracker: Default::default(),
             cycle_tracker_requests: Default::default(),
+            target_global_clk: None,
             deferred_state,
             defer_only,
             log_syscalls,
@@ -489,6 +484,7 @@ impl RiscvEmulator {
     }
 
     /// If it's the first cycle, initialize the program.
+    /// Pairs adjacent 4-byte entries from memory_image into 8-byte dwords.
     #[inline(always)]
     fn initialize_if_needed(&mut self) {
         if self.state.global_clk == 0 {
@@ -589,7 +585,7 @@ impl RiscvEmulator {
 
         let done = self.state.pc == 0
             || self.state.pc.wrapping_sub(self.program.pc_base)
-                >= (self.program.instructions.len() * 4) as u32;
+                >= (self.program.instructions.len() * 4) as u64;
         if done && self.is_unconstrained() {
             error!(
                 "program ended in unconstrained mode at clk {}",
@@ -599,8 +595,32 @@ impl RiscvEmulator {
         }
 
         if !self.is_unconstrained() {
-            // Check if there's enough cycles or move to the next chunk.
-            if self.state.clk + self.max_syscall_cycles >= self.opts.chunk_size * 4 {
+            if let Some(target_global_clk) = self.target_global_clk {
+                if self.state.global_clk >= target_global_clk {
+                    debug_assert_eq!(
+                        self.state.global_clk, target_global_clk,
+                        "snapshot worker overshot target_global_clk"
+                    );
+                    self.state.current_chunk += 1;
+                    self.state.clk = 0;
+
+                    let elapsed = last_record_time.elapsed();
+                    let tid = self.par_opts.unwrap_or_default().thread_id;
+
+                    debug!(
+                        "Record[{}] generated in {:.3} ms, thread_id: {}",
+                        self.state.current_chunk,
+                        elapsed.as_secs_f64() * 1000.0,
+                        tid
+                    );
+                    *last_record_time = Instant::now(); // reset timer
+
+                    self.bump_record(done, record_callback);
+                }
+            } else if self.state.clk + self.max_syscall_cycles
+                >= u64::from(self.opts.chunk_size) * 4
+            {
+                // Check if there's enough cycles or move to the next chunk.
                 self.state.current_chunk += 1;
                 self.state.clk = 0;
 
@@ -898,8 +918,8 @@ impl RiscvEmulator {
         // self.memory_snapshot will be Default (zeroed) after take
         // The reset logic is handled here as well.
         let mut mem_snap = std::mem::take(&mut self.memory_snapshot);
-        // let _snap_regs = self.snapshot_registers_bitmap;
-        self.snapshot_registers_bitmap = 0;
+        let register_snapshot_bitmap = self.register_snapshot_bitmap;
+        let register_snapshot = self.register_snapshot;
 
         // if done && !self.emit_global_memory_events {
         // trick: no need to rollback the bitmap in snapshot.memory
@@ -914,19 +934,9 @@ impl RiscvEmulator {
                 &mut self.state.uninitialized_memory,
             );
 
-            // Restore from snapshot: apply the pre-batch values to the rollback addresses
-            // Registers (addresses 0-31)
-
-            // Main memory (addresses >= 32)
+            // Restore from snapshot: apply pre-batch values to rollback addresses.
+            // Main memory is restored from memory_snapshot.
             snapshot.memory.par_restore_from(&mem_snap);
-
-            // TODO: remove registers handling here
-            // for i in 0..32 {
-            //     if (snap_regs & (1 << i)) != 0 {
-            //         let rec = mem_snap.get(i as u32);
-            //         snapshot.memory.insert(i as u32, rec);
-            //     }
-            // }
 
             // Recycle dirty mem_snap with reset=true
             let _ = crate::emulator::riscv::memory::GLOBAL_MEMORY_RECYCLER.send((mem_snap, true));
@@ -934,7 +944,6 @@ impl RiscvEmulator {
             // Reconstruct partial memory from snapshot
             // snapshot.memory was zeroed from clone_without_memory().
 
-            // As per user request: just swap memory and uninitialized_memory
             // Use mem_snap directly as snapshot.memory.
             // After swap:
             //   - snapshot.memory = mem_snap (The snapshot state)
@@ -947,6 +956,14 @@ impl RiscvEmulator {
             // Recycle it.
             let _ = crate::emulator::riscv::memory::GLOBAL_MEMORY_RECYCLER.send((mem_snap, false));
         }
+        // Restore touched registers from register snapshot.
+        for reg_idx in 0..32 {
+            if (register_snapshot_bitmap & (1 << reg_idx)) != 0 {
+                snapshot.registers[reg_idx as usize] = register_snapshot[reg_idx as usize];
+            }
+        }
+        self.register_snapshot_bitmap = 0;
+        self.register_snapshot = [RuntimeRegisterRecord::default(); 32];
 
         println!(
             "state mem rollback duration: {:?}ms",
@@ -959,18 +976,16 @@ impl RiscvEmulator {
 
     pub fn mr(
         &mut self,
-        addr: u32,
-        chunk: u32,
-        timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        addr: RvAddr,
+        chunk: RvChunk,
+        timestamp: RvTimestamp,
+        local_memory_access: Option<&mut HashMap<u64, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
-        // Check unconstrained status first to avoid borrow conflict
-        let is_unconstrained = self.is_unconstrained();
+        self.validate_main_memory_addr(addr);
 
-        // Use local accessor or fallback to default one
+        let is_unconstrained = self.is_unconstrained();
         let local_access = local_memory_access.unwrap_or(&mut self.local_memory_access);
 
-        // Use no_mark version in unconstrained mode to avoid bitmap side effects
         let (value, prev_chunk, prev_timestamp) = if is_unconstrained {
             self.state
                 .memory
@@ -986,13 +1001,7 @@ impl RiscvEmulator {
             timestamp: prev_timestamp,
         };
 
-        snapshot_addr_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&prev_record),
-        );
+        snapshot_memory_if_needed(&mut self.memory_snapshot, addr, Some(&prev_record));
         self.mode
             .add_unconstrained_memory_record(addr, Some(&prev_record));
 
@@ -1005,19 +1014,19 @@ impl RiscvEmulator {
         self.mode
             .add_memory_local_event(addr, final_record, prev_record, local_access);
 
-        // Construct the memory read record.
         MemoryReadRecord::new(value, chunk, timestamp, prev_chunk, prev_timestamp)
     }
 
-    /// Read a word from memory and create an access record.
+    /// Read a dword from memory and create an access record.
     pub fn mr_simple(
         &mut self,
-        addr: u32,
-        chunk: u32,
-        timestamp: u32,
-        _local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        addr: RvAddr,
+        chunk: RvChunk,
+        timestamp: RvTimestamp,
+        _local_memory_access: Option<&mut HashMap<u64, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
-        // Get the current record for snapshotting
+        self.validate_main_memory_addr(addr);
+
         let (value, prev_chunk, prev_timestamp) = self
             .state
             .memory
@@ -1027,33 +1036,25 @@ impl RiscvEmulator {
             chunk: prev_chunk,
             timestamp: prev_timestamp,
         };
-        snapshot_addr_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&prev_record),
-        );
+        snapshot_memory_if_needed(&mut self.memory_snapshot, addr, Some(&prev_record));
 
-        // Construct the memory read record.
         MemoryReadRecord::new(value, chunk, timestamp, prev_chunk, prev_timestamp)
     }
 
-    /// Write a word to memory and create an access record.
+    /// Write a dword to memory and create an access record.
     pub fn mw(
         &mut self,
-        addr: u32,
-        value: u32,
-        chunk: u32,
-        timestamp: u32,
-        local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        addr: RvAddr,
+        value: RvValue,
+        chunk: RvChunk,
+        timestamp: RvTimestamp,
+        local_memory_access: Option<&mut HashMap<u64, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
-        // Check unconstrained status first to avoid borrow conflict
-        let is_unconstrained = self.is_unconstrained();
+        self.validate_main_memory_addr(addr);
 
+        let is_unconstrained = self.is_unconstrained();
         let local_access = local_memory_access.unwrap_or(&mut self.local_memory_access);
 
-        // Use no_mark version in unconstrained mode to avoid bitmap side effects
         let (prev_value, prev_chunk, prev_timestamp) = if is_unconstrained {
             self.state
                 .memory
@@ -1064,25 +1065,16 @@ impl RiscvEmulator {
                 .write_and_capture_prev(addr, value, chunk, timestamp)
         };
 
-        // Reconstruct previous record for snapshot/events
         let prev_record = MemoryRecord {
             value: prev_value,
             chunk: prev_chunk,
             timestamp: prev_timestamp,
         };
 
-        // Snapshot logic (using the captured previous state)
-        snapshot_addr_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&prev_record),
-        );
+        snapshot_memory_if_needed(&mut self.memory_snapshot, addr, Some(&prev_record));
         self.mode
             .add_unconstrained_memory_record(addr, Some(&prev_record));
 
-        // Construct final record for events
         let final_record = MemoryRecord {
             value,
             chunk,
@@ -1102,15 +1094,17 @@ impl RiscvEmulator {
         )
     }
 
-    /// Write a word to memory
+    /// Write a dword to memory
     pub fn mw_simple(
         &mut self,
-        addr: u32,
-        value: u32,
-        chunk: u32,
-        timestamp: u32,
-        _local_memory_access: Option<&mut HashMap<u32, MemoryLocalEvent>>,
+        addr: RvAddr,
+        value: RvValue,
+        chunk: RvChunk,
+        timestamp: RvTimestamp,
+        _local_memory_access: Option<&mut HashMap<u64, MemoryLocalEvent>>,
     ) {
+        self.validate_main_memory_addr(addr);
+
         let (prev_value, prev_chunk, prev_timestamp) = self
             .state
             .memory
@@ -1122,17 +1116,11 @@ impl RiscvEmulator {
             timestamp: prev_timestamp,
         };
 
-        snapshot_addr_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&prev_record),
-        );
+        snapshot_memory_if_needed(&mut self.memory_snapshot, addr, Some(&prev_record));
     }
 
     /// Read from memory, assuming that all addresses are aligned.
-    pub fn mr_cpu(&mut self, addr: u32, position: MemoryAccessPosition) -> u32 {
+    pub fn mr_cpu(&mut self, addr: RvAddr, position: MemoryAccessPosition) -> RvValue {
         // Read the address from memory and create a memory read record.
         let record = self.mr(addr, self.chunk(), self.timestamp(&position), None);
 
@@ -1144,7 +1132,7 @@ impl RiscvEmulator {
     }
 
     /// Read from memory, assuming that all addresses are aligned.
-    pub fn mr_cpu_simple(&mut self, addr: u32, position: MemoryAccessPosition) -> u32 {
+    pub fn mr_cpu_simple(&mut self, addr: RvAddr, position: MemoryAccessPosition) -> RvValue {
         // Read the address from memory and create a memory read record.
         // TODO: may reduce record assembly
         let record = self.mr_simple(addr, self.chunk(), self.timestamp(&position), None);
@@ -1158,7 +1146,7 @@ impl RiscvEmulator {
     ///
     /// This function will panic if the address is not aligned or if the memory accesses are already
     /// initialized.
-    pub fn mw_cpu(&mut self, addr: u32, value: u32, position: MemoryAccessPosition) {
+    pub fn mw_cpu(&mut self, addr: RvAddr, value: RvValue, position: MemoryAccessPosition) {
         // Read the address from memory and create a memory read record.
         let record = self.mw(addr, value, self.chunk(), self.timestamp(&position), None);
 
@@ -1167,73 +1155,208 @@ impl RiscvEmulator {
             .set_memory_access(position, record.into(), &mut self.memory_accesses);
     }
 
-    pub fn mw_cpu_simple(&mut self, addr: u32, value: u32, position: MemoryAccessPosition) {
+    pub fn mw_cpu_simple(&mut self, addr: RvAddr, value: RvValue, position: MemoryAccessPosition) {
         // Read the address from memory and create a memory read record.
         self.mw_simple(addr, value, self.chunk(), self.timestamp(&position), None);
     }
 
+    #[inline(always)]
+    fn snapshot_register_if_needed(&mut self, reg_idx: u32, prev_record: &RuntimeRegisterRecord) {
+        let mask = 1u32 << reg_idx;
+        if (self.register_snapshot_bitmap & mask) == 0 {
+            self.register_snapshot[reg_idx as usize] = *prev_record;
+            self.register_snapshot_bitmap |= mask;
+        }
+    }
+
+    #[inline(always)]
+    fn read_register_common(
+        &mut self,
+        reg_idx: u32,
+        position: MemoryAccessPosition,
+        record_memory_access: bool,
+        emit_local_event: bool,
+        add_unconstrained_record: bool,
+    ) -> u64 {
+        let chunk = self.chunk();
+        let timestamp = self.timestamp(&position);
+        let prev_record = self.state.registers[reg_idx as usize];
+        let value = prev_record.value;
+        self.state.registers[reg_idx as usize] = RuntimeRegisterRecord {
+            value,
+            chunk,
+            timestamp,
+        };
+
+        self.snapshot_register_if_needed(reg_idx, &prev_record);
+        if add_unconstrained_record {
+            let reg_idx_u8 =
+                u8::try_from(reg_idx).expect("register index does not fit u8 during read rollback");
+            let prev_register_record = prev_record;
+            self.mode
+                .add_unconstrained_register_record(reg_idx_u8, Some(&prev_register_record));
+        }
+        if emit_local_event {
+            let final_record = MemoryRecord {
+                value,
+                chunk,
+                timestamp,
+            };
+            let prev_record = MemoryRecord {
+                value: prev_record.value,
+                chunk: prev_record.chunk,
+                timestamp: prev_record.timestamp,
+            };
+            self.mode.add_memory_local_event(
+                u64::from(reg_idx),
+                final_record,
+                prev_record,
+                &mut self.local_memory_access,
+            );
+        }
+        if record_memory_access {
+            let final_record = MemoryRecord {
+                value,
+                chunk,
+                timestamp,
+            };
+            let prev_record = MemoryRecord {
+                value: prev_record.value,
+                chunk: prev_record.chunk,
+                timestamp: prev_record.timestamp,
+            };
+            let record = MemoryReadRecord::new(
+                final_record.value,
+                final_record.chunk,
+                final_record.timestamp,
+                prev_record.chunk,
+                prev_record.timestamp,
+            );
+            self.mode
+                .set_memory_access(position, record.into(), &mut self.memory_accesses);
+        }
+        value
+    }
+
+    #[inline(always)]
+    fn write_register_common(
+        &mut self,
+        reg_idx: u32,
+        value: u64,
+        position: MemoryAccessPosition,
+        record_memory_access: bool,
+        emit_local_event: bool,
+        add_unconstrained_record: bool,
+    ) {
+        let chunk = self.chunk();
+        let timestamp = self.timestamp(&position);
+        let prev_record = self.state.registers[reg_idx as usize];
+        self.state.registers[reg_idx as usize] = RuntimeRegisterRecord {
+            value,
+            chunk,
+            timestamp,
+        };
+
+        self.snapshot_register_if_needed(reg_idx, &prev_record);
+        if add_unconstrained_record {
+            let reg_idx_u8 = u8::try_from(reg_idx)
+                .expect("register index does not fit u8 during write rollback");
+            let prev_register_record = prev_record;
+            self.mode
+                .add_unconstrained_register_record(reg_idx_u8, Some(&prev_register_record));
+        }
+        if emit_local_event {
+            let final_record = MemoryRecord {
+                value,
+                chunk,
+                timestamp,
+            };
+            let prev_record = MemoryRecord {
+                value: prev_record.value,
+                chunk: prev_record.chunk,
+                timestamp: prev_record.timestamp,
+            };
+            self.mode.add_memory_local_event(
+                u64::from(reg_idx),
+                final_record,
+                prev_record,
+                &mut self.local_memory_access,
+            );
+        }
+        if record_memory_access {
+            let prev_record = MemoryRecord {
+                value: prev_record.value,
+                chunk: prev_record.chunk,
+                timestamp: prev_record.timestamp,
+            };
+            let record = MemoryWriteRecord::new(
+                value,
+                chunk,
+                timestamp,
+                prev_record.value,
+                prev_record.chunk,
+                prev_record.timestamp,
+            );
+            self.mode
+                .set_memory_access(position, record.into(), &mut self.memory_accesses);
+        }
+    }
+
     /// Read from a register.
-    pub fn rr(&mut self, register: Register, position: MemoryAccessPosition) -> u32 {
-        self.mr_cpu(register as u32, position)
+    pub fn rr(&mut self, register: Register, position: MemoryAccessPosition) -> RvValue {
+        self.read_register_common(
+            compat_register_addr_u32(register),
+            position,
+            true,
+            true,
+            true,
+        )
     }
 
     /// Write to a register.
-    pub fn rw(&mut self, register: Register, value: u32) {
+    pub fn rw(&mut self, register: Register, value: RvValue) {
         // The only time we are writing to a register is when it is in operand A.
         // Register %x0 should always be 0. See 2.6 Load and Store Instruction on
         // P.18 of the RISC-V spec. We always write 0 to %x0.
-        if register == Register::X0 {
-            self.mw_cpu(register as u32, 0, MemoryAccessPosition::A);
-        } else {
-            self.mw_cpu(register as u32, value, MemoryAccessPosition::A);
-        }
+        let reg_idx = compat_register_addr_u32(register);
+        let value = if register == Register::X0 { 0 } else { value };
+        self.write_register_common(reg_idx, value, MemoryAccessPosition::A, true, true, true);
     }
 
-    pub fn rw_simple(&mut self, register: Register, value: u32) {
+    pub fn rw_simple(&mut self, register: Register, value: RvValue) {
         // The only time we are writing to a register is when it is in operand A.
         // Register %x0 should always be 0. See 2.6 Load and Store Instruction on
         // P.18 of the RISC-V spec. We always write 0 to %x0.
-        if register == Register::X0 {
-            self.mw_cpu_simple(register as u32, 0, MemoryAccessPosition::A);
-        } else {
-            self.mw_cpu_simple(register as u32, value, MemoryAccessPosition::A);
-        }
+        let reg_idx = compat_register_addr_u32(register);
+        let value = if register == Register::X0 { 0 } else { value };
+        self.write_register_common(reg_idx, value, MemoryAccessPosition::A, false, false, false);
     }
 
     // This fn is only used for ENTER_UNCONSTRAINED syscall in simple mode
-    pub fn rw_unconstrained(&mut self, register: Register, value: u32) {
-        let addr = register as u32;
+    pub fn rw_unconstrained(&mut self, register: Register, value: u64) {
+        let addr = compat_register_addr_u32(register);
         let chunk = self.chunk();
         let timestamp = self.timestamp(&MemoryAccessPosition::A);
-
-        // Always use no_mark version for unconstrained syscall
-        let (prev_value, prev_chunk, prev_timestamp) = self
-            .state
-            .memory
-            .write_and_capture_prev_no_mark(addr, value, chunk, timestamp);
-
-        // Reconstruct previous record for snapshotting/tracking
-        let prev_record = MemoryRecord {
-            value: prev_value,
-            chunk: prev_chunk,
-            timestamp: prev_timestamp,
+        let prev = self.state.registers[addr as usize];
+        self.state.registers[addr as usize] = RuntimeRegisterRecord {
+            value,
+            chunk,
+            timestamp,
         };
 
-        snapshot_addr_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&prev_record),
-        );
+        // Reconstruct previous record for snapshotting/tracking
+        self.snapshot_register_if_needed(addr, &prev);
 
         // TODO: no conditional check here
-        self.mode
-            .add_unconstrained_memory_record(addr, Some(&prev_record));
+        let prev_register_record = prev;
+        self.mode.add_unconstrained_register_record(
+            u8::try_from(addr).expect("register address does not fit u8 in unconstrained mode"),
+            Some(&prev_register_record),
+        );
     }
 
     /// Fetch the destination register and input operand values for an ALU instruction.
-    fn alu_rr(&mut self, instruction: &Instruction) -> (Register, u32, u32) {
+    fn alu_rr_u64(&mut self, instruction: &Instruction) -> (Register, u64, u64) {
         if !instruction.imm_c {
             let (rd, rs1, rs2) = instruction.r_type();
 
@@ -1243,14 +1366,13 @@ impl RiscvEmulator {
             (rd, b, c)
         } else if !instruction.imm_b && instruction.imm_c {
             let (rd, rs1, imm) = instruction.i_type();
-
             let (rd, b, c) = (rd, self.rr(rs1, MemoryAccessPosition::B), imm);
 
             (rd, b, c)
         } else {
             assert!(instruction.imm_b && instruction.imm_c);
             let (rd, b, c) = (
-                Register::from_u32(instruction.op_a),
+                Register::from_u8(instruction.op_a),
                 instruction.op_b,
                 instruction.op_c,
             );
@@ -1259,7 +1381,7 @@ impl RiscvEmulator {
     }
 
     /// Fetch the destination register and input operand values for an ALU instruction.
-    fn alu_rr_simple(&mut self, instruction: &Instruction) -> (Register, u32, u32) {
+    fn alu_rr_simple_u64(&mut self, instruction: &Instruction) -> (Register, u64, u64) {
         if !instruction.imm_c {
             let (rd, rs1, rs2) = instruction.r_type();
 
@@ -1275,7 +1397,7 @@ impl RiscvEmulator {
         } else {
             assert!(instruction.imm_b && instruction.imm_c);
             let (rd, b, c) = (
-                Register::from_u32(instruction.op_a),
+                Register::from_u8(instruction.op_a),
                 instruction.op_b,
                 instruction.op_c,
             );
@@ -1283,86 +1405,83 @@ impl RiscvEmulator {
         }
     }
 
+    /// Fetch the destination register and input operand values for an ALU instruction.
+    fn alu_rr(&mut self, instruction: &Instruction) -> (Register, u64, u64) {
+        self.alu_rr_u64(instruction)
+    }
+
+    /// Fetch the destination register and input operand values for an ALU instruction.
+    fn alu_rr_simple(&mut self, instruction: &Instruction) -> (Register, u64, u64) {
+        self.alu_rr_simple_u64(instruction)
+    }
+
     /// Read a register.
     #[inline]
-    pub fn rr_simple(&mut self, register: Register, position: MemoryAccessPosition) -> u32 {
-        let addr = register as u32; // Register index 0-31
-        let chunk = self.chunk();
-        let timestamp = self.timestamp(&position);
-
-        let (value, prev_chunk, prev_timestamp) = self
-            .state
-            .memory
-            .read_and_update_metadata(addr, chunk, timestamp);
-        let prev_record = MemoryRecord {
-            value,
-            chunk: prev_chunk,
-            timestamp: prev_timestamp,
-        };
-        snapshot_addr_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&prev_record),
-        );
-        value
+    pub fn rr_simple(&mut self, register: Register, position: MemoryAccessPosition) -> RvValue {
+        self.read_register_common(
+            compat_register_addr_u32(register),
+            position,
+            false,
+            false,
+            false,
+        )
     }
 
     /// Set the destination register with the result and emit an ALU event.
     #[inline]
-    fn alu_rw(&mut self, rd: Register, a: u32) {
+    fn alu_rw(&mut self, rd: Register, a: u64) {
         self.rw(rd, a);
     }
 
     /// Set the destination register with the result and emit an ALU event.
     #[inline]
-    fn alu_rw_simple(&mut self, rd: Register, a: u32) {
+    fn alu_rw_simple(&mut self, rd: Register, a: u64) {
         self.rw_simple(rd, a);
     }
 
     /// Fetch the input operand values for a load instruction.
-    fn load_rr(&mut self, instruction: &Instruction) -> (Register, u32, u32, u32, u32) {
+    fn load_rr(&mut self, instruction: &Instruction) -> (Register, u64, u64, u64, u64) {
         let (rd, rs1, imm) = instruction.i_type();
         let (b, c) = (self.rr(rs1, MemoryAccessPosition::B), imm);
         let addr = b.wrapping_add(c);
-        let memory_value = self.mr_cpu(align(addr), MemoryAccessPosition::Memory);
+        let memory_value = self.mr_cpu(align_u64(addr), MemoryAccessPosition::Memory);
         (rd, b, c, addr, memory_value)
     }
 
     /// Fetch the input operand values for a load instruction.
-    fn load_rr_simple(&mut self, instruction: &Instruction) -> (Register, u32, u32, u32, u32) {
+    fn load_rr_simple(&mut self, instruction: &Instruction) -> (Register, u64, u64, u64, u64) {
         let (rd, rs1, imm) = instruction.i_type();
         let (b, c) = (self.rr_simple(rs1, MemoryAccessPosition::B), imm);
         let addr = b.wrapping_add(c);
-        let memory_value = self.mr_cpu_simple(align(addr), MemoryAccessPosition::Memory);
+        let memory_value = self.mr_cpu_simple(align_u64(addr), MemoryAccessPosition::Memory);
         (rd, b, c, addr, memory_value)
     }
 
     /// Fetch the input operand values for a store instruction.
-    fn store_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32, u32) {
+    /// Returns (a, b, c, addr, existing_dword) where existing_dword is the current 8-byte value.
+    fn store_rr(&mut self, instruction: &Instruction) -> (u64, u64, u64, u64, u64) {
         let (rs1, rs2, imm) = instruction.s_type();
         let c = imm;
         let b = self.rr(rs2, MemoryAccessPosition::B);
         let a = self.rr(rs1, MemoryAccessPosition::A);
         let addr = b.wrapping_add(c);
-        let memory_value = self.word(align(addr));
+        let memory_value = self.dword(align_u64(addr));
         (a, b, c, addr, memory_value)
     }
 
     /// Fetch the input operand values for a store instruction.
-    fn store_rr_simple(&mut self, instruction: &Instruction) -> (u32, u32, u32, u32, u32) {
+    fn store_rr_simple(&mut self, instruction: &Instruction) -> (u64, u64, u64, u64, u64) {
         let (rs1, rs2, imm) = instruction.s_type();
         let c = imm;
         let b = self.rr_simple(rs2, MemoryAccessPosition::B);
         let a = self.rr_simple(rs1, MemoryAccessPosition::A);
         let addr = b.wrapping_add(c);
-        let memory_value = self.word(align(addr));
+        let memory_value = self.dword(align_u64(addr));
         (a, b, c, addr, memory_value)
     }
 
     /// Fetch the input operand values for a branch instruction.
-    fn branch_rr(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
+    fn branch_rr(&mut self, instruction: &Instruction) -> (u64, u64, u64) {
         let (rs1, rs2, imm) = instruction.b_type();
         let c = imm;
         let b = self.rr(rs2, MemoryAccessPosition::B);
@@ -1371,7 +1490,7 @@ impl RiscvEmulator {
     }
 
     /// Fetch the input operand values for a branch instruction.
-    fn branch_rr_simple(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
+    fn branch_rr_simple(&mut self, instruction: &Instruction) -> (u64, u64, u64) {
         let (rs1, rs2, imm) = instruction.b_type();
         let c = imm;
         let b = self.rr_simple(rs2, MemoryAccessPosition::B);
@@ -1386,6 +1505,7 @@ impl RiscvEmulator {
         state: RiscvEmulationState,
         opts: EmulatorOpts,
         shared_ds: SharedDeferredState,
+        target_global_clk: u64,
     ) -> Self
     where
         F: PrimeField32 + Poseidon2Init,
@@ -1393,25 +1513,19 @@ impl RiscvEmulator {
     {
         let mut runtime = Self::new_snapshot_worker::<F>(program, opts, None, shared_ds);
         runtime.state = state;
+        runtime.target_global_clk = Some(target_global_clk);
         runtime
     }
 
     /// Get the current values of the registers.
     #[allow(clippy::single_match_else)]
     #[must_use]
-    pub fn registers(&mut self) -> [u32; 32] {
+    pub fn registers(&mut self) -> [RvValue; 32] {
         let mut registers = [0; 32];
         for i in 0..32 {
-            let addr = Register::from_u32(i as u32) as u32;
-            let record = self.state.memory.get(addr);
-
-            snapshot_record_if_needed(
-                &self.mode,
-                &mut self.memory_snapshot,
-                &mut self.snapshot_registers_bitmap,
-                addr,
-                Some(record).as_ref(),
-            );
+            let addr = compat_register_addr_u32(Register::from_u8(i as u8));
+            let record = self.state.registers[addr as usize];
+            self.snapshot_register_if_needed(addr, &record);
             registers[i] = record.value;
         }
         registers
@@ -1419,33 +1533,48 @@ impl RiscvEmulator {
 
     /// Get the current value of a register.
     #[must_use]
-    pub fn register(&mut self, register: Register) -> u32 {
-        let addr = register as u32;
-        let record = self.state.memory.get(addr);
-        snapshot_record_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&record),
-        );
+    pub fn register(&mut self, register: Register) -> RvValue {
+        let addr = compat_register_addr_u32(register);
+        let record = self.state.registers[addr as usize];
+        self.snapshot_register_if_needed(addr, &record);
         record.value
     }
 
-    /// Get the current value of a word.
+    /// Get the current value of a dword (8 bytes) at an 8-byte-aligned address.
     #[must_use]
-    pub fn word(&mut self, addr: u32) -> u32 {
-        #[allow(clippy::single_match_else)]
-        let record = self.state.memory.get(addr);
+    pub fn dword(&mut self, addr: RvAddr) -> RvValue {
+        self.validate_main_memory_addr(addr);
 
-        snapshot_record_if_needed(
-            &self.mode,
-            &mut self.memory_snapshot,
-            &mut self.snapshot_registers_bitmap,
-            addr,
-            Some(&record),
-        );
+        let value = self.state.memory.peek_dword(addr);
+        let (chunk, timestamp) = self.state.memory.peek_metadata(addr);
+        let record = MemoryRecord {
+            value,
+            chunk,
+            timestamp,
+        };
+        snapshot_memory_if_needed(&mut self.memory_snapshot, addr, Some(&record));
         record.value
+    }
+
+    /// Get the current value of a word (4 bytes). Returns as u64 with upper 32 bits zero.
+    /// Kept for compatibility — internally reads the containing dword and extracts the half.
+    #[must_use]
+    pub fn word(&mut self, addr: RvAddr) -> RvValue {
+        let dword = self.dword(align_u64(addr));
+        let half = util::dword_half(addr);
+        if half == 0 {
+            dword & 0xFFFF_FFFF
+        } else {
+            dword >> 32
+        }
+    }
+
+    #[inline(always)]
+    fn validate_main_memory_addr(&self, addr: RvAddr) {
+        assert!(
+            addr >= MIN_MAIN_MEMORY_ADDR,
+            "memory access below floor 0x{MIN_MAIN_MEMORY_ADDR:08x}: 0x{addr:08x}"
+        );
     }
 
     /// Bump the record.
@@ -1475,15 +1604,16 @@ impl RiscvEmulator {
         }
         // helper
         // For registers, the timestamp cannot be 0
-        let is_used = |rec: &MemoryRecord| rec.value != 0 || rec.timestamp != 0 || rec.chunk != 0;
+        let is_used =
+            |rec: &RuntimeRegisterRecord| rec.value != 0 || rec.timestamp != 0 || rec.chunk != 0;
 
         let memory_finalize_events = &mut self.record.memory_finalize_events;
         let memory_initialize_events = &mut self.record.memory_initialize_events;
 
-        // We handle the addr = 0 case separately, as we constrain it to be 0 in the first row
+        // We handle x0 separately, as we constrain it to be 0 in the first row
         // of the memory finalize table so it must be first in the array of events.
-        let addr_0_record = self.state.memory.get(0u32);
-        let default_0_rec = MemoryRecord {
+        let addr_0_record = self.state.registers[0];
+        let default_0_rec = RuntimeRegisterRecord {
             value: 0,
             chunk: 0,
             timestamp: 1,
@@ -1495,58 +1625,67 @@ impl RiscvEmulator {
             (&default_0_rec, false)
         };
 
+        let addr_0_final_record = MemoryRecord {
+            value: addr_0_final_record.value,
+            chunk: addr_0_final_record.chunk,
+            timestamp: addr_0_final_record.timestamp,
+        };
         memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
             0,
-            addr_0_final_record,
+            &addr_0_final_record,
         ));
 
         let addr_0_initialize_event = MemoryInitializeFinalizeEvent::initialize(0, 0, used_0);
         memory_initialize_events.push(addr_0_initialize_event);
 
-        // // =========================================================
-        // // Handle registers[1..32]
-        // for reg in 1..32 {
-        //     let addr = reg as u32;
-        //     let record = self.state.memory.get(addr);
-        //
-        //     if is_used(&record) {
-        //         if !self.record.program.memory_image.contains_key(&addr) {
-        //             let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-        //             memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
-        //                 addr,
-        //                 *initial_value,
-        //                 true,
-        //             ));
-        //         }
-        //         memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
-        //             addr, &record,
-        //         ));
-        //     }
-        // }
+        // Handle x1..x31 registers from dedicated register storage.
+        for reg in 1..32 {
+            let addr = reg as u64;
+            let is_in_image = self.record.program.memory_image.contains_key(&addr);
+            debug_assert!(
+                !is_in_image,
+                "register address unexpectedly in memory_image: 0x{addr:08x}"
+            );
+            let record = self.state.registers[reg];
+            if is_used(&record) {
+                if !is_in_image {
+                    let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
+                    memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
+                        addr,
+                        *initial_value,
+                        true,
+                    ));
+                }
+                let record = MemoryRecord {
+                    value: record.value,
+                    chunk: record.chunk,
+                    timestamp: record.timestamp,
+                };
+                memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
+                    addr, &record,
+                ));
+            }
+        }
 
         // =========================================================
-        // Handle other memory + registers
+        // Handle main memory
         // =========================================================
         // accessed_addrs = the union set of (memory_image_addrs, global_accessed_addrs)
-        let accessed_addrs: Vec<u32> = self.state.memory.accessed_keys().collect();
-        println!(
-            "[DEBUG] postprocess: accessed_addrs len: {}",
-            accessed_addrs.len()
-        );
-        if accessed_addrs.is_empty() {
-            panic!("Empty Bitmap!!")
-        }
+        let accessed_addrs: Vec<RvAddr> = self.state.memory.accessed_keys().collect();
+        debug!("postprocess: accessed_addrs len: {}", accessed_addrs.len());
         for addr in accessed_addrs {
-            if addr == 0 {
+            if addr < MIN_MAIN_MEMORY_ADDR {
                 continue;
             }
 
-            let is_in_image = self.record.program.memory_image.contains_key(&addr);
+            // With 8-byte-aligned addresses, check if either 4-byte half is in the image.
+            let lo_in_image = self.record.program.memory_image.contains_key(&addr);
+            let hi_in_image = self.record.program.memory_image.contains_key(&(addr + 4));
+            let is_in_image = lo_in_image || hi_in_image;
             // Program memory is initialized in the MemoryProgram chip and doesn't require any
             // events, so we only send init events for other memory addresses.
             if !is_in_image {
                 let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-                // With immediate loading, initial value is 0 for addresses not in memory_image
                 memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
                     addr,
                     *initial_value,
@@ -1602,14 +1741,14 @@ impl RiscvEmulator {
             }
 
             eprintln!("\n========== ALIGNMENT CHECK ==========");
-            let prog_set: std::collections::HashSet<u32> =
+            let prog_set: std::collections::HashSet<u64> =
                 sorted_program_memory.into_iter().map(|(k, _)| *k).collect();
-            let init_set: std::collections::HashSet<u32> =
+            let init_set: std::collections::HashSet<u64> =
                 memory_initialize_events.iter().map(|e| e.addr).collect();
-            let final_set: std::collections::HashSet<u32> =
+            let final_set: std::collections::HashSet<u64> =
                 memory_finalize_events.iter().map(|e| e.addr).collect();
 
-            let mut all_addrs: Vec<u32> = final_set.iter().cloned().collect();
+            let mut all_addrs: Vec<RvAddr> = final_set.iter().cloned().collect();
             all_addrs.extend(prog_set.iter());
             all_addrs.extend(init_set.iter());
             all_addrs.sort();
@@ -1673,17 +1812,22 @@ impl RiscvEmulator {
         }
     }
 
-    /// Collect signatures from memory between the given begin and end addresses
-    pub fn collect_signatures(&mut self, begin: u32, end: u32) -> Vec<u32> {
+    /// Collect signatures from memory between the given begin and end addresses.
+    ///
+    /// The guest-facing address surface is RV64, but the signature collection format remains the
+    /// retained legacy 32-bit word stream used by the current proverchain harness.
+    pub fn collect_signatures(&mut self, begin: RvAddr, end: RvAddr) -> Vec<RvValue> {
         if begin >= end {
             return Vec::new();
         }
 
-        let size = (end - begin) as usize;
+        let size = usize::try_from(end - begin).unwrap_or_else(|_| {
+            panic!("collect_signatures range too large: begin={begin}, end={end}")
+        });
         let mut signatures = Vec::with_capacity(size / 4);
 
         for offset in (0..size).step_by(4) {
-            let addr = begin + offset as u32;
+            let addr = begin + offset as u64;
             let word = self.word(addr);
             signatures.push(word);
         }
@@ -1696,9 +1840,14 @@ impl RiscvEmulator {
 mod tests {
     use super::{Program, RiscvEmulator};
     use crate::{
-        compiler::riscv::compiler::{Compiler, SourceType},
+        compiler::riscv::{
+            compiler::{Compiler, SourceType},
+            instruction::Instruction,
+            opcode::Opcode,
+            register::Register,
+        },
         configs::stark_config::KoalaBearPoseidon2,
-        emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
+        emulator::{opts::EmulatorOpts, riscv::state::RuntimeRegisterRecord, stdin::EmulatorStdin},
     };
     use alloc::sync::Arc;
     use p3_baby_bear::BabyBear;
@@ -1712,20 +1861,61 @@ mod tests {
         include_bytes!("../../../compiler/test_elf/riscv32im-pico-keccak-elf");
 
     pub fn simple_fibo_program() -> Arc<Program> {
-        let compiler = Compiler::new(SourceType::RISCV, FIBONACCI_ELF);
+        let compiler =
+            Compiler::new(SourceType::RISCV, FIBONACCI_ELF).expect("failed to parse FIBONACCI_ELF");
 
         compiler.compile()
     }
 
     pub fn simple_keccak_program() -> Arc<Program> {
-        let compiler = Compiler::new(SourceType::RISCV, KECCAK_ELF);
+        let compiler =
+            Compiler::new(SourceType::RISCV, KECCAK_ELF).expect("failed to parse KECCAK_ELF");
 
         compiler.compile()
+    }
+
+    fn tiny_program() -> Arc<Program> {
+        Arc::new(Program::new(
+            vec![
+                r_type(Opcode::ADD, Register::X0, Register::X0, Register::X0),
+                r_type(Opcode::ADD, Register::X0, Register::X0, Register::X0),
+            ],
+            0x1000,
+            0x1000,
+        ))
     }
 
     const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 836789u32;
 
     #[test]
+    fn snapshot_worker_stops_at_target_global_clk_before_cycle_rollover() {
+        let opts = EmulatorOpts {
+            chunk_size: 16,
+            chunk_batch_size: 1,
+            max_cycles: Some(64),
+            ..EmulatorOpts::default()
+        };
+        let mut emulator = RiscvEmulator::new_single::<BabyBear>(tiny_program(), opts, None);
+        emulator.target_global_clk = Some(1);
+
+        let mut records = 0usize;
+        let report = emulator
+            .emulate_batch(&mut |_| {
+                records += 1;
+            })
+            .expect("snapshot worker batch should stop at target_global_clk");
+
+        assert!(!report.done);
+        assert_eq!(report.current_cycle, 1);
+        assert_eq!(emulator.state.global_clk, 1);
+        assert_eq!(emulator.state.current_chunk, 2);
+        assert_eq!(emulator.state.clk, 0);
+        assert_eq!(emulator.state.pc, 0x1004);
+        assert_eq!(records, 1);
+    }
+
+    #[test]
+    #[ignore = "RV32 ELF — not supported under RV64-only emulator"]
     fn test_simple_fib() {
         // just run a simple elf file in the compiler folder(test_elf)
         let program = simple_fibo_program();
@@ -1739,6 +1929,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "RV32 ELF — not supported under RV64-only emulator"]
     fn test_simple_keccak() {
         let program = simple_keccak_program();
         let n = "a"; // do keccak(b"abcdefg")
@@ -1749,5 +1940,644 @@ mod tests {
         let (stdin, _) = stdin.finalize();
         emulator.run(Some(stdin)).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
+    }
+
+    #[test]
+    fn test_phase2a_register_and_memory_paths_are_explicit() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        emulator.rw(Register::X5, 0xCAFE_BABE);
+        assert_eq!(emulator.register(Register::X5), 0xCAFE_BABE);
+
+        emulator.mw_cpu(
+            0x1000,
+            0x1020_3040,
+            crate::chips::chips::events::MemoryAccessPosition::Memory,
+        );
+        assert_eq!(emulator.word(0x1000), 0x1020_3040);
+    }
+
+    #[test]
+    fn test_guest_addr_to_event_addr_supports_u64() {
+        let addr = u64::from(u32::MAX) + 1;
+        assert_eq!(addr, u64::from(u32::MAX) + 1);
+    }
+
+    #[test]
+    fn test_rw_unconstrained_keeps_no_mark_behavior() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        let reg_idx = Register::X7 as u32;
+        let reg_byte_addr = (reg_idx * 4) as u64;
+        assert!(!emulator.state.memory.has_accessed(reg_byte_addr));
+        emulator.rw_unconstrained(Register::X7, 0x55AA_55AA);
+        assert_eq!(emulator.register(Register::X7), 0x55AA_55AA);
+        assert!(!emulator.state.memory.has_accessed(reg_byte_addr));
+    }
+
+    #[test]
+    fn test_register_access_does_not_mark_state_bitmap() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        let reg_idx = Register::X5 as u32;
+        let reg_byte_addr = (reg_idx * 4) as u64;
+        assert!(!emulator.state.memory.has_accessed(reg_byte_addr));
+        emulator.rw(Register::X5, 0xCAFE_BABE);
+        assert_eq!(emulator.register(Register::X5), 0xCAFE_BABE);
+        assert!(!emulator.state.memory.has_accessed(reg_byte_addr));
+    }
+
+    #[test]
+    fn test_simple_register_access_does_not_emit_local_memory_events() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+        emulator.mode = super::RiscvEmulatorMode::Simple;
+        emulator.update_mode_deps();
+
+        emulator.rw_simple(Register::X6, 0x1234_5678);
+        let _ = emulator.rr_simple(
+            Register::X6,
+            crate::chips::chips::events::MemoryAccessPosition::B,
+        );
+
+        assert!(emulator.local_memory_access.is_empty());
+    }
+
+    #[test]
+    fn test_register_and_memory_are_isolated() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        emulator.rw(Register::X5, 0xABCD_1234);
+        emulator.mw_cpu(
+            0x100,
+            0x5555_AAAA,
+            crate::chips::chips::events::MemoryAccessPosition::Memory,
+        );
+
+        assert_eq!(emulator.register(Register::X5), 0xABCD_1234);
+        assert_eq!(emulator.word(0x100), 0x5555_AAAA);
+    }
+
+    #[test]
+    fn test_memory_floor_accepts_boundary_address() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        emulator.mw_cpu(
+            0x100,
+            0xA5A5_5A5A,
+            crate::chips::chips::events::MemoryAccessPosition::Memory,
+        );
+        assert_eq!(emulator.word(0x100), 0xA5A5_5A5A);
+    }
+
+    #[test]
+    #[should_panic(expected = "memory access below floor")]
+    fn test_memory_floor_rejects_low_address() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+        let _ = emulator.word(0xFC);
+    }
+
+    #[test]
+    fn test_register_snapshot_is_consumed_during_rollback() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        // Simulate pre-batch snapshot state.
+        let mut snapshot = emulator.state.clone_without_memory();
+        snapshot.registers[3] = RuntimeRegisterRecord {
+            value: 0xAAAA_BBBB,
+            chunk: 1,
+            timestamp: 1,
+        };
+
+        // Simulate that x3 was touched and snapshotted before mutation.
+        emulator.register_snapshot[3] = RuntimeRegisterRecord {
+            value: 0x1111_2222,
+            chunk: 2,
+            timestamp: 2,
+        };
+        emulator.register_snapshot_bitmap = 1 << 3;
+
+        // Apply the same rollback semantics as emulate_state.
+        let register_snapshot_bitmap = emulator.register_snapshot_bitmap;
+        let register_snapshot = emulator.register_snapshot;
+        for reg_idx in 0..32 {
+            if (register_snapshot_bitmap & (1 << reg_idx)) != 0 {
+                snapshot.registers[reg_idx as usize] = register_snapshot[reg_idx as usize];
+            }
+        }
+
+        assert_eq!(snapshot.registers[3].value, 0x1111_2222);
+        assert_eq!(snapshot.registers[3].chunk, 2);
+        assert_eq!(snapshot.registers[3].timestamp, 2);
+    }
+
+    fn r_type(opcode: Opcode, rd: Register, rs1: Register, rs2: Register) -> Instruction {
+        Instruction::new(opcode, rd as u8, rs1 as u64, rs2 as u64, false, false)
+    }
+
+    fn i_type(opcode: Opcode, rd: Register, rs1: Register, imm: i32) -> Instruction {
+        Instruction::new(opcode, rd as u8, rs1 as u64, imm as i64 as u64, false, true)
+    }
+
+    fn s_type(opcode: Opcode, rs_value: Register, rs_base: Register, imm: i32) -> Instruction {
+        Instruction::new(
+            opcode,
+            rs_value as u8,
+            rs_base as u64,
+            imm as i64 as u64,
+            false,
+            true,
+        )
+    }
+
+    fn set_reg_raw(emulator: &mut RiscvEmulator, register: Register, value: u64) {
+        emulator.state.registers[register as usize] = RuntimeRegisterRecord {
+            value,
+            chunk: 0,
+            timestamp: 0,
+        };
+    }
+
+    #[test]
+    fn test_phase_3r3_w_ops_semantics() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        set_reg_raw(&mut emulator, Register::X1, 0xFFFF_FFFF);
+        set_reg_raw(&mut emulator, Register::X2, 1);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::ADDW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), 0);
+
+        set_reg_raw(&mut emulator, Register::X1, 1);
+        set_reg_raw(&mut emulator, Register::X2, 2);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::SUBW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), u64::MAX);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x8000_0001);
+        set_reg_raw(&mut emulator, Register::X2, 32);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::SLLW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), 0xFFFF_FFFF_8000_0001);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x8000_0001);
+        set_reg_raw(&mut emulator, Register::X2, 0);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::SRLW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), 0xFFFF_FFFF_8000_0001);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x8000_0000);
+        set_reg_raw(&mut emulator, Register::X2, 1);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::SRAW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), 0xFFFF_FFFF_C000_0000);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x8000_0000);
+        set_reg_raw(&mut emulator, Register::X2, 0xFFFF_FFFF);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::DIVW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), 0xFFFF_FFFF_8000_0000);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x8000_0001);
+        set_reg_raw(&mut emulator, Register::X2, 0);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::REMW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), 0xFFFF_FFFF_8000_0001);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x8000_0001);
+        set_reg_raw(&mut emulator, Register::X2, 0);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::DIVUW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), u64::MAX);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x8000_0001);
+        set_reg_raw(&mut emulator, Register::X2, 0);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::REMUW,
+                Register::X3,
+                Register::X1,
+                Register::X2,
+            ))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), 0xFFFF_FFFF_8000_0001);
+    }
+
+    #[test]
+    fn test_phase_3r3_lwu_ld_sd_semantics() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x1000);
+        set_reg_raw(&mut emulator, Register::X2, 0x1122_3344_5566_7788);
+        emulator
+            .emulate_instruction(&s_type(Opcode::SD, Register::X2, Register::X1, 0))
+            .unwrap();
+        assert_eq!(emulator.word(0x1000), 0x5566_7788);
+        assert_eq!(emulator.word(0x1004), 0x1122_3344);
+
+        emulator
+            .emulate_instruction(&i_type(Opcode::LD, Register::X3, Register::X1, 0))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X3), 0x1122_3344_5566_7788);
+
+        emulator.state.memory.write_word(0x1008, u32::MAX, 0, 0);
+        set_reg_raw(&mut emulator, Register::X1, 0x1008);
+        emulator
+            .emulate_instruction(&i_type(Opcode::LWU, Register::X4, Register::X1, 0))
+            .unwrap();
+        assert_eq!(emulator.register(Register::X4), 0x0000_0000_FFFF_FFFF);
+    }
+
+    #[test]
+    fn test_phase_3r5_cpu_event_payload_preserves_rv64_ld_sd_values() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        set_reg_raw(&mut emulator, Register::X1, 0x1000);
+        set_reg_raw(&mut emulator, Register::X2, 0xCAFE_BABE_DEAD_BEEF);
+
+        emulator
+            .emulate_instruction(&s_type(Opcode::SD, Register::X2, Register::X1, 0))
+            .unwrap();
+        let sd_event = emulator.record.cpu_events.last().unwrap();
+        assert_eq!(sd_event.a, 0xCAFE_BABE_DEAD_BEEF);
+        assert_eq!(sd_event.memory, Some(0xCAFE_BABE_DEAD_BEEF));
+
+        emulator
+            .emulate_instruction(&i_type(Opcode::LD, Register::X3, Register::X1, 0))
+            .unwrap();
+        let ld_event = emulator.record.cpu_events.last().unwrap();
+        assert_eq!(ld_event.a, 0xCAFE_BABE_DEAD_BEEF);
+        assert_eq!(ld_event.memory, Some(0xCAFE_BABE_DEAD_BEEF));
+    }
+
+    #[test]
+    fn test_phase_3r5_cpu_event_payload_preserves_rv64_w_op_values() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        set_reg_raw(&mut emulator, Register::X5, 0xAAAA_BBBB_FFFF_FFFF);
+        set_reg_raw(&mut emulator, Register::X6, 1);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::ADDW,
+                Register::X7,
+                Register::X5,
+                Register::X6,
+            ))
+            .unwrap();
+        let addw_event = emulator.record.cpu_events.last().unwrap();
+        assert_eq!(addw_event.a, 0);
+        assert_eq!(addw_event.b, 0xAAAA_BBBB_FFFF_FFFF);
+        assert_eq!(addw_event.c, 1);
+    }
+
+    #[test]
+    fn test_phase_3r6_alu_event_payload_preserves_rv64_w_op_operands() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        set_reg_raw(&mut emulator, Register::X5, 0xAAAA_BBBB_FFFF_FFFF);
+        set_reg_raw(&mut emulator, Register::X6, 1);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::ADDW,
+                Register::X7,
+                Register::X5,
+                Register::X6,
+            ))
+            .unwrap();
+        let addw_event = emulator.record.add_events.last().unwrap();
+        assert_eq!(addw_event.a, 0);
+        assert_eq!(addw_event.b, 0xAAAA_BBBB_FFFF_FFFF);
+        assert_eq!(addw_event.c, 1);
+    }
+
+    #[test]
+    fn test_phase_3r6_alu_event_payload_preserves_rv64_w_op_result() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        set_reg_raw(&mut emulator, Register::X5, 0xFFFF_FFFF_8000_0001);
+        set_reg_raw(&mut emulator, Register::X6, 0);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::DIVUW,
+                Register::X7,
+                Register::X5,
+                Register::X6,
+            ))
+            .unwrap();
+        let divuw_event = emulator.record.divrem_events.last().unwrap();
+        assert_eq!(divuw_event.a, u64::MAX);
+        assert_eq!(divuw_event.b, 0xFFFF_FFFF_8000_0001);
+        assert_eq!(divuw_event.c, 0);
+    }
+
+    #[test]
+    fn test_phase_3r6_alu_event_payload_preserves_rv64_mulw_inputs() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        set_reg_raw(&mut emulator, Register::X5, 0x1234_5678_FFFF_FFFE);
+        set_reg_raw(&mut emulator, Register::X6, 0xAAAA_BBBB_0000_0002);
+        emulator
+            .emulate_instruction(&r_type(
+                Opcode::MULW,
+                Register::X7,
+                Register::X5,
+                Register::X6,
+            ))
+            .unwrap();
+        let mulw_event = emulator.record.mul_events.last().unwrap();
+        assert_eq!(mulw_event.b, 0x1234_5678_FFFF_FFFE);
+        assert_eq!(mulw_event.c, 0xAAAA_BBBB_0000_0002);
+    }
+
+    #[test]
+    fn test_phase_3r3_lwu_ld_sd_alignment_errors() {
+        let program = simple_fibo_program();
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        // Use addresses in different 8-byte dwords to avoid timestamp collisions
+        // (failed instructions don't advance the clock but still touch memory metadata).
+        set_reg_raw(&mut emulator, Register::X1, 0x1002);
+        let err = emulator
+            .emulate_instruction(&i_type(Opcode::LWU, Register::X4, Register::X1, 0))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            super::EmulationError::InvalidMemoryAccess(Opcode::LWU, 0x1002)
+        ));
+
+        // Use 0x2004 (different 8-byte dword than 0x1002) to avoid timestamp conflict.
+        set_reg_raw(&mut emulator, Register::X1, 0x2004);
+        let err = emulator
+            .emulate_instruction(&i_type(Opcode::LD, Register::X4, Register::X1, 0))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            super::EmulationError::InvalidMemoryAccess(Opcode::LD, 0x2004)
+        ));
+
+        set_reg_raw(&mut emulator, Register::X1, 0x3004);
+        set_reg_raw(&mut emulator, Register::X2, 0xAABB_CCDD_EEFF_0011);
+        let err = emulator
+            .emulate_instruction(&s_type(Opcode::SD, Register::X2, Register::X1, 0))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            super::EmulationError::InvalidMemoryAccess(Opcode::SD, 0x3004)
+        ));
+    }
+
+    #[test]
+    fn test_phase_3r3_trace_simple_parity_for_rv64_ops() {
+        let program = simple_fibo_program();
+        let mut trace_emulator =
+            RiscvEmulator::new_single::<BabyBear>(program.clone(), EmulatorOpts::default(), None);
+        let mut simple_emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+
+        trace_emulator.mode = super::RiscvEmulatorMode::Trace;
+        trace_emulator.update_mode_deps();
+        simple_emulator.mode = super::RiscvEmulatorMode::Simple;
+        simple_emulator.update_mode_deps();
+
+        set_reg_raw(&mut trace_emulator, Register::X1, 0x1200);
+        set_reg_raw(&mut trace_emulator, Register::X2, 0xCAFE_BABE_DEAD_BEEF);
+        set_reg_raw(&mut trace_emulator, Register::X5, 0xFFFF_FFFF);
+        set_reg_raw(&mut trace_emulator, Register::X6, 1);
+
+        set_reg_raw(&mut simple_emulator, Register::X1, 0x1200);
+        set_reg_raw(&mut simple_emulator, Register::X2, 0xCAFE_BABE_DEAD_BEEF);
+        set_reg_raw(&mut simple_emulator, Register::X5, 0xFFFF_FFFF);
+        set_reg_raw(&mut simple_emulator, Register::X6, 1);
+
+        let instructions = [
+            s_type(Opcode::SD, Register::X2, Register::X1, 0),
+            i_type(Opcode::LD, Register::X3, Register::X1, 0),
+            r_type(Opcode::ADDW, Register::X4, Register::X5, Register::X6),
+            r_type(Opcode::DIVUW, Register::X7, Register::X5, Register::X6),
+        ];
+
+        for instruction in instructions {
+            trace_emulator.emulate_instruction(&instruction).unwrap();
+            simple_emulator
+                .emulate_instruction_simple(&instruction)
+                .unwrap();
+        }
+
+        assert_eq!(trace_emulator.state.pc, simple_emulator.state.pc);
+        assert_eq!(trace_emulator.state.clk, simple_emulator.state.clk);
+        assert_eq!(
+            trace_emulator.state.registers,
+            simple_emulator.state.registers
+        );
+        assert_eq!(trace_emulator.word(0x1200), simple_emulator.word(0x1200));
+        assert_eq!(trace_emulator.word(0x1204), simple_emulator.word(0x1204));
+    }
+
+    const RV64IM_FIBONACCI_ELF: &[u8] =
+        include_bytes!("../../../compiler/test_elf/riscv64im-pico-fibnacci-elf");
+
+    pub fn rv64im_fibonacci_program() -> Arc<Program> {
+        Compiler::new(SourceType::RISCV, RV64IM_FIBONACCI_ELF)
+            .expect("failed to parse RV64IM_FIBONACCI_ELF")
+            .compile()
+    }
+
+    #[test]
+    fn test_rv64im_fib() {
+        crate::machine::logger::setup_logger();
+
+        let program = rv64im_fibonacci_program();
+        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+        stdin.write(&10u64);
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+        let (stdin, _) = stdin.finalize();
+        emulator.run(Some(stdin)).unwrap();
+        println!("public_values: {:x?}", emulator.state.public_values_stream);
+    }
+
+    fn workspace_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("vm/ has a parent")
+            .to_path_buf()
+    }
+
+    fn load_rv64_reth_program() -> Arc<Program> {
+        let elf_path = workspace_root().join("perf/bench_data/rv64/reth-elf");
+        let elf_bytes = std::fs::read(&elf_path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", elf_path.display()));
+        Compiler::new(SourceType::RISCV, &elf_bytes)
+            .expect("failed to parse rv64 reth ELF")
+            .compile()
+    }
+
+    fn run_rv64_reth_block(block: u32) {
+        crate::machine::logger::setup_logger();
+
+        let program = load_rv64_reth_program();
+        let input_path = workspace_root().join(format!("perf/bench_data/rv64/reth-{block}.bin"));
+        let input_bytes = std::fs::read(&input_path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", input_path.display()));
+
+        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+        stdin.write_slice(&input_bytes);
+        let (stdin, _) = stdin.finalize();
+
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+        emulator.run(Some(stdin)).unwrap();
+
+        println!("block {block}: cycles = {}", emulator.state.global_clk);
+    }
+
+    fn run_rv64_reth_block_simple(block: u32) {
+        crate::machine::logger::setup_logger();
+
+        let program = load_rv64_reth_program();
+        let input_path = workspace_root().join(format!("perf/bench_data/rv64/reth-{block}.bin"));
+        let input_bytes = std::fs::read(&input_path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", input_path.display()));
+
+        let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+        stdin.write_slice(&input_bytes);
+        let (stdin, _) = stdin.finalize();
+
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+        emulator.mode = super::RiscvEmulatorMode::Simple;
+        emulator.update_mode_deps();
+        if let Err(err) = emulator.run(Some(stdin)) {
+            panic!(
+                "rv64 reth simple block {block} failed: {err:?}\npc=0x{:016x} clk={} global_clk={}\nstdout:\n{}\nstderr:\n{}",
+                emulator.state.pc,
+                emulator.state.clk,
+                emulator.state.global_clk,
+                emulator.stdout,
+                emulator.stderr,
+            );
+        }
+
+        println!("block {block}: cycles = {}", emulator.state.global_clk);
+    }
+
+    /// Run: cargo test --release -p pico-vm test_rv64_reth_17106222 -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
+    fn test_rv64_reth_17106222() {
+        run_rv64_reth_block(17106222);
+    }
+
+    /// Run: cargo test --release -p pico-vm test_rv64_reth_18884864 -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
+    fn test_rv64_reth_18884864() {
+        run_rv64_reth_block(18884864);
+    }
+
+    /// Run: cargo test --release -p pico-vm test_rv64_reth_23993050 -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
+    fn test_rv64_reth_23993050() {
+        run_rv64_reth_block(23993050);
+    }
+
+    /// Run: cargo test --release -p pico-vm test_rv64_reth_simple_17106222 -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
+    fn test_rv64_reth_simple_17106222() {
+        run_rv64_reth_block_simple(17106222);
+    }
+
+    /// Run: cargo test --release -p pico-vm test_rv64_reth_simple_18884864 -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
+    fn test_rv64_reth_simple_18884864() {
+        run_rv64_reth_block_simple(18884864);
+    }
+
+    /// Run: cargo test --release -p pico-vm test_rv64_reth_simple_23993050 -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires rv64 reth ELF + block inputs in perf/bench_data/rv64/"]
+    fn test_rv64_reth_simple_23993050() {
+        run_rv64_reth_block_simple(23993050);
     }
 }

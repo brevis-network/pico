@@ -1,8 +1,9 @@
 use std::mem::size_of;
 
 use crate::{
+    chips::gadgets::msb::U16MSBGadget,
     compiler::word::Word,
-    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, SR_DATAPAR, WORD_SIZE},
+    primitives::consts::{SR_DATAPAR, WORD_SIZE},
 };
 use pico_derive::AlignedBorrow;
 
@@ -17,42 +18,57 @@ pub struct ShiftRightCols<F: Copy> {
 
 pub const NUM_SLR_VALUE_COLS: usize = size_of::<ShiftRightValueCols<u8>>();
 
-/// The column layout for the chip.
+/// The column layout for a single shift right operation.
 #[derive(AlignedBorrow, Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct ShiftRightValueCols<F: Copy> {
     /// The output operand.
     pub a: Word<F>,
 
-    /// The first input operand.
+    /// The operand b (the value being shifted).
     pub b: Word<F>,
 
-    /// The second input operand.
-    pub c: Word<F>,
+    /// The operand c (shift amount) for ALU lookup.
+    pub c_for_lookup: Word<F>,
 
-    /// A boolean array whose `i`th element indicates whether `num_bits_to_shift = i`.
-    pub shift_by_n_bits: [F; BYTE_SIZE],
+    /// The most significant bit of `b` (for SRA/SRAW).
+    pub b_msb: U16MSBGadget<F>,
 
-    /// A boolean array whose `i`th element indicates whether `num_bytes_to_shift = i`.
-    pub shift_by_n_bytes: [F; WORD_SIZE],
+    /// The most significant byte of the result of SRLW/SRAW.
+    pub srw_msb: U16MSBGadget<F>,
 
-    /// The result of "byte-shifting" the input operand `b` by `num_bytes_to_shift`.
-    pub byte_shift_result: [F; LONG_WORD_SIZE],
+    /// The bottom 6 bits of `c` (shift amount).
+    pub c_bits: [F; 6],
 
-    /// The result of "bit-shifting" the byte-shifted input by `num_bits_to_shift`.
-    pub bit_shift_result: [F; LONG_WORD_SIZE],
+    /// The full c value (shift amount).
+    pub c: F,
 
-    /// The carry output of `shrcarry` on each byte of `byte_shift_result`.
-    pub shr_carry_output_carry: [F; LONG_WORD_SIZE],
+    /// Whether the shift amount is an immediate value.
+    pub imm_c: F,
 
-    /// The shift byte output of `shrcarry` on each byte of `byte_shift_result`.
-    pub shr_carry_output_shifted_byte: [F; LONG_WORD_SIZE],
+    /// SRA msb * v0123
+    pub sra_msb_v0123: F,
 
-    /// The most significant bit of `b`.
-    pub b_msb: F,
+    /// v0123 = 1 << (16 - (c & 15))
+    pub v_0123: F,
 
-    /// The least significant byte of `c`. Used to verify `shift_by_n_bits` and `shift_by_n_bytes`.
-    pub c_least_sig_byte: [F; BYTE_SIZE],
+    /// v012 = 1 << (8 - (c & 7))
+    pub v_012: F,
+
+    /// v01 = 1 << (4 - (c & 3))
+    pub v_01: F,
+
+    /// The lower bits of each limb.
+    pub lower_limb: Word<F>,
+
+    /// The higher bits of each limb.
+    pub higher_limb: Word<F>,
+
+    /// The result of the byte-shift.
+    pub limb_result: [F; WORD_SIZE],
+
+    /// The shift amount (which u16 limb to shift by).
+    pub shift_u16: [F; 4],
 
     /// If the opcode is SRL.
     pub is_srl: F,
@@ -60,6 +76,12 @@ pub struct ShiftRightValueCols<F: Copy> {
     /// If the opcode is SRA.
     pub is_sra: F,
 
-    /// Selector to know whether this row is enabled.
-    pub is_real: F,
+    /// If the opcode is SRLW.
+    pub is_srlw: F,
+
+    /// If the opcode is SRAW.
+    pub is_sraw: F,
+
+    /// If the opcode is W and immediate (SRLW/SRAW with immediate shift).
+    pub is_w_imm: F,
 }

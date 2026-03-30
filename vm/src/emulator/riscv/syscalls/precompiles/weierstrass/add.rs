@@ -1,9 +1,12 @@
 use crate::{
     chips::gadgets::curves::{CurveType, EllipticCurve},
-    emulator::riscv::syscalls::{
-        precompiles::{edwards::event::create_ec_add_event, PrecompileEvent},
-        syscall_context::SyscallContext,
-        Syscall, SyscallCode,
+    emulator::riscv::{
+        event_types::RvValue,
+        syscalls::{
+            precompiles::{edwards::event::create_ec_add_event, PrecompileEvent},
+            syscall_context::SyscallContext,
+            Syscall, SyscallCode,
+        },
     },
 };
 use std::marker::PhantomData;
@@ -26,9 +29,9 @@ impl<E: EllipticCurve> Syscall for WeierstrassAddAssignSyscall<E> {
         &self,
         rt: &mut SyscallContext,
         syscall_code: SyscallCode,
-        arg1: u32,
-        arg2: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
         let event = create_ec_add_event::<E>(rt, arg1, arg2);
 
         let syscall_event = rt

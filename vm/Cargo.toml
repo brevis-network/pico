@@ -74,7 +74,7 @@ paste.workspace = true
 rand.workspace = true
 rayon-scan = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
-rrs_lib.workspace = true
+rrs-lib.workspace = true
 rug = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true

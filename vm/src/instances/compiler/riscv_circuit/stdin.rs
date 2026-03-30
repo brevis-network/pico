@@ -74,7 +74,7 @@ where
     pub recursion_vk_merkle_data: MerkleProofStdin<SC>,
     pub start_reconstruct_deferred_digest: [SC::Val; DIGEST_SIZE],
     pub riscv_vk_digest: [SC::Val; DIGEST_SIZE],
-    pub end_pc: SC::Val,
+    pub end_pc: [SC::Val; 3],
 }
 
 pub struct DeferredStdinVariable<CC, SC>
@@ -88,7 +88,7 @@ where
     pub recursion_vk_merkle_data: MerkleProofStdinVariable<CC, SC>,
     pub start_reconstruct_deferred_digest: [Felt<CC::F>; DIGEST_SIZE],
     pub riscv_vk_digest: [Felt<CC::F>; DIGEST_SIZE],
-    pub end_pc: Felt<CC::F>,
+    pub end_pc: [Felt<CC::F>; 3],
 }
 
 pub struct ConvertStdinVariable<CC, SC>
@@ -209,7 +209,11 @@ where
         let start_reconstruct_deferred_digest =
             self.start_reconstruct_deferred_digest.read(builder);
         let riscv_vk_digest = self.riscv_vk_digest.read(builder);
-        let end_pc = self.end_pc.read(builder);
+        let end_pc = [
+            self.end_pc[0].read(builder),
+            self.end_pc[1].read(builder),
+            self.end_pc[2].read(builder),
+        ];
 
         DeferredStdinVariable {
             proof,
@@ -227,7 +231,9 @@ where
         self.recursion_vk_merkle_data.write(witness);
         self.start_reconstruct_deferred_digest.write(witness);
         self.riscv_vk_digest.write(witness);
-        self.end_pc.write(witness);
+        for pc in &self.end_pc {
+            pc.write(witness);
+        }
     }
 }
 
@@ -375,7 +381,7 @@ macro_rules! dummy_vk_and_chunk_proof {
 
             let vk = BaseVerifyingKey {
                 commit: dummy_hash::<$field>(),
-                pc_start: <$field>::ZERO,
+                pc_start: [<$field>::ZERO; 3],
                 initial_global_cumulative_sum: SepticDigest::<$field>::zero(),
                 preprocessed_info: preprocessed_chip_information.into(),
                 preprocessed_chip_ordering: preprocessed_chip_ordering.into(),
@@ -472,7 +478,7 @@ impl DeferredStdin<KoalaBearPoseidon2, RecursionChipType<KoalaBear>> {
             recursion_vk_merkle_data: recursion_vk_stdin.merkle_proof_stdin,
             start_reconstruct_deferred_digest: [KoalaBear::ZERO; DIGEST_SIZE],
             riscv_vk_digest: [KoalaBear::ZERO; DIGEST_SIZE],
-            end_pc: KoalaBear::ZERO,
+            end_pc: [KoalaBear::ZERO; 3],
         }
     }
 }
@@ -504,7 +510,7 @@ impl DeferredStdin<BabyBearPoseidon2, RecursionChipType<BabyBear>> {
             recursion_vk_merkle_data: recursion_vk_stdin.merkle_proof_stdin,
             start_reconstruct_deferred_digest: [BabyBear::ZERO; DIGEST_SIZE],
             riscv_vk_digest: [BabyBear::ZERO; DIGEST_SIZE],
-            end_pc: BabyBear::ZERO,
+            end_pc: [BabyBear::ZERO; 3],
         }
     }
 }

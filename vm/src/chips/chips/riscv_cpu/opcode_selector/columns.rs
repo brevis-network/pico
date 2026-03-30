@@ -29,9 +29,12 @@ pub struct OpcodeSelectorCols<T> {
     pub is_lh: T,
     pub is_lhu: T,
     pub is_lw: T,
+    pub is_lwu: T,
+    pub is_ld: T,
     pub is_sb: T,
     pub is_sh: T,
     pub is_sw: T,
+    pub is_sd: T,
 
     /// Branch Instructions.
     pub is_beq: T,
@@ -66,9 +69,12 @@ impl<F: Field> OpcodeSelectorCols<F> {
                 Opcode::LHU => self.is_lhu = F::ONE,
                 Opcode::LH => self.is_lh = F::ONE,
                 Opcode::LW => self.is_lw = F::ONE,
+                Opcode::LWU => self.is_lwu = F::ONE,
+                Opcode::LD => self.is_ld = F::ONE,
                 Opcode::SB => self.is_sb = F::ONE,
                 Opcode::SH => self.is_sh = F::ONE,
                 Opcode::SW => self.is_sw = F::ONE,
+                Opcode::SD => self.is_sd = F::ONE,
                 _ => unreachable!(),
             }
         } else if instruction.is_branch_instruction() {
@@ -87,7 +93,7 @@ impl<F: Field> OpcodeSelectorCols<F> {
             self.is_jalr = F::ONE;
         } else if instruction.opcode == Opcode::AUIPC {
             self.is_auipc = F::ONE;
-        } else if instruction.opcode == Opcode::UNIMP {
+        } else if matches!(instruction.opcode, Opcode::UNIMP | Opcode::EBREAK) {
             self.is_unimpl = F::ONE;
         }
     }
@@ -108,9 +114,12 @@ impl<T> IntoIterator for OpcodeSelectorCols<T> {
             self.is_lh,
             self.is_lhu,
             self.is_lw,
+            self.is_lwu,
+            self.is_ld,
             self.is_sb,
             self.is_sh,
             self.is_sw,
+            self.is_sd,
             self.is_beq,
             self.is_bne,
             self.is_blt,

@@ -60,7 +60,7 @@ fn run_baseline_bench(elf_bytes: &[u8], block_input: &[u8]) -> (u64, std::time::
 /// Run AOT emulator in batch mode.
 #[cfg(feature = "aot")]
 fn run_aot_bench(elf_bytes: &[u8], block_input: &[u8]) -> (u64, std::time::Duration, u32) {
-    let compiler = Compiler::new(SourceType::RISCV, elf_bytes);
+    let compiler = Compiler::new(SourceType::RISCV, elf_bytes).expect("Failed to create compiler");
     let program = compiler.compile();
 
     // Create stdin from raw block input bytes (not a serialized EmulatorStdinBuilder)

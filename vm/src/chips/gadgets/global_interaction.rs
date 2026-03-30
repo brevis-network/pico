@@ -29,13 +29,13 @@ pub struct GlobalInteractionOperation<T> {
 
 impl<F: PrimeField32 + FieldBehavior> GlobalInteractionOperation<F> {
     pub fn get_digest(
-        values: SepticBlock<u32>,
+        values: [u32; 8],
         is_receive: bool,
         kind: u8,
     ) -> (SepticCurve<F>, u8, [F; 16], [F; 16]) {
-        let x_start = SepticExtension::<F>::from_base_fn(|i| F::from_canonical_u32(values.0[i]))
-            + SepticExtension::from_base(F::from_canonical_u32((kind as u32) << 16));
-        let (point, offset, m_trial, m_hash) = SepticCurve::<F>::lift_x(x_start);
+        let mut new_values = values.map(|x| F::from_canonical_u32(x));
+        new_values[0] += F::from_canonical_u32((kind as u32) << 24);
+        let (point, offset, m_trial, m_hash) = SepticCurve::<F>::lift_x(new_values);
         if !is_receive {
             return (point.neg(), offset, m_trial, m_hash);
         }
@@ -44,7 +44,7 @@ impl<F: PrimeField32 + FieldBehavior> GlobalInteractionOperation<F> {
 
     pub fn populate(
         &mut self,
-        values: SepticBlock<u32>,
+        values: [u32; 8],
         is_receive: bool,
         is_real: bool,
         kind: u8,
@@ -107,14 +107,16 @@ impl<F: PrimeField32 + FieldBehavior> GlobalInteractionOperation<F> {
 
 impl<F: Field> GlobalInteractionOperation<F> {
     /// Constrain that the elliptic curve point for the global interaction is correctly derived.
+    #[allow(clippy::too_many_arguments)]
     pub fn eval_single_digest<CB: ChipBuilder<F>>(
         builder: &mut CB,
-        values: [CB::Expr; 7],
+        values: [CB::Expr; 8],
         cols: GlobalInteractionOperation<CB::Var>,
         is_receive: CB::Expr,
         is_send: CB::Expr,
         is_real: CB::Var,
         kind: CB::Var,
+        message_0_limbs: [CB::Var; 2],
     ) where
         CB::Expr: Any,
     {
@@ -128,26 +130,59 @@ impl<F: Field> GlobalInteractionOperation<F> {
             offset = offset.clone() + cols.offset_bits[i] * CB::F::from_canonical_u32(1 << i);
         }
 
-        // Range check the first element in the message to be a u16 so that we can encode the interaction kind in the upper 8 bits.
+        // Range check the first element in the message to be 24 bits so that we can encode the
+        // interaction kind in the upper bits.
+        // Decompose values[0] = message_0_16bit_limb + message_0_8bit_limb * 2^16.
+        builder.when(is_real).assert_eq(
+            values[0].clone(),
+            message_0_limbs[0] + message_0_limbs[1] * CB::F::from_canonical_u32(1 << 16),
+        );
+        // Range check: message_0_16bit_limb is u16, values[7] is u16.
         builder.looking_byte(
             CB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
-            values[0].clone(),
+            message_0_limbs[0].into(),
             CB::Expr::ZERO,
             CB::Expr::ZERO,
             is_real,
         );
+        builder.looking_byte(
+            CB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            values[7].clone(),
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            is_real,
+        );
+        // Range check: message_0_8bit_limb is u8.
+        builder.looking_byte(
+            CB::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
+            CB::Expr::ZERO,
+            message_0_limbs[1].into(),
+            CB::Expr::ZERO,
+            is_real,
+        );
+        // Range check that the `kind` is at most 6 bits (kind < 64).
+        builder.looking_byte(
+            CB::Expr::from_canonical_u8(ByteOpcode::LTU as u8),
+            CB::Expr::ONE,
+            kind.into(),
+            CB::Expr::from_canonical_u8(64),
+            is_real,
+        );
 
-        // Turn the message into a hash input. Only the first 8 elements are non-zero, as the rate of the Poseidon2 hash is 8.
-        // Combining `values[0]` with `kind` is safe, as `values[0]` is range checked to be u16, and `kind` is known to be u8.
+        // Turn the message into a hash input. All 8 elements correspond to the Poseidon2 absorption rate.
+        // Combining `values[0]` with `kind` is safe, as `values[0]` is range checked to be 24 bits,
+        // and `kind` is known to be 6 bits.
+        // Combining `values[7]` with `offset` is also safe, since `values[7]` is range checked
+        // to be 16 bits, while `offset` is known to be 8 bits.
         let m_trial = [
-            values[0].clone() + CB::Expr::from_canonical_u32(1 << 16) * kind,
+            values[0].clone() + CB::Expr::from_canonical_u32(1 << 24) * kind,
             values[1].clone(),
             values[2].clone(),
             values[3].clone(),
             values[4].clone(),
             values[5].clone(),
             values[6].clone(),
-            offset.clone(),
+            values[7].clone() + CB::Expr::from_canonical_u32(1 << 16) * offset.clone(),
             CB::Expr::ZERO,
             CB::Expr::ZERO,
             CB::Expr::ZERO,

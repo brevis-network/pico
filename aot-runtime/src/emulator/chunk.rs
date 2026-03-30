@@ -19,9 +19,16 @@ impl AotEmulatorCore {
             return false;
         }
         let max_chunk_size = self.batch_chunk_size;
+        let num_memory_rw_events = self.chunk_split_state.num_memory_read_write_events;
+        let num_global_lookup_base = self.chunk_split_state.num_global_lookup_base;
         let is_max_chunk_size = self.clk + self.max_syscall_cycles >= (max_chunk_size << 2);
 
-        if is_max_chunk_size {
+        if is_max_chunk_size
+            || (num_memory_rw_events > self.batch_memory_rw_threshold
+                && num_global_lookup_base >= self.batch_global_lookup_base_threshold)
+            || (num_memory_rw_events >= self.batch_memory_rw_threshold
+                && num_global_lookup_base > self.batch_global_lookup_base_threshold)
+        {
             self.chunk_split_state.clear();
             self.current_chunk = self.current_chunk.wrapping_add(1);
             self.clk = 0;
@@ -42,8 +49,10 @@ impl AotEmulatorCore {
     /// check_chunk_boundary() is called after every block/branch.
     #[inline(always)]
     pub fn check_chunk_boundary_fast(&mut self) -> bool {
-        // Fast path: skip full check if clock is far from threshold
-        if self.clk < self.batch_clk_fast_threshold {
+        // Fast path: skip full check if both clock and memory-RW counters are far from threshold.
+        if self.clk < self.batch_clk_fast_threshold
+            && self.chunk_split_state.num_memory_read_write_events < self.batch_event_fast_threshold
+        {
             return false;
         }
         // Slow path: full check
@@ -56,12 +65,37 @@ impl AotEmulatorCore {
         self.batch_stop && self.pc != 0
     }
 
-    /// Predict if a block with `count` instructions can fit in current chunk.
+    /// Predict if a block can fit in current chunk without crossing a split boundary.
     #[inline(always)]
-    pub fn can_fit_instructions(&self, count: u32) -> bool {
-        let cost = count * CLOCK_INCREMENT_PER_INSN;
+    pub fn can_fit_block(
+        &self,
+        insn_count: u32,
+        mem_rw_exact: usize,
+        global_lookup_base_max: usize,
+    ) -> bool {
+        let cost = insn_count * CLOCK_INCREMENT_PER_INSN;
         let remaining = self.batch_clk_threshold.saturating_sub(self.clk);
-        cost <= remaining
+        if cost > remaining {
+            return false;
+        }
+
+        let projected_memory = self
+            .chunk_split_state
+            .num_memory_read_write_events
+            .saturating_add(mem_rw_exact);
+        if projected_memory < self.batch_memory_rw_threshold {
+            return true;
+        }
+
+        let projected_global = self
+            .chunk_split_state
+            .num_global_lookup_base
+            .saturating_add(global_lookup_base_max);
+
+        !((projected_memory > self.batch_memory_rw_threshold
+            && projected_global >= self.batch_global_lookup_base_threshold)
+            || (projected_memory >= self.batch_memory_rw_threshold
+                && projected_global > self.batch_global_lookup_base_threshold))
     }
 
     /// Finalize a block and check for yield.
@@ -86,5 +120,148 @@ impl AotEmulatorCore {
         clock.flush_into(self);
         self.check_chunk_boundary();
         Err(err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AotEmulatorCore;
+    use pico_vm::compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program};
+    use std::{collections::BTreeMap, sync::Arc};
+
+    fn test_program() -> Arc<Program> {
+        let mut program = Program::new(
+            vec![Instruction::new(Opcode::ADD, 1, 0, 0, false, false)],
+            0x1000,
+            0x1000,
+        );
+        program.memory_image = Arc::new(BTreeMap::new());
+        Arc::new(program)
+    }
+
+    fn test_emu() -> AotEmulatorCore {
+        let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
+        emu.max_syscall_cycles = 0;
+        emu.batch_chunk_size = 64;
+        emu.batch_clk_threshold = 256;
+        emu.batch_clk_fast_threshold = 240;
+        emu.batch_memory_rw_threshold = 4;
+        emu.batch_global_lookup_base_threshold = 2;
+        emu.batch_event_fast_threshold = 3;
+        emu
+    }
+
+    #[test]
+    fn chunk_boundary_splits_on_cycle_limit() {
+        let mut emu = test_emu();
+        emu.clk = 256;
+
+        assert!(emu.check_chunk_boundary());
+        assert_eq!(emu.current_chunk, 2);
+        assert_eq!(emu.clk, 0);
+    }
+
+    #[test]
+    fn chunk_boundary_splits_on_mem_gt_global_eq_edge() {
+        let mut emu = test_emu();
+        emu.chunk_split_state.num_memory_read_write_events = 5;
+        emu.chunk_split_state.num_global_lookup_base = 2;
+
+        assert!(emu.check_chunk_boundary());
+    }
+
+    #[test]
+    fn chunk_boundary_splits_on_mem_eq_global_gt_edge() {
+        let mut emu = test_emu();
+        emu.chunk_split_state.num_memory_read_write_events = 4;
+        emu.chunk_split_state.num_global_lookup_base = 3;
+
+        assert!(emu.check_chunk_boundary());
+    }
+
+    #[test]
+    fn chunk_boundary_does_not_split_on_equal_thresholds() {
+        let mut emu = test_emu();
+        emu.chunk_split_state.num_memory_read_write_events = 4;
+        emu.chunk_split_state.num_global_lookup_base = 2;
+
+        assert!(!emu.check_chunk_boundary());
+    }
+
+    #[test]
+    fn chunk_boundary_does_not_split_when_memory_is_below_threshold() {
+        let mut emu = test_emu();
+        emu.chunk_split_state.num_memory_read_write_events = 3;
+        emu.chunk_split_state.num_global_lookup_base = 10;
+
+        assert!(!emu.check_chunk_boundary());
+    }
+
+    #[test]
+    fn chunk_boundary_is_skipped_in_unconstrained_mode() {
+        let mut emu = test_emu();
+        emu.enter_unconstrained_mode();
+        emu.clk = 256;
+        emu.chunk_split_state.num_memory_read_write_events = 5;
+        emu.chunk_split_state.num_global_lookup_base = 3;
+
+        assert!(!emu.check_chunk_boundary());
+    }
+
+    #[test]
+    fn chunk_boundary_fast_skips_slow_path_when_far_from_limits() {
+        let mut emu = test_emu();
+        emu.clk = 128;
+        emu.chunk_split_state.num_memory_read_write_events = 2;
+        emu.chunk_split_state.num_global_lookup_base = 100;
+
+        assert!(!emu.check_chunk_boundary_fast());
+        assert_eq!(emu.current_chunk, 1);
+    }
+
+    #[test]
+    fn chunk_boundary_fast_enters_slow_path_when_event_threshold_is_near() {
+        let mut emu = test_emu();
+        emu.clk = 128;
+        emu.chunk_split_state.num_memory_read_write_events = 4;
+        emu.chunk_split_state.num_global_lookup_base = 3;
+
+        assert!(emu.check_chunk_boundary_fast());
+        assert_eq!(emu.current_chunk, 2);
+    }
+
+    #[test]
+    fn can_fit_block_rejects_when_clock_budget_is_exceeded() {
+        let mut emu = test_emu();
+        emu.clk = 252;
+
+        assert!(!emu.can_fit_block(2, 0, 0));
+    }
+
+    #[test]
+    fn can_fit_block_rejects_on_event_threshold_crossing() {
+        let mut emu = test_emu();
+        emu.chunk_split_state.num_memory_read_write_events = 3;
+        emu.chunk_split_state.num_global_lookup_base = 1;
+
+        assert!(!emu.can_fit_block(1, 2, 1));
+    }
+
+    #[test]
+    fn can_fit_block_accepts_exact_threshold_without_strict_crossing() {
+        let mut emu = test_emu();
+        emu.chunk_split_state.num_memory_read_write_events = 3;
+        emu.chunk_split_state.num_global_lookup_base = 1;
+
+        assert!(emu.can_fit_block(1, 1, 1));
+    }
+
+    #[test]
+    fn can_fit_block_rejects_superblock_aggregate_crossing() {
+        let mut emu = test_emu();
+        emu.chunk_split_state.num_memory_read_write_events = 2;
+        emu.chunk_split_state.num_global_lookup_base = 1;
+
+        assert!(!emu.can_fit_block(4, 3, 2));
     }
 }

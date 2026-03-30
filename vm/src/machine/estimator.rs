@@ -19,7 +19,7 @@ use crate::{
         syscalls::{precompiles::PrecompileLocalMemory, SyscallCode},
     },
     primitives::consts::{
-        ADD_SUB_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
+        ADD_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
         MEMORY_RW_DATAPAR, MUL_DATAPAR, POSEIDON2_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
     },
 };
@@ -319,7 +319,8 @@ impl<'a> EventSizeCapture<'a> {
         data[CHIP_SLL] = self.num_shift_left_events.div_ceil(SLL_DATAPAR);
         let nb_rows = record.shape_chip_size("ShiftLeft");
         data[CHIP_SLL] = next_power_of_two(data[CHIP_SLL], nb_rows);
-        data[CHIP_ADDSUB] = (self.num_add_events + self.num_sub_events).div_ceil(ADD_SUB_DATAPAR);
+        //TODO
+        data[CHIP_ADDSUB] = (self.num_add_events + self.num_sub_events).div_ceil(ADD_DATAPAR);
         let nb_rows = record.shape_chip_size("AddSub");
         data[CHIP_ADDSUB] = next_power_of_two(data[CHIP_ADDSUB], nb_rows);
         data[CHIP_BITWISE] = self.num_bitwise_events.div_ceil(BITWISE_DATAPAR);

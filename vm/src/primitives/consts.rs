@@ -6,13 +6,16 @@ use crate::{
     },
 };
 use p3_baby_bear::BabyBear;
-use p3_field::PrimeField32;
+use p3_field::{Field, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use std::mem::size_of;
 
 /*
-For word and bytes
+For address, byte and word
  */
+
+/// The size of an address
+pub const ADDR_SIZE: usize = 3;
 
 /// The size of a byte in bits.
 pub const BYTE_SIZE: usize = 8;
@@ -22,6 +25,12 @@ pub const WORD_SIZE: usize = 4;
 
 /// The size of a long word in bytes.
 pub const LONG_WORD_SIZE: usize = 2 * WORD_SIZE;
+
+/// The size of a word in bytes.
+pub const WORD_BYTE_SIZE: usize = 2 * WORD_SIZE;
+
+/// The number of bytes necessary to represent a 128-bit integer.
+pub const LONG_WORD_BYTE_SIZE: usize = 2 * WORD_BYTE_SIZE;
 
 /*
 For public values
@@ -75,7 +84,7 @@ pub const COMBINE_SIZE: usize = 2;
 
 pub const EMPTY: usize = 0x_1111_1111;
 
-pub const ADDR_NUM_BITS: usize = 32;
+pub const ADDR_NUM_LIMBS: usize = 3;
 
 /// Converts a slice of words to a slice of bytes in little endian.
 pub fn words_to_bytes_le<const B: usize>(words: &[u32]) -> [u8; B] {
@@ -97,6 +106,29 @@ pub fn bytes_to_words_le<const W: usize>(bytes: &[u8]) -> [u32; W] {
         .collect::<Vec<_>>()
         .try_into()
         .unwrap()
+}
+
+/// Converts a 64-bit integer to four 16-bit limbs (little endian).
+pub fn u64_to_u16_limbs(value: u64) -> [u16; 4] {
+    [
+        (value & 0xFFFF) as u16,
+        (value >> 16) as u16,
+        (value >> 32) as u16,
+        (value >> 48) as u16,
+    ]
+}
+
+/// Converts a 32-bit integer to a pair of 16-bit integers.
+pub fn u32_to_u16_limbs(value: u32) -> [u16; 2] {
+    [(value & 0xFFFF) as u16, (value >> 16) as u16]
+}
+
+/// Converts a 32-bit integer to a pair of field elements (half words).
+pub fn u32_to_half_word<F: Field>(value: u32) -> [F; 2] {
+    [
+        F::from_canonical_u16((value & 0xFFFF) as u16),
+        F::from_canonical_u16((value >> 16) as u16),
+    ]
 }
 
 /*
@@ -222,7 +254,8 @@ pub const BN254_S_BOX_DEGREE: u64 = 5;
 /*
 Chip Data Parallelism
  */
-pub const ADD_SUB_DATAPAR: usize = 1;
+pub const ADD_DATAPAR: usize = 1;
+pub const SUB_DATAPAR: usize = 1;
 pub const MUL_DATAPAR: usize = 1;
 pub const DIVREM_DATAPAR: usize = 1;
 pub const LT_DATAPAR: usize = 1;

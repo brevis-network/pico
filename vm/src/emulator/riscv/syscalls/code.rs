@@ -154,10 +154,9 @@ pub enum SyscallCode {
 }
 
 impl SyscallCode {
-    /// Create a [`SyscallCode`] from a u32.
-    #[must_use]
-    pub fn from_u32(value: u32) -> Self {
-        match value {
+    #[inline(always)]
+    fn try_from_u32(value: u32) -> Option<Self> {
+        Some(match value {
             0x00_00_00_00 => SyscallCode::HALT,
             0x00_00_00_02 => SyscallCode::WRITE,
             0x00_00_00_03 => SyscallCode::ENTER_UNCONSTRAINED,
@@ -200,8 +199,51 @@ impl SyscallCode {
             0x00_01_01_30 => SyscallCode::SECP256R1_ADD,
             0x00_00_01_31 => SyscallCode::SECP256R1_DOUBLE,
             0x00_00_01_32_u32 => SyscallCode::SECP256R1_DECOMPRESS,
-            _ => panic!("invalid syscall number: {}", value),
+            _ => return None,
+        })
+    }
+
+    #[inline(always)]
+    fn try_from_exact_rv64(value: u64) -> Option<Self> {
+        let low = value as u32;
+        let zero_ext = u64::from(low);
+        let sign_ext = (low as i32 as i64) as u64;
+
+        if value == zero_ext || value == sign_ext {
+            Self::try_from_u32(low)
+        } else {
+            None
         }
+    }
+
+    #[inline(always)]
+    fn try_from_sign_extended_imm8(value: u64) -> Option<Self> {
+        let low_byte = value as u8;
+        let sign_ext_byte = (low_byte as i8 as i64) as u64;
+
+        if value == sign_ext_byte {
+            Self::try_from_u32(u32::from(low_byte))
+        } else {
+            None
+        }
+    }
+
+    /// Create a [`SyscallCode`] from a u32.
+    #[must_use]
+    pub fn from_u32(value: u32) -> Self {
+        Self::try_from_u32(value).unwrap_or_else(|| panic!("invalid syscall number: {}", value))
+    }
+
+    /// Create a [`SyscallCode`] from an RV64 register value carrying a 32-bit syscall encoding.
+    #[must_use]
+    pub fn from_rv64(value: u64) -> Self {
+        Self::try_from_exact_rv64(value)
+            .or_else(|| {
+                // Small syscall constants such as 0xF0/0xF1 may be materialized on RV64 with a
+                // sign-extended immediate (`li t0, 0xF0` -> 0xffff...fff0).
+                Self::try_from_sign_extended_imm8(value)
+            })
+            .unwrap_or_else(|| panic!("invalid rv64 syscall number encoding: 0x{value:016x}"))
     }
 
     /// Get the system call identifier.
@@ -243,5 +285,40 @@ impl SyscallCode {
 impl std::fmt::Display for SyscallCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SyscallCode;
+
+    #[test]
+    fn from_rv64_accepts_zero_extended_encoding() {
+        assert_eq!(
+            SyscallCode::from_rv64(0x0000_0000_0000_0002),
+            SyscallCode::WRITE
+        );
+    }
+
+    #[test]
+    fn from_rv64_accepts_sign_extended_encoding() {
+        assert_eq!(
+            SyscallCode::from_rv64(0xffff_ffff_ffff_fff0),
+            SyscallCode::HINT_LEN
+        );
+    }
+
+    #[test]
+    fn from_rv64_accepts_sign_extended_hint_read_encoding() {
+        assert_eq!(
+            SyscallCode::from_rv64(0xffff_ffff_ffff_fff1),
+            SyscallCode::HINT_READ
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid rv64 syscall number encoding")]
+    fn from_rv64_rejects_non_32bit_encoding() {
+        let _ = SyscallCode::from_rv64(0x1234_5678_0000_0002);
     }
 }

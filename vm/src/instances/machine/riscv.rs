@@ -448,8 +448,8 @@ where
         let mut proof_count = <Val<SC>>::ZERO;
         let mut execution_proof_count = <Val<SC>>::ZERO;
         let mut prev_next_pc = vk.pc_start;
-        let mut prev_last_initialize_addr_bits = [<Val<SC>>::ZERO; 32];
-        let mut prev_last_finalize_addr_bits = [<Val<SC>>::ZERO; 32];
+        let mut prev_last_init_addr_limbs = [<Val<SC>>::ZERO; 3];
+        let mut prev_last_finalize_addr_limbs = [<Val<SC>>::ZERO; 3];
 
         // let mut flag_extra = true;
         let mut committed_value_digest_prev = Default::default();
@@ -490,28 +490,27 @@ where
                     panic!("Cpu log degree too large");
                 }
 
-                if public_values.start_pc == <Val<SC>>::ZERO {
+                if public_values.start_pc == [<Val<SC>>::ZERO; 3] {
                     panic!("First proof start_pc is zero");
                 }
             } else if public_values.start_pc != public_values.next_pc {
                 panic!("Non-Cpu proof start_pc is not equal to next_pc");
             }
             if !each_proof.includes_chip("MemoryInitialize")
-                && public_values.previous_initialize_addr_bits
-                    != public_values.last_initialize_addr_bits
+                && public_values.previous_init_addr_limbs != public_values.last_init_addr_limbs
             {
-                panic!("Previous initialize addr bits mismatch");
+                panic!("Previous initialize addr limbs mismatch");
             }
 
             if !each_proof.includes_chip("MemoryFinalize")
-                && public_values.previous_finalize_addr_bits
-                    != public_values.last_finalize_addr_bits
+                && public_values.previous_finalize_addr_limbs
+                    != public_values.last_finalize_addr_limbs
             {
-                panic!("Previous finalize addr bits mismatch");
+                panic!("Previous finalize addr limbs mismatch");
             }
 
             // ending constraints
-            if i == proof.proofs().len() - 1 && public_values.next_pc != <Val<SC>>::ZERO {
+            if i == proof.proofs().len() - 1 && public_values.next_pc != [<Val<SC>>::ZERO; 3] {
                 panic!("Last proof next_pc is not zero");
             }
 
@@ -526,17 +525,17 @@ where
             if public_values.exit_code != <Val<SC>>::ZERO {
                 panic!("Exit code is not zero");
             }
-            if public_values.previous_initialize_addr_bits != prev_last_initialize_addr_bits {
-                panic!("Previous init addr bits mismatch");
+            if public_values.previous_init_addr_limbs != prev_last_init_addr_limbs {
+                panic!("Previous init addr limbs mismatch");
             }
-            if public_values.previous_finalize_addr_bits != prev_last_finalize_addr_bits {
-                panic!("Previous finalize addr bits mismatch");
+            if public_values.previous_finalize_addr_limbs != prev_last_finalize_addr_limbs {
+                panic!("Previous finalize addr limbs mismatch");
             }
 
             // update bookkeeping
             prev_next_pc = public_values.next_pc;
-            prev_last_initialize_addr_bits = public_values.last_initialize_addr_bits;
-            prev_last_finalize_addr_bits = public_values.last_finalize_addr_bits;
+            prev_last_init_addr_limbs = public_values.last_init_addr_limbs;
+            prev_last_finalize_addr_limbs = public_values.last_finalize_addr_limbs;
 
             // committed_value_digest checks
             transition_with_condition(

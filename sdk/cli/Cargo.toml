@@ -8,23 +8,26 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [build-dependencies]
-vergen = { version = "8", default-features = false, features = [
-    "build",
-    "git",
-    "git2",
-] }
+vergen.workspace = true
 
 [dependencies]
-clap = {workspace = true, features = ["cargo", "derive", "env"]}
 anyhow.workspace = true
-hex.workspace = true
-pico-sdk.workspace = true
-log.workspace = true
+cargo_metadata.workspace = true
+clap.workspace = true
+dirs.workspace = true
 env_logger.workspace = true
-pico-vm.workspace = true
-yansi = "1.0.1"
-cargo_metadata = "0.18.1"
-serde_json.workspace = true
-serde.workspace = true
+futures.workspace = true
+hex.workspace = true
+indicatif.workspace = true
+log.workspace = true
 num-bigint.workspace = true
 num-traits.workspace = true
+pico-sdk.workspace = true
+pico-vm.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+target-lexicon.workspace = true
+tokio.workspace = true
+yansi.workspace = true

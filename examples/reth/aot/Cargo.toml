@@ -37,9 +37,10 @@ path = "src/bin/compare.rs"
 [features]
 default = ["aot"]
 aot = ["pico-aot-dispatch", "aot-common/aot"]
-bigint-rug = ["pico-vm/bigint-rug"]
+bigint-rug = ["pico-vm/bigint-rug", "pico-aot-dispatch/bigint-rug"]
 jemalloc = ["pico-vm/jemalloc"]
-mmap-memory = ["pico-vm/mmap-memory"]
+mmap-memory = ["pico-vm/mmap-memory", "pico-aot-dispatch/mmap-memory"]
 
 [dev-dependencies]
+p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", rev = "f5056c9", features = ["nightly-features"] }
 rayon = "1.10"

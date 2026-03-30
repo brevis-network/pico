@@ -11,7 +11,7 @@ pub enum EmulationError {
 
     /// The emulation failed with an invalid memory access.
     #[error("invalid memory access for opcode {0} and address {1}")]
-    InvalidMemoryAccess(Opcode, u32),
+    InvalidMemoryAccess(Opcode, u64),
 
     /// The emulation failed with an unimplemented syscall.
     #[error("unimplemented syscall {0}")]

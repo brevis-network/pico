@@ -8,8 +8,9 @@ use crate::{
     chips::{
         chips::{
             alu::{
-                add_sub::AddSubChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip,
-                mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip,
+                add::AddChip, addw::AddwChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip,
+                mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip, sub::SubChip,
+                subw::SubwChip,
             },
             byte::ByteChip,
             riscv_cpu::CpuChip,
@@ -40,7 +41,10 @@ use crate::{
             edwards::{EdAddAssignChip, EdDecompressChip},
             fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
             keccak256::KeccakPermuteChip,
-            sha256::{compress::ShaCompressChip, extend::ShaExtendChip},
+            sha256::{
+                compress::{ShaCompressChip, ShaCompressControlChip},
+                extend::{ShaExtendChip, ShaExtendControlChip},
+            },
             uint256::Uint256MulChip,
             weierstrass::{
                 weierstrass_add::WeierstrassAddAssignChip,
@@ -62,8 +66,9 @@ use crate::{
         lookup::{LookupScope, LookupType},
     },
     primitives::consts::{
-        ADD_SUB_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
+        ADD_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
         MEMORY_RW_DATAPAR, MUL_DATAPAR, RISCV_POSEIDON2_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
+        SUB_DATAPAR,
     },
 };
 
@@ -93,6 +98,7 @@ define_chip_type!(
         (Program, ProgramChip),
         (Cpu, CpuChip),
         (ShaCompress, ShaCompressChip),
+        (ShaCompressControl, ShaCompressControlChip),
         (Ed25519Add, EdAddAssignChip),
         (Ed25519Decompress, EdDecompressChip),
         (WsBn254Add, WsBn254Add),
@@ -107,6 +113,7 @@ define_chip_type!(
         (WsDoubleSecp256k1, WsDoubleSecp256k1),
         (WsDoubleSecp256r1, WsDoubleSecp256r1),
         (ShaExtend, ShaExtendChip),
+        (ShaExtendControl, ShaExtendControlChip),
         (MemoryInitialize, MemoryInitializeFinalizeChip),
         (MemoryFinalize, MemoryInitializeFinalizeChip),
         (MemoryLocal, MemoryLocalChip),
@@ -116,7 +123,10 @@ define_chip_type!(
         (Lt, LtChip),
         (SR, ShiftRightChip),
         (SLL, SLLChip),
-        (AddSub, AddSubChip),
+        (Add, AddChip),
+        (Sub, SubChip),
+        (Addw, AddwChip),
+        (Subw, SubwChip),
         (Bitwise, BitwiseChip),
         (KeecakP, KeccakPermuteChip),
         (FpBn254, FpOpBn254),
@@ -142,8 +152,9 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Program(Default::default()),
             Self::Cpu(Default::default()),
             Self::ShaCompress(Default::default()),
-            Self::Ed25519Add(Default::default()),
-            Self::Ed25519Decompress(Default::default()),
+            Self::ShaCompressControl(Default::default()),
+            //Self::Ed25519Add(Default::default()),
+            //Self::Ed25519Decompress(Default::default()),
             Self::WsBn254Add(Default::default()),
             Self::WsBls381Add(Default::default()),
             Self::WsSecp256k1Add(Default::default()),
@@ -156,6 +167,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::WsDoubleSecp256k1(Default::default()),
             Self::WsDoubleSecp256r1(Default::default()),
             Self::ShaExtend(Default::default()),
+            Self::ShaExtendControl(Default::default()),
             Self::MemoryInitialize(MemoryInitializeFinalizeChip::new(
                 MemoryChipType::Initialize,
             )),
@@ -167,7 +179,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Lt(Default::default()),
             Self::SR(Default::default()),
             Self::SLL(Default::default()),
-            Self::AddSub(Default::default()),
+            Self::Add(Default::default()),
+            Self::Sub(Default::default()),
+            Self::Addw(Default::default()),
+            Self::Subw(Default::default()),
             Self::Bitwise(Default::default()),
             Self::KeecakP(Default::default()),
             Self::FpBn254(Default::default()),
@@ -214,8 +229,20 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 record.divrem_events.len().div_ceil(DIVREM_DATAPAR),
             ),
             (
-                Self::AddSub(Default::default()).name(),
-                (record.add_events.len() + record.sub_events.len()).div_ceil(ADD_SUB_DATAPAR),
+                Self::Add(Default::default()).name(),
+                (record.add_events.len()).div_ceil(ADD_DATAPAR),
+            ),
+            (
+                Self::Sub(Default::default()).name(),
+                (record.sub_events.len()).div_ceil(SUB_DATAPAR),
+            ),
+            (
+                Self::Addw(Default::default()).name(),
+                (record.add_events.len()).div_ceil(ADD_DATAPAR),
+            ),
+            (
+                Self::Subw(Default::default()).name(),
+                (record.sub_events.len()).div_ceil(SUB_DATAPAR),
             ),
             (
                 Self::Bitwise(Default::default()).name(),
@@ -314,7 +341,10 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
     pub(crate) fn get_all_riscv_chips() -> Vec<MetaChip<F, Self>> {
         [
             Self::Cpu(Default::default()),
-            Self::AddSub(Default::default()),
+            Self::Add(Default::default()),
+            Self::Sub(Default::default()),
+            Self::Addw(Default::default()),
+            Self::Subw(Default::default()),
             Self::Bitwise(Default::default()),
             Self::Mul(Default::default()),
             Self::DivRem(Default::default()),

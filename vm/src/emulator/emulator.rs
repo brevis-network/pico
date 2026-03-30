@@ -92,12 +92,13 @@ where
         state: RiscvEmulationState,
         par_opts: Option<ParOptions>,
         shared_ds: SharedDeferredState,
+        target_clk: u64,
     ) -> Self {
         let mut me = MetaEmulator::setup_riscv(witness, par_opts);
         let opts = me.emulator.as_ref().unwrap().opts;
         let prog = me.emulator.as_ref().unwrap().program.clone();
         me.emulator = Some(RiscvEmulator::recover::<SC::Val>(
-            prog, state, opts, shared_ds,
+            prog, state, opts, shared_ds, target_clk,
         ));
         me
     }

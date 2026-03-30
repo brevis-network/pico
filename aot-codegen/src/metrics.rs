@@ -25,11 +25,11 @@ pub struct ChunkMetrics {
     /// Number of blocks in this chunk
     pub block_count: usize,
     /// Minimum PC address in this chunk
-    pub pc_min: u32,
+    pub pc_min: u64,
     /// Maximum PC address in this chunk
-    pub pc_max: u32,
+    pub pc_max: u64,
     /// PC range span in bytes
-    pub pc_span: u32,
+    pub pc_span: u64,
     /// Number of instruction words in the PC range
     pub range_words: usize,
     /// Block density (block_count / range_words)
@@ -66,11 +66,11 @@ pub struct ProgramMetrics {
     /// Total number of basic blocks
     pub total_blocks: usize,
     /// Minimum PC address
-    pub pc_min: u32,
+    pub pc_min: u64,
     /// Maximum PC address
-    pub pc_max: u32,
+    pub pc_max: u64,
     /// PC range span in bytes
-    pub pc_span: u32,
+    pub pc_span: u64,
     /// Average instructions per block
     pub avg_instructions_per_block: f64,
     /// Minimum instructions in a block

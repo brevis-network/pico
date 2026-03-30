@@ -4,6 +4,7 @@ use crate::{
     compiler::riscv::program::Program,
     emulator::{
         riscv::{
+            event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
             record::EmulationRecord,
             syscalls::{Syscall, SyscallCode, SyscallEvent},
         },
@@ -77,30 +78,37 @@ impl RiscvEmulator {
 
     /// Get the current value of a byte.
     #[inline(always)]
-    pub fn byte(&mut self, addr: u32) -> u8 {
-        let word = self.word(align(addr));
-        word.to_le_bytes()[(addr % 4) as usize]
+    pub fn byte(&mut self, addr: RvAddr) -> u8 {
+        self.validate_main_memory_addr(addr);
+        let dword = self.dword(align_u64(addr));
+        dword.to_le_bytes()[(addr % 8) as usize]
     }
 
     /// Get the current timestamp for a given memory access position.
     #[inline(always)]
-    pub const fn timestamp(&self, position: &MemoryAccessPosition) -> u32 {
-        self.state.clk + *position as u32
+    pub fn timestamp(&self, position: &MemoryAccessPosition) -> RvTimestamp {
+        let timestamp = self.state.clk + *position as u64;
+        u32::try_from(timestamp).unwrap_or_else(|_| {
+            panic!(
+                "chunk-local timestamp {} exceeds u32::MAX; increase timestamp width or reduce chunk budget",
+                timestamp
+            )
+        })
     }
 
     /// Get the current chunk.
     #[inline(always)]
-    pub fn chunk(&self) -> u32 {
+    pub fn chunk(&self) -> RvChunk {
         self.state.current_chunk
     }
 
     #[inline]
     pub(crate) fn syscall_event(
         &self,
-        clk: u32,
+        clk: RvClk,
         syscall_id: u32,
-        arg1: u32,
-        arg2: u32,
+        arg1: RvValue,
+        arg2: RvValue,
     ) -> SyscallEvent {
         SyscallEvent {
             chunk: self.chunk(),
@@ -111,15 +119,26 @@ impl RiscvEmulator {
         }
     }
 
-    pub(crate) fn emit_syscall(&mut self, clk: u32, syscall_id: u32, arg1: u32, arg2: u32) {
+    pub(crate) fn emit_syscall(
+        &mut self,
+        clk: RvClk,
+        syscall_id: u32,
+        arg1: RvValue,
+        arg2: RvValue,
+    ) {
         let syscall_event = self.syscall_event(clk, syscall_id, arg1, arg2);
 
         self.record.syscall_events.push(syscall_event);
     }
 }
 
-/// Aligns an address to the nearest word below or equal to it.
 #[inline(always)]
-pub const fn align(addr: u32) -> u32 {
-    addr & (!3)
+pub const fn align_u64(addr: RvAddr) -> RvAddr {
+    addr & (!7)
+}
+
+/// Returns 0 if addr is in the lower 4-byte half of the dword, 1 if upper.
+#[inline(always)]
+pub const fn dword_half(addr: RvAddr) -> u32 {
+    ((addr >> 2) & 1) as u32
 }

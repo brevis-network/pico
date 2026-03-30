@@ -5,12 +5,12 @@ pub(crate) const STATE_SIZE: usize = 25;
 pub const STATE_NUM_WORDS: usize = STATE_SIZE * 2;
 
 /// Keccak256 permute syscall implementation with span operations.
-pub fn keccak_permute(core: &mut AotEmulatorCore, state_ptr: u32) {
+pub fn keccak_permute(core: &mut AotEmulatorCore, state_ptr: u64) {
     let clk = core.clk;
 
     // Stack-allocated buffer for state (50 words = 200 bytes)
     let mut state_values = [0u32; STATE_NUM_WORDS];
-    core.read_mem_span_at_clk(state_ptr, &mut state_values, clk);
+    core.read_mem_word_span_at_clk(state_ptr, &mut state_values, clk);
 
     // Convert to u64 state (stack-allocated)
     let mut state = [0u64; STATE_SIZE];
@@ -32,5 +32,5 @@ pub fn keccak_permute(core: &mut AotEmulatorCore, state_ptr: u32) {
     }
 
     // Write using span operation
-    core.write_mem_span_at_clk(state_ptr, &values_to_write, clk + 1);
+    core.write_mem_word_span_at_clk(state_ptr, &values_to_write, clk + 1);
 }

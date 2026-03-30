@@ -23,10 +23,10 @@ pub union OpcodeSpecificCols<T: Copy> {
 impl<T: Copy + Default> Default for OpcodeSpecificCols<T> {
     fn default() -> Self {
         // We must use the largest field to avoid uninitialized padding bytes.
-        const_assert!(size_of::<JumpCols<u8>>() == size_of::<OpcodeSpecificCols<u8>>());
+        const_assert!(size_of::<EcallCols<u8>>() == size_of::<OpcodeSpecificCols<u8>>());
 
         OpcodeSpecificCols {
-            jump: JumpCols::default(),
+            ecall: EcallCols::default(),
         }
     }
 }

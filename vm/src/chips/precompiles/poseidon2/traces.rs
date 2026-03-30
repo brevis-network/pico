@@ -3,7 +3,7 @@ use crate::{
     chips::{
         chips::{byte::event::ByteRecordBehavior, events::ByteLookupEvent},
         gadgets::poseidon2::traces::populate_perm,
-        precompiles::poseidon2::columns::Poseidon2Cols,
+        precompiles::{checked_u64_to_u32, poseidon2::columns::Poseidon2Cols},
         utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
@@ -179,9 +179,15 @@ impl<
 
         // cols.value_cols.is_real is populated in the following populate_perm
         cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.input_memory_ptr = F::from_canonical_u32(event.input_memory_ptr);
-        cols.output_memory_ptr = F::from_canonical_u32(event.output_memory_ptr);
+        cols.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "poseidon2 clk"));
+        cols.input_memory_ptr = F::from_canonical_u32(checked_u64_to_u32(
+            event.input_memory_ptr,
+            "poseidon2 input_memory_ptr proof boundary",
+        ));
+        cols.output_memory_ptr = F::from_canonical_u32(checked_u64_to_u32(
+            event.output_memory_ptr,
+            "poseidon2 output_memory_ptr proof boundary",
+        ));
 
         // Populate memory columns.
         for (i, read_record) in event.state_read_records.iter().enumerate() {

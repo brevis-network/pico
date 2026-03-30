@@ -9,9 +9,9 @@ use crate::chips::gadgets::{
     utils::conversions::{bytes_to_words_le, words_to_bytes_le},
 };
 
-use crate::{
-    chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
-    emulator::riscv::syscalls::{
+use crate::emulator::riscv::{
+    event_types::RvValue,
+    syscalls::{
         precompiles::{EdDecompressEvent, PrecompileEvent},
         syscall_context::SyscallContext,
         Syscall, SyscallCode,
@@ -36,22 +36,25 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
         &self,
         ctx: &mut SyscallContext,
         syscall_code: SyscallCode,
-        arg1: u32,
-        sign: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
         let start_clk = ctx.clk;
         let slice_ptr = arg1;
-        assert!(
-            slice_ptr.is_multiple_of(4),
-            "Pointer must be 4-byte aligned."
-        );
+        SyscallContext::assert_dword_aligned_precompile(slice_ptr, "edwards decompress slice_ptr");
+        let sign =
+            u32::try_from(arg2).unwrap_or_else(|_| panic!("ed decompress sign overflow: {}", arg2));
         assert!(sign <= 1, "Sign bit must be 0 or 1.");
 
-        let (y_memory_records_vec, y_vec) = ctx.mr_slice(
-            slice_ptr + (COMPRESSED_POINT_BYTES as u32),
-            WORDS_FIELD_ELEMENT,
-        );
-        let y_memory_records: [MemoryReadRecord; 8] = y_memory_records_vec.try_into().unwrap();
+        // The Ed25519 point halves are passed as packed u64 arrays on RV64, so each pair of
+        // legacy u32 limbs occupies one dword slot in guest memory.
+        let num_memory_words = WORDS_FIELD_ELEMENT;
+        let y_ptr = slice_ptr + (num_memory_words as u64) * 8;
+        let (y_memory_records, y_words) = ctx.mr_dword_slice(y_ptr, num_memory_words);
+        let y_vec = y_words
+            .iter()
+            .flat_map(|&word| [word as u32, (word >> 32) as u32])
+            .collect::<Vec<u32>>();
 
         let sign_bool = sign != 0;
 
@@ -71,28 +74,31 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
 
         let mut decompressed_x_bytes = decompressed.x.to_bytes_le();
         decompressed_x_bytes.resize(32, 0u8);
-        let decompressed_x_words: [u32; WORDS_FIELD_ELEMENT] =
+        let decompressed_x_words: [u32; WORDS_FIELD_ELEMENT * 2] =
             bytes_to_words_le(&decompressed_x_bytes);
 
         // Write decompressed X into slice
-        let x_memory_records_vec = ctx.mw_slice(slice_ptr, &decompressed_x_words);
-        let x_memory_records: [MemoryWriteRecord; 8] = x_memory_records_vec.try_into().unwrap();
+        let decompressed_x_dwords = decompressed_x_words
+            .chunks_exact(2)
+            .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
+            .collect::<Vec<u64>>();
+        let x_memory_records = ctx.mw_dword_slice(slice_ptr, &decompressed_x_dwords);
 
         let chunk = ctx.current_chunk();
         let event = EdDecompressEvent {
             chunk,
             clk: start_clk,
-            ptr: slice_ptr,
+            ptr: arg1,
             sign: sign_bool,
-            y_bytes,
-            decompressed_x_bytes: decompressed_x_bytes.try_into().unwrap(),
-            x_memory_records,
-            y_memory_records,
+            y_words: y_words.try_into().unwrap(),
+            decompressed_x_words: decompressed_x_dwords.try_into().unwrap(),
+            x_memory_records: x_memory_records.try_into().unwrap(),
+            y_memory_records: y_memory_records.try_into().unwrap(),
             local_mem_access: ctx.postprocess(),
         };
         let syscall_event = ctx
             .rt
-            .syscall_event(start_clk, syscall_code.syscall_id(), arg1, sign);
+            .syscall_event(start_clk, syscall_code.syscall_id(), arg1, arg2);
         ctx.record_mut().add_precompile_event(
             syscall_code,
             syscall_event,

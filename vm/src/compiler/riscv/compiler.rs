@@ -25,15 +25,15 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn new(source_type: SourceType, source_code: &[u8]) -> Self {
+    pub fn new(source_type: SourceType, source_code: &[u8]) -> eyre::Result<Self> {
         match source_type {
             SourceType::RISCV => {
-                let source = Elf::new(source_code).unwrap();
+                let source = Elf::new(source_code)?;
                 // construct the compiler
-                Self {
+                Ok(Self {
                     source_type,
                     source: Compilable::RISCV(source),
-                }
+                })
             }
         }
     }

@@ -53,6 +53,19 @@ pub trait ByteRecordBehavior {
         ));
     }
 
+    /// Adds a `ByteLookupEvent` to verify `a` fits in `num_bits` bits.
+    fn add_bit_range_check(&mut self, a: u16, num_bits: u8) {
+        let b = (a >> 8) as u8;
+        let c = a as u8;
+        self.add_byte_lookup_event(ByteLookupEvent::new(
+            ByteOpcode::BitRange,
+            0,
+            num_bits,
+            b,
+            c,
+        ));
+    }
+
     /// Adds `ByteLookupEvent`s to verify that all the bytes in the input slice are indeed bytes.
     fn add_u8_range_checks(&mut self, bytes: impl IntoIterator<Item = u8>) {
         for mut pair in &bytes.into_iter().chunks(2) {
@@ -71,6 +84,14 @@ pub trait ByteRecordBehavior {
     /// Adds `ByteLookupEvent`s to verify that all the bytes in the input slice are indeed bytes.
     fn add_u16_range_checks(&mut self, ls: &[u16]) {
         ls.iter().for_each(|x| self.add_u16_range_check(*x));
+    }
+
+    /// Adds `ByteLookupEvent`s to verify that all the field elements in the input slice are indeed
+    /// u16 values.
+    fn add_u16_range_checks_field<F: PrimeField32>(&mut self, field_values: &[F]) {
+        for x in field_values.iter() {
+            self.add_u16_range_check(x.as_canonical_u32() as u16);
+        }
     }
 }
 

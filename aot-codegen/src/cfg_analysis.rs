@@ -6,7 +6,7 @@
 
 use crate::{
     constants,
-    types::{Opcode, ProgramInfo},
+    types::{sign_extend_imm32_to_u64, Opcode, ProgramInfo},
 };
 use std::collections::HashMap;
 
@@ -31,17 +31,17 @@ impl CfgAnalysis {
     /// Analyze control flow from the program instructions and block PCs
     pub fn analyze(
         program: &ProgramInfo,
-        block_pcs: &[u32],
-        _leaders: &std::collections::HashSet<u32>,
+        block_pcs: &[u64],
+        _leaders: &std::collections::HashSet<u64>,
     ) -> Self {
         let mut pc_to_idx = HashMap::new();
         for (idx, &pc) in block_pcs.iter().enumerate() {
             pc_to_idx.insert(pc, idx);
         }
 
-        let inst_count = program.instructions.len() as u32;
+        let inst_count = program.instructions.len() as u64;
         let program_end = program.pc_base.wrapping_add(inst_count.saturating_mul(4));
-        let inst_idx_for_pc = |pc: u32| -> Option<usize> {
+        let inst_idx_for_pc = |pc: u64| -> Option<usize> {
             if pc < program.pc_base || pc >= program_end {
                 return None;
             }
@@ -49,7 +49,7 @@ impl CfgAnalysis {
             if !offset.is_multiple_of(4) {
                 return None;
             }
-            let idx = (offset / 4) as usize;
+            let idx = usize::try_from(offset / 4).ok()?;
             if idx < program.instructions.len() {
                 Some(idx)
             } else {
@@ -69,7 +69,7 @@ impl CfgAnalysis {
             let next_block_pc = if block_idx + 1 < block_pcs.len() {
                 block_pcs[block_idx + 1]
             } else {
-                program.pc_base + (program.instructions.len() as u32 * 4)
+                program.pc_base + ((program.instructions.len() as u64) * 4)
             };
 
             // Find the instruction just before the next block (last instruction of this block)
@@ -102,7 +102,7 @@ impl CfgAnalysis {
                     Opcode::JAL => {
                         has_terminator[block_idx] = true;
                         let (_, imm) = inst.j_type();
-                        let target = last_inst_pc.wrapping_add(imm);
+                        let target = last_inst_pc.wrapping_add(sign_extend_imm32_to_u64(imm));
                         if let Some(&target_idx) = pc_to_idx.get(&target) {
                             let weight =
                                 Self::edge_weight(EdgeType::JalTarget, last_inst_pc, target);
@@ -117,7 +117,7 @@ impl CfgAnalysis {
                     | Opcode::BGEU => {
                         has_terminator[block_idx] = true;
                         let (_, _, imm) = inst.b_type();
-                        let target = last_inst_pc.wrapping_add(imm);
+                        let target = last_inst_pc.wrapping_add(sign_extend_imm32_to_u64(imm));
                         let fallthrough = last_inst_pc.wrapping_add(4);
 
                         // Branch target
@@ -175,7 +175,7 @@ impl CfgAnalysis {
     }
 
     /// Compute edge weight based on type and whether it's a back-edge
-    fn edge_weight(edge_type: EdgeType, from_pc: u32, to_pc: u32) -> u32 {
+    fn edge_weight(edge_type: EdgeType, from_pc: u64, to_pc: u64) -> u32 {
         let base_weight = match edge_type {
             EdgeType::Fallthrough => constants::CFG_EDGE_WEIGHT_FALLTHROUGH,
             EdgeType::BranchTarget => constants::CFG_EDGE_WEIGHT_BRANCH_TARGET,

@@ -5,10 +5,12 @@ use super::{
     CpuChip,
 };
 use crate::{
-    compiler::word::Word,
+    compiler::{addr::Addr, word::Word},
     emulator::riscv::public_values::PublicValues,
     machine::{
-        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ScopedBuilder},
+        builder::{
+            ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ScopedBuilder,
+        },
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
     primitives::consts::RISCV_NUM_PVS,
@@ -43,6 +45,10 @@ where
             local.is_real,
         );
 
+        // Range check pc and next_pc limbs.
+        builder.slice_range_check_u16(&local.pc.0, local.is_real);
+        builder.slice_range_check_u16(&local.next_pc.0, local.is_real);
+
         // Compute some flags for which type of instruction we are dealing with.
         let is_memory_instruction: CB::Expr =
             self.is_memory_instruction::<CB>(&local.opcode_selector);
@@ -64,10 +70,14 @@ where
             .chain(once(local.opcode_selector.is_lh))
             .chain(once(local.opcode_selector.is_lhu))
             .chain(once(local.opcode_selector.is_lw))
+            .chain(once(local.opcode_selector.is_lwu))
+            .chain(once(local.opcode_selector.is_ld))
             .chain(once(local.opcode_selector.is_sb))
             .chain(once(local.opcode_selector.is_sh))
             .chain(once(local.opcode_selector.is_sw))
+            .chain(once(local.opcode_selector.is_sd))
             .map(Into::into);
+        // Memory lookup
         builder.looking(SymbolicLookup::new(
             values.collect(),
             is_memory_instruction,
@@ -75,7 +85,7 @@ where
             LookupScope::Regional,
         ));
 
-        // ALU instructions.
+        // ALU instructions
         builder.looking_alu(
             local.instruction.opcode,
             local.op_a_val(),
@@ -114,10 +124,16 @@ where
         self.eval_pc(builder, local, next, is_branch_instruction.clone());
 
         // Check public values constraints.
+        // Check public values constraints.
         self.eval_public_values(builder, local, next, public_values);
 
         // Check that the is_real flag is correct.
         self.eval_is_real(builder, local, next);
+
+        // Constrain all carry columns as boolean (degree 2, unconditional).
+        for &c in local.pc_carry_a.iter().chain(local.pc_carry_b.iter()) {
+            builder.assert_bool(c);
+        }
 
         // Check that when `is_real=0` that all flags that send interactions are zero.
         local
@@ -161,9 +177,12 @@ impl<F: Field> CpuChip<F> {
             + opcode_selectors.is_lh
             + opcode_selectors.is_lhu
             + opcode_selectors.is_lw
+            + opcode_selectors.is_lwu
+            + opcode_selectors.is_ld
             + opcode_selectors.is_sb
             + opcode_selectors.is_sh
             + opcode_selectors.is_sw
+            + opcode_selectors.is_sd
     }
 
     /// Computes whether the opcode is a store instruction.
@@ -171,7 +190,10 @@ impl<F: Field> CpuChip<F> {
         &self,
         opcode_selectors: &OpcodeSelectorCols<CB::Var>,
     ) -> CB::Expr {
-        opcode_selectors.is_sb + opcode_selectors.is_sh + opcode_selectors.is_sw
+        opcode_selectors.is_sb
+            + opcode_selectors.is_sh
+            + opcode_selectors.is_sw
+            + opcode_selectors.is_sd
     }
 
     /// Constraints related to the pc for non jump, branch, and halt instructions.
@@ -201,20 +223,25 @@ impl<F: Field> CpuChip<F> {
         // Verify that the pc increments by 4 for all instructions except branch, jump and halt
         // instructions. The other case is handled by eval_jump, eval_branch and eval_ecall
         // (for halt).
-        builder
-            .when_transition()
-            .when(next.is_real)
-            .when(local.is_sequential_instr)
-            .with_scope("is_sequential_instr", |builder| {
-                builder.assert_eq(local.pc + CB::Expr::from_canonical_u8(4), next.pc)
-            });
+        let condition = builder.is_transition() * next.is_real * local.is_sequential_instr;
+        local.pc.add_limb_with_carry(
+            builder,
+            condition,
+            CB::Expr::from_canonical_u8(4),
+            next.pc,
+            &local.pc_carry_a[0..4],
+        );
 
         // When the last row is real and it's a sequential instruction, assert that local.next_pc
         // <==> local.pc + 4
-        builder
-            .when(local.is_real)
-            .when(local.is_sequential_instr)
-            .assert_eq(local.pc + CB::Expr::from_canonical_u8(4), local.next_pc);
+        let condition = local.is_real * local.is_sequential_instr;
+        local.pc.add_limb_with_carry(
+            builder,
+            condition,
+            CB::Expr::from_canonical_u8(4),
+            local.next_pc,
+            &local.pc_carry_b,
+        );
     }
 
     /// Constraints related to the is_real column.
@@ -240,17 +267,20 @@ impl<F: Field> CpuChip<F> {
     fn looking_program<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        pc: impl Into<CB::Expr>,
+        pc: Addr<CB::Var>,
         instruction: InstructionCols<impl Into<CB::Expr> + Copy>,
         selectors: OpcodeSelectorCols<impl Into<CB::Expr> + Copy>,
         multiplicity: impl Into<CB::Expr>,
     ) {
-        let values = once(pc.into())
-            .chain(once(instruction.opcode.into()))
+        let values: Vec<CB::Expr> = pc
+            .into_iter()
+            .map(|x| x.into())
+            .chain(std::iter::once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect();
 
+        // Program lookup
         builder.looking(SymbolicLookup::new(
             values,
             multiplicity.into(),

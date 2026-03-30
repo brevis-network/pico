@@ -1,7 +1,9 @@
 use super::{Syscall, SyscallCode, SyscallContext};
 use crate::{
     chips::chips::riscv_memory::event::MemoryRecord,
-    emulator::riscv::riscv_emulator::RiscvEmulatorMode,
+    emulator::riscv::{
+        emulator::util::align_u64, event_types::RvValue, riscv_emulator::RiscvEmulatorMode,
+    },
 };
 
 pub(crate) struct HintLenSyscall;
@@ -11,9 +13,9 @@ impl Syscall for HintLenSyscall {
         &self,
         ctx: &mut SyscallContext,
         _: SyscallCode,
-        _arg1: u32,
-        _arg2: u32,
-    ) -> Option<u32> {
+        _arg1: RvValue,
+        _arg2: RvValue,
+    ) -> Option<RvValue> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
             panic!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
@@ -21,16 +23,25 @@ impl Syscall for HintLenSyscall {
                 ctx.rt.state.input_stream.len()
             );
         }
-        Some(ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].len() as u32)
+        Some(ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].len() as RvValue)
     }
 }
 
 pub(crate) struct HintReadSyscall;
 
 impl Syscall for HintReadSyscall {
-    fn emulate(&self, ctx: &mut SyscallContext, _: SyscallCode, ptr: u32, len: u32) -> Option<u32> {
+    fn emulate(
+        &self,
+        ctx: &mut SyscallContext,
+        _: SyscallCode,
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
+        let ptr = arg1;
+        let len =
+            usize::try_from(arg2).unwrap_or_else(|_| panic!("hint_read len overflow: {arg2}"));
         let stream_ptr = ctx.rt.state.input_stream_ptr;
-        // Check input stream bounds
+
         if stream_ptr >= ctx.rt.state.input_stream.len() {
             panic!(
                 "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
@@ -39,55 +50,53 @@ impl Syscall for HintReadSyscall {
             );
         }
 
-        // Scope the immutable borrow of input_stream for validation
         {
             let vec = &ctx.rt.state.input_stream[stream_ptr];
-            assert_eq!(
-                vec.len() as u32,
-                len,
-                "hint input stream read length mismatch"
-            );
-            assert_eq!(ptr % 4, 0, "hint read address not aligned to 4 bytes");
+            assert_eq!(vec.len(), len, "hint input stream read length mismatch");
+            assert_eq!(ptr % 8, 0, "hint read address not aligned to 8 bytes");
         }
 
-        // Iterate through the vec in 4-byte chunks, avoid holding the borrow
-        for i in (0..len).step_by(4) {
-            // Scope the immutable borrow to read the word
-            let word = {
-                let vec = &ctx.rt.state.input_stream[stream_ptr];
-                let b1 = vec[i as usize];
-                // In case the vec is not a multiple of 4, right-pad with 0s. This is fine because we
-                // are assuming the word is uninitialized, so filling it with 0s makes sense.
-                let b2 = vec.get(i as usize + 1).copied().unwrap_or(0);
-                let b3 = vec.get(i as usize + 2).copied().unwrap_or(0);
-                let b4 = vec.get(i as usize + 3).copied().unwrap_or(0);
-                u32::from_le_bytes([b1, b2, b3, b4])
-            };
+        let chunk_count = {
+            let vec = &ctx.rt.state.input_stream[stream_ptr];
+            vec.len().div_ceil(8)
+        };
 
-            // Write hint data directly to memory with (value, chunk=0, timestamp=0).
-            // This indicates it was initialized but not yet accessed by emulation.
-            let addr = ptr + i;
-            // TODO: use hashmap for uninitialized_memory to prevent some double-zero writing issues
+        for chunk_idx in 0..chunk_count {
+            let mut padded = [0u8; 8];
+            {
+                let vec = &ctx.rt.state.input_stream[stream_ptr];
+                let start = chunk_idx * 8;
+                let end = core::cmp::min(start + 8, vec.len());
+                let chunk = &vec[start..end];
+                padded[..chunk.len()].copy_from_slice(chunk);
+            }
+            let word = u64::from_le_bytes(padded);
+            let addr = ptr.checked_add((chunk_idx as u64) * 8).unwrap_or_else(|| {
+                panic!("hint_read address overflow: ptr=0x{ptr:016x} chunk_idx={chunk_idx}")
+            });
+
             let existing = ctx.rt.state.uninitialized_memory.get(addr).copied();
             if let Some(old) = existing.filter(|&v| v != 0) {
                 let is_trace = matches!(ctx.rt.mode, RiscvEmulatorMode::Trace);
-                if is_trace && (old == word) {
-                } else {
+                if !(is_trace && old == word) {
                     panic!(
                         "hint read address is initialized already (uninitialized_memory)\n\
-                         addr=0x{addr:08x} ptr=0x{ptr:08x} i={i} len={len} stream_ptr={stream_ptr}\n\
-                         old_uninit_word=0x{old:08x} new_word=0x{word:08x}",
+                         addr=0x{addr:016x} ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr}\n\
+                         old_uninit_dword=0x{old:016x} new_dword=0x{word:016x}",
                     );
                 }
             }
             ctx.rt.state.uninitialized_memory.insert(addr, word);
 
-            // Capture snapshot for this address (should be 0) before modifying it
-            // Now we can mutably borrow ctx.rt
-            ctx.rt.capture_snapshot_for_hint(addr);
+            let aligned = align_u64(addr);
+            debug_assert_eq!(
+                aligned, addr,
+                "hint_read must operate on aligned dword keys"
+            );
+            ctx.rt.capture_snapshot_for_hint(aligned);
 
             let prev_record = ctx.rt.state.memory.insert(
-                addr,
+                aligned,
                 MemoryRecord {
                     value: word,
                     chunk: 0,
@@ -98,17 +107,142 @@ impl Syscall for HintReadSyscall {
             if prev_record.value != 0 || prev_record.chunk != 0 || prev_record.timestamp != 0 {
                 panic!(
                     "hint read address is initialized already (memory)\n\
-                     addr=0x{addr:08x} ptr=0x{ptr:08x} i={i} len={len} stream_ptr={stream_ptr}\n\
+                     addr=0x{addr:016x} ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr}\n\
                      prev_record={prev_record:?}\n\
-                     new_record={{ value: 0x{word:08x}, chunk: 0, timestamp: 0 }}\n\
+                     new_record={{ value: 0x{word:016x}, chunk: 0, timestamp: 0 }}\n\
                      existing_uninit_word={:?}",
-                    existing.map(|x| format!("0x{x:08x}")),
+                    existing.map(|x| format!("0x{x:016x}")),
                 );
             }
         }
 
-        // Advance pointer after successful processing
         ctx.rt.state.input_stream_ptr += 1;
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        compiler::riscv::program::Program,
+        emulator::{opts::EmulatorOpts, riscv::riscv_emulator::RiscvEmulator},
+    };
+    use p3_baby_bear::BabyBear;
+    use std::{
+        collections::BTreeMap,
+        sync::{Arc, Mutex, MutexGuard, OnceLock},
+    };
+
+    fn hint_test_guard() -> MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+    }
+
+    fn test_program() -> Arc<Program> {
+        let mut program = Program::new(Vec::new(), 0x1000, 0x1000);
+        program.memory_image = Arc::new(BTreeMap::new());
+        Arc::new(program)
+    }
+
+    fn test_emulator(input_stream: Vec<Vec<u8>>) -> RiscvEmulator {
+        RiscvEmulator::new_single::<BabyBear>(test_program(), EmulatorOpts::default(), None)
+            .tap_mut(|emu| {
+                emu.state.input_stream = input_stream;
+            })
+    }
+
+    trait TapMut: Sized {
+        fn tap_mut(self, f: impl FnOnce(&mut Self)) -> Self;
+    }
+
+    impl<T> TapMut for T {
+        fn tap_mut(mut self, f: impl FnOnce(&mut Self)) -> Self {
+            f(&mut self);
+            self
+        }
+    }
+
+    #[test]
+    fn hint_read_writes_exact_dword_for_eight_byte_input() {
+        let _guard = hint_test_guard();
+        let mut emulator = test_emulator(vec![vec![1, 2, 3, 4, 5, 6, 7, 8]]);
+        let mut ctx = SyscallContext::new(&mut emulator);
+
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 8);
+
+        assert_eq!(
+            ctx.rt.state.uninitialized_memory.get(0x100).copied(),
+            Some(0x0807_0605_0403_0201)
+        );
+        assert_eq!(ctx.rt.state.memory.peek_dword(0x100), 0x0807_0605_0403_0201);
+        assert_eq!(ctx.rt.state.input_stream_ptr, 1);
+        let accessed: Vec<_> = ctx.rt.state.memory.accessed_keys().collect();
+        assert_eq!(accessed, vec![0x100]);
+    }
+
+    #[test]
+    fn hint_read_zero_pads_short_tail() {
+        let _guard = hint_test_guard();
+        let mut emulator = test_emulator(vec![vec![1, 2, 3]]);
+        let mut ctx = SyscallContext::new(&mut emulator);
+
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 3);
+
+        assert_eq!(
+            ctx.rt.state.uninitialized_memory.get(0x100).copied(),
+            Some(0x0000_0000_0003_0201)
+        );
+        assert_eq!(ctx.rt.state.memory.peek_dword(0x100), 0x0000_0000_0003_0201);
+    }
+
+    #[test]
+    fn hint_read_writes_full_dwords_plus_single_padded_tail() {
+        let _guard = hint_test_guard();
+        let mut emulator = test_emulator(vec![vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
+        let mut ctx = SyscallContext::new(&mut emulator);
+
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 10);
+
+        assert_eq!(
+            ctx.rt.state.uninitialized_memory.get(0x100).copied(),
+            Some(0x0807_0605_0403_0201)
+        );
+        assert_eq!(
+            ctx.rt.state.uninitialized_memory.get(0x108).copied(),
+            Some(0x0000_0000_0000_0A09)
+        );
+        assert_eq!(ctx.rt.state.memory.peek_dword(0x100), 0x0807_0605_0403_0201);
+        assert_eq!(ctx.rt.state.memory.peek_dword(0x108), 0x0000_0000_0000_0A09);
+        let accessed: Vec<_> = ctx.rt.state.memory.accessed_keys().collect();
+        assert_eq!(accessed, vec![0x100, 0x108]);
+    }
+
+    #[test]
+    #[should_panic(expected = "hint read address not aligned to 8 bytes")]
+    fn hint_read_rejects_unaligned_pointer() {
+        let _guard = hint_test_guard();
+        let mut emulator = test_emulator(vec![vec![1, 2, 3, 4]]);
+        let mut ctx = SyscallContext::new(&mut emulator);
+
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x104, 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "hint read address is initialized already (uninitialized_memory)")]
+    fn hint_read_rejects_duplicate_initialization_per_dword() {
+        let _guard = hint_test_guard();
+        let mut emulator = test_emulator(vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]]);
+
+        {
+            let mut ctx = SyscallContext::new(&mut emulator);
+            HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 4);
+        }
+
+        let mut ctx = SyscallContext::new(&mut emulator);
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 4);
     }
 }

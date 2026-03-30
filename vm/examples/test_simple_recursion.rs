@@ -47,7 +47,7 @@ macro_rules! run {
             let start = Instant::now();
 
             info!("\n Creating Program..");
-            let compiler = Compiler::new(SourceType::RISCV, elf);
+            let compiler = Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
             let program = compiler.compile();
 
             info!("\n Creating emulator (at {:?})..", start.elapsed());
@@ -80,12 +80,12 @@ macro_rules! run {
                 .clone_into(&mut record.memory_finalize_events);
             records[1]
                 .public_values
-                .last_initialize_addr_bits
-                .clone_into(&mut record.public_values.last_initialize_addr_bits);
+                .last_init_addr_limbs
+                .clone_into(&mut record.public_values.last_init_addr_limbs);
             records[1]
                 .public_values
-                .last_finalize_addr_bits
-                .clone_into(&mut record.public_values.last_finalize_addr_bits);
+                .last_finalize_addr_limbs
+                .clone_into(&mut record.public_values.last_finalize_addr_limbs);
             let program = record.program.clone();
 
             let stats = record.stats();

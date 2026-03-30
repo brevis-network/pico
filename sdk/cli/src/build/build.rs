@@ -1,3 +1,5 @@
+use super::{execute_command, find_target_file};
+use crate::{clean_command_env, get_target_directory, log_command, subcommand::build::BuildArgs};
 use anyhow::{Error, Result};
 use cargo_metadata::{MetadataCommand, Package};
 use std::{
@@ -6,15 +8,8 @@ use std::{
     process::Command,
 };
 
-use crate::{
-    clean_command_env, get_rustc_path, get_target_directory, log_command,
-    subcommand::build::BuildArgs,
-};
-
-use super::{execute_command, find_target_file};
-
-const RUSTUP_TOOLCHAIN_NAME: &str = "nightly-2025-08-04";
-const TARGET_ELF: &str = "riscv32im-pico-zkvm-elf";
+const RUSTUP_TOOLCHAIN_NAME: &str = "pico";
+const TARGET_ELF: &str = "riscv64im-pico-zkvm-elf";
 
 pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<PathBuf, Error> {
     let program_dir = program_dir.unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -70,33 +65,24 @@ pub fn build_program(args: &BuildArgs, program_dir: Option<PathBuf>) -> Result<P
 pub fn create_cargo_build_command(subcmd: &str, rust_flags: &[&str]) -> Command {
     let toolchain = format!("+{RUSTUP_TOOLCHAIN_NAME}");
 
-    let rustc = get_rustc_path(&toolchain);
-    println!("rustc version: {rustc}");
-
     let mut cmd = clean_command_env("cargo");
-    let mut args = vec![
+    let args = vec![
         &toolchain,
         subcmd,
         "--release",
         "--target",
-        "riscv32im-risc0-zkvm-elf",
-    ];
-
-    args.extend_from_slice(&[
+        "riscv64im-pico-zkvm-elf",
         "-Z",
         "build-std=alloc,core,proc_macro,panic_abort,std",
         "-Z",
         "build-std-features=compiler-builtins-mem",
-    ]);
-    // cmd.env("__CARGO_TESTS_ONLY_SRC_ROOT", rust_src);
-    // }
+    ];
 
     println!("Building guest package: cargo {}", args.join(" "));
 
     let encoded_rust_flags = encode_rust_flags(rust_flags);
 
-    cmd.env("RUSTC", rustc)
-        .env("CARGO_ENCODED_RUSTFLAGS", encoded_rust_flags)
+    cmd.env("CARGO_ENCODED_RUSTFLAGS", encoded_rust_flags)
         .args(args);
     cmd
 }

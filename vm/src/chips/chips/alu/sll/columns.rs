@@ -1,6 +1,5 @@
 use crate::{
-    compiler::word::Word,
-    primitives::consts::{BYTE_SIZE, SLL_DATAPAR, WORD_SIZE},
+    chips::gadgets::msb::U16MSBGadget, compiler::word::Word, primitives::consts::SLL_DATAPAR,
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
@@ -18,34 +17,45 @@ pub const NUM_SLL_VALUE_COLS: usize = size_of::<ShiftLeftValueCols<u8>>();
 #[repr(C)]
 #[derive(AlignedBorrow, Copy, Clone, Default)]
 pub struct ShiftLeftValueCols<F: Copy + Sized> {
-    /// The output operand, little-endian.
+    /// The output operand.
     pub a: Word<F>,
 
-    /// The first input operand, little-endian.
+    /// The input operand
     pub b: Word<F>,
 
-    /// The shift amount, storage as little-endian.
+    /// The input operand
     pub c: Word<F>,
 
-    /// The least significant byte of `c`. Used to verify `shift_by_n_bits` and `shift_by_n_bytes`.
-    /// Bit2Decimal(c_lsb[0..3]) = shift_by_n_bits
-    /// Bit2Decimal(c_lsb[4..5]) = shift_by_n_bytes
-    pub c_lsb: [F; BYTE_SIZE],
+    /// The lowerst byte of `c`.
+    pub c_bits: [F; 6],
 
-    /// A boolean array whose `i`th element indicates whether `num_bits_to_shift = i`.
-    pub shift_by_n_bits: [F; BYTE_SIZE],
+    /// v01 = (c0 + 1) * (3c1 + 1)
+    pub v_01: F,
 
-    /// The number to multiply to shift `b` by `num_bits_to_shift`. (i.e., `2^num_bits_to_shift`)
-    pub bit_shift_multiplier: F,
+    /// v012 = (c0 + 1) * (3c1 + 1) * (15c2 + 1)
+    pub v_012: F,
 
-    /// The result of multiplying `b` by `bit_shift_multiplier`.
-    pub shift_result: [F; WORD_SIZE],
+    /// v012 * c3
+    pub v_0123: F,
 
-    /// The carry propagated when multiplying `b` by `bit_shift_multiplier`.
-    pub shift_result_carry: [F; WORD_SIZE],
+    /// Flags representing c4 + 2c5.
+    pub shift_u16: [F; 4],
 
-    /// A boolean array whose `i`th element indicates whether `num_bytes_to_shift = i`.
-    pub shift_by_n_bytes: [F; WORD_SIZE],
+    /// The lower bits of each limb.
+    pub lower_limb: Word<F>,
 
-    pub is_real: F,
+    /// The higher bits of each limb.
+    pub higher_limb: Word<F>,
+
+    /// The limb results.
+    pub limb_result: Word<F>,
+
+    /// The most significant byte of the result of SLLW.
+    pub sllw_msb: U16MSBGadget<F>,
+
+    /// If the opcode is SLL.
+    pub is_sll: F,
+
+    /// If the opcode is SLLW.
+    pub is_sllw: F,
 }

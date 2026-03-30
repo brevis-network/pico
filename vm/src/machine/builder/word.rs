@@ -1,12 +1,33 @@
 //! Word associating builder functions
 
 use super::ChipBuilder;
-use crate::{compiler::word::Word, primitives::consts::WORD_SIZE};
+use crate::{
+    compiler::{addr::Addr, word::Word},
+    primitives::consts::WORD_SIZE,
+};
 use itertools::Itertools;
 use p3_field::Field;
 use std::array;
 
 pub trait ChipWordBuilder<F: Field>: ChipBuilder<F> {
+    /// Asserts that the two addresses are equal.
+    fn assert_addr_eq(
+        &mut self,
+        left: Addr<impl Into<Self::Expr>>,
+        right: Addr<impl Into<Self::Expr>>,
+    ) {
+        for (left, right) in left.0.into_iter().zip(right.0) {
+            self.assert_eq(left, right);
+        }
+    }
+
+    /// Asserts that the address is zero.
+    fn assert_addr_zero(&mut self, addr: Addr<impl Into<Self::Expr>>) {
+        for limb in addr.0 {
+            self.assert_zero(limb);
+        }
+    }
+
     /// Asserts that the two words are equal.
     fn assert_word_eq(
         &mut self,

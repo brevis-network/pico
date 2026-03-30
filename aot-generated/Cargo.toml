@@ -5,3 +5,21 @@ edition = "2021"
 
 [dependencies]
 pico-aot-runtime = { path = "../aot-runtime" }
+pico-aot-chunk-000 = { path = "chunks/chunk_000" }
+pico-aot-chunk-001 = { path = "chunks/chunk_001" }
+pico-aot-chunk-002 = { path = "chunks/chunk_002" }
+pico-aot-chunk-003 = { path = "chunks/chunk_003" }
+pico-aot-chunk-004 = { path = "chunks/chunk_004" }
+pico-aot-chunk-005 = { path = "chunks/chunk_005" }
+pico-aot-chunk-006 = { path = "chunks/chunk_006" }
+pico-aot-chunk-007 = { path = "chunks/chunk_007" }
+pico-aot-chunk-008 = { path = "chunks/chunk_008" }
+pico-aot-chunk-009 = { path = "chunks/chunk_009" }
+pico-aot-chunk-010 = { path = "chunks/chunk_010" }
+pico-aot-chunk-011 = { path = "chunks/chunk_011" }
+pico-aot-chunk-012 = { path = "chunks/chunk_012" }
+pico-aot-chunk-013 = { path = "chunks/chunk_013" }
+
+[features]
+bigint-rug = ["pico-aot-runtime/bigint-rug"]
+mmap-memory = ["pico-aot-runtime/mmap-memory"]

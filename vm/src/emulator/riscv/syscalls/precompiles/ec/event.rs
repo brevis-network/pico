@@ -15,7 +15,10 @@ use crate::{
             },
         },
     },
-    emulator::riscv::syscalls::syscall_context::SyscallContext,
+    emulator::riscv::{
+        event_types::{RvAddr, RvChunk, RvClk, RvValue},
+        syscalls::syscall_context::SyscallContext,
+    },
 };
 use serde::{Deserialize, Serialize};
 use typenum::Unsigned;
@@ -26,13 +29,13 @@ use typenum::Unsigned;
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveDoubleEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// The pointer to the point.
-    pub p_ptr: u32,
-    /// The point as a list of words.
-    pub p: Vec<u32>,
+    pub p_ptr: RvAddr,
+    /// The point in native guest-memory dword form.
+    pub p: Vec<RvValue>,
     /// The memory records for the point.
     pub p_memory_records: Vec<MemoryWriteRecord>,
     /// The local memory access records.
@@ -45,17 +48,17 @@ pub struct EllipticCurveDoubleEvent {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveDecompressEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// The pointer to the point.
-    pub ptr: u32,
+    pub ptr: RvAddr,
     /// The sign bit of the point.
     pub sign_bit: bool,
-    /// The x coordinate as a list of bytes.
-    pub x_bytes: Vec<u8>,
-    /// The decompressed y coordinate as a list of bytes.
-    pub decompressed_y_bytes: Vec<u8>,
+    /// The x coordinate in native guest-memory dword form.
+    pub x_words: Vec<RvValue>,
+    /// The decompressed y coordinate in native guest-memory dword form.
+    pub decompressed_y_words: Vec<RvValue>,
     /// The memory records for the x coordinate.
     pub x_memory_records: Vec<MemoryReadRecord>,
     /// The memory records for the y coordinate.
@@ -70,26 +73,34 @@ pub struct EllipticCurveDecompressEvent {
 /// result back to the memory location.
 pub fn create_ec_double_event<E: EllipticCurve>(
     rt: &mut SyscallContext,
-    arg1: u32,
-    _: u32,
+    arg1: RvAddr,
+    _: u64,
 ) -> EllipticCurveDoubleEvent {
     let start_clk = rt.clk;
     let p_ptr = arg1;
-    if !p_ptr.is_multiple_of(4) {
-        panic!();
-    }
+    SyscallContext::assert_dword_aligned_precompile(p_ptr, "ec double p_ptr");
 
     let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
+    // WordsCurvePoint is now the u64 dword count directly.
+    let num_memory_words = num_words;
 
-    let p = rt.slice_unsafe(p_ptr, num_words);
+    let p = rt.dword_slice_unsafe(p_ptr, num_memory_words);
+    let p_words = p
+        .iter()
+        .flat_map(|&word| [word as u32, (word >> 32) as u32])
+        .collect::<Vec<u32>>();
 
-    let p_affine = AffinePoint::<E>::from_words_le(&p);
+    let p_affine = AffinePoint::<E>::from_words_le(&p_words);
 
     let result_affine = E::ec_double(&p_affine);
 
     let result_words = result_affine.to_words_le();
+    let result_dwords = result_words
+        .chunks_exact(2)
+        .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
+        .collect::<Vec<u64>>();
 
-    let p_memory_records = rt.mw_slice(p_ptr, &result_words);
+    let p_memory_records = rt.mw_dword_slice(p_ptr, &result_dwords);
 
     EllipticCurveDoubleEvent {
         chunk: rt.current_chunk(),
@@ -107,21 +118,27 @@ pub fn create_ec_double_event<E: EllipticCurve>(
 /// writes the result back to the memory location.
 pub fn create_ec_decompress_event<E: EllipticCurve>(
     rt: &mut SyscallContext,
-    slice_ptr: u32,
-    sign_bit: u32,
+    slice_ptr: RvAddr,
+    sign_bit: u64,
 ) -> EllipticCurveDecompressEvent {
     let start_clk = rt.clk;
-    assert!(
-        slice_ptr.is_multiple_of(4),
-        "slice_ptr must be 4-byte aligned"
-    );
-    assert!(sign_bit <= 1, "is_odd must be 0 or 1");
+    SyscallContext::assert_dword_aligned_precompile(slice_ptr, "ec decompress slice_ptr");
+    let sign_bit_u32 = u32::try_from(sign_bit)
+        .unwrap_or_else(|_| panic!("ec decompress sign_bit overflow: {sign_bit}"));
+    assert!(sign_bit_u32 <= 1, "is_odd must be 0 or 1");
 
     let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
     let num_words_field_element = num_limbs / 4;
+    // num_words_field_element is derived from num_limbs / 4 (NOT NumWords), so it is still a u32
+    // word count. The in-memory dword count is half of that.
+    let num_memory_words_field_element = num_words_field_element / 2;
 
-    let (x_memory_records, x_vec) =
-        rt.mr_slice(slice_ptr + (num_limbs as u32), num_words_field_element);
+    let x_ptr = slice_ptr + (num_memory_words_field_element as u64) * 8;
+    let (x_memory_records, x_words) = rt.mr_dword_slice(x_ptr, num_memory_words_field_element);
+    let x_vec = x_words
+        .iter()
+        .flat_map(|&word| [word as u32, (word >> 32) as u32])
+        .collect::<Vec<u32>>();
 
     let x_bytes = words_to_bytes_le_vec(&x_vec);
     let mut x_bytes_be = x_bytes.clone();
@@ -134,21 +151,25 @@ pub fn create_ec_decompress_event<E: EllipticCurve>(
         _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
     };
 
-    let computed_point: AffinePoint<E> = decompress_fn(&x_bytes_be, sign_bit);
+    let computed_point: AffinePoint<E> = decompress_fn(&x_bytes_be, sign_bit_u32);
 
     let mut decompressed_y_bytes = computed_point.y.to_bytes_le();
     decompressed_y_bytes.resize(num_limbs, 0u8);
     let y_words = bytes_to_words_le_vec(&decompressed_y_bytes);
+    let decompressed_y_words = y_words
+        .chunks_exact(2)
+        .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
+        .collect::<Vec<u64>>();
 
-    let y_memory_records = rt.mw_slice(slice_ptr, &y_words);
+    let y_memory_records = rt.mw_dword_slice(slice_ptr, &decompressed_y_words);
 
     EllipticCurveDecompressEvent {
         chunk: rt.current_chunk(),
         clk: start_clk,
         ptr: slice_ptr,
-        sign_bit: sign_bit != 0,
-        x_bytes: x_bytes.clone(),
-        decompressed_y_bytes,
+        sign_bit: sign_bit_u32 != 0,
+        x_words,
+        decompressed_y_words,
         x_memory_records,
         y_memory_records,
         local_mem_access: rt.postprocess(),

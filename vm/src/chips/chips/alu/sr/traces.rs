@@ -1,20 +1,11 @@
-use super::columns::{ShiftRightValueCols, NUM_SLR_COLS, NUM_SLR_VALUE_COLS};
 use crate::{
     chips::{
-        chips::{
-            alu::event::AluEvent,
-            byte::{
-                event::{ByteLookupEvent, ByteRecordBehavior},
-                utils::shr_carry,
-            },
-        },
+        chips::{alu::event::AluEvent, byte::event::ByteRecordBehavior},
+        gadgets::msb::U16MSBGadget,
         utils::next_power_of_two,
     },
     compiler::{
-        riscv::{
-            opcode::{ByteOpcode, Opcode},
-            program::Program,
-        },
+        riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
@@ -23,14 +14,16 @@ use crate::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
     },
-    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, SR_DATAPAR, WORD_SIZE},
+    primitives::consts::{u64_to_u16_limbs, SR_DATAPAR, WORD_SIZE},
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use std::{borrow::BorrowMut, marker::PhantomData};
 
-/// A chip that implements bitwise operations for the opcodes SRL and SRA.
+use super::columns::{ShiftRightValueCols, NUM_SLR_COLS, NUM_SLR_VALUE_COLS};
+
+/// A chip that implements bitwise operations for the opcodes SRL, SRA, SRLW, and SRAW.
 #[derive(Default)]
 pub struct ShiftRightChip<F>(PhantomData<F>);
 
@@ -71,8 +64,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
         let padded_row_template = {
             let mut row = [F::ZERO; NUM_SLR_VALUE_COLS];
             let cols: &mut ShiftRightValueCols<F> = row.as_mut_slice().borrow_mut();
-            cols.shift_by_n_bits[0] = F::ONE;
-            cols.shift_by_n_bytes[0] = F::ONE;
+            cols.v_01 = F::from_canonical_u32(16);
+            cols.v_012 = F::from_canonical_u32(256);
+            cols.v_0123 = F::from_canonical_u32(65536);
+            cols.c = F::ZERO;
             row
         };
         for i in populate_len..values.len() {
@@ -115,102 +110,112 @@ impl<F: PrimeField32> ShiftRightChip<F> {
         &self,
         event: &AluEvent,
         cols: &mut ShiftRightValueCols<F>,
-        blu: &mut impl ByteRecordBehavior,
+        blu: &mut impl crate::chips::chips::byte::event::ByteRecordBehavior,
     ) {
-        // Initialize cols with basic operands and flags derived from the current event.
-        {
-            cols.a = Word::from(event.a);
-            cols.b = Word::from(event.b);
-            cols.c = Word::from(event.c);
+        let a = event.a;
+        let b = event.b;
+        let c = event.c;
 
-            cols.b_msb = F::from_canonical_u32((event.b >> 31) & 1);
+        // Set output operand
+        cols.a = Word::from(a);
 
-            cols.is_srl = F::from_bool(event.opcode == Opcode::SRL);
-            cols.is_sra = F::from_bool(event.opcode == Opcode::SRA);
+        // Set operand b (the value being shifted)
+        cols.b = Word::from(b);
 
-            cols.is_real = F::ONE;
+        // Set operand c (shift amount) for ALU lookup
+        cols.c_for_lookup = Word::from(c);
 
-            for i in 0..BYTE_SIZE {
-                cols.c_least_sig_byte[i] = F::from_canonical_u32((event.c >> i) & 1);
-            }
+        // Set opcode flags
+        cols.is_srl = F::from_bool(event.opcode == Opcode::SRL);
+        cols.is_sra = F::from_bool(event.opcode == Opcode::SRA);
+        cols.is_srlw = F::from_bool(event.opcode == Opcode::SRLW);
+        cols.is_sraw = F::from_bool(event.opcode == Opcode::SRAW);
 
-            // Insert the MSB lookup event.
-            let most_significant_byte = event.b.to_le_bytes()[WORD_SIZE - 1];
-            blu.add_byte_lookup_events(vec![ByteLookupEvent {
-                opcode: ByteOpcode::MSB,
-                a1: ((most_significant_byte >> 7) & 1) as u16,
-                a2: 0,
-                b: most_significant_byte,
-                c: 0,
-            }]);
+        // Set c_bits (6 lowest bits of c)
+        let c_val = u64_to_u16_limbs(c)[0];
+        for i in 0..6 {
+            cols.c_bits[i] = F::from_canonical_u16((c_val >> i) & 1);
+        }
+        cols.c = F::from_canonical_u16(c_val);
+        blu.add_bit_range_check(c_val >> 6, 10);
+
+        // Set v_01, v_012, v_0123
+        cols.v_01 = F::from_canonical_u32(1 << (4 - (c_val & 3)));
+        cols.v_012 = F::from_canonical_u32(1 << (8 - (c_val & 7)));
+        cols.v_0123 = F::from_canonical_u32(1 << (16 - (c_val & 15)));
+
+        // Convert b to u16 limbs
+        let b_limbs = u64_to_u16_limbs(b);
+
+        // Handle b_msb for SRA/SRAW
+        if event.opcode == Opcode::SRA {
+            // For 64-bit SRA, use the MSB of the highest limb (limb[3])
+            let mut gadget = U16MSBGadget::default();
+            gadget.populate(blu, b_limbs[3]);
+            cols.b_msb.msb = gadget.msb;
+        } else if event.opcode == Opcode::SRAW {
+            // For 32-bit SRAW, use the MSB of limb[1] (second limb, which represents the high 16 bits of the 32-bit value)
+            let mut gadget = U16MSBGadget::default();
+            gadget.populate(blu, b_limbs[1]);
+            cols.b_msb.msb = gadget.msb;
+        } else {
+            cols.b_msb.msb = F::ZERO;
+        }
+        cols.sra_msb_v0123 = cols.b_msb.msb * cols.v_0123;
+
+        let is_word = event.opcode == Opcode::SRLW || event.opcode == Opcode::SRAW;
+        let not_word = if is_word { 0u16 } else { 1u16 };
+
+        // Handle srw_msb for word operations
+        if is_word {
+            // For word operations, get MSB of a's second limb (high 16 bits of 32-bit value)
+            let a_limbs = u64_to_u16_limbs(a);
+            let mut gadget = U16MSBGadget::default();
+            gadget.populate(blu, a_limbs[1]);
+            cols.srw_msb.msb = gadget.msb;
+        } else {
+            cols.srw_msb.msb = F::ZERO;
         }
 
-        let num_bytes_to_shift = (event.c % 32) as usize / BYTE_SIZE;
-        let num_bits_to_shift = (event.c % 32) as usize % BYTE_SIZE;
+        // Calculate bit shift
+        let bit_shift = (c_val & 0xF) as u8;
 
-        // Byte shifting.
-        let mut byte_shift_result = [0u8; LONG_WORD_SIZE];
-        {
-            for i in 0..WORD_SIZE {
-                cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
-            }
-            let sign_extended_b = {
-                if event.opcode == Opcode::SRA {
-                    // Sign extension is necessary only for arithmetic right shift.
-                    ((event.b as i32) as i64).to_le_bytes()
-                } else {
-                    (event.b as u64).to_le_bytes()
-                }
-            };
-
-            for i in 0..LONG_WORD_SIZE {
-                if i + num_bytes_to_shift < LONG_WORD_SIZE {
-                    byte_shift_result[i] = sign_extended_b[i + num_bytes_to_shift];
-                }
-            }
-            cols.byte_shift_result = byte_shift_result.map(F::from_canonical_u8);
+        // Process each limb
+        for i in 0..WORD_SIZE {
+            let limb = b_limbs[i] as u32;
+            let lower_limb_val = (limb & ((1 << bit_shift) - 1)) as u16;
+            let higher_limb_val = (limb >> bit_shift) as u16;
+            cols.lower_limb[i] = F::from_canonical_u16(lower_limb_val);
+            cols.higher_limb[i] = F::from_canonical_u16(higher_limb_val);
+            blu.add_bit_range_check(lower_limb_val, bit_shift);
+            blu.add_bit_range_check(higher_limb_val, 16 - bit_shift);
         }
 
-        // Bit shifting.
-        {
-            for i in 0..BYTE_SIZE {
-                cols.shift_by_n_bits[i] = F::from_bool(num_bits_to_shift == i);
+        // Calculate limb_result
+        for i in 0..WORD_SIZE {
+            cols.limb_result[i] = cols.higher_limb[i];
+            if i != WORD_SIZE - 1 {
+                cols.limb_result[i] +=
+                    cols.lower_limb[i + 1] * F::from_canonical_u32(1 << (16 - bit_shift));
             }
-            let carry_multiplier = 1 << (8 - num_bits_to_shift);
-            let mut last_carry = 0u32;
-            let mut bit_shift_result = [0u8; LONG_WORD_SIZE];
-            let mut shr_carry_output_carry = [0u8; LONG_WORD_SIZE];
-            let mut shr_carry_output_shifted_byte = [0u8; LONG_WORD_SIZE];
-            for i in (0..LONG_WORD_SIZE).rev() {
-                let (shift, carry) = shr_carry(byte_shift_result[i], num_bits_to_shift as u8);
-
-                let byte_event = ByteLookupEvent {
-                    opcode: ByteOpcode::ShrCarry,
-                    a1: shift as u16,
-                    a2: carry,
-                    b: byte_shift_result[i],
-                    c: num_bits_to_shift as u8,
-                };
-                blu.add_byte_lookup_event(byte_event);
-
-                shr_carry_output_carry[i] = carry;
-                shr_carry_output_shifted_byte[i] = shift;
-                bit_shift_result[i] = ((shift as u32 + last_carry * carry_multiplier) & 0xff) as u8;
-                last_carry = carry as u32;
-            }
-            cols.bit_shift_result = bit_shift_result.map(F::from_canonical_u8);
-            cols.shr_carry_output_carry = shr_carry_output_carry.map(F::from_canonical_u8);
-            cols.shr_carry_output_shifted_byte =
-                shr_carry_output_shifted_byte.map(F::from_canonical_u8);
-            for i in 0..WORD_SIZE {
-                debug_assert_eq!(cols.a[i], cols.bit_shift_result[i].clone());
-            }
-
-            blu.add_u8_range_checks(byte_shift_result);
-            blu.add_u8_range_checks(bit_shift_result);
-            blu.add_u8_range_checks(shr_carry_output_carry);
-            blu.add_u8_range_checks(shr_carry_output_shifted_byte);
         }
+
+        // Calculate shift amount (which u16 limb to shift by)
+        // For word ops: shift_amount = 0 or 1 (only 0-31 bits)
+        // For 64-bit ops: shift_amount = 0, 1, 2, or 3 (0-63 bits)
+        let shift_amount = ((c_val >> 4) & 1) + 2 * ((c_val >> 5) & 1) * not_word;
+
+        let mut shift = [0u16; 4];
+        for i in 0..4 {
+            if i == shift_amount as usize {
+                shift[i] = 1;
+            }
+        }
+        cols.shift_u16 = shift.map(|x| F::from_canonical_u16(x));
+
+        let is_w_imm = is_word && event.is_imm;
+        cols.is_w_imm = F::from_bool(is_w_imm);
+        cols.imm_c = F::from_bool(event.is_imm);
     }
 }
 

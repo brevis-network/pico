@@ -134,13 +134,33 @@ pub fn test_ext_z_pow_exp<F: Field>() {
 }
 
 pub fn test_curve_double<F: PrimeField32>(x: SepticExtension<F>) {
-    let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
+    let m: [F; 8] = [
+        x.0[0],
+        x.0[1],
+        x.0[2],
+        x.0[3],
+        x.0[4],
+        x.0[5],
+        x.0[6],
+        F::ZERO,
+    ];
+    let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(m);
     let double_point = curve_point.double();
     assert!(double_point.check_on_point());
 }
 
 pub fn test_curve_lift_x<F: PrimeField32>(x: SepticExtension<F>) {
-    let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
+    let m: [F; 8] = [
+        x.0[0],
+        x.0[1],
+        x.0[2],
+        x.0[3],
+        x.0[4],
+        x.0[5],
+        x.0[6],
+        F::ZERO,
+    ];
+    let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(m);
     assert!(curve_point.check_on_point());
     assert!(curve_point.x.is_send() || curve_point.x.is_receive());
     assert!(!curve_point.x.is_exception());
@@ -182,7 +202,17 @@ pub fn test_curve_simple_sum<F: PrimeField32>() {
             F::from_canonical_u32(32 * i + 196),
             F::from_canonical_u32(64 * i + 667),
         ]);
-        let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
+        let m: [F; 8] = [
+            x.0[0],
+            x.0[1],
+            x.0[2],
+            x.0[3],
+            x.0[4],
+            x.0[5],
+            x.0[6],
+            F::ZERO,
+        ];
+        let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(m);
         vec.push(curve_point);
     }
     println!("Time elapsed: {:?}", start.elapsed());
@@ -219,7 +249,17 @@ pub fn test_curve_parallel_sum<F: PrimeField32>() {
             F::from_canonical_u32(32 * i + 196),
             F::from_canonical_u32(64 * i + 667),
         ]);
-        let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(x);
+        let m: [F; 8] = [
+            x.0[0],
+            x.0[1],
+            x.0[2],
+            x.0[3],
+            x.0[4],
+            x.0[5],
+            x.0[6],
+            F::ZERO,
+        ];
+        let (curve_point, _, _, _) = SepticCurve::<F>::lift_x(m);
         vec.push(SepticCurveComplete::Affine(curve_point));
     }
     println!("Time elapsed: {:?}", start.elapsed());

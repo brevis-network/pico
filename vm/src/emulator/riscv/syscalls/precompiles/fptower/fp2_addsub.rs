@@ -5,9 +5,12 @@ use std::marker::PhantomData;
 
 use crate::{
     chips::gadgets::field::field_op::FieldOperation,
-    emulator::riscv::syscalls::{
-        precompiles::{Fp2AddSubEvent, PrecompileEvent},
-        Syscall, SyscallCode, SyscallContext,
+    emulator::riscv::{
+        event_types::RvValue,
+        syscalls::{
+            precompiles::{Fp2AddSubEvent, PrecompileEvent},
+            Syscall, SyscallCode, SyscallContext,
+        },
     },
 };
 
@@ -30,26 +33,38 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
         &self,
         rt: &mut SyscallContext,
         syscall_code: SyscallCode,
-        x_ptr: u32,
-        y_ptr: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
+        let x_ptr = arg1;
+        let y_ptr = arg2;
         let clk = rt.clk;
-        assert!(x_ptr.is_multiple_of(4), "x_ptr is unaligned");
-        assert!(y_ptr.is_multiple_of(4), "y_ptr is unaligned");
+        SyscallContext::assert_dword_aligned_precompile(x_ptr, "fp2 addsub x_ptr");
+        SyscallContext::assert_dword_aligned_precompile(y_ptr, "fp2 addsub y_ptr");
 
         let num_words = <P as NumWords>::WordsCurvePoint::USIZE;
+        // WordsCurvePoint is now the u64 dword count directly.
+        let num_memory_words = num_words;
 
-        let x = rt.slice_unsafe(x_ptr, num_words);
-        let (y_memory_records, y) = rt.mr_slice(y_ptr, num_words);
+        let x_vals = rt.dword_slice_unsafe(x_ptr, num_memory_words);
+        let (y_memory_records, y_vals) = rt.mr_dword_slice(y_ptr, num_memory_words);
         rt.clk += 1;
 
-        let (ac0, ac1) = x.split_at(x.len() / 2);
-        let (bc0, bc1) = y.split_at(y.len() / 2);
+        let x_bytes = x_vals
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect::<Vec<u8>>();
+        let y_bytes = y_vals
+            .iter()
+            .flat_map(|word| word.to_le_bytes())
+            .collect::<Vec<u8>>();
+        let (ac0, ac1) = x_bytes.split_at(x_bytes.len() / 2);
+        let (bc0, bc1) = y_bytes.split_at(y_bytes.len() / 2);
 
-        let ac0 = BigUint::from_slice(ac0);
-        let ac1 = BigUint::from_slice(ac1);
-        let bc0 = BigUint::from_slice(bc0);
-        let bc1 = BigUint::from_slice(bc1);
+        let ac0 = BigUint::from_bytes_le(ac0);
+        let ac1 = BigUint::from_bytes_le(ac1);
+        let bc0 = BigUint::from_bytes_le(bc0);
+        let bc1 = BigUint::from_bytes_le(bc1);
         let modulus = &BigUint::from_bytes_le(P::MODULUS);
 
         let (c0, c1) = match self.op {
@@ -61,16 +76,17 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
             _ => panic!("Invalid operation"),
         };
 
-        let mut result = vec![0; num_words];
-        let c0_digits = c0.to_u32_digits();
-        let c1_digits = c1.to_u32_digits();
-        result[..c0_digits.len()].copy_from_slice(&c0_digits);
-        result[num_words / 2..num_words / 2 + c1_digits.len()].copy_from_slice(&c1_digits);
-        let x_memory_records = rt.mw_slice(x_ptr, &result);
+        // The first half of the dword buffer is c0 and the second half is c1, matching the guest
+        // memory layout read above.
+        let mut result = c0.to_u64_digits();
+        result.resize(num_memory_words / 2, 0);
+        result.append(&mut c1.to_u64_digits());
+        result.resize(num_memory_words, 0);
+        let x_memory_records = rt.mw_dword_slice(x_ptr, &result);
 
         let chunk = rt.current_chunk();
-        let x = x.into_boxed_slice();
-        let y = y.into_boxed_slice();
+        let x = x_vals.into_boxed_slice();
+        let y = y_vals.into_boxed_slice();
         let x_memory_records = x_memory_records.into_boxed_slice();
         let y_memory_records = y_memory_records.into_boxed_slice();
         let op = self.op;
@@ -99,9 +115,9 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event =
-                    rt.rt
-                        .syscall_event(clk, syscall_code.syscall_id(), x_ptr, y_ptr);
+                let syscall_event = rt
+                    .rt
+                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,
@@ -116,9 +132,9 @@ impl<P: FpOpField> Syscall for Fp2AddSubSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event =
-                    rt.rt
-                        .syscall_event(clk, syscall_code.syscall_id(), x_ptr, y_ptr);
+                let syscall_event = rt
+                    .rt
+                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,

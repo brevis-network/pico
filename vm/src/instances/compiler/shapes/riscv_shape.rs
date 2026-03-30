@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     chips::chips::{
         alu::{
-            add_sub::AddSubChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip,
-            mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip,
+            add::AddChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip, mul::MulChip,
+            sll::SLLChip, sr::traces::ShiftRightChip, sub::SubChip,
         },
         byte::ByteChip,
         riscv_cpu::CpuChip,
@@ -276,8 +276,11 @@ fn modify_stats_with_log2(stats: &HashMap<String, usize>) -> HashMap<String, usi
 
 fn add_none_if_missing(shapes: &mut [RiscvShapeSpec]) {
     for shape in shapes.iter_mut() {
-        if !shape.add_sub_height.contains(&None) {
-            shape.add_sub_height.insert(0, None);
+        if !shape.add_height.contains(&None) {
+            shape.add_height.insert(0, None);
+        }
+        if !shape.sub_height.contains(&None) {
+            shape.sub_height.insert(0, None);
         }
         if !shape.lt_height.contains(&None) {
             shape.lt_height.insert(0, None);
@@ -328,7 +331,8 @@ pub struct RiscvShapeConfig<F> {
 
 struct RiscvShapeSpec {
     cpu_height: Vec<Option<usize>>,
-    add_sub_height: Vec<Option<usize>>,
+    add_height: Vec<Option<usize>>,
+    sub_height: Vec<Option<usize>>,
     divrem_height: Vec<Option<usize>>,
     bitwise_height: Vec<Option<usize>>,
     mul_height: Vec<Option<usize>>,
@@ -727,7 +731,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             // small shapes
             RiscvShapeSpec {
                 cpu_height: vec![Some(15)],
-                add_sub_height: vec![Some(14)],
+                add_height: vec![Some(14)],
+                sub_height: vec![Some(14)],
                 lt_height: vec![Some(11)],
                 bitwise_height: vec![Some(13)],
                 shift_right_height: vec![Some(11)],
@@ -742,7 +747,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(19)],
-                add_sub_height: vec![Some(19)],
+                add_height: vec![Some(19)],
+                sub_height: vec![Some(19)],
                 lt_height: vec![Some(18)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(19)],
@@ -757,7 +763,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(20)],
-                add_sub_height: vec![Some(20)],
+                add_height: vec![Some(20)],
+                sub_height: vec![Some(20)],
                 lt_height: vec![Some(20)],
                 bitwise_height: vec![Some(17)],
                 shift_right_height: vec![Some(16)],
@@ -772,7 +779,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(20)],
-                add_sub_height: vec![Some(20)],
+                add_height: vec![Some(20)],
+                sub_height: vec![Some(20)],
                 lt_height: vec![Some(20)],
                 bitwise_height: vec![Some(18)],
                 shift_right_height: vec![Some(17)],
@@ -788,7 +796,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             // maximal riscv shape for CHUNK_SIZE=2^20
             RiscvShapeSpec {
                 cpu_height: vec![Some(20)],
-                add_sub_height: vec![Some(20)],
+                add_height: vec![Some(20)],
+                sub_height: vec![Some(20)],
                 lt_height: vec![Some(20)],
                 bitwise_height: vec![Some(20)],
                 shift_right_height: vec![Some(20)],
@@ -804,7 +813,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             // maximal riscv shape for CHUNK_SIZE=2^21
             RiscvShapeSpec {
                 cpu_height: vec![Some(21)],
-                add_sub_height: vec![Some(21)],
+                add_height: vec![Some(21)],
+                sub_height: vec![Some(21)],
                 lt_height: vec![Some(21)],
                 bitwise_height: vec![Some(21)],
                 shift_right_height: vec![Some(21)],
@@ -820,7 +830,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             // fibonacci
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(20)],
                 bitwise_height: vec![Some(13)],
                 shift_right_height: vec![Some(20)],
@@ -836,7 +847,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             // reth
             RiscvShapeSpec {
                 cpu_height: vec![Some(21)],
-                add_sub_height: vec![Some(21)],
+                add_height: vec![Some(21)],
+                sub_height: vec![Some(21)],
                 lt_height: vec![Some(21)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(17)],
@@ -851,7 +863,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(19)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(17)],
@@ -866,7 +879,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(21)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(18)],
@@ -881,7 +895,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(18)],
@@ -896,7 +911,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(20)],
                 shift_right_height: vec![Some(19)],
@@ -911,7 +927,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(20)],
                 shift_right_height: vec![Some(19)],
@@ -926,7 +943,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(21), Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(20), Some(21)],
                 bitwise_height: vec![Some(19), Some(20)],
                 shift_right_height: vec![Some(18), Some(19)],
@@ -942,7 +960,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             // tendermint
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(20)],
                 bitwise_height: vec![Some(21)],
                 shift_right_height: vec![Some(19)],
@@ -958,7 +977,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             // coprocessor integration
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(21)],
                 bitwise_height: vec![Some(18)],
                 shift_right_height: vec![Some(17)],
@@ -974,7 +994,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
             // maximal riscv shape (22 divide by DATAPAR)
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(22)],
                 shift_right_height: vec![Some(22)],
@@ -999,8 +1020,12 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfi
                     spec.cpu_height,
                 ),
                 (
-                    RiscvChipType::<F>::AddSub(AddSubChip::default()).name(),
-                    spec.add_sub_height,
+                    RiscvChipType::<F>::Add(AddChip::default()).name(),
+                    spec.add_height,
+                ),
+                (
+                    RiscvChipType::<F>::Sub(SubChip::default()).name(),
+                    spec.sub_height,
                 ),
                 (
                     RiscvChipType::<F>::Bitwise(BitwiseChip::default()).name(),
@@ -1149,7 +1174,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             // maximal riscv shape (22 divide by DATAPAR)
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(22)],
                 shift_right_height: vec![Some(22)],
@@ -1174,8 +1200,12 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                     spec.cpu_height,
                 ),
                 (
-                    RiscvChipType::<F>::AddSub(AddSubChip::default()).name(),
-                    spec.add_sub_height,
+                    RiscvChipType::<F>::Add(AddChip::default()).name(),
+                    spec.add_height,
+                ),
+                (
+                    RiscvChipType::<F>::Sub(SubChip::default()).name(),
+                    spec.sub_height,
                 ),
                 (
                     RiscvChipType::<F>::Bitwise(BitwiseChip::default()).name(),
@@ -1285,7 +1315,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
         let mut riscv_shapes = [
             RiscvShapeSpec {
                 cpu_height: vec![Some(21)],
-                add_sub_height: vec![Some(21)],
+                add_height: vec![Some(21)],
+                sub_height: vec![Some(21)],
                 lt_height: vec![Some(21)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(17)],
@@ -1300,7 +1331,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(19)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(17)],
@@ -1315,7 +1347,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(21)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(18)],
@@ -1330,7 +1363,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(19)],
                 shift_right_height: vec![Some(18)],
@@ -1345,7 +1379,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(20)],
                 shift_right_height: vec![Some(19)],
@@ -1360,7 +1395,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
             },
             RiscvShapeSpec {
                 cpu_height: vec![Some(22)],
-                add_sub_height: vec![Some(22)],
+                add_height: vec![Some(22)],
+                sub_height: vec![Some(22)],
                 lt_height: vec![Some(22)],
                 bitwise_height: vec![Some(20)],
                 shift_right_height: vec![Some(19)],
@@ -1385,8 +1421,12 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                     spec.cpu_height,
                 ),
                 (
-                    RiscvChipType::<F>::AddSub(AddSubChip::default()).name(),
-                    spec.add_sub_height,
+                    RiscvChipType::<F>::Add(AddChip::default()).name(),
+                    spec.add_height,
+                ),
+                (
+                    RiscvChipType::<F>::Sub(SubChip::default()).name(),
+                    spec.sub_height,
                 ),
                 (
                     RiscvChipType::<F>::Bitwise(BitwiseChip::default()).name(),

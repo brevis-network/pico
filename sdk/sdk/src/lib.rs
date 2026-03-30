@@ -77,11 +77,10 @@ mod zkvm {
         syscall_halt(0);
     }
 
-    static STACK_TOP: u32 = 0x0020_0400;
-
     core::arch::global_asm!(include_str!("memset.s"));
     core::arch::global_asm!(include_str!("memcpy.s"));
 
+    static STACK_TOP: u64 = 0x7800_0000;
     core::arch::global_asm!(
         r#"
     .section .text._start;
@@ -92,7 +91,7 @@ mod zkvm {
         la gp, __global_pointer$;
         .option pop;
         la sp, {0}
-        lw sp, 0(sp)
+        ld sp, 0(sp)
         call __start;
     "#,
         sym STACK_TOP

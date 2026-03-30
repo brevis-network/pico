@@ -223,7 +223,7 @@ fn contains_can_fit_call(expr: &Expr) -> bool {
     match expr {
         Expr::Unary(unary) => contains_can_fit_call(&unary.expr),
         Expr::Paren(paren) => contains_can_fit_call(&paren.expr),
-        Expr::MethodCall(method_call) => method_call.method == "can_fit_instructions",
+        Expr::MethodCall(method_call) => method_call.method == "can_fit_block",
         _ => false,
     }
 }

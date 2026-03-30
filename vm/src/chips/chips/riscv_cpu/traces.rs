@@ -6,13 +6,13 @@ use crate::{
     chips::chips::{
         alu::event::AluEvent,
         byte::event::ByteRecordBehavior,
-        events::ByteLookupEvent,
         riscv_cpu::event::CpuEvent,
         riscv_memory::{event::MemoryRecordEnum, read_write::columns::MemoryCols},
     },
-    compiler::riscv::{
-        opcode::{ByteOpcode, Opcode},
-        program::Program,
+    compiler::{
+        addr::Addr,
+        riscv::{opcode::Opcode, program::Program},
+        word::Word,
     },
     emulator::riscv::record::EmulationRecord,
     instances::compiler::shapes::riscv_shape::RiscvPadShape,
@@ -65,6 +65,51 @@ impl<F: PrimeField32> ChipBehavior<F> for CpuChip<F> {
                         self.event_to_row(&input.cpu_events[idx], cols, &mut byte_lookup_events);
                     });
             });
+
+        // Post-processing: compute pc_carry_a from adjacent rows.
+        // carry_a is for cross-row constraints (pc+4 = next_row.pc), which needs
+        // the actual next row's pc value, not available during per-row event_to_row.
+        let n_events = input.cpu_events.len();
+        if n_events > 1 {
+            let rows_slice = unsafe {
+                core::slice::from_raw_parts_mut(
+                    values.as_mut_ptr() as *mut [F; NUM_CPU_COLS],
+                    n_events,
+                )
+            };
+            for i in 0..n_events - 1 {
+                let cur: &CpuCols<F> = unsafe { &*(rows_slice[i].as_ptr() as *const CpuCols<F>) };
+                let next_row: &CpuCols<F> =
+                    unsafe { &*(rows_slice[i + 1].as_ptr() as *const CpuCols<F>) };
+
+                // carry_a is only needed when is_sequential or not_branching
+                let is_seq = cur.is_sequential_instr == F::ONE;
+                let not_branch = cur.not_branching == F::ONE;
+                if is_seq || not_branch {
+                    let base: u64 = 1 << 16;
+                    let pc_limbs = [
+                        cur.pc[0].as_canonical_u32() as u64,
+                        cur.pc[1].as_canonical_u32() as u64,
+                        cur.pc[2].as_canonical_u32() as u64,
+                    ];
+                    let next_pc_limbs = [
+                        next_row.pc[0].as_canonical_u32() as u64,
+                        next_row.pc[1].as_canonical_u32() as u64,
+                        next_row.pc[2].as_canonical_u32() as u64,
+                    ];
+                    let mut carry: u64 = 0;
+                    let cur_mut: &mut CpuCols<F> =
+                        unsafe { &mut *(rows_slice[i].as_mut_ptr() as *mut CpuCols<F>) };
+                    for k in 0..4 {
+                        let lhs = if k < 3 { pc_limbs[k] } else { 0 };
+                        let rhs = if k < 3 { next_pc_limbs[k] } else { 0 };
+                        let inc = if k == 0 { 4u64 } else { 0 };
+                        carry = (carry + lhs + inc - rhs) / base;
+                        cur_mut.pc_carry_a[k] = F::from_canonical_u64(carry);
+                    }
+                }
+            }
+        }
 
         // Convert the trace to a row major matrix.
         let mut trace = RowMajorMatrix::new(values, NUM_CPU_COLS);
@@ -145,18 +190,20 @@ impl<F> CpuChip<F> {
         if event.instruction.is_branch_instruction() {
             lt_events += 2;
 
-            let a_eq_b = event.a == event.b;
+            let a = event.a;
+            let b = event.b;
+            let a_eq_b = a == b;
             let use_signed_comparison =
                 matches!(event.instruction.opcode, Opcode::BLT | Opcode::BGE);
             let a_lt_b = if use_signed_comparison {
-                (event.a as i32) < (event.b as i32)
+                (a as i64) < (b as i64)
             } else {
-                event.a < event.b
+                a < b
             };
             let a_gt_b = if use_signed_comparison {
-                (event.a as i32) > (event.b as i32)
+                (a as i64) > (b as i64)
             } else {
-                event.a > event.b
+                a > b
             };
             let branching = match event.instruction.opcode {
                 Opcode::BEQ => a_eq_b,
@@ -194,14 +241,31 @@ impl<F: PrimeField32> CpuChip<F> {
         self.populate_chunk_clk(cols, event, blu_events);
 
         // Populate basic fields.
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.pc = Addr::try_from(event.pc).unwrap();
+        cols.next_pc = Addr::try_from(event.next_pc).unwrap();
+
+        // Range check pc limbs (3 limbs × 16 bits = 48 bits)
+        let pc_limb0 = event.pc as u16;
+        let pc_limb1 = (event.pc >> 16) as u16;
+        let pc_limb2 = (event.pc >> 32) as u16;
+        blu_events.add_u16_range_check(pc_limb0);
+        blu_events.add_u16_range_check(pc_limb1);
+        blu_events.add_u16_range_check(pc_limb2);
+
+        // Range check next_pc limbs
+        let next_pc_limb0 = event.next_pc as u16;
+        let next_pc_limb1 = (event.next_pc >> 16) as u16;
+        let next_pc_limb2 = (event.next_pc >> 32) as u16;
+        blu_events.add_u16_range_check(next_pc_limb0);
+        blu_events.add_u16_range_check(next_pc_limb1);
+        blu_events.add_u16_range_check(next_pc_limb2);
+
         cols.instruction.populate(event.instruction);
         cols.opcode_selector.populate(event.instruction);
 
-        *cols.op_a_access.value_mut() = event.a.into();
-        *cols.op_b_access.value_mut() = event.b.into();
-        *cols.op_c_access.value_mut() = event.c.into();
+        *cols.op_a_access.value_mut() = Word::from(event.a);
+        *cols.op_b_access.value_mut() = Word::from(event.b);
+        *cols.op_c_access.value_mut() = Word::from(event.c);
 
         // Populate memory accesses for a, b, and c.
         if let Some(record) = event.a_record {
@@ -214,40 +278,76 @@ impl<F: PrimeField32> CpuChip<F> {
             cols.op_c_access.populate(record, blu_events);
         }
 
-        // Populate range checks for a.
-        let a_bytes = cols
-            .op_a_access
-            .access
-            .value
-            .0
-            .iter()
-            .map(|x| x.as_canonical_u32())
-            .collect::<Vec<_>>();
-        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U8Range,
-            0,
-            0,
-            a_bytes[0] as u8,
-            a_bytes[1] as u8,
-        ));
-        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-            ByteOpcode::U8Range,
-            0,
-            0,
-            a_bytes[2] as u8,
-            a_bytes[3] as u8,
-        ));
+        // num_extra_clk is stored in the 3rd-byte of syscall code
+        // which comes from the syscall's num_extra_cycles() return value.
+        // For non-ecall instructions, this is 0.
+        let num_extra_clk = if event.instruction.is_ecall_instruction() {
+            let syscall_code = cols.op_a_access.prev_value().to_u64();
+            F::from_canonical_u8(((syscall_code >> 16) & 0xFF) as u8)
+        } else {
+            F::ZERO
+        };
+        cols.num_extra_clk = num_extra_clk;
 
         self.populate_branch(cols, event, &mut new_alu_events);
-        self.populate_jump(cols, event, &mut new_alu_events);
-        self.populate_auipc(cols, event, &mut new_alu_events);
-        let is_halt = self.populate_ecall(cols, event);
+        self.populate_jump(event, &mut new_alu_events);
+        self.populate_auipc(event, &mut new_alu_events);
+        let is_halt = self.populate_ecall(cols, event, blu_events);
 
         cols.is_sequential_instr = F::from_bool(
             !event.instruction.is_branch_instruction()
                 && !event.instruction.is_jump_instruction()
                 && !is_halt,
         );
+
+        // Populate carry columns for add_limb_with_carry constraints.
+        // carry_a and carry_b store the carries for pc+4 = result limb-wise addition.
+        // Both sequential and branch-not-taken use Addr carries (4 elements).
+        // Jump uses Word carries (5 elements).
+        let base: u64 = 1 << 16;
+        let pc_limbs = [
+            event.pc & 0xFFFF,
+            (event.pc >> 16) & 0xFFFF,
+            (event.pc >> 32) & 0xFFFF,
+        ];
+        let next_pc_limbs = [
+            event.next_pc & 0xFFFF,
+            (event.next_pc >> 16) & 0xFFFF,
+            (event.next_pc >> 32) & 0xFFFF,
+        ];
+
+        // For sequential and branch-not-taken rows: carry_b = carries for pc+4=local.next_pc
+        // Note: carry_a (for pc+4=next_row.pc) is computed in generate_main post-processing,
+        // since it requires access to the next row's pc which isn't available here.
+        if cols.is_sequential_instr == F::ONE || cols.not_branching == F::ONE {
+            let mut carry: u64 = 0;
+            for i in 0..4 {
+                let lhs = if i < 3 { pc_limbs[i] } else { 0 };
+                let rhs = if i < 3 { next_pc_limbs[i] } else { 0 };
+                let inc = if i == 0 { 4u64 } else { 0 };
+                carry = (carry + lhs + inc - rhs) / base;
+                cols.pc_carry_b[i] = F::from_canonical_u64(carry);
+            }
+        }
+
+        // For jump rows: carry_a = carries for pc+4=op_a (return address, Word 4 limbs)
+        if event.instruction.is_jump_instruction() && event.instruction.op_a != 0 {
+            let op_a = event.a;
+            let op_a_limbs = [
+                op_a & 0xFFFF,
+                (op_a >> 16) & 0xFFFF,
+                (op_a >> 32) & 0xFFFF,
+                (op_a >> 48) & 0xFFFF,
+            ];
+            let mut carry: u64 = 0;
+            for i in 0..5 {
+                let lhs = if i < 3 { pc_limbs[i] } else { 0 }; // pc is Addr (3 limbs), 4th=0
+                let rhs = if i < 4 { op_a_limbs[i] } else { 0 };
+                let inc = if i == 0 { 4u64 } else { 0 };
+                carry = (carry + lhs + inc - rhs) / base;
+                cols.pc_carry_a[i] = F::from_canonical_u64(carry);
+            }
+        }
 
         // Assert that the instruction is not a no-op.
         cols.is_real = F::ONE;

@@ -50,7 +50,7 @@ pub(crate) fn execute_command(
     } else {
         Ok(target_dir
             .as_ref()
-            .join("riscv32im-risc0-zkvm-elf")
+            .join("riscv64im-pico-zkvm-elf")
             .join("release"))
     }
 }

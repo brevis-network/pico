@@ -1,4 +1,4 @@
-use super::{align, EmulationError, RiscvEmulator};
+use super::{align_u64, EmulationError, RiscvEmulator};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
@@ -6,7 +6,33 @@ use crate::{
 };
 use tracing::debug;
 
+#[inline(always)]
+fn invalid_memory_addr_u64_simple(addr: u64, context: &str) -> u64 {
+    let _ = context;
+    addr
+}
+
 impl RiscvEmulator {
+    #[inline(always)]
+    fn w_alu_rr_simple(&mut self, instruction: &Instruction) -> (Register, u64, u64) {
+        if !instruction.imm_c {
+            let (rd, rs1, rs2) = instruction.r_type();
+            let c = self.rr_simple(rs2, MemoryAccessPosition::C);
+            let b = self.rr_simple(rs1, MemoryAccessPosition::B);
+            (rd, b, c)
+        } else if !instruction.imm_b {
+            let (rd, rs1, imm) = instruction.i_type();
+            (rd, self.rr_simple(rs1, MemoryAccessPosition::B), imm)
+        } else {
+            debug_assert!(instruction.imm_b && instruction.imm_c);
+            (
+                Register::from_u8(instruction.op_a),
+                instruction.op_b,
+                instruction.op_c,
+            )
+        }
+    }
+
     /// Emulate the given instruction over the current state.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn emulate_instruction_simple(
@@ -16,8 +42,8 @@ impl RiscvEmulator {
         let mut next_pc = self.state.pc.wrapping_add(4);
 
         let rd: Register;
-        let (a, b, c): (u32, u32, u32);
-        let (addr, memory_read_value): (u32, u32);
+        let (a, b, c): (u64, u64, u64);
+        let (addr, memory_read_value): (u64, u64);
 
         match instruction.opcode {
             // Arithmetic instructions.
@@ -48,22 +74,22 @@ impl RiscvEmulator {
             }
             Opcode::SLL => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
-                a = b.wrapping_shl(c);
+                a = b.wrapping_shl((c & 0x3f) as u32);
                 self.alu_rw_simple(rd, a);
             }
             Opcode::SRL => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
-                a = b.wrapping_shr(c);
+                a = b.wrapping_shr((c & 0x3f) as u32);
                 self.alu_rw_simple(rd, a);
             }
             Opcode::SRA => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
-                a = (b as i32).wrapping_shr(c) as u32;
+                a = (b as i64).wrapping_shr((c & 0x3f) as u32) as u64;
                 self.alu_rw_simple(rd, a);
             }
             Opcode::SLT => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
-                a = if (b as i32) < (c as i32) { 1 } else { 0 };
+                a = if (b as i64) < (c as i64) { 1 } else { 0 };
                 self.alu_rw_simple(rd, a);
             }
             Opcode::SLTU => {
@@ -75,82 +101,125 @@ impl RiscvEmulator {
             // Load instructions.
             Opcode::LB => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
-                let value = (memory_read_value).to_le_bytes()[(addr % 4) as usize];
-                a = ((value as i8) as i32) as u32;
+                let value = memory_read_value.to_le_bytes()[(addr % 8) as usize];
+                a = ((value as i8) as i64) as u64;
                 self.rw_simple(rd, a);
             }
             Opcode::LH => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LH, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(
+                        Opcode::LH,
+                        invalid_memory_addr_u64_simple(addr, "lh"),
+                    ));
                 }
-                let value = match (addr >> 1) % 2 {
-                    0 => memory_read_value & 0x0000_FFFF,
-                    1 => (memory_read_value & 0xFFFF_0000) >> 16,
-                    _ => unreachable!(),
-                };
-                a = ((value as i16) as i32) as u32;
+                let shift = ((addr / 2) % 4) * 16;
+                let value = ((memory_read_value >> shift) & 0xFFFF) as u16;
+                a = ((value as i16) as i64) as u64;
                 self.rw_simple(rd, a);
             }
             Opcode::LW => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
                 if addr % 4 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LW, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(
+                        Opcode::LW,
+                        invalid_memory_addr_u64_simple(addr, "lw"),
+                    ));
                 }
-                a = memory_read_value;
+                let shift = ((addr / 4) % 2) * 32;
+                let value = ((memory_read_value >> shift) & 0xFFFF_FFFF) as u32;
+                a = (value as i32 as i64) as u64;
                 self.rw_simple(rd, a);
             }
             Opcode::LBU => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
-                let value = (memory_read_value).to_le_bytes()[(addr % 4) as usize];
-                a = value as u32;
+                let value = memory_read_value.to_le_bytes()[(addr % 8) as usize];
+                a = u64::from(value);
                 self.rw_simple(rd, a);
             }
             Opcode::LHU => {
                 (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(Opcode::LHU, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(
+                        Opcode::LHU,
+                        invalid_memory_addr_u64_simple(addr, "lhu"),
+                    ));
                 }
-                let value = match (addr >> 1) % 2 {
-                    0 => memory_read_value & 0x0000_FFFF,
-                    1 => (memory_read_value & 0xFFFF_0000) >> 16,
-                    _ => unreachable!(),
-                };
-                a = (value as u16) as u32;
+                let shift = ((addr / 2) % 4) * 16;
+                let value = ((memory_read_value >> shift) & 0xFFFF) as u16;
+                a = u64::from(value);
                 self.rw_simple(rd, a);
+            }
+            Opcode::LWU => {
+                (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
+                if addr % 4 != 0 {
+                    return Err(EmulationError::InvalidMemoryAccess(
+                        Opcode::LWU,
+                        invalid_memory_addr_u64_simple(addr, "lwu"),
+                    ));
+                }
+                let shift = ((addr / 4) % 2) * 32;
+                a = ((memory_read_value >> shift) & 0xFFFF_FFFF) as u32 as u64;
+                self.rw_simple(rd, a);
+            }
+            Opcode::LD => {
+                (rd, _, _, addr, memory_read_value) = self.load_rr_simple(instruction);
+                if addr % 8 != 0 {
+                    return Err(EmulationError::InvalidMemoryAccess(
+                        Opcode::LD,
+                        invalid_memory_addr_u64_simple(addr, "ld"),
+                    ));
+                }
+                self.rw_simple(rd, memory_read_value);
             }
 
             // Store instructions.
             Opcode::SB => {
                 (a, _, _, addr, memory_read_value) = self.store_rr_simple(instruction);
-                let value = match addr % 4 {
-                    0 => (a & 0x0000_00FF) + (memory_read_value & 0xFFFF_FF00),
-                    1 => ((a & 0x0000_00FF) << 8) + (memory_read_value & 0xFFFF_00FF),
-                    2 => ((a & 0x0000_00FF) << 16) + (memory_read_value & 0xFF00_FFFF),
-                    3 => ((a & 0x0000_00FF) << 24) + (memory_read_value & 0x00FF_FFFF),
-                    _ => unreachable!(),
-                };
-                self.mw_cpu_simple(align(addr), value, MemoryAccessPosition::Memory);
+                let shift = (addr % 8) * 8;
+                let mask = 0xFFu64 << shift;
+                let value = (memory_read_value & !mask) | ((a & 0xFF) << shift);
+                self.mw_cpu_simple(align_u64(addr), value, MemoryAccessPosition::Memory);
             }
             Opcode::SH => {
                 (a, _, _, addr, memory_read_value) = self.store_rr_simple(instruction);
                 if addr % 2 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(Opcode::SH, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(
+                        Opcode::SH,
+                        invalid_memory_addr_u64_simple(addr, "sh"),
+                    ));
                 }
-                let value = match (addr >> 1) % 2 {
-                    0 => (a & 0x0000_FFFF) + (memory_read_value & 0xFFFF_0000),
-                    1 => ((a & 0x0000_FFFF) << 16) + (memory_read_value & 0x0000_FFFF),
-                    _ => unreachable!(),
-                };
-                self.mw_cpu_simple(align(addr), value, MemoryAccessPosition::Memory);
+                let shift = ((addr / 2) % 4) * 16;
+                let mask = 0xFFFFu64 << shift;
+                let value = (memory_read_value & !mask) | ((a & 0xFFFF) << shift);
+                self.mw_cpu_simple(align_u64(addr), value, MemoryAccessPosition::Memory);
             }
             Opcode::SW => {
-                (a, _, _, addr, _) = self.store_rr_simple(instruction);
+                (a, _, _, addr, memory_read_value) = self.store_rr_simple(instruction);
                 if addr % 4 != 0 {
-                    return Err(EmulationError::InvalidMemoryAccess(Opcode::SW, addr));
+                    return Err(EmulationError::InvalidMemoryAccess(
+                        Opcode::SW,
+                        invalid_memory_addr_u64_simple(addr, "sw"),
+                    ));
                 }
-                let value = a;
-                self.mw_cpu_simple(align(addr), value, MemoryAccessPosition::Memory);
+                let shift = ((addr / 4) % 2) * 32;
+                let mask = 0xFFFF_FFFFu64 << shift;
+                let value = (memory_read_value & !mask) | ((a & 0xFFFF_FFFF) << shift);
+                self.mw_cpu_simple(align_u64(addr), value, MemoryAccessPosition::Memory);
+            }
+            Opcode::SD => {
+                let (rs1, rs2, imm) = instruction.s_type();
+                c = imm;
+                b = self.rr_simple(rs2, MemoryAccessPosition::B);
+                let store_value = self.rr_simple(rs1, MemoryAccessPosition::A);
+                addr = b.wrapping_add(c);
+                if addr % 8 != 0 {
+                    return Err(EmulationError::InvalidMemoryAccess(
+                        Opcode::SD,
+                        invalid_memory_addr_u64_simple(addr, "sd"),
+                    ));
+                }
+                self.mw_cpu_simple(align_u64(addr), store_value, MemoryAccessPosition::Memory);
             }
 
             // B-type instructions.
@@ -168,13 +237,13 @@ impl RiscvEmulator {
             }
             Opcode::BLT => {
                 (a, b, c) = self.branch_rr_simple(instruction);
-                if (a as i32) < (b as i32) {
+                if (a as i64) < (b as i64) {
                     next_pc = self.state.pc.wrapping_add(c);
                 }
             }
             Opcode::BGE => {
                 (a, b, c) = self.branch_rr_simple(instruction);
-                if (a as i32) >= (b as i32) {
+                if (a as i64) >= (b as i64) {
                     next_pc = self.state.pc.wrapping_add(c);
                 }
             }
@@ -195,16 +264,16 @@ impl RiscvEmulator {
             Opcode::JAL => {
                 let (rd, imm) = instruction.j_type();
                 (_, _) = (imm, 0);
-                a = self.state.pc + 4;
+                a = self.state.pc.wrapping_add(4);
                 self.rw_simple(rd, a);
                 next_pc = self.state.pc.wrapping_add(imm);
             }
             Opcode::JALR => {
                 let (rd, rs1, imm) = instruction.i_type();
                 (b, c) = (self.rr_simple(rs1, MemoryAccessPosition::B), imm);
-                a = self.state.pc + 4;
+                a = self.state.pc.wrapping_add(4);
                 self.rw_simple(rd, a);
-                next_pc = b.wrapping_add(c);
+                next_pc = b.wrapping_add(c) & !1_u64;
             }
 
             // Upper immediate instructions.
@@ -220,10 +289,10 @@ impl RiscvEmulator {
                 // We peek at register x5 to get the syscall id. The reason we don't `self.rr` this
                 // register is that we write to it later.
                 let t0 = Register::X5;
-                let syscall_id = self.register(t0);
+                let syscall = SyscallCode::from_rv64(self.register(t0));
+                let syscall_id = syscall as u32;
                 c = self.rr_simple(Register::X11, MemoryAccessPosition::C);
                 b = self.rr_simple(Register::X10, MemoryAccessPosition::B);
-                let syscall = SyscallCode::from_u32(syscall_id);
 
                 self.mode.check_unconstrained_syscall(syscall)?;
 
@@ -253,7 +322,7 @@ impl RiscvEmulator {
                         if let Some(val) = res {
                             a = val;
                         } else {
-                            a = syscall_id;
+                            a = u64::from(syscall_id);
                         }
 
                         // If the syscall is `HALT` and the exit code is non-zero, return an error.
@@ -279,7 +348,7 @@ impl RiscvEmulator {
                     _ => self.rw_simple(t0, a),
                 }
                 next_pc = precompile_next_pc;
-                self.state.clk += precompile_cycles;
+                self.state.clk += u64::from(precompile_cycles);
             }
             Opcode::EBREAK => {
                 return Err(EmulationError::Breakpoint());
@@ -293,34 +362,34 @@ impl RiscvEmulator {
             }
             Opcode::MULH => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
-                a = (((b as i32) as i64).wrapping_mul((c as i32) as i64) >> 32) as u32;
+                a = (((b as i64) as i128).wrapping_mul((c as i64) as i128) >> 64) as u64;
                 self.alu_rw_simple(rd, a);
             }
             Opcode::MULHU => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
-                a = ((b as u64).wrapping_mul(c as u64) >> 32) as u32;
+                a = ((b as u128).wrapping_mul(c as u128) >> 64) as u64;
                 self.alu_rw_simple(rd, a);
             }
             Opcode::MULHSU => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
-                a = (((b as i32) as i64).wrapping_mul(c as i64) >> 32) as u32;
+                a = (((b as i64) as i128).wrapping_mul(c as i128) >> 64) as u64;
                 self.alu_rw_simple(rd, a);
             }
             Opcode::DIV => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
                 if c == 0 {
-                    a = u32::MAX;
+                    a = u64::MAX;
                 } else {
-                    a = (b as i32).wrapping_div(c as i32) as u32;
+                    a = (b as i64).wrapping_div(c as i64) as u64;
                 }
                 self.alu_rw_simple(rd, a);
             }
             Opcode::DIVU => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
                 if c == 0 {
-                    a = u32::MAX;
+                    a = u64::MAX;
                 } else {
-                    a = b.wrapping_div(c);
+                    a = b / c;
                 }
                 self.alu_rw_simple(rd, a);
             }
@@ -329,7 +398,7 @@ impl RiscvEmulator {
                 if c == 0 {
                     a = b;
                 } else {
-                    a = (b as i32).wrapping_rem(c as i32) as u32;
+                    a = (b as i64).wrapping_rem(c as i64) as u64;
                 }
                 self.alu_rw_simple(rd, a);
             }
@@ -341,6 +410,72 @@ impl RiscvEmulator {
                     a = b.wrapping_rem(c);
                 }
                 self.alu_rw_simple(rd, a);
+            }
+            Opcode::ADDW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = (b as i32).wrapping_add(c as i32) as i64 as u64;
+                self.rw_simple(rd, result);
+            }
+            Opcode::SUBW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = (b as i32).wrapping_sub(c as i32) as i64 as u64;
+                self.rw_simple(rd, result);
+            }
+            Opcode::SLLW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = ((b as u32).wrapping_shl((c & 0x1f) as u32) as i32) as i64 as u64;
+                self.rw_simple(rd, result);
+            }
+            Opcode::SRLW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = (((b as u32) >> ((c & 0x1f) as u32)) as i32) as i64 as u64;
+                self.rw_simple(rd, result);
+            }
+            Opcode::SRAW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = (b as i32).wrapping_shr((c & 0x1f) as u32) as i64 as u64;
+                self.rw_simple(rd, result);
+            }
+            Opcode::MULW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = (b as i32).wrapping_mul(c as i32) as i64 as u64;
+                self.rw_simple(rd, result);
+            }
+            Opcode::DIVW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = if c as i32 == 0 {
+                    u64::MAX
+                } else {
+                    (b as i32).wrapping_div(c as i32) as i64 as u64
+                };
+                self.rw_simple(rd, result);
+            }
+            Opcode::DIVUW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = if c as u32 == 0 {
+                    u64::MAX
+                } else {
+                    ((b as u32 / c as u32) as i32) as i64 as u64
+                };
+                self.rw_simple(rd, result);
+            }
+            Opcode::REMW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = if c as i32 == 0 {
+                    (b as i32) as i64 as u64
+                } else {
+                    (b as i32).wrapping_rem(c as i32) as i64 as u64
+                };
+                self.rw_simple(rd, result);
+            }
+            Opcode::REMUW => {
+                (rd, b, c) = self.w_alu_rr_simple(instruction);
+                let result = if c as u32 == 0 {
+                    (b as i32) as i64 as u64
+                } else {
+                    ((b as u32 % c as u32) as i32) as i64 as u64
+                };
+                self.rw_simple(rd, result);
             }
 
             // See https://github.com/riscv-non-isa/riscv-asm-manual/blob/main/src/asm-manual.adoc#instruction-aliases

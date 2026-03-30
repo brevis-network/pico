@@ -2,9 +2,8 @@
 pico_sdk::entrypoint!(main);
 
 use alloy_primitives::{fixed_bytes, B256, B512};
-use ecdsa::VerifyingKey;
 use k256::{
-    ecdsa::{Error, RecoveryId, Signature},
+    ecdsa::{Error, RecoveryId, Signature, VerifyingKey},
     Secp256k1,
 };
 use std::hint::black_box;
@@ -22,7 +21,7 @@ pub fn ecrecover_internal(sig: &B512, mut recid: u8, msg: &B256) -> Result<B256,
     let recid = RecoveryId::from_byte(recid).expect("recovery ID is valid");
 
     // recover key
-    let recovered_key = VerifyingKey::<Secp256k1>::recover_from_prehash(&msg[..], &sig, recid)?;
+    let recovered_key = VerifyingKey::recover_from_prehash(&msg[..], &sig, recid)?;
     // hash it
     let mut hash = [0; 32];
     let mut hasher = Keccak::v256();

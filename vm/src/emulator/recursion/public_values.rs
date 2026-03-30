@@ -96,11 +96,11 @@ pub struct RecursionPublicValues<T> {
     /// End state of reconstruct_deferred_digest.
     pub end_reconstruct_deferred_digest: [T; DIGEST_SIZE],
 
-    /// The start pc of chunks being proven.
-    pub start_pc: T,
+    /// The start pc of chunks being proven as 3×u16 limbs.
+    pub start_pc: [T; 3],
 
-    /// The expected start pc for the next chunk.
-    pub next_pc: T,
+    /// The expected start pc for the next chunk as 3×u16 limbs.
+    pub next_pc: [T; 3],
 
     /// First chunk being proven.
     pub start_chunk: T,
@@ -114,17 +114,17 @@ pub struct RecursionPublicValues<T> {
     /// Next execution chunk that should be proven.
     pub next_execution_chunk: T,
 
-    /// Previous MemoryInit address bits.
-    pub previous_initialize_addr_bits: [T; 32],
+    /// Previous MemoryInit address as 3×u16 limbs.
+    pub previous_init_addr_limbs: [T; 3],
 
-    /// Last MemoryInit address bits.
-    pub last_initialize_addr_bits: [T; 32],
+    /// Last MemoryInit address as 3×u16 limbs.
+    pub last_init_addr_limbs: [T; 3],
 
-    /// Previous MemoryFinalize address bits.
-    pub previous_finalize_addr_bits: [T; 32],
+    /// Previous MemoryFinalize address as 3×u16 limbs.
+    pub previous_finalize_addr_limbs: [T; 3],
 
-    /// Last MemoryFinalize address bits.
-    pub last_finalize_addr_bits: [T; 32],
+    /// Last MemoryFinalize address as 3×u16 limbs.
+    pub last_finalize_addr_limbs: [T; 3],
 
     /// The commitment to the Pico program being proven.
     pub riscv_vk_digest: [T; DIGEST_SIZE],
@@ -265,7 +265,9 @@ pub(crate) fn assert_complete<C>(
     builder.assert_felt_eq(flag_complete * (flag_complete - C::F::ONE), C::F::ZERO);
 
     // Assert that `next_pc` is equal to zero (so program execution has completed)
-    builder.assert_felt_eq(flag_complete * *next_pc, C::F::ZERO);
+    for &pc_limb in next_pc.iter() {
+        builder.assert_felt_eq(flag_complete * pc_limb, C::F::ZERO);
+    }
 
     // Assert that start chunk is equal to 1.
     builder.assert_felt_eq(flag_complete * (*start_chunk - C::F::ONE), C::F::ZERO);

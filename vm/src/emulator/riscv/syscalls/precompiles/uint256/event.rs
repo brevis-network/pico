@@ -1,5 +1,9 @@
-use crate::chips::chips::riscv_memory::event::{
-    MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord,
+use crate::{
+    chips::{
+        chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
+        precompiles::uint256::UINT256_NUM_WORDS,
+    },
+    emulator::riscv::event_types::{RvAddr, RvChunk, RvClk, RvValue},
 };
 use serde::{Deserialize, Serialize};
 
@@ -9,25 +13,25 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Uint256MulEvent {
     /// The chunk number
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle
-    pub clk: u32,
+    pub clk: RvClk,
     /// The pointer to the x value
-    pub x_ptr: u32,
-    /// The x value as a list of words
-    pub x: Vec<u32>,
+    pub x_ptr: RvAddr,
+    /// The x value in native guest-memory dword form.
+    pub x: [RvValue; UINT256_NUM_WORDS],
     /// The pointer to the y value
-    pub y_ptr: u32,
-    /// The y value as a list of words
-    pub y: Vec<u32>,
-    /// The modulus as a list of word.
-    pub modulus: Vec<u32>,
+    pub y_ptr: RvAddr,
+    /// The y value in native guest-memory dword form.
+    pub y: [RvValue; UINT256_NUM_WORDS],
+    /// The modulus in native guest-memory dword form.
+    pub modulus: [RvValue; UINT256_NUM_WORDS],
     /// The memory records for the x value
-    pub x_memory_records: Vec<MemoryWriteRecord>,
+    pub x_memory_records: [MemoryWriteRecord; UINT256_NUM_WORDS],
     /// The memory records for the y value
-    pub y_memory_records: Vec<MemoryReadRecord>,
+    pub y_memory_records: [MemoryReadRecord; UINT256_NUM_WORDS],
     /// The memory records for the modulus
-    pub modulus_memory_records: Vec<MemoryReadRecord>,
+    pub modulus_memory_records: [MemoryReadRecord; UINT256_NUM_WORDS],
     /// The local memory access records.
     pub local_mem_access: Vec<MemoryLocalEvent>,
 }

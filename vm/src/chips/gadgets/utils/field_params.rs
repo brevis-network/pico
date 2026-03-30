@@ -1,7 +1,7 @@
 use crate::chips::gadgets::utils::limbs::{Limbs, BITS_PER_LIMB};
 use core::ops::Div;
 use hybrid_array::{
-    typenum::{Unsigned, U2, U4},
+    typenum::{Unsigned, U4, U8},
     Array, ArraySize,
 };
 use num::BigUint;
@@ -92,19 +92,19 @@ pub trait FpOpField: FieldParameters + NumWords {
     const FIELD_TYPE: FieldType;
 }
 
-/// Implement NumWords for NumLimbs where # Limbs is divisible by 4.
+/// Implement NumWords for NumLimbs where # Limbs is divisible by 8.
 ///
-/// Using typenum we can do N/4 and N/2 in type-level arithmetic. Having it as a separate trait
-/// avoids needing the Div where clauses everywhere.
+/// With u64 words (8 bytes each), a field element needs Limbs/8 words,
+/// and a curve point (2 field elements) needs Limbs/4 words.
 impl<N: NumLimbs> NumWords for N
 where
+    N::Limbs: Div<U8>,
     N::Limbs: Div<U4>,
-    N::Limbs: Div<U2>,
+    <N::Limbs as Div<U8>>::Output: ArraySize,
     <N::Limbs as Div<U4>>::Output: ArraySize,
-    <N::Limbs as Div<U2>>::Output: ArraySize,
 {
-    /// Each word has 4 limbs so we divide by 4.
-    type WordsFieldElement = <N::Limbs as Div<U4>>::Output;
-    /// Curve point has 2 field elements so we divide by 2.
-    type WordsCurvePoint = <N::Limbs as Div<U2>>::Output;
+    /// Each word has 8 limbs (u64 = 8 bytes) so we divide by 8.
+    type WordsFieldElement = <N::Limbs as Div<U8>>::Output;
+    /// Curve point has 2 field elements so we divide by 4.
+    type WordsCurvePoint = <N::Limbs as Div<U4>>::Output;
 }

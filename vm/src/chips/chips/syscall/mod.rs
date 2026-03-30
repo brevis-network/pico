@@ -2,6 +2,9 @@ mod columns;
 mod constraints;
 mod traces;
 
+#[cfg(test)]
+mod tests;
+
 use crate::chips::chips::syscall::columns::SyscallCols;
 use core::fmt;
 use p3_field::PrimeField32;

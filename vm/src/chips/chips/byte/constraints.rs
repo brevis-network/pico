@@ -56,6 +56,9 @@ where
                 ByteOpcode::U16Range => {
                     builder.looked_byte(field_op, local.value_u16, CB::F::ZERO, CB::F::ZERO, mult)
                 }
+                ByteOpcode::BitRange => {
+                    builder.looked_byte(field_op, local.value_u16, local.bits, CB::F::ZERO, mult)
+                }
             }
         }
     }

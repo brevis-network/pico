@@ -65,7 +65,7 @@ where
     log_section("RISCV PHASE");
     let start = Instant::now();
 
-    let riscv_compiler = Compiler::new(SourceType::RISCV, elf);
+    let riscv_compiler = Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
     let riscv_program = riscv_compiler.compile();
 
     let riscv_machine = RiscvMachine::new(config, RiscvChipType::all_chips(), RISCV_NUM_PVS);

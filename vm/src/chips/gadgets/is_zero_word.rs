@@ -32,11 +32,11 @@ pub struct IsZeroWordGadget<T> {
 }
 
 impl<F: Field> IsZeroWordGadget<F> {
-    pub fn populate(&mut self, a_u32: u32) -> u32 {
-        self.populate_from_field_element(Word::from(a_u32))
+    pub fn populate(&mut self, a_u64: u64) -> u64 {
+        self.populate_from_field_element(Word::from(a_u64))
     }
 
-    pub fn populate_from_field_element(&mut self, a: Word<F>) -> u32 {
+    pub fn populate_from_field_element(&mut self, a: Word<F>) -> u64 {
         let mut is_zero = true;
         for i in 0..WORD_SIZE {
             is_zero &= self.is_zero_byte[i].populate_from_field_element(a[i]) == 1;
@@ -44,7 +44,7 @@ impl<F: Field> IsZeroWordGadget<F> {
         self.is_lower_half_zero = self.is_zero_byte[0].result * self.is_zero_byte[1].result;
         self.is_upper_half_zero = self.is_zero_byte[2].result * self.is_zero_byte[3].result;
         self.result = F::from_bool(is_zero);
-        is_zero as u32
+        is_zero as u64
     }
 
     pub fn eval<CB: ChipBuilder<F>>(

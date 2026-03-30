@@ -116,7 +116,7 @@ fn main() {
 
     info!("Setting-up..");
     let (elf, _, _) = parse_args::parse_args::<KoalaBearPoseidon2>();
-    let compiler = Compiler::new(SourceType::RISCV, elf);
+    let compiler = Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
 
     /*
     KoalaBear Test

@@ -129,6 +129,28 @@ impl BabyBearPoseidon2 {
         }
     }
 
+    pub fn test() -> Self {
+        let perm = Self::init();
+        let num_queries = match std::env::var("FRI_QUERIES") {
+            Ok(num_queries) => num_queries.parse().unwrap(),
+            Err(_) => 42,
+        };
+
+        let log_blowup = 2;
+        let simple_fri_config = SimpleFriConfig {
+            log_blowup,
+            num_queries,
+            proof_of_work_bits: 16,
+        };
+
+        Self {
+            perm,
+            simple_fri_config,
+            log_blowup,
+            num_queries,
+        }
+    }
+
     pub fn fri_config(&self) -> &SimpleFriConfig {
         &self.simple_fri_config
     }

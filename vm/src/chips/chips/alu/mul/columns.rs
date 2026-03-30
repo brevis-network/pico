@@ -1,7 +1,8 @@
 use std::mem::size_of;
 
-use super::PRODUCT_SIZE;
-use crate::{compiler::word::Word, primitives::consts::MUL_DATAPAR};
+use crate::{
+    chips::gadgets::mul::MulGadget, compiler::word::Word, primitives::consts::MUL_DATAPAR,
+};
 use pico_derive::AlignedBorrow;
 
 /// The number of main trace columns for `MulChip`.
@@ -10,7 +11,7 @@ pub const NUM_MUL_COLS: usize = size_of::<MulCols<u8>>();
 /// The column layout for the chip.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct MulCols<T> {
+pub struct MulCols<T: Copy> {
     pub values: [MulValueCols<T>; MUL_DATAPAR],
 }
 
@@ -19,7 +20,7 @@ pub const NUM_MUL_VALUE_COLS: usize = size_of::<MulValueCols<u8>>();
 /// The column layout for the chip.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct MulValueCols<F> {
+pub struct MulValueCols<F: Copy> {
     /// The output operand.
     pub a: Word<F>,
 
@@ -29,23 +30,8 @@ pub struct MulValueCols<F> {
     /// The second input operand.
     pub c: Word<F>,
 
-    /// Trace.
-    pub carry: [F; PRODUCT_SIZE],
-
-    /// An array storing the product of `b * c` after the carry propagation.
-    pub product: [F; PRODUCT_SIZE],
-
-    /// The most significant bit of `b`.
-    pub b_msb: F,
-
-    /// The most significant bit of `c`.
-    pub c_msb: F,
-
-    /// The sign extension of `b`.
-    pub b_sign_extend: F,
-
-    /// The sign extension of `c`.
-    pub c_sign_extend: F,
+    /// Instance of `MulGadget` to handle multiplication logic in `MulChip`'s ALU operations.
+    pub mul_gadget: MulGadget<F>,
 
     /// Flag indicating whether the opcode is `MUL` (`u32 x u32`).
     pub is_mul: F,
@@ -59,6 +45,6 @@ pub struct MulValueCols<F> {
     /// Flag indicating whether the opcode is `MULHSU` (`i32 x u32`, upper half).
     pub is_mulhsu: F,
 
-    /// Selector to know whether this row is enabled.
-    pub is_real: F,
+    /// Flag indicating whether the opcode is `MULW` (32-bit multiplication, sign-extended result).
+    pub is_mulw: F,
 }

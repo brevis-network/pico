@@ -19,7 +19,7 @@ where
     SC: FieldFriConfigVariable<CC, Val = CC::F, Domain = TwoAdicMultiplicativeCoset<CC::F>>,
 {
     pub commit: SC::DigestVariable,
-    pub pc_start: Felt<CC::F>,
+    pub pc_start: [Felt<CC::F>; 3],
     pub initial_global_cumulative_sum: SepticDigest<Felt<CC::F>>,
     pub preprocessed_info: Vec<(String, SC::Domain, Dimensions)>,
     pub preprocessed_chip_ordering: HashMap<String, usize>,
@@ -92,7 +92,9 @@ where
         // Observe the commitment.
         challenger.observe(builder, self.commit);
         // Observe the pc_start.
-        challenger.observe(builder, self.pc_start);
+        for &pc in &self.pc_start {
+            challenger.observe(builder, pc);
+        }
         challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.x.0);
         challenger.observe_slice(builder, self.initial_global_cumulative_sum.0.y.0);
         let zero: Felt<_> = builder.eval(CC::F::ZERO);
@@ -109,10 +111,10 @@ where
         SC::DigestVariable: IntoIterator<Item = Felt<CC::F>>,
     {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 1 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 3 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit);
-        inputs.push(self.pc_start);
+        inputs.extend(self.pc_start);
         for domain in prep_domains {
             inputs.push(builder.eval(CC::F::from_canonical_usize(domain.log_n)));
             let size = 1 << domain.log_n;

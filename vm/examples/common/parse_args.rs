@@ -7,22 +7,24 @@ use pico_vm::{
 use std::fs;
 use tracing::info;
 
-fn load_elf(elf: &str) -> &'static [u8] {
-    let elf_file = format!("./vm/src/compiler/test_elf/riscv32im-pico-{}-elf", elf);
+fn load_elf(name: &str) -> &'static [u8] {
+    let elf_file = format!("./perf/bench_data/rv64/{name}-elf");
     let bytes = std::fs::read(elf_file).expect("failed to read elf");
     bytes.leak()
 }
 
 fn load_reth() -> &'static [u8] {
-    let elf_file = "./perf/bench_data/reth-elf".to_string();
+    let elf_file = "./perf/bench_data/rv64/reth-elf".to_string();
     let bytes = std::fs::read(elf_file).expect("failed to read elf");
     bytes.leak()
 }
 
 fn load_input(n: u32) -> Result<Vec<u8>, Error> {
     match n {
-        17106222 => Ok(fs::read("./perf/bench_data/reth-17106222.bin")?),
-        20528709 => Ok(fs::read("./perf/bench_data/reth-20528709.bin")?),
+        171 => Ok(fs::read("./perf/bench_data/rv64/reth-17106222.bin")?),
+        188 => Ok(fs::read("./perf/bench_data/rv64/reth-18884864.bin")?),
+        239 => Ok(fs::read("./perf/bench_data/rv64/reth-23993050.bin")?),
+        246 => Ok(fs::read("./perf/bench_data/rv64/reth-24600825.bin")?),
         _ => panic!("invalid input"),
     }
 }
@@ -61,7 +63,7 @@ pub fn parse_args<SC: StarkGenericConfig>() -> (&'static [u8], EmulatorStdin<Pro
 
     let elf: &[u8];
     if args.elf == "fibonacci" || args.elf == "fib" || args.elf == "f" {
-        elf = load_elf("fibonacci");
+        elf = load_elf("fib");
         stdin.write(&args.n);
         info!(
             "Test Fibonacci, sequence n={}, step={}, field={}",

@@ -1,7 +1,7 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
-    machine::builder::{ChipBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder},
+    machine::builder::{ChipBuilder, ChipWordBuilder, RiscVMemoryBuilder},
 };
 use p3_field::{Field, FieldAlgebra};
 
@@ -25,7 +25,11 @@ impl<F: Field> CpuChip<F> {
         builder.eval_memory_access(
             local.chunk,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::B as u32),
-            local.instruction.op_b[0],
+            [
+                local.instruction.op_b[0].into(),
+                CB::Expr::ZERO,
+                CB::Expr::ZERO,
+            ],
             &local.op_b_access,
             CB::Expr::ONE - local.opcode_selector.imm_b,
         );
@@ -33,7 +37,11 @@ impl<F: Field> CpuChip<F> {
         builder.eval_memory_access(
             local.chunk,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::C as u32),
-            local.instruction.op_c[0],
+            [
+                local.instruction.op_c[0].into(),
+                CB::Expr::ZERO,
+                CB::Expr::ZERO,
+            ],
             &local.op_c_access,
             CB::Expr::ONE - local.opcode_selector.imm_c,
         );
@@ -48,14 +56,14 @@ impl<F: Field> CpuChip<F> {
         builder.eval_memory_access(
             local.chunk,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::A as u32),
-            local.instruction.op_a[0],
+            [
+                local.instruction.op_a[0].into(),
+                CB::Expr::ZERO,
+                CB::Expr::ZERO,
+            ],
             &local.op_a_access,
             local.is_real,
         );
-
-        // Always range check the word value in `op_a`, as JUMP instructions may witness
-        // an invalid word and write it to memory.
-        builder.slice_range_check_u8(&local.op_a_access.access.value.0, local.is_real);
 
         // If we are performing a branch or a store, then the value of `a` is the previous value.
         builder

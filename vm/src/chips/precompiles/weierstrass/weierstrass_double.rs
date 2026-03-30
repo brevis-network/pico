@@ -2,19 +2,26 @@ use crate::{
     chips::{
         chips::{
             byte::event::ByteRecordBehavior,
-            riscv_memory::read_write::columns::{MemoryCols, MemoryWriteCols},
+            riscv_memory::read_write::columns::{MemoryCols, MemoryWriteColsU8},
         },
         gadgets::{
+            addr_add::AddrAddGadget,
             curves::{weierstrass::WeierstrassParameters, AffinePoint, CurveType, EllipticCurve},
-            field::field_op::{FieldOpCols, FieldOperation},
+            field::{
+                field_lt::FieldLtCols,
+                field_op::{FieldOpCols, FieldOperation},
+            },
+            syscall_addr::SyscallAddrGadget,
             utils::{
+                conversions::{generate_limbs_from_write_cols_u8, limbs_to_words},
                 field_params::{FieldParameters, NumLimbs, NumWords},
                 limbs::Limbs,
             },
         },
+        precompiles::checked_u64_to_u32,
         utils::pad_rows_fixed,
     },
-    compiler::riscv::program::Program,
+    compiler::{riscv::program::Program, word::Word},
     emulator::riscv::{
         record::EmulationRecord,
         syscalls::{precompiles::PrecompileEvent, SyscallCode},
@@ -22,7 +29,6 @@ use crate::{
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
-        utils::limbs_from_prev_access,
     },
 };
 use core::{
@@ -37,6 +43,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use pico_derive::AlignedBorrow;
 use std::{fmt::Debug, marker::PhantomData};
+use typenum::Unsigned;
 
 pub const fn num_weierstrass_double_cols<P: FieldParameters + NumWords>() -> usize {
     size_of::<WeierstrassDoubleAssignCols<u8, P>>()
@@ -52,8 +59,9 @@ pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
     pub chunk: T,
     pub clk: T,
-    pub p_ptr: T,
-    pub p_access: Array<MemoryWriteCols<T>, P::WordsCurvePoint>,
+    pub p_ptr: SyscallAddrGadget<T>,
+    pub p_addrs: Array<AddrAddGadget<T>, P::WordsCurvePoint>,
+    pub p_access: Array<MemoryWriteColsU8<T>, P::WordsCurvePoint>,
     pub(crate) slope_denominator: FieldOpCols<T, P>,
     pub(crate) slope_numerator: FieldOpCols<T, P>,
     pub(crate) slope: FieldOpCols<T, P>,
@@ -65,6 +73,8 @@ pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub(crate) p_x_minus_x: FieldOpCols<T, P>,
     pub(crate) y3_ins: FieldOpCols<T, P>,
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<T, P>,
+    pub x3_range: FieldLtCols<T, P>,
+    pub y3_range: FieldLtCols<T, P>,
 }
 
 #[derive(Default)]
@@ -135,12 +145,15 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
             let p_x_plus_p_x =
                 cols.p_x_plus_p_x
                     .populate(blu_events, &p_x, &p_x, FieldOperation::Add);
-            cols.x3_ins.populate(
+            let x3 = cols.x3_ins.populate(
                 blu_events,
                 &slope_squared,
                 &p_x_plus_p_x,
                 FieldOperation::Sub,
-            )
+            );
+            cols.x3_range
+                .populate(blu_events, &x3, &E::BaseField::modulus());
+            x3
         };
 
         // y = slope * (p.x - x) - p.y.
@@ -154,12 +167,14 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
                 &p_x_minus_x,
                 FieldOperation::Mul,
             );
-            cols.y3_ins.populate(
+            let y3 = cols.y3_ins.populate(
                 blu_events,
                 &slope_times_p_x_minus_x,
                 &p_y,
                 FieldOperation::Sub,
             );
+            cols.y3_range
+                .populate(blu_events, &y3, &E::BaseField::modulus());
         }
     }
 }
@@ -223,23 +238,37 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                         let cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField> =
                             row.as_mut_slice().borrow_mut();
 
-                        // Decode affine points.
-                        let p = &event.p;
-                        let p = AffinePoint::<E>::from_words_le(p);
+                        // Decode affine points directly from u64 words.
+                        let p = AffinePoint::<E>::from_dwords_le(&event.p);
                         let (p_x, p_y) = (p.x, p.y);
 
                         // Populate basic columns.
                         cols.is_real = F::ONE;
                         cols.chunk = F::from_canonical_u32(event.chunk);
-                        cols.clk = F::from_canonical_u32(event.clk);
-                        cols.p_ptr = F::from_canonical_u32(event.p_ptr);
+                        cols.clk = F::from_canonical_u32(checked_u64_to_u32(
+                            event.clk,
+                            "weierstrass double clk",
+                        ));
+                        let len = <E::BaseField as NumLimbs>::Limbs::USIZE as u64 * 2;
+                        cols.p_ptr
+                            .populate(&mut new_byte_lookup_events, event.p_ptr, len);
 
                         Self::populate_field_ops(&mut new_byte_lookup_events, cols, p_x, p_y);
 
                         // Populate the memory access columns.
                         for i in 0..cols.p_access.len() {
                             cols.p_access[i]
+                                .inner
                                 .populate(event.p_memory_records[i], &mut new_byte_lookup_events);
+                            cols.p_access[i].prev_value_u8.populate_u16_to_u8_safe(
+                                &mut new_byte_lookup_events,
+                                event.p_memory_records[i].prev_value,
+                            );
+                            cols.p_addrs[i].populate(
+                                &mut new_byte_lookup_events,
+                                event.p_ptr,
+                                8 * i as u64,
+                            );
                         }
                         row
                     })
@@ -321,9 +350,23 @@ where
         let local = main.row_slice(0);
         let local: &WeierstrassDoubleAssignCols<CB::Var, E::BaseField> = (*local).borrow();
 
-        let num_words_field_element = E::BaseField::NUM_LIMBS / 4;
-        let p_x = limbs_from_prev_access(&local.p_access[0..num_words_field_element]);
-        let p_y = limbs_from_prev_access(&local.p_access[num_words_field_element..]);
+        let num_words_field_element = <E::BaseField as NumLimbs>::Limbs::USIZE / 8;
+
+        // Extract byte limbs from u16 word limbs via U16→U8 conversion.
+        let p_x_limbs = generate_limbs_from_write_cols_u8(
+            builder,
+            &local.p_access[0..num_words_field_element],
+            local.is_real.into(),
+        );
+        let p_x: Limbs<CB::Expr, <E::BaseField as NumLimbs>::Limbs> =
+            Limbs(Array::try_from_iter(p_x_limbs).expect("failed to convert p_x limbs"));
+        let p_y_limbs = generate_limbs_from_write_cols_u8(
+            builder,
+            &local.p_access[num_words_field_element..],
+            local.is_real.into(),
+        );
+        let p_y: Limbs<CB::Expr, <E::BaseField as NumLimbs>::Limbs> =
+            Limbs(Array::try_from_iter(p_y_limbs).expect("failed to convert p_y limbs"));
 
         // `a` in the Weierstrass form: y^2 = x^3 + a * x + b.
         let a = E::BaseField::to_limbs_field::<CB::Expr, _>(&E::a_int());
@@ -412,25 +455,80 @@ where
             );
         }
 
-        // Constraint self.p_access.value = [self.x3_ins.result, self.y3_ins.result]. This is to
-        // ensure that p_access is updated with the new value.
-        for i in 0..E::BaseField::NUM_LIMBS {
-            builder
-                .when(local.is_real)
-                .assert_eq(local.x3_ins.result[i], local.p_access[i / 4].value()[i % 4]);
-            builder.when(local.is_real).assert_eq(
-                local.y3_ins.result[i],
-                local.p_access[num_words_field_element + i / 4].value()[i % 4],
+        // Range check x3 and y3 against the field modulus.
+        let modulus = E::BaseField::to_limbs_field::<CB::Expr, CB::F>(&E::BaseField::modulus());
+        local
+            .x3_range
+            .eval(builder, &local.x3_ins.result, &modulus, local.is_real);
+        local
+            .y3_range
+            .eval(builder, &local.y3_ins.result, &modulus, local.is_real);
+
+        // Reconstruct byte-level results into Words for memory write constraints.
+        let x3_result_words = limbs_to_words(
+            &local
+                .x3_ins
+                .result
+                .0
+                .iter()
+                .map(|v| (*v).into())
+                .collect::<Vec<CB::Expr>>(),
+            CB::F::from_canonical_u32(256).into(),
+        );
+        let y3_result_words = limbs_to_words(
+            &local
+                .y3_ins
+                .result
+                .0
+                .iter()
+                .map(|v| (*v).into())
+                .collect::<Vec<CB::Expr>>(),
+            CB::F::from_canonical_u32(256).into(),
+        );
+        let result_words: Vec<_> = x3_result_words.into_iter().chain(y3_result_words).collect();
+
+        // Address alignment constraints.
+        let p_ptr = SyscallAddrGadget::<CB::F>::eval(
+            builder,
+            <E::BaseField as NumLimbs>::Limbs::USIZE as u32 * 2,
+            local.p_ptr,
+            local.is_real.into(),
+        );
+
+        for i in 0..local.p_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                Word([
+                    p_ptr[0].into(),
+                    p_ptr[1].into(),
+                    p_ptr[2].into(),
+                    CB::Expr::ZERO,
+                ]),
+                Word::from(8 * i as u64),
+                local.p_addrs[i],
+                local.is_real.into(),
             );
         }
 
-        builder.eval_memory_access_slice(
-            local.chunk,
-            local.clk.into(),
-            local.p_ptr,
-            &local.p_access,
-            local.is_real,
-        );
+        // Memory access constraints.
+        // Write p — iterate with value constraints.
+        for (i, (p_col, write_value)) in local.p_access.iter().zip(result_words.iter()).enumerate()
+        {
+            builder.eval_memory_access(
+                local.chunk,
+                local.clk.into(),
+                local.p_addrs[i].value.map(Into::into),
+                &p_col.inner,
+                local.is_real,
+            );
+            // Constrain that the current value matches the computed write value.
+            let do_check: CB::Expr = local.is_real.into();
+            for (v, w) in p_col.inner.value().0.iter().zip(write_value.0.iter()) {
+                builder
+                    .when(do_check.clone())
+                    .assert_eq((*v).into(), w.clone());
+            }
+        }
 
         // Fetch the syscall id for the curve type.
         let syscall_id_felt = match E::CURVE_TYPE {
@@ -450,8 +548,8 @@ where
         builder.looked_syscall(
             local.clk,
             syscall_id_felt,
-            local.p_ptr,
-            CB::Expr::ZERO,
+            p_ptr.map(Into::into),
+            [CB::F::ZERO, CB::F::ZERO, CB::F::ZERO],
             local.is_real,
         );
     }

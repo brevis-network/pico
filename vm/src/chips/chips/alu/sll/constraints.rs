@@ -2,12 +2,13 @@ use std::borrow::Borrow;
 
 use super::{columns::ShiftLeftCols, traces::SLLChip, ShiftLeftValueCols};
 use crate::{
-    compiler::riscv::opcode::Opcode,
-    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
+    chips::gadgets::msb::U16MSBGadget,
+    compiler::riscv::opcode::{ByteOpcode, Opcode},
+    machine::builder::{ChipBuilder, ChipLookupBuilder},
     primitives::consts::{BYTE_SIZE, WORD_SIZE},
 };
 use p3_air::{Air, AirBuilder};
-use p3_field::Field;
+use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 
 impl<F: Field, CB> Air<CB> for SLLChip<F>
@@ -20,116 +21,140 @@ where
         let local: &ShiftLeftCols<CB::Var> = (*local).borrow();
 
         let zero: CB::Expr = CB::F::ZERO.into();
-        let one: CB::Expr = CB::F::ONE.into();
-        let base: CB::Expr = CB::F::from_canonical_u32(1 << BYTE_SIZE).into();
+        let _one: CB::Expr = CB::F::ONE.into();
+        let _base: CB::Expr = CB::F::from_canonical_u32(1 << BYTE_SIZE).into();
 
         for ShiftLeftValueCols {
             a,
             b,
             c,
-            c_lsb,
-            shift_by_n_bits,
-            bit_shift_multiplier,
-            shift_result,
-            shift_result_carry,
-            shift_by_n_bytes,
-            is_real,
+            c_bits,
+            v_01,
+            v_012,
+            v_0123,
+            shift_u16,
+            lower_limb,
+            higher_limb,
+            limb_result,
+            sllw_msb,
+            is_sll,
+            is_sllw,
         } in local.values
         {
-            // Check the sum of c_lsb[i] * 2^i equals c[0].
-            let mut c_byte_sum = zero.clone();
-            for i in 0..BYTE_SIZE {
-                let val: CB::Expr = F::from_canonical_u32(1 << i).into();
-                c_byte_sum = c_byte_sum.clone() + val * c_lsb[i];
-            }
-            builder.assert_eq(c_byte_sum, c[0]);
+            let is_real = is_sll + is_sllw;
+            builder.assert_bool(is_real.clone());
+            builder.assert_bool(is_sll);
+            builder.assert_bool(is_sllw);
 
-            // Check shift_by_n_bits[i] is 1 if i = num_bits_to_shift.
-            let mut num_bits_to_shift = zero.clone();
-
-            //  num_bits_to_shift = event.c as usize % BYTE_SIZE, so the maximum value of num_bits_to_shift is 7, just need 3 bits to calculate this.
-            for i in 0..3 {
-                num_bits_to_shift =
-                    num_bits_to_shift.clone() + c_lsb[i] * F::from_canonical_u32(1 << i);
-            }
-            // check num_bits_to_shift i'th is 1
-            for i in 0..BYTE_SIZE {
-                builder
-                    .when(shift_by_n_bits[i])
-                    .assert_eq(num_bits_to_shift.clone(), F::from_canonical_usize(i));
+            for i in 0..6 {
+                builder.assert_bool(c_bits[i]);
             }
 
-            // Check bit_shift_multiplier = 2^num_bits_to_shift by using shift_by_n_bits.
-            for i in 0..BYTE_SIZE {
-                builder
-                    .when(shift_by_n_bits[i])
-                    .assert_eq(bit_shift_multiplier, F::from_canonical_usize(1 << i));
-            }
-
-            // Check bit_shift_result = b * bit_shift_multiplier by using bit_shift_result_carry to
-            // carry-propagate.
-            for i in 0..WORD_SIZE {
-                let mut v = b[i] * bit_shift_multiplier - shift_result_carry[i] * base.clone();
-                if i > 0 {
-                    v = v.clone() + shift_result_carry[i - 1].into();
+            let mut c_lower_bits = zero.clone();
+            let mut bit_shift = zero.clone();
+            for i in 0..6 {
+                c_lower_bits += c_bits[i] * CB::F::from_canonical_u32(1 << i);
+                if i == 3 {
+                    bit_shift = c_lower_bits.clone();
                 }
-                builder.assert_eq(shift_result[i], v);
             }
+            let inverse_64 = CB::F::from_canonical_u32(64).inverse();
+            builder.looking_byte(
+                CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                (c[0] - c_lower_bits) * inverse_64,
+                CB::F::from_canonical_u32(10),
+                zero.clone(),
+                is_real.clone(),
+            );
 
-            //  num_bytes_to_shift = (event.c & 0b11111) as usize / BYTE_SIZE; use the c_lsb 4th and 5th presents the byte shift number
-            let num_bytes_to_shift = c_lsb[3] + c_lsb[4] * F::from_canonical_u32(2);
+            builder.when(is_real.clone()).assert_eq(
+                shift_u16[0] + shift_u16[1] + shift_u16[2] + shift_u16[3],
+                CB::F::from_canonical_u32(1),
+            );
 
-            // Verify that shift_by_n_bytes[i] = 1 if and only if i = num_bytes_to_shift.
+            let one = CB::F::from_canonical_u32(1);
+            let three = CB::F::from_canonical_u32(3);
+            let fifteen = CB::F::from_canonical_u32(15);
+            let two_fifty_five = CB::F::from_canonical_u32(255);
+            builder.assert_eq(v_01, (c_bits[0] + one) * (c_bits[1] * three + one));
+            builder.assert_eq(v_012, v_01 * (c_bits[2] * fifteen + one));
+            builder.assert_eq(v_0123, v_012 * (c_bits[3] * two_fifty_five + one));
+
             for i in 0..WORD_SIZE {
-                builder
-                    .when(shift_by_n_bytes[i])
-                    .assert_eq(num_bytes_to_shift.clone(), F::from_canonical_usize(i));
+                let limb = b[i];
+                // Check that `lower_limb < 2^(16 - bit_shift)`
+                builder.looking_byte(
+                    CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                    lower_limb[i],
+                    CB::Expr::from_canonical_u32(16) - bit_shift.clone(),
+                    zero.clone(),
+                    is_real.clone(),
+                );
+                // Check that `higher_limb < 2^(bit_shift)`
+                builder.looking_byte(
+                    CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                    higher_limb[i],
+                    bit_shift.clone(),
+                    zero.clone(),
+                    is_real.clone(),
+                );
+                // Check that `limb == higher_limb * 2^(16 - bit_shift) + lower_limb`
+                // Multiply `2^(bit_shift)` to the equation to avoid populating `2^(16 - bit_shift)`.
+                // This is possible, since `2^(bit_shift)` is not zero.
+                builder.assert_eq(
+                    limb * v_0123,
+                    higher_limb[i] * CB::F::from_canonical_u32(1 << 16) + lower_limb[i] * v_0123,
+                );
             }
 
-            // The bytes of a must match those of bit_shift_result, taking into account the byte
-            // shifting.
-            for shift_size in 0..WORD_SIZE {
-                let mut shifting = builder.when(shift_by_n_bytes[shift_size]);
-                for i in 0..WORD_SIZE {
-                    if i < shift_size {
-                        // The first num_bytes_to_shift bytes must be zero.
-                        shifting.assert_eq(a[i], zero.clone());
+            // Compute the limb result based on the lower limbs and higher limbs.
+            for i in 0..WORD_SIZE {
+                let mut tmp_limb_result = lower_limb[i] * v_0123;
+                if i != 0 {
+                    tmp_limb_result = tmp_limb_result.clone() + higher_limb[i - 1];
+                }
+                builder.assert_eq(limb_result[i], tmp_limb_result);
+            }
+
+            // Perform the limb shifts based on `shift_u16` boolean flags.
+            for i in 0..WORD_SIZE {
+                for j in 0..WORD_SIZE {
+                    if j < i {
+                        builder.when(is_sll).when(shift_u16[i]).assert_zero(a[j]);
                     } else {
-                        shifting.assert_eq(a[i], shift_result[i - shift_size]);
+                        builder
+                            .when(is_sll)
+                            .when(shift_u16[i])
+                            .assert_eq(a[j], limb_result[j - i]);
                     }
                 }
             }
 
-            for bit in c_lsb.iter() {
-                builder.assert_bool(*bit);
+            for i in 0..WORD_SIZE / 2 {
+                for j in 0..WORD_SIZE / 2 {
+                    if j < i {
+                        builder.when(is_sllw).when(shift_u16[i]).assert_zero(a[j]);
+                    } else {
+                        builder
+                            .when(is_sllw)
+                            .when(shift_u16[i])
+                            .assert_eq(a[j], limb_result[j - i]);
+                    }
+                }
+            }
+            let u16_max = CB::F::from_canonical_u16(u16::MAX);
+            for i in WORD_SIZE / 2..WORD_SIZE {
+                builder
+                    .when(is_sllw)
+                    .assert_eq(sllw_msb.msb * u16_max, a[i]);
             }
 
-            for shift in shift_by_n_bits.iter() {
-                builder.assert_bool(*shift);
-            }
-            builder.assert_eq(
-                shift_by_n_bits.iter().fold(zero.clone(), |acc, &x| acc + x),
-                one.clone(),
-            );
+            U16MSBGadget::<CB::F>::eval(builder, a[1].into(), sllw_msb, is_sllw.into());
 
-            for shift in shift_by_n_bytes.iter() {
-                builder.assert_bool(*shift);
-            }
+            let opcode = is_sll * CB::F::from_canonical_u32(Opcode::SLL as u32)
+                + is_sllw * CB::F::from_canonical_u32(Opcode::SLLW as u32);
 
-            builder.assert_eq(
-                shift_by_n_bytes
-                    .iter()
-                    .fold(zero.clone(), |acc, &x| acc + x),
-                one.clone(),
-            );
-
-            builder.assert_bool(is_real);
-
-            // range check
-            builder.slice_range_check_u8(&shift_result, is_real);
-            builder.slice_range_check_u8(&shift_result_carry, is_real);
-
-            builder.looked_alu(F::from_canonical_u32(Opcode::SLL as u32), a, b, c, is_real);
+            builder.looked_alu(opcode, a, b, c, is_real);
         }
     }
 }

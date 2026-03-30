@@ -65,6 +65,12 @@ pub enum LookupType {
 
     /// Interaction with the global table.
     Global = 10,
+
+    /// Interaction with the `ShaCompress` chip.
+    ShaCompress = 11,
+
+    /// Interaction with the `ShaExtend` chip.
+    ShaExtend = 12,
 }
 
 impl LookupType {

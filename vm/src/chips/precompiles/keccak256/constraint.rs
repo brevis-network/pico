@@ -7,7 +7,11 @@ use p3_matrix::Matrix;
 
 use super::{columns::KeccakMemCols, KeccakPermuteChip, STATE_NUM_WORDS, STATE_SIZE};
 use crate::{
-    chips::chips::riscv_memory::read_write::columns::MemoryCols,
+    chips::{
+        chips::riscv_memory::read_write::columns::MemoryCols,
+        gadgets::{addr_add::AddrAddGadget, syscall_addr::SyscallAddrGadget},
+    },
+    compiler::word::Word,
     emulator::riscv::syscalls::SyscallCode,
     machine::builder::{
         ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
@@ -33,6 +37,29 @@ impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
             local.do_memory_check,
         );
 
+        // Address alignment constraints.
+        let state_addr = SyscallAddrGadget::<CB::F>::eval(
+            builder,
+            200, // 25 words × 8 bytes
+            local.state_addr,
+            local.is_real.into(),
+        );
+
+        for i in 0..STATE_NUM_WORDS {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                Word([
+                    state_addr[0].into(),
+                    state_addr[1].into(),
+                    state_addr[2].into(),
+                    CB::Expr::ZERO,
+                ]),
+                Word::from(8 * i as u64),
+                local.state_addrs[i],
+                local.do_memory_check.into(),
+            );
+        }
+
         // Constrain memory
         for i in 0..STATE_NUM_WORDS as u32 {
             // At the first cycle, verify that the memory has not changed since it's a memory read.
@@ -46,7 +73,7 @@ impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
             builder.eval_memory_access(
                 local.chunk,
                 local.clk + final_step, // The clk increments by 1 after a final step
-                local.state_addr + CB::Expr::from_canonical_u32(i * 4),
+                local.state_addrs[i as usize].value.map(Into::into),
                 &local.state_mem[i as usize],
                 local.do_memory_check,
             );
@@ -58,8 +85,8 @@ impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
         builder.looked_syscall(
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::KECCAK_PERMUTE.syscall_id()),
-            local.state_addr,
-            CB::Expr::ZERO,
+            state_addr.map(Into::into),
+            [CB::F::ZERO, CB::F::ZERO, CB::F::ZERO],
             local.receive_ecall,
         );
 
@@ -68,7 +95,9 @@ impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
         let mut transition_not_final_builder = transition_builder.when(not_final_step);
         transition_not_final_builder.assert_eq(local.chunk, next.chunk);
         transition_not_final_builder.assert_eq(local.clk, next.clk);
-        transition_not_final_builder.assert_eq(local.state_addr, next.state_addr);
+        transition_not_final_builder.assert_eq(local.state_addr.addr[0], next.state_addr.addr[0]);
+        transition_not_final_builder.assert_eq(local.state_addr.addr[1], next.state_addr.addr[1]);
+        transition_not_final_builder.assert_eq(local.state_addr.addr[2], next.state_addr.addr[2]);
         transition_not_final_builder.assert_eq(local.is_real, next.is_real);
 
         // The last row must be nonreal because NUM_ROUNDS is not a power of 2. This constraint
@@ -76,46 +105,38 @@ impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
         builder.when_last_row().assert_zero(local.is_real);
 
         // Verify that local.a values are equal to the memory values in the 0 and 23rd rows of each
-        // cycle Memory values are 32 bit values (encoded as 4 8-bit columns).
-        // local.a values are 64 bit values (encoded as 4 16-bit columns).
-        let expr_2_pow_8 = CB::Expr::from_canonical_u32(2u32.pow(8));
+        // cycle. Memory values are 64-bit words (4 u16 limbs), which directly match
+        // the keccak state's 4 u16 limbs per u64 element.
         for i in 0..STATE_SIZE as u32 {
-            // Interpret u32 memory words as u16 limbs
-            let least_sig_word = local.state_mem[(i * 2) as usize].value();
-            let most_sig_word = local.state_mem[(i * 2 + 1) as usize].value();
-            let memory_limbs = [
-                least_sig_word[0] + least_sig_word[1] * expr_2_pow_8.clone(),
-                least_sig_word[2] + least_sig_word[3] * expr_2_pow_8.clone(),
-                most_sig_word[0] + most_sig_word[1] * expr_2_pow_8.clone(),
-                most_sig_word[2] + most_sig_word[3] * expr_2_pow_8.clone(),
-            ];
+            // Word is 4×u16 limbs, directly matching keccak.a's u16 limbs
+            let memory_limbs = local.state_mem[i as usize].value();
 
             let y_idx = i / 5;
             let x_idx = i % 5;
 
             // On a first step row, verify memory matches with local.p3_keccak_cols.a
             let a_value_limbs = local.keccak.a[y_idx as usize][x_idx as usize];
-            for i in 0..U64_LIMBS {
+            for j in 0..U64_LIMBS {
                 builder
                     .when(first_step * local.is_real)
-                    .assert_eq(memory_limbs[i].clone(), a_value_limbs[i]);
+                    .assert_eq(memory_limbs[j], a_value_limbs[j]);
             }
 
             // On a final step row, verify memory matches with
             // local.p3_keccak_cols.a_prime_prime_prime
-            for i in 0..U64_LIMBS {
+            for j in 0..U64_LIMBS {
                 builder.when(final_step * local.is_real).assert_eq(
-                    memory_limbs[i].clone(),
+                    memory_limbs[j],
                     local
                         .keccak
-                        .a_prime_prime_prime(y_idx as usize, x_idx as usize, i),
+                        .a_prime_prime_prime(y_idx as usize, x_idx as usize, j),
                 )
             }
         }
 
-        // Range check all the values in `state_mem` to be bytes.
+        // Range check all the values in `state_mem` to be u16 limbs.
         for i in 0..STATE_NUM_WORDS {
-            builder.slice_range_check_u8(&local.state_mem[i].value().0, local.do_memory_check);
+            builder.slice_range_check_u16(&local.state_mem[i].value().0, local.do_memory_check);
         }
 
         let mut sub_builder =

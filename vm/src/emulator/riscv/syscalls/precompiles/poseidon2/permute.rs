@@ -1,7 +1,10 @@
 use super::event::Poseidon2PermuteEvent;
 use crate::{
-    emulator::riscv::syscalls::{
-        precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
+    emulator::riscv::{
+        event_types::RvValue,
+        syscalls::{
+            precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
+        },
     },
     primitives::{consts::PERMUTATION_WIDTH, Poseidon2Init},
 };
@@ -25,22 +28,20 @@ where
         &self,
         ctx: &mut SyscallContext,
         syscall_code: SyscallCode,
-        arg1: u32,
-        arg2: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
         let clk_init = ctx.clk;
         let input_memory_ptr = arg1;
         let output_memory_ptr = arg2;
 
-        let mut state_read_records = Vec::new();
-        let mut state_write_records = Vec::new();
-
-        let (state_records, state_values) = ctx.mr_slice(input_memory_ptr, PERMUTATION_WIDTH);
-        state_read_records.extend_from_slice(&state_records);
+        let (state_records, state_vals) = ctx.mr_slice(input_memory_ptr, PERMUTATION_WIDTH);
+        let state_values: Vec<u32> = state_vals.iter().map(|&v| v as u32).collect();
+        let state_read_records = state_records;
 
         let state: [F; PERMUTATION_WIDTH] = state_values
-            .clone()
-            .into_iter()
+            .iter()
+            .copied()
             .map(F::from_canonical_u32)
             .collect::<Vec<F>>()
             .try_into()
@@ -51,8 +52,11 @@ where
         // Increment the clk by 1 before writing because we read from memory at start_clk.
         ctx.clk += 1;
 
-        let write_records = ctx.mw_slice(output_memory_ptr, &state.map(|f| f.as_canonical_u32()));
-        state_write_records.extend_from_slice(&write_records);
+        let write_vals: Vec<u64> = state
+            .iter()
+            .map(|f| u64::from(f.as_canonical_u32()))
+            .collect();
+        let state_write_records = ctx.mw_slice(output_memory_ptr, &write_vals);
 
         let chunk = ctx.current_chunk();
         let event = Poseidon2PermuteEvent {

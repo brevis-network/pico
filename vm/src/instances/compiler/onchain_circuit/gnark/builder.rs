@@ -128,7 +128,7 @@ where
         machine: &BaseMachine<SC, RecursionChipType<Val<SC>>>,
         input: &OnchainStdinVariable<CC, SC>,
         expected_commitment: [Var<Bn254Fr>; 1],
-        expected_pc_start: SC::Val,
+        expected_pc_start: [SC::Val; 3],
     ) {
         let OnchainStdinVariable {
             vk,
@@ -139,7 +139,9 @@ where
         for (exp, act) in expected_commitment.iter().zip(vk.commit.iter()) {
             builder.assert_var_eq(*act, *exp);
         }
-        builder.assert_felt_eq(vk.pc_start, expected_pc_start);
+        for i in 0..3 {
+            builder.assert_felt_eq(vk.pc_start[i], expected_pc_start[i]);
+        }
 
         /*
         Verify chunk proof

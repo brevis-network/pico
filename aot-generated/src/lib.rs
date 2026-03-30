@@ -32,91 +32,91 @@ pub fn run_aot(emu: &mut AotEmulatorCore) -> Result<(), String> {
     }
     Ok(())
 }
-type ChunkLookupFn = fn(u32) -> Option<BlockFn>;
+type ChunkLookupFn = fn(u64) -> Option<BlockFn>;
 #[repr(C)]
 struct ChunkDesc {
-    pc_min: u32,
-    pc_max: u32,
+    pc_min: u64,
+    pc_max: u64,
     lookup: ChunkLookupFn,
 }
 const CHUNKS: &[ChunkDesc] = &[
     ChunkDesc {
-        pc_min: 2099200u32,
-        pc_max: 2101256u32,
+        pc_min: 2099200u64,
+        pc_max: 2102452u64,
         lookup: pico_aot_chunk_000::lookup,
     },
     ChunkDesc {
-        pc_min: 2101308u32,
-        pc_max: 2104708u32,
+        pc_min: 2102468u64,
+        pc_max: 2105828u64,
         lookup: pico_aot_chunk_001::lookup,
     },
     ChunkDesc {
-        pc_min: 2104724u32,
-        pc_max: 2123224u32,
+        pc_min: 2105840u64,
+        pc_max: 2125272u64,
         lookup: pico_aot_chunk_002::lookup,
     },
     ChunkDesc {
-        pc_min: 2123236u32,
-        pc_max: 2125464u32,
+        pc_min: 2125276u64,
+        pc_max: 2127208u64,
         lookup: pico_aot_chunk_003::lookup,
     },
     ChunkDesc {
-        pc_min: 2125512u32,
-        pc_max: 2127796u32,
+        pc_min: 2127252u64,
+        pc_max: 2129304u64,
         lookup: pico_aot_chunk_004::lookup,
     },
     ChunkDesc {
-        pc_min: 2127852u32,
-        pc_max: 2129976u32,
+        pc_min: 2129308u64,
+        pc_max: 2131676u64,
         lookup: pico_aot_chunk_005::lookup,
     },
     ChunkDesc {
-        pc_min: 2130000u32,
-        pc_max: 2132336u32,
+        pc_min: 2131692u64,
+        pc_max: 2134080u64,
         lookup: pico_aot_chunk_006::lookup,
     },
     ChunkDesc {
-        pc_min: 2132352u32,
-        pc_max: 2134384u32,
+        pc_min: 2134136u64,
+        pc_max: 2136284u64,
         lookup: pico_aot_chunk_007::lookup,
     },
     ChunkDesc {
-        pc_min: 2134420u32,
-        pc_max: 2136948u32,
+        pc_min: 2136300u64,
+        pc_max: 2139900u64,
         lookup: pico_aot_chunk_008::lookup,
     },
     ChunkDesc {
-        pc_min: 2136956u32,
-        pc_max: 2139552u32,
+        pc_min: 2139952u64,
+        pc_max: 2141608u64,
         lookup: pico_aot_chunk_009::lookup,
     },
     ChunkDesc {
-        pc_min: 2139580u32,
-        pc_max: 2142296u32,
+        pc_min: 2141612u64,
+        pc_max: 2143548u64,
         lookup: pico_aot_chunk_010::lookup,
     },
     ChunkDesc {
-        pc_min: 2142332u32,
-        pc_max: 2144560u32,
+        pc_min: 2143576u64,
+        pc_max: 2145344u64,
         lookup: pico_aot_chunk_011::lookup,
     },
     ChunkDesc {
-        pc_min: 2144568u32,
-        pc_max: 2146396u32,
+        pc_min: 2145352u64,
+        pc_max: 2147924u64,
         lookup: pico_aot_chunk_012::lookup,
     },
     ChunkDesc {
-        pc_min: 2146420u32,
-        pc_max: 2146636u32,
+        pc_min: 2147932u64,
+        pc_max: 2149020u64,
         lookup: pico_aot_chunk_013::lookup,
     },
 ];
-const GLOBAL_PC_MIN: u32 = 2099200u32;
+const GLOBAL_PC_MIN: u64 = 2099200u64;
 const PAGE_SHIFT: u32 = 12u32;
-const PAGE_HINT: [u16; 12usize] = [
-    0u16, 1u16, 2u16, 2u16, 2u16, 2u16, 3u16, 5u16, 6u16, 8u16, 10u16, 11u16,
+const PAGE_HINT: [u16; 13usize] = [
+    0u16, 1u16, 2u16, 2u16, 2u16, 2u16, 2u16, 4u16, 6u16, 7u16, 9u16, 11u16, 13u16,
 ];
-fn lookup_block(pc: u32) -> Option<BlockFn> {
+fn lookup_block(pc: u64) -> Option<BlockFn> {
     if CHUNKS.is_empty() {
         return None;
     }

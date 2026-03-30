@@ -18,17 +18,28 @@ pub struct IsEqualWordGadget<T> {
 }
 
 impl<F: Field> IsEqualWordGadget<F> {
-    pub fn populate(&mut self, a_u32: u32, b_u32: u32) -> u32 {
-        let a = a_u32.to_le_bytes();
-        let b = b_u32.to_le_bytes();
+    pub fn populate(&mut self, a_u64: u64, b_u64: u64) -> u64 {
+        // Convert u64 to 4 u16 limbs (matching Word<u64> implementation)
+        let a_limbs = [
+            (a_u64 & 0xFFFF) as u16,
+            ((a_u64 >> 16) & 0xFFFF) as u16,
+            ((a_u64 >> 32) & 0xFFFF) as u16,
+            ((a_u64 >> 48) & 0xFFFF) as u16,
+        ];
+        let b_limbs = [
+            (b_u64 & 0xFFFF) as u16,
+            ((b_u64 >> 16) & 0xFFFF) as u16,
+            ((b_u64 >> 32) & 0xFFFF) as u16,
+            ((b_u64 >> 48) & 0xFFFF) as u16,
+        ];
         let diff = Word([
-            F::from_canonical_u8(a[0]) - F::from_canonical_u8(b[0]),
-            F::from_canonical_u8(a[1]) - F::from_canonical_u8(b[1]),
-            F::from_canonical_u8(a[2]) - F::from_canonical_u8(b[2]),
-            F::from_canonical_u8(a[3]) - F::from_canonical_u8(b[3]),
+            F::from_canonical_u16(a_limbs[0]) - F::from_canonical_u16(b_limbs[0]),
+            F::from_canonical_u16(a_limbs[1]) - F::from_canonical_u16(b_limbs[1]),
+            F::from_canonical_u16(a_limbs[2]) - F::from_canonical_u16(b_limbs[2]),
+            F::from_canonical_u16(a_limbs[3]) - F::from_canonical_u16(b_limbs[3]),
         ]);
         self.is_diff_zero.populate_from_field_element(diff);
-        (a_u32 == b_u32) as u32
+        (a_u64 == b_u64) as u64
     }
 
     pub fn eval<CB: ChipBuilder<F>>(

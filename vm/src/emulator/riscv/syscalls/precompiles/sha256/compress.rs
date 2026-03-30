@@ -1,7 +1,10 @@
-use crate::emulator::riscv::syscalls::{
-    precompiles::{PrecompileEvent, ShaCompressEvent},
-    syscall_context::SyscallContext,
-    Syscall, SyscallCode,
+use crate::emulator::riscv::{
+    event_types::RvValue,
+    syscalls::{
+        precompiles::{PrecompileEvent, ShaCompressEvent},
+        syscall_context::SyscallContext,
+        Syscall, SyscallCode,
+    },
 };
 
 pub const SHA_COMPRESS_K: [u32; 64] = [
@@ -28,24 +31,29 @@ impl Syscall for Sha256CompressSyscall {
         &self,
         ctx: &mut SyscallContext,
         syscall_code: SyscallCode,
-        arg1: u32,
-        arg2: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
         let w_ptr = arg1;
         let h_ptr = arg2;
         assert_ne!(w_ptr, h_ptr);
+        SyscallContext::assert_dword_aligned_precompile(w_ptr, "sha compress w_ptr");
+        SyscallContext::assert_dword_aligned_precompile(h_ptr, "sha compress h_ptr");
 
         let start_clk = ctx.clk;
         let mut h_read_records = Vec::new();
         let mut w_i_read_records = Vec::new();
         let mut h_write_records = Vec::new();
 
+        // The SDK ABI exposes both buffers as packed `[u64; N]`, with each logical SHA word stored
+        // in the low 32 bits of one 64-bit slot.
+
         // Execute the "initialize" phase where we read in the h values.
         let mut hx = [0u32; 8];
         for i in 0..8 {
-            let (record, value) = ctx.mr(h_ptr + i as u32 * 4);
+            let (record, value) = ctx.mr_dword(h_ptr + (i as u64) * 8);
             h_read_records.push(record);
-            hx[i] = value;
+            hx[i] = u32::try_from(value).unwrap();
         }
 
         let mut original_w = Vec::new();
@@ -61,13 +69,14 @@ impl Syscall for Sha256CompressSyscall {
         for i in 0..64 {
             let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
             let ch = (e & f) ^ (!e & g);
-            let (record, w_i) = ctx.mr(w_ptr + i * 4);
+            let (record, w_i_val) = ctx.mr_dword(w_ptr + (i as u64) * 8);
+            let w_i = u32::try_from(w_i_val).unwrap();
             original_w.push(w_i);
             w_i_read_records.push(record);
             let temp1 = h
                 .wrapping_add(s1)
                 .wrapping_add(ch)
-                .wrapping_add(SHA_COMPRESS_K[i as usize])
+                .wrapping_add(SHA_COMPRESS_K[i])
                 .wrapping_add(w_i);
             let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
             let maj = (a & b) ^ (a & c) ^ (b & c);
@@ -89,7 +98,7 @@ impl Syscall for Sha256CompressSyscall {
         // Execute the "finalize" phase.
         let v = [a, b, c, d, e, f, g, h];
         for i in 0..8 {
-            let record = ctx.mw(h_ptr + i as u32 * 4, hx[i].wrapping_add(v[i]));
+            let record = ctx.mw_dword(h_ptr + (i as u64) * 8, u64::from(hx[i].wrapping_add(v[i])));
             h_write_records.push(record);
         }
 
@@ -101,7 +110,7 @@ impl Syscall for Sha256CompressSyscall {
             clk: start_clk,
             w_ptr,
             h_ptr,
-            w: original_w,
+            w: original_w.into_iter().collect(),
             h: hx,
             h_read_records: h_read_records.try_into().unwrap(),
             w_i_read_records,

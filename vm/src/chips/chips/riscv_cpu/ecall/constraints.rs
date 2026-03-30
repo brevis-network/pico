@@ -2,7 +2,10 @@ use super::super::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCol
 use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::MemoryCols,
-        gadgets::{field_range_check::word_range::FieldWordRangeChecker, is_zero::IsZeroGadget},
+        gadgets::{
+            field_range_check::word_range::FieldWordRangeChecker, is_zero::IsZeroGadget,
+            u16_to_u8::U16ToU8Gadget,
+        },
     },
     compiler::word::Word,
     emulator::riscv::{public_values::PublicValues, syscalls::SyscallCode},
@@ -37,10 +40,30 @@ impl<F: Field> CpuChip<F> {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.op_a_access.prev_value();
 
-        // We interpret the syscall_code as little-endian bytes and interpret each byte as a u8
-        // with different information.
-        let syscall_id = syscall_code[0];
-        let send_to_table = syscall_code[1];
+        // Under the u64 (u16-limb) model, syscall_code[0] is a 16-bit limb containing
+        // both syscall_id (low 8 bits) and send_to_table (high 8 bits).
+        // Use U16ToU8Gadget to decompose the Word into individual bytes.
+        let syscall_code_u16: [CB::Expr; 4] = syscall_code.0.map(Into::into);
+        let syscall_bytes = U16ToU8Gadget::<CB::F>::eval_u16_to_u8_safe(
+            builder,
+            syscall_code_u16,
+            ecall_cols.syscall_code_bytes,
+            is_ecall_instruction.clone(),
+        );
+        let syscall_id = syscall_bytes[0].clone();
+        let send_to_table = syscall_bytes[1].clone();
+
+        // Constrain send_to_table to be boolean (0 or 1).
+        builder
+            .when(is_ecall_instruction.clone())
+            .assert_bool(send_to_table.clone());
+
+        // Constrain num_extra_clk to equal byte 2 of the syscall code.
+        // In u16-limb model, byte 2 is the low byte of limb[1]. Using the decomposed
+        // byte from U16ToU8Gadget is more precise than using the full u16 limb.
+        builder
+            .when(is_ecall_instruction.clone())
+            .assert_eq(local.num_extra_clk, syscall_bytes[2].clone());
 
         // Handle cases:
         // - is_ecall_instruction = 1 => ecall_mul_send_to_table == send_to_table
@@ -50,11 +73,24 @@ impl<F: Field> CpuChip<F> {
             send_to_table * is_ecall_instruction.clone(),
         );
 
+        // Assert that op_b and op_c are 48-bit values (upper 16 bits = 0).
+        builder
+            .when(local.ecall_mul_send_to_table)
+            .assert_zero(local.op_b_val()[3].into());
+        builder
+            .when(local.ecall_mul_send_to_table)
+            .assert_zero(local.op_c_val()[3].into());
+
+        let op_b_val = local.op_b_val();
+        let op_c_val = local.op_c_val();
+        let arg1: [_; 3] = [op_b_val[0], op_b_val[1], op_b_val[2]];
+        let arg2: [_; 3] = [op_c_val[0], op_c_val[1], op_c_val[2]];
+
         builder.looking_syscall(
             local.clk,
-            syscall_id,
-            local.op_b_val().reduce::<CB>(),
-            local.op_c_val().reduce::<CB>(),
+            syscall_id.clone(),
+            arg1,
+            arg2,
             local.ecall_mul_send_to_table,
         );
 
@@ -62,7 +98,7 @@ impl<F: Field> CpuChip<F> {
         let is_enter_unconstrained = {
             IsZeroGadget::<CB::F>::eval(
                 builder,
-                syscall_id
+                syscall_id.clone()
                     - CB::Expr::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
                 ecall_cols.is_enter_unconstrained,
                 is_ecall_instruction.clone(),
@@ -82,7 +118,7 @@ impl<F: Field> CpuChip<F> {
         };
 
         // When syscall_id is ENTER_UNCONSTRAINED, the new value of op_a should be 0.
-        let zero_word = Word::<CB::F>::from(0);
+        let zero_word = Word([CB::Expr::ZERO; 4]);
         builder
             .when(is_ecall_instruction.clone() * is_enter_unconstrained)
             .assert_word_eq(local.op_a_val(), zero_word);
@@ -170,20 +206,22 @@ impl<F: Field> CpuChip<F> {
                 );
         }
 
-        // Retrieve the expected public values digest word to check against the one passed into the
-        // commit ecall. Note that for the interaction builder, it will not have any digest words,
-        // since it's used during AIR compilation time to parse for all send/receives. Since
-        // that interaction builder will ignore the other constraints of the air, it is safe
-        // to not include the verification check of the expected public values digest word.
+        // TODO: committed_value_digest is a u32 value (occupies only limbs[0] and limbs[1]).
+        // In rv64, the register (op_c) may hold a sign-extended 64-bit value,
+        // so we only compare the lower 2 limbs.
         let expected_pv_digest_word =
             builder.index_word_array(&commit_digest, &ecall_columns.index_bitmap);
 
         let digest_word = local.op_c_access.prev_value();
+        let commit_cond = local.opcode_selector.is_ecall * is_commit;
 
         // Verify the public_values_digest_word.
         builder
-            .when(local.opcode_selector.is_ecall * is_commit)
-            .assert_word_eq(expected_pv_digest_word, *digest_word);
+            .when(commit_cond.clone())
+            .assert_eq(expected_pv_digest_word[0].clone(), digest_word[0]);
+        builder
+            .when(commit_cond)
+            .assert_eq(expected_pv_digest_word[1].clone(), digest_word[1]);
 
         let expected_deferred_proofs_digest_element =
             builder.index_array(&deferred_proofs_digest, &ecall_columns.index_bitmap);
@@ -197,6 +235,7 @@ impl<F: Field> CpuChip<F> {
             .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs)
             .assert_eq(
                 expected_deferred_proofs_digest_element,
+                // TODO: check if operand is u32 for commit_deferred_proofs
                 digest_word.reduce::<CB>(),
             );
     }
@@ -217,7 +256,9 @@ impl<F: Field> CpuChip<F> {
             .when(is_halt.clone() + local.opcode_selector.is_unimpl)
             .assert_zero(next.is_real);
 
-        builder.when(is_halt.clone()).assert_zero(local.next_pc);
+        builder
+            .when(is_halt.clone())
+            .assert_addr_zero(local.next_pc);
 
         // Verify that the operand that was range checked is op_b.
         let ecall_columns = local.opcode_specific.ecall();
@@ -225,6 +266,7 @@ impl<F: Field> CpuChip<F> {
             .when(is_halt.clone())
             .assert_word_eq(local.op_b_val(), ecall_columns.operand_to_check);
 
+        // TODO: check if operand is u32 for halt
         builder.when(is_halt.clone()).assert_eq(
             local.op_b_access.value().reduce::<CB>(),
             public_values.exit_code.clone(),
@@ -243,7 +285,14 @@ impl<F: Field> CpuChip<F> {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.op_a_access.prev_value();
 
-        let syscall_id = syscall_code[0];
+        // Use U16ToU8Gadget (unsafe variant — range check already done in eval_ecall).
+        let syscall_code_u16: [CB::Expr; 4] = syscall_code.0.map(Into::into);
+        let syscall_bytes = U16ToU8Gadget::<CB::F>::eval_u16_to_u8_unsafe(
+            builder,
+            syscall_code_u16,
+            ecall_cols.syscall_code_bytes,
+        );
+        let syscall_id = syscall_bytes[0].clone();
 
         // Compute whether this ecall is HALT.
         let is_halt = {
@@ -272,13 +321,20 @@ impl<F: Field> CpuChip<F> {
         // The syscall code is the read-in value of op_a at the start of the instruction.
         let syscall_code = local.op_a_access.prev_value();
 
-        let syscall_id = syscall_code[0];
+        // Use U16ToU8Gadget (unsafe variant — range check already done in eval_ecall).
+        let syscall_code_u16: [CB::Expr; 4] = syscall_code.0.map(Into::into);
+        let syscall_bytes = U16ToU8Gadget::<CB::F>::eval_u16_to_u8_unsafe(
+            builder,
+            syscall_code_u16,
+            ecall_cols.syscall_code_bytes,
+        );
+        let syscall_id = syscall_bytes[0].clone();
 
         // Compute whether this ecall is COMMIT.
         let is_commit = {
             IsZeroGadget::<CB::F>::eval(
                 builder,
-                syscall_id - CB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
+                syscall_id.clone() - CB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
                 ecall_cols.is_commit,
                 is_ecall_instruction.clone(),
             );
@@ -309,11 +365,6 @@ impl<F: Field> CpuChip<F> {
     ) -> CB::Expr {
         let is_ecall_instruction = self.is_ecall_instruction::<CB>(&local.opcode_selector);
 
-        // The syscall code is the read-in value of op_a at the start of the instruction.
-        let syscall_code = local.op_a_access.prev_value();
-
-        let num_extra_cycles = syscall_code[2];
-
-        num_extra_cycles * is_ecall_instruction.clone()
+        local.num_extra_clk * is_ecall_instruction.clone()
     }
 }

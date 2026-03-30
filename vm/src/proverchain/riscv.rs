@@ -328,7 +328,9 @@ where
     }
 
     /// Emulate and collect RISCOF signatures from memory between the given addresses
-    pub fn test_emulator(&self, begin: u32, end: u32) -> Vec<u32> {
+    /// Note: Accepts u64 for RV64 compatibility, but truncates to u32 internally
+    /// TODO: Implement full RV64 support
+    pub fn test_emulator(&self, begin: u64, end: u64) -> Vec<u64> {
         use crate::emulator::riscv::riscv_emulator::RiscvEmulator;
 
         let mut emulator =
@@ -395,7 +397,9 @@ where
         shape_config: Option<Self::ShapeConfig>,
     ) -> Self {
         let (config, elf) = input;
-        let mut program = Compiler::new(SourceType::RISCV, elf).compile();
+        let mut program = Compiler::new(SourceType::RISCV, elf)
+            .expect("failed to parse RISC-V ELF")
+            .compile();
 
         if vk_verification_enabled() {
             if let Some(shape_config) = shape_config.clone() {
@@ -618,10 +622,15 @@ where
             let snapshot_msg_tx = snapshot_msg_tx.clone();
             let shared_ds = shared_ds.clone();
 
-            while let Ok((batch_idx, snapshot, done, _global_clk)) = snap_rx.recv() {
+            while let Ok((batch_idx, snapshot, done, global_clk)) = snap_rx.recv() {
                 let t_recover_and_emu = Instant::now();
-                let mut emu =
-                    MetaEmulator::recover_riscv(witness, snapshot, None, shared_ds.clone());
+                let mut emu = MetaEmulator::recover_riscv(
+                    witness,
+                    snapshot,
+                    None,
+                    shared_ds.clone(),
+                    global_clk,
+                );
                 let report = emu.next_record_batch(&mut |rec| {
                     snapshot_msg_tx
                         .send(Msg::Record {

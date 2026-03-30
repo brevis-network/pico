@@ -14,14 +14,16 @@ pub const SHA_COMPRESS_K: [u32; 64] = [
 /// SHA256 compress syscall implementation.
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::many_single_char_names)]
-pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u32, h_ptr: u32) {
+pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u64, h_ptr: u64) {
     assert_ne!(w_ptr, h_ptr);
+    assert!(w_ptr.is_multiple_of(8), "w_ptr is unaligned");
+    assert!(h_ptr.is_multiple_of(8), "h_ptr is unaligned");
 
     let clk = core.clk;
 
     // Execute the "initialize" phase where we read in the h values.
     let mut hx = [0u32; 8];
-    core.read_mem_span_at_clk(h_ptr, &mut hx, clk);
+    core.read_mem_low32_slot_span_at_clk(h_ptr, &mut hx, clk);
 
     // Execute the "compress" phase.
     let mut a = hx[0];
@@ -33,7 +35,7 @@ pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u32, h_ptr: u32) {
     let mut g = hx[6];
     let mut h = hx[7];
     let mut w = [0u32; 64];
-    core.read_mem_span_at_clk(w_ptr, &mut w, clk);
+    core.read_mem_low32_slot_span_at_clk(w_ptr, &mut w, clk);
     for i in 0..64 {
         let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
         let ch = (e & f) ^ (!e & g);
@@ -63,31 +65,32 @@ pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u32, h_ptr: u32) {
     for i in 0..8 {
         result[i] = hx[i].wrapping_add(v[i]);
     }
-    core.write_mem_span_at_clk(h_ptr, &result, clk + 1);
+    core.write_mem_low32_slot_span_at_clk(h_ptr, &result, clk + 1);
 }
 
 /// SHA256 extend syscall implementation.
-pub fn sha256_extend(core: &mut AotEmulatorCore, w_ptr: u32) {
+pub fn sha256_extend(core: &mut AotEmulatorCore, w_ptr: u64) {
+    assert!(w_ptr.is_multiple_of(8), "w_ptr is unaligned");
     let mut clk = core.clk;
 
-    for i in 16..64 {
+    for i in 16u64..64 {
         // Read w[i-15].
-        let w_i_minus_15 = core.read_mem_fast_at_clk(w_ptr + (i - 15) * 4, clk);
+        let w_i_minus_15 = core.read_mem_low32_slot_at_clk(w_ptr + (i - 15) * 8, clk);
 
         // Compute `s0`.
         let s0 = w_i_minus_15.rotate_right(7) ^ w_i_minus_15.rotate_right(18) ^ (w_i_minus_15 >> 3);
 
         // Read w[i-2].
-        let w_i_minus_2 = core.read_mem_fast_at_clk(w_ptr + (i - 2) * 4, clk);
+        let w_i_minus_2 = core.read_mem_low32_slot_at_clk(w_ptr + (i - 2) * 8, clk);
 
         // Compute `s1`.
         let s1 = w_i_minus_2.rotate_right(17) ^ w_i_minus_2.rotate_right(19) ^ (w_i_minus_2 >> 10);
 
         // Read w[i-16].
-        let w_i_minus_16 = core.read_mem_fast_at_clk(w_ptr + (i - 16) * 4, clk);
+        let w_i_minus_16 = core.read_mem_low32_slot_at_clk(w_ptr + (i - 16) * 8, clk);
 
         // Read w[i-7].
-        let w_i_minus_7 = core.read_mem_fast_at_clk(w_ptr + (i - 7) * 4, clk);
+        let w_i_minus_7 = core.read_mem_low32_slot_at_clk(w_ptr + (i - 7) * 8, clk);
 
         // Compute `w_i`.
         let w_i = s1
@@ -96,7 +99,7 @@ pub fn sha256_extend(core: &mut AotEmulatorCore, w_ptr: u32) {
             .wrapping_add(w_i_minus_7);
 
         // Write w[i].
-        core.write_mem_fast_at_clk(w_ptr + i * 4, w_i, clk);
+        core.write_mem_low32_slot_at_clk(w_ptr + i * 8, w_i, clk);
         clk += 1;
     }
 }

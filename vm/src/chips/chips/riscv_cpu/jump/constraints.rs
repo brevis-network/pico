@@ -1,8 +1,7 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
-    chips::gadgets::field_range_check::word_range::FieldWordRangeChecker,
-    compiler::riscv::opcode::Opcode,
-    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder},
+    compiler::{riscv::opcode::Opcode, word::Word},
+    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
 };
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
@@ -15,68 +14,68 @@ impl<F: Field> CpuChip<F> {
         local: &CpuCols<CB::Var>,
         next: &CpuCols<CB::Var>,
     ) {
-        // Get the jump specific columns
-        let jump_columns = local.opcode_specific.jump();
-
         let is_jump_instruction = local.opcode_selector.is_jal + local.opcode_selector.is_jalr;
 
         // Verify that the local.pc + 4 is saved in op_a for both jump instructions.
         // When op_a is set to register X0, the RISC-V spec states that the jump instruction will
         // not have a return destination address (it is effectively a GOTO command).  In this case,
         // we shouldn't verify the return address.
-        builder
-            .when(is_jump_instruction.clone())
-            .when_not(local.instruction.op_a_0)
-            .assert_eq(
-                local.op_a_val().reduce::<CB>(),
-                local.pc + CB::F::from_canonical_u8(4),
-            );
+        let pc_as_word = Word([
+            local.pc[0].into(),
+            local.pc[1].into(),
+            local.pc[2].into(),
+            CB::Expr::ZERO,
+        ]);
+        let op_a_as_word = Word([
+            local.op_a_val()[0].into(),
+            local.op_a_val()[1].into(),
+            local.op_a_val()[2].into(),
+            local.op_a_val()[3].into(),
+        ]);
+        let condition = is_jump_instruction.clone() * (CB::Expr::ONE - local.instruction.op_a_0);
+        pc_as_word.add_limb_with_carry(
+            builder,
+            condition,
+            CB::Expr::from_canonical_u8(4),
+            op_a_as_word,
+            &local.pc_carry_a,
+        );
 
         // Verify that the word form of local.pc is correct for JAL instructions.
         builder
             .when(local.opcode_selector.is_jal)
-            .assert_eq(jump_columns.pc.reduce::<CB>(), local.pc);
+            .assert_addr_eq(local.pc, local.pc);
 
         // Verify that the word form of next.pc is correct for both jump instructions.
         builder
             .when_transition()
             .when(next.is_real)
             .when(is_jump_instruction.clone())
-            .assert_eq(jump_columns.next_pc.reduce::<CB>(), next.pc);
+            .assert_addr_eq(local.next_pc, next.pc);
 
-        // When the last row is real and it's a jump instruction, assert that local.next_pc <==>
-        // jump_column.next_pc
+        // Assert that the 4th limb (bits 48-63) is 0.
         builder
-            .when(local.is_real)
             .when(is_jump_instruction.clone())
-            .assert_eq(jump_columns.next_pc.reduce::<CB>(), local.next_pc);
-
-        // Range check op_a, pc, and next_pc.
-        FieldWordRangeChecker::<CB::F>::range_check(
-            builder,
-            local.op_a_val(),
-            jump_columns.op_a_range_checker,
-            is_jump_instruction.clone(),
-        );
-
-        FieldWordRangeChecker::<CB::F>::range_check(
-            builder,
-            jump_columns.pc,
-            jump_columns.pc_range_checker,
-            local.opcode_selector.is_jal.into(),
-        );
-        FieldWordRangeChecker::<CB::F>::range_check(
-            builder,
-            jump_columns.next_pc,
-            jump_columns.next_pc_range_checker,
-            is_jump_instruction.clone(),
-        );
+            .assert_zero(local.op_a_val()[3].into());
 
         // Verify that the new pc is calculated correctly for JAL instructions.
+        // Convert Addr to Word (zero-extend to 64-bit)
+        let pc_as_word = Word([
+            local.pc[0].into(),
+            local.pc[1].into(),
+            local.pc[2].into(),
+            F::ZERO.into(),
+        ]);
+        let next_pc_as_word = Word([
+            local.next_pc[0].into(),
+            local.next_pc[1].into(),
+            local.next_pc[2].into(),
+            F::ZERO.into(),
+        ]);
         builder.looking_alu(
             CB::Expr::from_canonical_u32(Opcode::ADD as u32),
-            jump_columns.next_pc,
-            jump_columns.pc,
+            next_pc_as_word.clone(),
+            pc_as_word,
             local.op_b_val(),
             local.opcode_selector.is_jal,
         );
@@ -84,7 +83,7 @@ impl<F: Field> CpuChip<F> {
         // Verify that the new pc is calculated correctly for JALR instructions.
         builder.looking_alu(
             CB::Expr::from_canonical_u32(Opcode::ADD as u32),
-            jump_columns.next_pc,
+            next_pc_as_word.clone(),
             local.op_b_val(),
             local.op_c_val(),
             local.opcode_selector.is_jalr,

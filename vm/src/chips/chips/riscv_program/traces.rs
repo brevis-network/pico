@@ -6,7 +6,7 @@ use super::{
     ProgramChip,
 };
 use crate::{
-    compiler::riscv::program::Program,
+    compiler::{addr::Addr, riscv::program::Program},
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator},
     machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
@@ -36,10 +36,10 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
             .iter()
             .enumerate()
             .map(|(i, instruction)| {
-                let pc = program.pc_base + (i as u32 * 4);
+                let pc = program.pc_base + (i as u64 * 4);
                 let mut row = [F::ZERO; NUM_PROGRAM_PREPROCESSED_COLS];
                 let cols: &mut ProgramPreprocessedCols<F> = row.as_mut_slice().borrow_mut();
-                cols.pc = F::from_canonical_u32(pc);
+                cols.pc = Addr::try_from(pc).unwrap();
                 cols.instruction.populate(*instruction);
                 cols.selectors.populate(*instruction);
 
@@ -62,7 +62,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
         // Collect instruction counts in parallel using a thread-safe HashMap
-        let instruction_counts: HashMap<u32, usize> = input
+        let instruction_counts: HashMap<u64, usize> = input
             .cpu_events
             .pico_iter()
             .pico_fold(HashMap::new, |mut acc, event| {
@@ -84,7 +84,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
             .pico_iter()
             .enumerate()
             .map(|(i, _)| {
-                let pc = input.program.pc_base + (i as u32 * 4);
+                let pc = input.program.pc_base + (i as u64 * 4);
                 let mut row = [F::ZERO; NUM_PROGRAM_MULT_COLS];
                 let cols: &mut ProgramMultiplicityCols<F> = row.as_mut_slice().borrow_mut();
                 cols.multiplicity =

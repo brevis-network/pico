@@ -1,8 +1,15 @@
-use crate::compiler::riscv::register::Register;
+use crate::{compiler::riscv::register::Register, emulator::riscv::event_types::RvValue};
 
 use super::{super::emulator::RiscvEmulator, Syscall, SyscallCode, SyscallContext};
 
 pub(crate) struct WriteSyscall;
+
+impl WriteSyscall {
+    #[inline(always)]
+    fn decode_len_usize(value: RvValue) -> usize {
+        usize::try_from(value).expect("write syscall byte count does not fit usize")
+    }
+}
 
 impl Syscall for WriteSyscall {
     /// Handle writes to file descriptors during emulation.
@@ -29,17 +36,22 @@ impl Syscall for WriteSyscall {
         &self,
         ctx: &mut SyscallContext,
         _: SyscallCode,
-        arg1: u32,
-        arg2: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
         let a2 = Register::X12;
         let rt = &mut ctx.rt;
-        let fd = arg1;
+        let fd = u32::try_from(arg1).unwrap_or_else(|_| panic!("write fd overflow: {}", arg1));
         let write_buf = arg2;
-        let nbytes = rt.register(a2);
+        let nbytes = Self::decode_len_usize(rt.register(a2));
         // Read nbytes from memory starting at write_buf.
         let bytes = (0..nbytes)
-            .map(|i| rt.byte(write_buf + i))
+            .map(|i| {
+                let addr = write_buf
+                    .checked_add(i as u64)
+                    .expect("write syscall address overflow");
+                rt.byte(addr)
+            })
             .collect::<Vec<u8>>();
         let slice = bytes.as_slice();
         if fd == 1 || fd == 2 {

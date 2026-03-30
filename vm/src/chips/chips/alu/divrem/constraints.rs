@@ -66,13 +66,13 @@ use crate::{
             columns::{DivRemCols, DivRemValueCols},
             DivRemChip,
         },
-        gadgets::{is_equal_word::IsEqualWordGadget, is_zero_word::IsZeroWordGadget},
+        gadgets::{
+            add::AddGadget, is_equal_word::IsEqualWordGadget, is_zero_word::IsZeroWordGadget,
+            lt_word_u16::LtWordU16Gadget, msb::U16MSBGadget, mul::MulGadget,
+        },
     },
-    compiler::{
-        riscv::opcode::{ByteOpcode, Opcode},
-        word::Word,
-    },
-    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
+    compiler::{riscv::opcode::Opcode, word::Word},
+    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder},
     primitives::consts::{LONG_WORD_SIZE, WORD_SIZE},
 };
 use p3_air::{Air, AirBuilder};
@@ -88,7 +88,7 @@ where
         let main = builder.main();
         let local = main.row_slice(0);
         let local: &DivRemCols<CB::Var> = (*local).borrow();
-        let base = CB::F::from_canonical_u32(1 << 8);
+        let base = CB::F::from_canonical_u32(1 << 16);
         let one: CB::Expr = CB::F::ONE.into();
         let zero: CB::Expr = CB::F::ZERO.into();
 
@@ -97,40 +97,67 @@ where
             b: local_b,
             c: local_c,
             quotient: local_quotient,
+            quotient_comp: local_quotient_comp,
             remainder: local_remainder,
+            remainder_comp: local_remainder_comp,
             abs_remainder: local_abs_remainder,
             abs_c: local_abs_c,
             max_abs_c_or_1: local_max_abs_c_or_1,
             c_times_quotient: local_c_times_quotient,
             carry: local_carry,
+            c_times_quotient_lower: local_c_times_quotient_lower,
+            c_times_quotient_upper: local_c_times_quotient_upper,
+            remainder_lt_gadget: local_remainder_lt_gadget,
+            c_neg_gadget: local_c_neg_operation,
+            rem_neg_gadget: local_rem_neg_operation,
             is_c_0: local_is_c_0,
             is_div: local_is_div,
             is_divu: local_is_divu,
             is_rem: local_is_rem,
             is_remu: local_is_remu,
+            is_divw: local_is_divw,
+            is_remw: local_is_remw,
+            is_divuw: local_is_divuw,
+            is_remuw: local_is_remuw,
             is_overflow: local_is_overflow,
             is_overflow_b: local_is_overflow_b,
             is_overflow_c: local_is_overflow_c,
             b_msb: local_b_msb,
             rem_msb: local_rem_msb,
             c_msb: local_c_msb,
+            quot_msb: local_quot_msb,
             b_neg: local_b_neg,
+            b_neg_not_overflow: local_b_neg_not_overflow,
+            b_not_neg_not_overflow: local_b_not_neg_not_overflow,
             rem_neg: local_rem_neg,
             c_neg: local_c_neg,
             abs_c_alu_event: local_abs_c_alu_event,
             abs_rem_alu_event: local_abs_rem_alu_event,
             is_real: local_is_real,
+            is_real_not_word: local_is_real_not_word,
             remainder_check_multiplicity: local_remainder_check_multiplicity,
+            ..
         } in local.values
         {
+            let is_word_operation = local_is_divw + local_is_remw + local_is_divuw + local_is_remuw;
+            let is_unsigned_word_operation = local_is_divuw + local_is_remuw;
+            let is_signed_word_operation = local_is_divw + local_is_remw;
+            let is_not_word_operation = one.clone() - is_word_operation.clone();
+            // Negative if and only if op code is signed & MSB = 1.
+            let is_signed_type = local_is_div + local_is_rem + local_is_divw + local_is_remw;
+
+            // Constraint: is_real_not_word = is_real * (1 - is_word_operation)
+            builder.assert_eq(
+                local_is_real_not_word,
+                local_is_real * (one.clone() - is_word_operation.clone()),
+            );
+
             // Calculate whether b, remainder, and c are negative.
             {
-                // Negative if and only if op code is signed & MSB = 1.
-                let is_signed_type = local_is_div + local_is_rem;
                 let msb_sign_pairs = [
-                    (local_b_msb, local_b_neg),
-                    (local_rem_msb, local_rem_neg),
-                    (local_c_msb, local_c_neg),
+                    (local_b_msb.msb, local_b_neg),
+                    (local_rem_msb.msb, local_rem_neg),
+                    (local_c_msb.msb, local_c_neg),
                 ];
 
                 for msb_sign_pair in msb_sign_pairs.iter() {
@@ -140,79 +167,180 @@ where
                 }
             }
 
+            // Set up `quotient_comp` and `remainder_comp`.
+            // `quotient_comp` is defined as following:
+            // - `quotient` for 64-bit operations and signed word operations.
+            // - for signed operations, this is the 32-bit result sign-extended to 64 bits.
+            // - `quotient` but truncated to 32-bit for unsigned word operations.
+            {
+                for i in 0..WORD_SIZE / 2 {
+                    builder.assert_eq(local_quotient_comp[i], local_quotient[i]);
+                }
+
+                for i in WORD_SIZE / 2..WORD_SIZE {
+                    builder
+                        .when(is_unsigned_word_operation.clone())
+                        .assert_eq(local_quotient_comp[i], zero.clone());
+                    builder.when(is_signed_word_operation.clone()).assert_eq(
+                        local_quotient_comp[i],
+                        local_quot_msb.msb * CB::F::from_canonical_u16(u16::MAX),
+                    );
+                    builder.when(is_word_operation.clone()).assert_eq(
+                        local_quotient[i],
+                        local_quot_msb.msb * CB::F::from_canonical_u16(u16::MAX),
+                    );
+                    builder
+                        .when(is_not_word_operation.clone())
+                        .assert_eq(local_quotient_comp[i], local_quotient[i]);
+                }
+
+                // `remainder_comp` is defined as following:
+                // - `remainder` for 64-bit operations and signed word operations.
+                // - for signed operations, this is the 32-bit result sign-extended to 64 bits.
+                // - `remainder_comp` but truncated to 32-bit for unsigned word operations.
+                for i in 0..WORD_SIZE / 2 {
+                    builder.assert_eq(local_remainder_comp[i], local_remainder[i]);
+                }
+
+                for i in WORD_SIZE / 2..WORD_SIZE {
+                    builder
+                        .when(is_unsigned_word_operation.clone())
+                        .assert_eq(local_remainder_comp[i], zero.clone());
+                    builder.when(is_signed_word_operation.clone()).assert_eq(
+                        local_remainder_comp[i],
+                        local_rem_msb.msb * CB::F::from_canonical_u16(u16::MAX),
+                    );
+                    builder.when(is_word_operation.clone()).assert_eq(
+                        local_remainder[i],
+                        local_rem_msb.msb * CB::F::from_canonical_u16(u16::MAX),
+                    );
+                    builder
+                        .when(is_not_word_operation.clone())
+                        .assert_eq(local_remainder_comp[i], local_remainder[i]);
+                }
+            }
+
             // Use the mul table to compute c * quotient and compare it to local.c_times_quotient.
             {
-                let lower_half: [CB::Expr; 4] = [
-                    local_c_times_quotient[0].into(),
-                    local_c_times_quotient[1].into(),
-                    local_c_times_quotient[2].into(),
-                    local_c_times_quotient[3].into(),
-                ];
-
-                // The lower 4 bytes of c_times_quotient must match the lower 4 bytes of (c * quotient).
-                builder.looking_alu(
-                    CB::Expr::from_canonical_u32(Opcode::MUL as u32),
-                    Word(lower_half),
-                    local_quotient,
+                // The lower 8 bytes of c_times_quotient are always computed by `MUL` opcode.
+                MulGadget::<CB::F>::eval(
+                    builder,
+                    Word(local_c_times_quotient[..4].try_into().unwrap()),
+                    local_quotient_comp,
                     local_c,
-                    local_is_real,
+                    local_c_times_quotient_lower,
+                    local_is_real.into(),
+                    local_is_real.into(), // is_mul
+                    zero.clone(),         // is_mulh
+                    zero.clone(),         // is_mulw
+                    zero.clone(),         // is_mulhu
+                    zero.clone(),         // is_mulhsu
                 );
 
-                let opcode_for_upper_half = {
-                    let mulh = CB::Expr::from_canonical_u32(Opcode::MULH as u32);
-                    let mulhu = CB::Expr::from_canonical_u32(Opcode::MULHU as u32);
-                    let is_signed = local_is_div + local_is_rem;
-                    let is_unsigned = local_is_divu + local_is_remu;
-                    is_signed * mulh + is_unsigned * mulhu
-                };
+                // SAFETY: Since exactly one flag is turned on, `is_mulh` and `is_mulhu` are correct.
+                let is_mulh = local_is_div + local_is_rem;
+                let is_mulhu = local_is_divu + local_is_remu;
 
-                let upper_half: [CB::Expr; 4] = [
-                    local_c_times_quotient[4].into(),
-                    local_c_times_quotient[5].into(),
-                    local_c_times_quotient[6].into(),
-                    local_c_times_quotient[7].into(),
-                ];
-
-                builder.looking_alu(
-                    opcode_for_upper_half,
-                    Word(upper_half),
-                    local_quotient,
+                // The upper 8 bytes of c_times_quotient are computed by `MULH` or `MULHU` opcode.
+                MulGadget::<CB::F>::eval(
+                    builder,
+                    Word(local_c_times_quotient[4..].try_into().unwrap()),
+                    local_quotient_comp,
                     local_c,
-                    local_is_real,
+                    local_c_times_quotient_upper,
+                    local_is_real_not_word.into(),
+                    zero.clone(),     // is_mul
+                    is_mulh.clone(),  // is_mulh
+                    zero.clone(),     // is_mulw
+                    is_mulhu.clone(), // is_mulhu
+                    zero.clone(),     // is_mulhsu
                 );
             }
 
-            // Calculate is_overflow. is_overflow = is_equal(b, -2^{31}) * is_equal(c, -1) * is_signed
+            // Calculate is_overflow. This is true if and only if `b, c` are overflow cases, and it's a
+            // signed operation. The overflow cases for `b, c` are defined as
+            // - For word operations, `b == -2^31` and `c == -1`.
+            // - For 64-bit operations, `b == -2^63`, and `c == -1`.
             {
+                // 1. For 64-bit operations (non-word): check b == i64::MIN, c == -1
                 IsEqualWordGadget::<CB::F>::eval(
                     builder,
                     local_b.map(|x| x.into()),
-                    Word::from(i32::MIN as u32).map(|x: CB::F| x.into()),
+                    Word::from(i64::MIN as u64).map(|x: CB::F| x.into()),
                     local_is_overflow_b,
-                    local_is_real.into(),
+                    local_is_real_not_word.into(),
                 );
 
                 IsEqualWordGadget::<CB::F>::eval(
                     builder,
                     local_c.map(|x| x.into()),
-                    Word::from(-1i32 as u32).map(|x: CB::F| x.into()),
+                    Word::from(-1i64 as u64).map(|x: CB::F| x.into()),
                     local_is_overflow_c,
-                    local_is_real.into(),
+                    local_is_real_not_word.into(),
                 );
 
-                let is_signed = local_is_div + local_is_rem;
+                // 2. For word operations: use truncated b/c (lower 32 bits)
+                let truncated_b: Word<CB::Expr> = Word([
+                    local_b[0].into(),
+                    local_b[1].into(),
+                    zero.clone(),
+                    zero.clone(),
+                ]);
+                let truncated_c: Word<CB::Expr> = Word([
+                    local_c[0].into(),
+                    local_c[1].into(),
+                    zero.clone(),
+                    zero.clone(),
+                ]);
+
+                IsEqualWordGadget::<CB::F>::eval(
+                    builder,
+                    truncated_b,
+                    Word::from(i32::MIN as u32 as u64).map(|x: CB::F| x.into()),
+                    local_is_overflow_b,
+                    is_word_operation.clone(),
+                );
+
+                IsEqualWordGadget::<CB::F>::eval(
+                    builder,
+                    truncated_c,
+                    Word::from(-1i32 as u32 as u64).map(|x: CB::F| x.into()),
+                    local_is_overflow_c,
+                    is_word_operation.clone(),
+                );
 
                 builder.assert_eq(
                     local_is_overflow,
                     local_is_overflow_b.is_diff_zero.result
                         * local_is_overflow_c.is_diff_zero.result
-                        * is_signed,
+                        * is_signed_type.clone(),
                 );
+
+                // Compute b_neg_not_overflow and b_not_neg_not_overflow
+                builder.assert_eq(
+                    local_b_neg_not_overflow,
+                    local_b_neg * (one.clone() - local_is_overflow),
+                );
+                builder.assert_eq(
+                    local_b_not_neg_not_overflow,
+                    (one.clone() - local_b_neg) * (one.clone() - local_is_overflow),
+                );
+
+                // For overflow cases, explicitly constrain the result.
+                // When b = -2^31 and c = -1 (overflow case), quotient = b and remainder = 0
+                for i in 0..WORD_SIZE {
+                    builder
+                        .when(local_is_overflow)
+                        .assert_eq(local_quotient[i], local_b[i]);
+                    builder
+                        .when(local_is_overflow)
+                        .assert_eq(local_remainder[i], zero.clone());
+                }
             }
 
             // Add remainder to product c * quotient, and compare it to b.
             {
-                let sign_extension = local_rem_neg * CB::F::from_canonical_u8(u8::MAX);
+                let sign_extension = local_rem_neg * CB::F::from_canonical_u16(u16::MAX);
                 let mut c_times_quotient_plus_remainder: Vec<CB::Expr> =
                     vec![CB::F::ZERO.into(); LONG_WORD_SIZE];
 
@@ -228,7 +356,7 @@ where
                             if i < WORD_SIZE {
                                 *quotient_plus_remainder_times = quotient_plus_remainder_times
                                     .clone()
-                                    + local_remainder[i].into();
+                                    + local_remainder_comp[i].into();
                             } else {
                                 // If rem is negative, add 0xff to the upper 4 bytes.
                                 *quotient_plus_remainder_times =
@@ -236,6 +364,8 @@ where
                             }
 
                             // Propagate carry.
+                            // SAFETY: Since carry is a boolean and `c_times_quotient_plus_remainder` are u16s,
+                            // the results are guaranteed to be correct by the constraints.
                             *quotient_plus_remainder_times =
                                 quotient_plus_remainder_times.clone() - local_carry[i] * base;
                             if i > 0 {
@@ -248,42 +378,30 @@ where
                         // Compare c_times_quotient_plus_remainder to b by checking each limb.
                         {
                             if i < WORD_SIZE {
-                                // The lower 4 bytes of the result must match the corresponding bytes in b.
+                                // The lower 4 bytes: when NOT overflow, must match b
                                 builder
+                                    .when_not(local_is_overflow)
                                     .assert_eq(local_b[i], quotient_plus_remainder_times.clone());
                             } else {
-                                // The upper 4 bytes must reflect the sign of b in two's complement:
-                                // - All 1s (0xff) for negative b.
-                                // - All 0s for non-negative b.
-                                let not_overflow = one.clone() - local_is_overflow;
-                                builder
-                                    .when(not_overflow.clone())
-                                    .when(local_b_neg)
-                                    .assert_eq(
-                                        quotient_plus_remainder_times.clone(),
-                                        CB::F::from_canonical_u8(u8::MAX),
-                                    );
-                                builder
-                                    .when(not_overflow.clone())
-                                    .when_ne(one.clone(), local_b_neg)
-                                    .assert_zero(quotient_plus_remainder_times.clone());
-
-                                // The only exception to the upper-4-byte check is the overflow case.
-                                builder
-                                    .when(local_is_overflow)
-                                    .assert_zero(quotient_plus_remainder_times.clone());
+                                // The upper 4 bytes: when NOT overflow, must equal b_neg * 0xFFFF
+                                builder.when_not(local_is_overflow).assert_eq(
+                                    local_b_neg * CB::F::from_canonical_u16(u16::MAX),
+                                    quotient_plus_remainder_times.clone(),
+                                );
                             }
                         }
                     });
+
+                builder.slice_range_check_u16(&c_times_quotient_plus_remainder, local_is_real);
             }
 
-            // a must equal remainder or quotient depending on the opcode.
+            // `a` must equal remainder or quotient depending on the opcode.
             for i in 0..WORD_SIZE {
                 builder
-                    .when(local_is_divu + local_is_div)
+                    .when(local_is_divu + local_is_div + local_is_divuw + local_is_divw)
                     .assert_eq(local_quotient[i], local_a[i]);
                 builder
-                    .when(local_is_remu + local_is_rem)
+                    .when(local_is_remu + local_is_rem + local_is_remuw + local_is_remw)
                     .assert_eq(local_remainder[i], local_a[i]);
             }
 
@@ -313,7 +431,7 @@ where
                     .assert_zero(local_b_neg); // b is not negative.
             }
 
-            // When division by 0, quotient must be 0xffffffff per RISC-V spec.
+            // When division by 0, quotient must be 0xffffffff_ffffffff = u64::MAX per RISC-V spec.
             {
                 // Calculate whether c is 0.
                 IsZeroWordGadget::<CB::F>::eval(
@@ -323,11 +441,18 @@ where
                     local_is_real.into(),
                 );
 
-                // If is_c_0 is true, then quotient must be 0xffffffff = u32::MAX.
+                // If is_c_0 is true, then quotient must be 0xffffffff_ffffffff = u64::MAX.
                 for i in 0..WORD_SIZE {
                     builder
                         .when(local_is_c_0.result)
-                        .assert_eq(local_quotient[i], CB::F::from_canonical_u8(u8::MAX));
+                        .assert_eq(local_quotient[i], CB::F::from_canonical_u16(u16::MAX));
+                }
+
+                // If is_c_0 is true, then the remainder must be b.
+                for i in 0..WORD_SIZE {
+                    builder
+                        .when(local_is_c_0.result)
+                        .assert_eq(local_remainder_comp[i], local_b[i]);
                 }
             }
 
@@ -394,42 +519,96 @@ where
                 builder.assert_eq(local_abs_c_alu_event, local_c_neg * local_is_real);
                 builder.assert_eq(local_abs_rem_alu_event, local_rem_neg * local_is_real);
 
+                // Evaluate c_neg_operation to compute absolute value of c.
+                // When c is negative, we verify c + abs_c = 0. When c is positive, c = abs_c.
+                AddGadget::<CB::F>::eval(
+                    builder,
+                    local_c,
+                    local_abs_c,
+                    local_c_neg_operation,
+                    local_abs_c_alu_event,
+                );
+                builder.slice_range_check_u16(&local_abs_c.0, local_is_real);
+
+                // Evaluate rem_neg_operation to compute absolute value of remainder.
+                // When remainder is negative, we verify remainder + abs_remainder = 0.
+                AddGadget::<CB::F>::eval(
+                    builder,
+                    local_remainder_comp,
+                    local_abs_remainder,
+                    local_rem_neg_operation,
+                    local_abs_rem_alu_event,
+                );
+                builder.slice_range_check_u16(&local_abs_remainder.0, local_is_real);
+
+                // When c is negative, the result of c_neg_operation should be 0.
+                builder.when(local_abs_c_alu_event).assert_word_eq(
+                    Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
+                    local_c_neg_operation.value,
+                );
+
+                // When remainder is negative, the result of rem_neg_operation should be 0.
+                builder.when(local_abs_rem_alu_event).assert_word_eq(
+                    Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
+                    local_rem_neg_operation.value,
+                );
+
                 // Dispatch abs(remainder) < max(abs(c), 1), this is equivalent to abs(remainder) <
                 // abs(c) if not division by 0.
-                builder.looking_alu(
-                    CB::Expr::from_canonical_u32(Opcode::SLTU as u32),
-                    Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
-                    local_abs_remainder,
-                    local_max_abs_c_or_1,
-                    local_remainder_check_multiplicity,
+                LtWordU16Gadget::<CB::F>::eval(
+                    builder,
+                    local_abs_remainder.map(|v| v.into()),
+                    local_max_abs_c_or_1.map(|v| v.into()),
+                    local_remainder_lt_gadget,
+                    local_remainder_check_multiplicity.into(),
                 );
             }
 
             // Check that the MSBs are correct.
             {
-                let msb_pairs = [
-                    (local_b_msb, local_b[WORD_SIZE - 1]),
-                    (local_c_msb, local_c[WORD_SIZE - 1]),
-                    (local_rem_msb, local_remainder[WORD_SIZE - 1]),
+                // If not word operation, we check the last limb.
+                let msb_pairs_not_word = [
+                    (local_b_msb, local_b[WORD_SIZE - 1].into()),
+                    (local_c_msb, local_c[WORD_SIZE - 1].into()),
+                    (local_rem_msb, local_remainder[WORD_SIZE - 1].into()),
                 ];
-                let opcode = CB::F::from_canonical_u32(ByteOpcode::MSB as u32);
-                for msb_pair in msb_pairs.iter() {
-                    let msb = msb_pair.0;
-                    let byte = msb_pair.1;
-                    builder.looking_byte(opcode, msb, byte, zero.clone(), local_is_real);
+                for msb_pair in msb_pairs_not_word.iter() {
+                    let (msb, byte) = msb_pair;
+                    U16MSBGadget::<CB::F>::eval(
+                        builder,
+                        byte.clone(),
+                        *msb,
+                        local_is_real_not_word.into(),
+                    );
+                }
+
+                // If word operation, we check the second limb.
+                let msb_pairs_word = [
+                    (local_b_msb, local_b[WORD_SIZE / 2 - 1].into()),
+                    (local_c_msb, local_c[WORD_SIZE / 2 - 1].into()),
+                    (local_rem_msb, local_remainder[WORD_SIZE / 2 - 1].into()),
+                ];
+                for msb_pair in msb_pairs_word.iter() {
+                    let (msb, byte) = msb_pair;
+                    U16MSBGadget::<CB::F>::eval(
+                        builder,
+                        byte.clone(),
+                        *msb,
+                        is_word_operation.clone(),
+                    );
                 }
             }
 
-            // Range check all the bytes.
+            // Range check all the u16 limbs and boolean carries.
             {
-                builder.slice_range_check_u8(&local_quotient.0, local_is_real);
-                builder.slice_range_check_u8(&local_remainder.0, local_is_real);
+                builder.slice_range_check_u16(&local_quotient.0, local_is_real);
+                builder.slice_range_check_u16(&local_remainder.0, local_is_real);
 
                 local_carry.iter().for_each(|carry| {
                     builder.assert_bool(*carry);
                 });
 
-                builder.slice_range_check_u8(&local_c_times_quotient, local_is_real);
+                builder.slice_range_check_u16(&local_c_times_quotient, local_is_real);
             }
 
             // Check that the flags are boolean.
@@ -439,11 +618,15 @@ where
                     local_is_divu,
                     local_is_rem,
                     local_is_remu,
+                    local_is_divw,
+                    local_is_remw,
+                    local_is_divuw,
+                    local_is_remuw,
                     local_is_overflow,
-                    local_b_msb,
-                    local_rem_msb,
-                    local_c_msb,
+                    local_is_real_not_word,
                     local_b_neg,
+                    local_b_neg_not_overflow,
+                    local_b_not_neg_not_overflow,
                     local_rem_neg,
                     local_c_neg,
                     local_is_real,
@@ -459,7 +642,14 @@ where
                 // Exactly one of the opcode flags must be on.
                 builder.assert_eq(
                     one.clone(),
-                    local_is_divu + local_is_remu + local_is_div + local_is_rem,
+                    local_is_divu
+                        + local_is_remu
+                        + local_is_div
+                        + local_is_rem
+                        + local_is_divw
+                        + local_is_remw
+                        + local_is_divuw
+                        + local_is_remuw,
                 );
 
                 let opcode = {
@@ -467,11 +657,19 @@ where
                     let remu: CB::Expr = CB::F::from_canonical_u32(Opcode::REMU as u32).into();
                     let div: CB::Expr = CB::F::from_canonical_u32(Opcode::DIV as u32).into();
                     let rem: CB::Expr = CB::F::from_canonical_u32(Opcode::REM as u32).into();
+                    let divw: CB::Expr = CB::F::from_canonical_u32(Opcode::DIVW as u32).into();
+                    let remw: CB::Expr = CB::F::from_canonical_u32(Opcode::REMW as u32).into();
+                    let divuw: CB::Expr = CB::F::from_canonical_u32(Opcode::DIVUW as u32).into();
+                    let remuw: CB::Expr = CB::F::from_canonical_u32(Opcode::REMUW as u32).into();
 
                     local_is_divu * divu
                         + local_is_remu * remu
                         + local_is_div * div
                         + local_is_rem * rem
+                        + local_is_divw * divw
+                        + local_is_remw * remw
+                        + local_is_divuw * divuw
+                        + local_is_remuw * remuw
                 };
 
                 builder.looked_alu(opcode, local_a, local_b, local_c, local_is_real);

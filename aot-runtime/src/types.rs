@@ -9,7 +9,7 @@ pub enum NextStep {
     /// Direct jump to a known block function
     Direct(fn(&mut AotEmulatorCore) -> Result<NextStep, String>),
     /// Dynamic jump to a PC (requires lookup or interpretation)
-    Dynamic(u32),
+    Dynamic(u64),
     /// Halt execution
     Halt,
 }

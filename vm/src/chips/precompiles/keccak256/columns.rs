@@ -1,7 +1,10 @@
 use core::mem::size_of;
 
 use crate::{
-    chips::chips::riscv_memory::read_write::columns::MemoryReadWriteCols,
+    chips::{
+        chips::riscv_memory::read_write::columns::MemoryReadWriteCols,
+        gadgets::{addr_add::AddrAddGadget, syscall_addr::SyscallAddrGadget},
+    },
     emulator::riscv::syscalls::precompiles::keccak256::permute::STATE_NUM_WORDS,
 };
 use p3_keccak_air::KeccakCols;
@@ -19,7 +22,10 @@ pub(crate) struct KeccakMemCols<T> {
 
     pub chunk: T,
     pub clk: T,
-    pub state_addr: T,
+    /// The state address with alignment validation.
+    pub state_addr: SyscallAddrGadget<T>,
+    /// Address gadgets for each of the 25 state words.
+    pub state_addrs: [AddrAddGadget<T>; STATE_NUM_WORDS],
 
     /// Memory columns for the state.
     pub state_mem: [MemoryReadWriteCols<T>; STATE_NUM_WORDS],

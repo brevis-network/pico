@@ -13,15 +13,18 @@ use crate::{
     compiler::{riscv::program::Program, word::Word},
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, PicoIterator, PicoSlice, PicoSliceMut},
-    machine::{
-        chip::ChipBehavior,
-        estimator::{EventCapture, EventSizeCapture},
-    },
-    primitives::consts::{BYTE_SIZE, SLL_DATAPAR, WORD_SIZE},
+    machine::chip::ChipBehavior,
+    primitives::consts::{SLL_DATAPAR, WORD_SIZE},
 };
 use p3_air::BaseAir;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
+
+use crate::{
+    compiler::riscv::opcode::Opcode,
+    machine::estimator::{EventCapture, EventSizeCapture},
+    primitives::consts::{u32_to_u16_limbs, u64_to_u16_limbs},
+};
 use std::{borrow::BorrowMut, marker::PhantomData};
 
 #[derive(Default, Clone, Debug)]
@@ -64,11 +67,12 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
         let padded_row_template = {
             let mut row = [F::ZERO; NUM_SLL_VALUE_COLS];
             let cols: &mut ShiftLeftValueCols<F> = row.as_mut_slice().borrow_mut();
-            cols.shift_by_n_bits[0] = F::ONE;
-            cols.shift_by_n_bytes[0] = F::ONE;
-            cols.bit_shift_multiplier = F::ONE;
+            cols.v_01 = F::ONE;
+            cols.v_012 = F::ONE;
+            cols.v_0123 = F::ONE;
             row
         };
+
         for i in populate_len..values.len() {
             values[i] = padded_row_template[i % NUM_SLL_VALUE_COLS];
         }
@@ -111,57 +115,62 @@ impl<F: Field> SLLChip<F> {
         cols: &mut ShiftLeftValueCols<F>,
         blu: &mut impl ByteRecordBehavior,
     ) {
-        let a = event.a.to_le_bytes();
-        let b = event.b.to_le_bytes();
-        let c = event.c.to_le_bytes();
-        cols.a = Word(a.map(F::from_canonical_u8));
-        cols.b = Word(b.map(F::from_canonical_u8));
-        cols.c = Word(c.map(F::from_canonical_u8));
-        cols.is_real = F::ONE;
+        let c = u64_to_u16_limbs(event.c)[0];
 
-        for i in 0..BYTE_SIZE {
-            // get c least 8 bits (a byte)
-            cols.c_lsb[i] = F::from_canonical_u32((event.c >> i) & 1);
+        if event.opcode == Opcode::SLLW {
+            let sllw_val = ((event.b as i64) << (c & 0x1f)) as u32;
+            let sllw_limbs = u32_to_u16_limbs(sllw_val);
+            cols.sllw_msb.populate(blu, sllw_limbs[1]);
+        } else {
+            cols.sllw_msb.msb = F::ZERO;
         }
 
-        // c_slb 1th and 3th bits presents bits shift num
-        let num_bits_to_shift = event.c as usize % BYTE_SIZE;
-        for i in 0..BYTE_SIZE {
-            cols.shift_by_n_bits[i] = F::from_bool(num_bits_to_shift == i);
+        cols.a = Word::from(event.a);
+        cols.b = Word::from(event.b);
+        cols.c = Word::from(event.c);
+        let is_sll = event.opcode == Opcode::SLL;
+        cols.is_sll = F::from_bool(is_sll);
+
+        cols.is_sllw = F::from_bool(event.opcode == Opcode::SLLW);
+
+        for i in 0..6 {
+            cols.c_bits[i] = F::from_canonical_u16((c >> i) & 1);
+        }
+        blu.add_bit_range_check(c >> 6, 10);
+
+        cols.v_01 = F::from_canonical_u16(1 << (c & 3));
+        cols.v_012 = F::from_canonical_u16(1 << (c & 7));
+        cols.v_0123 = F::from_canonical_u16(1 << (c & 15));
+
+        let shift_amount = ((c >> 4) & 1) + 2 * ((c >> 5) & 1) * (is_sll as u16);
+
+        let mut shift = [0u16; 4];
+        for i in 0..4 {
+            if i == shift_amount as usize {
+                shift[i] = 1;
+            }
         }
 
-        let bit_shift_multiplier = 1u32 << num_bits_to_shift;
-        cols.bit_shift_multiplier = F::from_canonical_u32(bit_shift_multiplier);
-
-        let mut carry = 0u32;
-        let base = 1u32 << BYTE_SIZE;
-        let mut shift_result = [0u8; WORD_SIZE];
-        let mut shift_result_carry = [0u8; WORD_SIZE];
+        let b = u64_to_u16_limbs(event.b);
+        let bit_shift = (c & 0xF) as u8;
         for i in 0..WORD_SIZE {
-            let v = b[i] as u32 * bit_shift_multiplier + carry;
-            carry = v / base;
-            shift_result[i] = (v % base) as u8;
-            shift_result_carry[i] = carry as u8;
+            let limb = b[i] as u32;
+            let lower_limb = (limb & ((1 << (16 - bit_shift)) - 1)) as u16;
+            let higher_limb = (limb >> (16 - bit_shift)) as u16;
+            cols.lower_limb[i] = F::from_canonical_u16(lower_limb);
+            cols.higher_limb[i] = F::from_canonical_u16(higher_limb);
+            blu.add_bit_range_check(lower_limb, 16 - bit_shift);
+            blu.add_bit_range_check(higher_limb, bit_shift);
         }
-        cols.shift_result = shift_result.map(F::from_canonical_u8);
-        cols.shift_result_carry = shift_result_carry.map(F::from_canonical_u8);
 
-        // c_slb 4th and 5th bits presents byte shift num, maximum is 4
-        let num_bytes_to_shift = (event.c & 0b11111) as usize / BYTE_SIZE;
         for i in 0..WORD_SIZE {
-            cols.shift_by_n_bytes[i] = F::from_bool(num_bytes_to_shift == i);
+            cols.limb_result[i] = cols.lower_limb[i] * F::from_canonical_u32(1u32 << bit_shift);
+            if i != 0 {
+                cols.limb_result[i] += cols.higher_limb[i - 1];
+            }
         }
 
-        blu.add_u8_range_checks(shift_result);
-        blu.add_u8_range_checks(shift_result_carry);
-
-        // Sanity check.
-        for i in num_bytes_to_shift..WORD_SIZE {
-            debug_assert_eq!(
-                cols.shift_result[i - num_bytes_to_shift],
-                F::from_canonical_u8(a[i])
-            );
-        }
+        cols.shift_u16 = shift.map(|x| F::from_canonical_u16(x));
     }
 }
 

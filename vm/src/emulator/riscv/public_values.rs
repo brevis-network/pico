@@ -16,11 +16,11 @@ pub struct PublicValues<W, T> {
     /// hash of each proof+vkey hash and the previous hash which is initially zero.
     pub deferred_proofs_digest: [T; DIGEST_SIZE],
 
-    /// The chunk's start program counter.
-    pub start_pc: T,
+    /// The chunk's start program counter as 3×u16 limbs.
+    pub start_pc: [T; 3],
 
-    /// The expected start program counter for the next chunk.
-    pub next_pc: T,
+    /// The expected start program counter for the next chunk as 3×u16 limbs.
+    pub next_pc: [T; 3],
 
     /// The exit code of the program.  Only valid if halt has been executed.
     pub exit_code: T,
@@ -31,17 +31,17 @@ pub struct PublicValues<W, T> {
     /// The execution chunk number.
     pub execution_chunk: T,
 
-    /// The bits of the largest address that is witnessed for initialization in the previous chunk.
-    pub previous_initialize_addr_bits: [T; 32],
+    /// The previous initialization address as 3×u16 limbs.
+    pub previous_init_addr_limbs: [T; 3],
 
-    /// The largest address that is witnessed for initialization in the current chunk.
-    pub last_initialize_addr_bits: [T; 32],
+    /// The largest initialization address in the current chunk as 3×u16 limbs.
+    pub last_init_addr_limbs: [T; 3],
 
-    /// The bits of the largest address that is witnessed for finalization in the previous chunk.
-    pub previous_finalize_addr_bits: [T; 32],
+    /// The previous finalization address as 3×u16 limbs.
+    pub previous_finalize_addr_limbs: [T; 3],
 
-    /// The bits of the largest address that is witnessed for finalization in the current chunk.
-    pub last_finalize_addr_bits: [T; 32],
+    /// The largest finalization address in the current chunk as 3×u16 limbs.
+    pub last_finalize_addr_limbs: [T; 3],
 
     /// This field is here to ensure that the size of the public values struct is a multiple of 8.
     pub empty: [T; 3],
@@ -92,10 +92,10 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
             exit_code,
             chunk,
             execution_chunk,
-            previous_initialize_addr_bits,
-            last_initialize_addr_bits,
-            previous_finalize_addr_bits,
-            last_finalize_addr_bits,
+            previous_init_addr_limbs,
+            last_init_addr_limbs,
+            previous_finalize_addr_limbs,
+            last_finalize_addr_limbs,
             ..
         } = value;
 
@@ -105,16 +105,15 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
         let deferred_proofs_digest: [_; DIGEST_SIZE] =
             core::array::from_fn(|i| F::from_canonical_u32(deferred_proofs_digest[i]));
 
-        let start_pc = F::from_canonical_u32(start_pc);
-        let next_pc = F::from_canonical_u32(next_pc);
+        let start_pc = start_pc.map(F::from_canonical_u32);
+        let next_pc = next_pc.map(F::from_canonical_u32);
         let exit_code = F::from_canonical_u32(exit_code);
         let chunk = F::from_canonical_u32(chunk);
         let execution_chunk = F::from_canonical_u32(execution_chunk);
-        let previous_initialize_addr_bits =
-            previous_initialize_addr_bits.map(F::from_canonical_u32);
-        let last_initialize_addr_bits = last_initialize_addr_bits.map(F::from_canonical_u32);
-        let previous_finalize_addr_bits = previous_finalize_addr_bits.map(F::from_canonical_u32);
-        let last_finalize_addr_bits = last_finalize_addr_bits.map(F::from_canonical_u32);
+        let previous_init_addr_limbs = previous_init_addr_limbs.map(F::from_canonical_u32);
+        let last_init_addr_limbs = last_init_addr_limbs.map(F::from_canonical_u32);
+        let previous_finalize_addr_limbs = previous_finalize_addr_limbs.map(F::from_canonical_u32);
+        let last_finalize_addr_limbs = last_finalize_addr_limbs.map(F::from_canonical_u32);
 
         Self {
             committed_value_digest,
@@ -124,11 +123,11 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
             exit_code,
             chunk,
             execution_chunk,
-            previous_initialize_addr_bits,
-            last_initialize_addr_bits,
-            previous_finalize_addr_bits,
-            last_finalize_addr_bits,
-            empty: [F::ZERO, F::ZERO, F::ZERO],
+            previous_init_addr_limbs,
+            last_init_addr_limbs,
+            previous_finalize_addr_limbs,
+            last_finalize_addr_limbs,
+            empty: [F::ZERO; 3],
         }
     }
 }

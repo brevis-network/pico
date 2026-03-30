@@ -28,6 +28,7 @@ use std::{mem::take, sync::Arc};
 const THRESHOLD_2POW15: usize = 1 << 15;
 const THRESHOLD_2POW16: usize = 1 << 16;
 const THRESHOLD_2POW20: usize = 1 << 20;
+
 /// A record of the emulation of a program.
 ///
 /// The trace of the emulation is represented as a list of "events" that occur every cycle.
@@ -103,26 +104,36 @@ impl EmulationRecord {
     pub fn add_alu_events(&mut self, mut alu_events: HashMap<Opcode, Vec<AluEvent>>) {
         for (opcode, value) in &mut alu_events {
             match opcode {
-                Opcode::ADD => {
+                Opcode::ADD | Opcode::ADDW => {
                     self.add_events.append(value);
                 }
-                Opcode::MUL | Opcode::MULH | Opcode::MULHU | Opcode::MULHSU => {
+                Opcode::MUL | Opcode::MULH | Opcode::MULHU | Opcode::MULHSU | Opcode::MULW => {
                     self.mul_events.append(value);
                 }
-                Opcode::SUB => {
+                Opcode::SUB | Opcode::SUBW => {
                     self.sub_events.append(value);
                 }
                 Opcode::XOR | Opcode::OR | Opcode::AND => {
                     self.bitwise_events.append(value);
                 }
-                Opcode::SLL => {
+                Opcode::SLL | Opcode::SLLW => {
                     self.shift_left_events.append(value);
                 }
-                Opcode::SRL | Opcode::SRA => {
+                Opcode::SRL | Opcode::SRA | Opcode::SRLW | Opcode::SRAW => {
                     self.shift_right_events.append(value);
                 }
                 Opcode::SLT | Opcode::SLTU => {
                     self.lt_events.append(value);
+                }
+                Opcode::DIV
+                | Opcode::DIVU
+                | Opcode::REM
+                | Opcode::REMU
+                | Opcode::DIVW
+                | Opcode::DIVUW
+                | Opcode::REMW
+                | Opcode::REMUW => {
+                    self.divrem_events.append(value);
                 }
                 _ => {
                     panic!("Invalid opcode: {opcode:?}");
@@ -248,8 +259,8 @@ impl EmulationRecord {
                 .sort_by_key(|event| event.addr);
             self.memory_finalize_events.sort_by_key(|event| event.addr);
 
-            let mut init_addr_bits = [0; 32];
-            let mut finalize_addr_bits = [0; 32];
+            let mut init_addr_limbs = [0u32; 3];
+            let mut finalize_addr_limbs = [0u32; 3];
             for mem_chunks in self
                 .memory_initialize_events
                 .chunks(opts.memory)
@@ -266,23 +277,34 @@ impl EmulationRecord {
                 memory_chunk
                     .memory_initialize_events
                     .extend_from_slice(mem_init_chunk);
-                memory_chunk.public_values.previous_initialize_addr_bits = init_addr_bits;
+                memory_chunk.public_values.previous_init_addr_limbs = init_addr_limbs;
                 if let Some(last_event) = mem_init_chunk.last() {
-                    let last_init_addr_bits = core::array::from_fn(|i| (last_event.addr >> i) & 1);
-                    init_addr_bits = last_init_addr_bits;
+                    // The public-value schema intentionally retains 48-bit address limbs in this
+                    // tranche, so the last init address is packed explicitly here.
+                    let addr = last_event.addr;
+                    init_addr_limbs = [
+                        (addr & 0xFFFF) as u32,
+                        ((addr >> 16) & 0xFFFF) as u32,
+                        ((addr >> 32) & 0xFFFF) as u32,
+                    ];
                 }
-                memory_chunk.public_values.last_initialize_addr_bits = init_addr_bits;
+                memory_chunk.public_values.last_init_addr_limbs = init_addr_limbs;
 
                 memory_chunk
                     .memory_finalize_events
                     .extend_from_slice(mem_finalize_chunk);
-                memory_chunk.public_values.previous_finalize_addr_bits = finalize_addr_bits;
+                memory_chunk.public_values.previous_finalize_addr_limbs = finalize_addr_limbs;
                 if let Some(last_event) = mem_finalize_chunk.last() {
-                    let last_finalize_addr_bits =
-                        core::array::from_fn(|i| (last_event.addr >> i) & 1);
-                    finalize_addr_bits = last_finalize_addr_bits;
+                    // The public-value schema intentionally retains 48-bit address limbs in this
+                    // tranche, so the last finalize address is packed explicitly here.
+                    let addr = last_event.addr;
+                    finalize_addr_limbs = [
+                        (addr & 0xFFFF) as u32,
+                        ((addr >> 16) & 0xFFFF) as u32,
+                        ((addr >> 32) & 0xFFFF) as u32,
+                    ];
                 }
-                memory_chunk.public_values.last_finalize_addr_bits = finalize_addr_bits;
+                memory_chunk.public_values.last_finalize_addr_limbs = finalize_addr_limbs;
 
                 chunk_records.push(memory_chunk);
             }
@@ -422,5 +444,72 @@ pub struct MemoryAccessRecord {
 impl ByteRecordBehavior for EmulationRecord {
     fn add_byte_lookup_event(&mut self, blu_event: ByteLookupEvent) {
         *self.byte_lookups.entry(blu_event).or_insert(0) += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EmulationRecord;
+    use crate::{
+        chips::chips::alu::event::AluEvent,
+        compiler::riscv::{opcode::Opcode, program::Program},
+    };
+    use hashbrown::HashMap;
+    use std::sync::Arc;
+
+    #[test]
+    fn add_alu_events_accepts_wide_rv64_opcode_families() {
+        let mut record = EmulationRecord::new(Arc::new(Program::default()));
+        let mut grouped = HashMap::new();
+
+        grouped.insert(
+            Opcode::ADDW,
+            vec![AluEvent::new(1, Opcode::ADDW, 1, 2, 3, false)],
+        );
+        grouped.insert(
+            Opcode::SUBW,
+            vec![AluEvent::new(2, Opcode::SUBW, 4, 5, 6, false)],
+        );
+        grouped.insert(
+            Opcode::SLLW,
+            vec![AluEvent::new(3, Opcode::SLLW, 7, 8, 9, false)],
+        );
+        grouped.insert(
+            Opcode::SRLW,
+            vec![AluEvent::new(4, Opcode::SRLW, 10, 11, 12, false)],
+        );
+        grouped.insert(
+            Opcode::SRAW,
+            vec![AluEvent::new(5, Opcode::SRAW, 13, 14, 15, false)],
+        );
+        grouped.insert(
+            Opcode::MULW,
+            vec![AluEvent::new(6, Opcode::MULW, 16, 17, 18, false)],
+        );
+        grouped.insert(
+            Opcode::DIVW,
+            vec![AluEvent::new(7, Opcode::DIVW, 19, 20, 21, false)],
+        );
+        grouped.insert(
+            Opcode::DIVUW,
+            vec![AluEvent::new(8, Opcode::DIVUW, 22, 23, 24, false)],
+        );
+        grouped.insert(
+            Opcode::REMW,
+            vec![AluEvent::new(9, Opcode::REMW, 25, 26, 27, false)],
+        );
+        grouped.insert(
+            Opcode::REMUW,
+            vec![AluEvent::new(10, Opcode::REMUW, 28, 29, 30, false)],
+        );
+
+        record.add_alu_events(grouped);
+
+        assert_eq!(record.add_events.len(), 1);
+        assert_eq!(record.sub_events.len(), 1);
+        assert_eq!(record.shift_left_events.len(), 1);
+        assert_eq!(record.shift_right_events.len(), 2);
+        assert_eq!(record.mul_events.len(), 1);
+        assert_eq!(record.divrem_events.len(), 4);
     }
 }

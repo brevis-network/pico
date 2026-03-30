@@ -6,7 +6,7 @@ use crate::{
     chips::chips::riscv_memory::read_write::columns::{
         MemoryCols, MemoryReadCols, MemoryReadWriteCols,
     },
-    compiler::word::Word,
+    compiler::{addr::Addr, word::Word},
 };
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
@@ -29,11 +29,14 @@ pub struct CpuCols<T: Copy> {
     /// The most significant 8 bit limb of clk.
     pub clk_8bit_limb: T,
 
+    /// Number of extra clock cycles for ecall instructions (stored in syscall code).
+    pub num_extra_clk: T,
+
     /// The program counter value.
-    pub pc: T,
+    pub pc: Addr<T>,
 
     /// The expected next program counter value.
-    pub next_pc: T,
+    pub next_pc: Addr<T>,
 
     /// Columns related to the instruction.
     pub instruction: InstructionCols<T>,
@@ -76,6 +79,18 @@ pub struct CpuCols<T: Copy> {
     /// This is true for all instructions that are not jumps, branches, and halt.  Those
     /// instructions may move the program counter to a non sequential instruction.
     pub is_sequential_instr: T,
+
+    /// Carry columns for cross-row PC constraints (`pc + 4 = next_row.pc`).
+    /// Used by: sequential transition (#1), branch not-taken transition (#3),
+    /// and jump return address `pc + 4 = op_a` (#5).
+    /// These are mutually exclusive, so the columns are shared.
+    /// Addr constraints use [0..4]; Word (jump) uses all [0..5].
+    pub pc_carry_a: [T; 5],
+
+    /// Carry columns for same-row PC constraints (`pc + 4 = local.next_pc`).
+    /// Used by: sequential (#2) and branch not-taken (#4).
+    /// These are mutually exclusive, so the columns are shared.
+    pub pc_carry_b: [T; 4],
 }
 
 impl<T: Copy> CpuCols<T> {

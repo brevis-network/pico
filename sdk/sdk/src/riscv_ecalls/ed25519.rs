@@ -11,7 +11,7 @@ use core::arch::asm;
 /// byte boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_ed_add(p: *mut [u32; 16], q: *const [u32; 16]) {
+pub extern "C" fn syscall_ed_add(p: *mut [u64; 8], q: *const [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(
@@ -26,7 +26,7 @@ pub extern "C" fn syscall_ed_add(p: *mut [u32; 16], q: *const [u32; 16]) {
     unreachable!()
 }
 
-/// Decompresses a compressed Edwards point.
+/// Decompresses a compressed Edwards point, encoded as a little-endian u64 array.
 ///
 /// The second half of the input array should contain the compressed Y point with the final bit as
 /// the sign bit. The first half of the input array will be overwritten with the decompressed point,
@@ -38,11 +38,14 @@ pub extern "C" fn syscall_ed_add(p: *mut [u32; 16], q: *const [u32; 16]) {
 /// boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_ed_decompress(point: &mut [u8; 64]) {
+pub extern "C" fn syscall_ed_decompress(point: &mut [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     {
-        let sign = point[63] >> 7;
-        point[63] &= 0b0111_1111;
+        const SIGN_OFFSET: u32 = 1;
+        const SIGN_MASK: u64 = 1u64 << (u64::BITS - SIGN_OFFSET);
+        let sign = ((point[7] & SIGN_MASK) != 0) as u64;
+        point[7] <<= SIGN_OFFSET;
+        point[7] >>= SIGN_OFFSET;
         let p = point.as_mut_ptr() as *mut u8;
         unsafe {
             asm!(

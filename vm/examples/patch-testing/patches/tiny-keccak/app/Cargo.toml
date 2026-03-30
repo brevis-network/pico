@@ -7,5 +7,7 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
-pico-sdk = { workspace = true }
-tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak.git", features = ["keccak"], branch = "patch-v1.0.0" }
+# TODO: use a branch of pico-sdk temp to avoid re-installing
+# pico-sdk = { workspace = true }
+pico-sdk = { git = "https://github.com/brevis-network/pico", branch = "rv64" }
+tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak", features = ["keccak"], branch = "patch-v1.0.0-rv64" }

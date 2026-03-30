@@ -23,6 +23,8 @@ pub fn run_impl(emu: &mut AotEmulatorCore) -> Result<(), String> {
     emu.batch_chunk_size = u32::MAX / 4;
     emu.batch_clk_threshold = u32::MAX;
     emu.batch_clk_fast_threshold = u32::MAX - 20000;
+    emu.batch_memory_rw_threshold = usize::MAX;
+    emu.batch_global_lookup_base_threshold = usize::MAX;
     emu.batch_event_fast_threshold = usize::MAX - 10000;
     pico_aot_dispatch::run_aot(emu)
 }
@@ -46,10 +48,12 @@ pub fn next_state_batch_impl(
 
     const FAST_PATH_CLK_MARGIN: u32 = 20000;
     const FAST_PATH_EVENT_MARGIN: usize = 10000;
+    let memory_rw_event_threshold = (opts.chunk_size as usize) >> 1;
     emu.batch_clk_fast_threshold = emu
         .batch_clk_threshold
         .saturating_sub(FAST_PATH_CLK_MARGIN);
-    let memory_rw_event_threshold = (opts.chunk_size as usize) >> 1;
+    emu.batch_memory_rw_threshold = memory_rw_event_threshold;
+    emu.batch_global_lookup_base_threshold = memory_rw_event_threshold >> 1;
     emu.batch_event_fast_threshold = memory_rw_event_threshold.saturating_sub(FAST_PATH_EVENT_MARGIN);
 
     emu.save_batch_start_state();
@@ -57,8 +61,12 @@ pub fn next_state_batch_impl(
 
     pico_aot_dispatch::run_aot(emu)?;
 
-    let done =
-        emu.pc == 0 || emu.pc.wrapping_sub(emu.program_pc_base()).wrapping_div(4) >= emu.program_len() as u32;
+    let done = emu.pc == 0
+        || emu
+            .pc
+            .wrapping_sub(emu.program_pc_base())
+            .wrapping_div(4)
+            >= emu.program_len() as u64;
 
     if !done {
         emu.current_batch = emu.current_batch.wrapping_add(1);

@@ -13,7 +13,8 @@ pub struct BuildCmd {
 impl BuildCmd {
     pub fn run(&self) -> Result<()> {
         println!("Building ELF binary...");
-        let elf_path = build_program(&self.build_args, None)?;
+        let program_dir = self.build_args.path.as_ref().map(std::path::PathBuf::from);
+        let elf_path = build_program(&self.build_args, program_dir)?;
         println!("ELF binary built at: {:?}", elf_path.display());
         Ok(())
     }
@@ -21,6 +22,9 @@ impl BuildCmd {
 
 #[derive(Clone, Parser)]
 pub struct BuildArgs {
+    #[clap(long, action, help = "Path to the program directory")]
+    pub path: Option<String>,
+
     #[clap(
         long,
         action,

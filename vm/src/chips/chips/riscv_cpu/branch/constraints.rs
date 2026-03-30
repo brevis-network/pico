@@ -1,6 +1,5 @@
 use super::super::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCols, CpuChip};
 use crate::{
-    chips::gadgets::field_range_check::word_range::FieldWordRangeChecker,
     compiler::{riscv::opcode::Opcode, word::Word},
     machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
 };
@@ -41,66 +40,58 @@ impl<F: Field> CpuChip<F> {
 
         // Evaluate program counter constraints.
         {
-            // When we are branching, assert local.pc <==> branch_cols.pc as Word.
-            builder
-                .when(local.branching)
-                .assert_eq(branch_cols.pc.reduce::<CB>(), local.pc);
-
-            // When we are branching, assert that next.pc <==> branch_columns.next_pc as Word.
+            // When we are branching, assert that next.pc <==> local.next_pc.
             builder
                 .when_transition()
                 .when(next.is_real)
                 .when(local.branching)
-                .assert_eq(branch_cols.next_pc.reduce::<CB>(), next.pc);
+                .assert_addr_eq(local.next_pc, next.pc);
 
-            // When the current row is real and local.branching, assert that local.next_pc <==>
-            // branch_columns.next_pc as Word.
-            builder
-                .when(local.is_real)
-                .when(local.branching)
-                .assert_eq(branch_cols.next_pc.reduce::<CB>(), local.next_pc);
-
-            // Range check branch_cols.pc and branch_cols.next_pc.
-            // println!("marking field type: {:?}", CB::F::field_type());
-
-            FieldWordRangeChecker::<CB::F>::range_check(
-                builder,
-                branch_cols.pc,
-                branch_cols.pc_range_checker,
-                is_branch_instruction.clone(),
-            );
-            FieldWordRangeChecker::<CB::F>::range_check(
-                builder,
-                branch_cols.next_pc,
-                branch_cols.next_pc_range_checker,
-                is_branch_instruction.clone(),
-            );
-
-            // When we are branching, calculate branch_cols.next_pc <==> branch_cols.pc + c.
+            // When we are branching, calculate local.next_pc <==> local.pc + c.
+            // Convert Addr to Word (zero-extend to 64-bit)
+            let pc_as_word = Word([
+                local.pc[0].into(),
+                local.pc[1].into(),
+                local.pc[2].into(),
+                F::ZERO.into(),
+            ]);
+            let next_pc_as_word = Word([
+                local.next_pc[0].into(),
+                local.next_pc[1].into(),
+                local.next_pc[2].into(),
+                F::ZERO.into(),
+            ]);
             builder.looking_alu(
                 Opcode::ADD.as_field::<CB::F>(),
-                branch_cols.next_pc,
-                branch_cols.pc,
+                next_pc_as_word,
+                pc_as_word,
                 local.op_c_val(),
                 local.branching,
             );
 
-            // When we are not branching, assert that local.pc + 4 <==> next.pc.
-            builder
-                .when_transition()
-                .when(next.is_real)
-                .when(local.not_branching)
-                .assert_eq(local.pc + CB::Expr::from_canonical_u8(4), next.pc);
-
             // When local.not_branching is true, assert that local.is_real is true.
             builder.when(local.not_branching).assert_one(local.is_real);
 
+            // When we are not branching, assert that local.pc + 4 <==> next.pc.
+            let condition = builder.is_transition() * next.is_real * local.not_branching;
+            local.pc.add_limb_with_carry(
+                builder,
+                condition,
+                CB::Expr::from_canonical_u8(4),
+                next.pc,
+                &local.pc_carry_a[0..4],
+            );
+
             // When the last row is real and local.not_branching, assert that local.pc + 4 <==>
             // local.next_pc.
-            builder
-                .when(local.is_real)
-                .when(local.not_branching)
-                .assert_eq(local.pc + CB::Expr::from_canonical_u8(4), local.next_pc);
+            let condition = local.is_real * local.not_branching;
+            local.pc.add_limb_with_carry(
+                builder,
+                condition,
+                CB::Expr::from_canonical_u8(4),
+                local.next_pc,
+                &local.pc_carry_b,
+            );
 
             // Assert that either we are branching or not branching when the instruction is a
             // branch.
