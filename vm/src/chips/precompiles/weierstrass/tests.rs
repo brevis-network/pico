@@ -286,3 +286,115 @@ fn test_bn254_double_prove_verify() {
     run_extra_records(&chips, &mut record);
     test_rv64_prove_and_verify_chunk(program, chips, record);
 }
+
+#[test]
+fn test_ws_secp256k1_add_chip_simple_eval() {
+    use super::weierstrass_add::WeierstrassAddAssignChip;
+    use crate::{
+        chips::gadgets::curves::weierstrass::Secp256k1,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: WeierstrassAddAssignChip<KoalaBear, Secp256k1> = WeierstrassAddAssignChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 950);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 1121);
+}
+
+#[test]
+fn test_ws_secp256k1_double_chip_simple_eval() {
+    use super::weierstrass_double::WeierstrassDoubleAssignChip;
+    use crate::{
+        chips::gadgets::curves::weierstrass::Secp256k1,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: WeierstrassDoubleAssignChip<KoalaBear, Secp256k1> =
+        WeierstrassDoubleAssignChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 936);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 1126);
+}
+
+#[test]
+fn test_ws_secp256k1_decompress_chip_simple_eval() {
+    use super::weierstrass_decompress::WeierstrassDecompressChip;
+    use crate::{
+        chips::gadgets::curves::weierstrass::Secp256k1,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: WeierstrassDecompressChip<KoalaBear, Secp256k1> =
+        WeierstrassDecompressChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 628);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 564);
+}
+
+#[test]
+fn test_ws_bls12381_add_chip_simple_eval() {
+    use super::weierstrass_add::WeierstrassAddAssignChip;
+    use crate::{
+        chips::gadgets::curves::weierstrass::Bls12381,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: WeierstrassAddAssignChip<KoalaBear, Bls12381> = WeierstrassAddAssignChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 1422);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 1689);
+}
+
+#[test]
+fn test_ws_bn254_add_chip_simple_eval() {
+    use super::weierstrass_add::WeierstrassAddAssignChip;
+    use crate::{
+        chips::gadgets::curves::weierstrass::Bn254,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: WeierstrassAddAssignChip<KoalaBear, Bn254> = WeierstrassAddAssignChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 950);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 1121);
+}
