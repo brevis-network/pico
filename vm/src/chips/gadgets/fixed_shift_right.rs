@@ -149,3 +149,40 @@ impl<F: Field> FixedShiftRightOperation<F> {
         builder.assert_eq(cols.value[WORD_SIZE - 1], first_shift);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_air::AirBuilder;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        input: Word<T>,
+        shift_right: FixedShiftRightOperation<T>,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_fixed_shift_right_simple_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        FixedShiftRightOperation::<KoalaBear>::eval(
+            &mut builder,
+            local.input,
+            7,
+            local.shift_right,
+            local.is_real,
+        );
+    }
+}

@@ -68,3 +68,41 @@ impl<F: Field> IsZeroGadget<F> {
             .assert_zero(a.clone());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        a: T,
+        is_zero: IsZeroGadget<T>,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_is_zero_gadget_simple_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder: SymbolicConstraintFolder<KoalaBear> = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        IsZeroGadget::<KoalaBear>::eval(
+            &mut builder,
+            local.a.into(),
+            local.is_zero,
+            local.is_real.into(),
+        );
+
+        let _ = builder.num_constraints();
+        let _ = builder.num_lookups();
+    }
+}

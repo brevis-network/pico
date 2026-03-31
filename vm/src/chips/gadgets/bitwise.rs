@@ -74,3 +74,44 @@ impl<F: Field> BitWiseGadget<F> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::primitives::consts::WORD_BYTE_SIZE;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use p3_air::AirBuilder;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        a: [T; WORD_BYTE_SIZE],
+        b: [T; WORD_BYTE_SIZE],
+        bitwise: BitWiseGadget<T>,
+        opcode: T,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_bitwise_gadget_simple_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        BitWiseGadget::<KoalaBear>::eval(
+            &mut builder,
+            local.a.map(|v| v.into()),
+            local.b.map(|v| v.into()),
+            local.bitwise,
+            local.opcode.into(),
+            local.is_real.into(),
+        );
+    }
+}

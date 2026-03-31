@@ -88,3 +88,70 @@ impl<F: Field> U16ToU8Gadget<F> {
         ret
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_air::AirBuilder;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        a: [T; 4],
+        u16_to_u8: U16ToU8Gadget<T>,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_u16_to_u8_gadget_unsafe_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        let _ret = U16ToU8Gadget::<KoalaBear>::eval_u16_to_u8_unsafe(
+            &mut builder,
+            [
+                local.a[0].into(),
+                local.a[1].into(),
+                local.a[2].into(),
+                local.a[3].into(),
+            ],
+            local.u16_to_u8,
+        );
+
+        let _ = builder.num_constraints();
+        let _ = builder.num_lookups();
+    }
+
+    #[test]
+    fn test_u16_to_u8_gadget_safe_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        let _ret = U16ToU8Gadget::<KoalaBear>::eval_u16_to_u8_safe(
+            &mut builder,
+            [
+                local.a[0].into(),
+                local.a[1].into(),
+                local.a[2].into(),
+                local.a[3].into(),
+            ],
+            local.u16_to_u8,
+            local.is_real.into(),
+        );
+
+        let _ = builder.num_constraints();
+        let _ = builder.num_lookups();
+    }
+}

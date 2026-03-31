@@ -63,3 +63,41 @@ impl<F: Field> IsEqualWordGadget<F> {
         IsZeroWordGadget::<CB::F>::eval(builder, diff, cols.is_diff_zero, is_real.clone());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use p3_air::AirBuilder;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        a: Word<T>,
+        b: Word<T>,
+        is_equal_word: IsEqualWordGadget<T>,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_is_equal_word_gadget_simple_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        IsEqualWordGadget::<KoalaBear>::eval(
+            &mut builder,
+            local.a.map(|v| v.into()),
+            local.b.map(|v| v.into()),
+            local.is_equal_word,
+            local.is_real.into(),
+        );
+    }
+}

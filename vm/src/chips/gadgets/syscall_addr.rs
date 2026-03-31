@@ -90,3 +90,37 @@ impl<F: Field> SyscallAddrGadget<F> {
         [cols.addr[0], cols.addr[1], cols.addr[2]]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        syscall_addr: SyscallAddrGadget<T>,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_syscall_addr_gadget_simple_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        SyscallAddrGadget::<KoalaBear>::eval(
+            &mut builder,
+            8u32,
+            local.syscall_addr,
+            local.is_real.into(),
+        );
+    }
+}
