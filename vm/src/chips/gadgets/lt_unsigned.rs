@@ -185,6 +185,7 @@ impl<F: Field> LtUnsignedGadget<F> {
 mod tests {
     use super::*;
     use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
@@ -215,5 +216,9 @@ mod tests {
             local.lt_unsigned,
             local.is_real.into(),
         );
+    
+        assert_eq!(builder.num_constraints(), 11);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 1);
     }
 }

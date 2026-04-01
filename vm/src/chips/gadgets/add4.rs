@@ -157,6 +157,7 @@ impl<F: Field> Add4Operation<F> {
 mod tests {
     use super::*;
     use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
@@ -191,5 +192,9 @@ mod tests {
             local.is_real,
             local.add4,
         );
+    
+        assert_eq!(builder.num_constraints(), 29);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 10);
     }
 }

@@ -157,6 +157,7 @@ impl<F: Field> FixedRotateRightOperation<F> {
 mod tests {
     use super::*;
     use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
     use p3_air::AirBuilder;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
@@ -187,5 +188,9 @@ mod tests {
             local.rotate_right,
             local.is_real,
         );
+    
+        assert_eq!(builder.num_constraints(), 4);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 4);
     }
 }

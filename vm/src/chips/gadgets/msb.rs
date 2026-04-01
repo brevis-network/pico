@@ -59,6 +59,7 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
     use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
     use p3_air::AirBuilder;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
@@ -91,5 +92,9 @@ mod tests {
 
         let _ = builder.num_constraints();
         let _ = builder.num_lookups();
+    
+        assert_eq!(builder.num_constraints(), 2);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 1);
     }
 }

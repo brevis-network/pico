@@ -79,6 +79,7 @@ impl<F: Field> BitWiseGadget<F> {
 mod tests {
     use super::*;
     use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
     use crate::primitives::consts::WORD_BYTE_SIZE;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
@@ -113,5 +114,9 @@ mod tests {
             local.opcode.into(),
             local.is_real.into(),
         );
+    
+        assert_eq!(builder.num_constraints(), 0);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 8);
     }
 }

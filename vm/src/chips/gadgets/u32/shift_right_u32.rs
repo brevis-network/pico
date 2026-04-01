@@ -109,6 +109,7 @@ impl<F: Field> FixedShiftRightU32Gadget<F> {
 mod tests {
     use super::*;
     use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
@@ -139,5 +140,9 @@ mod tests {
             local.shift_right_u32,
             local.is_real,
         );
+    
+        assert_eq!(builder.num_constraints(), 3);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 4);
     }
 }
