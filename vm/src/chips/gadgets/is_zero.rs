@@ -103,8 +103,6 @@ mod tests {
             local.is_real.into(),
         );
 
-        let _ = builder.num_constraints();
-        let _ = builder.num_lookups();
     
         assert_eq!(builder.num_constraints(), 3);
         assert_eq!(builder.public_values().len(), 119);
