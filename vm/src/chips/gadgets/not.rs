@@ -50,13 +50,11 @@ impl<F: Field> NotOperation<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::machine::folder::SymbolicConstraintFolder;
-    use crate::machine::builder::PublicValuesBuilder;
+    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
-    use std::borrow::Borrow;
-    use std::mem::size_of;
+    use std::{borrow::Borrow, mem::size_of};
 
     #[derive(AlignedBorrow, Clone, Copy)]
     #[repr(C)]
@@ -74,14 +72,8 @@ mod tests {
         let local = main.row_slice(0);
         let local: &TestCols<_> = (*local).borrow();
 
-        NotOperation::<KoalaBear>::eval(
-            &mut builder,
-            local.a,
-            local.not_op,
-            local.is_real,
-        );
+        NotOperation::<KoalaBear>::eval(&mut builder, local.a, local.not_op, local.is_real);
 
-    
         assert_eq!(builder.num_constraints(), 4);
         assert_eq!(builder.public_values().len(), 119);
         assert_eq!(builder.num_lookups(), 2);

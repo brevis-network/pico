@@ -90,13 +90,11 @@ impl<F: Field> AddrAddGadget<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::machine::folder::SymbolicConstraintFolder;
-    use crate::machine::builder::PublicValuesBuilder;
+    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
-    use std::borrow::Borrow;
-    use std::mem::size_of;
+    use std::{borrow::Borrow, mem::size_of};
 
     #[derive(AlignedBorrow, Clone, Copy)]
     #[repr(C)]
@@ -122,7 +120,7 @@ mod tests {
             local.addr_add,
             local.is_real.into(),
         );
-    
+
         assert_eq!(builder.num_constraints(), 5);
         assert_eq!(builder.public_values().len(), 119);
         assert_eq!(builder.num_lookups(), 3);

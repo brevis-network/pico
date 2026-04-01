@@ -93,14 +93,12 @@ impl<F: Field> AndU32Gadget<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::machine::folder::SymbolicConstraintFolder;
-    use crate::machine::builder::PublicValuesBuilder;
+    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
+    use p3_air::AirBuilder;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
-    use std::borrow::Borrow;
-    use p3_air::AirBuilder;
-    use std::mem::size_of;
+    use std::{borrow::Borrow, mem::size_of};
 
     #[derive(AlignedBorrow, Clone, Copy)]
     #[repr(C)]
@@ -126,7 +124,7 @@ mod tests {
             local.and_u32,
             local.is_real,
         );
-    
+
         assert_eq!(builder.num_constraints(), 1);
         assert_eq!(builder.public_values().len(), 119);
         assert_eq!(builder.num_lookups(), 4);

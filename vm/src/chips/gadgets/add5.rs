@@ -166,13 +166,11 @@ impl<F: Field> Add5Operation<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::machine::folder::SymbolicConstraintFolder;
-    use crate::machine::builder::PublicValuesBuilder;
+    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
-    use std::borrow::Borrow;
-    use std::mem::size_of;
+    use std::{borrow::Borrow, mem::size_of};
 
     #[derive(AlignedBorrow, Clone, Copy)]
     #[repr(C)]
@@ -195,13 +193,8 @@ mod tests {
         let local: &TestCols<_> = (*local).borrow();
 
         let words = [local.w0, local.w1, local.w2, local.w3, local.w4];
-        Add5Operation::<KoalaBear>::eval(
-            &mut builder,
-            &words,
-            local.is_real,
-            local.add5,
-        );
-    
+        Add5Operation::<KoalaBear>::eval(&mut builder, &words, local.is_real, local.add5);
+
         assert_eq!(builder.num_constraints(), 33);
         assert_eq!(builder.public_values().len(), 119);
         assert_eq!(builder.num_lookups(), 12);

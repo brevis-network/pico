@@ -67,8 +67,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
-    use std::borrow::Borrow;
-    use std::mem::size_of;
+    use std::{borrow::Borrow, mem::size_of};
 
     #[derive(AlignedBorrow, Clone, Copy)]
     #[repr(C)]

@@ -78,15 +78,15 @@ impl<F: Field> BitWiseGadget<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::machine::folder::SymbolicConstraintFolder;
-    use crate::machine::builder::PublicValuesBuilder;
-    use crate::primitives::consts::WORD_BYTE_SIZE;
+    use crate::{
+        machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder},
+        primitives::consts::WORD_BYTE_SIZE,
+    };
+    use p3_air::AirBuilder;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::Matrix;
     use pico_derive::AlignedBorrow;
-    use std::borrow::Borrow;
-    use p3_air::AirBuilder;
-    use std::mem::size_of;
+    use std::{borrow::Borrow, mem::size_of};
 
     #[derive(AlignedBorrow, Clone, Copy)]
     #[repr(C)]
@@ -114,7 +114,7 @@ mod tests {
             local.opcode.into(),
             local.is_real.into(),
         );
-    
+
         assert_eq!(builder.public_values().len(), 119);
         assert_eq!(builder.num_lookups(), 8);
     }
