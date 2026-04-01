@@ -180,3 +180,45 @@ impl<F: Field> LtUnsignedGadget<F> {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        a: Word<T>,
+        b: Word<T>,
+        lt_unsigned: LtUnsignedGadget<T>,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_lt_unsigned_gadget_simple_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        LtUnsignedGadget::<KoalaBear>::eval(
+            &mut builder,
+            local.a.map(|v| v.into()),
+            local.b.map(|v| v.into()),
+            local.lt_unsigned,
+            local.is_real.into(),
+        );
+    
+        assert_eq!(builder.num_constraints(), 11);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 1);
+    }
+}

@@ -162,3 +162,48 @@ impl<F: Field> Add5Operation<F> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        w0: Word<T>,
+        w1: Word<T>,
+        w2: Word<T>,
+        w3: Word<T>,
+        w4: Word<T>,
+        add5: Add5Operation<T>,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_add5_operation_simple_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        let words = [local.w0, local.w1, local.w2, local.w3, local.w4];
+        Add5Operation::<KoalaBear>::eval(
+            &mut builder,
+            &words,
+            local.is_real,
+            local.add5,
+        );
+    
+        assert_eq!(builder.num_constraints(), 33);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 12);
+    }
+}

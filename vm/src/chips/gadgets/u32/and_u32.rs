@@ -89,3 +89,46 @@ impl<F: Field> AndU32Gadget<F> {
         [result_limb0, result_limb1]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::machine::folder::SymbolicConstraintFolder;
+    use crate::machine::builder::PublicValuesBuilder;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::Matrix;
+    use pico_derive::AlignedBorrow;
+    use std::borrow::Borrow;
+    use p3_air::AirBuilder;
+    use std::mem::size_of;
+
+    #[derive(AlignedBorrow, Clone, Copy)]
+    #[repr(C)]
+    struct TestCols<T> {
+        b: [T; 2],
+        c: [T; 2],
+        and_u32: AndU32Gadget<T>,
+        is_real: T,
+    }
+
+    #[test]
+    fn test_and_u32_gadget_simple_eval() {
+        let width = size_of::<TestCols<u8>>();
+        let mut builder = SymbolicConstraintFolder::new(0, width);
+        let main = builder.main();
+        let local = main.row_slice(0);
+        let local: &TestCols<_> = (*local).borrow();
+
+        let _ = AndU32Gadget::<KoalaBear>::eval(
+            &mut builder,
+            local.b.map(|v| v.into()),
+            local.c.map(|v| v.into()),
+            local.and_u32,
+            local.is_real,
+        );
+    
+        assert_eq!(builder.num_constraints(), 1);
+        assert_eq!(builder.public_values().len(), 119);
+        assert_eq!(builder.num_lookups(), 4);
+    }
+}
