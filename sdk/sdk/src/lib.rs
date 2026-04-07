@@ -20,7 +20,6 @@ mod libm;
 pub mod poseidon2_hash;
 pub mod riscv_ecalls;
 
-#[cfg(all(target_os = "zkvm", feature = "libm"))]
 mod libm;
 
 pub mod verify;
