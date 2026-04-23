@@ -1,3 +1,4 @@
+pub mod chunk_split;
 pub mod emulator;
 pub mod event_types;
 pub mod hook;

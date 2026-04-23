@@ -108,9 +108,7 @@ impl<F: PrimeField32> ShaExtendChip<F> {
         rows: &mut Option<Vec<[F; NUM_SHA_EXTEND_COLS]>>,
         blu: &mut impl ByteRecordBehavior,
     ) {
-        // Extend now begins one cycle after the actual syscall itself, therefore need to use
-        // a bumped clk.
-        let bumped_clk = event.clk + 1;
+        let start_clk = event.clk;
         for j in 0..48_usize {
             let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
@@ -118,7 +116,7 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             let i = j as u64 + 16;
             cols.i = F::from_canonical_u64(i);
             cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(u32::try_from(bumped_clk + j as u64).unwrap());
+            cols.clk = F::from_canonical_u32(u32::try_from(start_clk + j as u64).unwrap());
             cols.w_ptr = [
                 F::from_canonical_u64(event.w_ptr & 0xFFFF),
                 F::from_canonical_u64((event.w_ptr >> 16) & 0xFFFF),

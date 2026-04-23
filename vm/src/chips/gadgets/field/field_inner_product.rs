@@ -22,13 +22,23 @@ use super::{field_op::eval_field_operation, utils::compute_root_quotient_and_shi
 /// `M` is the modulus `P::modulus()` under the assumption that the length of `a` and `b` is small
 /// enough so that the vanishing polynomial has limbs bounded by the witness shift. It is the
 /// responsibility of the caller to ensure that the length of `a` and `b` is small enough.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct FieldInnerProductCols<T, P: FieldParameters> {
     /// The result of `a inner product b`, where a, b are field elements
     pub result: Limbs<T, P::Limbs>,
     pub(crate) carry: Limbs<T, P::Limbs>,
     pub(crate) witness: Limbs<T, P::Witness>,
+}
+
+impl<T: Debug, P: FieldParameters> Debug for FieldInnerProductCols<T, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "FieldInnerProductCols {{ result: {:?}, carry: {:?}, witness: {:?}}}",
+            self.result, self.carry, self.witness
+        )
+    }
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldInnerProductCols<F, P> {

@@ -1,7 +1,9 @@
 use crate::{
     chips::{
         chips::{
-            alu::{bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::ShiftRightChip},
+            alu::{
+                bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::traces::ShiftRightChip,
+            },
             riscv_cpu::CpuChip,
             riscv_global::GlobalChip,
             riscv_memory::{
@@ -136,7 +138,6 @@ pub struct EventSizeCapture<'a> {
     pub(crate) num_poseidon2_events: usize,
     pub(crate) num_global_lookup_events: usize,
 
-    // this is an option to make default work, because I am lazy
     record: Option<&'a EmulationRecord>,
     field: &'a str,
 }
@@ -234,7 +235,7 @@ impl<'a> EventSizeCapture<'a> {
     pub fn estimate(&self) -> CycleEstimator {
         let mut data = [0; NUM_RISCV_CHIPS];
 
-        let record = self.record.expect("hack");
+        let record = self.record.unwrap();
 
         // program: 1 row per instruction
         data[CHIP_PROGRAM] = self.num_program_events;

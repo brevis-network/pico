@@ -19,11 +19,8 @@ use pico_vm::{
     primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
 
-use aot::{AotRun, FibonacciEmulator};
-use pico_vm::emulator::riscv::{
-    emulator::RiscvEmulator,
-    memory::GLOBAL_MEMORY_RECYCLER,
-};
+use aot::{AotRun, FibonacciEmulator, recycle_snapshot_memory};
+use pico_vm::emulator::riscv::emulator::RiscvEmulator;
 
 const INPUT_VALUE: u32 = 10_000_000u32;
 
@@ -209,11 +206,6 @@ fn compare_uninitialized_memory(
     }
 }
 
-fn recycle_snapshot_memory(snapshot: RiscvEmulationState) {
-    let RiscvEmulationState { memory, .. } = snapshot;
-    let _ = GLOBAL_MEMORY_RECYCLER.send((memory, true));
-}
-
 /// Compares EmulationReport fields between baseline and AOT.
 fn compare_reports(chunk_idx: usize, baseline: &EmulationReport, aot: &EmulationReport) {
     assert_eq!(
@@ -278,6 +270,7 @@ fn run_and_compare_chunks(
         let (baseline_snapshot, baseline_report) = baseline_emu
             .emulate_state(true, &mut |_rec| {})
             .expect("baseline emulate_state failed");
+        // NOTE: caller must recycle returned snapshot memory.
         let (aot_snapshot, aot_report) = aot_emu
             .next_state_batch(opts)
             .expect("AOT next_state_batch failed");

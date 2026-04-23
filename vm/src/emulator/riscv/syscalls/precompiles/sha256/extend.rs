@@ -29,9 +29,6 @@ impl Syscall for Sha256ExtendSyscall {
         assert!(arg2 == 0, "arg2 must be 0");
         SyscallContext::assert_dword_aligned_precompile(w_ptr, "sha extend w_ptr");
 
-        // Initial clk increment
-        ctx.clk += 1;
-
         let w_ptr_init = w_ptr;
         let mut w_i_minus_15_reads = Vec::new();
         let mut w_i_minus_2_reads = Vec::new();

@@ -597,6 +597,11 @@ where
                         send_ms    = send_dur.as_secs_f64() * 1e3,
                         "batch finished"
                     );
+                    info!(
+                        target = "bench",
+                        "[bench][emulator-0](chunk-{batch_idx}) simple_emulator: running={:.3} ms",
+                        batch_dur.as_secs_f64() * 1e3,
+                    );
 
                     if done {
                         total_cycles = emu.cycles();
@@ -631,6 +636,7 @@ where
                     shared_ds.clone(),
                     global_clk,
                 );
+                let t_record_batch = Instant::now();
                 let report = emu.next_record_batch(&mut |rec| {
                     snapshot_msg_tx
                         .send(Msg::Record {
@@ -640,6 +646,11 @@ where
                         })
                         .unwrap();
                 });
+                let record_batch_ms = t_record_batch.elapsed().as_secs_f64() * 1000.0;
+                info!(
+                    target = "bench",
+                    "[bench][emulator-{tid}](chunk-{batch_idx}) emulator: running={record_batch_ms:.3} ms"
+                );
                 {
                     // thread safe append reports
                     let mut lock = reports.lock().expect("ok");

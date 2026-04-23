@@ -42,5 +42,5 @@ jemalloc = ["pico-vm/jemalloc"]
 mmap-memory = ["pico-vm/mmap-memory", "pico-aot-dispatch/mmap-memory"]
 
 [dev-dependencies]
-p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", rev = "f5056c9", features = ["nightly-features"] }
+p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7fbe190", features = ["nightly-features"] }
 rayon = "1.10"

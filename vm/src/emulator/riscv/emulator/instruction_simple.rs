@@ -309,21 +309,19 @@ impl RiscvEmulator {
                 *syscall_count += 1;
 
                 let syscall_impl = self.get_syscall(syscall).cloned();
-                // if syscall.should_send() != 0 {
-                //     self.emit_syscall(clk, syscall.syscall_id(), b, c);
-                // }
-                let mut precompile_rt = SyscallContext::new(self);
-                let (precompile_next_pc, precompile_cycles, _returned_exit_code) =
+                if syscall.should_send() != 0 {
+                    self.chunk_split_state.record_syscall_event();
+                }
+                self.chunk_split_state.enter_syscall();
+                let syscall_result = (|| {
+                    let mut precompile_rt = SyscallContext::new(self);
                     if let Some(syscall_impl) = syscall_impl {
                         // Executing a syscall optionally returns a value to write to the t0
                         // register. If it returns None, we just keep the
                         // syscall_id in t0.
-                        let res = syscall_impl.emulate(&mut precompile_rt, syscall, b, c);
-                        if let Some(val) = res {
-                            a = val;
-                        } else {
-                            a = u64::from(syscall_id);
-                        }
+                        let ret_value = syscall_impl
+                            .emulate(&mut precompile_rt, syscall, b, c)
+                            .unwrap_or(u64::from(syscall_id));
 
                         // If the syscall is `HALT` and the exit code is non-zero, return an error.
                         if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
@@ -332,14 +330,20 @@ impl RiscvEmulator {
                             ));
                         }
 
-                        (
+                        Ok((
                             precompile_rt.next_pc,
                             syscall_impl.num_extra_cycles(),
                             precompile_rt.exit_code,
-                        )
+                            ret_value,
+                        ))
                     } else {
-                        return Err(EmulationError::UnsupportedSyscall(syscall_id));
-                    };
+                        Err(EmulationError::UnsupportedSyscall(syscall_id))
+                    }
+                })();
+                self.chunk_split_state.exit_syscall();
+                let (precompile_next_pc, precompile_cycles, _returned_exit_code, ret_value) =
+                    syscall_result?;
+                a = ret_value;
                 // TODO: this debug syscall somehow improves fibonacci-emulator performance by 10%
                 // The reason is unclear.
                 // debug!("syscall: {:?}", syscall);

@@ -5,7 +5,7 @@ use crate::{
     chips::gadgets::msb::U16MSBGadget,
     compiler::riscv::opcode::{ByteOpcode, Opcode},
     machine::builder::{ChipBuilder, ChipLookupBuilder},
-    primitives::consts::{BYTE_SIZE, WORD_SIZE},
+    primitives::consts::WORD_SIZE,
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::{Field, FieldAlgebra};
@@ -21,8 +21,6 @@ where
         let local: &ShiftLeftCols<CB::Var> = (*local).borrow();
 
         let zero: CB::Expr = CB::F::ZERO.into();
-        let _one: CB::Expr = CB::F::ONE.into();
-        let _base: CB::Expr = CB::F::from_canonical_u32(1 << BYTE_SIZE).into();
 
         for ShiftLeftValueCols {
             a,

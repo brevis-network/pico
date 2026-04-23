@@ -182,8 +182,8 @@ impl AotEmulatorCore {
             let addr = write_buf
                 .checked_add(i as u64)
                 .ok_or_else(|| "write syscall address overflow".to_string())?;
-            let word_addr = addr & !3;
-            let word = self.read_mem_word_snapshot(word_addr);
+            let word_addr = addr & !7;
+            let word = self.read_mem_dword_snapshot(word_addr);
             bytes.push(Self::read_u8_from_word(word, addr));
             i += 1;
         }

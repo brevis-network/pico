@@ -30,7 +30,7 @@ name = "compare"
 path = "src/bin/compare.rs"
 
 [dev-dependencies]
-p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", rev = "f5056c9", features = ["nightly-features"] }
+p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", rev = "7fbe190", features = ["nightly-features"] }
 
 [features]
 default = ["aot"]

@@ -1,5 +1,5 @@
 use super::{
-    constants::{sign_extend_imm32, BYTES_PER_WORD, SHIFT_MASK},
+    constants::{sign_extend_imm32, SHIFT_MASK},
     AotEmulatorCore,
 };
 
@@ -436,7 +436,7 @@ impl AotEmulatorCore {
         if !addr.is_multiple_of(2) {
             return Err(format!("Unaligned LH at {:#x}", addr));
         }
-        let word = self.read_mem_word(addr & !3);
+        let word = self.read_mem_dword(Self::dword_addr(addr));
         let v = Self::read_u16_from_word(word, addr);
         self.write_reg_tracked(rd, (v as i16) as i64 as u64);
         self.pc = next_pc;
@@ -458,7 +458,7 @@ impl AotEmulatorCore {
         if !addr.is_multiple_of(2) {
             return Err(format!("Unaligned LHU at {:#x}", addr));
         }
-        let word = self.read_mem_word(addr & !3);
+        let word = self.read_mem_dword(Self::dword_addr(addr));
         self.write_reg_tracked(rd, u64::from(Self::read_u16_from_word(word, addr)));
         self.pc = next_pc;
         self.update_insn_clock();
@@ -480,10 +480,10 @@ impl AotEmulatorCore {
         if !addr.is_multiple_of(2) {
             return Err(format!("Unaligned SH at {:#x}", addr));
         }
-        let word_addr = addr & !u64::from(BYTES_PER_WORD - 1);
-        let word = self.read_mem_word(word_addr);
+        let word_addr = Self::dword_addr(addr);
+        let word = self.read_mem_dword(word_addr);
         let new_word = Self::write_u16_into_word(word, addr, v);
-        self.write_mem_word(word_addr, new_word);
+        self.write_mem_dword(word_addr, new_word);
         self.pc = next_pc;
         self.update_insn_clock();
         Ok(())
@@ -494,7 +494,7 @@ impl AotEmulatorCore {
         let addr = self
             .read_reg_b_tracked(rs1)
             .wrapping_add(sign_extend_imm32(imm));
-        let word = self.read_mem_word(addr & !u64::from(BYTES_PER_WORD - 1));
+        let word = self.read_mem_dword(Self::dword_addr(addr));
         let v = Self::read_u8_from_word(word, addr) as i8 as i64 as u64;
         self.write_reg_tracked(rd, v);
         self.pc = next_pc;
@@ -506,7 +506,7 @@ impl AotEmulatorCore {
         let addr = self
             .read_reg_b_tracked(rs1)
             .wrapping_add(sign_extend_imm32(imm));
-        let word = self.read_mem_word(addr & !u64::from(BYTES_PER_WORD - 1));
+        let word = self.read_mem_dword(Self::dword_addr(addr));
         self.write_reg_tracked(rd, u64::from(Self::read_u8_from_word(word, addr)));
         self.pc = next_pc;
         self.update_insn_clock();
@@ -518,10 +518,10 @@ impl AotEmulatorCore {
         let addr = self
             .read_reg_b_tracked(rs1)
             .wrapping_add(sign_extend_imm32(imm));
-        let word_addr = addr & !u64::from(BYTES_PER_WORD - 1);
-        let word = self.read_mem_word(word_addr);
+        let word_addr = Self::dword_addr(addr);
+        let word = self.read_mem_dword(word_addr);
         let new_word = Self::write_u8_into_word(word, addr, v);
-        self.write_mem_word(word_addr, new_word);
+        self.write_mem_dword(word_addr, new_word);
         self.pc = next_pc;
         self.update_insn_clock();
     }

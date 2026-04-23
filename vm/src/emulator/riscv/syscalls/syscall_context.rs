@@ -116,6 +116,11 @@ impl<'a> SyscallContext<'a> {
             // This dword was already accessed in this syscall invocation.
             // Reuse the existing metadata instead of calling rt.mr() again
             // (which would fail the timestamp monotonicity check).
+            //
+            // Chunk splitting still needs to see the repeated syscall-local
+            // access. AOT counts every syscall memory access even when it hits
+            // the same dword multiple times within one syscall invocation.
+            self.rt.chunk_split_state.add_syscall_memory_events(1);
             let value = self.rt.state.memory.peek_dword(aligned);
             let initial = &local_event.initial_mem_access;
             MemoryReadRecord {
@@ -178,6 +183,11 @@ impl<'a> SyscallContext<'a> {
             // This dword was already accessed in this syscall invocation.
             // Write directly to memory and update the local event's final state,
             // without calling rt.mw() (which would fail the monotonicity check).
+            //
+            // Keep chunk-split accounting aligned with AOT: repeated accesses
+            // to the same dword inside a syscall still contribute syscall
+            // memory events even though the metadata update is coalesced here.
+            self.rt.chunk_split_state.add_syscall_memory_events(1);
             let prev_value = existing;
             self.rt
                 .state
@@ -372,6 +382,20 @@ impl<'a> SyscallContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::SyscallContext;
+    use crate::{
+        compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
+        emulator::{opts::EmulatorOpts, riscv::riscv_emulator::RiscvEmulator},
+    };
+    use alloc::sync::Arc;
+    use p3_baby_bear::BabyBear;
+
+    fn tiny_program() -> Arc<Program> {
+        Arc::new(Program::new(
+            vec![Instruction::new(Opcode::ADD, 0, 0, 0, false, false)],
+            0x1000,
+            0x1000,
+        ))
+    }
 
     #[test]
     fn dword_alignment_helper_accepts_eight_byte_alignment() {
@@ -382,5 +406,35 @@ mod tests {
     #[should_panic(expected = "must be 8-byte aligned")]
     fn dword_alignment_helper_rejects_four_byte_alignment() {
         SyscallContext::assert_dword_aligned_precompile(0x1004, "test");
+    }
+
+    #[test]
+    fn repeated_syscall_word_reads_still_count_chunk_split_events() {
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(tiny_program(), EmulatorOpts::default(), None);
+        emulator.chunk_split_state.enter_syscall();
+
+        let mut ctx = SyscallContext::new(&mut emulator);
+        let _ = ctx.mr(0x10000);
+        let _ = ctx.mr(0x10004);
+
+        assert_eq!(ctx.rt.chunk_split_state.num_syscall_memory_events, 2);
+        assert_eq!(ctx.rt.chunk_split_state.num_global_lookup_base, 3);
+        ctx.rt.chunk_split_state.exit_syscall();
+    }
+
+    #[test]
+    fn repeated_syscall_word_writes_still_count_chunk_split_events() {
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(tiny_program(), EmulatorOpts::default(), None);
+        emulator.chunk_split_state.enter_syscall();
+
+        let mut ctx = SyscallContext::new(&mut emulator);
+        let _ = ctx.mw(0x10000, 1);
+        let _ = ctx.mw(0x10004, 2);
+
+        assert_eq!(ctx.rt.chunk_split_state.num_syscall_memory_events, 2);
+        assert_eq!(ctx.rt.chunk_split_state.num_global_lookup_base, 3);
+        ctx.rt.chunk_split_state.exit_syscall();
     }
 }

@@ -233,7 +233,7 @@ where
         );
 
         // Send the initial state, with the starting index being 16.
-        let send_values = once(local.clk.into() + CB::Expr::ONE)
+        let send_values = once(local.clk.into())
             .chain(w_ptr.map(Into::into))
             .chain(once(CB::Expr::from_canonical_u32(16)))
             .collect::<Vec<_>>();
@@ -245,7 +245,7 @@ where
         ));
 
         // Receive the final state, with the final index being 64.
-        let receive_values = once(local.clk.into() + CB::Expr::from_canonical_u8(49))
+        let receive_values = once(local.clk.into() + CB::Expr::from_canonical_u8(48))
             .chain(w_ptr.map(Into::into))
             .chain(once(CB::Expr::from_canonical_u32(64)))
             .collect::<Vec<_>>();

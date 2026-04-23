@@ -36,7 +36,7 @@ use core::{
     mem::size_of,
 };
 use hybrid_array::Array;
-use num::{BigUint, Zero};
+use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -291,8 +291,25 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 let mut row = vec![F::ZERO; num_weierstrass_double_cols::<E::BaseField>()];
                 let cols: &mut WeierstrassDoubleAssignCols<F, E::BaseField> =
                     row.as_mut_slice().borrow_mut();
+                // Use (x = 0, y = 1) as the dummy point so that
+                // slope_denominator = 2*y = 2 is non-zero, avoiding the
+                // `division by zero` assertion in FieldOpCols::populate for
+                // curves with a != 0 (e.g. secp256r1 where a = -3).
+                //
+                // The eval reads point coords from `p_access` via
+                // `generate_limbs_from_write_cols_u8`, which uses
+                // `inner.prev_value` and `prev_value_u8.low_bytes`. Those
+                // constraints are NOT gated by is_real, so the memory
+                // values must match the field-op inputs (p_y = 1).
+                let num_words_field_element = <E::BaseField as NumLimbs>::Limbs::USIZE / 8;
+                cols.p_access[num_words_field_element].inner.prev_value.0[0] = F::ONE;
+                cols.p_access[num_words_field_element]
+                    .prev_value_u8
+                    .low_bytes[0] = F::ONE;
+
                 let zero = BigUint::zero();
-                Self::populate_field_ops(&mut vec![], cols, zero.clone(), zero.clone());
+                let one = BigUint::one();
+                Self::populate_field_ops(&mut vec![], cols, zero, one);
                 row
             },
             log_rows,

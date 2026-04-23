@@ -35,6 +35,17 @@ impl AotEmulatorCore {
         }
     }
 
+    #[doc(hidden)]
+    pub fn debug_interpret_single_step(&mut self) -> Result<(), String> {
+        if self.pc == 0 {
+            return Ok(());
+        }
+        let pc = self.pc;
+        let inst = self.fetch_instruction(pc)?;
+        let _ = self.execute_interpreter_instruction(pc, inst)?;
+        Ok(())
+    }
+
     /// Execute a single instruction via the interpreter.
     #[cold]
     #[inline(never)]
@@ -383,7 +394,7 @@ impl AotEmulatorCore {
         }
         let value = match inst.opcode {
             Opcode::LB => {
-                let word = self.read_mem_word(addr & !3);
+                let word = self.read_mem_dword(Self::dword_addr(addr));
                 let byte = Self::read_u8_from_word(word, addr) as i8;
                 byte as i64 as u64
             }
@@ -391,7 +402,7 @@ impl AotEmulatorCore {
                 if !addr.is_multiple_of(2) {
                     return Err(format!("Unaligned halfword access at {:#x}", addr));
                 }
-                let word = self.read_mem_word(addr & !3);
+                let word = self.read_mem_dword(Self::dword_addr(addr));
                 let raw = Self::read_u16_from_word(word, addr);
                 (raw as i16) as i64 as u64
             }
@@ -415,14 +426,14 @@ impl AotEmulatorCore {
                 self.read_mem_dword(addr)
             }
             Opcode::LBU => {
-                let word = self.read_mem_word(addr & !3);
+                let word = self.read_mem_dword(Self::dword_addr(addr));
                 u64::from(Self::read_u8_from_word(word, addr))
             }
             Opcode::LHU => {
                 if !addr.is_multiple_of(2) {
                     return Err(format!("Unaligned halfword access at {:#x}", addr));
                 }
-                let word = self.read_mem_word(addr & !3);
+                let word = self.read_mem_dword(Self::dword_addr(addr));
                 u64::from(Self::read_u16_from_word(word, addr))
             }
             _ => unreachable!(),
@@ -455,19 +466,19 @@ impl AotEmulatorCore {
         }
         match inst.opcode {
             Opcode::SB => {
-                let word_addr = addr & !3;
-                let word = self.read_mem_word(word_addr);
+                let word_addr = Self::dword_addr(addr);
+                let word = self.read_mem_dword(word_addr);
                 let new_word = Self::write_u8_into_word(word, addr, value);
-                self.write_mem_word(word_addr, new_word);
+                self.write_mem_dword(word_addr, new_word);
             }
             Opcode::SH => {
                 if !addr.is_multiple_of(2) {
                     return Err(format!("Unaligned halfword store at {:#x}", addr));
                 }
-                let word_addr = addr & !3;
-                let word = self.read_mem_word(word_addr);
+                let word_addr = Self::dword_addr(addr);
+                let word = self.read_mem_dword(word_addr);
                 let new_word = Self::write_u16_into_word(word, addr, value);
-                self.write_mem_word(word_addr, new_word);
+                self.write_mem_dword(word_addr, new_word);
             }
             Opcode::SW => {
                 if !addr.is_multiple_of(4) {

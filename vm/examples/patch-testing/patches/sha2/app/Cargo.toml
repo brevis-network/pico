@@ -7,7 +7,6 @@ keywords = { workspace = true }
 categories = { workspace = true }
 
 [dependencies]
-# TODO: use a branch of pico-sdk temp to avoid re-installing
-# pico-sdk = { workspace = true }
-pico-sdk = { git = "https://github.com/brevis-network/pico", branch = "rv64" }
+# pico-sdk = { git = "https://github.com/brevis-network/pico", branch = "rv64" }
+pico-sdk.workspace = true
 sha2 = { git = "https://github.com/brevis-network/hashes.git", package = "sha2", branch = "sha2-0.10.9-rv64" }

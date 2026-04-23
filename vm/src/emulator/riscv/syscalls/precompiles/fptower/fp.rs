@@ -45,7 +45,11 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
         // WordsFieldElement is now the u64 dword count.
         let num_u64_words = <P as NumWords>::WordsFieldElement::USIZE;
         let num_memory_words = match P::FIELD_TYPE {
-            FieldType::Secp256k1 => num_u64_words * 2, // u32 word memory ops
+            FieldType::Secp256k1 => {
+                SyscallContext::assert_dword_aligned_precompile(x_ptr, "fp x_ptr");
+                SyscallContext::assert_dword_aligned_precompile(y_ptr, "fp y_ptr");
+                num_u64_words
+            }
             // BN/BLS field elements use packed 64-bit dwords in guest memory.
             FieldType::Bn254 | FieldType::Bls381 => {
                 SyscallContext::assert_dword_aligned_precompile(x_ptr, "fp x_ptr");
@@ -55,16 +59,24 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
         };
 
         let x_vals = match P::FIELD_TYPE {
-            FieldType::Secp256k1 => rt.slice_unsafe(x_ptr, num_memory_words),
+            FieldType::Secp256k1 => rt.dword_slice_unsafe(x_ptr, num_u64_words),
             FieldType::Bn254 | FieldType::Bls381 => rt.dword_slice_unsafe(x_ptr, num_memory_words),
         };
         let (a, b, y_vals, y_memory_records) = match P::FIELD_TYPE {
             FieldType::Secp256k1 => {
-                let (y_memory_records, y_vals) = rt.mr_slice(y_ptr, num_memory_words);
-                let a =
-                    BigUint::from_slice(&x_vals.iter().map(|&v| v as u32).collect::<Vec<u32>>());
-                let b =
-                    BigUint::from_slice(&y_vals.iter().map(|&v| v as u32).collect::<Vec<u32>>());
+                let (y_memory_records, y_vals) = rt.mr_dword_slice(y_ptr, num_u64_words);
+                let a = BigUint::from_bytes_le(
+                    &x_vals
+                        .iter()
+                        .flat_map(|word| word.to_le_bytes())
+                        .collect::<Vec<u8>>(),
+                );
+                let b = BigUint::from_bytes_le(
+                    &y_vals
+                        .iter()
+                        .flat_map(|word| word.to_le_bytes())
+                        .collect::<Vec<u8>>(),
+                );
                 (a, b, y_vals, y_memory_records)
             }
             FieldType::Bn254 | FieldType::Bls381 => {
@@ -97,11 +109,10 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
         };
         let x_memory_records = match P::FIELD_TYPE {
             FieldType::Secp256k1 => {
-                let mut result = result.to_u32_digits();
-                result.resize(num_u64_words * 2, 0);
-                let result_u64: Vec<u64> = result.into_iter().map(u64::from).collect();
+                let mut result_u64 = result.to_u64_digits();
+                result_u64.resize(num_u64_words, 0);
                 rt.clk += 1;
-                rt.mw_slice(x_ptr, &result_u64)
+                rt.mw_dword_slice(x_ptr, &result_u64)
             }
             FieldType::Bn254 | FieldType::Bls381 => {
                 let mut result = result.to_u64_digits();

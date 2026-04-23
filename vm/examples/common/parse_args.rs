@@ -70,7 +70,7 @@ pub fn parse_args<SC: StarkGenericConfig>() -> (&'static [u8], EmulatorStdin<Pro
             args.n, args.step, args.field
         );
     } else if args.elf == "keccak" || args.elf == "k" {
-        elf = load_elf("keccak");
+        elf = load_elf("tiny-keccak");
         let input_str = (0..args.n).map(|_| "x").collect::<String>();
         stdin.write(&input_str);
         info!(
@@ -79,9 +79,6 @@ pub fn parse_args<SC: StarkGenericConfig>() -> (&'static [u8], EmulatorStdin<Pro
             args.step,
             args.field
         );
-    } else if args.elf == "precompile" {
-        elf = load_elf("precompile");
-        info!("Test multiple precompiles in a single elf");
     } else if args.elf == "poseidon2" {
         elf = load_elf("poseidon2");
         // pass in the expected hash value as input

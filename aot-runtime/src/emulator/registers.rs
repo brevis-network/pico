@@ -34,7 +34,7 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     pub(crate) fn track_chunk_split_address(&mut self, addr: u64) {
-        self.chunk_split_state.insert_memory_address(addr);
+        self.chunk_split_state.track_address(addr);
     }
 
     /// Clear all accessed register tracking.

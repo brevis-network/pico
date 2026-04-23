@@ -22,6 +22,7 @@ use crate::{
                 CurveType, EllipticCurve,
             },
             field::{
+                field_inner_product::FieldInnerProductCols,
                 field_lt::FieldLtCols,
                 field_op::{FieldOpCols, FieldOperation},
                 field_sqrt::FieldSqrtCols,
@@ -31,6 +32,7 @@ use crate::{
                 conversions::{generate_limbs_from_read_cols_u8, limbs_to_words},
                 field_params::{limbs_from_slice, FieldParameters, NumLimbs, NumWords},
                 limbs::Limbs,
+                polynomial::Polynomial,
             },
         },
         precompiles::checked_u64_to_u32,
@@ -48,7 +50,7 @@ use crate::{
     primitives::consts::u64_to_u16_limbs,
 };
 use hybrid_array::Array;
-use num::{BigUint, Zero};
+use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -77,7 +79,8 @@ pub struct WeierstrassDecompressCols<T, P: FieldParameters + NumWords> {
     pub(crate) range_x: FieldLtCols<T, P>,
     pub(crate) x_2: FieldOpCols<T, P>,
     pub(crate) x_3: FieldOpCols<T, P>,
-    pub(crate) x_3_plus_b: FieldOpCols<T, P>,
+    pub(crate) ax_plus_b: FieldInnerProductCols<T, P>,
+    pub(crate) x_3_plus_b_plus_ax: FieldOpCols<T, P>,
     pub(crate) y: FieldSqrtCols<T, P>,
     pub(crate) neg_y: FieldOpCols<T, P>,
     pub(crate) neg_y_range_check: FieldLtCols<T, P>,
@@ -163,7 +166,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecom
         cols: &mut WeierstrassDecompressCols<F, E::BaseField>,
         x: BigUint,
     ) {
-        // Y = sqrt(x^3 + b)
+        // Y = sqrt(x^3 + ax + b)
         cols.range_x
             .populate(blu_events, &x, &E::BaseField::modulus());
         let x_2 = cols
@@ -171,9 +174,13 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecom
             .populate(blu_events, &x.clone(), &x.clone(), FieldOperation::Mul);
         let x_3 = cols.x_3.populate(blu_events, &x_2, &x, FieldOperation::Mul);
         let b = E::b_int();
-        let x_3_plus_b = cols
-            .x_3_plus_b
-            .populate(blu_events, &x_3, &b, FieldOperation::Add);
+        let a = E::a_int();
+        let ax_plus_b = cols
+            .ax_plus_b
+            .populate(blu_events, &[a, b], &[x, BigUint::one()]);
+        let x_3_plus_b_plus_ax =
+            cols.x_3_plus_b_plus_ax
+                .populate(blu_events, &x_3, &ax_plus_b, FieldOperation::Add);
 
         let sqrt_fn = match E::CURVE_TYPE {
             CurveType::Bls12381 => bls12381_sqrt,
@@ -181,7 +188,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecom
             CurveType::Secp256r1 => secp256r1_sqrt,
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
         };
-        let y = cols.y.populate(blu_events, &x_3_plus_b, sqrt_fn);
+        let y = cols.y.populate(blu_events, &x_3_plus_b_plus_ax, sqrt_fn);
 
         let zero = BigUint::zero();
         let neg_y = cols
@@ -353,7 +360,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 let cols: &mut WeierstrassDecompressCols<F, E::BaseField> =
                     row.as_mut_slice()[0..weierstrass_width].borrow_mut();
 
-                // take X of the generator as a dummy value to make sure Y^2 = X^3 + b holds
+                // take X of the generator as a dummy value to make sure Y^2 = X^3 + aX + b holds
                 let dummy_value = E::generator().0;
                 let dummy_bytes = dummy_value.to_bytes_le();
                 // Convert bytes to u64 words for the dummy x_access values
@@ -470,12 +477,19 @@ where
             FieldOperation::Mul,
             local.is_real,
         );
-        let b = E::b_int();
-        let b_const = E::BaseField::to_limbs_field::<CB::F, _>(&b);
-        local.x_3_plus_b.eval(
+        let b_const = E::BaseField::to_limbs_field::<CB::F, _>(&E::b_int());
+        let a_const = E::BaseField::to_limbs_field::<CB::F, _>(&E::a_int());
+        let params = [a_const, b_const];
+        let p_x: Polynomial<CB::Expr> = x.into();
+        let p_one: Polynomial<CB::Expr> =
+            E::BaseField::to_limbs_field::<CB::F, _>(&BigUint::one()).into();
+        local
+            .ax_plus_b
+            .eval(builder, &params, &[p_x, p_one], local.is_real);
+        local.x_3_plus_b_plus_ax.eval(
             builder,
             &local.x_3.result,
-            &b_const,
+            &local.ax_plus_b.result,
             FieldOperation::Add,
             local.is_real,
         );
@@ -496,7 +510,7 @@ where
 
         local.y.eval(
             builder,
-            &local.x_3_plus_b.result,
+            &local.x_3_plus_b_plus_ax.result,
             local.y.lsb,
             local.is_real,
         );

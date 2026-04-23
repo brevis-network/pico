@@ -275,14 +275,6 @@ where
             local.s2,
         );
 
-        // The `s2_value_word` is the value to be written.
-        let _s2_value_word = Word([
-            local.s2.value[0].into(),
-            local.s2.value[1].into(),
-            CB::Expr::ZERO,
-            CB::Expr::ZERO,
-        ]);
-
         // Evaluate the pointer `ptr + i * 8`.
         AddrAddGadget::<CB::F>::eval(
             builder,

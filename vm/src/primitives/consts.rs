@@ -210,8 +210,6 @@ impl Poseidon2Config for BabyBearConfig {
     type PartialRounds = typenum::U13;
     type PartialRoundsM1 = typenum::U12;
     type SBoxRegisters = typenum::U1;
-    //type RiscvParallelism = typenum::U1;
-    //type Parallelism = typenum::U1;
 }
 pub const BABYBEAR_S_BOX_DEGREE: u64 = 7;
 pub const BABYBEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
@@ -227,8 +225,6 @@ impl Poseidon2Config for KoalaBearConfig {
     type PartialRounds = typenum::U20;
     type PartialRoundsM1 = typenum::U19;
     type SBoxRegisters = typenum::U0;
-    //type RiscvParallelism = typenum::U1;
-    //type Parallelism = typenum::U1;
 }
 pub const KOALABEAR_S_BOX_DEGREE: u64 = 3;
 pub const KOALABEAR_NUM_EXTERNAL_ROUNDS: usize = 8;
@@ -242,8 +238,6 @@ impl Poseidon2Config for Mersenne31Config {
     type PartialRounds = typenum::U14;
     type PartialRoundsM1 = typenum::U13;
     type SBoxRegisters = typenum::U1;
-    //type RiscvParallelism = typenum::U1;
-    //type Parallelism = typenum::U1;
 }
 pub const MERSENNE31_S_BOX_DEGREE: u64 = 5;
 pub const MERSENNE31_NUM_EXTERNAL_ROUNDS: usize = 8;
@@ -256,7 +250,6 @@ Chip Data Parallelism
  */
 pub const ADD_DATAPAR: usize = 1;
 pub const SUB_DATAPAR: usize = 1;
-pub const ADD_SUB_DATAPAR: usize = 1;
 pub const MUL_DATAPAR: usize = 1;
 pub const DIVREM_DATAPAR: usize = 1;
 pub const LT_DATAPAR: usize = 1;

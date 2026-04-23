@@ -30,8 +30,7 @@ use num::BigUint;
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::utils::field_params::{FieldParameters, NumWords};
-
-pub const WORD_SIZE: usize = 4;
+use crate::primitives::consts::WORD_SIZE;
 
 pub const NUM_WORDS_FIELD_ELEMENT: usize = 8;
 pub const NUM_BYTES_FIELD_ELEMENT: usize = NUM_WORDS_FIELD_ELEMENT * WORD_SIZE;

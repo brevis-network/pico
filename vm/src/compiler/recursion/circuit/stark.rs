@@ -40,7 +40,6 @@ use p3_koala_bear::KoalaBear;
 
 type F<FC> = <FC as FieldGenericConfig>::F;
 type EF<FC> = <FC as FieldGenericConfig>::EF;
-//type Opening<FC> = BaseOpenedValues<Felt<F<FC>>, Ext<F<FC>, EF<FC>>>;
 type Opening<FC> = Vec<ChipOpenedValues<Felt<F<FC>>, Ext<F<FC>, EF<FC>>>>;
 
 /// Reference: [pico_machine::stark::BaseProof]
@@ -77,8 +76,6 @@ pub struct MerkleProofVariable<CC: CircuitConfig, HV: FieldHasherVariable<CC>> {
     pub index: Vec<CC::Bit>,
     pub path: Vec<HV::DigestVariable>,
 }
-
-pub const EMPTY: usize = 0x_1111_1111;
 
 #[derive(Debug, Clone, Copy)]
 pub struct StarkVerifier<FC: FieldGenericConfig, SC: StarkGenericConfig, A> {

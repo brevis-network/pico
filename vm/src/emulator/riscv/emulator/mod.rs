@@ -15,6 +15,7 @@ use crate::{
         opts::{EmulatorOpts, SplitOpts},
         record::RecordBehavior,
         riscv::{
+            chunk_split::ChunkSplitConfig,
             event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
             hook::{default_hook_map, Hook},
             public_values::PublicValues,
@@ -263,6 +264,12 @@ impl EmulationDeferredState {
 
 type EmuFn = fn(&mut RiscvEmulator, &Instruction) -> Result<(), EmulationError>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChunkBoundaryMode {
+    ReplayToTarget,
+    ChunkSplit,
+}
+
 /// An emulator for the Pico RISC-V zkVM.
 ///
 /// The executor is responsible for executing a user program and tracing important events which
@@ -305,6 +312,12 @@ pub struct RiscvEmulator {
 
     /// The maximum number of cycles for a syscall.
     pub max_syscall_cycles: RvClk,
+
+    /// Shared event-based chunk splitting thresholds for the current execution mode.
+    pub chunk_split_config: ChunkSplitConfig,
+
+    /// Shared event-based counters for the current chunk.
+    pub chunk_split_state: crate::emulator::riscv::chunk_split::ChunkSplitState,
 
     /// Local memory access events.
     pub local_memory_access: HashMap<u64, MemoryLocalEvent>,
@@ -376,6 +389,33 @@ fn compat_register_addr_u32(register: Register) -> u32 {
 }
 
 impl RiscvEmulator {
+    #[inline(always)]
+    fn chunk_boundary_mode(&self) -> ChunkBoundaryMode {
+        if self.target_global_clk.is_some() {
+            ChunkBoundaryMode::ReplayToTarget
+        } else {
+            ChunkBoundaryMode::ChunkSplit
+        }
+    }
+
+    #[inline(always)]
+    fn max_syscall_cycles_u32(&self) -> u32 {
+        u32::try_from(self.max_syscall_cycles)
+            .expect("syscall cycle budget exceeds u32 during chunk split setup")
+    }
+
+    #[inline(always)]
+    fn chunk_clk_u32(&self) -> u32 {
+        u32::try_from(self.state.clk)
+            .expect("chunk-local clock exceeds u32 during chunk split evaluation")
+    }
+
+    #[inline(always)]
+    fn refresh_chunk_split_config(&mut self) {
+        self.chunk_split_config =
+            ChunkSplitConfig::for_chunk_size(self.opts.chunk_size, self.max_syscall_cycles_u32());
+    }
+
     /// Capture a snapshot for a hint address (which should be uninitialized/zero).
     pub fn capture_snapshot_for_hint(&mut self, addr: u64) {
         self.validate_main_memory_addr(addr);
@@ -456,6 +496,10 @@ impl RiscvEmulator {
             program,
             opts,
             max_syscall_cycles,
+            chunk_split_config: ChunkSplitConfig::disabled(
+                u32::try_from(max_syscall_cycles).expect("syscall cycle budget exceeds u32"),
+            ),
+            chunk_split_state: Default::default(),
             local_memory_access: Default::default(),
             mode: RiscvEmulatorMode::Trace,
             stdout: Default::default(),
@@ -595,12 +639,42 @@ impl RiscvEmulator {
         }
 
         if !self.is_unconstrained() {
-            if let Some(target_global_clk) = self.target_global_clk {
-                if self.state.global_clk >= target_global_clk {
-                    debug_assert_eq!(
-                        self.state.global_clk, target_global_clk,
-                        "snapshot worker overshot target_global_clk"
-                    );
+            match self.chunk_boundary_mode() {
+                ChunkBoundaryMode::ReplayToTarget => {
+                    if let Some(target_global_clk) = self.target_global_clk {
+                        if self.state.global_clk >= target_global_clk {
+                            debug_assert_eq!(
+                                self.state.global_clk, target_global_clk,
+                                "snapshot worker overshot target_global_clk"
+                            );
+                            self.chunk_split_state.clear();
+                            self.state.current_chunk += 1;
+                            self.state.clk = 0;
+
+                            let elapsed = last_record_time.elapsed();
+                            let tid = self.par_opts.unwrap_or_default().thread_id;
+
+                            debug!(
+                                "Record[{}] generated in {:.3} ms, thread_id: {}",
+                                self.state.current_chunk,
+                                elapsed.as_secs_f64() * 1000.0,
+                                tid
+                            );
+                            *last_record_time = Instant::now(); // reset timer
+
+                            self.bump_record(done, record_callback);
+                        }
+                    }
+                }
+                ChunkBoundaryMode::ChunkSplit
+                    if self.chunk_split_state.should_split(
+                        self.chunk_clk_u32(),
+                        self.max_syscall_cycles_u32(),
+                        &self.chunk_split_config,
+                    ) =>
+                {
+                    // Check if there's enough cycles or move to the next chunk.
+                    self.chunk_split_state.clear();
                     self.state.current_chunk += 1;
                     self.state.clk = 0;
 
@@ -617,25 +691,64 @@ impl RiscvEmulator {
 
                     self.bump_record(done, record_callback);
                 }
-            } else if self.state.clk + self.max_syscall_cycles
-                >= u64::from(self.opts.chunk_size) * 4
-            {
-                // Check if there's enough cycles or move to the next chunk.
-                self.state.current_chunk += 1;
-                self.state.clk = 0;
+                ChunkBoundaryMode::ChunkSplit => {
+                    // No boundary crossed.
+                }
+            }
+        }
 
-                let elapsed = last_record_time.elapsed();
-                let tid = self.par_opts.unwrap_or_default().thread_id;
+        Ok(done)
+    }
 
-                debug!(
-                    "Record[{}] generated in {:.3} ms, thread_id: {}",
-                    self.state.current_chunk,
-                    elapsed.as_secs_f64() * 1000.0,
-                    tid
-                );
-                *last_record_time = Instant::now(); // reset timer
+    #[doc(hidden)]
+    pub fn debug_step_simple(&mut self) -> Result<bool, EmulationError> {
+        self.initialize_if_needed();
+        self.refresh_chunk_split_config();
+        self.mode = RiscvEmulatorMode::Simple;
+        self.update_mode_deps();
 
-                self.bump_record(done, record_callback);
+        let instruction = self.program.fetch(self.state.pc);
+        Self::emulate_instruction_simple(self, &instruction)?;
+        self.state.global_clk += 1;
+
+        if let Some(max_cycles) = self.opts.max_cycles {
+            let current_cycles = self.state.global_clk;
+            if current_cycles >= max_cycles {
+                return Err(EmulationError::ExceededCycleLimit(current_cycles));
+            }
+        }
+
+        let done = self.state.pc == 0
+            || self.state.pc.wrapping_sub(self.program.pc_base)
+                >= (self.program.instructions.len() * 4) as u64;
+        if done && self.is_unconstrained() {
+            return Err(EmulationError::UnconstrainedEnd);
+        }
+
+        if !self.is_unconstrained() {
+            match self.chunk_boundary_mode() {
+                ChunkBoundaryMode::ReplayToTarget => {
+                    if let Some(target_global_clk) = self.target_global_clk {
+                        if self.state.global_clk >= target_global_clk {
+                            debug_assert_eq!(self.state.global_clk, target_global_clk);
+                            self.chunk_split_state.clear();
+                            self.state.current_chunk += 1;
+                            self.state.clk = 0;
+                        }
+                    }
+                }
+                ChunkBoundaryMode::ChunkSplit
+                    if self.chunk_split_state.should_split(
+                        self.chunk_clk_u32(),
+                        self.max_syscall_cycles_u32(),
+                        &self.chunk_split_config,
+                    ) =>
+                {
+                    self.chunk_split_state.clear();
+                    self.state.current_chunk += 1;
+                    self.state.clk = 0;
+                }
+                ChunkBoundaryMode::ChunkSplit => {}
             }
         }
 
@@ -654,6 +767,7 @@ impl RiscvEmulator {
         F: FnMut(EmulationRecord),
     {
         self.initialize_if_needed();
+        self.refresh_chunk_split_config();
 
         // Temporarily take out the deferred state during emulation.
         // Will set it back before finishing this function.
@@ -778,6 +892,7 @@ impl RiscvEmulator {
         F: FnMut(EmulationRecord),
     {
         self.initialize_if_needed();
+        self.refresh_chunk_split_config();
 
         let mut estimators = self.opts.cost_estimator.then_some(Vec::new());
         let start_chunk = self.state.current_chunk;
@@ -982,6 +1097,10 @@ impl RiscvEmulator {
         local_memory_access: Option<&mut HashMap<u64, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
         self.validate_main_memory_addr(addr);
+        self.chunk_split_state.track_address(addr);
+        if self.chunk_split_state.in_syscall() {
+            self.chunk_split_state.add_syscall_memory_events(1);
+        }
 
         let is_unconstrained = self.is_unconstrained();
         let local_access = local_memory_access.unwrap_or(&mut self.local_memory_access);
@@ -1026,6 +1145,10 @@ impl RiscvEmulator {
         _local_memory_access: Option<&mut HashMap<u64, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
         self.validate_main_memory_addr(addr);
+        self.chunk_split_state.track_address(addr);
+        if self.chunk_split_state.in_syscall() {
+            self.chunk_split_state.add_syscall_memory_events(1);
+        }
 
         let (value, prev_chunk, prev_timestamp) = self
             .state
@@ -1051,6 +1174,12 @@ impl RiscvEmulator {
         local_memory_access: Option<&mut HashMap<u64, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
         self.validate_main_memory_addr(addr);
+        self.chunk_split_state.track_address(addr);
+        if self.chunk_split_state.in_syscall() {
+            self.chunk_split_state.add_syscall_memory_events(1);
+        } else {
+            self.chunk_split_state.add_memory_rw_events(1);
+        }
 
         let is_unconstrained = self.is_unconstrained();
         let local_access = local_memory_access.unwrap_or(&mut self.local_memory_access);
@@ -1104,6 +1233,12 @@ impl RiscvEmulator {
         _local_memory_access: Option<&mut HashMap<u64, MemoryLocalEvent>>,
     ) {
         self.validate_main_memory_addr(addr);
+        self.chunk_split_state.track_address(addr);
+        if self.chunk_split_state.in_syscall() {
+            self.chunk_split_state.add_syscall_memory_events(1);
+        } else {
+            self.chunk_split_state.add_memory_rw_events(1);
+        }
 
         let (prev_value, prev_chunk, prev_timestamp) = self
             .state
@@ -1248,6 +1383,11 @@ impl RiscvEmulator {
         emit_local_event: bool,
         add_unconstrained_record: bool,
     ) {
+        self.chunk_split_state.track_address(u64::from(reg_idx));
+        if !self.is_unconstrained() {
+            self.chunk_split_state.add_memory_rw_events(1);
+        }
+
         let chunk = self.chunk();
         let timestamp = self.timestamp(&position);
         let prev_record = self.state.registers[reg_idx as usize];
@@ -1915,6 +2055,65 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_worker_replay_ignores_event_split_when_target_global_clk_is_set() {
+        let opts = EmulatorOpts {
+            chunk_size: 16,
+            chunk_batch_size: 1,
+            max_cycles: Some(64),
+            ..EmulatorOpts::default()
+        };
+        let mut emulator = RiscvEmulator::new_single::<BabyBear>(tiny_program(), opts, None);
+        emulator.target_global_clk = Some(2);
+        emulator.chunk_split_state.num_memory_read_write_events = 8;
+        emulator.chunk_split_state.num_global_lookup_base = 5;
+
+        let mut records = 0usize;
+        let report = emulator
+            .emulate_batch(&mut |_| {
+                records += 1;
+            })
+            .expect("snapshot replay batch should stop at target_global_clk");
+
+        assert!(report.done);
+        assert_eq!(report.current_cycle, 2);
+        assert_eq!(emulator.state.global_clk, 2);
+        assert_eq!(emulator.state.current_chunk, 2);
+        assert_eq!(emulator.state.clk, 0);
+        assert_eq!(emulator.state.pc, 0x1008);
+        assert!(records >= 1);
+    }
+
+    #[test]
+    fn interpreter_splits_on_event_threshold_in_boundary_authoritative_mode() {
+        let opts = EmulatorOpts {
+            chunk_size: 16,
+            chunk_batch_size: 1,
+            max_cycles: Some(64),
+            ..EmulatorOpts::default()
+        };
+        let mut emulator = RiscvEmulator::new_single::<BabyBear>(tiny_program(), opts, None);
+        emulator.chunk_split_state.num_memory_read_write_events = 7;
+        emulator.chunk_split_state.num_global_lookup_base = 5;
+
+        let mut records = 0usize;
+        let report = emulator
+            .emulate_batch(&mut |_| {
+                records += 1;
+            })
+            .expect("event-heavy batch should split");
+
+        assert!(!report.done);
+        assert_eq!(report.current_cycle, 1);
+        assert_eq!(emulator.state.global_clk, 1);
+        assert_eq!(emulator.state.current_chunk, 2);
+        assert_eq!(emulator.state.clk, 0);
+        assert_eq!(emulator.state.pc, 0x1004);
+        assert_eq!(records, 1);
+        assert_eq!(emulator.chunk_split_state.num_memory_read_write_events, 0);
+        assert_eq!(emulator.chunk_split_state.num_global_lookup_base, 0);
+    }
+
+    #[test]
     #[ignore = "RV32 ELF — not supported under RV64-only emulator"]
     fn test_simple_fib() {
         // just run a simple elf file in the compiler folder(test_elf)
@@ -2537,6 +2736,37 @@ mod tests {
         }
 
         println!("block {block}: cycles = {}", emulator.state.global_clk);
+    }
+
+    fn single_instruction_program(instruction: Instruction) -> Arc<Program> {
+        Arc::new(Program::new(vec![instruction], 0x1000, 0x1000))
+    }
+
+    #[test]
+    fn jal_to_x0_counts_chunk_split_event() {
+        let program =
+            single_instruction_program(Instruction::new(Opcode::JAL, 0, 4, 0, false, true));
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+        emulator.run(None).unwrap();
+
+        assert_eq!(emulator.chunk_split_state.num_memory_read_write_events, 1);
+    }
+
+    #[test]
+    fn jalr_to_x0_counts_chunk_split_event() {
+        let program =
+            single_instruction_program(Instruction::new(Opcode::JALR, 0, 1, 0, false, true));
+        let mut emulator =
+            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+        emulator.state.registers[1] = RuntimeRegisterRecord {
+            value: 0,
+            chunk: 0,
+            timestamp: 0,
+        };
+        emulator.run(None).unwrap();
+
+        assert_eq!(emulator.chunk_split_state.num_memory_read_write_events, 1);
     }
 
     /// Run: cargo test --release -p pico-vm test_rv64_reth_17106222 -- --ignored --nocapture

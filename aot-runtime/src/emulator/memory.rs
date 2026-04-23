@@ -8,7 +8,7 @@ impl AotEmulatorCore {
     }
 
     #[inline(always)]
-    fn dword_addr(addr: u64) -> u64 {
+    pub(crate) fn dword_addr(addr: u64) -> u64 {
         addr & !7
     }
 
@@ -354,7 +354,7 @@ impl AotEmulatorCore {
     #[inline(always)]
     pub fn write_mem_word_syscall(&mut self, addr: u64, value: u64) {
         let dword_addr = Self::dword_addr(addr);
-        let current = self.read_mem_dword_syscall_impl(dword_addr);
+        let current = self.read_mem_dword_unsafe(dword_addr);
         self.write_mem_dword_syscall(dword_addr, Self::insert_word(current, addr, value));
     }
 
@@ -371,7 +371,7 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     pub(crate) fn byte_shift(addr: u64) -> u32 {
-        ((addr % u64::from(BYTES_PER_WORD)) * 8) as u32
+        ((addr % 8) * 8) as u32
     }
 
     #[inline(always)]
@@ -381,7 +381,7 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     pub(crate) fn read_u16_from_word(word: u64, addr: u64) -> u16 {
-        ((word >> (((addr >> 1) % 2) * 16)) & 0xffff) as u16
+        ((word >> (((addr >> 1) % 4) * 16)) & 0xffff) as u16
     }
 
     #[inline(always)]
@@ -393,7 +393,7 @@ impl AotEmulatorCore {
 
     #[inline(always)]
     pub(crate) fn write_u16_into_word(word: u64, addr: u64, value: u64) -> u64 {
-        let shift = ((addr >> 1) % 2) * 16;
+        let shift = ((addr >> 1) % 4) * 16;
         let mask = !(0xffff_u64 << shift);
         (word & mask) | ((value & 0xffff) << shift)
     }
@@ -597,21 +597,9 @@ impl AotEmulatorCore {
     /// Read a span of 4-byte logical words at a specific clock cycle into a preallocated buffer.
     #[inline]
     pub fn read_mem_word_span_at_clk(&mut self, addr: u64, out: &mut [u32], clk: u32) {
-        let mut i = 0usize;
-        while i < out.len() {
+        for (i, slot) in out.iter_mut().enumerate() {
             let word_addr = addr + (i as u64) * u64::from(BYTES_PER_WORD);
-            let dword_addr = Self::dword_addr(word_addr);
-            let dword = self.read_mem_dword_value_at_clk(dword_addr, clk);
-            out[i] = Self::backing_word(Self::extract_word(dword, word_addr));
-            i += 1;
-
-            if i < out.len() {
-                let next_word_addr = addr + (i as u64) * u64::from(BYTES_PER_WORD);
-                if Self::dword_addr(next_word_addr) == dword_addr {
-                    out[i] = Self::backing_word(Self::extract_word(dword, next_word_addr));
-                    i += 1;
-                }
-            }
+            *slot = Self::backing_word(self.read_mem_word_at_clk(word_addr, clk));
         }
     }
 
@@ -624,23 +612,9 @@ impl AotEmulatorCore {
     /// Write a span of 4-byte logical words at a specific clock cycle from a buffer.
     #[inline]
     pub fn write_mem_word_span_at_clk(&mut self, addr: u64, values: &[u32], clk: u32) {
-        let mut i = 0usize;
-        while i < values.len() {
+        for (i, &value) in values.iter().enumerate() {
             let word_addr = addr + (i as u64) * u64::from(BYTES_PER_WORD);
-            let dword_addr = Self::dword_addr(word_addr);
-            let mut dword = self.read_mem_dword_value_at_clk(dword_addr, clk);
-            dword = Self::insert_word(dword, word_addr, u64::from(values[i]));
-            i += 1;
-
-            if i < values.len() {
-                let next_word_addr = addr + (i as u64) * u64::from(BYTES_PER_WORD);
-                if Self::dword_addr(next_word_addr) == dword_addr {
-                    dword = Self::insert_word(dword, next_word_addr, u64::from(values[i]));
-                    i += 1;
-                }
-            }
-
-            self.write_mem_dword_value_at_clk(dword_addr, dword, clk);
+            self.write_mem_word_at_clk(word_addr, u64::from(value), clk);
         }
     }
 
@@ -790,5 +764,31 @@ mod tests {
         emu.write_mem_word_span_at_clk(0x100, &[0x1122_3344, 0x5566_7788], 9);
 
         assert_eq!(emu.memory.get(0x100).value, 0x5566_7788_1122_3344);
+    }
+
+    #[test]
+    fn syscall_word_write_counts_one_chunk_split_event_per_logical_word() {
+        let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
+        emu.write_mem_dword(0x100, 0);
+        emu.enter_syscall();
+
+        emu.write_mem_word_syscall(0x104, 0x1122_3344);
+
+        assert_eq!(emu.chunk_split_state.num_syscall_memory_events, 1);
+    }
+
+    #[test]
+    fn syscall_word_span_counts_one_event_per_logical_word() {
+        let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
+        emu.write_mem_dword(0x100, 0);
+        emu.enter_syscall();
+
+        let mut words = [0u32; 2];
+        emu.read_mem_word_span_at_clk(0x100, &mut words, 7);
+        assert_eq!(emu.chunk_split_state.num_syscall_memory_events, 2);
+
+        emu.chunk_split_state.clear();
+        emu.write_mem_word_span_at_clk(0x100, &[0x1122_3344, 0x5566_7788], 9);
+        assert_eq!(emu.chunk_split_state.num_syscall_memory_events, 2);
     }
 }

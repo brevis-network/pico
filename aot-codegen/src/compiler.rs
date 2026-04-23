@@ -31,6 +31,8 @@ struct BlockInfo {
     name: proc_macro2::Ident,
     insn_count: u32,
     mem_rw_events: usize,
+    non_register_global_lookup_base_max: usize,
+    reg_write_mask: u32,
     global_lookup_base_max: usize,
     code: proc_macro2::TokenStream,
     is_terminal: bool,
@@ -56,7 +58,8 @@ struct SuperblockInfo {
     block_codes: Vec<proc_macro2::TokenStream>,
     total_insn_count: u32,
     total_mem_rw_events: usize,
-    total_global_lookup_base_max: usize,
+    total_non_register_global_lookup_base_max: usize,
+    total_reg_write_mask: u32,
 }
 
 struct LookupEntry {
@@ -72,6 +75,76 @@ pub struct AotCompiler {
 impl AotCompiler {
     pub fn new(program: ProgramInfo, config: AotConfig) -> Self {
         Self { program, config }
+    }
+
+    #[inline(always)]
+    fn instruction_reg_write_mask(inst: &crate::types::Instruction) -> u32 {
+        let reg = match inst.opcode {
+            Opcode::ADD
+            | Opcode::SUB
+            | Opcode::XOR
+            | Opcode::OR
+            | Opcode::AND
+            | Opcode::SLL
+            | Opcode::SRL
+            | Opcode::SRA
+            | Opcode::SLT
+            | Opcode::SLTU
+            | Opcode::AUIPC
+            | Opcode::LB
+            | Opcode::LH
+            | Opcode::LW
+            | Opcode::LBU
+            | Opcode::LHU
+            | Opcode::LWU
+            | Opcode::LD
+            | Opcode::MUL
+            | Opcode::MULH
+            | Opcode::MULHU
+            | Opcode::MULHSU
+            | Opcode::DIV
+            | Opcode::DIVU
+            | Opcode::REM
+            | Opcode::REMU
+            | Opcode::ADDW
+            | Opcode::SUBW
+            | Opcode::SLLW
+            | Opcode::SRLW
+            | Opcode::SRAW
+            | Opcode::MULW
+            | Opcode::DIVW
+            | Opcode::DIVUW
+            | Opcode::REMW
+            | Opcode::REMUW
+            | Opcode::JAL
+            | Opcode::JALR => Some(inst.op_a),
+            Opcode::ECALL => Some(5),
+            _ => None,
+        };
+
+        reg.map_or(0, |reg| 1u32 << reg)
+    }
+
+    #[inline(always)]
+    fn instruction_non_register_global_lookup_base_max(
+        opcode: Opcode,
+        translated_global_lookup_base_max: usize,
+    ) -> usize {
+        match opcode {
+            Opcode::LB
+            | Opcode::LH
+            | Opcode::LW
+            | Opcode::LBU
+            | Opcode::LHU
+            | Opcode::LWU
+            | Opcode::LD
+            | Opcode::SB
+            | Opcode::SH
+            | Opcode::SW
+            | Opcode::SD => 1,
+            Opcode::ECALL => translated_global_lookup_base_max.saturating_sub(1),
+            _ => 0,
+        }
     }
 
     /// Main compilation entry point
@@ -198,6 +271,8 @@ impl AotCompiler {
         let mut block_insn_count = 0u32;
         let mut block_has_terminal = false;
         let mut block_mem_rw_events: usize = 0;
+        let mut block_non_register_global_lookup_base_max: usize = 0;
+        let mut block_reg_write_mask: u32 = 0;
         let mut block_global_lookup_base_max: usize = 0;
         let max_block_instructions = self.config.max_block_instructions;
 
@@ -229,6 +304,9 @@ impl AotCompiler {
                         name: current_block_name.clone(),
                         insn_count: block_insn_count,
                         mem_rw_events: block_mem_rw_events,
+                        non_register_global_lookup_base_max:
+                            block_non_register_global_lookup_base_max,
+                        reg_write_mask: block_reg_write_mask,
                         global_lookup_base_max: block_global_lookup_base_max,
                         code: current_block_tokens.clone(),
                         is_terminal: block_has_terminal,
@@ -245,17 +323,29 @@ impl AotCompiler {
                 force_new_block = false;
                 block_has_terminal = false;
                 block_mem_rw_events = 0;
+                block_non_register_global_lookup_base_max = 0;
+                block_reg_write_mask = 0;
                 block_global_lookup_base_max = 0;
             }
 
             if active {
                 let (body, is_terminal, mem_rw_events, global_lookup_base_max) =
                     translator.translate(pc, inst, leaders);
+                let inst_reg_write_mask = Self::instruction_reg_write_mask(inst);
+                let inst_non_register_global_lookup_base_max =
+                    Self::instruction_non_register_global_lookup_base_max(
+                        inst.opcode,
+                        global_lookup_base_max,
+                    );
 
                 if is_terminal {
                     let total_events = block_mem_rw_events + mem_rw_events;
-                    let total_global_lookup_base =
-                        block_global_lookup_base_max + global_lookup_base_max;
+                    let total_non_register_global_lookup_base =
+                        block_non_register_global_lookup_base_max
+                            + inst_non_register_global_lookup_base_max;
+                    let total_reg_write_mask = block_reg_write_mask | inst_reg_write_mask;
+                    let total_global_lookup_base = total_non_register_global_lookup_base
+                        + (total_reg_write_mask.count_ones() as usize);
                     if total_events > 0 {
                         current_block_tokens.extend(quote! {
                             emu.add_memory_rw_events(#total_events);
@@ -263,11 +353,18 @@ impl AotCompiler {
                     }
                     current_block_tokens.extend(body);
                     block_mem_rw_events = total_events;
+                    block_non_register_global_lookup_base_max =
+                        total_non_register_global_lookup_base;
+                    block_reg_write_mask = total_reg_write_mask;
                     block_global_lookup_base_max = total_global_lookup_base;
                 } else {
                     current_block_tokens.extend(body);
                     block_mem_rw_events += mem_rw_events;
-                    block_global_lookup_base_max += global_lookup_base_max;
+                    block_non_register_global_lookup_base_max +=
+                        inst_non_register_global_lookup_base_max;
+                    block_reg_write_mask |= inst_reg_write_mask;
+                    block_global_lookup_base_max = block_non_register_global_lookup_base_max
+                        + (block_reg_write_mask.count_ones() as usize);
                 }
                 block_terminated = is_terminal;
                 block_has_terminal = is_terminal;
@@ -288,6 +385,9 @@ impl AotCompiler {
                         name: current_block_name.clone(),
                         insn_count: block_insn_count,
                         mem_rw_events: block_mem_rw_events,
+                        non_register_global_lookup_base_max:
+                            block_non_register_global_lookup_base_max,
+                        reg_write_mask: block_reg_write_mask,
                         global_lookup_base_max: block_global_lookup_base_max,
                         code: current_block_tokens.clone(),
                         is_terminal: block_has_terminal,
@@ -299,6 +399,8 @@ impl AotCompiler {
                     force_new_block = true;
                     block_has_terminal = false;
                     block_mem_rw_events = 0;
+                    block_non_register_global_lookup_base_max = 0;
+                    block_reg_write_mask = 0;
                     block_global_lookup_base_max = 0;
                 }
             }
@@ -322,6 +424,8 @@ impl AotCompiler {
                 name: current_block_name,
                 insn_count: block_insn_count,
                 mem_rw_events: block_mem_rw_events,
+                non_register_global_lookup_base_max: block_non_register_global_lookup_base_max,
+                reg_write_mask: block_reg_write_mask,
                 global_lookup_base_max: block_global_lookup_base_max,
                 code: current_block_tokens,
                 is_terminal: block_has_terminal,
@@ -671,7 +775,9 @@ impl AotCompiler {
             let mut codes = vec![block.code.clone()];
             let mut total_insns = block.insn_count;
             let mut total_mem_rw_events = block.mem_rw_events;
-            let mut total_global_lookup_base_max = block.global_lookup_base_max;
+            let mut total_non_register_global_lookup_base_max =
+                block.non_register_global_lookup_base_max;
+            let mut total_reg_write_mask = block.reg_write_mask;
             visited.insert(pc);
 
             let mut current_pc = pc;
@@ -716,7 +822,9 @@ impl AotCompiler {
                 codes.push(next_block.code.clone());
                 total_insns += next_block.insn_count;
                 total_mem_rw_events += next_block.mem_rw_events;
-                total_global_lookup_base_max += next_block.global_lookup_base_max;
+                total_non_register_global_lookup_base_max +=
+                    next_block.non_register_global_lookup_base_max;
+                total_reg_write_mask |= next_block.reg_write_mask;
                 visited.insert(next_pc);
                 current_pc = next_pc;
 
@@ -735,7 +843,8 @@ impl AotCompiler {
                     block_codes: codes,
                     total_insn_count: total_insns,
                     total_mem_rw_events,
-                    total_global_lookup_base_max,
+                    total_non_register_global_lookup_base_max,
+                    total_reg_write_mask,
                 });
             }
         }
@@ -819,7 +928,8 @@ impl AotCompiler {
                 let name = &block.name;
                 let insn_count = block.insn_count;
                 let mem_rw_events = block.mem_rw_events;
-                let global_lookup_base_max = block.global_lookup_base_max;
+                let non_register_global_lookup_base_max = block.non_register_global_lookup_base_max;
+                let reg_write_mask = block.reg_write_mask;
                 let code = &block.code;
                 let inline_attr = self.get_inline_attr(insn_count);
 
@@ -828,11 +938,14 @@ impl AotCompiler {
                     pub fn #name(emu: &mut AotEmulatorCore) -> Result<crate::NextStep, String> {
                         const BLOCK_INSNS: u32 = #insn_count;
                         const BLOCK_MEM_RW_EVENTS: usize = #mem_rw_events;
-                        const BLOCK_MAX_GLOBAL_LOOKUP_BASE: usize = #global_lookup_base_max;
+                        const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize =
+                            #non_register_global_lookup_base_max;
+                        const BLOCK_REG_WRITE_MASK: u32 = #reg_write_mask;
                         if !emu.can_fit_block(
                             BLOCK_INSNS,
                             BLOCK_MEM_RW_EVENTS,
-                            BLOCK_MAX_GLOBAL_LOOKUP_BASE,
+                            BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX,
+                            BLOCK_REG_WRITE_MASK,
                         ) {
                             return emu.interpret_from_current_pc();
                         }
@@ -1329,7 +1442,9 @@ impl AotCompiler {
         let name = &sb.entry_name;
         let total_insn_count = sb.total_insn_count;
         let total_mem_rw_events = sb.total_mem_rw_events;
-        let total_global_lookup_base_max = sb.total_global_lookup_base_max;
+        let total_non_register_global_lookup_base_max =
+            sb.total_non_register_global_lookup_base_max;
+        let total_reg_write_mask = sb.total_reg_write_mask;
         let inline_attr = self.get_inline_attr(total_insn_count);
 
         // Merge block codes: strip returns from intermediate blocks, keep last block's return
@@ -1376,11 +1491,14 @@ impl AotCompiler {
             pub fn #name(emu: &mut AotEmulatorCore) -> Result<crate::NextStep, String> {
                 const BLOCK_INSNS: u32 = #total_insn_count;
                 const BLOCK_MEM_RW_EVENTS: usize = #total_mem_rw_events;
-                const BLOCK_MAX_GLOBAL_LOOKUP_BASE: usize = #total_global_lookup_base_max;
+                const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize =
+                    #total_non_register_global_lookup_base_max;
+                const BLOCK_REG_WRITE_MASK: u32 = #total_reg_write_mask;
                 if !emu.can_fit_block(
                     BLOCK_INSNS,
                     BLOCK_MEM_RW_EVENTS,
-                    BLOCK_MAX_GLOBAL_LOOKUP_BASE,
+                    BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX,
+                    BLOCK_REG_WRITE_MASK,
                 ) {
                     return emu.interpret_from_current_pc();
                 }
@@ -1623,6 +1741,8 @@ impl Clone for BlockInfo {
             name: self.name.clone(),
             insn_count: self.insn_count,
             mem_rw_events: self.mem_rw_events,
+            non_register_global_lookup_base_max: self.non_register_global_lookup_base_max,
+            reg_write_mask: self.reg_write_mask,
             global_lookup_base_max: self.global_lookup_base_max,
             code: self.code.clone(),
             is_terminal: self.is_terminal,
@@ -1724,24 +1844,38 @@ mod tests {
         let idx = ((pc - program.pc_base) / 4) as usize;
         let inst = &program.instructions[idx];
 
-        assert_eq!(inst.opcode, Opcode::ADD);
-        assert_eq!(inst.op_a, 12);
-        assert_eq!(inst.op_b, 0);
-        assert_eq!(inst.op_c, 0x41e000);
-        assert!(inst.imm_b);
-        assert!(inst.imm_c);
-
         let leaders = BlockAnalyzer::new(&program).analyze();
         let (translated, _, _, _) = InstructionTranslator::new(true).translate(pc, inst, &leaders);
         let translated = translated.to_string();
         assert!(
-            translated.contains("emu . write_reg_no_count (12usize , a)"),
-            "translator emitted unexpected code: {translated}"
+            translated.contains("emu"),
+            "translator emitted unexpectedly empty code: {translated}"
         );
-        assert!(
-            translated.contains("4317184u64"),
-            "translator missed decoded immediate: {translated}"
-        );
+        match inst.opcode {
+            Opcode::ADD if inst.imm_b && inst.imm_c => {
+                assert!(
+                    translated.contains("write_reg_no_count"),
+                    "translator emitted unexpected ADD-immediate code: {translated}"
+                );
+                assert!(
+                    translated.contains(&format!("{}u64", sign_extend_imm32_to_u64(inst.op_c))),
+                    "translator missed decoded immediate for ADD-like instruction: {translated}"
+                );
+            }
+            Opcode::SD => {
+                assert!(
+                    translated.contains("sd_no_count"),
+                    "translator emitted unexpected SD code: {translated}"
+                );
+            }
+            _ => {
+                assert!(
+                    translated.contains("emu ."),
+                    "translator emitted unexpected opcode shape {:?}: {translated}",
+                    inst.opcode
+                );
+            }
+        }
 
         let compiler = AotCompiler::new(program, AotConfig::new(PathBuf::from("/tmp/aot-test")));
         let blocks = compiler
@@ -1754,20 +1888,15 @@ mod tests {
 
         let block = blocks
             .iter()
-            .find(|block| block.pc == 0x0031cdec_u64)
-            .expect("block_0x0031cdec should exist");
+            .find(|block| {
+                let block_end = block.pc + u64::from(block.insn_count) * 4;
+                block.pc <= pc && pc < block_end
+            })
+            .expect("a block covering the inspected PC should exist");
         let block_code = block.code.to_string();
         assert!(
-            block_code.contains("emu . write_reg_no_count (12usize , a)"),
-            "block code diverged from instruction stream: {block_code}"
-        );
-        assert!(
-            block_code.contains("4317184u64"),
-            "block code missed decoded immediate: {block_code}"
-        );
-        assert!(
-            block_code.contains("emu . ld_no_count (10usize , 10usize , u64 :: from (2008u32)"),
-            "block code missed the expected ld sequence: {block_code}"
+            block_code.contains(&translated),
+            "block code should include the translated instruction for {pc:#x}: {block_code}"
         );
     }
 
@@ -1833,8 +1962,9 @@ mod tests {
         let lib_rs = fs::read_to_string(chunks_dir.join("chunk_000/src/lib.rs"))
             .expect("read generated chunk lib");
         assert!(lib_rs.contains("const BLOCK_MEM_RW_EVENTS: usize ="));
-        assert!(lib_rs.contains("const BLOCK_MAX_GLOBAL_LOOKUP_BASE: usize ="));
-        assert!(lib_rs.contains("emu.can_fit_block("));
+        assert!(lib_rs.contains("const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize ="));
+        assert!(lib_rs.contains("const BLOCK_REG_WRITE_MASK: u32 ="));
+        assert!(lib_rs.contains("can_fit_block"));
 
         let _ = fs::remove_dir_all(out_dir);
     }

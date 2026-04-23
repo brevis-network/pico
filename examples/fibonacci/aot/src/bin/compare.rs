@@ -9,7 +9,6 @@ use pico_vm::{
     emulator::{
         emulator::MetaEmulator,
         opts::EmulatorOpts,
-        riscv::{memory::GLOBAL_MEMORY_RECYCLER, state::RiscvEmulationState},
         stdin::EmulatorStdin,
     },
     instances::{
@@ -21,7 +20,7 @@ use pico_vm::{
 use std::time::Instant;
 
 #[cfg(feature = "aot")]
-use aot::{AotRun, FibonacciEmulator};
+use aot::{AotRun, FibonacciEmulator, recycle_snapshot_memory};
 
 const WARMUP_RUNS: usize = 1;
 const BENCH_RUNS: usize = 5;
@@ -95,6 +94,7 @@ fn run_aot_bench(elf_bytes: &[u8]) -> (u64, std::time::Duration, u32) {
     for _ in 0..WARMUP_RUNS {
         let mut emu = FibonacciEmulator::new(program.clone(), input_stream.clone());
         loop {
+            // NOTE: caller must recycle returned snapshot memory.
             let (snapshot, report) = emu
                 .next_state_batch(opts)
                 .expect("AOT next_state_batch failed");
@@ -109,6 +109,7 @@ fn run_aot_bench(elf_bytes: &[u8]) -> (u64, std::time::Duration, u32) {
     let start = Instant::now();
     let mut batch_count = 0;
     loop {
+        // NOTE: caller must recycle returned snapshot memory.
         let (snapshot, report) = emu
             .next_state_batch(opts)
             .expect("AOT next_state_batch failed");
@@ -126,11 +127,6 @@ fn run_aot_bench(elf_bytes: &[u8]) -> (u64, std::time::Duration, u32) {
 #[cfg(not(feature = "aot"))]
 fn run_aot_bench(_elf_bytes: &[u8]) -> (u64, std::time::Duration, u32) {
     panic!("AOT feature not enabled. Build with: cargo run --features aot --bin compare");
-}
-
-fn recycle_snapshot_memory(snapshot: RiscvEmulationState) {
-    let RiscvEmulationState { memory, .. } = snapshot;
-    let _ = GLOBAL_MEMORY_RECYCLER.send((memory, true));
 }
 
 fn main() {

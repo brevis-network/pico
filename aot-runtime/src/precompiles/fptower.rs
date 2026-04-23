@@ -36,14 +36,17 @@ fn fp_op_secp256k1(
     clk: u32,
     num_words: usize,
 ) {
-    let mut x_buf = [0u32; 8];
-    let mut y_buf = [0u32; 8];
+    assert!(x_ptr.is_multiple_of(8), "x_ptr is unaligned");
+    assert!(y_ptr.is_multiple_of(8), "y_ptr is unaligned");
+    let num_dwords = num_words;
+    let mut x_buf = [0u64; 4];
+    let mut y_buf = [0u64; 4];
 
-    core.read_mem_word_span_snapshot(x_ptr, &mut x_buf[..num_words * 2]);
-    core.read_mem_word_span_at_clk(y_ptr, &mut y_buf[..num_words * 2], clk);
+    core.read_mem_dword_span_snapshot(x_ptr, &mut x_buf[..num_dwords]);
+    core.read_mem_dword_span_at_clk(y_ptr, &mut y_buf[..num_dwords], clk);
 
-    let a_bytes = words_to_bytes_32(&x_buf);
-    let b_bytes = words_to_bytes_32(&y_buf);
+    let a_bytes = dwords_to_bytes(&x_buf[..num_dwords]);
+    let b_bytes = dwords_to_bytes(&y_buf[..num_dwords]);
     let a = Secp256k1Fq::from_le_bytes_mod_order(&a_bytes);
     let b = Secp256k1Fq::from_le_bytes_mod_order(&b_bytes);
 
@@ -54,8 +57,8 @@ fn fp_op_secp256k1(
         _ => panic!("Unsupported operation"),
     };
 
-    let result_words = fq_to_words_32(result);
-    core.write_mem_word_span_at_clk(x_ptr, &result_words[..num_words * 2], clk + 1);
+    let result_dwords = result.into_bigint().0;
+    core.write_mem_dword_span_at_clk(x_ptr, &result_dwords[..num_dwords], clk + 1);
 }
 
 fn fp_op_bn254(
@@ -345,15 +348,6 @@ fn pack_words_to_packed_dwords(words: &[u32]) -> Vec<u64> {
         .chunks_exact(2)
         .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
         .collect()
-}
-
-#[inline(always)]
-fn words_to_bytes_32(words: &[u32; 8]) -> [u8; 32] {
-    let mut bytes = [0u8; 32];
-    for i in 0..8 {
-        bytes[i * 4..(i + 1) * 4].copy_from_slice(&words[i].to_le_bytes());
-    }
-    bytes
 }
 
 #[inline(always)]

@@ -2,7 +2,12 @@
 use pico_aot_dispatch::AotEmulatorCore;
 #[cfg(feature = "aot")]
 use pico_vm::{
-    emulator::{opts::EmulatorOpts, riscv::state::RiscvEmulationState},
+    emulator::{
+        opts::EmulatorOpts,
+        riscv::{
+            chunk_split::ChunkSplitConfig, memory::GLOBAL_MEMORY_RECYCLER, state::RiscvEmulationState,
+        },
+    },
     machine::report::EmulationReport,
 };
 
@@ -16,16 +21,17 @@ pub trait AotRun {
 }
 
 #[cfg(feature = "aot")]
+pub fn recycle_snapshot_memory(snapshot: RiscvEmulationState) {
+    let RiscvEmulationState { memory, .. } = snapshot;
+    let _ = GLOBAL_MEMORY_RECYCLER.send((memory, true));
+}
+
+#[cfg(feature = "aot")]
 pub fn run_impl(emu: &mut AotEmulatorCore) -> Result<(), String> {
     emu.batch_chunk_target = 0;
     emu.batch_chunks_emulated = 0;
     emu.batch_stop = false;
-    emu.batch_chunk_size = u32::MAX / 4;
-    emu.batch_clk_threshold = u32::MAX;
-    emu.batch_clk_fast_threshold = u32::MAX - 20000;
-    emu.batch_memory_rw_threshold = usize::MAX;
-    emu.batch_global_lookup_base_threshold = usize::MAX;
-    emu.batch_event_fast_threshold = usize::MAX - 10000;
+    emu.chunk_split_config = ChunkSplitConfig::disabled(emu.max_syscall_cycles);
     pico_aot_dispatch::run_aot(emu)
 }
 
@@ -37,24 +43,10 @@ pub fn next_state_batch_impl(
     let start_chunk = emu.current_chunk;
     let start_cycle = emu.insn_count;
 
-    emu.batch_chunk_size = opts.chunk_size;
     emu.batch_chunk_target = opts.chunk_batch_size;
     emu.batch_chunks_emulated = 0;
     emu.batch_stop = false;
-    emu.batch_clk_threshold = opts
-        .chunk_size
-        .saturating_mul(4)
-        .saturating_sub(emu.max_syscall_cycles);
-
-    const FAST_PATH_CLK_MARGIN: u32 = 20000;
-    const FAST_PATH_EVENT_MARGIN: usize = 10000;
-    let memory_rw_event_threshold = (opts.chunk_size as usize) >> 1;
-    emu.batch_clk_fast_threshold = emu
-        .batch_clk_threshold
-        .saturating_sub(FAST_PATH_CLK_MARGIN);
-    emu.batch_memory_rw_threshold = memory_rw_event_threshold;
-    emu.batch_global_lookup_base_threshold = memory_rw_event_threshold >> 1;
-    emu.batch_event_fast_threshold = memory_rw_event_threshold.saturating_sub(FAST_PATH_EVENT_MARGIN);
+    emu.chunk_split_config = ChunkSplitConfig::for_chunk_size(opts.chunk_size, emu.max_syscall_cycles);
 
     emu.save_batch_start_state();
     let mut snapshot = emu.build_snapshot_state();

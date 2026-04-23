@@ -2,7 +2,10 @@ use hashbrown::HashMap;
 use pico_vm::{
     chips::chips::riscv_memory::event::MemoryRecord,
     compiler::riscv::program::Program,
-    emulator::riscv::memory::{ContiguousRiscvMemory, Memory},
+    emulator::riscv::{
+        chunk_split::{ChunkSplitConfig, ChunkSplitState},
+        memory::{ContiguousRiscvMemory, Memory},
+    },
     primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
 use std::sync::Arc;
@@ -14,10 +17,7 @@ use crate::{
     types::BlockFn,
 };
 
-use super::{
-    constants::{FAST_PATH_CLK_MARGIN, FAST_PATH_EVENT_MARGIN},
-    types::{ChunkSplitState, RegisterRecord},
-};
+use super::types::RegisterRecord;
 
 /// Core AOT Emulator struct with all base functionality.
 ///
@@ -60,19 +60,7 @@ pub struct AotEmulatorCore {
     pub batch_chunk_target: u32,
     pub batch_chunks_emulated: u32,
     pub batch_stop: bool,
-    pub batch_chunk_size: u32,
-    /// Pre-computed chunk boundary threshold (chunk_size*4 - max_syscall_cycles)
-    pub batch_clk_threshold: u32,
-    /// Fast-path threshold for early exit (batch_clk_threshold - FAST_PATH_MARGIN)
-    /// When clk < this value AND events < event_fast_threshold, skip the full check.
-    pub batch_clk_fast_threshold: u32,
-    /// Event threshold for memory read/write events.
-    pub batch_memory_rw_threshold: usize,
-    /// Event threshold for global lookup events in base units (before legacy x2 expansion).
-    pub batch_global_lookup_base_threshold: usize,
-    /// Fast-path event threshold for early exit (memory_rw_event_threshold - max_block_events)
-    /// Events below this combined with clk below fast threshold allows skipping full check.
-    pub batch_event_fast_threshold: usize,
+    pub chunk_split_config: ChunkSplitConfig,
     /// Snapshot (rollback) register data for the current batch
     pub batch_start_registers: [u64; 32],
     pub batch_start_reg_present: [bool; 32],
@@ -149,12 +137,7 @@ impl AotEmulatorCore {
             batch_chunk_target: 0,
             batch_chunks_emulated: 0,
             batch_stop: false,
-            batch_chunk_size: u32::MAX / 4,
-            batch_clk_threshold: u32::MAX,
-            batch_clk_fast_threshold: u32::MAX.saturating_sub(FAST_PATH_CLK_MARGIN),
-            batch_memory_rw_threshold: usize::MAX,
-            batch_global_lookup_base_threshold: usize::MAX,
-            batch_event_fast_threshold: usize::MAX.saturating_sub(FAST_PATH_EVENT_MARGIN),
+            chunk_split_config: ChunkSplitConfig::disabled(max_syscall_cycles),
             batch_start_registers: [0; 32],
             batch_start_reg_present: [false; 32],
             register_records: [RegisterRecord::default(); 32],
@@ -410,6 +393,54 @@ mod tests {
         assert_eq!(no_count.read_reg_unsafe(2), 0xffff_ffff_ffff_ff80);
         assert_eq!(no_count.read_reg_unsafe(3), 0x0000_0000_ffff_ff80);
         assert_eq!(no_count.read_reg_unsafe(4), 0x1234_5678_ffff_ff80);
+    }
+
+    #[test]
+    fn phase3_subword_helpers_use_dword_backing_layout() {
+        let mut emu = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
+        emu.write_reg(1, 0x100);
+        emu.write_mem_dword(0x100, 0x8877_6655_4433_2211);
+
+        emu.lb(2, 1, 4, 0x1004);
+        emu.lbu(3, 1, 5, 0x1008);
+        emu.lh(4, 1, 6, 0x100c).unwrap();
+        emu.lhu(5, 1, 2, 0x1010).unwrap();
+        assert_eq!(emu.read_reg_unsafe(2), 0x55);
+        assert_eq!(emu.read_reg_unsafe(3), 0x66);
+        assert_eq!(emu.read_reg_unsafe(4), 0xffff_ffff_ffff_8877);
+        assert_eq!(emu.read_reg_unsafe(5), 0x4433);
+
+        emu.write_reg(6, 0xaa);
+        emu.sb(6, 1, 5, 0x1014);
+        emu.write_reg(7, 0xbbcc);
+        emu.sh(7, 1, 6, 0x1018).unwrap();
+        assert_eq!(emu.read_mem_dword_unsafe(0x100), 0xbbcc_aa55_4433_2211);
+
+        let mut tracked = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
+        tracked.write_reg_tracked(1, 0x100);
+        tracked.write_mem_dword(0x100, 0x8877_6655_4433_2211);
+        tracked.lb_tracked(2, 1, 4, 0x1004);
+        tracked.lbu_tracked(3, 1, 5, 0x1008);
+        tracked.lh_tracked(4, 1, 6, 0x100c).unwrap();
+        tracked.lhu_tracked(5, 1, 2, 0x1010).unwrap();
+        tracked.write_reg_tracked(6, 0xaa);
+        tracked.sb_tracked(6, 1, 5, 0x1014);
+        tracked.write_reg_tracked(7, 0xbbcc);
+        tracked.sh_tracked(7, 1, 6, 0x1018).unwrap();
+        assert_eq!(tracked.read_mem_dword_unsafe(0x100), 0xbbcc_aa55_4433_2211);
+
+        let mut no_count = AotEmulatorCore::new(test_program(0x1000, 0x1000), Vec::new());
+        no_count.write_reg_no_count(1, 0x100);
+        no_count.write_mem_dword(0x100, 0x8877_6655_4433_2211);
+        no_count.lb_no_count(2, 1, 4, 0x1004);
+        no_count.lbu_no_count(3, 1, 5, 0x1008);
+        no_count.lh_no_count(4, 1, 6, 0x100c).unwrap();
+        no_count.lhu_no_count(5, 1, 2, 0x1010).unwrap();
+        no_count.write_reg_no_count(6, 0xaa);
+        no_count.sb_no_count(6, 1, 5, 0x1014);
+        no_count.write_reg_no_count(7, 0xbbcc);
+        no_count.sh_no_count(7, 1, 6, 0x1018).unwrap();
+        assert_eq!(no_count.read_mem_dword_unsafe(0x100), 0xbbcc_aa55_4433_2211);
     }
 
     #[test]

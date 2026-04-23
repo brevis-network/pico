@@ -1,12 +1,10 @@
-use super::{
-    constants::{FAST_PATH_CLK_MARGIN, FAST_PATH_EVENT_MARGIN},
-    AotEmulatorCore,
-};
+use super::AotEmulatorCore;
 use hashbrown::HashMap;
 use pico_vm::{
     emulator::{
         opts::EmulatorOpts,
         riscv::{
+            chunk_split::ChunkSplitConfig,
             memory::{Memory, GLOBAL_MEMORY_POOL},
             state::{RiscvEmulationState, RuntimeRegisterRecord},
         },
@@ -24,22 +22,11 @@ impl AotEmulatorCore {
         let start_chunk = self.current_chunk;
         let start_cycle = self.insn_count;
 
-        self.batch_chunk_size = opts.chunk_size;
         self.batch_chunk_target = opts.chunk_batch_size;
         self.batch_chunks_emulated = 0;
         self.batch_stop = false;
-        self.batch_clk_threshold = opts
-            .chunk_size
-            .saturating_mul(4)
-            .saturating_sub(self.max_syscall_cycles);
-        self.batch_clk_fast_threshold = self
-            .batch_clk_threshold
-            .saturating_sub(FAST_PATH_CLK_MARGIN);
-        let memory_rw_event_threshold = (opts.chunk_size as usize) >> 1;
-        self.batch_memory_rw_threshold = memory_rw_event_threshold;
-        self.batch_global_lookup_base_threshold = memory_rw_event_threshold >> 2;
-        self.batch_event_fast_threshold =
-            memory_rw_event_threshold.saturating_sub(FAST_PATH_EVENT_MARGIN);
+        self.chunk_split_config =
+            ChunkSplitConfig::for_chunk_size(opts.chunk_size, self.max_syscall_cycles);
         self.save_batch_start_state();
 
         (start_chunk, start_cycle)
@@ -60,12 +47,7 @@ impl AotEmulatorCore {
         self.batch_chunk_target = 0;
         self.batch_chunks_emulated = 0;
         self.batch_stop = false;
-        self.batch_chunk_size = u32::MAX / 4;
-        self.batch_clk_threshold = u32::MAX;
-        self.batch_clk_fast_threshold = u32::MAX.saturating_sub(FAST_PATH_CLK_MARGIN);
-        self.batch_memory_rw_threshold = usize::MAX;
-        self.batch_global_lookup_base_threshold = usize::MAX;
-        self.batch_event_fast_threshold = usize::MAX.saturating_sub(FAST_PATH_EVENT_MARGIN);
+        self.chunk_split_config = ChunkSplitConfig::disabled(self.max_syscall_cycles);
         run_dispatch(self)
     }
 

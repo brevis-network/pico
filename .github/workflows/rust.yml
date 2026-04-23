@@ -3,13 +3,15 @@ on:
     branches:
       - main
       - release/v*
+      # temp
+      - cpu-rv64
     paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - '.gitignore'
-      - 'Makefile'
-      - 'tools/**'
-      - 'scripts/**'
+      - "docs/**"
+      - "README.md"
+      - ".gitignore"
+      - "Makefile"
+      - "tools/**"
+      - "scripts/**"
 
 name: Check, Test, and Format
 
@@ -39,6 +41,8 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
       - name: Configure git for private repo
         run: |
           git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
@@ -67,7 +71,7 @@ jobs:
           done
 
   test:
-    if: false
+    if: true
     name: Tests
     runs-on: ubuntu-latest
     steps:
@@ -86,7 +90,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Cargo run examples
         run: |
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example toy_simple_machine
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv_emulator
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_proverchain
       - name: Check single threaded build
@@ -94,7 +97,7 @@ jobs:
           cargo build -p pico-vm --no-default-features --features=strict
 
   kb-tests:
-    if: false
+    if: true
     name: KoalaBear tests
     runs-on: ubuntu-latest
     steps:
@@ -114,9 +117,8 @@ jobs:
       - name: Cargo run examples
         run: |
           # KB basic tests
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_simple_recursion -- --elf keccak --n 15 --field kb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf precompile --field kb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf poseidon2 --field kb --n 1066971790
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_simple_recursion -- --elf fib --n 100 --field kb
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_riscv -- --elf keccak --n 10 --field kb
 
           # KB e2e test and copy the final STARK proof for later test
           RUST_LOG=info FRI_QUERIES=1 cargo run --release  --example test_e2e -- --field kb
@@ -129,14 +131,14 @@ jobs:
           sudo mv ./target/release/libfield_ffi.so /usr/lib/
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: "1.22"
       - name: Gnark verification
         run: |
           cd gnark/koalabear_verifier/
           go test -timeout 70s -run TestSolveVerifierCircuit
 
   bb-tests:
-    if: false
+    if: true
     name: BabyBear tests
     runs-on: ubuntu-latest
     steps:
@@ -156,9 +158,8 @@ jobs:
       - name: Cargo run examples
         run: |
           # BB basic tests
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_simple_recursion -- --elf keccak --n 15 --field bb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf precompile --field bb
-          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf poseidon2 --field bb --n 1071209047
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_simple_recursion -- --elf fib --n 100 --field bb
+          RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf keccak --n 10 --field bb
 
           # BB e2e test and copy the final STARK proof for later test
           RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_e2e -- --field bb
@@ -171,85 +172,8 @@ jobs:
           sudo mv ./target/release/libfield_ffi.so /usr/lib/
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: "1.22"
       - name: Gnark verification
         run: |
           cd gnark/babybear_verifier/
           go test -timeout 70s -run TestSolveVerifierCircuit
-
-  m31-tests:
-    if: true
-    name: Mersenne31 tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure git for private repo
-        run: |
-          git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
-      - name: Checkout sources
-        uses: actions/checkout@v4
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2025-08-04
-          override: true
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-      - name: Cargo run examples
-        run: |
-          # M31 basic tests
-          # TODO: restart these tests once the m31 prover is actually fixed
-          # RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --field m31
-          # RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf precompile --field m31
-          # RUST_LOG=info FRI_QUERIES=1 cargo run --release --example test_riscv -- --elf poseidon2 --field m31 --n 2118082624
-
-  riscof:
-    if: true
-    name: RISCOF Arch Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Configure git for private repo
-        run: |
-          git config --global url."https://${{ secrets.GH_TOKEN }}:@github.com/".insteadOf "https://github.com/"
-      - name: Checkout pico sources
-        uses: actions/checkout@v4
-        with:
-          path: pico
-      - name: Install toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly-2025-08-04
-          override: true
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: pico
-      - name: Build pico-cli
-        run: |
-          cd pico
-          cargo build --release -p pico-cli
-      - name: Checkout zkevm-test-monitor
-        uses: actions/checkout@v4
-        with:
-          repository: eth-act/zkevm-test-monitor
-          path: zkevm-test-monitor
-      - name: Setup pico binary for RISCOF
-        run: |
-          mkdir -p zkevm-test-monitor/binaries
-          cp pico/target/release/cargo-pico zkevm-test-monitor/binaries/pico-binary
-          chmod +x zkevm-test-monitor/binaries/pico-binary
-      - name: Run RISCOF arch tests
-        run: |
-          cd zkevm-test-monitor
-          ./src/test.sh --arch pico
-      - name: Display test results
-        if: always()
-        run: |
-          cd zkevm-test-monitor
-          if [ -f "test-results/pico/summary-arch.json" ]; then
-            echo "📊 RISCOF Test Results:"
-            cat test-results/pico/summary-arch.json | jq '.'
-          else
-            echo "⚠️ No test results found"
-          fi

@@ -295,8 +295,11 @@ impl InstructionTranslator {
             // Execute syscall via the generic syscall system
             match emu.execute_syscall(syscall_id, arg1, arg2) {
                 Ok((return_value, new_next_pc, extra_cycles, should_halt)) => {
-                    // Write return value to t0 (x5)
-                    emu.write_reg_no_count(5, return_value);
+                    // Write return value to t0 (x5).
+                    // This must happen at runtime instead of being pre-batched because
+                    // ENTER_UNCONSTRAINED mirrors baseline rw_unconstrained() semantics
+                    // and does not increment the chunk-split mem_rw counter.
+                    emu.write_reg(5, return_value);
 
                     // Update PC and clock
                     // Note: new_next_pc is usually pc+4, but some syscalls like
@@ -329,7 +332,7 @@ impl InstructionTranslator {
                 }
             }
         };
-        (code, true, 1, 1)
+        (code, true, 0, 1)
     }
 
     /// Generates code for EBREAK (breakpoint) instruction.

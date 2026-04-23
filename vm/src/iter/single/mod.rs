@@ -38,21 +38,6 @@ pub trait PicoIterator: Iterator {
     }
 }
 
-//struct Scan<T> {
-//    data: Vec<T>,
-//    offset: usize,
-//}
-//
-//impl<T> Iterator for Scan<T> {
-//    type Item = T;
-//
-//    fn next(&mut self) -> Option<T> {
-//        let result = self.data.get(self.offset);
-//        self.offset += 1;
-//        result
-//    }
-//}
-
 pub trait PicoScanIterator: Iterator {
     // rename to pico_scan to deconflict with core::iter::Iterator::scan
     fn pico_scan<F>(self, scan_op: F, identity: Self::Item) -> impl Iterator<Item = Self::Item>
@@ -64,21 +49,11 @@ pub trait PicoScanIterator: Iterator {
         Self::Item: Copy,
         Self: Sized,
     {
-        //let mut lhs = &identity;
-        //let mut data = Vec::new();
-        //for (i, rhs) in self.enumerate() {
-        //    data.push(scan_op(lhs, &rhs));
-        //    lhs = &data[i];
-        //}
         Iterator::scan(self, identity, move |st, item| {
             let result = scan_op(st, &item);
             *st = result;
             Some(result)
         })
-        //Scan {
-        //    data,
-        //    offset: 0,
-        //}
     }
 }
 
