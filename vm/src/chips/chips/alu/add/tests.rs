@@ -87,3 +87,23 @@ fn test_rv64_add_overflow_wrapping() {
 fn test_rv64_add_chained() {
     run_test(create_add_chained_program(), "add chained");
 }
+
+#[test]
+fn test_add_chip_simple_eval() {
+    use crate::machine::{
+        builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: crate::chips::chips::alu::add::AddChip<KoalaBear> =
+        crate::chips::chips::alu::add::AddChip::default();
+    let preprocessed_width = chip.preprocessed_width();
+    let width = chip.width();
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 6);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 5);
+}
