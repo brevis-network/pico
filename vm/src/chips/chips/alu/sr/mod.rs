@@ -1,5 +1,9 @@
-pub mod columns;
-pub mod constraints;
+mod columns;
+mod constraints;
+mod traces;
+
 #[cfg(test)]
-pub mod tests;
-pub mod traces;
+mod tests;
+
+pub use columns::*;
+pub use traces::*;

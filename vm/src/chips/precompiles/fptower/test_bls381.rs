@@ -116,3 +116,69 @@ fn test_rv64_bls381_fp2_mul() {
     }
     panic!("No bls 12381 fp2 mul add events found!");
 }
+
+#[test]
+fn test_bls381_fp_op_chip_simple_eval() {
+    use super::fp::FpOpChip;
+    use crate::{
+        chips::gadgets::curves::weierstrass::bls381::Bls381BaseField,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: FpOpChip<KoalaBear, Bls381BaseField> = FpOpChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 341);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 278);
+}
+
+#[test]
+fn test_bls381_fp2_addsub_chip_simple_eval() {
+    use super::fp2_addsub::Fp2AddSubChip;
+    use crate::{
+        chips::gadgets::curves::weierstrass::bls381::Bls381BaseField,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: Fp2AddSubChip<KoalaBear, Bls381BaseField> = Fp2AddSubChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 664);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 553);
+}
+
+#[test]
+fn test_bls381_fp2_mul_chip_simple_eval() {
+    use super::fp2_mul::Fp2MulChip;
+    use crate::{
+        chips::gadgets::curves::weierstrass::bls381::Bls381BaseField,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: Fp2MulChip<KoalaBear, Bls381BaseField> = Fp2MulChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 1043);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 1121);
+}

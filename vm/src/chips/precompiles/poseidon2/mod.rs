@@ -1,5 +1,7 @@
 mod columns;
 mod constraints;
+#[cfg(test)]
+mod tests;
 mod traces;
 
 use crate::{

@@ -66,3 +66,25 @@ fn test_rv64_byte_chip() {
 
     test_rv64_prove_and_verify_chunk(program, chips, record);
 }
+
+#[test]
+fn test_byte_chip_simple_eval() {
+    use crate::{
+        chips::chips::byte::ByteChip,
+        machine::{
+            builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+        },
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: ByteChip<KoalaBear> = ByteChip::default();
+    let preprocessed_width = chip.preprocessed_width();
+    let width = chip.width();
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 0);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 10);
+}
