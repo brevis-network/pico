@@ -42,7 +42,13 @@ where
             let scope = format!("AddValueCols[{}]", i);
             builder.with_scope(scope, |builder| {
                 // Evaluate the 64-bit addition gadget.
-                AddGadget::<CB::F>::eval(builder, operand_1, operand_2, add_operation, is_add);
+                AddGadget::<CB::F>::eval(
+                    builder,
+                    operand_1,
+                    operand_2,
+                    add_operation,
+                    is_add.into(),
+                );
 
                 // Receive the ADD lookup: a = b + c, multiplicity = is_add.
                 builder.looked_alu(

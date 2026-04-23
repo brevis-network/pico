@@ -8,10 +8,24 @@ use crate::{
     },
     compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
     emulator::riscv::record::EmulationRecord,
-    machine::chip::ChipBehavior,
+    machine::{builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder},
 };
+use p3_air::{Air, BaseAir};
 use p3_koala_bear::KoalaBear;
 use rand::{prelude::SliceRandom, thread_rng, Rng};
+
+#[test]
+fn test_divrem_chip_simple_eval() {
+    let chip: DivRemChip<KoalaBear> = DivRemChip::default();
+    let preprocessed_width = chip.preprocessed_width();
+    let width = chip.width();
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 337);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 120);
+}
 
 /// Construct a Program with DIV/REM (signed 64-bit) instructions.
 fn create_div_rem_program() -> Program {

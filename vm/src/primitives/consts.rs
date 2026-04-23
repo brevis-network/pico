@@ -250,6 +250,7 @@ Chip Data Parallelism
  */
 pub const ADD_DATAPAR: usize = 1;
 pub const SUB_DATAPAR: usize = 1;
+pub const ADD_SUB_DATAPAR: usize = 1;
 pub const MUL_DATAPAR: usize = 1;
 pub const DIVREM_DATAPAR: usize = 1;
 pub const LT_DATAPAR: usize = 1;
