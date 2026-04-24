@@ -206,22 +206,28 @@ impl<F: Field> CpuChip<F> {
                 );
         }
 
-        // TODO: committed_value_digest is a u32 value (occupies only limbs[0] and limbs[1]).
-        // In rv64, the register (op_c) may hold a sign-extended 64-bit value,
-        // so we only compare the lower 2 limbs.
-        let expected_pv_digest_word =
+        // committed_value_digest is a u32 value (occupies the lower 2 u16 limbs of
+        // the register). Each PV `Word` slot stores 4 little-endian *bytes* (not u16
+        // limbs), so we recompose byte pairs into u16 limbs before comparing against
+        // the register word.
+        let expected_pv_digest_bytes =
             builder.index_word_array(&commit_digest, &ecall_columns.index_bitmap);
 
         let digest_word = local.op_c_access.prev_value();
         let commit_cond = local.opcode_selector.is_ecall * is_commit;
 
-        // Verify the public_values_digest_word.
-        builder
-            .when(commit_cond.clone())
-            .assert_eq(expected_pv_digest_word[0].clone(), digest_word[0]);
-        builder
-            .when(commit_cond)
-            .assert_eq(expected_pv_digest_word[1].clone(), digest_word[1]);
+        // low u16: bytes[0] + bytes[1] * 256 == digest_word[0]
+        builder.when(commit_cond.clone()).assert_eq(
+            expected_pv_digest_bytes.0[0].clone()
+                + expected_pv_digest_bytes.0[1].clone() * CB::Expr::from_canonical_u32(1 << 8),
+            digest_word[0],
+        );
+        // high u16: bytes[2] + bytes[3] * 256 == digest_word[1]
+        builder.when(commit_cond).assert_eq(
+            expected_pv_digest_bytes.0[2].clone()
+                + expected_pv_digest_bytes.0[3].clone() * CB::Expr::from_canonical_u32(1 << 8),
+            digest_word[1],
+        );
 
         let expected_deferred_proofs_digest_element =
             builder.index_array(&deferred_proofs_digest, &ecall_columns.index_bitmap);

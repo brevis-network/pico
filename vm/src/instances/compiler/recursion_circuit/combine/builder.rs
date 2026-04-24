@@ -125,7 +125,8 @@ where
         let compress_public_values: &mut RecursionPublicValues<_> =
             compress_public_values_stream.as_mut_slice().borrow_mut();
 
-        // Digests
+        // Digests — each `Word` slot holds 4 *bytes* (not 4 u16 limbs), so downstream
+        // `words_to_bytes` + `felt_bytes_to_bn254_var` can consume the 32 bytes directly.
         let mut committed_value_digest: [Word<Felt<_>>; PV_DIGEST_NUM_WORDS] =
             array::from_fn(|_| Word(array::from_fn(|_| builder.uninit())));
         let mut deferred_proofs_digest: [Felt<_>; DIGEST_SIZE] =

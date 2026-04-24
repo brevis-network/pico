@@ -9,6 +9,10 @@ use std::borrow::{Borrow, BorrowMut};
 #[derive(Clone, Copy, Default, Debug, Serialize, Deserialize)]
 #[repr(C)]
 pub struct PublicValues<W, T> {
+    /// Each `Word` slot stores 4 individual bytes (each limb < 256), not the 4×u16
+    /// limbs that `Word` carries for 64-bit values. The 32 bytes feed directly into
+    /// the downstream bn254 reduction (`words_to_bytes` + `felt_bytes_to_bn254_var`),
+    /// so **do not** call `Word::from(u32)` / `reduce()` / `to_u64()` on these values.
     pub committed_value_digest: [W; PV_DIGEST_NUM_WORDS],
 
     /// The hash of all deferred proofs that have been witnessed in the VM. It will be rebuilt in
@@ -99,8 +103,19 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
             ..
         } = value;
 
-        let committed_value_digest: [_; PV_DIGEST_NUM_WORDS] =
-            core::array::from_fn(|i| Word::from(committed_value_digest[i]));
+        // Split each u32 digest word into 4 little-endian bytes so the downstream
+        // bn254 reduction operates on true bytes (each limb < 256). **Do not** use
+        // `Word::from(u32)` here — since the u64 rework `Word::from(u32)` produces
+        // [u16, u16, 0, 0], which would make the constraint-side num2bits path and
+        // the witness-side `as_canonical_u32()` path disagree.
+        let committed_value_digest: [_; PV_DIGEST_NUM_WORDS] = core::array::from_fn(|i| {
+            Word([
+                F::from_canonical_u32(committed_value_digest[i] & 0xFF),
+                F::from_canonical_u32((committed_value_digest[i] >> 8) & 0xFF),
+                F::from_canonical_u32((committed_value_digest[i] >> 16) & 0xFF),
+                F::from_canonical_u32((committed_value_digest[i] >> 24) & 0xFF),
+            ])
+        });
 
         let deferred_proofs_digest: [_; DIGEST_SIZE] =
             core::array::from_fn(|i| F::from_canonical_u32(deferred_proofs_digest[i]));

@@ -92,7 +92,7 @@ pub fn print_recursion_public_values<CC, SC>(
         DigestVariable = [Felt<CC::F>; DIGEST_SIZE],
     >,
 {
-    // 1. committed_value_digest  (PV_DIGEST_NUM_WORDS * WORD_SIZE)
+    // 1. committed_value_digest  (PV_DIGEST_NUM_WORDS * 4 bytes)
     for word in &pv.committed_value_digest {
         for elt in &word.0 {
             builder.print_f(*elt);

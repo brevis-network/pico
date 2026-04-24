@@ -85,6 +85,10 @@ impl<T: Clone> ChallengerPublicValues<T> {
 #[repr(C)]
 pub struct RecursionPublicValues<T> {
     /// The hash of all the bytes that the program has written to public values.
+    /// Each `Word<T>` slot stores 4 individual bytes (each limb < 256) rather than
+    /// the 4×u16 limbs of a 64-bit value. The downstream bn254 reduction consumes
+    /// the 32 bytes directly via `words_to_bytes` + `felt_bytes_to_bn254_var`, so
+    /// **do not** call `Word::from(u32)` / `reduce()` / `to_u64()` on these values.
     pub committed_value_digest: [Word<T>; PV_DIGEST_NUM_WORDS],
 
     /// The hash of all deferred proofs that have been witnessed in the VM.

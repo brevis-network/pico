@@ -21,7 +21,7 @@ pub fn embed_public_values_digest<SC: StarkGenericConfig>(
         .chain(
             (public_values.committed_value_digest)
                 .into_iter()
-                .flat_map(|word| word.0.into_iter()),
+                .flat_map(|bytes| bytes.into_iter()),
         )
         .collect::<Vec<_>>();
     config.hash_slice(&input)
