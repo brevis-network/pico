@@ -43,6 +43,10 @@ use p3_symmetric::Permutation;
 use std::marker::PhantomData;
 use tracing::debug_span;
 
+#[cfg(feature = "aot-emulator")]
+use crate::emulator::aot::create_aot_emulator;
+use crate::emulator::snapshot::SnapshotEmulator;
+
 // Meta emulator that encapsulates multiple emulators
 // SC and C for configs in the emulated machine
 // P and I for the native program and input types
@@ -109,6 +113,12 @@ where
     {
         let emulator = self.emulator.as_mut().unwrap();
         emulator.emulate_batch(record_callback).unwrap()
+    }
+
+    pub fn set_cost_estimator(&mut self, enabled: bool) {
+        if let Some(e) = &mut self.emulator {
+            e.opts.cost_estimator = enabled;
+        }
     }
 
     pub fn next_state_batch<F>(
@@ -526,3 +536,102 @@ impl_emulator!(
     KoalaBearPoseidon2,
     KOALABEAR_S_BOX_DEGREE
 );
+
+#[cfg(feature = "aot-emulator")]
+pub struct AotMetaEmulator<SC, C>
+where
+    SC: StarkGenericConfig,
+    C: ChipBehavior<Val<SC>>,
+{
+    emulator: Box<dyn crate::emulator::aot::AotSnapshotEmulator>,
+    _sc_and_chip: PhantomData<(SC, C)>,
+}
+
+#[cfg(feature = "aot-emulator")]
+impl<SC, C> AotMetaEmulator<SC, C>
+where
+    SC: StarkGenericConfig,
+    SC::Val: PrimeField32 + Poseidon2Init,
+    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
+    C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
+{
+    pub fn setup_riscv(proving_witness: &ProvingWitness<SC, C, Vec<u8>>) -> Self {
+        let opts = proving_witness.opts.as_ref().expect("witness.opts not set");
+        let program = proving_witness
+            .program
+            .as_ref()
+            .expect("witness.program not set")
+            .clone();
+        let input_stream = proving_witness
+            .stdin
+            .as_ref()
+            .expect("witness.stdin not set")
+            .inputs
+            .to_vec();
+        let emulator = create_aot_emulator(program, input_stream, *opts)
+            .expect("AOT emulator factory not registered");
+        Self {
+            emulator,
+            _sc_and_chip: PhantomData,
+        }
+    }
+
+    pub fn next_state_batch(
+        &mut self,
+    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
+        self.emulator.next_state_batch()
+    }
+
+    pub fn cycles(&self) -> u64 {
+        self.emulator.cycles()
+    }
+
+    pub fn get_pv_stream(&mut self) -> Vec<u8> {
+        self.emulator.get_pv_stream()
+    }
+}
+
+impl<SC, C> SnapshotEmulator for MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>
+where
+    SC: StarkGenericConfig,
+    SC::Val: PrimeField32 + Poseidon2Init,
+    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
+    C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
+{
+    fn next_state_batch(
+        &mut self,
+    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
+        MetaEmulator::next_state_batch(self, true, &mut |_| {})
+    }
+
+    fn cycles(&self) -> u64 {
+        MetaEmulator::cycles(self)
+    }
+
+    fn get_pv_stream(&mut self) -> Vec<u8> {
+        MetaEmulator::get_pv_stream(self)
+    }
+}
+
+#[cfg(feature = "aot-emulator")]
+impl<SC, C> SnapshotEmulator for AotMetaEmulator<SC, C>
+where
+    SC: StarkGenericConfig,
+    SC::Val: PrimeField32 + Poseidon2Init,
+    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
+    C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
+{
+    fn next_state_batch(
+        &mut self,
+    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
+        AotMetaEmulator::next_state_batch(self)
+    }
+
+    fn cycles(&self) -> u64 {
+        AotMetaEmulator::cycles(self)
+    }
+
+    fn get_pv_stream(&mut self) -> Vec<u8> {
+        AotMetaEmulator::get_pv_stream(self)
+    }
+}

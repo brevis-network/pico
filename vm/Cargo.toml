@@ -120,6 +120,7 @@ nightly-features = [
     "p3-poseidon2/nightly-features",
 ]
 strict = []
+aot-emulator = []
 # Use memory-mapped storage for ContiguousRiscvMemory (Unix only)
 # Enables fast reset via madvise(MADV_DONTNEED)
 mmap-memory = ["dep:memmap2", "dep:libc"]

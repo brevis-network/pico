@@ -6,7 +6,8 @@ edition = "2021"
 [dependencies]
 pico-vm = { path = "../../vm" }
 pico-aot-dispatch = { path = "../../aot-generated", optional = true }
+tracing = { version = "0.1.40", optional = true }
 
 [features]
 default = []
-aot = ["pico-aot-dispatch"]
+aot = ["pico-aot-dispatch", "pico-vm/aot-emulator", "dep:tracing"]

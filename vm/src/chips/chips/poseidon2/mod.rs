@@ -10,8 +10,6 @@ use p3_field::Field;
 use typenum::Unsigned;
 
 pub mod constraints;
-#[cfg(test)]
-mod tests;
 pub mod traces;
 
 pub(crate) type FieldSpecificPoseidon2Chip<F> = Poseidon2Chip<

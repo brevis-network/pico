@@ -51,6 +51,37 @@ fn run_table_word_u32(word_offset: u64) -> u32 {
     u32::try_from(word_offset).expect("run-table word offset exceeds u32")
 }
 
+/// Emit the `pico-aot-runtime = { ... }` line for a generated Cargo.toml.
+///
+/// Defaults to a relative `path = "{default_path}"` so the brevis-vm
+/// in-tree layout keeps working. When `PICO_AOT_RUNTIME_SPEC` is set and
+/// non-empty, its value is inlined as the dep body verbatim, letting
+/// downstream consumers generate `aot-generated/` outside the brevis-vm
+/// workspace (e.g. at a template's root) and wire the runtime via git.
+///
+/// Example:
+///   PICO_AOT_RUNTIME_SPEC='git = "https://github.com/brevis-network/pico", branch = "X"'
+fn runtime_dep_line(default_path: &str) -> String {
+    match std::env::var("PICO_AOT_RUNTIME_SPEC").ok() {
+        Some(spec) if !spec.trim().is_empty() => {
+            let trimmed = spec.trim();
+            // Sanity check: a valid Cargo dep fragment always contains `=`
+            // (e.g. `git = "..."`, `path = "..."`). A value missing `=` will
+            // produce a cryptic Cargo parse error at the consumer; warn now
+            // so the cause is obvious.
+            if !trimmed.contains('=') {
+                eprintln!(
+                    "warning: PICO_AOT_RUNTIME_SPEC={:?} does not look like a Cargo dep \
+                     fragment (expected `key = value`); emitting anyway",
+                    trimmed
+                );
+            }
+            format!("pico-aot-runtime = {{ {} }}\n", trimmed)
+        }
+        _ => format!("pico-aot-runtime = {{ path = \"{}\" }}\n", default_path),
+    }
+}
+
 struct SuperblockInfo {
     entry_pc: u64,
     entry_name: proc_macro2::Ident,
@@ -878,8 +909,9 @@ impl AotCompiler {
 
         let crate_name = format!("pico-aot-chunk-{:03}", chunk.chunk_idx);
         let cargo_toml = format!(
-            "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\npico-aot-runtime = {{ path = \"../../../aot-runtime\" }}\n",
-            crate_name
+            "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}",
+            crate_name,
+            runtime_dep_line("../../../aot-runtime"),
         );
         fs::write(crate_dir.join("Cargo.toml"), cargo_toml).map_err(|e| {
             format!(
@@ -1045,7 +1077,8 @@ impl AotCompiler {
             .collect();
 
         let cargo_toml = format!(
-            "[package]\nname = \"pico-aot-dispatch\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\npico-aot-runtime = {{ path = \"../aot-runtime\" }}\n{}\n\n[features]\nbigint-rug = [\"pico-aot-runtime/bigint-rug\"]\nmmap-memory = [\"pico-aot-runtime/mmap-memory\"]\n",
+            "[package]\nname = \"pico-aot-dispatch\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}{}\n\n[features]\nbigint-rug = [\"pico-aot-runtime/bigint-rug\"]\nmmap-memory = [\"pico-aot-runtime/mmap-memory\"]\n",
+            runtime_dep_line("../aot-runtime"),
             chunk_deps.join("\n")
         );
         fs::write(output_dir.join("Cargo.toml"), cargo_toml)

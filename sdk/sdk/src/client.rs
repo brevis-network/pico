@@ -10,7 +10,7 @@ use pico_vm::{
         field_config::{BabyBearBn254, KoalaBearBn254},
         stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
     },
-    emulator::stdin::EmulatorStdinBuilder,
+    emulator::{opts::EmulatorOpts, stdin::EmulatorStdinBuilder},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
@@ -51,6 +51,13 @@ macro_rules! create_sdk_prove_client {
 
         impl $client_name {
             pub fn new(elf: &[u8]) -> Self {
+                Self::new_with_opts(elf, EmulatorOpts::default())
+            }
+
+            /// Construct a prover client with caller-supplied RISC-V emulator opts.
+            /// Use this to opt in to AOT (`opts.with_snapshot_main(SnapshotMainMode::Aot)`)
+            /// or to tune chunk sizes / cost estimator behavior at construction time.
+            pub fn new_with_opts(elf: &[u8], riscv_opts: EmulatorOpts) -> Self {
                 let vk_verification = vk_verification_enabled();
                 debug!("VK_VERIFICATION in prover client: {}", vk_verification);
                 let (riscv, deferred, convert, combine, compress, embed) = if vk_verification {
@@ -61,7 +68,7 @@ macro_rules! create_sdk_prove_client {
                     >::default();
                     let riscv = RiscvProver::new_initial_prover(
                         (<$sc>::new(), elf),
-                        Default::default(),
+                        riscv_opts,
                         Some(riscv_shape_config),
                     );
                     let convert = ConvertProver::new_with_prev(
@@ -88,7 +95,7 @@ macro_rules! create_sdk_prove_client {
                     (riscv, deferred, convert, combine, compress, embed)
                 } else {
                     let riscv =
-                        RiscvProver::new_initial_prover((<$sc>::new(), elf), Default::default(), None);
+                        RiscvProver::new_initial_prover((<$sc>::new(), elf), riscv_opts, None);
                     let convert = ConvertProver::new_with_prev(&riscv, Default::default(), None);
                     let deferred = DeferredProver::<$sc>::new(Default::default(), None);
                     let combine = CombineProver::new_with_prev(&convert, Default::default(), None);

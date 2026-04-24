@@ -1,6 +1,9 @@
+#[cfg(feature = "aot-emulator")]
+pub mod aot;
 pub mod emulator;
 pub mod opts;
 pub mod record;
 pub mod recursion;
 pub mod riscv;
+pub mod snapshot;
 pub mod stdin;
