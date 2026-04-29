@@ -1,7 +1,23 @@
 use crate::{
-    chips::tests::run_test,
+    chips::{chips::alu::sr::traces::ShiftRightChip, tests::run_test},
     compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
+    machine::{builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder},
 };
+use p3_air::{Air, BaseAir};
+use p3_koala_bear::KoalaBear;
+
+#[test]
+fn test_shift_right_chip_simple_eval() {
+    let chip: ShiftRightChip<KoalaBear> = ShiftRightChip::default();
+    let preprocessed_width = chip.preprocessed_width();
+    let width = chip.width();
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 55);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 13);
+}
 
 /// Construct a Program with SRL (Shift Right Logical 64-bit) instructions.
 fn create_srl_program() -> Program {

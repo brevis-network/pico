@@ -10,6 +10,8 @@ use std::marker::PhantomData;
 
 pub mod constraints;
 pub mod event;
+#[cfg(test)]
+mod tests;
 pub mod traces;
 
 pub use event::Poseidon2Event;

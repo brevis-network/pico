@@ -92,3 +92,79 @@ fn test_rv64_sha2_extend() {
     }
     panic!("No SHA_EXTEND events found!");
 }
+
+#[test]
+fn test_sha_compress_chip_simple_eval() {
+    use super::compress::ShaCompressChip;
+    use crate::machine::{
+        builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: ShaCompressChip<KoalaBear> = ShaCompressChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 301);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 99);
+}
+
+#[test]
+fn test_sha_compress_control_chip_simple_eval() {
+    use super::compress::ShaCompressControlChip;
+    use crate::machine::{
+        builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: ShaCompressControlChip<KoalaBear> = ShaCompressControlChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 21);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 11);
+}
+
+#[test]
+fn test_sha_extend_chip_simple_eval() {
+    use super::extend::ShaExtendChip;
+    use crate::machine::{
+        builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: ShaExtendChip<KoalaBear> = ShaExtendChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 77);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 81);
+}
+
+#[test]
+fn test_sha_extend_control_chip_simple_eval() {
+    use super::extend::ShaExtendControlChip;
+    use crate::machine::{
+        builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: ShaExtendControlChip<KoalaBear> = ShaExtendControlChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 21);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 13);
+}

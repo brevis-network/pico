@@ -526,7 +526,7 @@ where
                     local_c,
                     local_abs_c,
                     local_c_neg_operation,
-                    local_abs_c_alu_event,
+                    local_abs_c_alu_event.into(),
                 );
                 builder.slice_range_check_u16(&local_abs_c.0, local_is_real);
 
@@ -537,7 +537,7 @@ where
                     local_remainder_comp,
                     local_abs_remainder,
                     local_rem_neg_operation,
-                    local_abs_rem_alu_event,
+                    local_abs_rem_alu_event.into(),
                 );
                 builder.slice_range_check_u16(&local_abs_remainder.0, local_is_real);
 
