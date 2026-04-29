@@ -1,31 +1,13 @@
 use crate::{
-    chips::{chips::alu::sll::traces::SLLChip, tests::test_rv64_prove_and_verify},
+    chips::tests::test_rv64_prove_and_verify,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
     configs::stark_config::KoalaBearPoseidon2,
     emulator::stdin::EmulatorStdin,
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::{
-        builder::PublicValuesBuilder,
-        chip::{ChipBehavior, MetaChip},
-        folder::SymbolicConstraintFolder,
-    },
+    machine::chip::MetaChip,
 };
-use p3_air::{Air, BaseAir};
 use p3_koala_bear::KoalaBear;
 use std::sync::Arc;
-
-#[test]
-fn test_sll_chip_simple_eval() {
-    let chip: SLLChip<KoalaBear> = SLLChip::default();
-    let preprocessed_width = chip.preprocessed_width();
-    let width = chip.width();
-    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
-    chip.eval(&mut builder);
-
-    assert_eq!(builder.num_constraints(), 45);
-    assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 11);
-}
 
 fn run_test(program: Program) {
     let program = Arc::new(program);

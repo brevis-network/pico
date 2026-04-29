@@ -9,7 +9,8 @@ use crate::{
         chips::{
             alu::{
                 add::AddChip, addw::AddwChip, bitwise::BitwiseChip, divrem::DivRemChip, lt::LtChip,
-                mul::MulChip, sll::SLLChip, sr::ShiftRightChip, sub::SubChip, subw::SubwChip,
+                mul::MulChip, sll::SLLChip, sr::traces::ShiftRightChip, sub::SubChip,
+                subw::SubwChip,
             },
             byte::ByteChip,
             riscv_cpu::CpuChip,
@@ -52,7 +53,7 @@ use crate::{
             },
         },
     },
-    compiler::riscv::program::Program,
+    compiler::riscv::{opcode::Opcode, program::Program},
     define_chip_type,
     emulator::riscv::{record::EmulationRecord, syscalls::precompiles::PrecompileLocalMemory},
     instances::compiler::shapes::riscv_shape::{
@@ -229,19 +230,39 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             ),
             (
                 Self::Add(Default::default()).name(),
-                (record.add_events.len()).div_ceil(ADD_DATAPAR),
+                record
+                    .add_events
+                    .iter()
+                    .filter(|e| e.opcode == Opcode::ADD)
+                    .count()
+                    .div_ceil(ADD_DATAPAR),
             ),
             (
                 Self::Sub(Default::default()).name(),
-                (record.sub_events.len()).div_ceil(SUB_DATAPAR),
+                record
+                    .sub_events
+                    .iter()
+                    .filter(|e| e.opcode == Opcode::SUB)
+                    .count()
+                    .div_ceil(SUB_DATAPAR),
             ),
             (
                 Self::Addw(Default::default()).name(),
-                (record.add_events.len()).div_ceil(ADD_DATAPAR),
+                record
+                    .add_events
+                    .iter()
+                    .filter(|e| e.opcode == Opcode::ADDW)
+                    .count()
+                    .div_ceil(ADD_DATAPAR),
             ),
             (
                 Self::Subw(Default::default()).name(),
-                (record.sub_events.len()).div_ceil(SUB_DATAPAR),
+                record
+                    .sub_events
+                    .iter()
+                    .filter(|e| e.opcode == Opcode::SUBW)
+                    .count()
+                    .div_ceil(SUB_DATAPAR),
             ),
             (
                 Self::Bitwise(Default::default()).name(),
@@ -388,6 +409,12 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
         // Remove the preprocessed chips.
         excluded_chip_names.insert(Self::Program(ProgramChip::default()).name());
         excluded_chip_names.insert(Self::Byte(ByteChip::default()).name());
+        // SHA control chips are siblings of the compute chips: they share the same
+        // syscall events and emit no Memory+Regional lookups of their own. Exclude
+        // them from the precompile pool — their shape entry is appended directly to
+        // the parent ShaCompress/ShaExtend shape in `get_precompile_shapes`.
+        excluded_chip_names.insert(Self::ShaCompressControl(Default::default()).name());
+        excluded_chip_names.insert(Self::ShaExtendControl(Default::default()).name());
 
         all_chips
             .into_iter()

@@ -1,7 +1,9 @@
 use crate::{
     chips::{
         chips::{
-            alu::{bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::ShiftRightChip},
+            alu::{
+                bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::traces::ShiftRightChip,
+            },
             riscv_cpu::CpuChip,
             riscv_global::GlobalChip,
             riscv_memory::{

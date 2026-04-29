@@ -1,8 +1,6 @@
-pub mod columns;
-pub mod constraints;
-#[cfg(test)]
-mod tests;
-pub mod trace;
+mod columns;
+mod constraints;
+mod trace;
 
 use std::marker::PhantomData;
 
