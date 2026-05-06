@@ -27,7 +27,7 @@ use crate::{
     },
     machine::{chip::ChipBehavior, machine::BaseMachine},
     primitives::consts::{
-        ADDR_NUM_BITS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
+        ADDR_NUM_LIMBS, DIGEST_SIZE, EXTENSION_DEGREE, PV_DIGEST_NUM_WORDS, RECURSION_NUM_PVS,
     },
 };
 use itertools::Itertools;
@@ -125,7 +125,8 @@ where
         let compress_public_values: &mut RecursionPublicValues<_> =
             compress_public_values_stream.as_mut_slice().borrow_mut();
 
-        // Digests
+        // Digests — each `Word` slot holds 4 *bytes* (not 4 u16 limbs), so downstream
+        // `words_to_bytes` + `felt_bytes_to_bn254_var` can consume the 32 bytes directly.
         let mut committed_value_digest: [Word<Felt<_>>; PV_DIGEST_NUM_WORDS] =
             array::from_fn(|_| Word(array::from_fn(|_| builder.uninit())));
         let mut deferred_proofs_digest: [Felt<_>; DIGEST_SIZE] =
@@ -135,15 +136,15 @@ where
             array::from_fn(|_| builder.uninit());
 
         // PC and chunk values
-        let mut current_pc: Felt<_> = builder.uninit();
+        let mut current_pc: [Felt<_>; 3] = array::from_fn(|_| builder.uninit());
         let mut current_chunk: Felt<_> = builder.uninit();
         let mut current_execution_chunk: Felt<_> = builder.uninit();
         let mut contains_execution_chunk: Felt<_> = builder.eval(zero);
 
-        // Address bits
-        let mut current_initialize_addr_bits: [Felt<_>; ADDR_NUM_BITS] =
+        // Address limbs
+        let mut current_init_addr_limbs: [Felt<_>; ADDR_NUM_LIMBS] =
             array::from_fn(|_| builder.uninit());
-        let mut current_finalize_addr_bits: [Felt<_>; ADDR_NUM_BITS] =
+        let mut current_finalize_addr_limbs: [Felt<_>; ADDR_NUM_LIMBS] =
             array::from_fn(|_| builder.uninit());
 
         // Cumsum
@@ -201,16 +202,16 @@ where
                         current_public_values.start_execution_chunk;
                     current_execution_chunk = current_public_values.start_execution_chunk;
 
-                    // Address bits.
-                    for i in 0..ADDR_NUM_BITS {
-                        compress_public_values.previous_initialize_addr_bits[i] =
-                            current_public_values.previous_initialize_addr_bits[i];
-                        current_initialize_addr_bits[i] =
-                            current_public_values.previous_initialize_addr_bits[i];
-                        compress_public_values.previous_finalize_addr_bits[i] =
-                            current_public_values.previous_finalize_addr_bits[i];
-                        current_finalize_addr_bits[i] =
-                            current_public_values.previous_finalize_addr_bits[i];
+                    // Address limbs.
+                    for i in 0..ADDR_NUM_LIMBS {
+                        compress_public_values.previous_init_addr_limbs[i] =
+                            current_public_values.previous_init_addr_limbs[i];
+                        current_init_addr_limbs[i] =
+                            current_public_values.previous_init_addr_limbs[i];
+                        compress_public_values.previous_finalize_addr_limbs[i] =
+                            current_public_values.previous_finalize_addr_limbs[i];
+                        current_finalize_addr_limbs[i] =
+                            current_public_values.previous_finalize_addr_limbs[i];
                     }
 
                     // Digests
@@ -244,19 +245,21 @@ where
                     Check current status
                      */
 
-                    // PC and chunk numbers
-                    builder.assert_felt_eq(current_pc, current_public_values.start_pc);
+                    // PC and chunk numbers (3-limb comparison)
+                    for j in 0..3 {
+                        builder.assert_felt_eq(current_pc[j], current_public_values.start_pc[j]);
+                    }
                     builder.assert_felt_eq(current_chunk, current_public_values.start_chunk);
 
-                    // Address bits
-                    for i in 0..ADDR_NUM_BITS {
+                    // Address limbs
+                    for i in 0..ADDR_NUM_LIMBS {
                         builder.assert_felt_eq(
-                            current_initialize_addr_bits[i],
-                            current_public_values.previous_initialize_addr_bits[i],
+                            current_init_addr_limbs[i],
+                            current_public_values.previous_init_addr_limbs[i],
                         );
                         builder.assert_felt_eq(
-                            current_finalize_addr_bits[i],
-                            current_public_values.previous_finalize_addr_bits[i],
+                            current_finalize_addr_limbs[i],
+                            current_public_values.previous_finalize_addr_limbs[i],
                         );
                     }
 
@@ -424,12 +427,11 @@ where
                             * (SymbolicFelt::ONE - current_public_values.contains_execution_chunk),
                 );
 
-                // Address bits.
-                current_initialize_addr_bits[..ADDR_NUM_BITS].copy_from_slice(
-                    &current_public_values.last_initialize_addr_bits[..ADDR_NUM_BITS],
-                );
-                current_finalize_addr_bits[..ADDR_NUM_BITS].copy_from_slice(
-                    &current_public_values.last_finalize_addr_bits[..ADDR_NUM_BITS],
+                // Address limbs.
+                current_init_addr_limbs[..ADDR_NUM_LIMBS]
+                    .copy_from_slice(&current_public_values.last_init_addr_limbs[..ADDR_NUM_LIMBS]);
+                current_finalize_addr_limbs[..ADDR_NUM_LIMBS].copy_from_slice(
+                    &current_public_values.last_finalize_addr_limbs[..ADDR_NUM_LIMBS],
                 );
 
                 // Cumsum
@@ -446,8 +448,8 @@ where
         compress_public_values.next_execution_chunk = current_execution_chunk;
         compress_public_values.contains_execution_chunk = contains_execution_chunk;
 
-        compress_public_values.last_initialize_addr_bits = current_initialize_addr_bits;
-        compress_public_values.last_finalize_addr_bits = current_finalize_addr_bits;
+        compress_public_values.last_init_addr_limbs = current_init_addr_limbs;
+        compress_public_values.last_finalize_addr_limbs = current_finalize_addr_limbs;
 
         compress_public_values.vk_root = vk_root;
         compress_public_values.flag_complete = flag_complete;

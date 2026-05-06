@@ -134,6 +134,29 @@ impl KoalaBearPoseidon2 {
         }
     }
 
+    /// Create a config for testing with higher blowup factor.
+    pub fn test() -> Self {
+        let perm = Self::init();
+        let num_queries = match std::env::var("FRI_QUERIES") {
+            Ok(num_queries) => num_queries.parse().unwrap(),
+            Err(_) => 21,
+        };
+
+        let log_blowup = 1;
+        let simple_fri_config = SimpleFriConfig {
+            log_blowup,
+            num_queries,
+            proof_of_work_bits: 16,
+        };
+
+        Self {
+            perm,
+            simple_fri_config,
+            log_blowup,
+            num_queries,
+        }
+    }
+
     pub fn fri_config(&self) -> &SimpleFriConfig {
         &self.simple_fri_config
     }

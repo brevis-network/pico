@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 
 mod columns;
 mod constraints;
+mod controller;
 mod trace;
 
 pub const SHA_COMPRESS_K: [u32; 64] = [
@@ -23,6 +24,7 @@ pub const SHA_COMPRESS_K: [u32; 64] = [
 /// initialization and finalize respectively. The middle 64 rows are for compression. Each row
 /// operates over a single memory word.
 #[derive(Default)]
-pub struct ShaCompressChip<F> {
-    _marker: PhantomData<F>,
-}
+pub struct ShaCompressChip<F>(PhantomData<F>);
+
+#[derive(Default)]
+pub struct ShaCompressControlChip<F>(PhantomData<F>);

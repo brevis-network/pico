@@ -82,7 +82,6 @@ pub fn verify_two_adic_pcs<CC: CircuitConfig<F = SC::Val>, SC: FieldFriConfigVar
     CC::F: TwoAdicField,
 {
     // observe polynomial evals to avoid a security loophole
-    // see: https://github.com/succinctlabs/sp1/security/advisories/GHSA-c873-wfhp-wx5m
     for round in &rounds {
         for mat in &round.domains_points_and_opens {
             for point in &mat.values {

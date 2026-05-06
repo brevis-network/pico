@@ -6,6 +6,9 @@ mod columns;
 mod constraints;
 mod traces;
 
+#[cfg(test)]
+mod tests;
+
 type Uint256NumWords = <U256Field as NumWords>::WordsFieldElement;
 pub const UINT256_NUM_WORDS: usize = Uint256NumWords::USIZE;
 

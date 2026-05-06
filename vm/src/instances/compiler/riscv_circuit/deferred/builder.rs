@@ -92,7 +92,7 @@ pub fn print_recursion_public_values<CC, SC>(
         DigestVariable = [Felt<CC::F>; DIGEST_SIZE],
     >,
 {
-    // 1. committed_value_digest  (PV_DIGEST_NUM_WORDS * WORD_SIZE)
+    // 1. committed_value_digest  (PV_DIGEST_NUM_WORDS * 4 bytes)
     for word in &pv.committed_value_digest {
         for elt in &word.0 {
             builder.print_f(*elt);
@@ -105,25 +105,29 @@ pub fn print_recursion_public_values<CC, SC>(
     }
 
     // 3~8. start/next pc & chunk
-    builder.print_f(pv.start_pc);
-    builder.print_f(pv.next_pc);
+    for &pc in &pv.start_pc {
+        builder.print_f(pc);
+    }
+    for &pc in &pv.next_pc {
+        builder.print_f(pc);
+    }
     builder.print_f(pv.start_chunk);
     builder.print_f(pv.next_chunk);
     builder.print_f(pv.start_execution_chunk);
     builder.print_f(pv.next_execution_chunk);
 
-    // 9~12. addr bits
-    for bit in &pv.previous_initialize_addr_bits {
-        builder.print_f(*bit);
+    // 9~12. addr limbs
+    for limb in &pv.previous_init_addr_limbs {
+        builder.print_f(*limb);
     }
-    for bit in &pv.last_initialize_addr_bits {
-        builder.print_f(*bit);
+    for limb in &pv.last_init_addr_limbs {
+        builder.print_f(*limb);
     }
-    for bit in &pv.previous_finalize_addr_bits {
-        builder.print_f(*bit);
+    for limb in &pv.previous_finalize_addr_limbs {
+        builder.print_f(*limb);
     }
-    for bit in &pv.last_finalize_addr_bits {
-        builder.print_f(*bit);
+    for limb in &pv.last_finalize_addr_limbs {
+        builder.print_f(*limb);
     }
 
     // 13. riscv_vk_digest

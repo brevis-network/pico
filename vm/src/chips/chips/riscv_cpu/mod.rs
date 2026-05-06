@@ -16,5 +16,8 @@ pub mod register;
 pub mod traces;
 pub mod utils;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Default)]
 pub struct CpuChip<F>(PhantomData<F>);

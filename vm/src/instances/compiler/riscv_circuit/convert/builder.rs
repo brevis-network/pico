@@ -28,7 +28,8 @@ use crate::{
         machine::BaseMachine,
     },
     primitives::consts::{
-        ADDR_NUM_BITS, DIGEST_SIZE, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS, RECURSION_NUM_PVS,
+        ADDR_NUM_LIMBS, DIGEST_SIZE, MAX_LOG_CHUNK_SIZE, MAX_LOG_NUMBER_OF_CHUNKS,
+        RECURSION_NUM_PVS,
     },
 };
 use itertools::Itertools;
@@ -183,18 +184,20 @@ where
                 CC::F::ONE,
             );
 
-            // `start_pc` equals `vk.pc_start`.
-            builder.assert_felt_eq(
-                flag_first_chunk * (public_values.start_pc - riscv_vk.pc_start),
-                CC::F::ZERO,
-            );
-
-            // Assert that previous `init_addr_bits` and `finalize_addr_bits` are zeros
-            for bit in public_values.previous_initialize_addr_bits.iter() {
-                builder.assert_felt_eq(flag_first_chunk * *bit, CC::F::ZERO);
+            // `start_pc` equals `vk.pc_start` (3-limb comparison).
+            for i in 0..3 {
+                builder.assert_felt_eq(
+                    flag_first_chunk * (public_values.start_pc[i] - riscv_vk.pc_start[i]),
+                    CC::F::ZERO,
+                );
             }
-            for bit in public_values.previous_finalize_addr_bits.iter() {
-                builder.assert_felt_eq(flag_first_chunk * *bit, CC::F::ZERO);
+
+            // Assert that previous `init_addr_limbs` and `finalize_addr_limbs` are zeros
+            for limb in public_values.previous_init_addr_limbs.iter() {
+                builder.assert_felt_eq(flag_first_chunk * *limb, CC::F::ZERO);
+            }
+            for limb in public_values.previous_finalize_addr_limbs.iter() {
+                builder.assert_felt_eq(flag_first_chunk * *limb, CC::F::ZERO);
             }
         }
 
@@ -222,13 +225,16 @@ where
             if !flag_cpu {
                 builder.assert_felt_ne(current_chunk, CC::F::ONE);
 
-                builder.assert_felt_eq(public_values.start_pc, public_values.next_pc);
+                for i in 0..3 {
+                    builder.assert_felt_eq(public_values.start_pc[i], public_values.next_pc[i]);
+                }
             }
             if flag_cpu {
                 let log_degree_cpu = proofs[0].log_degree_cpu();
                 assert!(log_degree_cpu <= MAX_LOG_CHUNK_SIZE);
 
-                builder.assert_felt_ne(public_values.start_pc, CC::F::ZERO);
+                // At least limb0 is nonzero (valid RISC-V PC >= 4).
+                builder.assert_felt_ne(public_values.start_pc[0], CC::F::ZERO);
             }
         }
 
@@ -237,19 +243,19 @@ where
          */
         {
             if !flag_memory_initialize {
-                for i in 0..ADDR_NUM_BITS {
+                for i in 0..ADDR_NUM_LIMBS {
                     builder.assert_felt_eq(
-                        public_values.previous_initialize_addr_bits[i],
-                        public_values.last_initialize_addr_bits[i],
+                        public_values.previous_init_addr_limbs[i],
+                        public_values.last_init_addr_limbs[i],
                     );
                 }
             }
 
             if !flag_memory_finalize {
-                for i in 0..ADDR_NUM_BITS {
+                for i in 0..ADDR_NUM_LIMBS {
                     builder.assert_felt_eq(
-                        public_values.previous_finalize_addr_bits[i],
-                        public_values.last_finalize_addr_bits[i],
+                        public_values.previous_finalize_addr_limbs[i],
+                        public_values.last_finalize_addr_limbs[i],
                     );
                 }
             }
@@ -308,13 +314,13 @@ where
 
             recursion_public_values.start_reconstruct_deferred_digest = deferred_digest;
             recursion_public_values.end_reconstruct_deferred_digest = deferred_digest;
-            recursion_public_values.previous_initialize_addr_bits =
-                public_values.previous_initialize_addr_bits;
-            recursion_public_values.last_initialize_addr_bits =
-                public_values.last_initialize_addr_bits;
-            recursion_public_values.previous_finalize_addr_bits =
-                public_values.previous_finalize_addr_bits;
-            recursion_public_values.last_finalize_addr_bits = public_values.last_finalize_addr_bits;
+            recursion_public_values.previous_init_addr_limbs =
+                public_values.previous_init_addr_limbs;
+            recursion_public_values.last_init_addr_limbs = public_values.last_init_addr_limbs;
+            recursion_public_values.previous_finalize_addr_limbs =
+                public_values.previous_finalize_addr_limbs;
+            recursion_public_values.last_finalize_addr_limbs =
+                public_values.last_finalize_addr_limbs;
 
             recursion_public_values.riscv_vk_digest = vk_digest;
             recursion_public_values.vk_root = vk_root;

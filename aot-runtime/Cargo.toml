@@ -30,7 +30,10 @@ ark-ff = "0.5"
 ark-secp256k1 = "0.5"
 ark-bn254 = "0.5"
 ark-bls12-381 = "0.5"
+memmap2 = { version = "0.9", optional = true }
+libc = { version = "0.2", optional = true }
 
 
 [features]
 bigint-rug = ["pico-vm/bigint-rug"]
+mmap-memory = ["pico-vm/mmap-memory", "dep:memmap2", "dep:libc"]

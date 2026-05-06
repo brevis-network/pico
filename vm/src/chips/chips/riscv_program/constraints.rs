@@ -8,6 +8,7 @@ use crate::{
             ProgramChip,
         },
     },
+    compiler::addr::Addr,
     machine::{
         builder::ChipBuilder,
         lookup::{LookupScope, LookupType, SymbolicLookup},
@@ -17,7 +18,6 @@ use core::borrow::Borrow;
 use p3_air::{Air, BaseAir};
 use p3_field::Field;
 use p3_matrix::Matrix;
-use std::iter::once;
 
 impl<F: Field> BaseAir<F> for ProgramChip<F> {
     fn width(&self) -> usize {
@@ -53,13 +53,15 @@ impl<F: Field> ProgramChip<F> {
     fn looked_program<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
-        pc: impl Into<CB::Expr>,
+        pc: Addr<CB::Var>,
         instruction: InstructionCols<impl Into<CB::Expr> + Copy>,
         selectors: OpcodeSelectorCols<impl Into<CB::Expr> + Copy>,
         multiplicity: impl Into<CB::Expr>,
     ) {
-        let values: Vec<CB::Expr> = once(pc.into())
-            .chain(once(instruction.opcode.into()))
+        let values: Vec<CB::Expr> = pc
+            .into_iter()
+            .map(|x| x.into())
+            .chain(std::iter::once(instruction.opcode.into()))
             .chain(instruction.into_iter().map(|x| x.into()))
             .chain(selectors.into_iter().map(|x| x.into()))
             .collect();

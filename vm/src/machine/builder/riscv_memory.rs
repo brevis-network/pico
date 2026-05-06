@@ -1,5 +1,6 @@
 use crate::{
     chips::chips::riscv_memory::read_write::columns::{MemoryAccessCols, MemoryCols},
+    compiler::word::Word,
     machine::{
         builder::{ChipBuilder, ChipRangeBuilder},
         lookup::{LookupScope, LookupType, SymbolicLookup},
@@ -15,11 +16,13 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
     ///
     /// This method verifies that a memory access timestamp (chunk, clk) is greater than the
     /// previous access's timestamp.  It will also add to the memory argument.
+    ///
+    /// `addr` is a 3-element array of u16 limbs representing the full 48-bit address.
     fn eval_memory_access<E: Into<Self::Expr> + Clone>(
         &mut self,
         chunk: impl Into<Self::Expr>,
         clk: impl Into<Self::Expr>,
-        addr: impl Into<Self::Expr>,
+        addr: [impl Into<Self::Expr> + Clone; 3],
         memory_access: &impl MemoryCols<E>,
         do_check: impl Into<Self::Expr>,
     ) {
@@ -33,18 +36,24 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
         // Verify that the current memory access time is greater than the previous's.
         self.eval_memory_access_timestamp(mem_access, do_check.clone(), chunk.clone(), clk.clone());
 
-        // Add to the memory argument.
-        let addr = addr.into();
+        // Regional lookup: 9 elements [chunk, clk, addr[0], addr[1], addr[2], v0, v1, v2, v3]
+        let addr0: Self::Expr = addr[0].clone().into();
+        let addr1: Self::Expr = addr[1].clone().into();
+        let addr2: Self::Expr = addr[2].clone().into();
         let prev_chunk = mem_access.prev_chunk.clone().into();
         let prev_clk = mem_access.prev_clk.clone().into();
         let prev_values = once(prev_chunk)
             .chain(once(prev_clk))
-            .chain(once(addr.clone()))
+            .chain(once(addr0.clone()))
+            .chain(once(addr1.clone()))
+            .chain(once(addr2.clone()))
             .chain(memory_access.prev_value().clone().map(Into::into))
             .collect_vec();
         let current_values = once(chunk)
             .chain(once(clk))
-            .chain(once(addr.clone()))
+            .chain(once(addr0))
+            .chain(once(addr1))
+            .chain(once(addr2))
             .chain(memory_access.value().clone().map(Into::into))
             .collect_vec();
 
@@ -66,22 +75,81 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
     }
 
     /// Constraints a memory read or write to a slice of `MemoryAccessCols`.
+    ///
+    /// `initial_addr` is a 3-element array of u16 limbs. The offset `i * addr_offset` is added
+    /// to limb[0] for each element. Use `addr_offset=4` for u32 words, `addr_offset=8` for u64.
     fn eval_memory_access_slice<E: Into<Self::Expr> + Copy>(
         &mut self,
         chunk: impl Into<Self::Expr> + Copy,
         clk: impl Into<Self::Expr> + Clone,
-        initial_addr: impl Into<Self::Expr> + Clone,
+        initial_addr: [impl Into<Self::Expr> + Clone; 3],
         memory_access_slice: &[impl MemoryCols<E>],
+        addr_offset: usize,
         verify_memory_access: impl Into<Self::Expr> + Copy,
     ) {
         for (i, access_slice) in memory_access_slice.iter().enumerate() {
             self.eval_memory_access(
                 chunk,
                 clk.clone(),
-                initial_addr.clone().into() + Self::Expr::from_canonical_usize(i * 4),
+                [
+                    initial_addr[0].clone().into()
+                        + Self::Expr::from_canonical_usize(i * addr_offset),
+                    initial_addr[1].clone().into(),
+                    initial_addr[2].clone().into(),
+                ],
                 access_slice,
                 verify_memory_access,
             );
+        }
+    }
+
+    /// Constraints a memory write to a slice of `MemoryAccessCols`, additionally constraining
+    /// that the write values match `write_values`.
+    ///
+    /// This is needed for precompile chips that compute new values (e.g. via FieldOpCols) and
+    /// write them back to memory. The constraint ensures `access.value() == write_value`.
+    #[allow(clippy::too_many_arguments)]
+    fn eval_memory_access_slice_write<E: Into<Self::Expr> + Copy>(
+        &mut self,
+        chunk: impl Into<Self::Expr> + Copy,
+        clk: impl Into<Self::Expr> + Clone,
+        initial_addr: [impl Into<Self::Expr> + Clone; 3],
+        memory_access_slice: &[impl MemoryCols<E>],
+        write_values: &[Word<Self::Expr>],
+        addr_offset: usize,
+        verify_memory_access: impl Into<Self::Expr> + Copy,
+    ) {
+        for (i, (access_slice, write_value)) in memory_access_slice
+            .iter()
+            .zip(write_values.iter())
+            .enumerate()
+        {
+            self.eval_memory_access(
+                chunk,
+                clk.clone(),
+                [
+                    initial_addr[0].clone().into()
+                        + Self::Expr::from_canonical_usize(i * addr_offset),
+                    initial_addr[1].clone().into(),
+                    initial_addr[2].clone().into(),
+                ],
+                access_slice,
+                verify_memory_access,
+            );
+
+            // Constrain that the current value matches the computed write value.
+            let do_check: Self::Expr = verify_memory_access.into();
+            for (j, (v, w)) in access_slice
+                .value()
+                .0
+                .iter()
+                .zip(write_value.0.iter())
+                .enumerate()
+            {
+                let _ = j;
+                self.when(do_check.clone())
+                    .assert_eq((*v).into(), w.clone());
+            }
         }
     }
 

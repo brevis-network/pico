@@ -1,3 +1,4 @@
+# Bootstrap stub - will be replaced by generate_crates
 [package]
 name = "pico-aot-dispatch"
 version = "0.1.0"
@@ -5,3 +6,10 @@ edition = "2021"
 
 [dependencies]
 pico-aot-runtime = { path = "../aot-runtime" }
+
+[features]
+bigint-rug = ["pico-aot-runtime/bigint-rug"]
+mmap-memory = ["pico-aot-runtime/mmap-memory"]
+
+[lib]
+path = "src/lib.rs"

@@ -33,13 +33,13 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
     /// Check that each limb of the given slice is a u16.
     fn slice_range_check_u16(
         &mut self,
-        input: &[impl Into<Self::Expr> + Copy],
+        input: &[impl Into<Self::Expr> + Clone],
         mult: impl Into<Self::Expr> + Clone,
     ) {
         input.iter().for_each(|limb| {
             self.looking_rangecheck(
                 ByteOpcode::U16Range,
-                *limb,
+                limb.clone(),
                 Self::Expr::ZERO,
                 Self::Expr::ZERO,
                 Self::Expr::ZERO,

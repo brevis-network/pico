@@ -23,6 +23,17 @@ pub struct EmulatorOpts {
     pub cycle_tracker: bool,
     /// Whether or not to track cycle prediction information
     pub cost_estimator: bool,
+    /// Selects which emulator implementation runs in the snapshot-main thread.
+    #[serde(default)]
+    pub snapshot_main: SnapshotMainMode,
+}
+
+/// Which emulator drives the snapshot-main thread in `emulate_snapshot_pipeline`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SnapshotMainMode {
+    #[default]
+    Interpreter,
+    Aot,
 }
 
 impl Default for EmulatorOpts {
@@ -54,6 +65,7 @@ impl Default for EmulatorOpts {
             max_cycles: default_max_cycles.into(),
             cycle_tracker: false,
             cost_estimator: false,
+            snapshot_main: SnapshotMainMode::default(),
         }
     }
 }
@@ -138,6 +150,40 @@ impl EmulatorOpts {
             max_cycles: Some(max_cycles),
             ..self
         }
+    }
+
+    pub fn with_snapshot_main(self, snapshot_main: SnapshotMainMode) -> Self {
+        Self {
+            snapshot_main,
+            ..self
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_main_default_is_interpreter() {
+        // Default must be Interpreter regardless of feature flags or any
+        // registered AOT factory. Callers that want AOT must opt in via
+        // `.with_snapshot_main(SnapshotMainMode::Aot)`.
+        let opts = EmulatorOpts::default();
+        assert_eq!(opts.snapshot_main, SnapshotMainMode::Interpreter);
+    }
+
+    #[test]
+    fn serde_backward_compat_deserializes_without_snapshot_main() {
+        // Build a serialized blob from current opts, then strip the snapshot_main field
+        // and confirm deserialize still succeeds with default Interpreter.
+        let opts = EmulatorOpts::default();
+        let value = serde_json::to_value(opts).expect("serialize");
+        let mut map = value.as_object().unwrap().clone();
+        map.remove("snapshot_main");
+        let stripped = serde_json::Value::Object(map);
+        let back: EmulatorOpts = serde_json::from_value(stripped).expect("deserialize");
+        assert_eq!(back.snapshot_main, SnapshotMainMode::Interpreter);
     }
 }
 

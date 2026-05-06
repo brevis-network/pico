@@ -47,7 +47,7 @@ run_benchmark "bn" 3
 run_benchmark "bls12381" 3
 
 run_benchmark "fibonacci-300kn" 1
-# run_benchmark "reth-18884864" 1
+run_benchmark "reth-18884864" 1
 run_benchmark "reth-17106222" 1
 
 run_benchmark "reth-23993050" 1

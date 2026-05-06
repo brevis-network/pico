@@ -14,7 +14,7 @@ pub use pico_vm::{
 pub use pico_aot_dispatch::AotEmulatorCore;
 
 #[cfg(feature = "aot")]
-pub use aot_common::AotRun;
+pub use aot_common::{AotRun, recycle_snapshot_memory, register_with_vm};
 
 // Type alias for backwards compatibility
 #[cfg(feature = "aot")]

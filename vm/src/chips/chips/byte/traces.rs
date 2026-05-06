@@ -14,7 +14,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IndexedParallelIterator, ParallelIterator, ParallelSliceMut};
 use std::borrow::BorrowMut;
 
-pub const NUM_ROWS: usize = 1 << 16;
+pub const NUM_ROWS: usize = 1 << 17;
 
 impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
     type Record = EmulationRecord;
@@ -44,7 +44,22 @@ impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
             .enumerate()
             .for_each(|(row_idx, row)| {
                 for (lookup, mult) in lookups.iter() {
-                    if row_idx == (((lookup.b as u16) << 8) + lookup.c as u16) as usize {
+                    let row_index: usize =
+                        if lookup.opcode == ByteOpcode::BitRange && lookup.a2 == 16 {
+                            // U16Range: row = (b << 8) | c
+                            ((lookup.b as usize) << 8) + lookup.c as usize
+                        } else if lookup.opcode == ByteOpcode::BitRange && lookup.a2 < 16 {
+                            // BitRange: row = 65536 + (b << 8) | c + (1 << bits)
+                            let base = 1usize << 16;
+                            base + ((lookup.b as usize) << 8)
+                                + lookup.c as usize
+                                + (1usize << lookup.a2 as usize)
+                        } else {
+                            // Other byte ops: row = (b << 8) | c
+                            ((lookup.b as usize) << 8) + lookup.c as usize
+                        };
+
+                    if row_idx == row_index {
                         let cols: &mut ByteMultCols<F> = row.borrow_mut();
                         let index = lookup.opcode as usize;
                         cols.multiplicities[index] += F::from_canonical_usize(**mult);
@@ -119,7 +134,27 @@ impl<F: Field> ByteChip<F> {
                         let v = ((b as u32) << 8) + c as u32;
                         col.value_u16 = F::from_canonical_u32(v);
                     }
+                    ByteOpcode::BitRange => {
+                        let v = ((b as u32) << 8) + c as u32;
+                        col.value_u16 = F::from_canonical_u32(v);
+                        col.bits = F::from_canonical_u8(16);
+                    }
                 };
+            }
+        }
+
+        // Fill BitRange table for bits = 0..16
+        // Rows 65536..131071: bits = 0..15 (bits=16 already filled in first 65536 rows)
+        let base_row = 1 << 16;
+        for bits in 0..16u8 {
+            for a in 0..(1u16 << bits) {
+                let row_index = base_row + a as usize + (1usize << bits);
+                if row_index < NUM_ROWS {
+                    let col: &mut BytePreprocessedCols<F> =
+                        initial_trace.row_mut(row_index).borrow_mut();
+                    col.value_u16 = F::from_canonical_u16(a);
+                    col.bits = F::from_canonical_u8(bits);
+                }
             }
         }
         initial_trace

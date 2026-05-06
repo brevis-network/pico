@@ -95,6 +95,32 @@ pub enum Opcode {
     REM = 36,
     /// rd ← rs1 % rs2 (unsigned), pc ← pc + 4
     REMU = 37,
+    /// rd ← sext32(rs1 + rs2), pc ← pc + 4
+    ADDW = 40,
+    /// rd ← sext32(rs1 - rs2), pc ← pc + 4
+    SUBW = 41,
+    /// rd ← sext32(rs1 << rs2[4:0]), pc ← pc + 4
+    SLLW = 42,
+    /// rd ← sext32(rs1 >> rs2[4:0]) (logical), pc ← pc + 4
+    SRLW = 43,
+    /// rd ← sext32(rs1 >> rs2[4:0]) (arithmetic), pc ← pc + 4
+    SRAW = 44,
+    /// rd ← zx(m32(rs1 + imm)), pc ← pc + 4
+    LWU = 45,
+    /// rd ← m64(rs1 + imm), pc ← pc + 4
+    LD = 46,
+    /// m64(rs1 + imm) ← rs2[63:0], pc ← pc + 4
+    SD = 47,
+    /// rd ← sext32(rs1 * rs2), pc ← pc + 4
+    MULW = 48,
+    /// rd ← sext32(rs1 / rs2) (signed), pc ← pc + 4
+    DIVW = 49,
+    /// rd ← sext32(rs1 / rs2) (unsigned), pc ← pc + 4
+    DIVUW = 50,
+    /// rd ← sext32(rs1 % rs2) (signed), pc ← pc + 4
+    REMW = 51,
+    /// rd ← sext32(rs1 % rs2) (unsigned), pc ← pc + 4
+    REMUW = 52,
     /// Unimplemented instruction.
     UNIMP = 39,
 }
@@ -125,6 +151,8 @@ pub enum ByteOpcode {
     U8Range = 7,
     /// Unsigned 16-bit Range Check.
     U16Range = 8,
+    /// Bit Range Check.
+    BitRange = 9,
 }
 
 /// Range Check Opcode.
@@ -183,6 +211,19 @@ impl Opcode {
             Opcode::DIVU => "divu",
             Opcode::REM => "rem",
             Opcode::REMU => "remu",
+            Opcode::ADDW => "addw",
+            Opcode::SUBW => "subw",
+            Opcode::SLLW => "sllw",
+            Opcode::SRLW => "srlw",
+            Opcode::SRAW => "sraw",
+            Opcode::LWU => "lwu",
+            Opcode::LD => "ld",
+            Opcode::SD => "sd",
+            Opcode::MULW => "mulw",
+            Opcode::DIVW => "divw",
+            Opcode::DIVUW => "divuw",
+            Opcode::REMW => "remw",
+            Opcode::REMUW => "remuw",
             Opcode::UNIMP => "unimp",
         }
     }
@@ -201,7 +242,7 @@ impl Display for Opcode {
 }
 
 /// The number of different byte operations.
-pub const NUM_BYTE_OPS: usize = 9;
+pub const NUM_BYTE_OPS: usize = 10;
 
 impl From<Opcode> for ByteOpcode {
     /// Convert an opcode to a byte opcode.
@@ -230,6 +271,7 @@ impl ByteOpcode {
             ByteOpcode::MSB,
             ByteOpcode::U8Range,
             ByteOpcode::U16Range,
+            ByteOpcode::BitRange,
         ];
         assert_eq!(opcodes.len(), NUM_BYTE_OPS);
         opcodes

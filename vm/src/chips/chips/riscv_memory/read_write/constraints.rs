@@ -1,16 +1,18 @@
 #![allow(clippy::assign_op_pattern)]
 
 use super::{
-    super::event::MemoryAccessPosition,
     columns::{MemoryChipCols, MemoryInstructionCols, NUM_MEMORY_CHIP_COLS},
     MemoryReadWriteChip,
 };
 use crate::{
-    chips::{
-        chips::riscv_memory::read_write::columns::{MemoryChipValueCols, MemoryCols},
-        gadgets::field_range_check::word_range::FieldWordRangeChecker,
+    chips::chips::riscv_memory::{
+        event::MemoryAccessPosition,
+        read_write::columns::{MemoryChipValueCols, MemoryCols},
     },
-    compiler::{riscv::opcode::Opcode, word::Word},
+    compiler::{
+        riscv::opcode::{ByteOpcode, Opcode},
+        word::Word,
+    },
     machine::{
         builder::{
             ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
@@ -39,25 +41,28 @@ where
         let local: &MemoryChipCols<CB::Var> = (*local).borrow();
 
         for local_memory_chip_value_cols in local.values {
-            // The clock cycle value for memory offset
             let is_memory_instruction: CB::Expr =
                 self.is_memory_instruction::<CB>(&local_memory_chip_value_cols.instruction);
 
-            // build a custom memory lookup to fully constrain the used columns
+            // CPU Lookup: receive instruction parameters via looked lookup.
+            // Now includes 11 selector flags (8 original + 3 new: is_lwu, is_ld, is_sd).
             use core::iter::once;
-            let values = once(local_memory_chip_value_cols.instruction.opcode) // opcode
-                .chain(local_memory_chip_value_cols.instruction.op_a_val()) // instr.op_a
-                .chain(local_memory_chip_value_cols.instruction.op_b_val()) // instr.op_b
-                .chain(local_memory_chip_value_cols.instruction.op_c_val()) // instr.op_c
-                .chain(once(local_memory_chip_value_cols.instruction.op_a_0)) // instr.op_a_0
-                .chain(once(local_memory_chip_value_cols.instruction.is_lb)) // selectors.is_lb
-                .chain(once(local_memory_chip_value_cols.instruction.is_lbu)) // selectors.is_lbu
-                .chain(once(local_memory_chip_value_cols.instruction.is_lh)) // selectors.is_lh
-                .chain(once(local_memory_chip_value_cols.instruction.is_lhu)) // selectors.is_lhu
-                .chain(once(local_memory_chip_value_cols.instruction.is_lw)) // selectors.is_lw
-                .chain(once(local_memory_chip_value_cols.instruction.is_sb)) // selectors.is_sb
-                .chain(once(local_memory_chip_value_cols.instruction.is_sh)) // selectors.is_sh
-                .chain(once(local_memory_chip_value_cols.instruction.is_sw)) // selectors.is_sw
+            let values = once(local_memory_chip_value_cols.instruction.opcode)
+                .chain(local_memory_chip_value_cols.instruction.op_a_val())
+                .chain(local_memory_chip_value_cols.instruction.op_b_val())
+                .chain(local_memory_chip_value_cols.instruction.op_c_val())
+                .chain(once(local_memory_chip_value_cols.instruction.op_a_0))
+                .chain(once(local_memory_chip_value_cols.instruction.is_lb))
+                .chain(once(local_memory_chip_value_cols.instruction.is_lbu))
+                .chain(once(local_memory_chip_value_cols.instruction.is_lh))
+                .chain(once(local_memory_chip_value_cols.instruction.is_lhu))
+                .chain(once(local_memory_chip_value_cols.instruction.is_lw))
+                .chain(once(local_memory_chip_value_cols.instruction.is_lwu))
+                .chain(once(local_memory_chip_value_cols.instruction.is_ld))
+                .chain(once(local_memory_chip_value_cols.instruction.is_sb))
+                .chain(once(local_memory_chip_value_cols.instruction.is_sh))
+                .chain(once(local_memory_chip_value_cols.instruction.is_sw))
+                .chain(once(local_memory_chip_value_cols.instruction.is_sd))
                 .map(Into::into);
 
             builder.looked(SymbolicLookup::new(
@@ -89,6 +94,16 @@ impl<F: Field> MemoryReadWriteChip<F> {
             + instruction.is_lh
             + instruction.is_lhu
             + instruction.is_lw
+            + instruction.is_lwu
+            + instruction.is_ld
+    }
+
+    /// Computes whether the opcode is a store instruction.
+    pub(crate) fn is_store_instruction<CB: ChipBuilder<F>>(
+        &self,
+        instruction: &MemoryInstructionCols<CB::Var>,
+    ) -> CB::Expr {
+        instruction.is_sb + instruction.is_sh + instruction.is_sw + instruction.is_sd
     }
 
     /// Computes whether the opcode is a memory instruction.
@@ -96,100 +111,125 @@ impl<F: Field> MemoryReadWriteChip<F> {
         &self,
         instruction: &MemoryInstructionCols<CB::Var>,
     ) -> CB::Expr {
-        instruction.is_lb
-            + instruction.is_lbu
-            + instruction.is_lh
-            + instruction.is_lhu
-            + instruction.is_lw
-            + instruction.is_sb
-            + instruction.is_sh
-            + instruction.is_sw
+        self.is_load_instruction::<CB>(instruction) + self.is_store_instruction::<CB>(instruction)
     }
 
-    /// Constrains the addr_aligned, addr_offset, and addr_word memory columns.
-    ///
-    /// This method will do the following:
-    /// 1. Calculate that the unaligned address is correctly computed to be op_b.value + op_c.value.
-    /// 2. Calculate that the address offset is address % 4.
-    /// 3. Assert the validity of the aligned address given the address offset and the unaligned
-    ///    address.
+    // ========================================================================
+    // C1 + C2 + C3 + C4: Address calculation, offset, timestamp, load-no-write
+    // ========================================================================
+
     pub(crate) fn eval_memory_address_and_access<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
         local: &MemoryChipValueCols<CB::Var>,
         is_memory_instruction: CB::Expr,
     ) {
-        // Send to the ALU table to verify correct calculation of addr_word.
+        let is_mem = is_memory_instruction.clone();
+
+        // ---- C1: Address calculation ----
+
+        // 1. ALU ADD lookup: addr_word = op_b + op_c (ALU supports 4×u16)
         builder.looking_alu(
             CB::Expr::from_canonical_u32(Opcode::ADD as u32),
             local.addr_word,
             local.op_b_val(),
             local.op_c_val(),
-            is_memory_instruction.clone(),
+            is_mem.clone(),
         );
 
-        // Range check the addr_word to be a valid field word.
-        FieldWordRangeChecker::<CB::F>::range_check(
-            builder,
-            local.addr_word,
-            local.addr_word_range_checker,
-            is_memory_instruction.clone(),
-        );
-
-        // Check that each addr_word element is a byte.
-        builder.slice_range_check_u8(&local.addr_word.0, is_memory_instruction.clone());
-
-        // Evaluate the addr_offset column and offset flags.
-        self.eval_offset_value_flags(builder, local);
-
-        // Assert that reduce(addr_word) == addr_aligned + addr_offset.
+        // 2. addr is the low 3 limbs; constrain 4th limb = 0 (addr fits 48 bits)
         builder
-            .when(is_memory_instruction.clone())
-            .assert_eq::<CB::Expr, CB::Expr>(
-                local.addr_aligned + local.addr_offset,
-                local.addr_word.reduce::<CB>(),
+            .when(is_mem.clone())
+            .assert_zero(local.addr_word.0[3]);
+
+        // 3. u16 range check on addr limbs
+        builder.slice_range_check_u16(&local.addr_word.0[0..3], is_mem.clone());
+
+        // 4. Stack guard: addr[1] + addr[2] != 0 → addr >= 2^16
+        let sum_top: CB::Expr = local.addr_word.0[1] + local.addr_word.0[2];
+        builder.assert_eq(
+            CB::Expr::ZERO + local.addr_top_two_limb_inv * sum_top,
+            is_mem.clone(),
+        );
+
+        // ---- C2: Offset decomposition + alignment ----
+
+        // 1. offset bits are bool
+        for i in 0..3 {
+            builder
+                .when(is_mem.clone())
+                .assert_bool(local.offset_bit[i]);
+        }
+
+        // 1b. Constrain limb_select as one-hot derived from (bit1, bit2).
+        // Each is when(deg1) × max(deg1, deg2) = degree 3.
+        let ls_b1: CB::Expr = CB::Expr::ZERO + local.offset_bit[1];
+        let ls_b2: CB::Expr = CB::Expr::ZERO + local.offset_bit[2];
+        builder.when(is_mem.clone()).assert_eq(
+            local.limb_select[0],
+            (CB::Expr::ONE - ls_b1.clone()) * (CB::Expr::ONE - ls_b2.clone()),
+        );
+        builder.when(is_mem.clone()).assert_eq(
+            local.limb_select[1],
+            ls_b1.clone() * (CB::Expr::ONE - ls_b2.clone()),
+        );
+        builder.when(is_mem.clone()).assert_eq(
+            local.limb_select[2],
+            (CB::Expr::ONE - ls_b1.clone()) * ls_b2.clone(),
+        );
+        builder
+            .when(is_mem.clone())
+            .assert_eq(local.limb_select[3], ls_b1 * ls_b2);
+
+        // 2. Bind offset_bit to addr[0]: (addr[0] - offset) must be divisible by 8.
+        //    Method: looking_byte(BitRange, (addr[0]-offset)/8, 13, 0, is_mem).
+        //    Max value of (addr[0]-offset)/8 = (65535-0)/8 = 8191 = 2^13-1, so 13 bits suffice.
+        //    If offset_bit is wrong, (addr[0]-offset)/8 is not an integer and the
+        //    field element will be > 2^13 (since p >> 2^13), failing the range check.
+        let offset_sum: CB::Expr = CB::Expr::ZERO
+            + local.offset_bit[0]
+            + CB::Expr::TWO * local.offset_bit[1]
+            + CB::Expr::from_canonical_u8(4) * local.offset_bit[2];
+        let inv_8 = CB::F::from_canonical_u8(8).inverse();
+        builder.looking_byte(
+            CB::Expr::from_canonical_u8(ByteOpcode::BitRange as u8),
+            (CB::Expr::ZERO + local.addr_word.0[0] - offset_sum) * CB::Expr::from(inv_8),
+            CB::Expr::from_canonical_u8(13),
+            CB::Expr::ZERO,
+            is_mem.clone(),
+        );
+
+        // 4. Alignment constraints
+        // Half-word alignment: bit0 == 0
+        builder
+            .when(local.instruction.is_lh + local.instruction.is_lhu + local.instruction.is_sh)
+            .assert_zero(local.offset_bit[0]);
+        // Word alignment: bit0 == 0, bit1 == 0
+        builder
+            .when(local.instruction.is_lw + local.instruction.is_lwu + local.instruction.is_sw)
+            .assert_zero(CB::Expr::ZERO + local.offset_bit[0] + local.offset_bit[1]);
+        // Double-word alignment: bit0 == 0, bit1 == 0, bit2 == 0
+        builder
+            .when(local.instruction.is_ld + local.instruction.is_sd)
+            .assert_zero(
+                CB::Expr::ZERO + local.offset_bit[0] + local.offset_bit[1] + local.offset_bit[2],
             );
 
-        // Verify that the least significant byte of addr_word - addr_offset is divisible by 4.
-        let offset = [
-            local.offset_is_one,
-            local.offset_is_two,
-            local.offset_is_three,
-        ]
-        .iter()
-        .enumerate()
-        .fold(CB::Expr::ZERO, |acc, (index, &value)| {
-            acc + CB::Expr::from_canonical_usize(index + 1) * value
-        });
-        let mut recomposed_byte = CB::Expr::ZERO;
-        local
-            .aa_least_sig_byte_decomp
-            .iter()
-            .enumerate()
-            .for_each(|(i, value)| {
-                builder
-                    .when(is_memory_instruction.clone())
-                    .assert_bool(*value);
-
-                recomposed_byte =
-                    recomposed_byte.clone() + CB::Expr::from_canonical_usize(1 << (i + 2)) * *value;
-            });
-
-        builder
-            .when(is_memory_instruction.clone())
-            .assert_eq(local.addr_word[0] - offset, recomposed_byte);
-
-        // For operations that require reading from memory (not registers), we need to read the
-        // value into the memory columns.
+        // ---- C3: Timestamp + Regional Lookup ----
+        // eval_memory_access handles timestamp monotonicity and 9-element Regional lookup.
         builder.eval_memory_access(
             local.chunk,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::Memory as u32),
-            local.addr_aligned,
+            [
+                local.addr_aligned.0[0],
+                local.addr_aligned.0[1],
+                local.addr_aligned.0[2],
+            ],
             &local.memory_access,
-            is_memory_instruction.clone(),
+            is_mem.clone(),
         );
 
-        // On memory load instructions, make sure that the memory value is not changed.
+        // ---- C4: Load doesn't change memory ----
         builder
             .when(self.is_load_instruction::<CB>(&local.instruction))
             .assert_word_eq(
@@ -198,245 +238,337 @@ impl<F: Field> MemoryReadWriteChip<F> {
             );
     }
 
-    /// Evaluates constraints related to loading from memory.
+    // ========================================================================
+    // C5 + C6 + C8: Load sub-word selection + sign extension + x0 handling
+    // ========================================================================
+
     pub(crate) fn eval_memory_load<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
         local: &MemoryChipValueCols<CB::Var>,
     ) {
-        // Verify the unsigned_mem_value column.
-        self.eval_unsigned_mem_value(builder, local);
+        let mem_val = *local.memory_access.prev_value();
+        let is_mem = self.is_memory_instruction::<CB>(&local.instruction);
 
-        // If it's a signed operation (such as LB or LH), then we need verify the bit decomposition
-        // of the most significant byte to get it's sign.
-        self.eval_most_sig_byte_bit_decomp(builder, local, &local.unsigned_mem_val);
+        // ---- C5: Limb selection (4-choose-1 via limb_select one-hot) ----
+        // selected_limb = mem_val[2*bit2 + bit1]
+        // Uses pre-computed limb_select[i] (Var, degree 1) instead of
+        // algebraic bit products (degree 2) to keep total degree ≤ 3.
+        let bit0 = local.offset_bit[0];
+        let bit2 = local.offset_bit[2];
 
-        // sanity check op_a_0
+        let expected_limb: CB::Expr = CB::Expr::ZERO
+            + local.limb_select[0] * mem_val[0]
+            + local.limb_select[1] * mem_val[1]
+            + local.limb_select[2] * mem_val[2]
+            + local.limb_select[3] * mem_val[3];
+        builder
+            .when(is_mem.clone())
+            .assert_eq(local.selected_limb, expected_limb);
+
+        // ---- C6: Load sub-word extraction ----
+
+        // LB/LBU: split selected_limb into 2 bytes, select one via bit0
+        let inv_256 = CB::F::from_canonical_u16(256).inverse();
+        let byte0: CB::Expr = CB::Expr::ZERO + local.selected_limb_low_byte;
+        let byte1: CB::Expr = (CB::Expr::ZERO + local.selected_limb - local.selected_limb_low_byte)
+            * CB::Expr::from(inv_256);
+
+        let is_byte_load: CB::Expr = local.instruction.is_lb + local.instruction.is_lbu;
+        builder.when(is_byte_load.clone()).assert_eq(
+            local.selected_byte,
+            CB::Expr::ZERO + bit0 * byte1 + (CB::Expr::ONE - bit0) * byte0,
+        );
+
+        // Range check: selected_limb_low_byte ∈ [0, 255]
+        builder.slice_range_check_u8(&[local.selected_limb_low_byte], is_byte_load.clone());
+
+        // LB/LBU: unsigned_mem_val = [selected_byte, 0, 0, 0]
+        let byte_word = Word([
+            CB::Expr::ZERO + local.selected_byte,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+        ]);
+        builder
+            .when(is_byte_load)
+            .assert_word_eq(local.unsigned_mem_val.map(|x| x.into()), byte_word);
+
+        // LH/LHU: unsigned_mem_val = [selected_limb, 0, 0, 0]
+        let half_word = Word([
+            CB::Expr::ZERO + local.selected_limb,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+        ]);
+        builder
+            .when(local.instruction.is_lh + local.instruction.is_lhu)
+            .assert_word_eq(local.unsigned_mem_val.map(|x| x.into()), half_word);
+
+        // LW/LWU: selected_word selection via bit2 (algebraic approach)
+        let is_word_load: CB::Expr = local.instruction.is_lw + local.instruction.is_lwu;
+        // selected_word[0] = (1-bit2)*mem[0] + bit2*mem[2]
+        // selected_word[1] = (1-bit2)*mem[1] + bit2*mem[3]
+        let expected_sw0: CB::Expr =
+            (CB::Expr::ONE - bit2) * mem_val[0] + (CB::Expr::ZERO + bit2) * mem_val[2];
+        let expected_sw1: CB::Expr =
+            (CB::Expr::ONE - bit2) * mem_val[1] + (CB::Expr::ZERO + bit2) * mem_val[3];
+        builder
+            .when(is_word_load.clone())
+            .assert_eq(local.selected_word[0], expected_sw0);
+        builder
+            .when(is_word_load.clone())
+            .assert_eq(local.selected_word[1], expected_sw1);
+
+        // LW/LWU: unsigned_mem_val = [word[0], word[1], 0, 0]
+        let word_val = Word([
+            CB::Expr::ZERO + local.selected_word[0],
+            CB::Expr::ZERO + local.selected_word[1],
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+        ]);
+        builder
+            .when(is_word_load)
+            .assert_word_eq(local.unsigned_mem_val.map(|x| x.into()), word_val);
+
+        // LD: unsigned_mem_val = mem_val (all 4 limbs)
+        builder
+            .when(local.instruction.is_ld)
+            .assert_word_eq(local.unsigned_mem_val, mem_val);
+
+        // --- msb independent verification ----
+
+        // LB: verify msb == bit7 of selected_byte via ByteOpcode::MSB lookup
+        builder.looking_byte(
+            CB::Expr::from_canonical_u8(ByteOpcode::MSB as u8),
+            local.msb,           // a = msb result
+            local.selected_byte, // b = byte value
+            CB::Expr::ZERO,      // c = 0
+            local.instruction.is_lb,
+        );
+        // LBU: msb forced to 0
+        builder
+            .when(local.instruction.is_lbu)
+            .assert_zero(local.msb);
+
+        // LH: U16MSBOperation — verify msb == bit15 of selected_limb
+        //   assert_bool(msb), then check 2*selected_limb - msb*2^16 ∈ [0, 2^16)
+        builder.when(local.instruction.is_lh).assert_bool(local.msb);
+        builder.looking_byte(
+            CB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            CB::Expr::TWO * local.selected_limb
+                - CB::Expr::ZERO
+                - local.msb * CB::Expr::from_canonical_u32(1 << 16),
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            local.instruction.is_lh,
+        );
+        // LHU: msb forced to 0
+        builder
+            .when(local.instruction.is_lhu)
+            .assert_zero(local.msb);
+
+        // LW: U16MSBOperation — verify msb == bit15 of selected_word[1]
+        builder.when(local.instruction.is_lw).assert_bool(local.msb);
+        builder.looking_byte(
+            CB::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            CB::Expr::TWO * local.selected_word[1]
+                - CB::Expr::ZERO
+                - local.msb * CB::Expr::from_canonical_u32(1 << 16),
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            local.instruction.is_lw,
+        );
+        // LWU/LD: msb forced to 0 (no sign extension)
+        builder
+            .when(local.instruction.is_lwu + local.instruction.is_ld)
+            .assert_zero(local.msb);
+
+        // ---- C8: x0 handling + sign extension ----
+
         builder.assert_bool(local.instruction.op_a_0);
 
-        // Assert that correct value of `mem_value_is_neg_not_x0`.
+        // mem_value_is_neg_not_x0 = (is_lb + is_lh + is_lw) * msb * (1 - op_a_0)
         builder.assert_eq(
             local.mem_value_is_neg_not_x0,
-            (local.instruction.is_lb + local.instruction.is_lh)
-                * local.most_sig_byte_decomp[7]
+            (local.instruction.is_lb + local.instruction.is_lh + local.instruction.is_lw)
+                * local.msb
                 * (CB::Expr::ONE - local.instruction.op_a_0),
         );
 
-        // When the memory value is negative and not writing to x0, use the SUB opcode to compute
-        // the signed value of the memory value and verify that the op_a value is correct.
-        let signed_value = Word([
-            CB::Expr::ZERO,
-            CB::Expr::ONE * local.instruction.is_lb,
-            CB::Expr::ONE * local.instruction.is_lh,
-            CB::Expr::ZERO,
-        ]);
-
-        builder.looking_alu(
-            Opcode::SUB.as_field::<CB::F>(),
-            local.op_a_val(),
-            local.unsigned_mem_val,
-            signed_value,
-            local.mem_value_is_neg_not_x0,
-        );
-
-        // Assert that correct value of `mem_value_is_pos_not_x0`.
-        let mem_value_is_pos = (local.instruction.is_lb + local.instruction.is_lh)
-            * (CB::Expr::ONE - local.most_sig_byte_decomp[7])
-            + local.instruction.is_lbu
+        // mem_value_is_pos_not_x0
+        let mem_value_is_pos: CB::Expr = local.instruction.is_lbu
             + local.instruction.is_lhu
-            + local.instruction.is_lw;
+            + local.instruction.is_lwu
+            + local.instruction.is_ld
+            + (local.instruction.is_lb + local.instruction.is_lh + local.instruction.is_lw)
+                * (CB::Expr::ONE - local.msb);
         builder.assert_eq(
             local.mem_value_is_pos_not_x0,
             mem_value_is_pos * (CB::Expr::ONE - local.instruction.op_a_0),
         );
 
-        // When the memory value is not positive and not writing to x0, assert that op_a value is
-        // equal to the unsigned memory value.
+        // Sign extension via direct limb fill:
+        let msb_expr: CB::Expr = CB::Expr::ZERO + local.msb;
+        let fill_ffff: CB::Expr = CB::Expr::from_canonical_u16(0xFFFF) * msb_expr.clone();
+
+        // LB sign extension: op_a = [byte + 0xFF00*msb, 0xFFFF*msb, 0xFFFF*msb, 0xFFFF*msb]
+        let lb_sign_ext = Word([
+            CB::Expr::ZERO
+                + local.selected_byte
+                + CB::Expr::from_canonical_u16(0xFF00) * msb_expr.clone(),
+            fill_ffff.clone(),
+            fill_ffff.clone(),
+            fill_ffff.clone(),
+        ]);
+        builder
+            .when(local.mem_value_is_neg_not_x0)
+            .when(local.instruction.is_lb)
+            .assert_word_eq(local.op_a_val().map(|x| x.into()), lb_sign_ext);
+
+        // LH sign extension: op_a = [selected_limb, 0xFFFF*msb, ...]
+        let lh_sign_ext = Word([
+            CB::Expr::ZERO + local.selected_limb,
+            fill_ffff.clone(),
+            fill_ffff.clone(),
+            fill_ffff.clone(),
+        ]);
+        builder
+            .when(local.mem_value_is_neg_not_x0)
+            .when(local.instruction.is_lh)
+            .assert_word_eq(local.op_a_val().map(|x| x.into()), lh_sign_ext);
+
+        // LW sign extension: op_a = [word[0], word[1], 0xFFFF*msb, 0xFFFF*msb]
+        let lw_sign_ext = Word([
+            CB::Expr::ZERO + local.selected_word[0],
+            CB::Expr::ZERO + local.selected_word[1],
+            fill_ffff.clone(),
+            fill_ffff,
+        ]);
+        builder
+            .when(local.mem_value_is_neg_not_x0)
+            .when(local.instruction.is_lw)
+            .assert_word_eq(local.op_a_val().map(|x| x.into()), lw_sign_ext);
+
+        // When positive and not x0: op_a = unsigned_mem_val
         builder
             .when(local.mem_value_is_pos_not_x0)
             .assert_word_eq(local.unsigned_mem_val, local.op_a_val());
     }
 
-    /// Evaluates constraints related to storing to memory.
+    // ========================================================================
+    // C7: Store sub-word writing (increment pattern)
+    // ========================================================================
+
     pub(crate) fn eval_memory_store<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
         local: &MemoryChipValueCols<CB::Var>,
     ) {
-        // Get the memory offset flags.
-        self.eval_offset_value_flags(builder, local);
-        // Compute the offset_is_zero flag.  The other offset flags are already contrained by the
-        // method `eval_memory_address_and_access`, which is called in
-        // `eval_memory_address_and_access`.
-        let offset_is_zero =
-            CB::Expr::ONE - local.offset_is_one - local.offset_is_two - local.offset_is_three;
-
-        // Compute the expected stored value for a SB instruction.
-        let one = CB::Expr::ONE;
         let a_val = local.op_a_val();
         let mem_val = *local.memory_access.value();
         let prev_mem_val = *local.memory_access.prev_value();
-        let sb_expected_stored_value = Word([
-            a_val[0] * offset_is_zero.clone()
-                + (one.clone() - offset_is_zero.clone()) * prev_mem_val[0],
-            a_val[0] * local.offset_is_one + (one.clone() - local.offset_is_one) * prev_mem_val[1],
-            a_val[0] * local.offset_is_two + (one.clone() - local.offset_is_two) * prev_mem_val[2],
-            a_val[0] * local.offset_is_three
-                + (one.clone() - local.offset_is_three) * prev_mem_val[3],
-        ]);
+        let bit0 = local.offset_bit[0];
+        let bit2 = local.offset_bit[2];
 
-        builder
-            .when(local.instruction.is_sb)
-            .assert_word_eq(mem_val.map(|x| x.into()), sb_expected_stored_value);
-
-        // When the instruction is SH, make sure both offset one and three are off.
-        builder
-            .when(local.instruction.is_sh)
-            .assert_zero(local.offset_is_one + local.offset_is_three);
-
-        // When the instruction is SW, ensure that the offset is 0.
-        builder
-            .when(local.instruction.is_sw)
-            .assert_one(offset_is_zero.clone());
-
-        // Compute the expected stored value for a SH instruction.
-        let a_is_lower_half = offset_is_zero;
-        let a_is_upper_half = local.offset_is_two;
-        let sh_expected_stored_value = Word([
-            a_val[0] * a_is_lower_half.clone()
-                + (one.clone() - a_is_lower_half.clone()) * prev_mem_val[0],
-            a_val[1] * a_is_lower_half.clone() + (one.clone() - a_is_lower_half) * prev_mem_val[1],
-            a_val[0] * a_is_upper_half + (one.clone() - a_is_upper_half) * prev_mem_val[2],
-            a_val[1] * a_is_upper_half + (one.clone() - a_is_upper_half) * prev_mem_val[3],
-        ]);
-
-        builder
-            .when(local.instruction.is_sh)
-            .assert_word_eq(mem_val.map(|x| x.into()), sh_expected_stored_value);
-
-        // When the instruction is SW, just use the word without masking.
-        builder
-            .when(local.instruction.is_sw)
-            .assert_word_eq(mem_val.map(|x| x.into()), a_val.map(|x| x.into()));
-    }
-
-    /// This function is used to evaluate the unsigned memory value for the load memory
-    /// instructions.
-    fn eval_unsigned_mem_value<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        local: &MemoryChipValueCols<CB::Var>,
-    ) {
-        let mem_val = *local.memory_access.value();
-
-        // Compute the offset_is_zero flag.  The other offset flags are already contrained by the
-        // method `eval_memory_address_and_access`, which is called in
-        // `eval_memory_address_and_access`.
-        let offset_is_zero =
-            CB::Expr::ONE - local.offset_is_one - local.offset_is_two - local.offset_is_three;
-
-        // Compute the byte value.
-        let mem_byte = mem_val[0] * offset_is_zero.clone()
-            + mem_val[1] * local.offset_is_one
-            + mem_val[2] * local.offset_is_two
-            + mem_val[3] * local.offset_is_three;
-        let byte_value = Word::extend_expr::<CB>(mem_byte.clone());
-
-        // When the instruction is LB or LBU, just use the lower byte.
-        builder
-            .when(local.instruction.is_lb + local.instruction.is_lbu)
-            .assert_word_eq(byte_value, local.unsigned_mem_val.map(|x| x.into()));
-
-        // When the instruction is LH or LHU, use the lower half.
-        builder
-            .when(local.instruction.is_lh + local.instruction.is_lhu)
-            .assert_zero(local.offset_is_one + local.offset_is_three);
-
-        // When the instruction is LW, ensure that the offset is zero.
-        builder
-            .when(local.instruction.is_lw)
-            .assert_one(offset_is_zero.clone());
-
-        let use_lower_half = offset_is_zero;
-        let use_upper_half = local.offset_is_two;
-        let half_value = Word([
-            use_lower_half.clone() * mem_val[0] + use_upper_half * mem_val[2],
-            use_lower_half * mem_val[1] + use_upper_half * mem_val[3],
+        // ---- SB: byte-split range checks (P0-3) ----
+        // Split register op_a[0] into 2 bytes, range check both → binds register_low_byte
+        let inv_256 = CB::F::from_canonical_u16(256).inverse();
+        let reg_high_byte: CB::Expr =
+            (CB::Expr::ZERO + a_val[0] - local.register_low_byte) * CB::Expr::from(inv_256);
+        builder.looking_rangecheck(
+            ByteOpcode::U8Range,
             CB::Expr::ZERO,
             CB::Expr::ZERO,
-        ]);
-
-        builder
-            .when(local.instruction.is_lh + local.instruction.is_lhu)
-            .assert_word_eq(half_value, local.unsigned_mem_val.map(|x| x.into()));
-
-        // When the instruction is LW, just use the word.
-        builder
-            .when(local.instruction.is_lw)
-            .assert_word_eq(mem_val, local.unsigned_mem_val);
-    }
-
-    /// Evaluates the decomposition of the most significant byte of the memory value.
-    fn eval_most_sig_byte_bit_decomp<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        local: &MemoryChipValueCols<CB::Var>,
-        unsigned_mem_val: &Word<CB::Var>,
-    ) {
-        let is_mem = self.is_memory_instruction::<CB>(&local.instruction);
-        let mut recomposed_byte = CB::Expr::ZERO;
-        for i in 0..8 {
-            builder
-                .when(is_mem.clone())
-                .assert_bool(local.most_sig_byte_decomp[i]);
-            recomposed_byte = recomposed_byte
-                + local.most_sig_byte_decomp[i] * CB::Expr::from_canonical_u8(1 << i);
-        }
-        builder
-            .when(local.instruction.is_lb)
-            .assert_eq(recomposed_byte.clone(), unsigned_mem_val[0]);
-        builder
-            .when(local.instruction.is_lh)
-            .assert_eq(recomposed_byte, unsigned_mem_val[1]);
-    }
-
-    /// Evaluates the offset value flags.
-    fn eval_offset_value_flags<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        local: &MemoryChipValueCols<CB::Var>,
-    ) {
-        let is_mem_op = self.is_memory_instruction::<CB>(&local.instruction);
-        let offset_is_zero =
-            CB::Expr::ONE - local.offset_is_one - local.offset_is_two - local.offset_is_three;
-
-        let mut filtered_builder = builder.when(is_mem_op);
-
-        // Assert that the value flags are boolean
-        filtered_builder.assert_bool(local.offset_is_one);
-        filtered_builder.assert_bool(local.offset_is_two);
-        filtered_builder.assert_bool(local.offset_is_three);
-
-        // Assert that only one of the value flags is true
-        filtered_builder.assert_one(
-            offset_is_zero.clone()
-                + local.offset_is_one
-                + local.offset_is_two
-                + local.offset_is_three,
+            local.register_low_byte,
+            reg_high_byte,
+            local.instruction.is_sb,
+        );
+        // Split selected_limb (target mem limb) into 2 bytes → binds mem_limb_low_byte
+        let mem_high_byte: CB::Expr = (CB::Expr::ZERO + local.selected_limb
+            - local.mem_limb_low_byte)
+            * CB::Expr::from(inv_256);
+        builder.looking_rangecheck(
+            ByteOpcode::U8Range,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            local.mem_limb_low_byte,
+            mem_high_byte.clone(),
+            local.instruction.is_sb,
         );
 
-        // Assert that the correct value flag is set
-        filtered_builder
-            .when(offset_is_zero)
-            .assert_zero(local.addr_offset);
-        filtered_builder
-            .when(local.offset_is_one)
-            .assert_one(local.addr_offset);
-        filtered_builder
-            .when(local.offset_is_two)
-            .assert_eq(local.addr_offset, CB::Expr::TWO);
-        filtered_builder
-            .when(local.offset_is_three)
-            .assert_eq(local.addr_offset, CB::Expr::from_canonical_u8(3));
+        // ---- SB: increment pattern ----
+        let inc_low: CB::Expr = (CB::Expr::ONE - bit0)
+            * (CB::Expr::ZERO + local.register_low_byte - local.mem_limb_low_byte);
+        let inc_high: CB::Expr = (CB::Expr::ZERO + bit0)
+            * ((CB::Expr::ZERO + local.register_low_byte) * CB::Expr::from_canonical_u16(256)
+                - local.selected_limb
+                + local.mem_limb_low_byte);
+        builder
+            .when(local.instruction.is_sb)
+            .assert_eq(local.increment, inc_low + inc_high);
+
+        // store_value[i] = prev[i] + increment * limb_select[i]
+        // Uses limb_select[i] (Var, degree 1) instead of bit products (degree 2)
+        // to keep total degree ≤ 3.
+        for i in 0..4usize {
+            builder.when(local.instruction.is_sb).assert_eq(
+                local.store_value[i],
+                CB::Expr::ZERO
+                    + prev_mem_val[i]
+                    + (CB::Expr::ZERO + local.increment) * local.limb_select[i],
+            );
+        }
+
+        // ---- SH: increment pattern ----
+        let store_limb_sh: CB::Expr = CB::Expr::ZERO + a_val[0];
+        for i in 0..4usize {
+            builder.when(local.instruction.is_sh).assert_eq(
+                local.store_value[i],
+                CB::Expr::ZERO
+                    + prev_mem_val[i]
+                    + (store_limb_sh.clone() - prev_mem_val[i]) * local.limb_select[i],
+            );
+        }
+
+        // ---- SW: increment pattern ----
+        let not_bit2: CB::Expr = CB::Expr::ONE - bit2;
+        let bit2_expr: CB::Expr = CB::Expr::ZERO + bit2;
+        builder.when(local.instruction.is_sw).assert_eq(
+            local.store_value[0],
+            CB::Expr::ZERO
+                + prev_mem_val[0]
+                + (CB::Expr::ZERO + a_val[0] - prev_mem_val[0]) * not_bit2.clone(),
+        );
+        builder.when(local.instruction.is_sw).assert_eq(
+            local.store_value[1],
+            CB::Expr::ZERO
+                + prev_mem_val[1]
+                + (CB::Expr::ZERO + a_val[1] - prev_mem_val[1]) * not_bit2,
+        );
+        builder.when(local.instruction.is_sw).assert_eq(
+            local.store_value[2],
+            CB::Expr::ZERO
+                + prev_mem_val[2]
+                + (CB::Expr::ZERO + a_val[0] - prev_mem_val[2]) * bit2_expr.clone(),
+        );
+        builder.when(local.instruction.is_sw).assert_eq(
+            local.store_value[3],
+            CB::Expr::ZERO
+                + prev_mem_val[3]
+                + (CB::Expr::ZERO + a_val[1] - prev_mem_val[3]) * bit2_expr,
+        );
+
+        // ---- SD: store_value = op_a (complete write) ----
+        builder
+            .when(local.instruction.is_sd)
+            .assert_word_eq(local.store_value.map(|x| x.into()), a_val.map(|x| x.into()));
+
+        // ---- Assert store_value == memory_access.value() for all store instructions ----
+        let is_store = self.is_store_instruction::<CB>(&local.instruction);
+        builder.when(is_store).assert_word_eq(
+            mem_val.map(|x| x.into()),
+            local.store_value.map(|x| x.into()),
+        );
     }
 }

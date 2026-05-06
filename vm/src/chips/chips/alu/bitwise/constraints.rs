@@ -3,7 +3,9 @@ use super::{
     BitwiseChip,
 };
 use crate::{
-    chips::chips::alu::bitwise::columns::BitwiseValueCols,
+    chips::{
+        chips::alu::bitwise::columns::BitwiseValueCols, gadgets::bitwise_u16::BitWiseU16Gadget,
+    },
     compiler::riscv::opcode::{ByteOpcode, Opcode},
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
@@ -28,30 +30,36 @@ where
         let local: &BitwiseCols<CB::Var> = (*local).borrow();
 
         for BitwiseValueCols {
-            a,
             b,
             c,
+            bitwise,
             is_xor,
             is_or,
             is_and,
         } in local.values
         {
+            let is_real = is_xor + is_or + is_and;
+
             // Get the opcode for the operation.
             let opcode = is_xor * ByteOpcode::XOR.as_field::<CB::F>()
                 + is_or * ByteOpcode::OR.as_field::<CB::F>()
                 + is_and * ByteOpcode::AND.as_field::<CB::F>();
 
-            let is_real = is_xor + is_or + is_and;
-            for ((a, b), c) in a.into_iter().zip(b).zip(c) {
-                builder.looking_byte(opcode.clone(), a, b, c, is_real.clone());
-            }
+            // Use BitWiseGadget to evaluate the bitwise operation
+            let a = BitWiseU16Gadget::<F>::eval(
+                builder,
+                b.map(Into::into),
+                c.map(Into::into),
+                bitwise,
+                opcode.clone(),
+                is_real.clone(),
+            );
 
             // Get the cpu opcode, which corresponds to the opcode being sent in the CPU table.
             let cpu_opcode = is_xor * Opcode::XOR.as_field::<CB::F>()
                 + is_or * Opcode::OR.as_field::<CB::F>()
                 + is_and * Opcode::AND.as_field::<CB::F>();
 
-            // Looked the ALU arguments.
             builder.looked_alu(cpu_opcode, a, b, c, is_real.clone());
 
             builder.assert_bool(is_xor);

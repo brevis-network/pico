@@ -1,5 +1,8 @@
-use crate::chips::chips::riscv_cpu::{
-    instruction::columns::InstructionCols, opcode_selector::columns::OpcodeSelectorCols,
+use crate::{
+    chips::chips::riscv_cpu::{
+        instruction::columns::InstructionCols, opcode_selector::columns::OpcodeSelectorCols,
+    },
+    compiler::addr::Addr,
 };
 use core::mem::size_of;
 use pico_derive::AlignedBorrow;
@@ -14,7 +17,7 @@ pub const NUM_PROGRAM_MULT_COLS: usize = size_of::<ProgramMultiplicityCols<u8>>(
 #[derive(AlignedBorrow, Clone, Copy, Default)]
 #[repr(C)]
 pub struct ProgramPreprocessedCols<T> {
-    pub pc: T,
+    pub pc: Addr<T>,
     pub instruction: InstructionCols<T>,
     pub selectors: OpcodeSelectorCols<T>,
 }

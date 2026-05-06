@@ -1,3 +1,7 @@
+#![deprecated(
+    note = "word is a uint64 now, but this constrains it to be a uint32 of a BabyBear or KoalaBear field"
+)]
+
 use crate::{
     chips::gadgets::is_zero::IsZeroGadget,
     compiler::word::Word,

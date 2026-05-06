@@ -1,22 +1,26 @@
-use p3_air::{Air, AirBuilder};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::Matrix;
-
 use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::MemoryCols,
         gadgets::{
-            add4::Add4Operation, fixed_rotate_right::FixedRotateRightOperation,
-            fixed_shift_right::FixedShiftRightOperation, xor::XorOperation,
+            addr_add::AddrAddGadget,
+            u32::{
+                add4_u32::Add4U32Gadget, rotate_right_u32::FixedRotateRightU32Gadget,
+                shift_right_u32::FixedShiftRightU32Gadget, xor_u32::XorU32Gadget,
+            },
         },
         precompiles::sha256::extend::{columns::ShaExtendCols, ShaExtendChip},
     },
-    emulator::riscv::syscalls::SyscallCode,
-    machine::builder::{
-        ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder,
+    compiler::{riscv::opcode::ByteOpcode, word::Word},
+    machine::{
+        builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
 use core::borrow::Borrow;
+use p3_air::Air;
+use p3_field::{FieldAlgebra, PrimeField32};
+use p3_matrix::Matrix;
+use std::iter::once;
 
 impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for ShaExtendChip<F>
 where
@@ -25,192 +29,268 @@ where
     fn eval(&self, builder: &mut CB) {
         // Initialize columns.
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let local = main.row_slice(0);
         let local: &ShaExtendCols<CB::Var> = (*local).borrow();
-        let next: &ShaExtendCols<CB::Var> = (*next).borrow();
 
-        let i_start = CB::F::from_canonical_u32(16);
-        let nb_bytes_in_word = CB::F::from_canonical_u32(4);
+        // Assert that `is_real` is a bool.
+        builder.assert_bool(local.is_real);
 
-        // Evaluate the control flags.
-        self.eval_flags(builder);
+        // Receive the state.
+        let receive_values = once(local.clk.into())
+            .chain(local.w_ptr.map(Into::into))
+            .chain(once(local.i.into()))
+            .collect::<Vec<_>>();
+        builder.looked(SymbolicLookup::new(
+            receive_values,
+            local.is_real.into(),
+            LookupType::ShaExtend,
+            LookupScope::Regional,
+        ));
 
-        // Copy over the inputs until the result has been computed (every 48 rows).
-        builder
-            .when_transition()
-            .when_not(local.cycle_16_end.result * local.cycle_48[2])
-            .assert_eq(local.chunk, next.chunk);
-        builder
-            .when_transition()
-            .when_not(local.cycle_16_end.result * local.cycle_48[2])
-            .assert_eq(local.clk, next.clk);
-        builder
-            .when_transition()
-            .when_not(local.cycle_16_end.result * local.cycle_48[2])
-            .assert_eq(local.w_ptr, next.w_ptr);
+        // Send the next state, with incremented `local.i`.
+        let send_values = once(local.clk.into() + CB::Expr::ONE)
+            .chain(local.w_ptr.map(Into::into))
+            .chain(once(local.i + CB::Expr::ONE))
+            .collect::<Vec<_>>();
+        builder.looking(SymbolicLookup::new(
+            send_values,
+            local.is_real.into(),
+            LookupType::ShaExtend,
+            LookupScope::Regional,
+        ));
 
-        // Read w[i-15].
+        // Check that `16 <= local.i < 64` holds.
+        // This makes all the `AddrAddOperation`s below safe, as the increments will be bounded.
+        builder.looking_byte(
+            CB::Expr::from_canonical_u32(ByteOpcode::LTU as u32),
+            CB::Expr::ONE,
+            local.i - CB::Expr::from_canonical_u32(16),
+            CB::Expr::from_canonical_u32(48),
+            local.is_real,
+        );
+
+        let ptr = Word([
+            local.w_ptr[0].into(),
+            local.w_ptr[1].into(),
+            local.w_ptr[2].into(),
+            CB::Expr::ZERO,
+        ]);
+
+        // Evaluate the pointer `ptr + (i - 15) * 8`.
+        AddrAddGadget::<CB::F>::eval(
+            builder,
+            ptr.clone(),
+            Word::extend_expr::<CB>(
+                (local.i - CB::F::from_canonical_u32(15)) * CB::F::from_canonical_u32(8),
+            ),
+            local.w_i_minus_15_ptr,
+            local.is_real.into(),
+        );
+
+        // Read `w[i - 15]`.
         builder.eval_memory_access(
             local.chunk,
-            local.clk + (local.i - i_start),
-            local.w_ptr + (local.i - CB::F::from_canonical_u32(15)) * nb_bytes_in_word,
+            local.clk,
+            local.w_i_minus_15_ptr.value.map(Into::into),
             &local.w_i_minus_15,
             local.is_real,
         );
 
-        // Read w[i-2].
+        // Check that `w[i - 15]` is an u32 value.
+        let prev_value = local.w_i_minus_15.prev_value();
+        let w_i_minus_15_prev_value_half_word = [prev_value[0], prev_value[1]];
+        builder.assert_zero(prev_value[2]);
+        builder.assert_zero(prev_value[3]);
+
+        // Evaluate the pointer `ptr + (i - 2) * 8`.
+        AddrAddGadget::<CB::F>::eval(
+            builder,
+            ptr.clone(),
+            Word::extend_expr::<CB>(
+                (local.i - CB::F::from_canonical_u32(2)) * CB::F::from_canonical_u32(8),
+            ),
+            local.w_i_minus_2_ptr,
+            local.is_real.into(),
+        );
+
+        // Read `w[i - 2]`.
         builder.eval_memory_access(
             local.chunk,
-            local.clk + (local.i - i_start),
-            local.w_ptr + (local.i - CB::F::from_canonical_u32(2)) * nb_bytes_in_word,
+            local.clk,
+            local.w_i_minus_2_ptr.value.map(Into::into),
             &local.w_i_minus_2,
             local.is_real,
         );
 
-        // Read w[i-16].
+        // Check that `w[i - 2]` is an u32 value.
+        let prev_value = local.w_i_minus_2.prev_value();
+        let w_i_minus_2_prev_value_half_word = [prev_value[0], prev_value[1]];
+        builder.assert_zero(prev_value[2]);
+        builder.assert_zero(prev_value[3]);
+
+        // Evaluate the pointer `ptr + (i - 16) * 8`.
+        AddrAddGadget::<CB::F>::eval(
+            builder,
+            ptr.clone(),
+            Word::extend_expr::<CB>(
+                (local.i - CB::F::from_canonical_u32(16)) * CB::F::from_canonical_u32(8),
+            ),
+            local.w_i_minus_16_ptr,
+            local.is_real.into(),
+        );
+
+        // Read `w[i - 16]`.
         builder.eval_memory_access(
             local.chunk,
-            local.clk + (local.i - i_start),
-            local.w_ptr + (local.i - CB::F::from_canonical_u32(16)) * nb_bytes_in_word,
+            local.clk,
+            local.w_i_minus_16_ptr.value.map(Into::into),
             &local.w_i_minus_16,
             local.is_real,
         );
 
-        // Read w[i-7].
+        // Check that `w[i - 16]` is an u32 value.
+        let prev_value = local.w_i_minus_16.prev_value();
+        let w_i_minus_16_prev_value_half_word = [prev_value[0], prev_value[1]];
+        builder.assert_zero(prev_value[2]);
+        builder.assert_zero(prev_value[3]);
+
+        // Evaluate the pointer `ptr + (i - 7) * 8`.
+        AddrAddGadget::<CB::F>::eval(
+            builder,
+            ptr.clone(),
+            Word::extend_expr::<CB>(
+                (local.i - CB::F::from_canonical_u32(7)) * CB::F::from_canonical_u32(8),
+            ),
+            local.w_i_minus_7_ptr,
+            local.is_real.into(),
+        );
+
+        // Read `w[i - 7]`.
         builder.eval_memory_access(
             local.chunk,
-            local.clk + (local.i - i_start),
-            local.w_ptr + (local.i - CB::F::from_canonical_u32(7)) * nb_bytes_in_word,
+            local.clk,
+            local.w_i_minus_7_ptr.value.map(Into::into),
             &local.w_i_minus_7,
             local.is_real,
         );
 
+        // Check that `w[i - 7]` is an u32 value.
+        let prev_value = local.w_i_minus_7.prev_value();
+        let w_i_minus_7_prev_value_half_word = [prev_value[0], prev_value[1]];
+        builder.assert_zero(prev_value[2]);
+        builder.assert_zero(prev_value[3]);
+
         // Compute `s0`.
         // w[i-15] rightrotate 7.
-        FixedRotateRightOperation::<CB::F>::eval(
+        FixedRotateRightU32Gadget::<CB::F>::eval(
             builder,
-            *local.w_i_minus_15.value(),
+            w_i_minus_15_prev_value_half_word,
             7,
             local.w_i_minus_15_rr_7,
             local.is_real,
         );
         // w[i-15] rightrotate 18.
-        FixedRotateRightOperation::<CB::F>::eval(
+        FixedRotateRightU32Gadget::<CB::F>::eval(
             builder,
-            *local.w_i_minus_15.value(),
+            w_i_minus_15_prev_value_half_word,
             18,
             local.w_i_minus_15_rr_18,
             local.is_real,
         );
         // w[i-15] rightshift 3.
-        FixedShiftRightOperation::<CB::F>::eval(
+        FixedShiftRightU32Gadget::<CB::F>::eval(
             builder,
-            *local.w_i_minus_15.value(),
+            w_i_minus_15_prev_value_half_word,
             3,
             local.w_i_minus_15_rs_3,
             local.is_real,
         );
         // (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18)
-        XorOperation::<CB::F>::eval(
+        let s0_intermediate_result = XorU32Gadget::<CB::F>::eval(
             builder,
-            local.w_i_minus_15_rr_7.value,
-            local.w_i_minus_15_rr_18.value,
+            local.w_i_minus_15_rr_7.value.map(Into::into),
+            local.w_i_minus_15_rr_18.value.map(Into::into),
             local.s0_intermediate,
             local.is_real,
         );
         // s0 := (w[i-15] rightrotate 7) xor (w[i-15] rightrotate 18) xor (w[i-15] rightshift 3)
-        XorOperation::<CB::F>::eval(
+        let s0_result = XorU32Gadget::<CB::F>::eval(
             builder,
-            local.s0_intermediate.value,
-            local.w_i_minus_15_rs_3.value,
+            s0_intermediate_result,
+            local.w_i_minus_15_rs_3.value.map(Into::into),
             local.s0,
             local.is_real,
         );
 
         // Compute `s1`.
         // w[i-2] rightrotate 17.
-        FixedRotateRightOperation::<CB::F>::eval(
+        FixedRotateRightU32Gadget::<CB::F>::eval(
             builder,
-            *local.w_i_minus_2.value(),
+            w_i_minus_2_prev_value_half_word,
             17,
             local.w_i_minus_2_rr_17,
             local.is_real,
         );
         // w[i-2] rightrotate 19.
-        FixedRotateRightOperation::<CB::F>::eval(
+        FixedRotateRightU32Gadget::<CB::F>::eval(
             builder,
-            *local.w_i_minus_2.value(),
+            w_i_minus_2_prev_value_half_word,
             19,
             local.w_i_minus_2_rr_19,
             local.is_real,
         );
         // w[i-2] rightshift 10.
-        FixedShiftRightOperation::<CB::F>::eval(
+        FixedShiftRightU32Gadget::<CB::F>::eval(
             builder,
-            *local.w_i_minus_2.value(),
+            w_i_minus_2_prev_value_half_word,
             10,
             local.w_i_minus_2_rs_10,
             local.is_real,
         );
         // (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19)
-        XorOperation::<CB::F>::eval(
+        let s1_intermediate_result = XorU32Gadget::<CB::F>::eval(
             builder,
-            local.w_i_minus_2_rr_17.value,
-            local.w_i_minus_2_rr_19.value,
+            local.w_i_minus_2_rr_17.value.map(Into::into),
+            local.w_i_minus_2_rr_19.value.map(Into::into),
             local.s1_intermediate,
             local.is_real,
         );
         // s1 := (w[i-2] rightrotate 17) xor (w[i-2] rightrotate 19) xor (w[i-2] rightshift 10)
-        XorOperation::<CB::F>::eval(
+        let s1_result = XorU32Gadget::<CB::F>::eval(
             builder,
-            local.s1_intermediate.value,
-            local.w_i_minus_2_rs_10.value,
+            s1_intermediate_result,
+            local.w_i_minus_2_rs_10.value.map(Into::into),
             local.s1,
             local.is_real,
         );
 
         // s2 := w[i-16] + s0 + w[i-7] + s1.
-        Add4Operation::<CB::F>::eval(
+        Add4U32Gadget::<CB::F>::eval(
             builder,
-            *local.w_i_minus_16.value(),
-            local.s0.value,
-            *local.w_i_minus_7.value(),
-            local.s1.value,
+            w_i_minus_16_prev_value_half_word.map(Into::into),
+            s0_result,
+            w_i_minus_7_prev_value_half_word.map(Into::into),
+            s1_result,
             local.is_real,
             local.s2,
         );
 
-        // Write `s2` to `w[i]`.
+        // Evaluate the pointer `ptr + i * 8`.
+        AddrAddGadget::<CB::F>::eval(
+            builder,
+            ptr.clone(),
+            Word::extend_expr::<CB>(local.i * CB::F::from_canonical_u32(8)),
+            local.w_i_ptr,
+            local.is_real.into(),
+        );
+
+        // Write `s2_value_word` into `w[i]`.
         builder.eval_memory_access(
             local.chunk,
-            local.clk + (local.i - i_start),
-            local.w_ptr + local.i * nb_bytes_in_word,
+            local.clk,
+            local.w_i_ptr.value.map(Into::into),
             &local.w_i,
             local.is_real,
         );
-
-        builder.assert_word_eq(*local.w_i.value(), local.s2.value);
-
-        // Receive syscall event in first row of 48-cycle.
-        builder.looked_syscall(
-            local.clk,
-            CB::F::from_canonical_u32(SyscallCode::SHA_EXTEND.syscall_id()),
-            local.w_ptr,
-            CB::Expr::ZERO,
-            local.cycle_48_start,
-        );
-
-        // Assert that is_real is a bool.
-        builder.assert_bool(local.is_real);
-
-        // Ensure that all rows in a 48 row cycle has the same `is_real` values.
-        builder
-            .when_transition()
-            .when_not(local.cycle_48_end)
-            .assert_eq(local.is_real, next.is_real);
-
-        // Assert that the table ends in nonreal columns. Since each extend ecall is 48 cycles and
-        // the table is padded to a power of 2, the last row of the table should always be padding.
-        builder.when_last_row().assert_zero(local.is_real);
     }
 }

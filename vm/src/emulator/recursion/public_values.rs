@@ -85,6 +85,10 @@ impl<T: Clone> ChallengerPublicValues<T> {
 #[repr(C)]
 pub struct RecursionPublicValues<T> {
     /// The hash of all the bytes that the program has written to public values.
+    /// Each `Word<T>` slot stores 4 individual bytes (each limb < 256) rather than
+    /// the 4×u16 limbs of a 64-bit value. The downstream bn254 reduction consumes
+    /// the 32 bytes directly via `words_to_bytes` + `felt_bytes_to_bn254_var`, so
+    /// **do not** call `Word::from(u32)` / `reduce()` / `to_u64()` on these values.
     pub committed_value_digest: [Word<T>; PV_DIGEST_NUM_WORDS],
 
     /// The hash of all deferred proofs that have been witnessed in the VM.
@@ -96,11 +100,11 @@ pub struct RecursionPublicValues<T> {
     /// End state of reconstruct_deferred_digest.
     pub end_reconstruct_deferred_digest: [T; DIGEST_SIZE],
 
-    /// The start pc of chunks being proven.
-    pub start_pc: T,
+    /// The start pc of chunks being proven as 3×u16 limbs.
+    pub start_pc: [T; 3],
 
-    /// The expected start pc for the next chunk.
-    pub next_pc: T,
+    /// The expected start pc for the next chunk as 3×u16 limbs.
+    pub next_pc: [T; 3],
 
     /// First chunk being proven.
     pub start_chunk: T,
@@ -114,17 +118,17 @@ pub struct RecursionPublicValues<T> {
     /// Next execution chunk that should be proven.
     pub next_execution_chunk: T,
 
-    /// Previous MemoryInit address bits.
-    pub previous_initialize_addr_bits: [T; 32],
+    /// Previous MemoryInit address as 3×u16 limbs.
+    pub previous_init_addr_limbs: [T; 3],
 
-    /// Last MemoryInit address bits.
-    pub last_initialize_addr_bits: [T; 32],
+    /// Last MemoryInit address as 3×u16 limbs.
+    pub last_init_addr_limbs: [T; 3],
 
-    /// Previous MemoryFinalize address bits.
-    pub previous_finalize_addr_bits: [T; 32],
+    /// Previous MemoryFinalize address as 3×u16 limbs.
+    pub previous_finalize_addr_limbs: [T; 3],
 
-    /// Last MemoryFinalize address bits.
-    pub last_finalize_addr_bits: [T; 32],
+    /// Last MemoryFinalize address as 3×u16 limbs.
+    pub last_finalize_addr_limbs: [T; 3],
 
     /// The commitment to the Pico program being proven.
     pub riscv_vk_digest: [T; DIGEST_SIZE],
@@ -265,7 +269,9 @@ pub(crate) fn assert_complete<C>(
     builder.assert_felt_eq(flag_complete * (flag_complete - C::F::ONE), C::F::ZERO);
 
     // Assert that `next_pc` is equal to zero (so program execution has completed)
-    builder.assert_felt_eq(flag_complete * *next_pc, C::F::ZERO);
+    for &pc_limb in next_pc.iter() {
+        builder.assert_felt_eq(flag_complete * pc_limb, C::F::ZERO);
+    }
 
     // Assert that start chunk is equal to 1.
     builder.assert_felt_eq(flag_complete * (*start_chunk - C::F::ONE), C::F::ZERO);

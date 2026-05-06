@@ -2,9 +2,19 @@
 use pico_aot_dispatch::AotEmulatorCore;
 #[cfg(feature = "aot")]
 use pico_vm::{
-    emulator::{opts::EmulatorOpts, riscv::state::RiscvEmulationState},
+    compiler::riscv::program::Program,
+    emulator::{
+        aot::{register_aot_factory, AotSnapshotEmulator},
+        opts::EmulatorOpts,
+        riscv::{
+            chunk_split::ChunkSplitConfig, memory::GLOBAL_MEMORY_RECYCLER,
+            riscv_emulator::EmulationError, state::RiscvEmulationState,
+        },
+    },
     machine::report::EmulationReport,
 };
+#[cfg(feature = "aot")]
+use std::sync::Arc;
 
 #[cfg(feature = "aot")]
 pub trait AotRun {
@@ -16,14 +26,17 @@ pub trait AotRun {
 }
 
 #[cfg(feature = "aot")]
+pub fn recycle_snapshot_memory(snapshot: RiscvEmulationState) {
+    let RiscvEmulationState { memory, .. } = snapshot;
+    let _ = GLOBAL_MEMORY_RECYCLER.send((memory, true));
+}
+
+#[cfg(feature = "aot")]
 pub fn run_impl(emu: &mut AotEmulatorCore) -> Result<(), String> {
     emu.batch_chunk_target = 0;
     emu.batch_chunks_emulated = 0;
     emu.batch_stop = false;
-    emu.batch_chunk_size = u32::MAX / 4;
-    emu.batch_clk_threshold = u32::MAX;
-    emu.batch_clk_fast_threshold = u32::MAX - 20000;
-    emu.batch_event_fast_threshold = usize::MAX - 10000;
+    emu.chunk_split_config = ChunkSplitConfig::disabled(emu.max_syscall_cycles);
     pico_aot_dispatch::run_aot(emu)
 }
 
@@ -35,30 +48,22 @@ pub fn next_state_batch_impl(
     let start_chunk = emu.current_chunk;
     let start_cycle = emu.insn_count;
 
-    emu.batch_chunk_size = opts.chunk_size;
     emu.batch_chunk_target = opts.chunk_batch_size;
     emu.batch_chunks_emulated = 0;
     emu.batch_stop = false;
-    emu.batch_clk_threshold = opts
-        .chunk_size
-        .saturating_mul(4)
-        .saturating_sub(emu.max_syscall_cycles);
-
-    const FAST_PATH_CLK_MARGIN: u32 = 20000;
-    const FAST_PATH_EVENT_MARGIN: usize = 10000;
-    emu.batch_clk_fast_threshold = emu
-        .batch_clk_threshold
-        .saturating_sub(FAST_PATH_CLK_MARGIN);
-    let memory_rw_event_threshold = (opts.chunk_size as usize) >> 1;
-    emu.batch_event_fast_threshold = memory_rw_event_threshold.saturating_sub(FAST_PATH_EVENT_MARGIN);
+    emu.chunk_split_config = ChunkSplitConfig::for_chunk_size(opts.chunk_size, emu.max_syscall_cycles);
 
     emu.save_batch_start_state();
     let mut snapshot = emu.build_snapshot_state();
 
     pico_aot_dispatch::run_aot(emu)?;
 
-    let done =
-        emu.pc == 0 || emu.pc.wrapping_sub(emu.program_pc_base()).wrapping_div(4) >= emu.program_len() as u32;
+    let done = emu.pc == 0
+        || emu
+            .pc
+            .wrapping_sub(emu.program_pc_base())
+            .wrapping_div(4)
+            >= emu.program_len() as u64;
 
     if !done {
         emu.current_batch = emu.current_batch.wrapping_add(1);
@@ -83,6 +88,49 @@ pub fn next_state_batch_impl(
     }
 
     Ok((snapshot, report))
+}
+
+#[cfg(feature = "aot")]
+struct VmAotAdapter {
+    core: AotEmulatorCore,
+    opts: EmulatorOpts,
+}
+
+#[cfg(feature = "aot")]
+impl AotSnapshotEmulator for VmAotAdapter {
+    fn next_state_batch(
+        &mut self,
+    ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
+        next_state_batch_impl(&mut self.core, self.opts).map_err(|s| {
+            tracing::error!(error = %s, "AOT adapter error");
+            EmulationError::Aot(s)
+        })
+    }
+
+    fn cycles(&self) -> u64 {
+        self.core.insn_count
+    }
+
+    fn get_pv_stream(&mut self) -> Vec<u8> {
+        core::mem::take(&mut self.core.public_values_stream)
+    }
+}
+
+#[cfg(feature = "aot")]
+fn aot_factory(
+    program: Arc<Program>,
+    input_stream: Vec<Vec<u8>>,
+    opts: EmulatorOpts,
+) -> Box<dyn AotSnapshotEmulator> {
+    Box::new(VmAotAdapter {
+        core: AotEmulatorCore::new(program, input_stream),
+        opts,
+    })
+}
+
+#[cfg(feature = "aot")]
+pub fn register_with_vm() {
+    register_aot_factory(aot_factory);
 }
 
 #[cfg(feature = "aot")]

@@ -8,9 +8,10 @@ use crate::{
     chips::{
         chips::{
             byte::event::ByteRecordBehavior,
-            riscv_memory::read_write::columns::{MemoryReadCols, MemoryReadWriteCols},
+            riscv_memory::read_write::columns::{MemoryReadColsU8, MemoryWriteColsU8},
         },
         gadgets::{
+            addr_add::AddrAddGadget,
             curves::{
                 weierstrass::{
                     bls381::{bls12381_sqrt, Bls12381},
@@ -21,19 +22,23 @@ use crate::{
                 CurveType, EllipticCurve,
             },
             field::{
+                field_inner_product::FieldInnerProductCols,
                 field_lt::FieldLtCols,
                 field_op::{FieldOpCols, FieldOperation},
                 field_sqrt::FieldSqrtCols,
             },
+            syscall_addr::SyscallAddrGadget,
             utils::{
-                conversions::{bytes_to_words_le_vec, limbs_from_access, limbs_from_prev_access},
+                conversions::{generate_limbs_from_read_cols_u8, limbs_to_words},
                 field_params::{limbs_from_slice, FieldParameters, NumLimbs, NumWords},
                 limbs::Limbs,
+                polynomial::Polynomial,
             },
         },
+        precompiles::checked_u64_to_u32,
         utils::pad_rows_fixed,
     },
-    compiler::riscv::program::Program,
+    compiler::{riscv::program::Program, word::Word},
     emulator::riscv::{
         record::EmulationRecord,
         syscalls::{precompiles::PrecompileEvent, SyscallCode},
@@ -42,9 +47,10 @@ use crate::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
     },
+    primitives::consts::u64_to_u16_limbs,
 };
 use hybrid_array::Array;
-use num::{BigUint, Zero};
+use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
@@ -64,16 +70,20 @@ pub struct WeierstrassDecompressCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
     pub chunk: T,
     pub clk: T,
-    pub ptr: T,
+    pub ptr: SyscallAddrGadget<T>,
+    pub x_addrs: Array<AddrAddGadget<T>, P::WordsFieldElement>,
+    pub y_addrs: Array<AddrAddGadget<T>, P::WordsFieldElement>,
     pub sign_bit: T,
-    pub x_access: Array<MemoryReadCols<T>, P::WordsFieldElement>,
-    pub y_access: Array<MemoryReadWriteCols<T>, P::WordsFieldElement>,
+    pub x_access: Array<MemoryReadColsU8<T>, P::WordsFieldElement>,
+    pub y_access: Array<MemoryWriteColsU8<T>, P::WordsFieldElement>,
     pub(crate) range_x: FieldLtCols<T, P>,
     pub(crate) x_2: FieldOpCols<T, P>,
     pub(crate) x_3: FieldOpCols<T, P>,
-    pub(crate) x_3_plus_b: FieldOpCols<T, P>,
+    pub(crate) ax_plus_b: FieldInnerProductCols<T, P>,
+    pub(crate) x_3_plus_b_plus_ax: FieldOpCols<T, P>,
     pub(crate) y: FieldSqrtCols<T, P>,
     pub(crate) neg_y: FieldOpCols<T, P>,
+    pub(crate) neg_y_range_check: FieldLtCols<T, P>,
 }
 
 /// A set of columns to compute `WeierstrassDecompress` that decompresses a point on a Weierstrass
@@ -156,7 +166,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecom
         cols: &mut WeierstrassDecompressCols<F, E::BaseField>,
         x: BigUint,
     ) {
-        // Y = sqrt(x^3 + b)
+        // Y = sqrt(x^3 + ax + b)
         cols.range_x
             .populate(blu_events, &x, &E::BaseField::modulus());
         let x_2 = cols
@@ -164,9 +174,13 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecom
             .populate(blu_events, &x.clone(), &x.clone(), FieldOperation::Mul);
         let x_3 = cols.x_3.populate(blu_events, &x_2, &x, FieldOperation::Mul);
         let b = E::b_int();
-        let x_3_plus_b = cols
-            .x_3_plus_b
-            .populate(blu_events, &x_3, &b, FieldOperation::Add);
+        let a = E::a_int();
+        let ax_plus_b = cols
+            .ax_plus_b
+            .populate(blu_events, &[a, b], &[x, BigUint::one()]);
+        let x_3_plus_b_plus_ax =
+            cols.x_3_plus_b_plus_ax
+                .populate(blu_events, &x_3, &ax_plus_b, FieldOperation::Add);
 
         let sqrt_fn = match E::CURVE_TYPE {
             CurveType::Bls12381 => bls12381_sqrt,
@@ -174,11 +188,14 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDecom
             CurveType::Secp256r1 => secp256r1_sqrt,
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
         };
-        let y = cols.y.populate(blu_events, &x_3_plus_b, sqrt_fn);
+        let y = cols.y.populate(blu_events, &x_3_plus_b_plus_ax, sqrt_fn);
 
         let zero = BigUint::zero();
-        cols.neg_y
+        let neg_y = cols
+            .neg_y
             .populate(blu_events, &zero, &y, FieldOperation::Sub);
+        cols.neg_y_range_check
+            .populate(blu_events, &neg_y, &E::BaseField::modulus());
     }
 }
 
@@ -237,19 +254,46 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
 
             cols.is_real = F::from_bool(true);
             cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.ptr = F::from_canonical_u32(event.ptr);
+            cols.clk =
+                F::from_canonical_u32(checked_u64_to_u32(event.clk, "weierstrass decompress clk"));
+            let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
+            let len = num_limbs as u64 * 2;
+            cols.ptr
+                .populate(&mut new_byte_lookup_events, event.ptr, len);
             cols.sign_bit = F::from_bool(event.sign_bit);
 
-            let x = BigUint::from_bytes_le(&event.x_bytes);
+            let x = BigUint::from_bytes_le(
+                &event
+                    .x_words
+                    .iter()
+                    .flat_map(|word| word.to_le_bytes())
+                    .collect::<Vec<u8>>(),
+            );
             Self::populate_field_ops(&mut new_byte_lookup_events, cols, x);
 
             for i in 0..cols.x_access.len() {
-                cols.x_access[i].populate(event.x_memory_records[i], &mut new_byte_lookup_events);
+                cols.x_access[i]
+                    .inner
+                    .populate(event.x_memory_records[i], &mut new_byte_lookup_events);
+                cols.x_access[i].prev_value_u8.populate_u16_to_u8_safe(
+                    &mut new_byte_lookup_events,
+                    event.x_memory_records[i].value,
+                );
+                cols.x_addrs[i].populate(
+                    &mut new_byte_lookup_events,
+                    event.ptr + num_limbs as u64,
+                    8 * i as u64,
+                );
             }
             for i in 0..cols.y_access.len() {
                 cols.y_access[i]
-                    .populate_write(event.y_memory_records[i], &mut new_byte_lookup_events);
+                    .inner
+                    .populate(event.y_memory_records[i], &mut new_byte_lookup_events);
+                cols.y_access[i].prev_value_u8.populate_u16_to_u8_safe(
+                    &mut new_byte_lookup_events,
+                    event.y_memory_records[i].prev_value,
+                );
+                cols.y_addrs[i].populate(&mut new_byte_lookup_events, event.ptr, 8 * i as u64);
             }
 
             if matches!(self.sign_rule, SignChoiceRule::Lexicographic) {
@@ -257,11 +301,17 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 let choice_cols: &mut LexicographicChoiceCols<F, E::BaseField> =
                     row[weierstrass_width..width].borrow_mut();
 
-                let decompressed_y = BigUint::from_bytes_le(&event.decompressed_y_bytes);
+                let decompressed_y = BigUint::from_bytes_le(
+                    &event
+                        .decompressed_y_words
+                        .iter()
+                        .flat_map(|word| word.to_le_bytes())
+                        .collect::<Vec<u8>>(),
+                );
                 let neg_y = &modulus - &decompressed_y;
 
                 let is_y_eq_sqrt_y_result =
-                    F::from_canonical_u8(event.decompressed_y_bytes[0] % 2) == lsb;
+                    F::from_canonical_u8((event.decompressed_y_words[0] & 1) as u8) == lsb;
                 choice_cols.is_y_eq_sqrt_y_result = F::from_bool(is_y_eq_sqrt_y_result);
 
                 if is_y_eq_sqrt_y_result {
@@ -310,12 +360,35 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 let cols: &mut WeierstrassDecompressCols<F, E::BaseField> =
                     row.as_mut_slice()[0..weierstrass_width].borrow_mut();
 
-                // take X of the generator as a dummy value to make sure Y^2 = X^3 + b holds
+                // take X of the generator as a dummy value to make sure Y^2 = X^3 + aX + b holds
                 let dummy_value = E::generator().0;
                 let dummy_bytes = dummy_value.to_bytes_le();
-                let words = bytes_to_words_le_vec(&dummy_bytes);
+                // Convert bytes to u64 words for the dummy x_access values
+                let u64_words: Vec<u64> = dummy_bytes
+                    .chunks(8)
+                    .map(|chunk| {
+                        let mut arr = [0u8; 8];
+                        arr[..chunk.len()].copy_from_slice(chunk);
+                        u64::from_le_bytes(arr)
+                    })
+                    .collect();
                 for i in 0..cols.x_access.len() {
-                    cols.x_access[i].access.value = words[i].into();
+                    let limbs = u64_to_u16_limbs(u64_words[i]);
+                    cols.x_access[i].inner.access.value = crate::compiler::word::Word([
+                        F::from_canonical_u16(limbs[0]),
+                        F::from_canonical_u16(limbs[1]),
+                        F::from_canonical_u16(limbs[2]),
+                        F::from_canonical_u16(limbs[3]),
+                    ]);
+                    // Must also set prev_value_u8.low_bytes so that the U16→U8
+                    // decomposition in eval (generate_limbs_from_read_cols_u8)
+                    // produces correct byte limbs.  Without this, padding rows
+                    // have low_bytes=0 while value≠0, causing the polynomial
+                    // constraint (which is NOT gated by is_real) to fail.
+                    for j in 0..4 {
+                        cols.x_access[i].prev_value_u8.low_bytes[j] =
+                            F::from_canonical_u8((limbs[j] & 0xFF) as u8);
+                    }
                 }
 
                 Self::populate_field_ops(&mut vec![], cols, dummy_value);
@@ -379,12 +452,14 @@ where
             (*local_slice)[0..weierstrass_cols].borrow();
 
         let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
-        let num_words_field_element = num_limbs / 4;
 
         builder.assert_bool(local.sign_bit);
 
-        let x: Limbs<CB::Var, <E::BaseField as NumLimbs>::Limbs> =
-            limbs_from_prev_access(&local.x_access);
+        // Extract byte limbs from u16 word limbs via U16→U8 conversion.
+        let x_limbs =
+            generate_limbs_from_read_cols_u8(builder, &local.x_access[..], local.is_real.into());
+        let x: Limbs<CB::Expr, <E::BaseField as NumLimbs>::Limbs> =
+            Limbs(Array::try_from_iter(x_limbs).expect("failed to convert x limbs"));
         let max_num_limbs = E::BaseField::to_limbs_field_slice(&E::BaseField::modulus());
         local.range_x.eval(
             builder,
@@ -402,12 +477,19 @@ where
             FieldOperation::Mul,
             local.is_real,
         );
-        let b = E::b_int();
-        let b_const = E::BaseField::to_limbs_field::<CB::F, _>(&b);
-        local.x_3_plus_b.eval(
+        let b_const = E::BaseField::to_limbs_field::<CB::F, _>(&E::b_int());
+        let a_const = E::BaseField::to_limbs_field::<CB::F, _>(&E::a_int());
+        let params = [a_const, b_const];
+        let p_x: Polynomial<CB::Expr> = x.into();
+        let p_one: Polynomial<CB::Expr> =
+            E::BaseField::to_limbs_field::<CB::F, _>(&BigUint::one()).into();
+        local
+            .ax_plus_b
+            .eval(builder, &params, &[p_x, p_one], local.is_real);
+        local.x_3_plus_b_plus_ax.eval(
             builder,
             &local.x_3.result,
-            &b_const,
+            &local.ax_plus_b.result,
             FieldOperation::Add,
             local.is_real,
         );
@@ -420,15 +502,41 @@ where
             local.is_real,
         );
 
+        // Range check neg_y against the field modulus.
+        let modulus = E::BaseField::to_limbs_field::<CB::Expr, CB::F>(&E::BaseField::modulus());
+        local
+            .neg_y_range_check
+            .eval(builder, &local.neg_y.result, &modulus, local.is_real);
+
         local.y.eval(
             builder,
-            &local.x_3_plus_b.result,
+            &local.x_3_plus_b_plus_ax.result,
             local.y.lsb,
             local.is_real,
         );
 
-        let y_limbs: Limbs<CB::Var, <E::BaseField as NumLimbs>::Limbs> =
-            limbs_from_access(&local.y_access);
+        // Convert computed sqrt(y) and neg_y results from u8 limbs to u16 Words for value constraints.
+        let sqrt_y_words = limbs_to_words(
+            &local
+                .y
+                .multiplication
+                .result
+                .0
+                .iter()
+                .map(|v| (*v).into())
+                .collect::<Vec<CB::Expr>>(),
+            CB::F::from_canonical_u32(256).into(),
+        );
+        let neg_y_words = limbs_to_words(
+            &local
+                .neg_y
+                .result
+                .0
+                .iter()
+                .map(|v| (*v).into())
+                .collect::<Vec<CB::Expr>>(),
+            CB::F::from_canonical_u32(256).into(),
+        );
 
         // Constrain the y value according the sign rule convention.
         match self.sign_rule {
@@ -438,14 +546,7 @@ where
                 // value. Thus, if the sign_bit matches the local.y.lsb value, then the result
                 // should be the square root of the y value. Otherwise, the result should be the
                 // negative square root of the y value.
-                builder
-                    .when(local.is_real)
-                    .when_ne(local.y.lsb, CB::Expr::ONE - local.sign_bit)
-                    .assert_all_eq(local.y.multiplication.result, y_limbs);
-                builder
-                    .when(local.is_real)
-                    .when_ne(local.y.lsb, local.sign_bit)
-                    .assert_all_eq(local.neg_y.result, y_limbs);
+                // The actual y write value constraint is applied in the memory write loop below.
             }
             SignChoiceRule::Lexicographic => {
                 // When the sign rule is Lexicographic, the sign_bit corresponds to whether
@@ -484,17 +585,8 @@ where
                     choice_cols.when_sqrt_y_res_is_lt + choice_cols.when_neg_y_res_is_lt,
                 );
 
-                // Assert that the value of `y` matches the claimed value by the flags.
-
-                builder
-                    .when(local.is_real)
-                    .when(choice_cols.is_y_eq_sqrt_y_result)
-                    .assert_all_eq(local.y.multiplication.result, y_limbs);
-
-                builder
-                    .when(local.is_real)
-                    .when_not(choice_cols.is_y_eq_sqrt_y_result)
-                    .assert_all_eq(local.neg_y.result, y_limbs);
+                // NOTE: The actual y write value constraint is applied in the memory write loop below
+                // using sqrt_y_words / neg_y_words, conditioned on is_y_eq_sqrt_y_result.
 
                 // Assert that the comparison only turns on when `is_real` is true.
                 builder
@@ -544,23 +636,130 @@ where
             }
         }
 
-        for i in 0..num_words_field_element {
+        // Address alignment constraints.
+        let ptr = SyscallAddrGadget::<CB::F>::eval(
+            builder,
+            <E::BaseField as NumLimbs>::Limbs::USIZE as u32 * 2,
+            local.ptr,
+            local.is_real.into(),
+        );
+
+        // x_addrs[i] = ptr + num_limbs + 8*i
+        for i in 0..local.x_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                Word([ptr[0].into(), ptr[1].into(), ptr[2].into(), CB::Expr::ZERO]),
+                Word::from(num_limbs as u64 + 8 * i as u64),
+                local.x_addrs[i],
+                local.is_real.into(),
+            );
+        }
+
+        // y_addrs[i] = ptr + 8*i
+        for i in 0..local.y_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                Word([ptr[0].into(), ptr[1].into(), ptr[2].into(), CB::Expr::ZERO]),
+                Word::from(8 * i as u64),
+                local.y_addrs[i],
+                local.is_real.into(),
+            );
+        }
+
+        // Memory access constraints.
+        // Read x — x is at offset num_limbs from ptr.
+        for (i, x_col) in local.x_access.iter().enumerate() {
             builder.eval_memory_access(
                 local.chunk,
-                local.clk,
-                local.ptr.into() + CB::F::from_canonical_u32((i as u32) * 4 + num_limbs as u32),
-                &local.x_access[i],
+                local.clk.into(),
+                local.x_addrs[i].value.map(Into::into),
+                &x_col.inner,
                 local.is_real,
             );
         }
-        for i in 0..num_words_field_element {
+        // Write y — y is at offset 0 from ptr, with value constraints.
+        // We constrain y_access.value == sqrt_y_words or neg_y_words conditionally.
+
+        for (i, y_col) in local.y_access.iter().enumerate() {
             builder.eval_memory_access(
                 local.chunk,
-                local.clk,
-                local.ptr.into() + CB::F::from_canonical_u32((i as u32) * 4),
-                &local.y_access[i],
+                local.clk.into(),
+                local.y_addrs[i].value.map(Into::into),
+                &y_col.inner,
                 local.is_real,
             );
+
+            // Constrain the write value to the correct computed y result.
+            let do_check: CB::Expr = local.is_real.into();
+            match self.sign_rule {
+                SignChoiceRule::LeastSignificantBit => {
+                    // When lsb != 1 - sign_bit (i.e., lsb == sign_bit),
+                    // write value = sqrt(y).
+                    for (v, w) in y_col
+                        .inner
+                        .access
+                        .value
+                        .0
+                        .iter()
+                        .zip(sqrt_y_words[i].0.iter())
+                    {
+                        builder
+                            .when(do_check.clone())
+                            .when_ne(local.y.lsb, CB::Expr::ONE - local.sign_bit)
+                            .assert_eq((*v).into(), w.clone());
+                    }
+                    // When lsb != sign_bit (i.e., lsb == 1 - sign_bit),
+                    // write value = neg_y.
+                    for (v, w) in y_col
+                        .inner
+                        .access
+                        .value
+                        .0
+                        .iter()
+                        .zip(neg_y_words[i].0.iter())
+                    {
+                        builder
+                            .when(do_check.clone())
+                            .when_ne(local.y.lsb, local.sign_bit)
+                            .assert_eq((*v).into(), w.clone());
+                    }
+                }
+                SignChoiceRule::Lexicographic => {
+                    let choice_cols: &LexicographicChoiceCols<CB::Var, E::BaseField> =
+                        (*local_slice)[weierstrass_cols
+                            ..weierstrass_cols
+                                + size_of::<LexicographicChoiceCols<u8, E::BaseField>>()]
+                            .borrow();
+                    // When is_y_eq_sqrt_y_result, write value = sqrt(y).
+                    for (v, w) in y_col
+                        .inner
+                        .access
+                        .value
+                        .0
+                        .iter()
+                        .zip(sqrt_y_words[i].0.iter())
+                    {
+                        builder
+                            .when(do_check.clone())
+                            .when(choice_cols.is_y_eq_sqrt_y_result)
+                            .assert_eq((*v).into(), w.clone());
+                    }
+                    // When not is_y_eq_sqrt_y_result, write value = neg_y.
+                    for (v, w) in y_col
+                        .inner
+                        .access
+                        .value
+                        .0
+                        .iter()
+                        .zip(neg_y_words[i].0.iter())
+                    {
+                        builder
+                            .when(do_check.clone())
+                            .when_not(choice_cols.is_y_eq_sqrt_y_result)
+                            .assert_eq((*v).into(), w.clone());
+                    }
+                }
+            }
         }
 
         let syscall_id = match E::CURVE_TYPE {
@@ -576,11 +775,12 @@ where
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
         };
 
+        let sign_bit_expr: CB::Expr = local.sign_bit.into();
         builder.looked_syscall(
             local.clk,
             syscall_id,
-            local.ptr,
-            local.sign_bit,
+            ptr.map(Into::into),
+            [sign_bit_expr, CB::Expr::ZERO, CB::Expr::ZERO],
             local.is_real,
         );
     }

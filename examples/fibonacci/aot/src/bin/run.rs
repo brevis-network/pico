@@ -6,7 +6,7 @@ compile_error!(
 );
 
 #[cfg(feature = "aot")]
-use aot::{AotRun, FibonacciEmulator};
+use aot::{AotRun, FibonacciEmulator, recycle_snapshot_memory};
 use pico_vm::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
@@ -14,7 +14,6 @@ use pico_vm::{
     },
     emulator::{
         opts::EmulatorOpts,
-        riscv::{memory::GLOBAL_MEMORY_RECYCLER, state::RiscvEmulationState},
         stdin::EmulatorStdin,
     },
     instances::configs::riscv_kb_config::StarkConfig as RiscvKBSC,
@@ -24,11 +23,6 @@ use std::time::Instant;
 const WARMUP_RUNS: usize = 1;
 const BENCH_RUNS: usize = 5;
 
-fn recycle_snapshot_memory(snapshot: RiscvEmulationState) {
-    let RiscvEmulationState { memory, .. } = snapshot;
-    let _ = GLOBAL_MEMORY_RECYCLER.send((memory, true));
-}
-
 fn main() {
     println!("Fibonacci AOT Emulator");
     println!("=====================\n");
@@ -36,11 +30,12 @@ fn main() {
     // Load program
     let elf_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../app/elf/riscv32im-pico-zkvm-elf"
+        "/../app/elf/riscv64im-pico-zkvm-elf"
     );
     let elf_bytes = std::fs::read(elf_path).expect("Failed to read ELF file");
 
-    let compiler = Compiler::new(SourceType::RISCV, &elf_bytes);
+    let compiler = Compiler::new(SourceType::RISCV, &elf_bytes)
+        .expect("Failed to create RISC-V compiler");
     let program = compiler.compile();
 
     println!("Loaded program:");
@@ -63,6 +58,7 @@ fn main() {
         let mut emu = FibonacciEmulator::new(program.clone(), input_stream.to_vec());
         let mut batch_count = 0;
         loop {
+            // NOTE: caller must recycle returned snapshot memory.
             let (snapshot, report) = emu
                 .next_state_batch(opts)
                 .expect("AOT next_state_batch failed");

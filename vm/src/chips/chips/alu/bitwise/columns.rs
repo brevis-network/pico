@@ -1,4 +1,7 @@
-use crate::{compiler::word::Word, primitives::consts::BITWISE_DATAPAR};
+use crate::{
+    chips::gadgets::bitwise_u16::BitWiseU16Gadget, compiler::word::Word,
+    primitives::consts::BITWISE_DATAPAR,
+};
 use pico_derive::AlignedBorrow;
 use std::mem::size_of;
 
@@ -18,14 +21,14 @@ pub const NUM_BITWISE_VALUE_COLS: usize = size_of::<BitwiseValueCols<u8>>();
 #[derive(AlignedBorrow, Clone, Copy, Default)]
 #[repr(C)]
 pub struct BitwiseValueCols<T> {
-    /// The output operand.
-    pub a: Word<T>,
-
     /// The first input operand.
     pub b: Word<T>,
 
     /// The second input operand.
     pub c: Word<T>,
+
+    /// The bitwise gadget.
+    pub bitwise: BitWiseU16Gadget<T>,
 
     /// If the opcode is XOR.
     pub is_xor: T,

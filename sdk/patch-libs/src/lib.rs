@@ -1,6 +1,7 @@
 //! Wrapper syscall API for the Pico patches.
 pub mod bls12381;
 pub mod bn254;
+pub mod ecdsa;
 pub mod ed25519;
 pub mod io;
 pub mod secp256k1;
@@ -27,52 +28,54 @@ extern "C" {
     pub fn syscall_read(fd: u32, read_buf: *mut u8, nbytes: usize);
 
     /// Executes the SHA-256 extend operation on the given word array.
-    pub fn syscall_sha256_extend(w: *mut [u32; 64]);
+    /// Each logical SHA word is taken from the low 32 bits of one 8-byte-aligned `u64` slot.
+    pub fn syscall_sha256_extend(w: *mut [u64; 64]);
 
     /// Executes the SHA-256 compress operation on the given word array and a given state.
-    pub fn syscall_sha256_compress(w: *mut [u32; 64], state: *mut [u32; 8]);
+    /// Each logical SHA word is taken from the low 32 bits of one 8-byte-aligned `u64` slot.
+    pub fn syscall_sha256_compress(w: *mut [u64; 64], state: *mut [u64; 8]);
 
     /// Executes an Ed25519 curve addition on the given points.
-    pub fn syscall_ed_add(p: *mut [u32; 16], q: *const [u32; 16]);
+    pub fn syscall_ed_add(p: *mut [u64; 8], q: *const [u64; 8]);
 
     /// Executes an Ed25519 curve decompression on the given point.
-    pub fn syscall_ed_decompress(point: &mut [u8; 64]);
+    pub fn syscall_ed_decompress(point: &mut [u64; 8]);
 
-    /// Executes an Secp256k1 curve addition on the given points.
-    pub fn syscall_secp256k1_add(p: *mut [u32; 16], q: *const [u32; 16]);
+    /// Executes an Sepc256k1 curve addition on the given points.
+    pub fn syscall_secp256k1_add(p: *mut [u64; 8], q: *const [u64; 8]);
 
     /// Executes an Secp256k1 curve doubling on the given point.
-    pub fn syscall_secp256k1_double(p: *mut [u32; 16]);
+    pub fn syscall_secp256k1_double(p: *mut [u64; 8]);
 
     /// Executes an Secp256k1 curve decompression on the given point.
-    pub fn syscall_secp256k1_decompress(point: &mut [u8; 64], is_odd: bool);
+    pub fn syscall_secp256k1_decompress(point: &mut [u64; 8], is_odd: bool);
 
     /// Executes an Secp256r1 curve addition on the given points.
-    pub fn syscall_secp256r1_add(p: *mut [u32; 16], q: *const [u32; 16]);
+    pub fn syscall_secp256r1_add(p: *mut [u64; 8], q: *const [u64; 8]);
 
     /// Executes an Secp256r1 curve doubling on the given point.
-    pub fn syscall_secp256r1_double(p: *mut [u32; 16]);
+    pub fn syscall_secp256r1_double(p: *mut [u64; 8]);
 
     /// Executes an Secp256r1 curve decompression on the given point.
-    pub fn syscall_secp256r1_decompress(point: &mut [u8; 64], is_odd: bool);
+    pub fn syscall_secp256r1_decompress(point: &mut [u64; 8], is_odd: bool);
 
     /// Executes a Bn254 curve addition on the given points.
-    pub fn syscall_bn254_add(p: *mut [u32; 16], q: *const [u32; 16]);
+    pub fn syscall_bn254_add(p: *mut [u64; 8], q: *const [u64; 8]);
 
     /// Executes a Bn254 curve doubling on the given point.
-    pub fn syscall_bn254_double(p: *mut [u32; 16]);
+    pub fn syscall_bn254_double(p: *mut [u64; 8]);
 
     /// Executes a BLS12-381 curve addition on the given points.
-    pub fn syscall_bls12381_add(p: *mut [u32; 24], q: *const [u32; 24]);
+    pub fn syscall_bls12381_add(p: *mut [u64; 12], q: *const [u64; 12]);
 
     /// Executes a BLS12-381 curve doubling on the given point.
-    pub fn syscall_bls12381_double(p: *mut [u32; 24]);
+    pub fn syscall_bls12381_double(p: *mut [u64; 12]);
 
     /// Executes the Keccak-256 permutation on the given state.
     pub fn syscall_keccak_permute(state: *mut [u64; 25]);
 
     /// Executes an uint256 multiplication on the given inputs.
-    pub fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]);
+    pub fn syscall_uint256_mulmod(x: *mut [u64; 4], y: *const [u64; 4]);
 
     /// Enters unconstrained mode.
     pub fn syscall_enter_unconstrained() -> bool;
@@ -93,53 +96,54 @@ extern "C" {
     pub fn sys_alloc_aligned(bytes: usize, align: usize) -> *mut u8;
 
     /// Decompresses a BLS12-381 point.
-    pub fn syscall_bls12381_decompress(point: &mut [u8; 96], is_odd: bool);
+    pub fn syscall_bls12381_decompress(point: &mut [u64; 12], is_odd: bool);
 
     /// Computes a big integer operation with a modulus.
     pub fn sys_bigint(
-        result: *mut [u32; 8],
-        op: u32,
-        x: *const [u32; 8],
-        y: *const [u32; 8],
-        modulus: *const [u32; 8],
+        result: *mut [u64; 4],
+        op: u64,
+        x: *const [u64; 4],
+        y: *const [u64; 4],
+        modulus: *const [u64; 4],
     );
 
     /// Executes a BLS12-381 field addition on the given inputs.
-    pub fn syscall_bls12381_fp_addmod(p: *mut u32, q: *const u32);
+    pub fn syscall_bls12381_fp_addmod(p: *mut u64, q: *const u64);
 
     /// Executes a BLS12-381 field subtraction on the given inputs.
-    pub fn syscall_bls12381_fp_submod(p: *mut u32, q: *const u32);
+    pub fn syscall_bls12381_fp_submod(p: *mut u64, q: *const u64);
 
     /// Executes a BLS12-381 field multiplication on the given inputs.
-    pub fn syscall_bls12381_fp_mulmod(p: *mut u32, q: *const u32);
+    pub fn syscall_bls12381_fp_mulmod(p: *mut u64, q: *const u64);
 
     /// Executes a BLS12-381 Fp2 addition on the given inputs.
-    pub fn syscall_bls12381_fp2_addmod(p: *mut u32, q: *const u32);
+    pub fn syscall_bls12381_fp2_addmod(p: *mut u64, q: *const u64);
 
     /// Executes a BLS12-381 Fp2 subtraction on the given inputs.
-    pub fn syscall_bls12381_fp2_submod(p: *mut u32, q: *const u32);
+    pub fn syscall_bls12381_fp2_submod(p: *mut u64, q: *const u64);
 
     /// Executes a BLS12-381 Fp2 multiplication on the given inputs.
-    pub fn syscall_bls12381_fp2_mulmod(p: *mut u32, q: *const u32);
+    pub fn syscall_bls12381_fp2_mulmod(p: *mut u64, q: *const u64);
 
     /// Executes a BN254 field addition on the given inputs.
-    pub fn syscall_bn254_fp_addmod(p: *mut u32, q: *const u32);
+    pub fn syscall_bn254_fp_addmod(p: *mut u64, q: *const u64);
 
     /// Executes a BN254 field subtraction on the given inputs.
-    pub fn syscall_bn254_fp_submod(p: *mut u32, q: *const u32);
+    pub fn syscall_bn254_fp_submod(p: *mut u64, q: *const u64);
 
     /// Executes a BN254 field multiplication on the given inputs.
-    pub fn syscall_bn254_fp_mulmod(p: *mut u32, q: *const u32);
+    pub fn syscall_bn254_fp_mulmod(p: *mut u64, q: *const u64);
 
     /// Executes a BN254 Fp2 addition on the given inputs.
-    pub fn syscall_bn254_fp2_addmod(p: *mut u32, q: *const u32);
+    pub fn syscall_bn254_fp2_addmod(p: *mut u64, q: *const u64);
 
     /// Executes a BN254 Fp2 subtraction on the given inputs.
-    pub fn syscall_bn254_fp2_submod(p: *mut u32, q: *const u32);
+    pub fn syscall_bn254_fp2_submod(p: *mut u64, q: *const u64);
 
     /// Executes a BN254 Fp2 multiplication on the given inputs.
-    pub fn syscall_bn254_fp2_mulmod(p: *mut u32, q: *const u32);
+    pub fn syscall_bn254_fp2_mulmod(p: *mut u64, q: *const u64);
 
+    /*
     /// Executes a Secp256k1 field addition on the given inputs.
     pub fn syscall_secp256k1_fp_addmod(p: *mut u32, q: *const u32);
 
@@ -148,8 +152,8 @@ extern "C" {
 
     /// Executes a Secp256k1 field multiplication on the given inputs.
     pub fn syscall_secp256k1_fp_mulmod(p: *mut u32, q: *const u32);
+    */
 
     /// Executes an poseidon2 permute on the given inputs.
     pub fn syscall_poseidon2_permute(x: *const [u32; 16], y: *mut [u32; 16]);
-
 }

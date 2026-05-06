@@ -1,7 +1,8 @@
 use anyhow::Result;
 use clap::{crate_version, Parser, Subcommand};
 use pico_cli::subcommand::{
-    build::BuildCmd, new::NewCmd, prove::ProveCmd, test_emulator::TestEmulatorCmd,
+    build::BuildCmd, install::InstallCmd, new::NewCmd, prove::ProveCmd,
+    test_emulator::TestEmulatorCmd,
 };
 use pico_sdk::init_logger;
 
@@ -20,18 +21,21 @@ pub struct PicoCli {
 
 #[derive(Subcommand)]
 pub enum SubCommands {
+    Install(InstallCmd),
     Build(BuildCmd),
     Prove(ProveCmd),
     New(NewCmd),
     TestEmulator(TestEmulatorCmd),
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     init_logger();
     let Cargo::Pico(args) = Cargo::parse();
     let command: SubCommands = args.command.unwrap();
 
     match command {
+        SubCommands::Install(cmd) => cmd.run().await,
         SubCommands::Build(cmd) => cmd.run(),
         SubCommands::Prove(cmd) => cmd.run(),
         SubCommands::New(cmd) => cmd.run(),

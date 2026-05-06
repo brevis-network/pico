@@ -6,15 +6,13 @@ use crate::{
                 bitwise::columns::{BitwiseValueCols, NUM_BITWISE_VALUE_COLS},
                 event::AluEvent,
             },
-            byte::event::{ByteLookupEvent, ByteRecordBehavior},
+            byte::event::ByteRecordBehavior,
         },
+        gadgets::bitwise_u16::BitWiseU16Gadget,
         utils::next_power_of_two,
     },
     compiler::{
-        riscv::{
-            opcode::{ByteOpcode, Opcode},
-            program::Program,
-        },
+        riscv::{opcode::Opcode, program::Program},
         word::Word,
     },
     emulator::riscv::record::EmulationRecord,
@@ -98,28 +96,19 @@ impl<F: Field> BitwiseChip<F> {
         cols: &mut BitwiseValueCols<F>,
         blu: &mut impl ByteRecordBehavior,
     ) {
-        let a = event.a.to_le_bytes();
-        let b = event.b.to_le_bytes();
-        let c = event.c.to_le_bytes();
+        let a = event.a;
+        let b = event.b;
+        let c = event.c;
 
-        cols.a = Word::from(event.a);
-        cols.b = Word::from(event.b);
-        cols.c = Word::from(event.c);
+        cols.b = Word::from(b);
+        cols.c = Word::from(c);
 
         cols.is_xor = F::from_bool(event.opcode == Opcode::XOR);
         cols.is_or = F::from_bool(event.opcode == Opcode::OR);
         cols.is_and = F::from_bool(event.opcode == Opcode::AND);
 
-        for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
-            let byte_event = ByteLookupEvent {
-                opcode: ByteOpcode::from(event.opcode),
-                a1: b_a as u16,
-                a2: 0,
-                b: b_b,
-                c: b_c,
-            };
-            blu.add_byte_lookup_event(byte_event);
-        }
+        // Use BitWiseGadget to populate the result
+        BitWiseU16Gadget::populate(&mut cols.bitwise, blu, a, b, c, event.opcode);
     }
 }
 

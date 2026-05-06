@@ -34,7 +34,7 @@ where
         let next = main.row_slice(1);
         let next: &GlobalCols<CB::Var> = (*next).borrow();
 
-        // Receive the arguments, which consists of 7 message columns, `is_send`, `is_receive`, and `kind`.
+        // Receive the arguments, which consists of 8 message columns, `is_send`, `is_receive`, and `kind`.
         // In MemoryGlobal, MemoryLocal, Syscall chips, `is_send`, `is_receive`, `kind` are sent with correct constant values.
         // For a global send interaction, `is_send = 1` and `is_receive = 0` are used.
         // For a global receive interaction, `is_send = 0` and `is_receive = 1` are used.
@@ -51,6 +51,7 @@ where
                 local.message[4].into(),
                 local.message[5].into(),
                 local.message[6].into(),
+                local.message[7].into(),
                 local.is_send.into(),
                 local.is_receive.into(),
                 local.kind.into(),
@@ -69,6 +70,7 @@ where
             local.is_send.into(),
             local.is_real,
             local.kind,
+            [local.message_0_16bit_limb, local.message_0_8bit_limb],
         );
 
         // Evaluate the accumulation.

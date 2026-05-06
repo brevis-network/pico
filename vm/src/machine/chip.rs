@@ -95,6 +95,18 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         }
     }
 
+    /// Create a new chip without any lookup constraints.
+    /// Useful for testing individual chips without lookup dependencies.
+    pub fn test_no_lookup(chip: C) -> Self
+    where
+        C: ChipBehavior<F> + Air<SymbolicConstraintFolder<F>>,
+    {
+        let mut chip = Self::new(chip);
+        chip.looking.clear();
+        chip.looked.clear();
+        chip
+    }
+
     pub fn generate_permutation<EF: ExtensionField<F>>(
         &self,
         preprocessed: Option<&RowMajorMatrix<F>>,

@@ -16,7 +16,7 @@ use crate::{
     instruction_translator::InstructionTranslator,
     metrics::{AotMetrics, ChunkMetrics, LookupStrategy, ProgramMetrics},
     post_processor::AotPostProcessor,
-    types::{Opcode, ProgramInfo},
+    types::{sign_extend_imm32_to_u64, Opcode, ProgramInfo},
 };
 use quote::{format_ident, quote};
 use std::{
@@ -27,9 +27,13 @@ use syn::visit_mut::VisitMut;
 
 /// Information about a compiled basic block
 struct BlockInfo {
-    pc: u32,
+    pc: u64,
     name: proc_macro2::Ident,
     insn_count: u32,
+    mem_rw_events: usize,
+    non_register_global_lookup_base_max: usize,
+    reg_write_mask: u32,
+    global_lookup_base_max: usize,
     code: proc_macro2::TokenStream,
     is_terminal: bool,
 }
@@ -38,20 +42,59 @@ struct BlockInfo {
 struct ChunkInfo {
     chunk_idx: usize,
     blocks: Vec<BlockInfo>,
-    pc_min: u32,
-    pc_max: u32,
+    pc_min: u64,
+    pc_max: u64,
+}
+
+#[inline(always)]
+fn run_table_word_u32(word_offset: u64) -> u32 {
+    u32::try_from(word_offset).expect("run-table word offset exceeds u32")
+}
+
+/// Emit the `pico-aot-runtime = { ... }` line for a generated Cargo.toml.
+///
+/// Defaults to a relative `path = "{default_path}"` so the brevis-vm
+/// in-tree layout keeps working. When `PICO_AOT_RUNTIME_SPEC` is set and
+/// non-empty, its value is inlined as the dep body verbatim, letting
+/// downstream consumers generate `aot-generated/` outside the brevis-vm
+/// workspace (e.g. at a template's root) and wire the runtime via git.
+///
+/// Example:
+///   PICO_AOT_RUNTIME_SPEC='git = "https://github.com/brevis-network/pico", branch = "X"'
+fn runtime_dep_line(default_path: &str) -> String {
+    match std::env::var("PICO_AOT_RUNTIME_SPEC").ok() {
+        Some(spec) if !spec.trim().is_empty() => {
+            let trimmed = spec.trim();
+            // Sanity check: a valid Cargo dep fragment always contains `=`
+            // (e.g. `git = "..."`, `path = "..."`). A value missing `=` will
+            // produce a cryptic Cargo parse error at the consumer; warn now
+            // so the cause is obvious.
+            if !trimmed.contains('=') {
+                eprintln!(
+                    "warning: PICO_AOT_RUNTIME_SPEC={:?} does not look like a Cargo dep \
+                     fragment (expected `key = value`); emitting anyway",
+                    trimmed
+                );
+            }
+            format!("pico-aot-runtime = {{ {} }}\n", trimmed)
+        }
+        _ => format!("pico-aot-runtime = {{ path = \"{}\" }}\n", default_path),
+    }
 }
 
 struct SuperblockInfo {
-    entry_pc: u32,
+    entry_pc: u64,
     entry_name: proc_macro2::Ident,
-    block_pcs: Vec<u32>,
+    block_pcs: Vec<u64>,
     block_codes: Vec<proc_macro2::TokenStream>,
     total_insn_count: u32,
+    total_mem_rw_events: usize,
+    total_non_register_global_lookup_base_max: usize,
+    total_reg_write_mask: u32,
 }
 
 struct LookupEntry {
-    pc: u32,
+    pc: u64,
     name: proc_macro2::Ident,
 }
 
@@ -63,6 +106,76 @@ pub struct AotCompiler {
 impl AotCompiler {
     pub fn new(program: ProgramInfo, config: AotConfig) -> Self {
         Self { program, config }
+    }
+
+    #[inline(always)]
+    fn instruction_reg_write_mask(inst: &crate::types::Instruction) -> u32 {
+        let reg = match inst.opcode {
+            Opcode::ADD
+            | Opcode::SUB
+            | Opcode::XOR
+            | Opcode::OR
+            | Opcode::AND
+            | Opcode::SLL
+            | Opcode::SRL
+            | Opcode::SRA
+            | Opcode::SLT
+            | Opcode::SLTU
+            | Opcode::AUIPC
+            | Opcode::LB
+            | Opcode::LH
+            | Opcode::LW
+            | Opcode::LBU
+            | Opcode::LHU
+            | Opcode::LWU
+            | Opcode::LD
+            | Opcode::MUL
+            | Opcode::MULH
+            | Opcode::MULHU
+            | Opcode::MULHSU
+            | Opcode::DIV
+            | Opcode::DIVU
+            | Opcode::REM
+            | Opcode::REMU
+            | Opcode::ADDW
+            | Opcode::SUBW
+            | Opcode::SLLW
+            | Opcode::SRLW
+            | Opcode::SRAW
+            | Opcode::MULW
+            | Opcode::DIVW
+            | Opcode::DIVUW
+            | Opcode::REMW
+            | Opcode::REMUW
+            | Opcode::JAL
+            | Opcode::JALR => Some(inst.op_a),
+            Opcode::ECALL => Some(5),
+            _ => None,
+        };
+
+        reg.map_or(0, |reg| 1u32 << reg)
+    }
+
+    #[inline(always)]
+    fn instruction_non_register_global_lookup_base_max(
+        opcode: Opcode,
+        translated_global_lookup_base_max: usize,
+    ) -> usize {
+        match opcode {
+            Opcode::LB
+            | Opcode::LH
+            | Opcode::LW
+            | Opcode::LBU
+            | Opcode::LHU
+            | Opcode::LWU
+            | Opcode::LD
+            | Opcode::SB
+            | Opcode::SH
+            | Opcode::SW
+            | Opcode::SD => 1,
+            Opcode::ECALL => translated_global_lookup_base_max.saturating_sub(1),
+            _ => 0,
+        }
     }
 
     /// Main compilation entry point
@@ -176,7 +289,7 @@ impl AotCompiler {
     }
 
     /// Generate all basic blocks from the program
-    fn generate_blocks(&self, leaders: &HashSet<u32>) -> Result<Vec<BlockInfo>, String> {
+    fn generate_blocks(&self, leaders: &HashSet<u64>) -> Result<Vec<BlockInfo>, String> {
         let translator = InstructionTranslator::new(true);
         let mut blocks = Vec::new();
 
@@ -189,10 +302,13 @@ impl AotCompiler {
         let mut block_insn_count = 0u32;
         let mut block_has_terminal = false;
         let mut block_mem_rw_events: usize = 0;
+        let mut block_non_register_global_lookup_base_max: usize = 0;
+        let mut block_reg_write_mask: u32 = 0;
+        let mut block_global_lookup_base_max: usize = 0;
         let max_block_instructions = self.config.max_block_instructions;
 
         for (idx, inst) in self.program.instructions.iter().enumerate() {
-            let pc = self.program.pc_base + (idx as u32 * 4);
+            let pc = self.program.pc_base + ((idx as u64) * 4);
 
             if leaders.contains(&pc) || force_new_block {
                 if active {
@@ -208,7 +324,7 @@ impl AotCompiler {
                                 emu.pc = #pc;
                                 emu.check_chunk_boundary_fast();
                                 if emu.should_yield() {
-                                return Ok(crate::NextStep::Dynamic(emu.pc));
+                                    return Ok(crate::NextStep::Dynamic(emu.pc));
                             }
                             return Ok(crate::NextStep::Direct(#next_block_name));
                         });
@@ -218,6 +334,11 @@ impl AotCompiler {
                         pc: current_block_pc,
                         name: current_block_name.clone(),
                         insn_count: block_insn_count,
+                        mem_rw_events: block_mem_rw_events,
+                        non_register_global_lookup_base_max:
+                            block_non_register_global_lookup_base_max,
+                        reg_write_mask: block_reg_write_mask,
+                        global_lookup_base_max: block_global_lookup_base_max,
                         code: current_block_tokens.clone(),
                         is_terminal: block_has_terminal,
                     });
@@ -233,22 +354,48 @@ impl AotCompiler {
                 force_new_block = false;
                 block_has_terminal = false;
                 block_mem_rw_events = 0;
+                block_non_register_global_lookup_base_max = 0;
+                block_reg_write_mask = 0;
+                block_global_lookup_base_max = 0;
             }
 
             if active {
-                let (body, is_terminal, mem_rw_events) = translator.translate(pc, inst, leaders);
+                let (body, is_terminal, mem_rw_events, global_lookup_base_max) =
+                    translator.translate(pc, inst, leaders);
+                let inst_reg_write_mask = Self::instruction_reg_write_mask(inst);
+                let inst_non_register_global_lookup_base_max =
+                    Self::instruction_non_register_global_lookup_base_max(
+                        inst.opcode,
+                        global_lookup_base_max,
+                    );
 
                 if is_terminal {
                     let total_events = block_mem_rw_events + mem_rw_events;
+                    let total_non_register_global_lookup_base =
+                        block_non_register_global_lookup_base_max
+                            + inst_non_register_global_lookup_base_max;
+                    let total_reg_write_mask = block_reg_write_mask | inst_reg_write_mask;
+                    let total_global_lookup_base = total_non_register_global_lookup_base
+                        + (total_reg_write_mask.count_ones() as usize);
                     if total_events > 0 {
                         current_block_tokens.extend(quote! {
                             emu.add_memory_rw_events(#total_events);
                         });
                     }
                     current_block_tokens.extend(body);
+                    block_mem_rw_events = total_events;
+                    block_non_register_global_lookup_base_max =
+                        total_non_register_global_lookup_base;
+                    block_reg_write_mask = total_reg_write_mask;
+                    block_global_lookup_base_max = total_global_lookup_base;
                 } else {
                     current_block_tokens.extend(body);
                     block_mem_rw_events += mem_rw_events;
+                    block_non_register_global_lookup_base_max +=
+                        inst_non_register_global_lookup_base_max;
+                    block_reg_write_mask |= inst_reg_write_mask;
+                    block_global_lookup_base_max = block_non_register_global_lookup_base_max
+                        + (block_reg_write_mask.count_ones() as usize);
                 }
                 block_terminated = is_terminal;
                 block_has_terminal = is_terminal;
@@ -268,6 +415,11 @@ impl AotCompiler {
                         pc: current_block_pc,
                         name: current_block_name.clone(),
                         insn_count: block_insn_count,
+                        mem_rw_events: block_mem_rw_events,
+                        non_register_global_lookup_base_max:
+                            block_non_register_global_lookup_base_max,
+                        reg_write_mask: block_reg_write_mask,
+                        global_lookup_base_max: block_global_lookup_base_max,
                         code: current_block_tokens.clone(),
                         is_terminal: block_has_terminal,
                     });
@@ -278,6 +430,9 @@ impl AotCompiler {
                     force_new_block = true;
                     block_has_terminal = false;
                     block_mem_rw_events = 0;
+                    block_non_register_global_lookup_base_max = 0;
+                    block_reg_write_mask = 0;
+                    block_global_lookup_base_max = 0;
                 }
             }
         }
@@ -299,6 +454,10 @@ impl AotCompiler {
                 pc: current_block_pc,
                 name: current_block_name,
                 insn_count: block_insn_count,
+                mem_rw_events: block_mem_rw_events,
+                non_register_global_lookup_base_max: block_non_register_global_lookup_base_max,
+                reg_write_mask: block_reg_write_mask,
+                global_lookup_base_max: block_global_lookup_base_max,
                 code: current_block_tokens,
                 is_terminal: block_has_terminal,
             });
@@ -313,12 +472,12 @@ impl AotCompiler {
         let max_gap = self.config.max_chunk_pc_gap;
         let mut chunks = Vec::new();
         let mut current_blocks: Vec<BlockInfo> = Vec::new();
-        let mut prev_pc: Option<u32> = None;
+        let mut prev_pc: Option<u64> = None;
         let mut chunk_idx = 0usize;
 
         for block in blocks.into_iter() {
             let should_split_for_gap = prev_pc
-                .map(|pc| block.pc > pc && block.pc - pc > max_gap)
+                .map(|pc| block.pc > pc && block.pc - pc > u64::from(max_gap))
                 .unwrap_or(false);
             let should_split_for_size = current_blocks.len() >= blocks_per_chunk;
 
@@ -357,7 +516,7 @@ impl AotCompiler {
     fn partition_into_chunks_cfg_aware(
         &self,
         blocks: Vec<BlockInfo>,
-        leaders: &HashSet<u32>,
+        leaders: &HashSet<u64>,
     ) -> Result<Vec<ChunkInfo>, String> {
         if blocks.is_empty() {
             return Ok(Vec::new());
@@ -368,7 +527,7 @@ impl AotCompiler {
         let max_chunks = self.config.max_chunk_count.max(1);
 
         // Extract block PCs for CFG analysis
-        let block_pcs: Vec<u32> = blocks.iter().map(|b| b.pc).collect();
+        let block_pcs: Vec<u64> = blocks.iter().map(|b| b.pc).collect();
 
         // Perform CFG analysis
         let cfg = CfgAnalysis::analyze(&self.program, &block_pcs, leaders);
@@ -419,11 +578,11 @@ impl AotCompiler {
     /// Find forced split points based on PC gaps
     fn find_forced_splits(&self, blocks: &[BlockInfo], max_gap: u32) -> Vec<usize> {
         let mut splits = Vec::new();
-        let mut prev_pc: Option<u32> = None;
+        let mut prev_pc: Option<u64> = None;
 
         for (idx, block) in blocks.iter().enumerate() {
             if let Some(pc) = prev_pc {
-                if block.pc > pc && block.pc - pc > max_gap {
+                if block.pc > pc && block.pc - pc > u64::from(max_gap) {
                     // Split before this block (boundary is after previous block)
                     splits.push(idx.saturating_sub(1));
                 }
@@ -529,11 +688,11 @@ impl AotCompiler {
     fn analyze_block_cfg(
         &self,
         blocks: &[BlockInfo],
-    ) -> (HashMap<u32, usize>, HashMap<u32, Vec<u32>>) {
-        let mut pred_counts: HashMap<u32, usize> = HashMap::new();
-        let mut succ_map: HashMap<u32, Vec<u32>> = HashMap::new();
+    ) -> (HashMap<u64, usize>, HashMap<u64, Vec<u64>>) {
+        let mut pred_counts: HashMap<u64, usize> = HashMap::new();
+        let mut succ_map: HashMap<u64, Vec<u64>> = HashMap::new();
 
-        let pc_to_idx: HashMap<u32, usize> = blocks
+        let pc_to_idx: HashMap<u64, usize> = blocks
             .iter()
             .enumerate()
             .map(|(idx, block)| (block.pc, idx))
@@ -545,10 +704,11 @@ impl AotCompiler {
                 continue;
             }
 
-            let last_pc = block
-                .pc
-                .wrapping_add(block.insn_count.saturating_sub(1).saturating_mul(4));
-            let inst_idx = (last_pc.saturating_sub(self.program.pc_base) >> 2) as usize;
+            let last_pc = block.pc.wrapping_add(u64::from(
+                block.insn_count.saturating_sub(1).saturating_mul(4),
+            ));
+            let inst_idx =
+                usize::try_from(last_pc.saturating_sub(self.program.pc_base) >> 2).unwrap();
             if inst_idx >= self.program.instructions.len() {
                 succ_map.insert(block.pc, Vec::new());
                 continue;
@@ -559,7 +719,7 @@ impl AotCompiler {
             match inst.opcode {
                 Opcode::JAL => {
                     let (_, imm) = inst.j_type();
-                    let target = last_pc.wrapping_add(imm);
+                    let target = last_pc.wrapping_add(sign_extend_imm32_to_u64(imm));
                     if pc_to_idx.contains_key(&target) {
                         succs.push(target);
                     }
@@ -571,7 +731,7 @@ impl AotCompiler {
                 | Opcode::BLTU
                 | Opcode::BGEU => {
                     let (_, _, imm) = inst.b_type();
-                    let target = last_pc.wrapping_add(imm);
+                    let target = last_pc.wrapping_add(sign_extend_imm32_to_u64(imm));
                     let fallthrough = last_pc.wrapping_add(4);
                     if pc_to_idx.contains_key(&target) {
                         succs.push(target);
@@ -601,13 +761,13 @@ impl AotCompiler {
     fn build_chunk_superblocks(
         &self,
         chunk: &ChunkInfo,
-        pred_counts: &HashMap<u32, usize>,
-        succ_map: &HashMap<u32, Vec<u32>>,
+        pred_counts: &HashMap<u64, usize>,
+        succ_map: &HashMap<u64, Vec<u64>>,
     ) -> Vec<SuperblockInfo> {
         let mut superblocks = Vec::new();
         let mut visited = HashSet::new();
         let mut block_lookup = HashMap::new();
-        let chunk_pc_set: HashSet<u32> = chunk.blocks.iter().map(|b| b.pc).collect();
+        let chunk_pc_set: HashSet<u64> = chunk.blocks.iter().map(|b| b.pc).collect();
 
         for block in &chunk.blocks {
             block_lookup.insert(block.pc, block);
@@ -645,6 +805,10 @@ impl AotCompiler {
             let mut pcs = vec![pc];
             let mut codes = vec![block.code.clone()];
             let mut total_insns = block.insn_count;
+            let mut total_mem_rw_events = block.mem_rw_events;
+            let mut total_non_register_global_lookup_base_max =
+                block.non_register_global_lookup_base_max;
+            let mut total_reg_write_mask = block.reg_write_mask;
             visited.insert(pc);
 
             let mut current_pc = pc;
@@ -668,7 +832,8 @@ impl AotCompiler {
                     Some(b) => *b,
                     None => break,
                 };
-                let expected_fallthrough = current_pc.wrapping_add(current_block.insn_count * 4);
+                let expected_fallthrough =
+                    current_pc.wrapping_add(u64::from(current_block.insn_count * 4));
                 if next_pc != expected_fallthrough {
                     // Next block is a jump target, not a fallthrough - stop merging
                     break;
@@ -687,6 +852,10 @@ impl AotCompiler {
                 pcs.push(next_pc);
                 codes.push(next_block.code.clone());
                 total_insns += next_block.insn_count;
+                total_mem_rw_events += next_block.mem_rw_events;
+                total_non_register_global_lookup_base_max +=
+                    next_block.non_register_global_lookup_base_max;
+                total_reg_write_mask |= next_block.reg_write_mask;
                 visited.insert(next_pc);
                 current_pc = next_pc;
 
@@ -704,6 +873,9 @@ impl AotCompiler {
                     block_pcs: pcs,
                     block_codes: codes,
                     total_insn_count: total_insns,
+                    total_mem_rw_events,
+                    total_non_register_global_lookup_base_max,
+                    total_reg_write_mask,
                 });
             }
         }
@@ -727,8 +899,8 @@ impl AotCompiler {
         &self,
         chunk: &ChunkInfo,
         chunks_dir: &std::path::Path,
-        pred_counts: &HashMap<u32, usize>,
-        succ_map: &HashMap<u32, Vec<u32>>,
+        pred_counts: &HashMap<u64, usize>,
+        succ_map: &HashMap<u64, Vec<u64>>,
     ) -> Result<(), String> {
         let crate_dir = chunks_dir.join(format!("chunk_{:03}", chunk.chunk_idx));
         let src_dir = crate_dir.join("src");
@@ -737,8 +909,9 @@ impl AotCompiler {
 
         let crate_name = format!("pico-aot-chunk-{:03}", chunk.chunk_idx);
         let cargo_toml = format!(
-            "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\npico-aot-runtime = {{ path = \"../../../aot-runtime\" }}\n",
-            crate_name
+            "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}",
+            crate_name,
+            runtime_dep_line("../../../aot-runtime"),
         );
         fs::write(crate_dir.join("Cargo.toml"), cargo_toml).map_err(|e| {
             format!(
@@ -753,7 +926,7 @@ impl AotCompiler {
         let pc_max = chunk.pc_max;
         let superblocks = self.build_chunk_superblocks(chunk, pred_counts, succ_map);
 
-        let mut pc_to_export: HashMap<u32, proc_macro2::Ident> = HashMap::new();
+        let mut pc_to_export: HashMap<u64, proc_macro2::Ident> = HashMap::new();
         for block in &chunk.blocks {
             pc_to_export.insert(block.pc, block.name.clone());
         }
@@ -786,6 +959,9 @@ impl AotCompiler {
             .map(|block| {
                 let name = &block.name;
                 let insn_count = block.insn_count;
+                let mem_rw_events = block.mem_rw_events;
+                let non_register_global_lookup_base_max = block.non_register_global_lookup_base_max;
+                let reg_write_mask = block.reg_write_mask;
                 let code = &block.code;
                 let inline_attr = self.get_inline_attr(insn_count);
 
@@ -793,7 +969,16 @@ impl AotCompiler {
                     #inline_attr
                     pub fn #name(emu: &mut AotEmulatorCore) -> Result<crate::NextStep, String> {
                         const BLOCK_INSNS: u32 = #insn_count;
-                        if !emu.can_fit_instructions(BLOCK_INSNS) {
+                        const BLOCK_MEM_RW_EVENTS: usize = #mem_rw_events;
+                        const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize =
+                            #non_register_global_lookup_base_max;
+                        const BLOCK_REG_WRITE_MASK: u32 = #reg_write_mask;
+                        if !emu.can_fit_block(
+                            BLOCK_INSNS,
+                            BLOCK_MEM_RW_EVENTS,
+                            BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX,
+                            BLOCK_REG_WRITE_MASK,
+                        ) {
                             return emu.interpret_from_current_pc();
                         }
                         // Fast path: unconstrained mode is rare, fall back to interpreter
@@ -817,11 +1002,11 @@ impl AotCompiler {
             // DO NOT EDIT MANUALLY
             pub use pico_aot_runtime::{AotEmulatorCore, BlockClock, BlockFn, NextStep};
 
-            pub const PC_MIN: u32 = #pc_min;
-            pub const PC_MAX: u32 = #pc_max;
+            pub const PC_MIN: u64 = #pc_min;
+            pub const PC_MAX: u64 = #pc_max;
 
             #lookup_inline_attr
-            pub fn lookup(pc: u32) -> Option<BlockFn> {
+            pub fn lookup(pc: u64) -> Option<BlockFn> {
                 #lookup_body
             }
 
@@ -840,7 +1025,7 @@ impl AotCompiler {
         }
 
         let mut superblock_map = HashMap::new();
-        let block_pc_to_name: HashMap<u32, String> = chunk
+        let block_pc_to_name: HashMap<u64, String> = chunk
             .blocks
             .iter()
             .map(|b| (b.pc, b.name.to_string()))
@@ -892,7 +1077,8 @@ impl AotCompiler {
             .collect();
 
         let cargo_toml = format!(
-            "[package]\nname = \"pico-aot-dispatch\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\npico-aot-runtime = {{ path = \"../aot-runtime\" }}\n{}\n",
+            "[package]\nname = \"pico-aot-dispatch\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}{}\n\n[features]\nbigint-rug = [\"pico-aot-runtime/bigint-rug\"]\nmmap-memory = [\"pico-aot-runtime/mmap-memory\"]\n",
+            runtime_dep_line("../aot-runtime"),
             chunk_deps.join("\n")
         );
         fs::write(output_dir.join("Cargo.toml"), cargo_toml)
@@ -900,8 +1086,8 @@ impl AotCompiler {
 
         // Build chunk descriptor table
         let mut chunk_descs = Vec::with_capacity(chunks.len());
-        let mut global_pc_min = u32::MAX;
-        let mut global_pc_max = 0u32;
+        let mut global_pc_min = u64::MAX;
+        let mut global_pc_max = 0u64;
 
         for c in chunks.iter() {
             let chunk_crate = format_ident!("pico_aot_chunk_{:03}", c.chunk_idx);
@@ -930,11 +1116,11 @@ impl AotCompiler {
 
             // Calculate adaptive page size
             let page_size_f64 = (target_chunks_per_page * span as f64) / chunk_count;
-            let mut page_size = page_size_f64 as u32;
+            let mut page_size = page_size_f64 as u64;
 
             // Clamp to [PAGE_HINT_MIN_SIZE, PAGE_HINT_MAX_SIZE]
-            page_size = page_size.max(constants::PAGE_HINT_MIN_SIZE);
-            page_size = page_size.min(constants::PAGE_HINT_MAX_SIZE);
+            page_size = page_size.max(u64::from(constants::PAGE_HINT_MIN_SIZE));
+            page_size = page_size.min(u64::from(constants::PAGE_HINT_MAX_SIZE));
 
             // Round to power-of-two
             let page_shift_val = if page_size > 0 {
@@ -948,14 +1134,14 @@ impl AotCompiler {
             } else {
                 constants::PAGE_HINT_DEFAULT_SHIFT
             };
-            let actual_page_size = 1u32 << page_shift_val;
+            let actual_page_size = 1u64 << page_shift_val;
 
             // Build page hint table
-            let num_pages = span.div_ceil(actual_page_size) as usize;
+            let num_pages = usize::try_from(span.div_ceil(actual_page_size)).unwrap();
             let mut page_hints = Vec::with_capacity(num_pages);
 
             for page_idx in 0..num_pages {
-                let page_start = global_pc_min + (page_idx as u32 * actual_page_size);
+                let page_start = global_pc_min + ((page_idx as u64) * actual_page_size);
                 // Find the first chunk that could contain this page
                 let mut lo = 0usize;
                 let mut hi = chunks.len();
@@ -989,7 +1175,7 @@ impl AotCompiler {
             };
 
             quote! {
-                const GLOBAL_PC_MIN: u32 = #global_pc_min;
+                const GLOBAL_PC_MIN: u64 = #global_pc_min;
                 const PAGE_SHIFT: u32 = #page_shift_val;
                 #page_hint_table
             }
@@ -1036,12 +1222,12 @@ impl AotCompiler {
                 Ok(())
             }
 
-            type ChunkLookupFn = fn(u32) -> Option<BlockFn>;
+            type ChunkLookupFn = fn(u64) -> Option<BlockFn>;
 
             #[repr(C)]
             struct ChunkDesc {
-                pc_min: u32,
-                pc_max: u32,
+                pc_min: u64,
+                pc_max: u64,
                 lookup: ChunkLookupFn,
             }
 
@@ -1051,7 +1237,7 @@ impl AotCompiler {
 
             #page_hint_code
 
-            fn lookup_block(pc: u32) -> Option<BlockFn> {
+            fn lookup_block(pc: u64) -> Option<BlockFn> {
                 if CHUNKS.is_empty() {
                     return None;
                 }
@@ -1103,8 +1289,8 @@ impl AotCompiler {
     fn generate_chunk_lookup(
         &self,
         entries: &[LookupEntry],
-        pc_min: u32,
-        pc_max: u32,
+        pc_min: u64,
+        pc_max: u64,
         n: usize,
     ) -> Result<
         (
@@ -1135,7 +1321,8 @@ impl AotCompiler {
         }
 
         // Analyze chunk for dense index vs run table
-        let range_words = ((pc_max.saturating_sub(pc_min)) >> 2).saturating_add(1) as usize;
+        let range_words = usize::try_from(((pc_max.saturating_sub(pc_min)) >> 2).saturating_add(1))
+            .map_err(|_| "chunk lookup range overflow".to_string())?;
         let density = if range_words > 0 {
             n as f64 / range_words as f64
         } else {
@@ -1153,7 +1340,8 @@ impl AotCompiler {
             // Build index array: IDX[word_offset] = fn_index + 1 (0 = not found)
             let mut idx_array = vec![0u16; range_words];
             for (fn_idx, entry) in entries.iter().enumerate() {
-                let word_offset = ((entry.pc - pc_min) >> 2) as usize;
+                let word_offset = usize::try_from((entry.pc - pc_min) >> 2)
+                    .map_err(|_| "chunk dense lookup offset overflow".to_string())?;
                 if word_offset < range_words {
                     idx_array[word_offset] = (fn_idx + 1) as u16;
                 }
@@ -1173,7 +1361,10 @@ impl AotCompiler {
                 if pc < #pc_min || pc > #pc_max {
                     return None;
                 }
-                let word_offset = ((pc - #pc_min) >> 2) as usize;
+                let word_offset = match usize::try_from((pc - #pc_min) >> 2) {
+                    Ok(word_offset) => word_offset,
+                    Err(_) => return None,
+                };
                 if word_offset >= IDX.len() {
                     return None;
                 }
@@ -1221,7 +1412,7 @@ impl AotCompiler {
             .iter()
             .map(|&(start_idx, len)| {
                 let start_pc = entries[start_idx].pc;
-                let start_word = (start_pc - pc_min) >> 2;
+                let start_word = run_table_word_u32((start_pc - pc_min) >> 2);
                 quote! {
                     Run { start_word: #start_word, len: #len as u16, fn_offset: #start_idx as u16 },
                 }
@@ -1235,6 +1426,10 @@ impl AotCompiler {
             const FN: [BlockFn; #n] = [
                 #(#fn_entries)*
             ];
+            #[inline(always)]
+            fn run_table_word_u32(word_offset: u64) -> u32 {
+                u32::try_from(word_offset).expect("run-table word offset exceeds u32")
+            }
             #[repr(C)]
             struct Run {
                 start_word: u32,
@@ -1248,7 +1443,7 @@ impl AotCompiler {
             if pc < #pc_min || pc > #pc_max {
                 return None;
             }
-            let word_offset = ((pc - #pc_min) >> 2) as u32;
+            let word_offset = run_table_word_u32((pc - #pc_min) >> 2);
 
             // Binary search runs
             let mut lo = 0usize;
@@ -1279,6 +1474,10 @@ impl AotCompiler {
 
         let name = &sb.entry_name;
         let total_insn_count = sb.total_insn_count;
+        let total_mem_rw_events = sb.total_mem_rw_events;
+        let total_non_register_global_lookup_base_max =
+            sb.total_non_register_global_lookup_base_max;
+        let total_reg_write_mask = sb.total_reg_write_mask;
         let inline_attr = self.get_inline_attr(total_insn_count);
 
         // Merge block codes: strip returns from intermediate blocks, keep last block's return
@@ -1324,7 +1523,16 @@ impl AotCompiler {
             #inline_attr
             pub fn #name(emu: &mut AotEmulatorCore) -> Result<crate::NextStep, String> {
                 const BLOCK_INSNS: u32 = #total_insn_count;
-                if !emu.can_fit_instructions(BLOCK_INSNS) {
+                const BLOCK_MEM_RW_EVENTS: usize = #total_mem_rw_events;
+                const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize =
+                    #total_non_register_global_lookup_base_max;
+                const BLOCK_REG_WRITE_MASK: u32 = #total_reg_write_mask;
+                if !emu.can_fit_block(
+                    BLOCK_INSNS,
+                    BLOCK_MEM_RW_EVENTS,
+                    BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX,
+                    BLOCK_REG_WRITE_MASK,
+                ) {
                     return emu.interpret_from_current_pc();
                 }
                 // Fast path: unconstrained mode is rare, fall back to interpreter
@@ -1565,6 +1773,10 @@ impl Clone for BlockInfo {
             pc: self.pc,
             name: self.name.clone(),
             insn_count: self.insn_count,
+            mem_rw_events: self.mem_rw_events,
+            non_register_global_lookup_base_max: self.non_register_global_lookup_base_max,
+            reg_write_mask: self.reg_write_mask,
+            global_lookup_base_max: self.global_lookup_base_max,
             code: self.code.clone(),
             is_terminal: self.is_terminal,
         }
@@ -1615,11 +1827,178 @@ fn is_nextstep_direct(expr: &syn::Expr) -> bool {
     }
 }
 
-fn block_name_to_pc(name: &str) -> Option<u32> {
+fn block_name_to_pc(name: &str) -> Option<u64> {
     let prefix = "block_0x";
     if let Some(hex) = name.strip_prefix(prefix) {
-        u32::from_str_radix(hex, 16).ok()
+        u64::from_str_radix(hex, 16).ok()
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        block_analysis::BlockAnalyzer, elf_parser::parse_elf,
+        instruction_translator::InstructionTranslator, types::Instruction,
+    };
+    use std::{
+        collections::HashMap,
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn load_reth_program() -> ProgramInfo {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let elf_path = manifest_dir.join("../perf/bench_data/rv64/reth-elf");
+        let elf_bytes = fs::read(&elf_path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", elf_path.display()));
+        parse_elf(&elf_bytes)
+    }
+
+    fn small_program() -> ProgramInfo {
+        ProgramInfo::new(
+            vec![
+                Instruction::new(Opcode::ADD, 1, 2, 3, false, false),
+                Instruction::new(Opcode::LD, 4, 5, 8, false, true),
+                Instruction::new(Opcode::JAL, 0, 4, 0, false, true),
+            ],
+            0x1000,
+            0x1000,
+        )
+    }
+
+    #[test]
+    fn reth_codegen_preserves_decoded_instruction_stream_around_31ce10() {
+        let program = load_reth_program();
+        let pc = 0x0031ce10_u64;
+        let idx = ((pc - program.pc_base) / 4) as usize;
+        let inst = &program.instructions[idx];
+
+        let leaders = BlockAnalyzer::new(&program).analyze();
+        let (translated, _, _, _) = InstructionTranslator::new(true).translate(pc, inst, &leaders);
+        let translated = translated.to_string();
+        assert!(
+            translated.contains("emu"),
+            "translator emitted unexpectedly empty code: {translated}"
+        );
+        match inst.opcode {
+            Opcode::ADD if inst.imm_b && inst.imm_c => {
+                assert!(
+                    translated.contains("write_reg_no_count"),
+                    "translator emitted unexpected ADD-immediate code: {translated}"
+                );
+                assert!(
+                    translated.contains(&format!("{}u64", sign_extend_imm32_to_u64(inst.op_c))),
+                    "translator missed decoded immediate for ADD-like instruction: {translated}"
+                );
+            }
+            Opcode::SD => {
+                assert!(
+                    translated.contains("sd_no_count"),
+                    "translator emitted unexpected SD code: {translated}"
+                );
+            }
+            _ => {
+                assert!(
+                    translated.contains("emu ."),
+                    "translator emitted unexpected opcode shape {:?}: {translated}",
+                    inst.opcode
+                );
+            }
+        }
+
+        let compiler = AotCompiler::new(program, AotConfig::new(PathBuf::from("/tmp/aot-test")));
+        let blocks = compiler
+            .generate_blocks(&leaders)
+            .expect("block generation should succeed");
+        assert!(
+            blocks.iter().all(|block| block.pc != pc),
+            "default config should not force a synthetic split at {pc:#x}"
+        );
+
+        let block = blocks
+            .iter()
+            .find(|block| {
+                let block_end = block.pc + u64::from(block.insn_count) * 4;
+                block.pc <= pc && pc < block_end
+            })
+            .expect("a block covering the inspected PC should exist");
+        let block_code = block.code.to_string();
+        assert!(
+            block_code.contains(&translated),
+            "block code should include the translated instruction for {pc:#x}: {block_code}"
+        );
+    }
+
+    #[test]
+    fn block_translate_reports_global_lookup_base_by_opcode_shape() {
+        let leaders = HashSet::new();
+
+        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new(true).translate(
+            0x1000,
+            &Instruction::new(Opcode::LD, 1, 2, 8, false, true),
+            &leaders,
+        );
+        assert_eq!(mem_rw_events, 1);
+        assert_eq!(global_lookup_base, 2);
+
+        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new(true).translate(
+            0x1004,
+            &Instruction::new(Opcode::SD, 1, 2, 8, false, true),
+            &leaders,
+        );
+        assert_eq!(mem_rw_events, 1);
+        assert_eq!(global_lookup_base, 1);
+
+        let (_, _, mem_rw_events, global_lookup_base) = InstructionTranslator::new(true).translate(
+            0x1008,
+            &Instruction::new(Opcode::BEQ, 1, 2, 4, false, true),
+            &leaders,
+        );
+        assert_eq!(mem_rw_events, 0);
+        assert_eq!(global_lookup_base, 0);
+    }
+
+    #[test]
+    fn write_chunk_crate_emits_block_fit_constants_and_guard() {
+        let program = small_program();
+        let compiler = AotCompiler::new(
+            program.clone(),
+            AotConfig::new(PathBuf::from("/tmp/aot-test")),
+        );
+        let leaders = BlockAnalyzer::new(&program).analyze();
+        let blocks = compiler
+            .generate_blocks(&leaders)
+            .expect("block generation should succeed");
+        let chunk = ChunkInfo {
+            chunk_idx: 0,
+            pc_min: program.pc_base,
+            pc_max: program.pc_base + ((program.instructions.len() - 1) as u64) * 4,
+            blocks,
+        };
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before epoch")
+            .as_nanos();
+        let out_dir = std::env::temp_dir().join(format!("pico-aot-guard-{unique}"));
+        let chunks_dir = out_dir.join("chunks");
+        fs::create_dir_all(&chunks_dir).expect("create temp chunk root");
+
+        compiler
+            .write_chunk_crate(&chunk, &chunks_dir, &HashMap::new(), &HashMap::new())
+            .expect("write_chunk_crate should succeed");
+
+        let lib_rs = fs::read_to_string(chunks_dir.join("chunk_000/src/lib.rs"))
+            .expect("read generated chunk lib");
+        assert!(lib_rs.contains("const BLOCK_MEM_RW_EVENTS: usize ="));
+        assert!(lib_rs.contains("const BLOCK_NON_REGISTER_GLOBAL_LOOKUP_BASE_MAX: usize ="));
+        assert!(lib_rs.contains("const BLOCK_REG_WRITE_MASK: u32 ="));
+        assert!(lib_rs.contains("can_fit_block"));
+
+        let _ = fs::remove_dir_all(out_dir);
     }
 }

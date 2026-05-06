@@ -314,7 +314,10 @@ fn montgomery_mul<const N: usize>(
         out[i] = t[i + N] as u32;
     }
     let mut result = Limbs { limbs: out };
-    if ge_limbs(&result, &modulus.modulus) {
+    // When t[2*N] != 0, the true result is 2^(N*32) + result, which is
+    // necessarily >= modulus. The subtraction in u32 wrapping arithmetic
+    // gives the correct reduced value.
+    if t[2 * N] != 0 || ge_limbs(&result, &modulus.modulus) {
         let (reduced, _) = sub_limbs(&result, &modulus.modulus);
         result = reduced;
     }
@@ -422,10 +425,14 @@ fn mod_reduce_16_by_8(u: [u32; 16], v: &Limbs8) -> Limbs8 {
         let mut qhat = numerator / v_n1;
         let mut rhat = numerator % v_n1;
 
-        if qhat >= base {
-            qhat = base - 1;
-        }
-        while qhat * v_n2 > base * rhat + u_jn2 {
+        // Knuth Algorithm D step D3: refine qhat.
+        // Combined loop handles both qhat >= base and the v_n2 test,
+        // keeping qhat and rhat in sync (the original split lost rhat
+        // when clamping qhat, causing under-estimation for large inputs).
+        loop {
+            if qhat < base && qhat * v_n2 <= base * rhat + u_jn2 {
+                break;
+            }
             qhat -= 1;
             rhat += v_n1;
             if rhat >= base {
@@ -510,4 +517,225 @@ fn shl_limbs_17(mut limbs: [u32; 17], shift: u32) -> [u32; 17] {
         carry = new_carry;
     }
     limbs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num::BigUint;
+
+    fn limbs8_from_biguint(v: &BigUint) -> Limbs8 {
+        Limbs8::from_biguint(v)
+    }
+
+    fn biguint_from_limbs8(l: &Limbs8) -> BigUint {
+        l.to_biguint()
+    }
+
+    fn biguint_from_u32_16(arr: &[u32; 16]) -> BigUint {
+        BigUint::from_slice(arr)
+    }
+
+    /// Reference: compute (a * b) mod m using BigUint
+    fn ref_mulmod(a: &Limbs8, b: &Limbs8, m: &Limbs8) -> Limbs8 {
+        let ba = biguint_from_limbs8(a);
+        let bb = biguint_from_limbs8(b);
+        let bm = biguint_from_limbs8(m);
+        if bm == BigUint::from(0u32) {
+            let prod = ba * bb;
+            let mask = (BigUint::from(1u32) << 256) - BigUint::from(1u32);
+            limbs8_from_biguint(&(prod & mask))
+        } else {
+            limbs8_from_biguint(&((ba * bb) % bm))
+        }
+    }
+
+    /// Reference: compute product mod modulus using BigUint on the 16-limb product
+    fn ref_mod_reduce(product: &[u32; 16], modulus: &Limbs8) -> Limbs8 {
+        let bp = biguint_from_u32_16(product);
+        let bm = biguint_from_limbs8(modulus);
+        limbs8_from_biguint(&(bp % bm))
+    }
+
+    // ================================================================
+    // Test: mod_reduce_16_by_8 against BigUint for various inputs
+    // ================================================================
+
+    #[test]
+    fn test_mod_reduce_small_even() {
+        let a = Limbs8::from_slice(&[0xDEADBEEF]);
+        let b = Limbs8::from_slice(&[0xCAFEBABE]);
+        let m = Limbs8::from_slice(&[6]);
+        let product = mul_full_limbs_8(&a, &b);
+        let got = mod_reduce_16_by_8(product, &m);
+        let expected = ref_mod_reduce(&product, &m);
+        assert_eq!(got.limbs, expected.limbs, "small even modulus failed");
+    }
+
+    #[test]
+    fn test_mod_reduce_large_even_secp256k1() {
+        // secp256k1_n - 1 (a) * secp256k1_p (b) mod (secp256k1_p - 1) (even)
+        let a = Limbs8::from_slice(&[
+            0xD0364140, 0xBFD25E8C, 0xAF48A03B, 0xBAAEDCE6, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let b = Limbs8::from_slice(&[
+            0xFFFFFC2F, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let m = Limbs8::from_slice(&[
+            0xFFFFFC2E, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+
+        let product = mul_full_limbs_8(&a, &b);
+        let got = mod_reduce_16_by_8(product, &m);
+        let expected = ref_mod_reduce(&product, &m);
+
+        assert_eq!(
+            got.limbs, expected.limbs,
+            "\nmod_reduce_16_by_8 MISMATCH for large even modulus!\ngot:      {:08X?}\nexpected: {:08X?}",
+            got.limbs, expected.limbs
+        );
+    }
+
+    #[test]
+    fn test_mod_reduce_large_even_near_max() {
+        let a = Limbs8::from_slice(&[
+            0xFFFFFFFD, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let b = Limbs8::from_slice(&[
+            0xFFFFFFFB, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let m = Limbs8::from_slice(&[
+            0xFFFFFFFA, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+
+        let product = mul_full_limbs_8(&a, &b);
+        let got = mod_reduce_16_by_8(product, &m);
+        let expected = ref_mod_reduce(&product, &m);
+
+        assert_eq!(
+            got.limbs, expected.limbs,
+            "\nmod_reduce_16_by_8 MISMATCH for near-max even modulus!\ngot:      {:08X?}\nexpected: {:08X?}",
+            got.limbs, expected.limbs
+        );
+    }
+
+    // ================================================================
+    // Test: uint256_mod_mul end-to-end
+    // ================================================================
+
+    #[test]
+    fn test_uint256_mod_mul_odd_small() {
+        let a = Limbs8::from_slice(&[3]);
+        let b = Limbs8::from_slice(&[5]);
+        let m = Limbs8::from_slice(&[7]);
+        let got = uint256_mod_mul(&a, &b, &m);
+        let expected = ref_mulmod(&a, &b, &m);
+        assert_eq!(got.limbs, expected.limbs, "odd small modulus");
+    }
+
+    #[test]
+    fn test_uint256_mod_mul_odd_large() {
+        let a = Limbs8::from_slice(&[
+            0xD0364140, 0xBFD25E8C, 0xAF48A03B, 0xBAAEDCE6, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let b = a;
+        let m = Limbs8::from_slice(&[
+            0xD0364141, 0xBFD25E8C, 0xAF48A03B, 0xBAAEDCE6, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let got = uint256_mod_mul(&a, &b, &m);
+        let expected = ref_mulmod(&a, &b, &m);
+        assert_eq!(
+            got.limbs, expected.limbs,
+            "\nuint256_mod_mul MISMATCH (odd, large)!\ngot:      {:08X?}\nexpected: {:08X?}",
+            got.limbs, expected.limbs
+        );
+    }
+
+    #[test]
+    fn test_uint256_mod_mul_even_large() {
+        let a = Limbs8::from_slice(&[
+            0xD0364140, 0xBFD25E8C, 0xAF48A03B, 0xBAAEDCE6, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let b = Limbs8::from_slice(&[
+            0xFFFFFC2F, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let m = Limbs8::from_slice(&[
+            0xFFFFFC2E, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let got = uint256_mod_mul(&a, &b, &m);
+        let expected = ref_mulmod(&a, &b, &m);
+        assert_eq!(
+            got.limbs, expected.limbs,
+            "\nuint256_mod_mul MISMATCH (even, large)!\ngot:      {:08X?}\nexpected: {:08X?}",
+            got.limbs, expected.limbs
+        );
+    }
+
+    #[test]
+    fn test_montgomery_mul_large_odd() {
+        let a = Limbs8::from_slice(&[
+            0xD0364140, 0xBFD25E8C, 0xAF48A03B, 0xBAAEDCE6, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let b = a;
+        let m = Limbs8::from_slice(&[
+            0xD0364141, 0xBFD25E8C, 0xAF48A03B, 0xBAAEDCE6, 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFF,
+            0xFFFFFFFF,
+        ]);
+        let got = uint256_mod_mul(&a, &b, &m);
+        let expected = ref_mulmod(&a, &b, &m);
+        assert_eq!(
+            got.limbs, expected.limbs,
+            "\nMontgomery carry bug!\ngot:      {:08X?}\nexpected: {:08X?}",
+            got.limbs, expected.limbs
+        );
+    }
+
+    #[test]
+    fn test_mod_reduce_sweep_even_moduli() {
+        let base_mod = [
+            0xFFFFFFFA_u32,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+        ];
+        for delta in [0u32, 2, 4, 6, 100, 0x10000, 0xFFFFFFFE] {
+            let mut m_limbs = base_mod;
+            m_limbs[0] = m_limbs[0].wrapping_sub(delta) & 0xFFFFFFFE;
+            let m = Limbs8::from_slice(&m_limbs);
+
+            let a = Limbs8::from_slice(&[
+                0x12345678, 0x9ABCDEF0, 0x11111111, 0x22222222, 0xDDDDDDDD, 0xEEEEEEEE, 0xFFFFFFFF,
+                0xFFFFFFF0,
+            ]);
+            let b = Limbs8::from_slice(&[
+                0xABCDEF01, 0x23456789, 0x33333333, 0x44444444, 0x55555555, 0x66666666, 0x77777777,
+                0xFFFFFFF8,
+            ]);
+
+            let product = mul_full_limbs_8(&a, &b);
+            let got = mod_reduce_16_by_8(product, &m);
+            let expected = ref_mod_reduce(&product, &m);
+            assert_eq!(
+                got.limbs, expected.limbs,
+                "\nmod_reduce MISMATCH for even modulus delta={}!\nm:        {:08X?}\ngot:      {:08X?}\nexpected: {:08X?}",
+                delta, m.limbs, got.limbs, expected.limbs
+            );
+        }
+    }
 }

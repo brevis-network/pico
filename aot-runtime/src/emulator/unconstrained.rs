@@ -45,7 +45,7 @@ impl AotEmulatorCore {
     ///
     /// Restores all saved state (registers, timing, memory) to pre-unconstrained values.
     /// Returns the next PC to execute after unconstrained mode, or None if not in unconstrained mode.
-    pub(crate) fn exit_unconstrained_mode(&mut self) -> Option<u32> {
+    pub(crate) fn exit_unconstrained_mode(&mut self) -> Option<u64> {
         let mut state = self.unconstrained_state.take()?;
 
         // Restore timing/chunk state (matches baseline behavior)
@@ -88,7 +88,7 @@ impl AotEmulatorCore {
     #[inline(always)]
     pub(crate) fn record_unconstrained_memory_access(
         &mut self,
-        addr: u32,
+        addr: u64,
         prev_record: MemoryRecord,
     ) {
         let Some(state) = self.unconstrained_state.as_mut() else {

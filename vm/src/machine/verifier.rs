@@ -381,7 +381,7 @@ where
 
             // todo: properly handle errors
             if folded_constraints * sels.inv_zeroifier != quotient {
-                panic!("Constraint verification failed");
+                panic!("Constraint verification failed, chip: {}", chip.name());
             }
         }
 

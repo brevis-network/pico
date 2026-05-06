@@ -2,7 +2,6 @@ use super::{
     IndexedPicoIterator, IntoPicoIterator, IntoPicoRefIterator, IntoPicoRefMutIterator, PicoBridge,
     PicoExtend, PicoIterator, PicoScanIterator, PicoSlice, PicoSliceMut,
 };
-//use alloc::sync::Arc;
 use rayon::prelude::*;
 
 impl<I: ParallelIterator> PicoIterator for I {}

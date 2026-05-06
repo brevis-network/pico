@@ -1,7 +1,13 @@
-use crate::emulator::riscv::syscalls::{
-    precompiles::{PrecompileEvent, ShaExtendEvent},
-    syscall_context::SyscallContext,
-    Syscall, SyscallCode,
+use crate::{
+    chips::precompiles::checked_u64_to_u32,
+    emulator::riscv::{
+        event_types::RvValue,
+        syscalls::{
+            precompiles::{PrecompileEvent, ShaExtendEvent},
+            syscall_context::SyscallContext,
+            Syscall, SyscallCode,
+        },
+    },
 };
 
 pub(crate) struct Sha256ExtendSyscall;
@@ -15,12 +21,13 @@ impl Syscall for Sha256ExtendSyscall {
         &self,
         ctx: &mut SyscallContext,
         syscall_code: SyscallCode,
-        arg1: u32,
-        arg2: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
         let clk_init = ctx.clk;
         let w_ptr = arg1;
         assert!(arg2 == 0, "arg2 must be 0");
+        SyscallContext::assert_dword_aligned_precompile(w_ptr, "sha extend w_ptr");
 
         let w_ptr_init = w_ptr;
         let mut w_i_minus_15_reads = Vec::new();
@@ -28,9 +35,13 @@ impl Syscall for Sha256ExtendSyscall {
         let mut w_i_minus_16_reads = Vec::new();
         let mut w_i_minus_7_reads = Vec::new();
         let mut w_i_writes = Vec::new();
-        for i in 16..64 {
+
+        // The SDK ABI exposes the schedule as `[u64; 64]`, with each logical SHA word stored in
+        // the low 32 bits of one 64-bit slot.
+        for i in 16u64..64 {
             // Read w[i-15].
-            let (record, w_i_minus_15) = ctx.mr(w_ptr + (i - 15) * 4);
+            let (record, val) = ctx.mr_dword(w_ptr + (i - 15) * 8);
+            let w_i_minus_15 = checked_u64_to_u32(val, "sha256 extend w word");
             w_i_minus_15_reads.push(record);
 
             // Compute `s0`.
@@ -38,7 +49,8 @@ impl Syscall for Sha256ExtendSyscall {
                 w_i_minus_15.rotate_right(7) ^ w_i_minus_15.rotate_right(18) ^ (w_i_minus_15 >> 3);
 
             // Read w[i-2].
-            let (record, w_i_minus_2) = ctx.mr(w_ptr + (i - 2) * 4);
+            let (record, val) = ctx.mr_dword(w_ptr + (i - 2) * 8);
+            let w_i_minus_2 = checked_u64_to_u32(val, "sha256 extend w word");
             w_i_minus_2_reads.push(record);
 
             // Compute `s1`.
@@ -46,11 +58,13 @@ impl Syscall for Sha256ExtendSyscall {
                 w_i_minus_2.rotate_right(17) ^ w_i_minus_2.rotate_right(19) ^ (w_i_minus_2 >> 10);
 
             // Read w[i-16].
-            let (record, w_i_minus_16) = ctx.mr(w_ptr + (i - 16) * 4);
+            let (record, val) = ctx.mr_dword(w_ptr + (i - 16) * 8);
+            let w_i_minus_16 = checked_u64_to_u32(val, "sha256 extend w word");
             w_i_minus_16_reads.push(record);
 
             // Read w[i-7].
-            let (record, w_i_minus_7) = ctx.mr(w_ptr + (i - 7) * 4);
+            let (record, val) = ctx.mr_dword(w_ptr + (i - 7) * 8);
+            let w_i_minus_7 = checked_u64_to_u32(val, "sha256 extend w word");
             w_i_minus_7_reads.push(record);
 
             // Compute `w_i`.
@@ -60,7 +74,7 @@ impl Syscall for Sha256ExtendSyscall {
                 .wrapping_add(w_i_minus_7);
 
             // Write w[i].
-            w_i_writes.push(ctx.mw(w_ptr + i * 4, w_i));
+            w_i_writes.push(ctx.mw_dword(w_ptr + i * 8, u64::from(w_i)));
             ctx.clk += 1;
         }
 

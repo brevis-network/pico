@@ -16,6 +16,7 @@ use super::{
 use crate::{
     chips::{
         chips::{byte::event::ByteRecordBehavior, events::ByteLookupEvent},
+        precompiles::checked_u64_to_u32,
         utils::zeroed_f_vec,
     },
     compiler::riscv::program::Program,
@@ -167,15 +168,27 @@ impl<F: PrimeField32> KeccakPermuteChip<F> {
             let cols: &mut KeccakMemCols<F> = row.borrow_mut();
 
             cols.chunk = F::from_canonical_u32(chunk);
-            cols.clk = F::from_canonical_u32(start_clk);
-            cols.state_addr = F::from_canonical_u32(event.state_addr);
+            cols.clk = F::from_canonical_u32(checked_u64_to_u32(start_clk, "keccak clk"));
+            cols.state_addr
+                .populate(new_byte_lookup_events, event.state_addr, 200);
             cols.is_real = F::ONE;
 
             // If this is the first row, then populate read memory accesses
             if i == 0 {
                 for (j, read_record) in event.state_read_records.iter().enumerate() {
                     cols.state_mem[j].populate_read(*read_record, new_byte_lookup_events);
-                    new_byte_lookup_events.add_u8_range_checks(read_record.value.to_le_bytes());
+                    let v = read_record.value;
+                    new_byte_lookup_events.add_u16_range_checks(&[
+                        (v & 0xFFFF) as u16,
+                        ((v >> 16) & 0xFFFF) as u16,
+                        ((v >> 32) & 0xFFFF) as u16,
+                        ((v >> 48) & 0xFFFF) as u16,
+                    ]);
+                    cols.state_addrs[j].populate(
+                        new_byte_lookup_events,
+                        event.state_addr,
+                        8 * j as u64,
+                    );
                 }
                 cols.do_memory_check = F::ONE;
                 cols.receive_ecall = F::ONE;
@@ -185,7 +198,18 @@ impl<F: PrimeField32> KeccakPermuteChip<F> {
             if i == NUM_ROUNDS - 1 {
                 for (j, write_record) in event.state_write_records.iter().enumerate() {
                     cols.state_mem[j].populate_write(*write_record, new_byte_lookup_events);
-                    new_byte_lookup_events.add_u8_range_checks(write_record.value.to_le_bytes());
+                    let v = write_record.value;
+                    new_byte_lookup_events.add_u16_range_checks(&[
+                        (v & 0xFFFF) as u16,
+                        ((v >> 16) & 0xFFFF) as u16,
+                        ((v >> 32) & 0xFFFF) as u16,
+                        ((v >> 48) & 0xFFFF) as u16,
+                    ]);
+                    cols.state_addrs[j].populate(
+                        new_byte_lookup_events,
+                        event.state_addr,
+                        8 * j as u64,
+                    );
                 }
                 cols.do_memory_check = F::ONE;
             }

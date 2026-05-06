@@ -46,6 +46,19 @@ pub enum Opcode {
     DIVU = 35,
     REM = 36,
     REMU = 37,
+    ADDW = 40,
+    SUBW = 41,
+    SLLW = 42,
+    SRLW = 43,
+    SRAW = 44,
+    LWU = 45,
+    LD = 46,
+    SD = 47,
+    MULW = 48,
+    DIVW = 49,
+    DIVUW = 50,
+    REMW = 51,
+    REMUW = 52,
     UNIMP = 39,
 }
 
@@ -117,18 +130,24 @@ pub struct ProgramInfo {
     /// The instruction stream
     pub instructions: Vec<Instruction>,
     /// Base address for instruction indexing
-    pub pc_base: u32,
+    pub pc_base: u64,
     /// Program entry point
-    pub pc_start: u32,
+    pub pc_start: u64,
 }
 
 impl ProgramInfo {
     /// Create a new program info
-    pub fn new(instructions: Vec<Instruction>, pc_base: u32, pc_start: u32) -> Self {
+    pub fn new(instructions: Vec<Instruction>, pc_base: u64, pc_start: u64) -> Self {
         Self {
             instructions,
             pc_base,
             pc_start,
         }
     }
+}
+
+/// Sign-extend a decoded 32-bit immediate into the architectural RV64 value space.
+pub(crate) const fn sign_extend_imm32_to_u64(imm: u32) -> u64 {
+    // Centralized helper for decoded control-flow/immediate operands emitted by codegen.
+    ((imm as i32) as i64) as u64
 }

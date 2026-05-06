@@ -6,7 +6,6 @@ use pico_vm::{
     emulator::{
         emulator::MetaEmulator,
         opts::EmulatorOpts,
-        riscv::{memory::GLOBAL_MEMORY_RECYCLER, state::RiscvEmulationState},
     },
     instances::{
         chiptype::riscv_chiptype::RiscvChipType, configs::riscv_kb_config::StarkConfig as RiscvKBSC,
@@ -18,7 +17,7 @@ use reth_lib::{create_stdin, load_block_input, load_reth_elf, parse_block_arg, v
 use std::time::Instant;
 
 #[cfg(feature = "aot")]
-use reth_aot::{AotRun, RethEmulator};
+use reth_aot::{AotRun, RethEmulator, recycle_snapshot_memory};
 
 const WARMUP_RUNS: usize = 1;
 const BENCH_RUNS: usize = 5;
@@ -60,7 +59,7 @@ fn run_baseline_bench(elf_bytes: &[u8], block_input: &[u8]) -> (u64, std::time::
 /// Run AOT emulator in batch mode.
 #[cfg(feature = "aot")]
 fn run_aot_bench(elf_bytes: &[u8], block_input: &[u8]) -> (u64, std::time::Duration, u32) {
-    let compiler = Compiler::new(SourceType::RISCV, elf_bytes);
+    let compiler = Compiler::new(SourceType::RISCV, elf_bytes).expect("Failed to create compiler");
     let program = compiler.compile();
 
     // Create stdin from raw block input bytes (not a serialized EmulatorStdinBuilder)
@@ -71,6 +70,7 @@ fn run_aot_bench(elf_bytes: &[u8], block_input: &[u8]) -> (u64, std::time::Durat
     for _ in 0..WARMUP_RUNS {
         let mut emu = RethEmulator::new(program.clone(), input_stream.clone());
         loop {
+            // NOTE: caller must recycle returned snapshot memory.
             let (snapshot, report) = emu
                 .next_state_batch(opts)
                 .expect("AOT next_state_batch failed");
@@ -85,6 +85,7 @@ fn run_aot_bench(elf_bytes: &[u8], block_input: &[u8]) -> (u64, std::time::Durat
     let start = Instant::now();
     let mut batch_count = 0;
     loop {
+        // NOTE: caller must recycle returned snapshot memory.
         let (snapshot, report) = emu
             .next_state_batch(opts)
             .expect("AOT next_state_batch failed");
@@ -102,11 +103,6 @@ fn run_aot_bench(elf_bytes: &[u8], block_input: &[u8]) -> (u64, std::time::Durat
 #[cfg(not(feature = "aot"))]
 fn run_aot_bench(_elf_bytes: &[u8], _block_input: &[u8]) -> (u64, std::time::Duration, u32) {
     panic!("AOT feature not enabled. Build with: cargo run --features aot --bin compare");
-}
-
-fn recycle_snapshot_memory(snapshot: RiscvEmulationState) {
-    let RiscvEmulationState { memory, .. } = snapshot;
-    let _ = GLOBAL_MEMORY_RECYCLER.send((memory, true));
 }
 
 fn main() {

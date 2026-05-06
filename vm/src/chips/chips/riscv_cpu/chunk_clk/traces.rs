@@ -17,10 +17,11 @@ impl<F: Field> CpuChip<F> {
     ) {
         let chunk = event.chunk;
         cols.chunk = F::from_canonical_u32(chunk);
-        cols.clk = F::from_canonical_u32(event.clk);
+        let clk = u32::try_from(event.clk).unwrap();
+        cols.clk = F::from_canonical_u32(clk);
 
-        let clk_16bit_limb = (event.clk & 0xffff) as u16;
-        let clk_8bit_limb = ((event.clk >> 16) & 0xff) as u8;
+        let clk_16bit_limb = (clk & 0xffff) as u16;
+        let clk_8bit_limb = ((clk >> 16) & 0xff) as u8;
         cols.clk_16bit_limb = F::from_canonical_u16(clk_16bit_limb);
         cols.clk_8bit_limb = F::from_canonical_u8(clk_8bit_limb);
 

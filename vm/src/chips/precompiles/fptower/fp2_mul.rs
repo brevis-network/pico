@@ -16,6 +16,7 @@ use crate::{
                 polynomial::Polynomial,
             },
         },
+        precompiles::checked_u64_to_u32,
     },
     compiler::riscv::program::Program,
     emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
@@ -32,15 +33,23 @@ use p3_field::{Field, FieldAlgebra, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use pico_derive::AlignedBorrow;
 
-use super::{limbs_from_prev_access, words_to_bytes_le_slice};
+use super::words_to_bytes_le_slice;
 use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::{
-            value_as_limbs, MemoryReadCols, MemoryWriteCols,
+            MemoryCols, MemoryReadColsU8, MemoryWriteColsU8,
         },
-        gadgets::field::field_op::FieldOpCols,
+        gadgets::{
+            addr_add::AddrAddGadget,
+            field::{field_lt::FieldLtCols, field_op::FieldOpCols},
+            syscall_addr::SyscallAddrGadget,
+            utils::conversions::{
+                generate_limbs_from_read_cols_u8, generate_limbs_from_write_cols_u8, limbs_to_words,
+            },
+        },
         utils::pad_rows_fixed,
     },
+    compiler::word::Word,
     emulator::riscv::syscalls::precompiles::PrecompileEvent,
 };
 
@@ -67,16 +76,20 @@ where
     pub is_real: F,
     pub chunk: F,
     pub clk: F,
-    pub x_ptr: F,
-    pub y_ptr: F,
-    pub x_access: Array<MemoryWriteCols<F>, P::WordsCurvePoint>,
-    pub y_access: Array<MemoryReadCols<F>, P::WordsCurvePoint>,
+    pub x_ptr: SyscallAddrGadget<F>,
+    pub y_ptr: SyscallAddrGadget<F>,
+    pub x_addrs: Array<AddrAddGadget<F>, P::WordsCurvePoint>,
+    pub y_addrs: Array<AddrAddGadget<F>, P::WordsCurvePoint>,
+    pub x_access: Array<MemoryWriteColsU8<F>, P::WordsCurvePoint>,
+    pub y_access: Array<MemoryReadColsU8<F>, P::WordsCurvePoint>,
     pub(crate) a0_mul_b0: FieldOpCols<F, P>,
     pub(crate) a1_mul_b1: FieldOpCols<F, P>,
     pub(crate) a0_mul_b1: FieldOpCols<F, P>,
     pub(crate) a1_mul_b0: FieldOpCols<F, P>,
     pub(crate) c0: FieldOpCols<F, P>,
     pub(crate) c1: FieldOpCols<F, P>,
+    pub(crate) c0_range: FieldLtCols<F, P>,
+    pub(crate) c1_range: FieldLtCols<F, P>,
 }
 
 impl<F, P> Fp2MulChip<F, P>
@@ -128,20 +141,22 @@ where
             &modulus,
             FieldOperation::Mul,
         );
-        cols.c0.populate_with_modulus(
+        let c0 = cols.c0.populate_with_modulus(
             blu_events,
             &a0_mul_b0,
             &a1_mul_b1,
             &modulus,
             FieldOperation::Sub,
         );
-        cols.c1.populate_with_modulus(
+        let c1 = cols.c1.populate_with_modulus(
             blu_events,
             &a0_mul_b1,
             &a1_mul_b0,
             &modulus,
             FieldOperation::Add,
         );
+        cols.c0_range.populate(blu_events, &c0, &modulus);
+        cols.c1_range.populate(blu_events, &c1, &modulus);
     }
 }
 
@@ -191,18 +206,39 @@ where
 
             cols.is_real = F::ONE;
             cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(event.clk);
-            cols.x_ptr = F::from_canonical_u32(event.x_ptr);
-            cols.y_ptr = F::from_canonical_u32(event.y_ptr);
+            cols.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "fptower fp2 mul clk"));
+            cols.x_ptr.populate(
+                &mut new_byte_lookup_events,
+                event.x_ptr,
+                P::NUM_LIMBS as u64 * 2,
+            );
+            cols.y_ptr.populate(
+                &mut new_byte_lookup_events,
+                event.y_ptr,
+                P::NUM_LIMBS as u64 * 2,
+            );
 
             Self::populate_field_ops(&mut new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
 
-            // Populate the memory access columns.
             for i in 0..cols.y_access.len() {
-                cols.y_access[i].populate(event.y_memory_records[i], &mut new_byte_lookup_events);
+                cols.y_access[i]
+                    .inner
+                    .populate(event.y_memory_records[i], &mut new_byte_lookup_events);
+                cols.y_access[i].prev_value_u8.populate_u16_to_u8_safe(
+                    &mut new_byte_lookup_events,
+                    event.y_memory_records[i].value,
+                );
+                cols.y_addrs[i].populate(&mut new_byte_lookup_events, event.y_ptr, i as u64 * 8);
             }
             for i in 0..cols.x_access.len() {
-                cols.x_access[i].populate(event.x_memory_records[i], &mut new_byte_lookup_events);
+                cols.x_access[i]
+                    .inner
+                    .populate(event.x_memory_records[i], &mut new_byte_lookup_events);
+                cols.x_access[i].prev_value_u8.populate_u16_to_u8_safe(
+                    &mut new_byte_lookup_events,
+                    event.x_memory_records[i].prev_value,
+                );
+                cols.x_addrs[i].populate(&mut new_byte_lookup_events, event.x_ptr, i as u64 * 8);
             }
             rows.push(row)
         }
@@ -284,13 +320,38 @@ where
         let local = main.row_slice(0);
         let local: &Fp2MulCols<CB::Var, P> = (*local).borrow();
 
-        let num_words_field_element = <P as NumLimbs>::Limbs::USIZE / 4;
+        builder.assert_bool(local.is_real);
 
-        let p_x = limbs_from_prev_access(&local.x_access[0..num_words_field_element]);
-        let p_y = limbs_from_prev_access(&local.x_access[num_words_field_element..]);
+        let num_words_field_element = <P as NumLimbs>::Limbs::USIZE / 8;
 
-        let q_x = limbs_from_prev_access(&local.y_access[0..num_words_field_element]);
-        let q_y = limbs_from_prev_access(&local.y_access[num_words_field_element..]);
+        let p_x_limbs = generate_limbs_from_write_cols_u8(
+            builder,
+            &local.x_access[0..num_words_field_element],
+            local.is_real.into(),
+        );
+        let p_x: Limbs<CB::Expr, <P as NumLimbs>::Limbs> =
+            Limbs((&*p_x_limbs).try_into().expect("failed to convert limbs"));
+        let q_x_limbs = generate_limbs_from_read_cols_u8(
+            builder,
+            &local.y_access[0..num_words_field_element],
+            local.is_real.into(),
+        );
+        let q_x: Limbs<CB::Expr, <P as NumLimbs>::Limbs> =
+            Limbs((&*q_x_limbs).try_into().expect("failed to convert limbs"));
+        let p_y_limbs = generate_limbs_from_write_cols_u8(
+            builder,
+            &local.x_access[num_words_field_element..],
+            local.is_real.into(),
+        );
+        let p_y: Limbs<CB::Expr, <P as NumLimbs>::Limbs> =
+            Limbs((&*p_y_limbs).try_into().expect("failed to convert limbs"));
+        let q_y_limbs = generate_limbs_from_read_cols_u8(
+            builder,
+            &local.y_access[num_words_field_element..],
+            local.is_real.into(),
+        );
+        let q_y: Limbs<CB::Expr, <P as NumLimbs>::Limbs> =
+            Limbs((&*q_y_limbs).try_into().expect("failed to convert limbs"));
 
         let modulus_coeffs = P::MODULUS
             .iter()
@@ -356,30 +417,112 @@ where
             );
         }
 
-        builder.when(local.is_real).inner.assert_all_eq(
-            local.c0.result,
-            value_as_limbs(&local.x_access[0..num_words_field_element]),
+        let c0_result_limbs: Vec<CB::Expr> = local
+            .c0
+            .result
+            .0
+            .iter()
+            .copied()
+            .map(|x| x.into())
+            .collect();
+        let c0_result_words =
+            limbs_to_words::<CB::Expr>(&c0_result_limbs, CB::F::from_canonical_u32(256).into());
+
+        let c1_result_limbs: Vec<CB::Expr> = local
+            .c1
+            .result
+            .0
+            .iter()
+            .copied()
+            .map(|x| x.into())
+            .collect();
+        let c1_result_words =
+            limbs_to_words::<CB::Expr>(&c1_result_limbs, CB::F::from_canonical_u32(256).into());
+
+        let result_words = c0_result_words
+            .into_iter()
+            .chain(c1_result_words)
+            .collect_vec();
+
+        local
+            .c0_range
+            .eval(builder, &local.c0.result, &p_modulus, local.is_real);
+        local
+            .c1_range
+            .eval(builder, &local.c1.result, &p_modulus, local.is_real);
+
+        let x_ptr = SyscallAddrGadget::<CB::F>::eval(
+            builder,
+            P::NUM_LIMBS as u32 * 2,
+            local.x_ptr,
+            local.is_real.into(),
         );
-        builder.when(local.is_real).inner.assert_all_eq(
-            local.c1.result,
-            value_as_limbs(&local.x_access[num_words_field_element..]),
+        let y_ptr = SyscallAddrGadget::<CB::F>::eval(
+            builder,
+            P::NUM_LIMBS as u32 * 2,
+            local.y_ptr,
+            local.is_real.into(),
         );
 
-        builder.eval_memory_access_slice(
-            local.chunk,
-            local.clk.into(),
-            local.y_ptr,
-            &local.y_access,
-            local.is_real,
-        );
-        builder.eval_memory_access_slice(
-            local.chunk,
-            local.clk + CB::F::from_canonical_u32(1), /* We read p at +1 since p, q could be the
-                                                       * same. */
-            local.x_ptr,
-            &local.x_access,
-            local.is_real,
-        );
+        // x_addrs[i] = x_ptr + 8 * i
+        for i in 0..local.x_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                Word([
+                    x_ptr[0].into(),
+                    x_ptr[1].into(),
+                    x_ptr[2].into(),
+                    CB::Expr::ZERO,
+                ]),
+                Word::from(8 * i as u64),
+                local.x_addrs[i],
+                local.is_real.into(),
+            );
+        }
+
+        // y_addrs[i] = y_ptr + 8 * i
+        for i in 0..local.y_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                Word([
+                    y_ptr[0].into(),
+                    y_ptr[1].into(),
+                    y_ptr[2].into(),
+                    CB::Expr::ZERO,
+                ]),
+                Word::from(8 * i as u64),
+                local.y_addrs[i],
+                local.is_real.into(),
+            );
+        }
+
+        for (access, addr) in local.y_access.iter().zip(local.y_addrs.iter()) {
+            builder.eval_memory_access(
+                local.chunk,
+                local.clk,
+                addr.value.map(Into::into),
+                &access.inner,
+                local.is_real,
+            );
+        }
+
+        // We write x at clk+1 since x, y could be the same.
+        for (i, (access, addr)) in local.x_access.iter().zip(local.x_addrs.iter()).enumerate() {
+            builder.eval_memory_access(
+                local.chunk,
+                local.clk + CB::F::ONE,
+                addr.value.map(Into::into),
+                &access.inner,
+                local.is_real,
+            );
+            let do_check: CB::Expr = local.is_real.into();
+            for (v, w) in access.inner.value().0.iter().zip(result_words[i].0.iter()) {
+                builder
+                    .when(do_check.clone())
+                    .inner
+                    .assert_eq((*v).into(), w.clone());
+            }
+        }
 
         let syscall_id_felt = match P::FIELD_TYPE {
             FieldType::Bn254 => CB::F::from_canonical_u32(SyscallCode::BN254_FP2_MUL.syscall_id()),
@@ -392,8 +535,8 @@ where
         builder.looked_syscall(
             local.clk,
             syscall_id_felt,
-            local.x_ptr,
-            local.y_ptr,
+            x_ptr.map(Into::into),
+            y_ptr.map(Into::into),
             local.is_real,
         );
     }

@@ -1,4 +1,6 @@
 use super::{InitialProverSetup, MachineProver};
+#[cfg(feature = "aot-emulator")]
+use crate::emulator::{emulator::AotMetaEmulator, opts::SnapshotMainMode};
 use crate::{
     chips::{
         chips::riscv_poseidon2::FieldSpecificPoseidon2Chip,
@@ -17,6 +19,7 @@ use crate::{
             record::EmulationRecord,
             state::RiscvEmulationState,
         },
+        snapshot::SnapshotEmulator,
         stdin::EmulatorStdin,
     },
     instances::{
@@ -328,7 +331,9 @@ where
     }
 
     /// Emulate and collect RISCOF signatures from memory between the given addresses
-    pub fn test_emulator(&self, begin: u32, end: u32) -> Vec<u32> {
+    /// Note: Accepts u64 for RV64 compatibility, but truncates to u32 internally
+    /// TODO: Implement full RV64 support
+    pub fn test_emulator(&self, begin: u64, end: u64) -> Vec<u64> {
         use crate::emulator::riscv::riscv_emulator::RiscvEmulator;
 
         let mut emulator =
@@ -395,7 +400,9 @@ where
         shape_config: Option<Self::ShapeConfig>,
     ) -> Self {
         let (config, elf) = input;
-        let mut program = Compiler::new(SourceType::RISCV, elf).compile();
+        let mut program = Compiler::new(SourceType::RISCV, elf)
+            .expect("failed to parse RISC-V ELF")
+            .compile();
 
         if vk_verification_enabled() {
             if let Some(shape_config) = shape_config.clone() {
@@ -466,6 +473,50 @@ pub struct Bucket {
     pub(crate) finished: bool,
 }
 
+fn run_snapshot_main_loop<E: SnapshotEmulator>(
+    emu: &mut E,
+    snap_tx: &crossbeam::channel::Sender<(usize, RiscvEmulationState, bool, u64)>,
+    emu_result: &mut Result<(), EmulationError>,
+    total_cycles: &mut u64,
+    output_pv_stream: &mut Vec<u8>,
+) {
+    let mut batch_idx = 0;
+    loop {
+        let t_batch_start = Instant::now();
+        let (snapshot, report) = match emu.next_state_batch() {
+            Ok(res) => res,
+            Err(err) => {
+                *emu_result = Err(err);
+                break;
+            }
+        };
+        let done = report.done;
+        let batch_dur = t_batch_start.elapsed();
+
+        let t_send_start = Instant::now();
+        let emu_cycles = emu.cycles();
+        snap_tx
+            .send((batch_idx, snapshot, done, emu_cycles))
+            .unwrap();
+        let send_dur = t_send_start.elapsed();
+
+        info!(
+            %batch_idx,
+            cycles = emu_cycles,
+            emulate_ms = batch_dur.as_secs_f64() * 1e3,
+            send_ms    = send_dur.as_secs_f64() * 1e3,
+            "batch finished"
+        );
+
+        if done {
+            *total_cycles = emu_cycles;
+            *output_pv_stream = emu.get_pv_stream();
+            break;
+        }
+        batch_idx += 1;
+    }
+}
+
 pub fn emulate_snapshot_pipeline<SC, C, F>(
     witness: &ProvingWitness<SC, C, Vec<u8>>,
     handle_record: F,
@@ -488,7 +539,7 @@ where
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(1);
-    println!("Emulator snapshot worker threads: {}", num_threads);
+    info!("Emulator snapshot worker threads: {}", num_threads);
 
     let (snap_tx, snap_rx) = bounded::<(usize, RiscvEmulationState, bool, u64)>(256);
     let (snapshot_msg_tx, snapshot_msg_rx) = unbounded::<Msg>();
@@ -561,49 +612,36 @@ where
         // snapshot main thread
         s.spawn({
             || {
-                let mut emu = MetaEmulator::setup_riscv(witness, None);
-                // disable cost estimation if it is enabled on the snapshotter, only need it for the trace generator
-                if let Some(e) = &mut emu.emulator {
-                    e.opts.cost_estimator = false;
-                }
                 let t_snapshot_main = Instant::now();
-                let mut batch_idx = 0;
-                loop {
-                    let t_batch_start = Instant::now();
-                    let (snapshot, report) = match emu.next_state_batch(true, &mut |_| {}) {
-                        Ok(res) => res,
-                        Err(err) => {
-                            emu_result = Err(err);
-                            break;
-                        }
-                    };
-                    let done = report.done;
-                    let batch_dur = t_batch_start.elapsed();
 
-                    let t_send_start = Instant::now();
-                    snap_tx
-                        .send((batch_idx, snapshot, done, emu.cycles()))
-                        .unwrap();
-                    let send_dur = t_send_start.elapsed();
+                let run_interp = |emu_result: &mut _, total_cycles: &mut _, pv_stream: &mut _| {
+                    let mut emu = MetaEmulator::setup_riscv(witness, None);
+                    emu.set_cost_estimator(false);
+                    run_snapshot_main_loop(&mut emu, &snap_tx, emu_result, total_cycles, pv_stream);
+                };
 
-                    info!(
-                        %batch_idx,
-                        cycles = emu.cycles(),
-                        emulate_ms = batch_dur.as_secs_f64() * 1e3,
-                        send_ms    = send_dur.as_secs_f64() * 1e3,
-                        "batch finished"
-                    );
-
-                    if done {
-                        total_cycles = emu.cycles();
-                        pv_stream = emu.get_pv_stream();
-                        // cycles_for_snapshot.store(emu.cycles(), Ordering::Relaxed);
-                        break;
+                #[cfg(feature = "aot-emulator")]
+                match witness.opts.expect("witness.opts not set").snapshot_main {
+                    SnapshotMainMode::Aot => {
+                        info!("snapshot main mode: AOT");
+                        let mut emu = AotMetaEmulator::<SC, C>::setup_riscv(witness);
+                        run_snapshot_main_loop(
+                            &mut emu,
+                            &snap_tx,
+                            &mut emu_result,
+                            &mut total_cycles,
+                            &mut pv_stream,
+                        );
                     }
-                    batch_idx += 1;
+                    SnapshotMainMode::Interpreter => {
+                        run_interp(&mut emu_result, &mut total_cycles, &mut pv_stream);
+                    }
                 }
+                #[cfg(not(feature = "aot-emulator"))]
+                run_interp(&mut emu_result, &mut total_cycles, &mut pv_stream);
+
                 drop(snap_tx);
-                println!(
+                info!(
                     "[Thread Snapshot] Done in {:.3}s",
                     t_snapshot_main.elapsed().as_secs_f64()
                 );
@@ -618,10 +656,16 @@ where
             let snapshot_msg_tx = snapshot_msg_tx.clone();
             let shared_ds = shared_ds.clone();
 
-            while let Ok((batch_idx, snapshot, done, _global_clk)) = snap_rx.recv() {
+            while let Ok((batch_idx, snapshot, done, global_clk)) = snap_rx.recv() {
                 let t_recover_and_emu = Instant::now();
-                let mut emu =
-                    MetaEmulator::recover_riscv(witness, snapshot, None, shared_ds.clone());
+                let mut emu = MetaEmulator::recover_riscv(
+                    witness,
+                    snapshot,
+                    None,
+                    shared_ds.clone(),
+                    global_clk,
+                );
+                let t_record_batch = Instant::now();
                 let report = emu.next_record_batch(&mut |rec| {
                     snapshot_msg_tx
                         .send(Msg::Record {
@@ -631,6 +675,11 @@ where
                         })
                         .unwrap();
                 });
+                let record_batch_ms = t_record_batch.elapsed().as_secs_f64() * 1000.0;
+                info!(
+                    target = "bench",
+                    "[bench][emulator-{tid}](chunk-{batch_idx}) emulator: running={record_batch_ms:.3} ms"
+                );
                 {
                     // thread safe append reports
                     let mut lock = reports.lock().expect("ok");

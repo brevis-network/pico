@@ -6,7 +6,11 @@ use crate::{
     },
     compiler::riscv::{instruction::Instruction, opcode::Opcode},
     emulator::riscv::{
-        emulator::EmulationError, record::MemoryAccessRecord, syscalls::SyscallCode,
+        emulator::EmulationError,
+        event_types::{RvAddr, RvChunk, RvClk, RvValue},
+        record::MemoryAccessRecord,
+        state::RuntimeRegisterRecord,
+        syscalls::SyscallCode,
     },
 };
 use hashbrown::HashMap;
@@ -63,17 +67,17 @@ impl RiscvEmulatorMode {
     #[allow(clippy::too_many_arguments)]
     pub fn emit_cpu(
         &self,
-        chunk: u32,
-        clk: u32,
-        pc: u32,
-        next_pc: u32,
+        chunk: RvChunk,
+        clk: RvClk,
+        pc: RvAddr,
+        next_pc: RvAddr,
         exit_code: u32,
-        a: u32,
-        b: u32,
-        c: u32,
+        a: RvValue,
+        b: RvValue,
+        c: RvValue,
         instruction: Instruction,
         memory_record: MemoryAccessRecord,
-        memory_store_value: Option<u32>,
+        memory_store_value: Option<RvValue>,
         events: &mut Vec<CpuEvent>,
         mem_read_write: &mut Vec<usize>,
     ) {
@@ -101,23 +105,19 @@ impl RiscvEmulatorMode {
     }
 
     /// Emit a ALU event.
+    #[allow(clippy::too_many_arguments)]
     pub fn emit_alu(
         &self,
-        clk: u32,
-        a: u32,
-        b: u32,
-        c: u32,
+        clk: RvClk,
+        a: RvValue,
+        b: RvValue,
+        c: RvValue,
         opcode: Opcode,
+        is_imm: bool,
         events: &mut Vec<AluEvent>,
     ) {
         if let Self::Trace = self {
-            let event = AluEvent {
-                clk,
-                opcode,
-                a,
-                b,
-                c,
-            };
+            let event = AluEvent::new(clk, opcode, a, b, c, is_imm);
             events.push(event);
         }
     }
@@ -125,10 +125,10 @@ impl RiscvEmulatorMode {
     /// Add a memory local event.
     pub fn add_memory_local_event(
         &self,
-        addr: u32,
+        addr: u64,
         record: MemoryRecord,
         prev_record: MemoryRecord,
-        events: &mut HashMap<u32, MemoryLocalEvent>,
+        events: &mut HashMap<u64, MemoryLocalEvent>,
     ) {
         // Self::Simple matching only for syscall emulate in simple mode
         if matches!(self, Self::Trace | Self::Simple) {
@@ -151,7 +151,7 @@ impl RiscvEmulatorMode {
     /// Since the previous mode could be either `Trace` or `Simple`, both cases must be handled here.
     pub fn copy_local_memory_events(
         &self,
-        from: &mut HashMap<u32, MemoryLocalEvent>,
+        from: &mut HashMap<u64, MemoryLocalEvent>,
         to: &mut Vec<MemoryLocalEvent>,
     ) {
         if matches!(self, Self::Trace | Self::Simple) {
@@ -186,9 +186,23 @@ impl RiscvEmulatorMode {
     }
 
     /// Add an unconstrained memory record.
-    pub fn add_unconstrained_memory_record(&mut self, addr: u32, record: Option<&MemoryRecord>) {
+    pub fn add_unconstrained_memory_record(&mut self, addr: RvAddr, record: Option<&MemoryRecord>) {
         if let Self::Unconstrained(state) = self {
             state.memory_diff.entry(addr).or_insert(record.copied());
+        }
+    }
+
+    /// Add an unconstrained register record.
+    pub fn add_unconstrained_register_record(
+        &mut self,
+        register: u8,
+        record: Option<&RuntimeRegisterRecord>,
+    ) {
+        if let Self::Unconstrained(state) = self {
+            state
+                .register_diff
+                .entry(register)
+                .or_insert(record.copied());
         }
     }
 

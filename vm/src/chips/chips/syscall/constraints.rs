@@ -3,7 +3,7 @@ use crate::{
         columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS,
     },
     machine::{
-        builder::{ChipBuilder, ChipLookupBuilder},
+        builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
@@ -24,7 +24,12 @@ where
         // ensure is_real is boolean
         builder.assert_bool(local.is_real);
 
-        // dummy constraints to normalize degree
+        // Constrain syscall_id ∈ [0, 255] (u8 range).
+        builder.slice_range_check_u8(&[local.syscall_id.into()], local.is_real);
+        // Constrain arg1[0] ∈ [0, 65535] (u16 range).
+        builder.slice_range_check_u16(&[local.arg1[0].into()], local.is_real);
+
+        // Degree-3 padding constraint for AIR quotient polynomial degree alignment.
         builder.assert_eq(
             local.is_real * local.is_real * local.is_real,
             local.is_real * local.is_real * local.is_real,
@@ -32,27 +37,27 @@ where
 
         match self.chunk_kind {
             SyscallChunkKind::Riscv => {
-                builder.looked_syscall(
-                    local.clk,
-                    local.syscall_id,
-                    local.arg1,
-                    local.arg2,
-                    local.is_real,
-                );
+                // arg1 and arg2 are now Addr<T> = [T; 3]
+                let arg1: [_; 3] = [local.arg1[0], local.arg1[1], local.arg1[2]];
+                let arg2: [_; 3] = [local.arg2[0], local.arg2[1], local.arg2[2]];
+                builder.looked_syscall(local.clk, local.syscall_id, arg1, arg2, local.is_real);
 
                 // Send the "send interaction" to the global table.
+                // Format: [msg[0..7], is_send, is_receive, kind] — 11 elements matching GlobalChip.
                 builder.looking(SymbolicLookup::new(
                     vec![
-                        local.chunk.into(),
                         local.clk.into(),
-                        local.syscall_id.into(),
-                        local.arg1.into(),
-                        local.arg2.into(),
-                        CB::Expr::ZERO,
-                        CB::Expr::ZERO,
-                        CB::Expr::ONE,
-                        CB::Expr::ZERO,
-                        CB::Expr::from_canonical_u8(LookupType::Syscall as u8),
+                        local.syscall_id.into()
+                            + local.arg1[0].into() * CB::Expr::from_canonical_u32(1 << 8),
+                        local.arg1[1].into(),
+                        local.arg1[2].into(),
+                        local.arg2[0].into(),
+                        local.arg2[1].into(),
+                        local.arg2[2].into(),
+                        CB::Expr::ZERO, // message[7] padding (Pico uses single clk)
+                        CB::Expr::ONE,  // is_send = 1
+                        CB::Expr::ZERO, // is_receive = 0
+                        CB::Expr::from_canonical_u8(LookupType::Syscall as u8), // kind
                     ],
                     local.is_real.into(),
                     LookupType::Global,
@@ -60,27 +65,27 @@ where
                 ));
             }
             SyscallChunkKind::Precompile => {
-                builder.looking_syscall(
-                    local.clk,
-                    local.syscall_id,
-                    local.arg1,
-                    local.arg2,
-                    local.is_real,
-                );
+                // arg1 and arg2 are now Addr<T> = [T; 3], pass as arrays
+                let arg1: [_; 3] = [local.arg1[0], local.arg1[1], local.arg1[2]];
+                let arg2: [_; 3] = [local.arg2[0], local.arg2[1], local.arg2[2]];
+                builder.looking_syscall(local.clk, local.syscall_id, arg1, arg2, local.is_real);
 
                 // Send the "receive interaction" to the global table.
+                // Format: [msg[0..7], is_send, is_receive, kind] — 11 elements matching GlobalChip.
                 builder.looking(SymbolicLookup::new(
                     vec![
-                        local.chunk.into(),
                         local.clk.into(),
-                        local.syscall_id.into(),
-                        local.arg1.into(),
-                        local.arg2.into(),
-                        CB::Expr::ZERO,
-                        CB::Expr::ZERO,
-                        CB::Expr::ZERO,
-                        CB::Expr::ONE,
-                        CB::Expr::from_canonical_u8(LookupType::Syscall as u8),
+                        local.syscall_id.into()
+                            + local.arg1[0].into() * CB::Expr::from_canonical_u32(1 << 8),
+                        local.arg1[1].into(),
+                        local.arg1[2].into(),
+                        local.arg2[0].into(),
+                        local.arg2[1].into(),
+                        local.arg2[2].into(),
+                        CB::Expr::ZERO, // message[7] padding
+                        CB::Expr::ZERO, // is_send = 0
+                        CB::Expr::ONE,  // is_receive = 1
+                        CB::Expr::from_canonical_u8(LookupType::Syscall as u8), // kind
                     ],
                     local.is_real.into(),
                     LookupType::Global,

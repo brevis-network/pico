@@ -5,9 +5,12 @@ use std::marker::PhantomData;
 
 use crate::{
     chips::gadgets::field::field_op::FieldOperation,
-    emulator::riscv::syscalls::{
-        precompiles::{FpEvent, PrecompileEvent},
-        Syscall, SyscallCode, SyscallContext,
+    emulator::riscv::{
+        event_types::RvValue,
+        syscalls::{
+            precompiles::{FpEvent, PrecompileEvent},
+            Syscall, SyscallCode, SyscallContext,
+        },
     },
 };
 
@@ -30,21 +33,73 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
         &self,
         rt: &mut SyscallContext,
         syscall_code: SyscallCode,
-        x_ptr: u32,
-        y_ptr: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
+        let x_ptr = arg1;
+        let y_ptr = arg2;
         let clk = rt.clk;
         assert!(x_ptr.is_multiple_of(4), "x_ptr is unaligned");
         assert!(y_ptr.is_multiple_of(4), "y_ptr is unaligned");
 
-        let num_words = <P as NumWords>::WordsFieldElement::USIZE;
+        // WordsFieldElement is now the u64 dword count.
+        let num_u64_words = <P as NumWords>::WordsFieldElement::USIZE;
+        let num_memory_words = match P::FIELD_TYPE {
+            FieldType::Secp256k1 => {
+                SyscallContext::assert_dword_aligned_precompile(x_ptr, "fp x_ptr");
+                SyscallContext::assert_dword_aligned_precompile(y_ptr, "fp y_ptr");
+                num_u64_words
+            }
+            // BN/BLS field elements use packed 64-bit dwords in guest memory.
+            FieldType::Bn254 | FieldType::Bls381 => {
+                SyscallContext::assert_dword_aligned_precompile(x_ptr, "fp x_ptr");
+                SyscallContext::assert_dword_aligned_precompile(y_ptr, "fp y_ptr");
+                num_u64_words
+            }
+        };
 
-        let x = rt.slice_unsafe(x_ptr, num_words);
-        let (y_memory_records, y) = rt.mr_slice(y_ptr, num_words);
+        let x_vals = match P::FIELD_TYPE {
+            FieldType::Secp256k1 => rt.dword_slice_unsafe(x_ptr, num_u64_words),
+            FieldType::Bn254 | FieldType::Bls381 => rt.dword_slice_unsafe(x_ptr, num_memory_words),
+        };
+        let (a, b, y_vals, y_memory_records) = match P::FIELD_TYPE {
+            FieldType::Secp256k1 => {
+                let (y_memory_records, y_vals) = rt.mr_dword_slice(y_ptr, num_u64_words);
+                let a = BigUint::from_bytes_le(
+                    &x_vals
+                        .iter()
+                        .flat_map(|word| word.to_le_bytes())
+                        .collect::<Vec<u8>>(),
+                );
+                let b = BigUint::from_bytes_le(
+                    &y_vals
+                        .iter()
+                        .flat_map(|word| word.to_le_bytes())
+                        .collect::<Vec<u8>>(),
+                );
+                (a, b, y_vals, y_memory_records)
+            }
+            FieldType::Bn254 | FieldType::Bls381 => {
+                let (y_memory_records, y_vals) = rt.mr_dword_slice(y_ptr, num_memory_words);
+                let a = BigUint::from_bytes_le(
+                    &x_vals
+                        .iter()
+                        .flat_map(|word| word.to_le_bytes())
+                        .collect::<Vec<u8>>(),
+                );
+                let b = BigUint::from_bytes_le(
+                    &y_vals
+                        .iter()
+                        .flat_map(|word| word.to_le_bytes())
+                        .collect::<Vec<u8>>(),
+                );
+                (a, b, y_vals, y_memory_records)
+            }
+        };
 
         let modulus = &BigUint::from_bytes_le(P::MODULUS);
-        let a = BigUint::from_slice(&x) % modulus;
-        let b = BigUint::from_slice(&y) % modulus;
+        let a = a % modulus;
+        let b = b % modulus;
 
         let result = match self.op {
             FieldOperation::Add => (a + b) % modulus,
@@ -52,15 +107,24 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
             FieldOperation::Mul => (a * b) % modulus,
             _ => panic!("Unsupported operation"),
         };
-        let mut result = result.to_u32_digits();
-        result.resize(num_words, 0);
-
-        rt.clk += 1;
-        let x_memory_records = rt.mw_slice(x_ptr, &result);
+        let x_memory_records = match P::FIELD_TYPE {
+            FieldType::Secp256k1 => {
+                let mut result_u64 = result.to_u64_digits();
+                result_u64.resize(num_u64_words, 0);
+                rt.clk += 1;
+                rt.mw_dword_slice(x_ptr, &result_u64)
+            }
+            FieldType::Bn254 | FieldType::Bls381 => {
+                let mut result = result.to_u64_digits();
+                result.resize(num_memory_words, 0);
+                rt.clk += 1;
+                rt.mw_dword_slice(x_ptr, &result)
+            }
+        };
 
         let chunk = rt.current_chunk();
-        let x = x.into_boxed_slice();
-        let y = y.into_boxed_slice();
+        let x = x_vals.into_boxed_slice();
+        let y = y_vals.into_boxed_slice();
         let x_memory_records = x_memory_records.into_boxed_slice();
         let y_memory_records = y_memory_records.into_boxed_slice();
         let op = self.op;
@@ -87,9 +151,9 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event =
-                    rt.rt
-                        .syscall_event(clk, syscall_code.syscall_id(), x_ptr, y_ptr);
+                let syscall_event = rt
+                    .rt
+                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,
@@ -105,9 +169,9 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event =
-                    rt.rt
-                        .syscall_event(clk, syscall_code.syscall_id(), x_ptr, y_ptr);
+                let syscall_event = rt
+                    .rt
+                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,
@@ -123,9 +187,9 @@ impl<P: FpOpField> Syscall for FpSyscall<P> {
                     _ => unreachable!(),
                 };
 
-                let syscall_event =
-                    rt.rt
-                        .syscall_event(clk, syscall_code.syscall_id(), x_ptr, y_ptr);
+                let syscall_event = rt
+                    .rt
+                    .syscall_event(clk, syscall_code.syscall_id(), arg1, arg2);
                 rt.record_mut().add_precompile_event(
                     syscall_code_key,
                     syscall_event,

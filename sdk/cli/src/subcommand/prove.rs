@@ -94,7 +94,7 @@ impl ProveCmd {
                     .parent()
                     .unwrap()
                     .join(DEFAULT_ELF_DIR)
-                    .join("riscv32im-pico-zkvm-elf")
+                    .join("riscv64im-pico-zkvm-elf")
             }
         };
         let elf: Vec<u8> = std::fs::read(elf_path)?;

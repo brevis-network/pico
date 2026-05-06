@@ -24,8 +24,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub struct BaseProvingKey<SC: StarkGenericConfig> {
     /// The commitment to the named traces.
     pub commit: Com<SC>,
-    /// start pc of program
-    pub pc_start: SC::Val,
+    /// start pc of program as 3×u16 limbs
+    pub pc_start: [SC::Val; 3],
     /// named preprocessed traces.
     pub preprocessed_trace: Arc<[RowMajorMatrix<SC::Val>]>,
     /// The pcs data for the preprocessed traces.
@@ -59,7 +59,9 @@ impl<SC: StarkGenericConfig> BaseProvingKey<SC> {
     /// Observes the values of the proving key into the challenger.
     pub fn observed_by(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
-        challenger.observe(self.pc_start);
+        for &pc in &self.pc_start {
+            challenger.observe(pc);
+        }
         challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
         challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
         for _ in 0..7 {
@@ -74,8 +76,8 @@ impl<SC: StarkGenericConfig> BaseProvingKey<SC> {
 pub struct BaseVerifyingKey<SC: StarkGenericConfig> {
     /// The commitment to the preprocessed traces.
     pub commit: Com<SC>,
-    /// start pc of program
-    pub pc_start: SC::Val,
+    /// start pc of program as 3×u16 limbs
+    pub pc_start: [SC::Val; 3],
     /// The preprocessed information.
     pub preprocessed_info: Arc<[(String, Dom<SC>, Dimensions)]>,
     /// the index of for chips, chip name for key
@@ -88,7 +90,9 @@ impl<SC: StarkGenericConfig> BaseVerifyingKey<SC> {
     /// Observes the values of the verifying key into the challenger.
     pub fn observed_by(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
-        challenger.observe(self.pc_start);
+        for &pc in &self.pc_start {
+            challenger.observe(pc);
+        }
         challenger.observe_slice(&self.initial_global_cumulative_sum.0.x.0);
         challenger.observe_slice(&self.initial_global_cumulative_sum.0.y.0);
         for _ in 0..7 {
@@ -139,10 +143,10 @@ where
 {
     fn hash_field(&self) -> [BabyBear; DIGEST_SIZE] {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 1 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 3 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit.as_ref());
-        inputs.push(self.pc_start);
+        inputs.extend(self.pc_start);
         for domain in prep_domains {
             inputs.push(BabyBear::from_canonical_usize(domain.log_n));
             let size = 1 << domain.log_n;
@@ -163,10 +167,10 @@ where
 {
     fn hash_field(&self) -> [KoalaBear; DIGEST_SIZE] {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 1 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 3 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit.as_ref());
-        inputs.push(self.pc_start);
+        inputs.extend(self.pc_start);
         for domain in prep_domains {
             inputs.push(KoalaBear::from_canonical_usize(domain.log_n));
             let size = 1 << domain.log_n;
@@ -187,10 +191,10 @@ where
 {
     fn hash_field(&self) -> [Mersenne31; DIGEST_SIZE] {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 1 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 3 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit.as_ref());
-        inputs.push(self.pc_start);
+        inputs.extend(self.pc_start);
         for domain in prep_domains {
             inputs.push(Mersenne31::from_canonical_usize(domain.log_n));
             inputs.push(Mersenne31::from_canonical_usize(domain.size()));

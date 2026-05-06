@@ -11,7 +11,7 @@ pub enum EmulationError {
 
     /// The emulation failed with an invalid memory access.
     #[error("invalid memory access for opcode {0} and address {1}")]
-    InvalidMemoryAccess(Opcode, u32),
+    InvalidMemoryAccess(Opcode, u64),
 
     /// The emulation failed with an unimplemented syscall.
     #[error("unimplemented syscall {0}")]
@@ -36,4 +36,10 @@ pub enum EmulationError {
     /// The emulation ended in unconstrained mode
     #[error("ended in unconstrained mode")]
     UnconstrainedEnd,
+
+    /// The AOT runtime or adapter returned a failure. The payload is the
+    /// adapter-provided message; callers should propagate or log it rather
+    /// than collapse to a generic variant.
+    #[error("AOT emulation error: {0}")]
+    Aot(String),
 }

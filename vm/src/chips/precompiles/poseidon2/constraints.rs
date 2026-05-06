@@ -51,31 +51,52 @@ where
                 .collect::<Vec<CB::Expr>>(),
         );
 
+        // TODO: addr
         // Read input_memory.
         builder.eval_memory_access_slice(
             local.chunk,
             local.clk.into(),
-            local.input_memory_ptr,
+            [
+                local.input_memory_ptr.into(),
+                CB::Expr::ZERO,
+                CB::Expr::ZERO,
+            ],
             &local.input_memory,
+            4,
             local.value_cols.is_real,
         );
 
+        // TODO: addr
         // Write output_memory.
         builder.eval_memory_access_slice(
             local.chunk,
             local.clk.into() + CB::Expr::ONE,
-            local.output_memory_ptr,
+            [
+                local.output_memory_ptr.into(),
+                CB::Expr::ZERO,
+                CB::Expr::ZERO,
+            ],
             &local.output_memory,
+            4,
             local.value_cols.is_real,
         );
 
         let syscall_code = SyscallCode::POSEIDON2_PERMUTE;
 
+        // TODO: Need to convert ptr columns to Addr type to support full 48-bit address representation
         builder.looked_syscall(
             local.clk,
             CB::F::from_canonical_u32(syscall_code.syscall_id()),
-            local.input_memory_ptr,
-            local.output_memory_ptr,
+            [
+                local.input_memory_ptr,
+                local.input_memory_ptr,
+                local.input_memory_ptr,
+            ],
+            [
+                local.output_memory_ptr,
+                local.output_memory_ptr,
+                local.output_memory_ptr,
+            ],
             local.value_cols.is_real,
         );
 

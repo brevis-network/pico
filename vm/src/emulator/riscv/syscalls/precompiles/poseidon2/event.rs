@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::chips::chips::riscv_memory::event::{
-    MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord,
+use crate::{
+    chips::chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
+    emulator::riscv::event_types::{RvAddr, RvChunk, RvClk},
 };
 
 /// Poseidon2 Permutation Event.
@@ -10,15 +11,15 @@ use crate::chips::chips::riscv_memory::event::{
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Poseidon2PermuteEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// State
     pub state_values: Vec<u32>,
     /// The pointer to the memory.
-    pub input_memory_ptr: u32,
+    pub input_memory_ptr: RvAddr,
     /// The pointer to the memory.
-    pub output_memory_ptr: u32,
+    pub output_memory_ptr: RvAddr,
     /// The memory records for the pre-state.
     pub state_read_records: Vec<MemoryReadRecord>,
     /// The memory records for the post-state.

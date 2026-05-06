@@ -1,24 +1,33 @@
 pub trait AffinePoint<const N: usize>: Clone + Sized {
     /// The generator.
-    const GENERATOR: [u32; N];
+    #[deprecated = "This const will have the `Self` type in the next major version."]
+    const GENERATOR: [u64; N];
+
+    const GENERATOR_T: Self;
 
     /// Creates a new [`AffinePoint`] from the given limbs.
-    fn new(limbs: [u32; N]) -> Self;
+    fn new(limbs: [u64; N]) -> Self;
+
+    /// Creates a new [`AffinePoint`] that corresponds to the identity point.
+    fn identity() -> Self;
 
     /// Returns a reference to the limbs.
-    fn limbs_ref(&self) -> &[u32; N];
+    fn limbs_ref(&self) -> &[u64; N];
 
-    /// Returns a mutable reference to the limbs. If the point is the infinity point, this will panic.
-    fn limbs_mut(&mut self) -> &mut [u32; N];
+    /// Returns a mutable reference to the limbs. If the point is the infinity point, this will
+    /// panic.
+    fn limbs_mut(&mut self) -> &mut [u64; N];
+
+    fn is_identity(&self) -> bool;
 
     /// Creates a new [`AffinePoint`] from the given x and y coordinates.
     ///
     /// The bytes are the concatenated little endian representations of the coordinates.
     fn from(x: &[u8], y: &[u8]) -> Self {
-        debug_assert!(x.len() == N * 2);
-        debug_assert!(y.len() == N * 2);
+        debug_assert!(x.len() == N * 4);
+        debug_assert!(y.len() == N * 4);
 
-        let mut limbs = [0u32; N];
+        let mut limbs = [0u64; N];
         let x = bytes_to_words_le(x);
         let y = bytes_to_words_le(y);
 
@@ -40,7 +49,7 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
     /// Creates a new [`AffinePoint`] from the given bytes in big endian.
     fn to_le_bytes(&self) -> Vec<u8> {
         let le_bytes = words_to_bytes_le(self.limbs_ref());
-        debug_assert!(le_bytes.len() == N * 4);
+        debug_assert!(le_bytes.len() == N * 8);
         le_bytes
     }
 
@@ -48,7 +57,8 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
     fn add_assign(&mut self, other: &Self);
 
     /// Adds the given [`AffinePoint`] to `self`. Can be optionally overridden to use a different
-    /// implementation of addition in multi-scalar multiplication, which is used in secp256k1 recovery.
+    /// implementation of addition in multi-scalar multiplication, which is used in secp256k1
+    /// recovery.
     fn complete_add_assign(&mut self, other: &Self) {
         self.add_assign(other);
     }
@@ -57,32 +67,22 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
     fn double(&mut self);
 
     /// Multiplies `self` by the given scalar.
-    fn mul_assign(&mut self, scalar: &[u32]) -> Result<(), MulAssignError> {
-        debug_assert!(scalar.len() == N / 2);
+    fn mul_assign(&mut self, scalar: &[u64]) {
+        debug_assert_eq!(scalar.len(), N / 2);
 
-        let mut res: Option<Self> = None;
+        let mut res: Self = Self::identity();
         let mut temp = self.clone();
 
-        let scalar_is_zero = scalar.iter().all(|&words| words == 0);
-        if scalar_is_zero {
-            return Err(MulAssignError::ScalarIsZero);
-        }
-
         for &words in scalar.iter() {
-            for i in 0..32 {
+            for i in 0..u64::BITS {
                 if (words >> i) & 1 == 1 {
-                    match res.as_mut() {
-                        Some(res) => res.add_assign(&temp),
-                        None => res = Some(temp.clone()),
-                    };
+                    res.complete_add_assign(&temp);
                 }
-
                 temp.double();
             }
         }
 
-        *self = res.unwrap();
-        Ok(())
+        *self = res;
     }
 
     /// Performs multi-scalar multiplication (MSM) on slices of bit vectors and points. Note:
@@ -92,28 +92,20 @@ pub trait AffinePoint<const N: usize>: Clone + Sized {
         a: Self,
         b_bits_le: &[bool],
         b: Self,
-    ) -> Option<Self> {
+    ) -> Self {
         // The length of the bit vectors must be the same.
         debug_assert!(a_bits_le.len() == b_bits_le.len());
 
-        let mut res: Option<Self> = None;
+        let mut res: Self = Self::identity();
         let mut temp_a = a.clone();
         let mut temp_b = b.clone();
         for (a_bit, b_bit) in a_bits_le.iter().zip(b_bits_le.iter()) {
             if *a_bit {
-                match res.as_mut() {
-                    Some(res) => res.complete_add_assign(&temp_a),
-                    None => res = Some(temp_a.clone()),
-                };
+                res.complete_add_assign(&temp_a);
             }
-
             if *b_bit {
-                match res.as_mut() {
-                    Some(res) => res.complete_add_assign(&temp_b),
-                    None => res = Some(temp_b.clone()),
-                };
+                res.complete_add_assign(&temp_b);
             }
-
             temp_a.double();
             temp_b.double();
         }
@@ -128,26 +120,26 @@ pub enum MulAssignError {
 }
 
 /// Converts a slice of words to a byte array in little endian.
-pub fn words_to_bytes_le(words: &[u32]) -> Vec<u8> {
+pub fn words_to_bytes_le(words: &[u64]) -> Vec<u8> {
     words
         .iter()
-        .flat_map(|word| word.to_le_bytes().to_vec())
+        .flat_map(|word| word.to_le_bytes())
         .collect::<Vec<_>>()
 }
 
 /// Converts a byte array in little endian to a slice of words.
-pub fn bytes_to_words_le(bytes: &[u8]) -> Vec<u32> {
+pub fn bytes_to_words_le(bytes: &[u8]) -> Vec<u64> {
     bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+        .chunks_exact(8)
+        .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
         .collect::<Vec<_>>()
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 /// A representation of a point on a Weierstrass curve.
 pub enum WeierstrassPoint<const N: usize> {
     Infinity,
-    Affine([u32; N]),
+    Affine([u64; N]),
 }
 
 /// A trait for affine points on Weierstrass curves.

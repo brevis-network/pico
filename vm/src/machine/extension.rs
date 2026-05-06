@@ -1,5 +1,3 @@
-// TODO: refactor to use p3 BionmialExtensionField
-
 use core::marker::PhantomData;
 use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
@@ -7,7 +5,6 @@ use p3_field::{
 };
 use pico_derive::AlignedBorrow;
 use std::ops::{Add, Div, Mul, Neg, Sub};
-//use typenum::Unsigned;
 
 /// A binomial extension element represented over a generic type `T` which is
 /// mapped into by base field B
@@ -76,7 +73,6 @@ impl<B: Field + BinomiallyExtendable<D>, T: Add + Mul + FieldAlgebra + From<B>, 
 
     fn mul(self, rhs: Self) -> Self::Output {
         let mut result = [T::ZERO; D];
-        //let w = T::from_canonical_u32(B::W::U32);
         let w = T::from(B::W);
 
         for i in 0..D {

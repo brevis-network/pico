@@ -1,6 +1,9 @@
-use crate::chips::{
-    chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
-    gadgets::field::field_op::FieldOperation,
+use crate::{
+    chips::{
+        chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
+        gadgets::field::field_op::FieldOperation,
+    },
+    emulator::riscv::event_types::{RvAddr, RvChunk, RvClk, RvValue},
 };
 use serde::{Deserialize, Serialize};
 
@@ -8,17 +11,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FpEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// The pointer to the x operand.
-    pub x_ptr: u32,
-    /// The x operand.
-    pub x: Box<[u32]>,
+    pub x_ptr: RvAddr,
+    /// The x operand in native guest-memory word form.
+    pub x: Box<[RvValue]>,
     /// The pointer to the y operand.
-    pub y_ptr: u32,
-    /// The y operand.
-    pub y: Box<[u32]>,
+    pub y_ptr: RvAddr,
+    /// The y operand in native guest-memory word form.
+    pub y: Box<[RvValue]>,
     /// The operation to perform.
     pub op: FieldOperation,
     /// The memory records for the x operand.
@@ -33,17 +36,17 @@ pub struct FpEvent {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Fp2AddSubEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// The pointer to the x operand.
-    pub x_ptr: u32,
-    /// The x operand.
-    pub x: Box<[u32]>,
+    pub x_ptr: RvAddr,
+    /// The x operand in native guest-memory dword form.
+    pub x: Box<[RvValue]>,
     /// The pointer to the y operand.
-    pub y_ptr: u32,
-    /// The y operand.
-    pub y: Box<[u32]>,
+    pub y_ptr: RvAddr,
+    /// The y operand in native guest-memory dword form.
+    pub y: Box<[RvValue]>,
     /// The operation to perform.
     pub op: FieldOperation,
     /// The memory records for the x operand.
@@ -58,17 +61,17 @@ pub struct Fp2AddSubEvent {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Fp2MulEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// The pointer to the x operand.
-    pub x_ptr: u32,
-    /// The x operand.
-    pub x: Box<[u32]>,
+    pub x_ptr: RvAddr,
+    /// The x operand in native guest-memory dword form.
+    pub x: Box<[RvValue]>,
     /// The pointer to the y operand.
-    pub y_ptr: u32,
-    /// The y operand.
-    pub y: Box<[u32]>,
+    pub y_ptr: RvAddr,
+    /// The y operand in native guest-memory dword form.
+    pub y: Box<[RvValue]>,
     /// The memory records for the x operand.
     pub x_memory_records: Box<[MemoryWriteRecord]>,
     /// The memory records for the y operand.

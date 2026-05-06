@@ -1,7 +1,9 @@
 use crate::compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register};
 use alloc::sync::Arc;
 use rrs_lib::{
-    instruction_formats::{BType, IType, ITypeCSR, ITypeShamt, JType, RType, SType, UType},
+    instruction_formats::{
+        BType, IType, ITypeCSR, ITypeShamt, ITypeShamtW, JType, RType, SType, UType,
+    },
     process_instruction, InstructionProcessor,
 };
 
@@ -11,9 +13,9 @@ impl Instruction {
     pub const fn from_r_type(opcode: Opcode, dec_insn: &RType) -> Self {
         Self::new(
             opcode,
-            dec_insn.rd as u32,
-            dec_insn.rs1 as u32,
-            dec_insn.rs2 as u32,
+            dec_insn.rd as u8,
+            dec_insn.rs1,
+            dec_insn.rs2,
             false,
             false,
         )
@@ -24,9 +26,9 @@ impl Instruction {
     pub const fn from_i_type(opcode: Opcode, dec_insn: &IType) -> Self {
         Self::new(
             opcode,
-            dec_insn.rd as u32,
-            dec_insn.rs1 as u32,
-            dec_insn.imm as u32,
+            dec_insn.rd as u8,
+            dec_insn.rs1,
+            dec_insn.imm as u64,
             false,
             true,
         )
@@ -37,8 +39,21 @@ impl Instruction {
     pub const fn from_i_type_shamt(opcode: Opcode, dec_insn: &ITypeShamt) -> Self {
         Self::new(
             opcode,
-            dec_insn.rd as u32,
-            dec_insn.rs1 as u32,
+            dec_insn.rd as u8,
+            dec_insn.rs1,
+            dec_insn.shamt,
+            false,
+            true,
+        )
+    }
+
+    /// Create a new [`Instruction`] from an I-type word instruction with a shamt.
+    #[must_use]
+    pub const fn from_i_type_shamt_w(opcode: Opcode, dec_insn: &ITypeShamtW) -> Self {
+        Self::new(
+            opcode,
+            dec_insn.rd as u8,
+            dec_insn.rs1,
             dec_insn.shamt,
             false,
             true,
@@ -50,9 +65,9 @@ impl Instruction {
     pub const fn from_s_type(opcode: Opcode, dec_insn: &SType) -> Self {
         Self::new(
             opcode,
-            dec_insn.rs2 as u32,
-            dec_insn.rs1 as u32,
-            dec_insn.imm as u32,
+            dec_insn.rs2 as u8,
+            dec_insn.rs1,
+            dec_insn.imm as u64,
             false,
             true,
         )
@@ -63,9 +78,9 @@ impl Instruction {
     pub const fn from_b_type(opcode: Opcode, dec_insn: &BType) -> Self {
         Self::new(
             opcode,
-            dec_insn.rs1 as u32,
-            dec_insn.rs2 as u32,
-            dec_insn.imm as u32,
+            dec_insn.rs1 as u8,
+            dec_insn.rs2,
+            dec_insn.imm as u64,
             false,
             true,
         )
@@ -96,19 +111,19 @@ impl Instruction {
     #[must_use]
     pub fn r_type(&self) -> (Register, Register, Register) {
         (
-            Register::from_u32(self.op_a),
-            Register::from_u32(self.op_b),
-            Register::from_u32(self.op_c),
+            Register::from_u8(self.op_a),
+            Register::from_u8(self.op_b as u8),
+            Register::from_u8(self.op_c as u8),
         )
     }
 
     /// Decode the [`Instruction`] in the I-type format.
     #[inline]
     #[must_use]
-    pub fn i_type(&self) -> (Register, Register, u32) {
+    pub fn i_type(&self) -> (Register, Register, u64) {
         (
-            Register::from_u32(self.op_a),
-            Register::from_u32(self.op_b),
+            Register::from_u8(self.op_a),
+            Register::from_u8(self.op_b as u8),
             self.op_c,
         )
     }
@@ -116,10 +131,10 @@ impl Instruction {
     /// Decode the [`Instruction`] in the S-type format.
     #[inline]
     #[must_use]
-    pub fn s_type(&self) -> (Register, Register, u32) {
+    pub fn s_type(&self) -> (Register, Register, u64) {
         (
-            Register::from_u32(self.op_a),
-            Register::from_u32(self.op_b),
+            Register::from_u8(self.op_a),
+            Register::from_u8(self.op_b as u8),
             self.op_c,
         )
     }
@@ -127,10 +142,10 @@ impl Instruction {
     /// Decode the [`Instruction`] in the B-type format.
     #[inline]
     #[must_use]
-    pub fn b_type(&self) -> (Register, Register, u32) {
+    pub fn b_type(&self) -> (Register, Register, u64) {
         (
-            Register::from_u32(self.op_a),
-            Register::from_u32(self.op_b),
+            Register::from_u8(self.op_a),
+            Register::from_u8(self.op_b as u8),
             self.op_c,
         )
     }
@@ -138,15 +153,15 @@ impl Instruction {
     /// Decode the [`Instruction`] in the J-type format.
     #[inline]
     #[must_use]
-    pub fn j_type(&self) -> (Register, u32) {
-        (Register::from_u32(self.op_a), self.op_b)
+    pub fn j_type(&self) -> (Register, u64) {
+        (Register::from_u8(self.op_a), self.op_b)
     }
 
     /// Decode the [`Instruction`] in the U-type format.
     #[inline]
     #[must_use]
-    pub fn u_type(&self) -> (Register, u32) {
-        (Register::from_u32(self.op_a), self.op_b)
+    pub fn u_type(&self) -> (Register, u64) {
+        (Register::from_u8(self.op_a), self.op_b)
     }
 }
 
@@ -291,8 +306,8 @@ impl InstructionProcessor for InstructionTranspiler {
     fn process_jal(&mut self, dec_insn: JType) -> Self::InstructionResult {
         Instruction::new(
             Opcode::JAL,
-            dec_insn.rd as u32,
-            dec_insn.imm as u32,
+            dec_insn.rd as u8,
+            dec_insn.imm as u64,
             0,
             true,
             true,
@@ -302,36 +317,28 @@ impl InstructionProcessor for InstructionTranspiler {
     fn process_jalr(&mut self, dec_insn: IType) -> Self::InstructionResult {
         Instruction::new(
             Opcode::JALR,
-            dec_insn.rd as u32,
-            dec_insn.rs1 as u32,
-            dec_insn.imm as u32,
+            dec_insn.rd as u8,
+            dec_insn.rs1,
+            dec_insn.imm as u64,
             false,
             true,
         )
     }
 
     fn process_lui(&mut self, dec_insn: UType) -> Self::InstructionResult {
-        // LUI instructions are handled in a special way inside the zkVM.
-        //
-        // Notably, LUI instructions are converted to an SLL instruction with `imm_b` and `imm_c`
-        // turned on. Additionally the `op_c` should be set to 12.
-        Instruction::new(
-            Opcode::ADD,
-            dec_insn.rd as u32,
-            0,
-            dec_insn.imm as u32,
-            true,
-            true,
-        )
+        // LUI is encoded as ADD rd, 0, imm (with imm_b and imm_c set). The rrs-pico UType `imm`
+        // field already contains the upper-20-bit value shifted into position (lower 12 bits
+        // zero), so the ADD computes 0 + imm = imm and writes it to rd.
+        Instruction::new(Opcode::ADD, dec_insn.rd as u8, 0, dec_insn.imm, true, true)
     }
 
     /// AUIPC instructions have the third operand set to imm << 12.
     fn process_auipc(&mut self, dec_insn: UType) -> Self::InstructionResult {
         Instruction::new(
             Opcode::AUIPC,
-            dec_insn.rd as u32,
-            dec_insn.imm as u32,
-            dec_insn.imm as u32,
+            dec_insn.rd as u8,
+            dec_insn.imm,
+            dec_insn.imm,
             true,
             true,
         )
@@ -340,9 +347,9 @@ impl InstructionProcessor for InstructionTranspiler {
     fn process_ecall(&mut self) -> Self::InstructionResult {
         Instruction::new(
             Opcode::ECALL,
-            Register::X5 as u32,
-            Register::X10 as u32,
-            Register::X11 as u32,
+            Register::X5 as u8,
+            Register::X10 as u64,
+            Register::X11 as u64,
             false,
             false,
         )
@@ -382,6 +389,76 @@ impl InstructionProcessor for InstructionTranspiler {
 
     fn process_remu(&mut self, dec_insn: RType) -> Self::InstructionResult {
         Instruction::from_r_type(Opcode::REMU, &dec_insn)
+    }
+
+    // RV64I
+    fn process_addw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::ADDW, &dec_insn)
+    }
+
+    fn process_subw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::SUBW, &dec_insn)
+    }
+
+    fn process_sllw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::SLLW, &dec_insn)
+    }
+
+    fn process_srlw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::SRLW, &dec_insn)
+    }
+
+    fn process_sraw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::SRAW, &dec_insn)
+    }
+
+    fn process_addiw(&mut self, dec_insn: IType) -> Self::InstructionResult {
+        Instruction::from_i_type(Opcode::ADDW, &dec_insn)
+    }
+
+    fn process_slliw(&mut self, dec_insn: ITypeShamtW) -> Self::InstructionResult {
+        Instruction::from_i_type_shamt_w(Opcode::SLLW, &dec_insn)
+    }
+
+    fn process_srliw(&mut self, dec_insn: ITypeShamtW) -> Self::InstructionResult {
+        Instruction::from_i_type_shamt_w(Opcode::SRLW, &dec_insn)
+    }
+
+    fn process_sraiw(&mut self, dec_insn: ITypeShamtW) -> Self::InstructionResult {
+        Instruction::from_i_type_shamt_w(Opcode::SRAW, &dec_insn)
+    }
+
+    fn process_lwu(&mut self, dec_insn: IType) -> Self::InstructionResult {
+        Instruction::from_i_type(Opcode::LWU, &dec_insn)
+    }
+
+    fn process_ld(&mut self, dec_insn: IType) -> Self::InstructionResult {
+        Instruction::from_i_type(Opcode::LD, &dec_insn)
+    }
+
+    fn process_sd(&mut self, dec_insn: SType) -> Self::InstructionResult {
+        Instruction::from_s_type(Opcode::SD, &dec_insn)
+    }
+
+    // RV64M
+    fn process_mulw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::MULW, &dec_insn)
+    }
+
+    fn process_divw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::DIVW, &dec_insn)
+    }
+
+    fn process_divuw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::DIVUW, &dec_insn)
+    }
+
+    fn process_remw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::REMW, &dec_insn)
+    }
+
+    fn process_remuw(&mut self, dec_insn: RType) -> Self::InstructionResult {
+        Instruction::from_r_type(Opcode::REMUW, &dec_insn)
     }
 
     fn process_csrrc(&mut self, _: ITypeCSR) -> Self::InstructionResult {
@@ -438,6 +515,9 @@ pub(crate) fn transpile(instructions_u32: &[u32]) -> Arc<[Instruction]> {
     instructions_u32
         .iter()
         .copied()
-        .map(|inst| process_instruction(&mut transpiler, inst).unwrap())
+        .map(|inst| {
+            process_instruction(&mut transpiler, inst)
+                .unwrap_or_else(|| panic!("failed to decode instruction {inst:#010x}"))
+        })
         .collect()
 }

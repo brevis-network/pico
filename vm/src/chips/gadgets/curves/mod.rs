@@ -30,8 +30,7 @@ use num::BigUint;
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::utils::field_params::{FieldParameters, NumWords};
-
-pub const WORD_SIZE: usize = 4;
+use crate::primitives::consts::WORD_SIZE;
 
 pub const NUM_WORDS_FIELD_ELEMENT: usize = 8;
 pub const NUM_BYTES_FIELD_ELEMENT: usize = NUM_WORDS_FIELD_ELEMENT * WORD_SIZE;
@@ -97,19 +96,39 @@ impl<E: EllipticCurveParameters> AffinePoint<E> {
         }
     }
 
+    pub fn from_dwords_le(dwords: &[u64]) -> Self {
+        let half = dwords.len() / 2;
+        let x_bytes: Vec<u8> = dwords[..half]
+            .iter()
+            .flat_map(|n| n.to_le_bytes())
+            .collect();
+        let y_bytes: Vec<u8> = dwords[half..]
+            .iter()
+            .flat_map(|n| n.to_le_bytes())
+            .collect();
+        let x = BigUint::from_bytes_le(&x_bytes);
+        let y = BigUint::from_bytes_le(&y_bytes);
+        Self {
+            x,
+            y,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
     pub fn to_words_le(&self) -> Vec<u32> {
-        let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
-        let num_bytes = num_words * 4;
-        let half_words = num_words / 2;
+        let num_u64_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
+        let num_u32_words = num_u64_words * 2;
+        let half_u32_words = num_u64_words; // each coordinate = num_u64_words u32 words
+        let num_bytes_per_coord = num_u64_words * 4;
 
         let mut x_bytes = self.x.to_bytes_le();
-        x_bytes.resize(num_bytes / 2, 0u8);
+        x_bytes.resize(num_bytes_per_coord, 0u8);
         let mut y_bytes = self.y.to_bytes_le();
-        y_bytes.resize(num_bytes / 2, 0u8);
+        y_bytes.resize(num_bytes_per_coord, 0u8);
 
-        let mut words = vec![0u32; num_words];
+        let mut words = vec![0u32; num_u32_words];
 
-        for i in 0..half_words {
+        for i in 0..half_u32_words {
             let x = u32::from_le_bytes([
                 x_bytes[4 * i],
                 x_bytes[4 * i + 1],
@@ -124,7 +143,7 @@ impl<E: EllipticCurveParameters> AffinePoint<E> {
             ]);
 
             words[i] = x;
-            words[half_words + i] = y;
+            words[half_u32_words + i] = y;
         }
 
         words

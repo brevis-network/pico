@@ -14,43 +14,26 @@ pub struct LtCols<F: Copy> {
 pub const NUM_LT_VALUE_COLS: usize = size_of::<LtValueCols<u8>>();
 
 /// Layout of Lt Value Chip Column
+/// This uses LtSignedGadget which combines:
+/// - LtUnsignedGadget for unsigned comparison
+/// - U16MSBGadget for MSB extraction of operands
 #[derive(AlignedBorrow, Default, Clone, Copy)]
 #[repr(C)]
 pub struct LtValueCols<F: Copy> {
-    /// If the opcode is SLT.
+    /// If the opcode is SLT (signed).
     pub is_slt: F,
-    /// If the opcode is SLTU.
+    /// If the opcode is SLTU (unsigned).
     pub is_slt_u: F,
-    /// The output operand.
+    /// The output operand (result of comparison).
     pub a: Word<F>,
     /// The first input operand.
     pub b: Word<F>,
     /// The second input operand.
     pub c: Word<F>,
-    /// Boolean flag to indicate which byte differs.
-    /// All flags should be zero when b = c, otherwise, at most 1 in the flags.
-    pub byte_flags: [F; 4],
-    /// The masking b[3] & 0x7F.
-    pub b_masked: F,
-    /// The masking c[3] & 0x7F.
-    pub c_masked: F,
-    /// The multiplication msb_b * is_slt.
-    pub bit_b: F,
-    /// The multiplication msb_c * is_slt.
-    pub bit_c: F,
-    /// An inverse of differing byte if c_comp != b_comp.
-    pub not_eq_inv: F,
-    /// The most significant bit of operand b.
-    /// 1: signed 0: unsigned
-    pub msb_b: F,
-    /// The most significant bit of operand c.
-    pub msb_c: F,
-    /// The result of the intermediate SLTU operation `b_comp < c_comp`.
-    pub slt_u: F,
-    /// A boolean flag for an intermediate comparison.
-    pub is_cmp_eq: F,
-    /// indicate b and c sign bits are same or not.
-    pub is_sign_bit_same: F,
-    /// The comparison bytes to be looked up.
-    pub cmp_bytes: [F; 2],
+    /// The signed less-than gadget combining unsigned comparison with MSB extraction.
+    /// This contains:
+    /// - lt_unsigned: LtUnsignedGadget with byte_flags, comparison bytes
+    /// - b_msb: U16MSBGadget for operand b
+    /// - c_msb: U16MSBGadget for operand c
+    pub lt_signed: crate::chips::gadgets::lt_signed::LtSignedGadget<F>,
 }

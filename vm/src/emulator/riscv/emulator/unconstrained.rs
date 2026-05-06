@@ -3,7 +3,9 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryRecord,
     emulator::riscv::{
         emulator::RiscvEmulator,
+        event_types::{RvAddr, RvClk},
         record::{EmulationRecord, MemoryAccessRecord},
+        state::RuntimeRegisterRecord,
     },
 };
 use hashbrown::HashMap;
@@ -11,12 +13,13 @@ use hashbrown::HashMap;
 /// A struct that records states that must be restored after we exit unconstrained mode
 #[derive(Clone, Debug)]
 pub struct UnconstrainedState {
-    pub(crate) global_clk: u64,
-    pub(crate) clk: u32,
-    pub(crate) pc: u32,
-    // Only memory_diff needs to be updated in the unconstrained mode
-    // others are just reverted when exiting uncontrained mode
-    pub(crate) memory_diff: HashMap<u32, Option<MemoryRecord>>,
+    pub(crate) global_clk: RvClk,
+    pub(crate) clk: RvClk,
+    pub(crate) pc: RvAddr,
+    // Only *_diff maps need to be updated in unconstrained mode.
+    // Keep registers and memory in separate namespaces to avoid address collisions.
+    pub(crate) memory_diff: HashMap<u64, Option<MemoryRecord>>,
+    pub(crate) register_diff: HashMap<u8, Option<RuntimeRegisterRecord>>,
     pub(crate) op_record: MemoryAccessRecord,
     pub(crate) record: EmulationRecord,
     pub(crate) prev_mode: EmulatorMode,
@@ -38,6 +41,7 @@ impl UnconstrainedState {
             clk: rt.state.clk,
             pc: rt.state.pc,
             memory_diff: HashMap::default(),
+            register_diff: HashMap::default(),
             record: core::mem::take(&mut rt.record),
             op_record: core::mem::take(&mut rt.memory_accesses),
             prev_mode,

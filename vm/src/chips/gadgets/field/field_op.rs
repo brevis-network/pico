@@ -11,7 +11,7 @@ use crate::{
     chips::{
         chips::byte::event::ByteRecordBehavior,
         gadgets::{
-            field::utils::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
+            field::utils::compute_root_quotient_and_shift,
             utils::{field_params::FieldParameters, limbs::Limbs, polynomial::Polynomial},
         },
     },
@@ -51,16 +51,15 @@ pub struct FieldOpCols<T, P: FieldParameters> {
     /// The result of `a op b`, where a, b are field elements
     pub result: Limbs<T, P::Limbs>,
     pub(crate) carry: Limbs<T, P::Limbs>,
-    pub(crate) witness_low: Limbs<T, P::Witness>,
-    pub(crate) witness_high: Limbs<T, P::Witness>,
+    pub(crate) witness: Limbs<T, P::Witness>,
 }
 
 impl<T: Debug, P: FieldParameters> Debug for FieldOpCols<T, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "FieldOpCols {{ result: {:?}, carry: {:?}, witness_low: {:?}, witness_high: {:?}}}",
-            self.result, self.carry, self.witness_low, self.witness_high
+            "FieldOpCols {{ result: {:?}, carry: {:?}, witness: {:?}}}",
+            self.result, self.carry, self.witness
         )
     }
 }
@@ -99,27 +98,22 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         let p_op = &p_a * &p_b + &p_c;
         let p_vanishing = &p_op - &p_result - &p_carry * &p_modulus;
 
-        let p_witness = compute_root_quotient_and_shift(
+        let mut p_witness = compute_root_quotient_and_shift(
             &p_vanishing,
             P::WITNESS_OFFSET,
             P::NUM_BITS_PER_LIMB as u32,
             P::NUM_WITNESS_LIMBS,
         );
 
-        let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
-
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
-        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
-        self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
-        self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
+        p_witness.resize(P::Witness::USIZE, F::ZERO);
+        self.witness = Limbs((&*p_witness).try_into().unwrap());
 
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         (result, carry)
     }
@@ -166,21 +160,18 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         };
         let p_vanishing: Polynomial<F> = &p_op - &p_result - &p_carry * &p_modulus;
 
-        let p_witness = compute_root_quotient_and_shift(
+        let mut p_witness = compute_root_quotient_and_shift(
             &p_vanishing,
             P::WITNESS_OFFSET,
             P::NUM_BITS_PER_LIMB as u32,
             P::NUM_WITNESS_LIMBS,
         );
-        let (mut p_witness_low, mut p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
 
         self.result = p_result.into();
         self.carry = p_carry.into();
 
-        p_witness_low.resize(P::Witness::USIZE, F::ZERO);
-        p_witness_high.resize(P::Witness::USIZE, F::ZERO);
-        self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
-        self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
+        p_witness.resize(P::Witness::USIZE, F::ZERO);
+        self.witness = Limbs((&*p_witness).try_into().unwrap());
 
         result
     }
@@ -241,8 +232,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         result
     }
@@ -367,15 +357,13 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
         let p_carry: Polynomial<<CB as AirBuilder>::Expr> = self.carry.into();
         let p_op_minus_result: Polynomial<CB::Expr> = p_op - &p_result;
         let p_vanishing = p_op_minus_result - &(&p_carry * &p_modulus);
-        let p_witness_low = self.witness_low.0.iter().into();
-        let p_witness_high = self.witness_high.0.iter().into();
-        eval_field_operation::<F, CB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
+        let p_witness: Polynomial<CB::Expr> = self.witness.0.iter().into();
+        eval_field_operation::<F, CB, P>(builder, &p_vanishing, &p_witness);
 
         // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
-        builder.slice_range_check_u8(p_witness_low.coefficients(), is_real.clone());
-        builder.slice_range_check_u8(p_witness_high.coefficients(), is_real);
+        builder.slice_range_check_u16(p_witness.coefficients(), is_real);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -399,19 +387,14 @@ impl<V: Copy, P: FieldParameters> FieldOpCols<V, P> {
 pub fn eval_field_operation<F: Field, CB: ChipBuilder<F>, P: FieldParameters>(
     builder: &mut CB,
     p_vanishing: &Polynomial<CB::Expr>,
-    p_witness_low: &Polynomial<CB::Expr>,
-    p_witness_high: &Polynomial<CB::Expr>,
+    p_witness: &Polynomial<CB::Expr>,
 ) {
-    // Reconstruct and shift back the witness polynomial
-    let limb: CB::Expr = CB::F::from_canonical_u32(2u32.pow(P::NUM_BITS_PER_LIMB as u32)).into();
-
-    let p_witness_shifted = p_witness_low + &(p_witness_high * limb.clone());
-
     // Shift down the witness polynomial. Shifting is needed to range check that each
     // coefficient w_i of the witness polynomial satisfies |w_i| < 2^WITNESS_OFFSET.
+    let limb: CB::Expr = CB::F::from_canonical_u32(2u32.pow(P::NUM_BITS_PER_LIMB as u32)).into();
     let offset: CB::Expr = CB::F::from_canonical_u32(P::WITNESS_OFFSET as u32).into();
-    let len = p_witness_shifted.coefficients().len();
-    let p_witness = p_witness_shifted - Polynomial::new(vec![offset; len]);
+    let len = p_witness.coefficients().len();
+    let p_witness = p_witness - &Polynomial::new(vec![offset; len]);
 
     // Multiply by (x-2^NUM_BITS_PER_LIMB) and make the constraint
     let root_monomial = Polynomial::new(vec![-limb, CB::F::ONE.into()]);

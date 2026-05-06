@@ -1,9 +1,7 @@
 use crate::{
     chips::{
         chips::{
-            alu::{
-                bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::traces::ShiftRightChip,
-            },
+            alu::{bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::ShiftRightChip},
             riscv_cpu::CpuChip,
             riscv_global::GlobalChip,
             riscv_memory::{
@@ -19,7 +17,7 @@ use crate::{
         syscalls::{precompiles::PrecompileLocalMemory, SyscallCode},
     },
     primitives::consts::{
-        ADD_SUB_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
+        ADD_DATAPAR, BITWISE_DATAPAR, DIVREM_DATAPAR, LOCAL_MEMORY_DATAPAR, LT_DATAPAR,
         MEMORY_RW_DATAPAR, MUL_DATAPAR, POSEIDON2_DATAPAR, SLL_DATAPAR, SR_DATAPAR,
     },
 };
@@ -138,7 +136,6 @@ pub struct EventSizeCapture<'a> {
     pub(crate) num_poseidon2_events: usize,
     pub(crate) num_global_lookup_events: usize,
 
-    // this is an option to make default work, because I am lazy
     record: Option<&'a EmulationRecord>,
     field: &'a str,
 }
@@ -236,7 +233,7 @@ impl<'a> EventSizeCapture<'a> {
     pub fn estimate(&self) -> CycleEstimator {
         let mut data = [0; NUM_RISCV_CHIPS];
 
-        let record = self.record.expect("hack");
+        let record = self.record.unwrap();
 
         // program: 1 row per instruction
         data[CHIP_PROGRAM] = self.num_program_events;
@@ -319,7 +316,8 @@ impl<'a> EventSizeCapture<'a> {
         data[CHIP_SLL] = self.num_shift_left_events.div_ceil(SLL_DATAPAR);
         let nb_rows = record.shape_chip_size("ShiftLeft");
         data[CHIP_SLL] = next_power_of_two(data[CHIP_SLL], nb_rows);
-        data[CHIP_ADDSUB] = (self.num_add_events + self.num_sub_events).div_ceil(ADD_SUB_DATAPAR);
+        //TODO
+        data[CHIP_ADDSUB] = (self.num_add_events + self.num_sub_events).div_ceil(ADD_DATAPAR);
         let nb_rows = record.shape_chip_size("AddSub");
         data[CHIP_ADDSUB] = next_power_of_two(data[CHIP_ADDSUB], nb_rows);
         data[CHIP_BITWISE] = self.num_bitwise_events.div_ceil(BITWISE_DATAPAR);

@@ -1,5 +1,6 @@
 //! Syscall definitions & implementations for the [`crate::Emulator`].
 
+mod abi;
 pub mod code;
 mod commit;
 mod deferred;
@@ -19,9 +20,12 @@ use crate::{
         },
         field::field_op::FieldOperation,
     },
-    emulator::riscv::syscalls::{
-        commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall,
-        syscall_context::SyscallContext, verify::VerifySyscall,
+    emulator::riscv::{
+        event_types::{RvChunk, RvClk, RvValue},
+        syscalls::{
+            commit::CommitSyscall, deferred::CommitDeferredSyscall, halt::HaltSyscall,
+            syscall_context::SyscallContext, verify::VerifySyscall,
+        },
     },
     primitives::Poseidon2Init,
 };
@@ -61,9 +65,9 @@ pub trait Syscall: Send + Sync {
         &self,
         ctx: &mut SyscallContext,
         syscall_code: SyscallCode,
-        arg1: u32,
-        arg2: u32,
-    ) -> Option<u32>;
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue>;
 
     /// The number of extra cycles that the syscall takes to emulate.
     ///
@@ -265,13 +269,13 @@ where
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SyscallEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// The syscall id.
     pub syscall_id: u32,
     /// The first argument.
-    pub arg1: u32,
+    pub arg1: RvValue,
     /// The second operand.
-    pub arg2: u32,
+    pub arg2: RvValue,
 }

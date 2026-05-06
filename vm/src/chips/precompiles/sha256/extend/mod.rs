@@ -2,13 +2,14 @@ use std::marker::PhantomData;
 
 mod columns;
 mod constraints;
-mod flags;
+mod controller;
 mod trace;
 
 #[derive(Default)]
-pub struct ShaExtendChip<F> {
-    _marker: PhantomData<F>,
-}
+pub struct ShaExtendChip<F>(PhantomData<F>);
+
+#[derive(Default)]
+pub struct ShaExtendControlChip<F>(PhantomData<F>);
 
 pub fn sha_extend(w: &mut [u32]) {
     for i in 16..64 {

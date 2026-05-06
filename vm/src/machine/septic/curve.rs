@@ -119,17 +119,20 @@ impl<F: PrimeField32 + FieldBehavior> SepticCurve<F> {
     /// As an x-coordinate may not be a valid one, we allow an additional value in `[0, 256)` to the hash input.
     /// Also, we always return the curve point with y-coordinate within `[1, (p-1)/2]`, where p is the characteristic.
     /// The returned values are the curve point, the offset used, and the hash input and output.
-    pub fn lift_x(m: SepticExtension<F>) -> (Self, u8, [F; 16], [F; 16]) {
+    ///
+    /// The input `m` contains 8 values corresponding to the Poseidon2 absorption rate.
+    /// The offset is encoded in `m[7]`'s upper bits: `m_trial[7] = m[7] + (1 << 16) * offset`.
+    pub fn lift_x(m: [F; 8]) -> (Self, u8, [F; 16], [F; 16]) {
         for offset in 0..=255 {
             let m_trial = [
-                m.0[0],
-                m.0[1],
-                m.0[2],
-                m.0[3],
-                m.0[4],
-                m.0[5],
-                m.0[6],
-                F::from_canonical_u8(offset),
+                m[0],
+                m[1],
+                m[2],
+                m[3],
+                m[4],
+                m[5],
+                m[6],
+                m[7] + F::from_canonical_u32(1 << 16) * F::from_canonical_u8(offset),
                 F::ZERO,
                 F::ZERO,
                 F::ZERO,

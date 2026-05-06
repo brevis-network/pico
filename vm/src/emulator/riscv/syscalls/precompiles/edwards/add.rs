@@ -2,10 +2,13 @@ use std::marker::PhantomData;
 
 use crate::{
     chips::gadgets::curves::{edwards::EdwardsParameters, EllipticCurve},
-    emulator::riscv::syscalls::{
-        precompiles::{edwards::event::create_ec_add_event, PrecompileEvent},
-        syscall_context::SyscallContext,
-        Syscall, SyscallCode,
+    emulator::riscv::{
+        event_types::RvValue,
+        syscalls::{
+            precompiles::{edwards::event::create_ec_add_event, PrecompileEvent},
+            syscall_context::SyscallContext,
+            Syscall, SyscallCode,
+        },
     },
 };
 
@@ -31,9 +34,9 @@ impl<E: EllipticCurve + EdwardsParameters> Syscall for EdwardsAddAssignSyscall<E
         &self,
         ctx: &mut SyscallContext,
         syscall_code: SyscallCode,
-        arg1: u32,
-        arg2: u32,
-    ) -> Option<u32> {
+        arg1: RvValue,
+        arg2: RvValue,
+    ) -> Option<RvValue> {
         let event = create_ec_add_event::<E>(ctx, arg1, arg2);
         let syscall_event = ctx
             .rt

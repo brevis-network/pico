@@ -4,6 +4,7 @@ use num::BigUint;
 use p3_air::AirBuilder;
 use p3_field::{Field, PrimeField32};
 use pico_derive::AlignedBorrow;
+use typenum::Unsigned;
 
 use crate::{
     chips::{
@@ -13,10 +14,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipRangeBuilder},
 };
 
-use super::{
-    field_op::eval_field_operation,
-    utils::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
-};
+use super::{field_op::eval_field_operation, utils::compute_root_quotient_and_shift};
 
 /// A set of columns to compute `FieldDen(a, b)` where `a`, `b` are field elements.
 ///
@@ -31,8 +29,7 @@ pub struct FieldDenCols<T, P: FieldParameters> {
     /// The result of `a den b`, where a, b are field elements
     pub result: Limbs<T, P::Limbs>,
     pub(crate) carry: Limbs<T, P::Limbs>,
-    pub(crate) witness_low: Limbs<T, P::Witness>,
-    pub(crate) witness_high: Limbs<T, P::Witness>,
+    pub(crate) witness: Limbs<T, P::Witness>,
 }
 
 impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
@@ -76,24 +73,22 @@ impl<F: PrimeField32, P: FieldParameters> FieldDenCols<F, P> {
         };
         debug_assert_eq!(vanishing_poly.degree(), P::NUM_WITNESS_LIMBS);
 
-        let p_witness = compute_root_quotient_and_shift(
+        let mut p_witness = compute_root_quotient_and_shift(
             &vanishing_poly,
             P::WITNESS_OFFSET,
             P::NUM_BITS_PER_LIMB as u32,
             P::NUM_WITNESS_LIMBS,
         );
-        let (p_witness_low, p_witness_high) = split_u16_limbs_to_u8_limbs(&p_witness);
 
         self.result = p_result.into();
         self.carry = p_carry.into();
-        self.witness_low = Limbs((&*p_witness_low).try_into().unwrap());
-        self.witness_high = Limbs((&*p_witness_high).try_into().unwrap());
+        p_witness.resize(P::Witness::USIZE, F::ZERO);
+        self.witness = Limbs((&*p_witness).try_into().unwrap());
 
         // Range checks
         record.add_u8_range_checks_field(&self.result.0);
         record.add_u8_range_checks_field(&self.carry.0);
-        record.add_u8_range_checks_field(&self.witness_low.0);
-        record.add_u8_range_checks_field(&self.witness_high.0);
+        record.add_u16_range_checks_field(&self.witness.0);
 
         result
     }
@@ -137,15 +132,13 @@ where
         let p_vanishing: Polynomial<<CB as AirBuilder>::Expr> =
             p_lhs_minus_rhs - &p_carry * &p_limbs;
 
-        let p_witness_low = self.witness_low.0.iter().into();
-        let p_witness_high = self.witness_high.0.iter().into();
+        let p_witness: Polynomial<CB::Expr> = self.witness.0.iter().into();
 
-        eval_field_operation::<F, CB, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high);
+        eval_field_operation::<F, CB, P>(builder, &p_vanishing, &p_witness);
 
         // Range checks for the result, carry, and witness columns.
         builder.slice_range_check_u8(&self.result.0, is_real.clone());
         builder.slice_range_check_u8(&self.carry.0, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_low.0, is_real.clone());
-        builder.slice_range_check_u8(&self.witness_high.0, is_real);
+        builder.slice_range_check_u16(p_witness.coefficients(), is_real);
     }
 }

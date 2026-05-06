@@ -21,7 +21,7 @@ fn main() {
 
     let elf_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../app/elf/riscv32im-pico-zkvm-elf"
+        "/../app/elf/riscv64im-pico-zkvm-elf"
     );
     let elf_bytes = std::fs::read(elf_path).expect("Failed to read ELF file");
 

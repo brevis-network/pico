@@ -2,13 +2,11 @@ use crate::{
     chips::{
         chips::{
             byte::event::ByteRecordBehavior,
-            riscv_memory::read_write::columns::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
+            riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
         },
         gadgets::{
             curves::{
-                edwards::{
-                    ed25519::Ed25519BaseField, EdwardsParameters, NUM_LIMBS, WORDS_CURVE_POINT,
-                },
+                edwards::{ed25519::Ed25519BaseField, EdwardsParameters, WORDS_CURVE_POINT},
                 AffinePoint, EllipticCurve,
             },
             field::{
@@ -16,10 +14,10 @@ use crate::{
                 field_inner_product::FieldInnerProductCols,
                 field_op::{FieldOpCols, FieldOperation},
             },
-            utils::{
-                field_params::{FieldParameters, NumLimbs},
-                limbs::Limbs,
-            },
+        },
+        precompiles::{
+            checked_u64_to_u32, split_dword_read_records_to_word_records,
+            split_dword_words_to_legacy_u32_words, split_dword_write_records_to_word_records,
         },
         utils::pad_rows_fixed,
     },
@@ -34,20 +32,13 @@ use crate::{
             },
         },
     },
-    machine::{
-        builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
-        chip::ChipBehavior,
-        utils::limbs_from_prev_access,
-    },
+    machine::{builder::ChipBuilder, chip::ChipBehavior},
 };
-use core::{
-    borrow::{Borrow, BorrowMut},
-    mem::size_of,
-};
+use core::{borrow::BorrowMut, mem::size_of};
 use num::{BigUint, Zero};
 use p3_air::{Air, BaseAir};
 use p3_field::{Field, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
 use pico_derive::AlignedBorrow;
 use std::{fmt::Debug, marker::PhantomData};
@@ -245,28 +236,39 @@ impl<F: PrimeField32, E: EllipticCurve + EdwardsParameters> EdAddAssignChip<F, E
         rlu: &mut impl ByteRecordBehavior,
     ) {
         // Decode affine points.
-        let p = &event.p;
-        let q = &event.q;
-        let p = AffinePoint::<E>::from_words_le(p);
+        // This chip still consumes affine points and memory accesses as legacy 32-bit word rows.
+        let legacy_p_words = split_dword_words_to_legacy_u32_words(&event.p);
+        let legacy_q_words = split_dword_words_to_legacy_u32_words(&event.q);
+        let legacy_p_memory_records =
+            split_dword_write_records_to_word_records(&event.p_memory_records);
+        let legacy_q_memory_records =
+            split_dword_read_records_to_word_records(&event.q_memory_records);
+        let p = AffinePoint::<E>::from_words_le(&legacy_p_words);
         let (p_x, p_y) = (p.x, p.y);
-        let q = AffinePoint::<E>::from_words_le(q);
+        let q = AffinePoint::<E>::from_words_le(&legacy_q_words);
         let (q_x, q_y) = (q.x, q.y);
 
         // Populate basic columns.
         cols.is_real = F::ONE;
         cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.p_ptr = F::from_canonical_u32(event.p_ptr);
-        cols.q_ptr = F::from_canonical_u32(event.q_ptr);
+        cols.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "edwards add clk"));
+        cols.p_ptr = F::from_canonical_u32(checked_u64_to_u32(
+            event.p_ptr,
+            "edwards add p_ptr proof boundary",
+        ));
+        cols.q_ptr = F::from_canonical_u32(checked_u64_to_u32(
+            event.q_ptr,
+            "edwards add q_ptr proof boundary",
+        ));
 
         Self::populate_field_ops(rlu, cols, p_x, p_y, q_x, q_y);
 
         // Populate the memory access columns.
         for i in 0..WORDS_CURVE_POINT {
-            cols.q_access[i].populate(event.q_memory_records[i], rlu);
+            cols.q_access[i].populate(legacy_q_memory_records[i], rlu);
         }
         for i in 0..WORDS_CURVE_POINT {
-            cols.p_access[i].populate(event.p_memory_records[i], rlu);
+            cols.p_access[i].populate(legacy_p_memory_records[i], rlu);
         }
     }
 }
@@ -283,109 +285,117 @@ where
     CB: ChipBuilder<F>,
     E: EllipticCurve + EdwardsParameters,
 {
-    fn eval(&self, builder: &mut CB) {
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &EdAddAssignCols<CB::Var> = (*local).borrow();
-
-        let x1: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
-            limbs_from_prev_access(&local.p_access[0..8]);
-        let x2: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
-            limbs_from_prev_access(&local.q_access[0..8]);
-        let y1: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
-            limbs_from_prev_access(&local.p_access[8..16]);
-        let y2: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
-            limbs_from_prev_access(&local.q_access[8..16]);
-
-        // x3_numerator = x1 * y2 + x2 * y1.
-        local
-            .x3_numerator
-            .eval(builder, &[x1, x2], &[y2, y1], local.is_real);
-
-        // y3_numerator = y1 * y2 + x1 * x2.
-        local
-            .y3_numerator
-            .eval(builder, &[y1, x1], &[y2, x2], local.is_real);
-
-        // f = x1 * x2 * y1 * y2.
-        local
-            .x1_mul_y1
-            .eval(builder, &x1, &y1, FieldOperation::Mul, local.is_real);
-        local
-            .x2_mul_y2
-            .eval(builder, &x2, &y2, FieldOperation::Mul, local.is_real);
-
-        let x1_mul_y1 = local.x1_mul_y1.result;
-        let x2_mul_y2 = local.x2_mul_y2.result;
-        local.f.eval(
-            builder,
-            &x1_mul_y1,
-            &x2_mul_y2,
-            FieldOperation::Mul,
-            local.is_real,
-        );
-
-        // d * f.
-        let f = local.f.result;
-        let d_biguint = E::d_biguint();
-        let d_const = E::BaseField::to_limbs_field::<CB::Expr, _>(&d_biguint);
-        local
-            .d_mul_f
-            .eval(builder, &f, &d_const, FieldOperation::Mul, local.is_real);
-
-        let d_mul_f = local.d_mul_f.result;
-
-        // x3 = x3_numerator / (1 + d * f).
-        local.x3_ins.eval(
-            builder,
-            &local.x3_numerator.result,
-            &d_mul_f,
-            true,
-            local.is_real,
-        );
-
-        // y3 = y3_numerator / (1 - d * f).
-        local.y3_ins.eval(
-            builder,
-            &local.y3_numerator.result,
-            &d_mul_f,
-            false,
-            local.is_real,
-        );
-
-        // Constraint self.p_access.value = [self.x3_ins.result, self.y3_ins.result]
-        // This is to ensure that p_access is updated with the new value.
-        let p_access_vec = value_as_limbs(&local.p_access);
-        builder
-            .when(local.is_real)
-            .assert_all_eq(local.x3_ins.result, p_access_vec[0..NUM_LIMBS].to_vec());
-        builder.when(local.is_real).assert_all_eq(
-            local.y3_ins.result,
-            p_access_vec[NUM_LIMBS..NUM_LIMBS * 2].to_vec(),
-        );
-
-        builder.eval_memory_access_slice(
-            local.chunk,
-            local.clk.into(),
-            local.q_ptr,
-            &local.q_access,
-            local.is_real,
-        );
-
-        builder.eval_memory_access_slice(
-            local.chunk,
-            local.clk + CB::F::from_canonical_u32(1),
-            local.p_ptr,
-            &local.p_access,
-            local.is_real,
-        );
-
-        builder.looked_syscall(
-            local.clk,
-            CB::F::from_canonical_u32(SyscallCode::ED_ADD.syscall_id()),
-            local.p_ptr,
-            local.q_ptr,
-            local.is_real,
-        );
+    fn eval(&self, _builder: &mut CB) {
+        // TODO(u64-upgrade): Ed25519 add chip needs full u64 upgrade
+        // (NumWords changed: WORDS_CURVE_POINT 16→8, old limb indexing is invalid)
+        todo!("EdAddAssign eval: pending u64 upgrade")
+        // let main = builder.main();
+        // let local = main.row_slice(0);
+        // let local: &EdAddAssignCols<CB::Var> = (*local).borrow();
+        //
+        // let x1: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
+        //     limbs_from_prev_access(&local.p_access[0..8]);
+        // let x2: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
+        //     limbs_from_prev_access(&local.q_access[0..8]);
+        // let y1: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
+        //     limbs_from_prev_access(&local.p_access[8..16]);
+        // let y2: Limbs<CB::Var, <Ed25519BaseField as NumLimbs>::Limbs> =
+        //     limbs_from_prev_access(&local.q_access[8..16]);
+        //
+        // // x3_numerator = x1 * y2 + x2 * y1.
+        // local
+        //     .x3_numerator
+        //     .eval(builder, &[x1, x2], &[y2, y1], local.is_real);
+        //
+        // // y3_numerator = y1 * y2 + x1 * x2.
+        // local
+        //     .y3_numerator
+        //     .eval(builder, &[y1, x1], &[y2, x2], local.is_real);
+        //
+        // // f = x1 * x2 * y1 * y2.
+        // local
+        //     .x1_mul_y1
+        //     .eval(builder, &x1, &y1, FieldOperation::Mul, local.is_real);
+        // local
+        //     .x2_mul_y2
+        //     .eval(builder, &x2, &y2, FieldOperation::Mul, local.is_real);
+        //
+        // let x1_mul_y1 = local.x1_mul_y1.result;
+        // let x2_mul_y2 = local.x2_mul_y2.result;
+        // local.f.eval(
+        //     builder,
+        //     &x1_mul_y1,
+        //     &x2_mul_y2,
+        //     FieldOperation::Mul,
+        //     local.is_real,
+        // );
+        //
+        // // d * f.
+        // let f = local.f.result;
+        // let d_biguint = E::d_biguint();
+        // let d_const = E::BaseField::to_limbs_field::<CB::Expr, _>(&d_biguint);
+        // local
+        //     .d_mul_f
+        //     .eval(builder, &f, &d_const, FieldOperation::Mul, local.is_real);
+        //
+        // let d_mul_f = local.d_mul_f.result;
+        //
+        // // x3 = x3_numerator / (1 + d * f).
+        // local.x3_ins.eval(
+        //     builder,
+        //     &local.x3_numerator.result,
+        //     &d_mul_f,
+        //     true,
+        //     local.is_real,
+        // );
+        //
+        // // y3 = y3_numerator / (1 - d * f).
+        // local.y3_ins.eval(
+        //     builder,
+        //     &local.y3_numerator.result,
+        //     &d_mul_f,
+        //     false,
+        //     local.is_real,
+        // );
+        //
+        // // Constraint self.p_access.value = [self.x3_ins.result, self.y3_ins.result]
+        // // This is to ensure that p_access is updated with the new value.
+        // let p_access_vec = value_as_limbs(&local.p_access);
+        // builder
+        //     .when(local.is_real)
+        //     .assert_all_eq(local.x3_ins.result, p_access_vec[0..NUM_LIMBS].to_vec());
+        // builder.when(local.is_real).assert_all_eq(
+        //     local.y3_ins.result,
+        //     p_access_vec[NUM_LIMBS..NUM_LIMBS * 2].to_vec(),
+        // );
+        //
+        // // TODO: addr
+        // builder.eval_memory_access_slice(
+        //     local.chunk,
+        //     local.clk.into(),
+        //     [local.q_ptr.into(), CB::Expr::ZERO, CB::Expr::ZERO],
+        //     &local.q_access,
+        //     4,
+        //     local.is_real,
+        // );
+        //
+        // // TODO: addr
+        // builder.eval_memory_access_slice(
+        //     local.chunk,
+        //     local.clk + CB::F::from_canonical_u32(1),
+        //     [local.p_ptr.into(), CB::Expr::ZERO, CB::Expr::ZERO],
+        //     &local.p_access,
+        //     4,
+        //     local.is_real,
+        // );
+        //
+        // builder.looked_syscall(
+        //     local.clk,
+        //     CB::F::from_canonical_u32(SyscallCode::ED_ADD.syscall_id()),
+        //     // TODO: Need to convert ptr columns to Addr type to support full 48-bit address representation
+        //     [local.p_ptr, local.p_ptr, local.p_ptr],
+        //     [local.q_ptr, local.q_ptr, local.q_ptr],
+        //     local.is_real,
+        // );
     }
 }

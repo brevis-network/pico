@@ -5,3 +5,6 @@ pub mod gadgets;
 pub mod precompiles;
 pub mod trace;
 pub mod utils;
+
+#[cfg(test)]
+pub mod tests;

@@ -4,7 +4,7 @@
 //! ahead-of-time compilation. It identifies block leaders (entry points),
 //! analyzes control flow, and generates optimal block layouts.
 
-use crate::types::{Opcode, ProgramInfo};
+use crate::types::{sign_extend_imm32_to_u64, Opcode, ProgramInfo};
 use std::collections::HashSet;
 
 /// Analyzes basic blocks in a RISC-V program for AOT compilation.
@@ -22,15 +22,15 @@ use std::collections::HashSet;
 /// - The target of a branch instruction (BEQ, BNE, BLT, BGE, BLTU, BGEU)
 /// - The instruction following a control flow instruction (fallthrough)
 pub struct BlockAnalyzer {
-    leaders: HashSet<u32>,
-    leader_vec: Vec<u32>,
+    leaders: HashSet<u64>,
+    leader_vec: Vec<u64>,
 }
 
 impl BlockAnalyzer {
     /// Creates a new block analyzer for the given program.
     pub fn new(program: &ProgramInfo) -> Self {
         let leaders = Self::compute_leaders(program);
-        let mut leader_vec: Vec<u32> = leaders.iter().copied().collect();
+        let mut leader_vec: Vec<u64> = leaders.iter().copied().collect();
         leader_vec.sort_unstable();
         Self {
             leaders,
@@ -44,11 +44,11 @@ impl BlockAnalyzer {
     /// - Entry points (program start and base)
     /// - Control flow targets (jump and branch destinations)
     /// - Fallthrough addresses (instructions following terminators)
-    pub fn analyze(&self) -> HashSet<u32> {
+    pub fn analyze(&self) -> HashSet<u64> {
         self.leaders.clone()
     }
 
-    fn compute_leaders(program: &ProgramInfo) -> HashSet<u32> {
+    fn compute_leaders(program: &ProgramInfo) -> HashSet<u64> {
         let mut leaders = HashSet::new();
 
         // Add entry points
@@ -57,12 +57,12 @@ impl BlockAnalyzer {
 
         // Pass 1: Identify block leaders
         for (idx, inst) in program.instructions.iter().enumerate() {
-            let pc = program.pc_base + (idx as u32 * 4);
+            let pc = program.pc_base + ((idx as u64) * 4);
 
             match inst.opcode {
                 Opcode::JAL => {
                     let (_, imm) = inst.j_type();
-                    leaders.insert(pc.wrapping_add(imm));
+                    leaders.insert(pc.wrapping_add(sign_extend_imm32_to_u64(imm)));
                     leaders.insert(pc.wrapping_add(4));
                 }
                 Opcode::BEQ
@@ -72,7 +72,7 @@ impl BlockAnalyzer {
                 | Opcode::BLTU
                 | Opcode::BGEU => {
                     let (_, _, imm) = inst.b_type();
-                    leaders.insert(pc.wrapping_add(imm));
+                    leaders.insert(pc.wrapping_add(sign_extend_imm32_to_u64(imm)));
                     leaders.insert(pc.wrapping_add(4));
                 }
                 Opcode::JALR | Opcode::ECALL | Opcode::EBREAK => {
@@ -86,12 +86,12 @@ impl BlockAnalyzer {
     }
 
     /// Returns an iterator over all block start addresses in program order.
-    pub fn block_starts(&self) -> Vec<u32> {
+    pub fn block_starts(&self) -> Vec<u64> {
         self.leader_vec.clone()
     }
 
     /// Checks if the given PC is a block leader.
-    pub fn is_leader(&self, pc: u32) -> bool {
+    pub fn is_leader(&self, pc: u64) -> bool {
         self.leaders.contains(&pc)
     }
 }

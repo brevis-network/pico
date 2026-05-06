@@ -5,14 +5,14 @@ use crate::{
     chips::{
         chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
         gadgets::{
-            curves::{
-                edwards::WORDS_FIELD_ELEMENT, AffinePoint, EllipticCurve, COMPRESSED_POINT_BYTES,
-                NUM_BYTES_FIELD_ELEMENT,
-            },
+            curves::{edwards::WORDS_FIELD_ELEMENT, AffinePoint, EllipticCurve},
             utils::field_params::NumWords,
         },
     },
-    emulator::riscv::syscalls::syscall_context::SyscallContext,
+    emulator::riscv::{
+        event_types::{RvAddr, RvChunk, RvClk, RvValue},
+        syscalls::syscall_context::SyscallContext,
+    },
 };
 
 /// Elliptic Curve Add Event.
@@ -21,17 +21,17 @@ use crate::{
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EllipticCurveAddEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// The pointer to the first point.
-    pub p_ptr: u32,
-    /// The first point as a list of words.
-    pub p: Vec<u32>,
+    pub p_ptr: RvAddr,
+    /// The first point in native guest-memory dword form.
+    pub p: Vec<RvValue>,
     /// The pointer to the second point.
-    pub q_ptr: u32,
-    /// The second point as a list of words.
-    pub q: Vec<u32>,
+    pub q_ptr: RvAddr,
+    /// The second point in native guest-memory dword form.
+    pub q: Vec<RvValue>,
     /// The memory records for the first point.
     pub p_memory_records: Vec<MemoryWriteRecord>,
     /// The memory records for the second point.
@@ -46,17 +46,17 @@ pub struct EllipticCurveAddEvent {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct EdDecompressEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
+    pub clk: RvClk,
     /// The pointer to the point.
-    pub ptr: u32,
+    pub ptr: RvAddr,
     /// The sign bit of the point.
     pub sign: bool,
-    /// The comprssed y coordinate as a list of bytes.
-    pub y_bytes: [u8; COMPRESSED_POINT_BYTES],
-    /// The decompressed x coordinate as a list of bytes.
-    pub decompressed_x_bytes: [u8; NUM_BYTES_FIELD_ELEMENT],
+    /// The compressed y coordinate in native guest-memory dword form.
+    pub y_words: [RvValue; WORDS_FIELD_ELEMENT],
+    /// The decompressed x coordinate in native guest-memory dword form.
+    pub decompressed_x_words: [RvValue; WORDS_FIELD_ELEMENT],
     /// The memory records for the x coordinate.
     pub x_memory_records: [MemoryWriteRecord; WORDS_FIELD_ELEMENT],
     /// The memory records for the y coordinate.
@@ -72,35 +72,44 @@ pub struct EdDecompressEvent {
 /// each.
 pub fn create_ec_add_event<E: EllipticCurve>(
     ctx: &mut SyscallContext,
-    arg1: u32,
-    arg2: u32,
+    arg1: RvAddr,
+    arg2: RvAddr,
 ) -> EllipticCurveAddEvent {
     let start_clk = ctx.clk;
     let p_ptr = arg1;
-    if !p_ptr.is_multiple_of(4) {
-        panic!();
-    }
+    SyscallContext::assert_dword_aligned_precompile(p_ptr, "edwards add p_ptr");
     let q_ptr = arg2;
-    if !q_ptr.is_multiple_of(4) {
-        panic!();
-    }
+    SyscallContext::assert_dword_aligned_precompile(q_ptr, "edwards add q_ptr");
 
     let num_words = <E::BaseField as NumWords>::WordsCurvePoint::USIZE;
+    // WordsCurvePoint is now the u64 dword count directly.
+    let num_memory_words = num_words;
 
-    let p = ctx.slice_unsafe(p_ptr, num_words);
-
-    let (q_memory_records, q) = ctx.mr_slice(q_ptr, num_words);
+    let p = ctx.dword_slice_unsafe(p_ptr, num_memory_words);
+    let (q_memory_records, q) = ctx.mr_dword_slice(q_ptr, num_memory_words);
 
     // When we write to p, we want the clk to be incremented because p and q could be the same.
     ctx.clk += 1;
 
-    let p_affine = AffinePoint::<E>::from_words_le(&p);
-    let q_affine = AffinePoint::<E>::from_words_le(&q);
+    let p_words = p
+        .iter()
+        .flat_map(|&word| [word as u32, (word >> 32) as u32])
+        .collect::<Vec<u32>>();
+    let q_words = q
+        .iter()
+        .flat_map(|&word| [word as u32, (word >> 32) as u32])
+        .collect::<Vec<u32>>();
+    let p_affine = AffinePoint::<E>::from_words_le(&p_words);
+    let q_affine = AffinePoint::<E>::from_words_le(&q_words);
     let result_affine = p_affine + q_affine;
 
     let result_words = result_affine.to_words_le();
+    let result_dwords = result_words
+        .chunks_exact(2)
+        .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
+        .collect::<Vec<u64>>();
 
-    let p_memory_records = ctx.mw_slice(p_ptr, &result_words);
+    let p_memory_records = ctx.mw_dword_slice(p_ptr, &result_dwords);
 
     EllipticCurveAddEvent {
         chunk: ctx.current_chunk(),

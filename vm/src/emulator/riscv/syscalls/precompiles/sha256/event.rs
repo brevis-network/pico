@@ -1,5 +1,6 @@
-use crate::chips::chips::riscv_memory::event::{
-    MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord,
+use crate::{
+    chips::chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
+    emulator::riscv::event_types::{RvAddr, RvChunk, RvClk},
 };
 use serde::{Deserialize, Serialize};
 
@@ -9,11 +10,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ShaExtendEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
-    /// The pointer to the word.
-    pub w_ptr: u32,
+    pub clk: RvClk,
+    /// The pointer to the packed guest-memory schedule buffer.
+    pub w_ptr: RvAddr,
     /// The memory reads of w[i-15].
     pub w_i_minus_15_reads: Vec<MemoryReadRecord>,
     /// The memory reads of w[i-2].
@@ -34,13 +35,13 @@ pub struct ShaExtendEvent {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct ShaCompressEvent {
     /// The chunk number.
-    pub chunk: u32,
+    pub chunk: RvChunk,
     /// The clock cycle.
-    pub clk: u32,
-    /// The pointer to the word.
-    pub w_ptr: u32,
-    /// The word as a list of words.
-    pub h_ptr: u32,
+    pub clk: RvClk,
+    /// The pointer to the packed guest-memory schedule buffer.
+    pub w_ptr: RvAddr,
+    /// The pointer to the packed guest-memory state buffer.
+    pub h_ptr: RvAddr,
     /// The word as a list of words.
     pub w: Vec<u32>,
     /// The word as a list of words.

@@ -3,13 +3,11 @@ use super::{
     MemoryChipType, MemoryInitializeFinalizeChip,
 };
 use crate::{
-    chips::gadgets::{
-        field_range_check::bit_decomposition::FieldBitDecomposition, is_zero::IsZeroGadget,
-    },
+    chips::gadgets::{is_zero::IsZeroGadget, lt_word_u16::LtWordU16Gadget},
     compiler::word::Word,
     emulator::riscv::public_values::PublicValues,
     machine::{
-        builder::{ChipBaseBuilder, ChipBuilder},
+        builder::{ChipBaseBuilder, ChipBuilder, ChipRangeBuilder},
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
     primitives::consts::MAX_NUM_PVS,
@@ -38,38 +36,50 @@ where
         let next: &MemoryInitializeFinalizeCols<CB::Var> = (*next).borrow();
 
         builder.assert_bool(local.is_real);
-        for i in 0..32 {
-            builder.assert_bool(local.value[i]);
-        }
+        builder.assert_bool(local.is_comp);
 
-        let mut byte1 = CB::Expr::ZERO;
-        let mut byte2 = CB::Expr::ZERO;
-        let mut byte3 = CB::Expr::ZERO;
-        let mut byte4 = CB::Expr::ZERO;
-        for i in 0..8 {
-            byte1 = byte1.clone() + local.value[i].into() * CB::F::from_canonical_u8(1 << i);
-            byte2 = byte2.clone() + local.value[i + 8].into() * CB::F::from_canonical_u8(1 << i);
-            byte3 = byte3.clone() + local.value[i + 16].into() * CB::F::from_canonical_u8(1 << i);
-            byte4 = byte4.clone() + local.value[i + 24].into() * CB::F::from_canonical_u8(1 << i);
-        }
-        let value = [byte1, byte2, byte3, byte4];
+        // ──────────────────────────────────────────────────
+        // Range checks: addr, prev_addr, value as u16 limbs
+        // ──────────────────────────────────────────────────
+        builder.slice_range_check_u16(&local.value.0, local.is_real);
+        builder.slice_range_check_u16(&local.prev_addr, local.is_real);
+        builder.slice_range_check_u16(&local.addr, local.is_real);
+
+        // ──────────────────────────────────────────────
+        // packing: value.0[2] = value_lower + value_upper * 256
+        // ──────────────────────────────────────────────
+        builder.assert_eq(
+            local.value.0[2],
+            local.value_lower + local.value_upper * CB::F::from_canonical_u32(256),
+        );
+        // Range check value_lower and value_upper as u8
+        builder.slice_range_check_u8(&[local.value_lower, local.value_upper], local.is_real);
+
+        // ──────────────────────────────────────────────
+        // Global message construction (8-slot packed format)
+        // ──────────────────────────────────────────────
+
+        // v0 + v2_lower<<16, v1 + v2_upper<<16, v3
+        let slot5: CB::Expr =
+            local.value.0[0].into() + local.value_lower * CB::F::from_canonical_u32(1 << 16);
+        let slot6: CB::Expr =
+            local.value.0[1].into() + local.value_upper * CB::F::from_canonical_u32(1 << 16);
+        let slot7: CB::Expr = local.value.0[3].into();
 
         if self.kind == MemoryChipType::Initialize {
-            let mut values = vec![CB::Expr::ZERO, CB::Expr::ZERO, local.addr.into()];
-            values.extend(value.clone().map(Into::into));
-
-            // Send the "send interaction" to the global table.
+            // Initialize: send interaction. chunk=0, timestamp=0 (initial state).
             builder.looking(SymbolicLookup::new(
                 vec![
-                    CB::Expr::ZERO,
-                    CB::Expr::ZERO,
-                    local.addr.into(),
-                    value[0].clone(),
-                    value[1].clone(),
-                    value[2].clone(),
-                    value[3].clone(),
-                    CB::Expr::ONE,
-                    CB::Expr::ZERO,
+                    CB::Expr::ZERO,       // slot0: chunk = 0
+                    CB::Expr::ZERO,       // slot1: timestamp = 0
+                    local.addr[0].into(), // slot2: addr[0]
+                    local.addr[1].into(), // slot3: addr[1]
+                    local.addr[2].into(), // slot4: addr[2]
+                    slot5.clone(),        // slot5: v0 + v2_lower<<16
+                    slot6.clone(),        // slot6: v1 + v2_upper<<16
+                    slot7.clone(),        // slot7: v3
+                    CB::Expr::ONE,        // is_send = 1
+                    CB::Expr::ZERO,       // is_receive = 0
                     CB::Expr::from_canonical_u8(LookupType::Memory as u8),
                 ],
                 local.is_real.into(),
@@ -77,25 +87,19 @@ where
                 LookupScope::Regional,
             ));
         } else {
-            let mut values = vec![
-                local.chunk.into(),
-                local.timestamp.into(),
-                local.addr.into(),
-            ];
-            values.extend(value.clone());
-
-            // Send the "receive interaction" to the global table.
+            // Finalize: receive interaction. Uses actual chunk and timestamp.
             builder.looking(SymbolicLookup::new(
                 vec![
-                    local.chunk.into(),
-                    local.timestamp.into(),
-                    local.addr.into(),
-                    value[0].clone(),
-                    value[1].clone(),
-                    value[2].clone(),
-                    value[3].clone(),
-                    CB::Expr::ZERO,
-                    CB::Expr::ONE,
+                    local.chunk.into(),     // slot0: chunk
+                    local.timestamp.into(), // slot1: timestamp
+                    local.addr[0].into(),   // slot2: addr[0]
+                    local.addr[1].into(),   // slot3: addr[1]
+                    local.addr[2].into(),   // slot4: addr[2]
+                    slot5.clone(),          // slot5: v0 + v2_lower<<16
+                    slot6.clone(),          // slot6: v1 + v2_upper<<16
+                    slot7.clone(),          // slot7: v3
+                    CB::Expr::ZERO,         // is_send = 0
+                    CB::Expr::ONE,          // is_receive = 1
                     CB::Expr::from_canonical_u8(LookupType::Memory as u8),
                 ],
                 local.is_real.into(),
@@ -104,165 +108,169 @@ where
             ));
         }
 
-        // Canonically decompose the address into bits so we can do comparisons.
-        FieldBitDecomposition::<CB::F>::range_check(
+        // ──────────────────────────────────────────────
+        // Address ordering: prev_addr < addr when is_comp == 1
+        // ──────────────────────────────────────────────
+
+        // Wrap addr and prev_addr into Word<Expr> for LtWordU16Gadget.
+        // 4th limb is Expr::ZERO (addresses are 48-bit).
+        let prev_addr_word = Word([
+            local.prev_addr[0].into(),
+            local.prev_addr[1].into(),
+            local.prev_addr[2].into(),
+            CB::Expr::ZERO,
+        ]);
+        let addr_word = Word([
+            local.addr[0].into(),
+            local.addr[1].into(),
+            local.addr[2].into(),
+            CB::Expr::ZERO,
+        ]);
+
+        LtWordU16Gadget::<CB::F>::eval(
             builder,
-            local.addr,
-            local.addr_bits,
-            local.is_real.into(),
+            prev_addr_word,
+            addr_word,
+            local.lt_cols,
+            local.is_comp.into(),
         );
 
-        // Assertion for increasing address. We need to make two types of less-than assertions,
-        // first we ned to assert that the addr < addr' when the next row is real. Then we need to
-        // make assertions with regards to public values.
-        //
-        // If the chip is a `MemoryInitialize`:
-        // - In the first row, we need to assert that previous_initialize_addr < addr.
-        // - In the last real row, we need to assert that addr = last_initialize_addr.
-        //
-        // If the chip is a `MemoryFinalize`:
-        // - In the first row, we need to assert that previous_finalize_addr < addr.
-        // - In the last real row, we need to assert that addr = last_finalize_addr.
+        // ──────────────────────────────────────────────
+        // is_prev_addr_zero: check if prev_addr is all zeros
+        // ──────────────────────────────────────────────
+        // SAFETY: u16 limbs sum can't overflow (max = 3 * 65535 = 196605 < p).
+        let prev_addr_sum: CB::Expr =
+            local.prev_addr[0].into() + local.prev_addr[1].into() + local.prev_addr[2].into();
 
-        // Assert that addr < addr' when the next row is real.
+        let is_first_row = builder.is_first_row();
+        IsZeroGadget::<CB::F>::eval(
+            builder,
+            prev_addr_sum,
+            local.is_prev_addr_zero,
+            is_first_row,
+        );
+
+        // ──────────────────────────────────────────────
+        // Row ordering constraints (Pico's when_transition style)
+        // ──────────────────────────────────────────────
+
+        // On transition rows where next.is_real: next.prev_addr == local.addr
+        for i in 0..3 {
+            builder
+                .when_transition()
+                .when(next.is_real)
+                .assert_eq(next.prev_addr[i], local.addr[i]);
+        }
+
+        // On transition rows: next.is_comp == next.is_real (all non-first real rows do comparison)
         builder
             .when_transition()
-            .assert_eq(next.is_next_comp, next.is_real);
-        next.lt_cols.eval(
-            builder,
-            &local.addr_bits.bits,
-            &next.addr_bits.bits,
-            next.is_next_comp,
-        );
+            .assert_eq(next.is_comp, next.is_real);
 
-        // Assert that the real rows are all padded to the top.
+        // Real rows are padded to the top (no padding→real transition).
         builder
             .when_transition()
             .when_not(local.is_real)
             .assert_zero(next.is_real);
 
-        // Make assertions for the initial comparison.
+        // Ensure at least one real row.
+        builder.when_first_row().assert_one(local.is_real);
 
-        // We want to constrain that the `adrr` in the first row is larger than the previous
-        // initialized/finalized address, unless the previous address is zero. Since the previous
-        // address is either zero or constrained by a different chunk, we know it's an element of
-        // the field, so we can get an element from the bit decomposition with no concern for
-        // overflow.
-
-        let local_addr_bits = local.addr_bits.bits;
+        // ──────────────────────────────────────────────
+        // First row constraints: prev_addr from public values
+        // ──────────────────────────────────────────────
 
         let public_values_array: [CB::Expr; MAX_NUM_PVS] =
             array::from_fn(|i| builder.public_values()[i].into());
         let public_values: &PublicValues<Word<CB::Expr>, CB::Expr> =
             public_values_array.as_slice().borrow();
 
-        let prev_addr_bits = match self.kind {
-            MemoryChipType::Initialize => &public_values.previous_initialize_addr_bits,
-            MemoryChipType::Finalize => &public_values.previous_finalize_addr_bits,
+        let prev_addr_limbs = match self.kind {
+            MemoryChipType::Initialize => &public_values.previous_init_addr_limbs,
+            MemoryChipType::Finalize => &public_values.previous_finalize_addr_limbs,
         };
 
-        // Since the previous address is either zero or constrained by a different chunk, we know
-        // it's an element of the field, so we can get an element from the bit decomposition with
-        // no concern for overflow.
-        let prev_addr = prev_addr_bits
-            .iter()
-            .enumerate()
-            .map(|(i, bit)| bit.clone() * CB::F::from_wrapped_u32(1 << i))
-            .sum::<CB::Expr>();
+        // First row: prev_addr must match PV u16 limbs directly.
+        for i in 0..3 {
+            builder
+                .when_first_row()
+                .assert_eq(local.prev_addr[i], prev_addr_limbs[i].clone());
+        }
 
-        // Constrain the is_prev_addr_zero only in the first row.
-        let is_first_row = builder.is_first_row();
-        IsZeroGadget::<CB::F>::eval(builder, prev_addr, local.is_prev_addr_zero, is_first_row);
+        // NOTE: PV prev_addr limbs are transitively range-checked:
+        //   PV limb == local.prev_addr[i] (assert_eq above) → u16 range check
 
-        // Constrain the inequality assertion in the first row.
-        local.lt_cols.eval(
-            builder,
-            prev_addr_bits,
-            &local_addr_bits,
-            local.is_first_comp,
-        );
-
-        // Constrain the is_first_comp column.
-        builder.assert_bool(local.is_first_comp);
+        // First row: is_comp = is_real * (1 - is_prev_addr_zero.result)
+        //   If prev_addr == 0, no comparison needed (addr could be 0 for x0 register).
         builder.when_first_row().assert_eq(
-            local.is_first_comp,
-            CB::Expr::ONE - local.is_prev_addr_zero.result,
+            local.is_comp,
+            local.is_real * (CB::Expr::ONE - local.is_prev_addr_zero.result),
         );
 
-        // Ensure at least one real row.
-        builder.when_first_row().assert_one(local.is_real);
-
-        // Insure that there are no duplicate initializations by assuring there is exactly one
-        // initialization event of the zero address. This is done by assuring that when the previous
-        // address is zero, then the first row address is also zero, and that the second row is also
-        // real, and the less than comparison is being made.
+        // When prev_addr == 0 on first row: addr must also be 0 (x0 register initialization).
         builder
             .when_first_row()
             .when(local.is_prev_addr_zero.result)
-            .assert_zero(local.addr);
+            .assert_zero(local.addr[0] + local.addr[1] + local.addr[2]);
+
+        // When prev_addr == 0 on first row: the next row must also be real, and comparison enabled.
         builder
             .when_first_row()
             .when(local.is_prev_addr_zero.result)
             .assert_one(next.is_real);
-        // Ensure that in the address zero case the comparison is being made so that there is an
-        // address bigger than zero being committed to.
         builder
             .when_first_row()
             .when(local.is_prev_addr_zero.result)
-            .assert_one(next.is_next_comp);
+            .assert_one(next.is_comp);
 
-        // Make assertions for specific types of memory chips.
-
+        // ──────────────────────────────────────────────
+        // Initialize chip: timestamp must be 1 (initial timestamp)
+        // ──────────────────────────────────────────────
         if self.kind == MemoryChipType::Initialize {
             builder
                 .when(local.is_real)
                 .assert_eq(local.timestamp, CB::F::ONE);
         }
 
-        // Constraints related to register %x0.
-
-        // Register %x0 should always be 0. See 2.6 Load and Store Instruction on
-        // P.18 of the RISC-V spec.  To ensure that, we will constrain that the value is zero
-        // whenever the `is_first_comp` flag is set to zero as well. This guarantees that the
-        // presence of this flag asserts the initialization/finalization of %x0 to zero.
-        //
-        // **Remark**: it is up to the verifier to ensure that this flag is set to zero exactly
-        // once, this can be constrained by the public values setting `previous_initialize_addr_bits` or
-        // `previous_finalize_addr_bits` to zero.
-        for i in 0..32 {
+        // ──────────────────────────────────────────────
+        // x0 register constraint: value must be 0 when is_comp == 0
+        // ──────────────────────────────────────────────
+        // When is_comp==0 (meaning prev_addr==0 on first row, i.e., this is address 0),
+        // the value must be zero. This enforces the RISC-V invariant that x0 == 0.
+        for i in 0..4 {
             builder
                 .when_first_row()
-                .when_not(local.is_first_comp)
-                .assert_zero(local.value[i]);
+                .when_not(local.is_comp)
+                .assert_zero(local.value.0[i]);
         }
 
-        // The last address is either:
-        // - It's the last row and `is_real` is set to one.
-        // - The flag `is_real` is set to one and the next `is_real` is set to zero.
-
-        // Constrain the `is_last_addr` flag.
-        builder.when_transition().assert_eq(
-            local.is_last_addr,
-            local.is_real * (CB::Expr::ONE - next.is_real),
-        );
-
-        // Make assertions for the final value. We need to connect the final valid address to the
-        // corresponding `last_addr` value.
-        let last_addr_bits = match self.kind {
-            MemoryChipType::Initialize => &public_values.last_initialize_addr_bits,
-            MemoryChipType::Finalize => &public_values.last_finalize_addr_bits,
+        // ──────────────────────────────────────────────
+        // Last address → public values connection
+        // ──────────────────────────────────────────────
+        let last_addr_limbs = match self.kind {
+            MemoryChipType::Initialize => &public_values.last_init_addr_limbs,
+            MemoryChipType::Finalize => &public_values.last_finalize_addr_limbs,
         };
 
-        // Constrain the last address bits to be equal to the corresponding `last_addr_bits` value.
-        for (local_bit, pub_bit) in local.addr_bits.bits.iter().zip(last_addr_bits.iter()) {
+        // The last real row's addr must match the PV last_addr.
+        // "Last real row" = either last row & is_real, or transition where is_real but next not.
+        let is_last_addr: CB::Expr = local.is_real * (CB::Expr::ONE - next.is_real);
+
+        for i in 0..3 {
             builder
                 .when_last_row()
                 .when(local.is_real)
-                .assert_eq(*local_bit, pub_bit.clone());
+                .assert_eq(local.addr[i], last_addr_limbs[i].clone());
+        }
+
+        for i in 0..3 {
             builder
                 .when_transition()
-                .when(local.is_last_addr)
-                .assert_eq(*local_bit, pub_bit.clone());
+                .when(is_last_addr.clone())
+                .assert_eq(local.addr[i], last_addr_limbs[i].clone());
         }
+
+        // NOTE: PV last_addr limbs are transitively range-checked:
+        //   PV limb == local.addr[i] (assert_eq above) → u16 range check
     }
 }

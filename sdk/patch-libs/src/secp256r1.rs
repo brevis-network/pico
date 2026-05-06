@@ -4,11 +4,11 @@ use crate::{
 };
 
 /// The number of limbs in [Secp256r1Point].
-pub const N: usize = 16;
+pub const N: usize = 8;
 
-/// An affine point on the Secp256r1 curve.
-#[derive(Copy, Clone)]
-#[repr(align(4))]
+/// An affine point on the Secp256k1 curve.
+#[derive(Copy, Clone, Debug)]
+#[repr(align(8))]
 pub struct Secp256r1Point(pub WeierstrassPoint<N>);
 
 impl WeierstrassAffinePoint<N> for Secp256r1Point {
@@ -22,32 +22,44 @@ impl WeierstrassAffinePoint<N> for Secp256r1Point {
 }
 
 impl AffinePoint<N> for Secp256r1Point {
-    const GENERATOR: [u32; N] = [
-        3633889942, 4104206661, 770388896, 1996717441, 1671708914, 4173129445, 3777774151,
-        1796723186, 935285237, 3417718888, 1798397646, 734933847, 2081398294, 2397563722,
-        4263149467, 1340293858,
+    const GENERATOR: [u64; N] = [
+        17627433388654248598,
+        8575836109218198432,
+        17923454489921339634,
+        7716867327612699207,
+        14678990851816772085,
+        3156516839386865358,
+        10297457778147434006,
+        5756518291402817435,
     ];
 
-    fn new(limbs: [u32; N]) -> Self {
+    #[allow(deprecated)]
+    const GENERATOR_T: Self = Self(WeierstrassPoint::Affine(Self::GENERATOR));
+
+    fn new(limbs: [u64; N]) -> Self {
         Self(WeierstrassPoint::Affine(limbs))
     }
 
-    fn limbs_ref(&self) -> &[u32; N] {
+    fn identity() -> Self {
+        Self::infinity()
+    }
+
+    fn is_identity(&self) -> bool {
+        self.is_infinity()
+    }
+
+    fn limbs_ref(&self) -> &[u64; N] {
         match &self.0 {
             WeierstrassPoint::Infinity => panic!("Infinity point has no limbs"),
             WeierstrassPoint::Affine(limbs) => limbs,
         }
     }
 
-    fn limbs_mut(&mut self) -> &mut [u32; N] {
+    fn limbs_mut(&mut self) -> &mut [u64; N] {
         match &mut self.0 {
             WeierstrassPoint::Infinity => panic!("Infinity point has no limbs"),
             WeierstrassPoint::Affine(limbs) => limbs,
         }
-    }
-
-    fn complete_add_assign(&mut self, other: &Self) {
-        self.weierstrass_add_assign(other);
     }
 
     fn add_assign(&mut self, other: &Self) {
@@ -56,6 +68,10 @@ impl AffinePoint<N> for Secp256r1Point {
         unsafe {
             syscall_secp256r1_add(a, b);
         }
+    }
+
+    fn complete_add_assign(&mut self, other: &Self) {
+        self.weierstrass_add_assign(other);
     }
 
     fn double(&mut self) {

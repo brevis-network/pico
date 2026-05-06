@@ -94,7 +94,8 @@ macro_rules! run {
             });
 
             // Compile RISCV program and apply padding if VK_VERIFICATION is enabled.
-            let riscv_compiler = Compiler::new(SourceType::RISCV, elf);
+            let riscv_compiler =
+                Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
             let mut riscv_program = riscv_compiler.compile();
             if let Some(ref shape_config) = riscv_shape_config {
                 let program = Arc::get_mut(&mut riscv_program).expect("cannot get_mut arc");

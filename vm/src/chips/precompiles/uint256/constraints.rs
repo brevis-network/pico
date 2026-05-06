@@ -1,12 +1,17 @@
 use crate::{
     chips::{
-        chips::riscv_memory::read_write::columns::value_as_limbs,
+        chips::riscv_memory::read_write::columns::MemoryCols,
         gadgets::{
+            addr_add::AddrAddGadget,
             field::field_op::FieldOperation,
             is_zero::IsZeroGadget,
+            syscall_addr::SyscallAddrGadget,
             uint256::U256Field,
             utils::{
-                conversions::{limbs_from_access, limbs_from_prev_access},
+                conversions::{
+                    generate_limbs_from_read_cols_u8, generate_limbs_from_write_cols_u8,
+                    limbs_to_words,
+                },
                 field_params::NumLimbs,
                 limbs::Limbs,
                 polynomial::Polynomial,
@@ -17,10 +22,12 @@ use crate::{
             Uint256MulChip,
         },
     },
+    compiler::word::Word,
     emulator::riscv::syscalls::SyscallCode,
-    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+    machine::builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
 };
-use p3_air::{Air, BaseAir};
+use hybrid_array::Array;
+use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, FieldAlgebra};
 use p3_matrix::Matrix;
 use std::borrow::Borrow;
@@ -43,9 +50,25 @@ where
 
         // We are computing (x * y) % modulus. The value of x is stored in the "prev_value" of
         // the x_memory, since we write to it later.
-        let x_limbs = limbs_from_prev_access(&local.x_memory);
-        let y_limbs = limbs_from_access(&local.y_memory);
-        let modulus_limbs = limbs_from_access(&local.modulus_memory);
+        // Extract byte limbs from u16 word limbs via U16→U8 conversion.
+        let x_limbs_vec =
+            generate_limbs_from_write_cols_u8(builder, &local.x_memory[..], local.is_real.into());
+        let x_limbs: Limbs<CB::Expr, <U256Field as NumLimbs>::Limbs> =
+            Limbs(Array::try_from_iter(x_limbs_vec).expect("failed to convert x limbs"));
+
+        let y_limbs_vec =
+            generate_limbs_from_read_cols_u8(builder, &local.y_memory[..], local.is_real.into());
+        let y_limbs: Limbs<CB::Expr, <U256Field as NumLimbs>::Limbs> =
+            Limbs(Array::try_from_iter(y_limbs_vec).expect("failed to convert y limbs"));
+
+        let modulus_limbs_vec = generate_limbs_from_read_cols_u8(
+            builder,
+            &local.modulus_memory[..],
+            local.is_real.into(),
+        );
+        let modulus_limbs: Limbs<CB::Expr, <U256Field as NumLimbs>::Limbs> = Limbs(
+            Array::try_from_iter(modulus_limbs_vec).expect("failed to convert modulus limbs"),
+        );
 
         // If the modulus is zero, then we don't perform the modulus operation.
         // Evaluate the modulus_is_zero operation by summing each byte of the modulus. The sum will
@@ -53,7 +76,7 @@ where
         let modulus_byte_sum = modulus_limbs
             .0
             .iter()
-            .fold(CB::Expr::ZERO, |acc, &limb| acc + limb);
+            .fold(CB::Expr::ZERO, |acc, limb| acc + limb.clone());
         IsZeroGadget::<CB::F>::eval(
             builder,
             modulus_byte_sum,
@@ -67,7 +90,7 @@ where
         let mut coeff_2_256 = Vec::new();
         coeff_2_256.resize(32, CB::Expr::ZERO);
         coeff_2_256.push(CB::Expr::ONE);
-        let modulus_polynomial: Polynomial<CB::Expr> = modulus_limbs.into();
+        let modulus_polynomial: Polynomial<CB::Expr> = modulus_limbs.clone().into();
         let p_modulus: Polynomial<CB::Expr> = modulus_polynomial
             * (CB::Expr::ONE - modulus_is_zero.into())
             + Polynomial::from_coefficients(&coeff_2_256) * modulus_is_zero.into();
@@ -82,7 +105,7 @@ where
             local.is_real,
         );
 
-        // Verify the range of the output if the moduls is not zero.  Also, check the value of
+        // Verify the range of the output if the modulus is not zero. Also, check the value of
         // modulus_is_not_zero.
         local.output_range_check.eval(
             builder,
@@ -96,33 +119,86 @@ where
         );
 
         // Assert that the correct result is being written to x_memory.
-        builder
-            .when(local.is_real)
-            .assert_all_eq(local.output.result, value_as_limbs(&local.x_memory));
+        // Reconstruct byte-level results into Words for memory write constraints.
+        let result_words = limbs_to_words(
+            &local
+                .output
+                .result
+                .0
+                .iter()
+                .map(|v| (*v).into())
+                .collect::<Vec<CB::Expr>>(),
+            CB::F::from_canonical_u32(256).into(),
+        );
+        let do_check: CB::Expr = local.is_real.into();
+        for (i, word) in result_words.iter().enumerate() {
+            for (v, w) in local.x_memory[i].inner.value().0.iter().zip(word.0.iter()) {
+                builder
+                    .when(do_check.clone())
+                    .assert_eq((*v).into(), w.clone());
+            }
+        }
 
-        // Read and write x.
+        // Address alignment constraints.
+        let x_ptr =
+            SyscallAddrGadget::<CB::F>::eval(builder, 32, local.x_ptr, local.is_real.into());
+        let y_ptr =
+            SyscallAddrGadget::<CB::F>::eval(builder, 64, local.y_ptr, local.is_real.into());
+
+        for i in 0..local.x_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                Word([
+                    x_ptr[0].into(),
+                    x_ptr[1].into(),
+                    x_ptr[2].into(),
+                    CB::Expr::ZERO,
+                ]),
+                Word::from(8 * i as u64),
+                local.x_addrs[i],
+                local.is_real.into(),
+            );
+        }
+        for i in 0..local.y_and_modulus_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                Word([
+                    y_ptr[0].into(),
+                    y_ptr[1].into(),
+                    y_ptr[2].into(),
+                    CB::Expr::ZERO,
+                ]),
+                Word::from(8 * i as u64),
+                local.y_and_modulus_addrs[i],
+                local.is_real.into(),
+            );
+        }
+
+        // Memory access constraints.
+        // Read and write x using constrained addresses.
         for (i, access) in local.x_memory.iter().enumerate() {
             builder.eval_memory_access(
-                local.chunk,
+                local.chunk.into(),
                 local.clk.into() + CB::Expr::ONE,
-                local.x_ptr + CB::Expr::from_canonical_usize(i * 4),
-                access,
+                local.x_addrs[i].value.map(Into::into),
+                &access.inner,
                 local.is_real,
             )
         }
 
         // Evaluate the y_ptr memory access. We concatenate y and modulus into a single array since
         // we read it contiguously from the y_ptr memory location.
-        for (i, access) in [local.y_memory, local.modulus_memory]
-            .concat()
+        for (i, access) in local
+            .y_memory
             .iter()
+            .chain(local.modulus_memory.iter())
             .enumerate()
         {
             builder.eval_memory_access(
-                local.chunk,
+                local.chunk.into(),
                 local.clk.into(),
-                local.y_ptr + CB::Expr::from_canonical_usize(i * 4),
-                access,
+                local.y_and_modulus_addrs[i].value.map(Into::into),
+                &access.inner,
                 local.is_real,
             )
         }
@@ -131,8 +207,8 @@ where
         builder.looked_syscall(
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::UINT256_MUL.syscall_id()),
-            local.x_ptr,
-            local.y_ptr,
+            x_ptr.map(Into::into),
+            y_ptr.map(Into::into),
             local.is_real,
         );
 

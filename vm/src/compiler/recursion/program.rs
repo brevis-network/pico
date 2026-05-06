@@ -19,8 +19,8 @@ pub struct RecursionProgram<F> {
 }
 
 impl<F: Field> ProgramBehavior<F> for RecursionProgram<F> {
-    fn pc_start(&self) -> F {
-        F::ZERO
+    fn pc_start(&self) -> [F; 3] {
+        [F::ZERO; 3]
     }
 
     fn clone(&self) -> Self {

@@ -12,7 +12,7 @@ use crate::{
         gadgets::global_interaction::GlobalInteractionOperation,
         utils::{next_power_of_two, zeroed_f_vec},
     },
-    compiler::riscv::program::Program,
+    compiler::riscv::{opcode::ByteOpcode, program::Program},
     emulator::riscv::record::EmulationRecord,
     iter::{
         IndexedPicoIterator, IntoPicoIterator, IntoPicoRefMutIterator, PicoBridge, PicoIterator,
@@ -22,7 +22,7 @@ use crate::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
         lookup::LookupScope,
-        septic::{SepticBlock, SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
+        septic::{SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
     },
 };
 use p3_field::PrimeField32;
@@ -49,16 +49,17 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
                 let mut blu: Vec<ByteLookupEvent> = vec![];
                 let mut poseidon2: Vec<Poseidon2Event> = vec![];
                 events.iter().for_each(|event| {
-                    blu.add_u16_range_check(event.message[0].try_into().unwrap());
+                    let message0_16bit_limb = (event.message[0] & 0xFFFF) as u16;
+                    let message0_8bit_limb = ((event.message[0] >> 16) & 0xFF) as u8;
+                    blu.add_u16_range_check(message0_16bit_limb);
+                    blu.add_u16_range_check(event.message[7] as u16);
+                    blu.add_u8_range_check(message0_8bit_limb, 0);
+                    // kind < 64 (6-bit range check via LTU)
+                    blu.push(ByteLookupEvent::new(ByteOpcode::LTU, 1, 0, event.kind, 64));
 
                     poseidon2.push(
                         GlobalInteractionOperation::<F>::default()
-                            .populate(
-                                SepticBlock(event.message),
-                                event.is_receive,
-                                true,
-                                event.kind,
-                            )
+                            .populate(event.message, event.is_receive, true, event.kind)
                             .unwrap(),
                     );
                 });
@@ -103,8 +104,12 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
                         let event: &GlobalInteractionEvent = &events[idx];
                         cols.message = event.message.map(F::from_canonical_u32);
                         cols.kind = F::from_canonical_u8(event.kind);
+                        cols.message_0_16bit_limb =
+                            F::from_canonical_u32(event.message[0] & 0xFFFF);
+                        cols.message_0_8bit_limb =
+                            F::from_canonical_u32((event.message[0] >> 16) & 0xFF);
                         cols.interaction.populate(
-                            SepticBlock(event.message),
+                            event.message,
                             event.is_receive,
                             true,
                             event.kind,

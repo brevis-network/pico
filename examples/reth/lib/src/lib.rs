@@ -43,12 +43,12 @@ fn workspace_relative_path(relative_path: &str) -> PathBuf {
 
 /// Returns the path to the reth ELF binary.
 pub fn reth_elf_path() -> PathBuf {
-    workspace_relative_path("perf/bench_data/reth-elf")
+    workspace_relative_path("perf/bench_data/rv64/reth-elf")
 }
 
 /// Returns the path to the block input file for a given block number.
 pub fn block_input_path(block_number: u32) -> PathBuf {
-    workspace_relative_path(&format!("perf/bench_data/reth-{}.bin", block_number))
+    workspace_relative_path(&format!("perf/bench_data/rv64/reth-{}.bin", block_number))
 }
 
 /// Loads the reth ELF binary from the default location.

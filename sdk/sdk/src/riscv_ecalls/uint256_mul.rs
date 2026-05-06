@@ -11,7 +11,7 @@ use core::arch::asm;
 /// byte boundary.
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_uint256_mulmod(x: *mut [u32; 8], y: *const [u32; 8]) {
+pub extern "C" fn syscall_uint256_mulmod(x: *mut [u64; 4], y: *const [u64; 4]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
         asm!(

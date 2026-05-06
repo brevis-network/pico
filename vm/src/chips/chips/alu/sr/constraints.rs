@@ -2,10 +2,10 @@
 
 use super::{columns::ShiftRightCols, traces::ShiftRightChip};
 use crate::{
-    chips::chips::alu::sr::columns::ShiftRightValueCols,
+    chips::{chips::alu::sr::columns::ShiftRightValueCols, gadgets::msb::U16MSBGadget},
     compiler::riscv::opcode::{ByteOpcode, Opcode},
-    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
-    primitives::consts::{BYTE_SIZE, LONG_WORD_SIZE, WORD_SIZE},
+    machine::builder::{ChipBuilder, ChipLookupBuilder},
+    primitives::consts::WORD_SIZE,
 };
 use p3_air::{Air, AirBuilder};
 use p3_field::Field;
@@ -26,196 +26,183 @@ where
         for ShiftRightValueCols {
             a,
             b,
-            c,
-            shift_by_n_bits,
-            shift_by_n_bytes,
-            byte_shift_result,
-            bit_shift_result,
-            shr_carry_output_carry,
-            shr_carry_output_shifted_byte,
+            c_for_lookup,
             b_msb,
-            c_least_sig_byte,
+            srw_msb,
+            c_bits,
+            c,
+            sra_msb_v0123,
+            v_0123,
+            v_012,
+            v_01,
+            lower_limb,
+            higher_limb,
+            limb_result,
+            shift_u16,
             is_srl,
             is_sra,
-            is_real,
+            is_srlw,
+            is_sraw,
+            is_w_imm,
+            imm_c,
         } in local.values
         {
-            // Check that the MSB of most_significant_byte matches local.b_msb using lookup.
-            {
-                let byte = b[WORD_SIZE - 1];
-                let opcode = CB::F::from_canonical_u32(ByteOpcode::MSB as u32);
-                let msb = b_msb;
-                builder.looking_byte(opcode, msb, byte, zero.clone(), is_real);
-            }
+            // Compute is_real from the opcode flags
+            // Note: Var types implement Copy, so .clone() is unnecessary
+            let is_real = is_srl + is_sra + is_srlw + is_sraw;
 
-            // Calculate the number of bits and bytes to shift by from c.
-            {
-                // The sum of c_least_sig_byte[i] * 2^i must match c[0].
-                let mut c_byte_sum = zero.clone();
-                for i in 0..BYTE_SIZE {
-                    let val: CB::Expr = CB::F::from_canonical_u32(1 << i).into();
-                    c_byte_sum = c_byte_sum.clone() + val * c_least_sig_byte[i];
-                }
-                builder.assert_eq(c_byte_sum, c[0]);
-
-                // Number of bits to shift.
-
-                // The 3-bit number represented by the 3 least significant bits of c equals the number
-                // of bits to shift.
-                let mut num_bits_to_shift = zero.clone();
-                for i in 0..3 {
-                    num_bits_to_shift = num_bits_to_shift.clone()
-                        + c_least_sig_byte[i] * CB::F::from_canonical_u32(1 << i);
-                }
-                for i in 0..BYTE_SIZE {
-                    builder
-                        .when(shift_by_n_bits[i])
-                        .assert_eq(num_bits_to_shift.clone(), CB::F::from_canonical_usize(i));
-                }
-
-                // Exactly one of the shift_by_n_bits must be 1.
-                builder.assert_eq(
-                    shift_by_n_bits.iter().fold(zero.clone(), |acc, &x| acc + x),
-                    one.clone(),
-                );
-
-                // The 2-bit number represented by the 3rd and 4th least significant bits of c is the
-                // number of bytes to shift.
-                let num_bytes_to_shift =
-                    c_least_sig_byte[3] + c_least_sig_byte[4] * CB::F::from_canonical_u32(2);
-
-                // If shift_by_n_bytes[i] = 1, then i = num_bytes_to_shift.
-                for i in 0..WORD_SIZE {
-                    builder
-                        .when(shift_by_n_bytes[i])
-                        .assert_eq(num_bytes_to_shift.clone(), CB::F::from_canonical_usize(i));
-                }
-
-                // Exactly one of the shift_by_n_bytes must be 1.
-                builder.assert_eq(
-                    shift_by_n_bytes
-                        .iter()
-                        .fold(zero.clone(), |acc, &x| acc + x),
-                    one.clone(),
-                );
-            }
-
-            // Byte shift the sign-extended b.
-            {
-                // The leading bytes of b should be 0xff if b's MSB is 1 & opcode = SRA, 0 otherwise.
-                let leading_byte = is_sra * b_msb * F::from_canonical_u8(0xff);
-                let mut sign_extended_b: Vec<CB::Expr> = vec![];
-                for i in 0..WORD_SIZE {
-                    sign_extended_b.push(b[i].into());
-                }
-                for _ in 0..WORD_SIZE {
-                    sign_extended_b.push(leading_byte.clone());
-                }
-
-                // Shift the bytes of sign_extended_b by num_bytes_to_shift.
-                for num_bytes_to_shift in 0..WORD_SIZE {
-                    for i in 0..(LONG_WORD_SIZE - num_bytes_to_shift) {
-                        builder
-                            .when(shift_by_n_bytes[num_bytes_to_shift])
-                            .assert_eq(
-                                byte_shift_result[i],
-                                sign_extended_b[i + num_bytes_to_shift].clone(),
-                            );
-                    }
-                }
-            }
-
-            // Bit shift the byte_shift_result using ShrCarry, and compare the result to a.
-            {
-                // The carry multiplier is 2^(8 - num_bits_to_shift).
-                let mut carry_multiplier = zero.clone();
-                for i in 0..BYTE_SIZE {
-                    let val: CB::Expr = F::from_canonical_u32(1u32 << (8 - i)).into();
-
-                    carry_multiplier = carry_multiplier + val * shift_by_n_bits[i];
-                }
-
-                // The 3-bit number represented by the 3 least significant bits of c equals the number
-                // of bits to shift.
-                let mut num_bits_to_shift = zero.clone();
-                for i in 0..3 {
-                    num_bits_to_shift = num_bits_to_shift.clone()
-                        + c_least_sig_byte[i] * CB::F::from_canonical_u32(1 << i);
-                }
-
-                // Calculate ShrCarry.
-                for i in (0..LONG_WORD_SIZE).rev() {
-                    builder.looking_byte_pair(
-                        CB::F::from_canonical_u32(ByteOpcode::ShrCarry as u32),
-                        shr_carry_output_shifted_byte[i],
-                        shr_carry_output_carry[i],
-                        byte_shift_result[i],
-                        num_bits_to_shift.clone(),
-                        is_real,
-                    );
-                }
-
-                // Use the results of ShrCarry to calculate the bit shift result.
-                for i in (0..LONG_WORD_SIZE).rev() {
-                    let mut v: CB::Expr = shr_carry_output_shifted_byte[i].into();
-                    if i + 1 < LONG_WORD_SIZE {
-                        v = v.clone() + shr_carry_output_carry[i + 1] * carry_multiplier.clone();
-                    }
-                    builder.assert_eq(v, bit_shift_result[i]);
-                }
-            }
-
-            // The 4 least significant bytes must match a. The 4 most significant bytes of result may be
-            // inaccurate.
-            {
-                for i in 0..WORD_SIZE {
-                    builder.assert_eq(a[i], bit_shift_result[i]);
-                }
-            }
-
-            // Check that the flags are indeed boolean.
-            {
-                let flags = [is_srl, is_sra, is_real, b_msb];
-                for flag in flags.iter() {
-                    builder.assert_bool(*flag);
-                }
-                for shift_by_n_byte in shift_by_n_bytes.iter() {
-                    builder.assert_bool(*shift_by_n_byte);
-                }
-                for shift_by_n_bit in shift_by_n_bits.iter() {
-                    builder.assert_bool(*shift_by_n_bit);
-                }
-                for bit in c_least_sig_byte.iter() {
-                    builder.assert_bool(*bit);
-                }
-            }
-
-            let long_words = [
-                byte_shift_result,
-                bit_shift_result,
-                shr_carry_output_carry,
-                shr_carry_output_shifted_byte,
-            ];
-
-            for long_word in long_words.iter() {
-                builder.slice_range_check_u8(long_word, is_real);
-            }
-
-            // Check that the operation flags are boolean.
+            // Check that the operation flags are boolean (Var types - no clone needed)
             builder.assert_bool(is_srl);
             builder.assert_bool(is_sra);
-            builder.assert_bool(is_real);
+            builder.assert_bool(is_srlw);
+            builder.assert_bool(is_sraw);
+            builder.assert_bool(imm_c);
 
-            // Check that is_real is the sum of the two operation flags.
-            builder.assert_eq(is_srl + is_sra, is_real);
+            let is_word = is_srlw + is_sraw;
+            let not_word = is_srl + is_sra;
 
-            // Receive the arguments.
+            // Constrain is_w_imm = (is_srlw + is_sraw) * imm_c
+            builder.assert_eq(is_w_imm, is_word.clone() * imm_c);
+
+            // Check that c_bits are the 6 lowest bits of c (Var types - no clone needed)
+            for i in 0..6 {
+                builder.assert_bool(c_bits[i]);
+            }
+            let mut c_lower_bits = zero.clone();
+            let mut bit_shift = zero.clone();
+            for i in 0..6 {
+                c_lower_bits = c_lower_bits + c_bits[i] * CB::F::from_canonical_u32(1 << i);
+                if i == 3 {
+                    bit_shift = c_lower_bits.clone();
+                }
+            }
+
+            // Check that bits 6-15 of c are zero
+            let inverse_64: CB::Expr = CB::F::from_canonical_u32(64).inverse().into();
+            builder.looking_byte(
+                CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                (c - c_lower_bits) * inverse_64,
+                CB::F::from_canonical_u32(10),
+                zero.clone(),
+                is_real.clone(),
+            );
+
+            // Check v_01, v_012, v_0123 constraints
+            let two = CB::F::from_canonical_u32(2);
+            let three = CB::F::from_canonical_u32(3);
+            let fifteen = CB::F::from_canonical_u32(15);
+            let two_fifty_five = CB::F::from_canonical_u32(255);
+
+            builder.assert_eq(
+                v_01,
+                (((one.clone() - c_bits[0]) + one.clone()) * two)
+                    * ((one.clone() - c_bits[1]) * three + one.clone()),
+            );
+            builder.assert_eq(
+                v_012,
+                v_01 * ((one.clone() - c_bits[2]) * fifteen + one.clone()),
+            );
+            builder.assert_eq(
+                v_0123,
+                v_012 * ((one.clone() - c_bits[3]) * two_fifty_five + one.clone()),
+            );
+
+            // Check shift_u16 constraints (Var types - no clone needed)
+            for i in 0..4 {
+                builder.when(shift_u16[i]).assert_eq(
+                    c_bits[4] + c_bits[5] * CB::F::from_canonical_u32(2) * not_word.clone(),
+                    CB::F::from_canonical_u32(i as u32),
+                );
+                builder.assert_bool(shift_u16[i]);
+            }
+            builder.when(is_real.clone()).assert_eq(
+                shift_u16[0] + shift_u16[1] + shift_u16[2] + shift_u16[3],
+                one.clone(),
+            );
+
+            // Check that lower_limb < 2^bit_shift and higher_limb < 2^(16 - bit_shift)
+            let sixteen: CB::Expr = CB::F::from_canonical_u32(16).into();
+            for i in 0..WORD_SIZE {
+                builder.looking_byte(
+                    CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                    lower_limb[i],
+                    bit_shift.clone(),
+                    zero.clone(),
+                    is_real.clone(),
+                );
+                builder.looking_byte(
+                    CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                    higher_limb[i],
+                    sixteen.clone() - bit_shift.clone(),
+                    zero.clone(),
+                    is_real.clone(),
+                );
+            }
+
+            // Check limb_result = higher_limb + lower_limb[i+1] * v_0123
+            for i in 0..WORD_SIZE {
+                let mut limb_res: CB::Expr = higher_limb[i].into();
+                if i != WORD_SIZE - 1 {
+                    limb_res = limb_res + lower_limb[i + 1] * v_0123;
+                }
+                builder.assert_eq(limb_result[i], limb_res);
+            }
+
+            // Check U16MSB for b_msb (only for SRA/SRAW operations)
+            U16MSBGadget::eval(builder, b.0[3].into(), b_msb, is_sra.into());
+            U16MSBGadget::eval(builder, b.0[1].into(), b_msb, is_sraw.into());
+
+            builder.when(is_srl + is_srlw).assert_zero(b_msb.msb);
+            builder.assert_eq(sra_msb_v0123, b_msb.msb * v_0123);
+
+            // Check U16MSB for srw_msb (only for word operations)
+            U16MSBGadget::eval(builder, a.0[1].into(), srw_msb, is_word.clone());
+            builder.when(not_word.clone()).assert_zero(srw_msb.msb);
+
+            let base = CB::F::from_canonical_u32(1 << 16);
+            let base_minus_one = CB::F::from_canonical_u16(u16::MAX);
+
+            // Constrain the final result based on shift amount
+            // For 64-bit operations (SRL/SRA)
+            for i in 0..WORD_SIZE {
+                for j in 0..(WORD_SIZE - 1 - i) {
+                    builder
+                        .when(not_word.clone())
+                        .when(shift_u16[i])
+                        .assert_eq(a[j], limb_result[i + j]);
+                }
+
+                builder.when(not_word.clone()).when(shift_u16[i]).assert_eq(
+                    a[WORD_SIZE - 1 - i],
+                    limb_result[WORD_SIZE - 1] + (b_msb.msb * base - sra_msb_v0123),
+                );
+
+                for j in (WORD_SIZE - i)..WORD_SIZE {
+                    builder
+                        .when(not_word.clone())
+                        .when(shift_u16[i])
+                        .assert_eq(a[j], b_msb.msb * base_minus_one);
+                }
+            }
+
+            // TODO: constrain 32-bit operations (SRLW/SRAW)
+
+            // For word operations, the upper bits should be sign-extended
+            for i in WORD_SIZE / 2..WORD_SIZE {
+                builder
+                    .when(is_word.clone())
+                    .assert_eq(a[i], srw_msb.msb * base_minus_one);
+            }
+
+            // Receive the arguments via ALU lookup
             builder.looked_alu(
                 is_srl * CB::F::from_canonical_u32(Opcode::SRL as u32)
-                    + is_sra * CB::F::from_canonical_u32(Opcode::SRA as u32),
+                    + is_sra * CB::F::from_canonical_u32(Opcode::SRA as u32)
+                    + is_srlw * CB::F::from_canonical_u32(Opcode::SRLW as u32)
+                    + is_sraw * CB::F::from_canonical_u32(Opcode::SRAW as u32),
                 a,
                 b,
-                c,
+                c_for_lookup,
                 is_real,
             );
         }

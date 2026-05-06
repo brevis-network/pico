@@ -20,6 +20,10 @@ use crate::{
                 limbs::Limbs,
             },
         },
+        precompiles::{
+            checked_u64_to_u32, split_dword_read_records_to_word_records,
+            split_dword_words_to_legacy_u32_words, split_dword_write_records_to_word_records,
+        },
         utils::pad_rows_fixed,
     },
     compiler::riscv::program::Program,
@@ -89,17 +93,31 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         record: &mut EmulationRecord,
     ) {
         let mut new_byte_lookup_events = Vec::new();
+        // This chip still consumes decompression payloads as legacy 32-bit word rows.
+        let legacy_y_words = split_dword_words_to_legacy_u32_words(&event.y_words);
+        let legacy_x_memory_records =
+            split_dword_write_records_to_word_records(&event.x_memory_records);
+        let legacy_y_memory_records =
+            split_dword_read_records_to_word_records(&event.y_memory_records);
         self.is_real = F::from_bool(true);
         self.chunk = F::from_canonical_u32(event.chunk);
-        self.clk = F::from_canonical_u32(event.clk);
-        self.ptr = F::from_canonical_u32(event.ptr);
+        self.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "edwards decompress clk"));
+        self.ptr = F::from_canonical_u32(checked_u64_to_u32(
+            event.ptr,
+            "edwards decompress ptr proof boundary",
+        ));
         self.sign = F::from_bool(event.sign);
         for i in 0..8 {
-            self.x_access[i].populate(event.x_memory_records[i], &mut new_byte_lookup_events);
-            self.y_access[i].populate(event.y_memory_records[i], &mut new_byte_lookup_events);
+            self.x_access[i].populate(legacy_x_memory_records[i], &mut new_byte_lookup_events);
+            self.y_access[i].populate(legacy_y_memory_records[i], &mut new_byte_lookup_events);
         }
 
-        let y = &BigUint::from_bytes_le(&event.y_bytes);
+        let y = &BigUint::from_bytes_le(
+            &legacy_y_words
+                .iter()
+                .flat_map(|word| word.to_le_bytes())
+                .collect::<Vec<u8>>(),
+        );
         self.populate_field_ops::<E>(&mut new_byte_lookup_events, y);
 
         record.add_byte_lookup_events(new_byte_lookup_events);
@@ -201,18 +219,26 @@ impl<V: Copy> EdDecompressCols<V> {
             self.is_real,
         );
 
+        // TODO: addr
         builder.eval_memory_access_slice(
             self.chunk,
             self.clk,
-            self.ptr,
+            [self.ptr.into(), CB::Expr::ZERO, CB::Expr::ZERO],
             &self.x_access,
+            4,
             self.is_real,
         );
+        // TODO: addr
         builder.eval_memory_access_slice(
             self.chunk,
             self.clk,
-            self.ptr.into() + CB::F::from_canonical_u32(32),
+            [
+                self.ptr.into() + CB::F::from_canonical_u32(32),
+                CB::Expr::ZERO,
+                CB::Expr::ZERO,
+            ],
             &self.y_access,
+            4,
             self.is_real,
         );
 
@@ -246,8 +272,9 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.looked_syscall(
             self.clk,
             CB::F::from_canonical_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
-            self.ptr,
-            self.sign,
+            // TODO: Need to convert ptr columns to Addr type to support full 48-bit address representation
+            [self.ptr, self.ptr, self.ptr],
+            [self.sign, self.sign, self.sign],
             self.is_real,
         );
     }

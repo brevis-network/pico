@@ -7,14 +7,11 @@ compile_error!(
 
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
-    emulator::{
-        opts::EmulatorOpts,
-        riscv::{memory::GLOBAL_MEMORY_RECYCLER, state::RiscvEmulationState},
-    },
+    emulator::opts::EmulatorOpts,
     instances::configs::riscv_kb_config::StarkConfig as RiscvKBSC,
 };
 #[cfg(feature = "aot")]
-use reth_aot::{AotRun, RethEmulator};
+use reth_aot::{AotRun, RethEmulator, recycle_snapshot_memory};
 use reth_lib::{create_stdin, load_block_input, load_reth_elf, parse_block_arg, validate_block};
 use std::time::Instant;
 
@@ -43,7 +40,7 @@ fn main() {
         }
     };
 
-    let compiler = Compiler::new(SourceType::RISCV, &elf_bytes);
+    let compiler = Compiler::new(SourceType::RISCV, &elf_bytes).expect("Failed to create compiler");
     let program = compiler.compile();
 
     println!("Loaded program:");
@@ -71,6 +68,7 @@ fn main() {
         let mut emu = RethEmulator::new(program.clone(), input_stream.to_vec());
         let mut batch_count = 0;
         loop {
+            // NOTE: caller must recycle returned snapshot memory.
             let (snapshot, report) = emu
                 .next_state_batch(opts)
                 .expect("AOT next_state_batch failed");
@@ -141,9 +139,4 @@ fn main() {
     println!("  Batches: {}", first_batches);
     println!("  Avg Wall time: {:.3}s", avg_time);
     println!("  Avg Throughput: {:.2}M insn/s", avg_throughput);
-}
-
-fn recycle_snapshot_memory(snapshot: RiscvEmulationState) {
-    let RiscvEmulationState { memory, .. } = snapshot;
-    let _ = GLOBAL_MEMORY_RECYCLER.send((memory, true));
 }
