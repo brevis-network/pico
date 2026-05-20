@@ -141,3 +141,31 @@ fn test_lt_chip_simple_eval() {
     assert_eq!(builder.public_values().len(), 119);
     assert_eq!(builder.num_lookups(), 4);
 }
+
+/// SLT: -1 < 1 should be true (a[0] = 1); exercises the signed comparison path
+#[test]
+fn test_rv64_slt_negative_less_than_positive() {
+    let instructions = vec![
+        Instruction::new(Opcode::ADD, 10, 0, (-1i64) as u64, false, true),
+        Instruction::new(Opcode::ADD, 11, 0, 1, false, true),
+        Instruction::new(Opcode::SLT, 12, 10, 11, false, false),
+        Instruction::new(Opcode::ADD, 10, 0, 0, false, true),
+        Instruction::new(Opcode::ECALL, 0, 0, 0, false, false),
+    ];
+    let program = Program::new(instructions, 0x10000, 0x10000);
+    run_test(program, "SLT: negative < positive");
+}
+
+/// SLTU: u64::MAX < u64::MAX should be false (a[0] = 0); exercises the equal case
+#[test]
+fn test_rv64_sltu_max_values() {
+    let instructions = vec![
+        Instruction::new(Opcode::ADD, 10, 0, u64::MAX, false, true),
+        Instruction::new(Opcode::ADD, 11, 0, u64::MAX, false, true),
+        Instruction::new(Opcode::SLTU, 12, 10, 11, false, false),
+        Instruction::new(Opcode::ADD, 10, 0, 0, false, true),
+        Instruction::new(Opcode::ECALL, 0, 0, 0, false, false),
+    ];
+    let program = Program::new(instructions, 0x10000, 0x10000);
+    run_test(program, "SLTU: max == max");
+}

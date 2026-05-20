@@ -185,7 +185,28 @@ where
                 }
             }
 
-            // TODO: constrain 32-bit operations (SRLW/SRAW)
+            // Constrain 32-bit operations (SRLW/SRAW): a[0] and a[1]
+            let half = WORD_SIZE / 2;
+            for i in 0..half {
+                for j in 0..(half - 1 - i) {
+                    builder
+                        .when(is_word.clone())
+                        .when(shift_u16[i])
+                        .assert_eq(a[j], limb_result[i + j]);
+                }
+
+                builder.when(is_word.clone()).when(shift_u16[i]).assert_eq(
+                    a[half - 1 - i],
+                    higher_limb[half - 1] + (b_msb.msb * base - sra_msb_v0123),
+                );
+
+                for j in (half - i)..half {
+                    builder
+                        .when(is_word.clone())
+                        .when(shift_u16[i])
+                        .assert_eq(a[j], b_msb.msb * base_minus_one);
+                }
+            }
 
             // For word operations, the upper bits should be sign-extended
             for i in WORD_SIZE / 2..WORD_SIZE {

@@ -99,3 +99,17 @@ fn test_rv64_srlw() {
 fn test_rv64_sraw() {
     run_test(create_sraw_program(), "SRAW");
 }
+
+/// SRAW: 0x80000000 >> 16 — exercises shift_u16[1] (a[0] is assigned from limb_result[1])
+#[test]
+fn test_rv64_sraw_word_cross_boundary() {
+    let instructions = vec![
+        Instruction::new(Opcode::ADD, 10, 0, 0x80000000, false, true),
+        Instruction::new(Opcode::ADD, 11, 0, 16, false, true),
+        Instruction::new(Opcode::SRAW, 12, 10, 11, false, false),
+        Instruction::new(Opcode::ADD, 10, 0, 0, false, true),
+        Instruction::new(Opcode::ECALL, 0, 0, 0, false, false),
+    ];
+    let program = Program::new(instructions, 0x10000, 0x10000);
+    run_test(program, "SRAW: word boundary");
+}

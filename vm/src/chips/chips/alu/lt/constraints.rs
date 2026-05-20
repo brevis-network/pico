@@ -7,7 +7,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use core::borrow::Borrow;
-use p3_air::Air;
+use p3_air::{Air, AirBuilder};
 use p3_field::Field;
 use p3_matrix::Matrix;
 
@@ -46,6 +46,11 @@ where
             builder.assert_zero(a[1]);
             builder.assert_zero(a[2]);
             builder.assert_zero(a[3]);
+
+            // a[0] must equal the comparison result bit
+            builder
+                .when(is_real.clone())
+                .assert_eq(a[0], lt_signed.result.bit);
 
             // SLT looked
             let lt_op_code = *is_slt * CB::F::from_canonical_u32(Opcode::SLT as u32)
