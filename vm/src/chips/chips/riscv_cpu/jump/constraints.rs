@@ -1,7 +1,7 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
     compiler::{riscv::opcode::Opcode, word::Word},
-    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
+    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder},
 };
 use p3_air::AirBuilder;
 use p3_field::{Field, FieldAlgebra};
@@ -81,9 +81,32 @@ impl<F: Field> CpuChip<F> {
         );
 
         // Verify that the new pc is calculated correctly for JALR instructions.
+        // RISC-V spec: target = (rs1 + imm) & !1 (clear bit 0).
+        // We witness jalr_lsb = bit 0 of (rs1 + imm) and verify:
+        //   jalr_lsb ∈ {0, 1},
+        //   next_pc[0] is even  (via inverse-multiply range check),
+        //   rs1 + imm = next_pc + jalr_lsb  (via ALU ADD).
+        let jalr_lsb: CB::Expr = local.opcode_specific.jump().jalr_lsb.into();
+
+        builder
+            .when(local.opcode_selector.is_jalr)
+            .assert_bool(jalr_lsb.clone());
+
+        // Prove next_pc[0] is even: next_pc[0] * inv(2) must be a valid u16.
+        // If next_pc[0] were odd, next_pc[0] * inv(2) mod p ≈ p/2, which exceeds u16 range.
+        let two_inv: CB::Expr = F::from_canonical_u32(2).inverse().into();
+        let half_low: CB::Expr = local.next_pc[0].into() * two_inv;
+        builder.slice_range_check_u16(&[half_low], local.opcode_selector.is_jalr);
+
+        let sum_as_word = Word([
+            local.next_pc[0].into() + jalr_lsb,
+            local.next_pc[1].into(),
+            local.next_pc[2].into(),
+            F::ZERO.into(),
+        ]);
         builder.looking_alu(
             CB::Expr::from_canonical_u32(Opcode::ADD as u32),
-            next_pc_as_word.clone(),
+            sum_as_word,
             local.op_b_val(),
             local.op_c_val(),
             local.opcode_selector.is_jalr,

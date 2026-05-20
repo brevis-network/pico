@@ -290,7 +290,7 @@ impl<F: PrimeField32> CpuChip<F> {
         cols.num_extra_clk = num_extra_clk;
 
         self.populate_branch(cols, event, &mut new_alu_events);
-        self.populate_jump(event, &mut new_alu_events);
+        self.populate_jump(cols, event, blu_events, &mut new_alu_events);
         self.populate_auipc(event, &mut new_alu_events);
         let is_halt = self.populate_ecall(cols, event, blu_events);
 
