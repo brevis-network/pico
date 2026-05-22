@@ -167,6 +167,16 @@ where
                 }
             }
 
+            // For word operations, constrain the upper limbs of c to be proper sign/zero
+            // extension. Without this, a prover can set c[2] != 0 while c[0]=c[1]=0, making
+            // is_c_0 false while the actual 32-bit divisor is zero, bypassing div-by-zero.
+            for i in WORD_SIZE / 2..WORD_SIZE {
+                builder.when(is_word_operation.clone()).assert_eq(
+                    local_c[i],
+                    local_c_neg * CB::F::from_canonical_u16(u16::MAX),
+                );
+            }
+
             // Set up `quotient_comp` and `remainder_comp`.
             // `quotient_comp` is defined as following:
             // - `quotient` for 64-bit operations and signed word operations.
