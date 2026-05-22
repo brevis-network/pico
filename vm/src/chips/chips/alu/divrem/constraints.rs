@@ -592,6 +592,7 @@ where
                     (local_b_msb, local_b[WORD_SIZE / 2 - 1].into()),
                     (local_c_msb, local_c[WORD_SIZE / 2 - 1].into()),
                     (local_rem_msb, local_remainder[WORD_SIZE / 2 - 1].into()),
+                    (local_quot_msb, local_quotient[WORD_SIZE / 2 - 1].into()),
                 ];
                 for msb_pair in msb_pairs_word.iter() {
                     let (msb, byte) = msb_pair;
