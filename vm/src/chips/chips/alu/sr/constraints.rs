@@ -64,6 +64,10 @@ where
             // Constrain is_w_imm = (is_srlw + is_sraw) * imm_c
             builder.assert_eq(is_w_imm, is_word.clone() * imm_c);
 
+            // Bind scalar c to c_for_lookup[0] so the shift amount used in computation
+            // matches the operand visible to the CPU via the multiset lookup.
+            builder.assert_eq(c, c_for_lookup[0].into());
+
             // Check that c_bits are the 6 lowest bits of c (Var types - no clone needed)
             for i in 0..6 {
                 builder.assert_bool(c_bits[i]);
@@ -120,7 +124,8 @@ where
                 one.clone(),
             );
 
-            // Check that lower_limb < 2^bit_shift and higher_limb < 2^(16 - bit_shift)
+            // Check that lower_limb < 2^bit_shift and higher_limb < 2^(16 - bit_shift),
+            // and tie b[i] to its decomposition: b[i] = lower_limb[i] + higher_limb[i] * 2^bit_shift.
             let sixteen: CB::Expr = CB::F::from_canonical_u32(16).into();
             for i in 0..WORD_SIZE {
                 builder.looking_byte(
@@ -136,6 +141,12 @@ where
                     sixteen.clone() - bit_shift.clone(),
                     zero.clone(),
                     is_real.clone(),
+                );
+                // Carry equation: b[i] * v_0123 = higher_limb[i] * 2^16 + lower_limb[i] * v_0123
+                // (v_0123 = 2^(16 - bit_shift), so this reduces to b[i] = lower_limb[i] + higher_limb[i] * 2^bit_shift)
+                builder.assert_eq(
+                    b[i] * v_0123,
+                    higher_limb[i] * CB::F::from_canonical_u32(1 << 16) + lower_limb[i] * v_0123,
                 );
             }
 
