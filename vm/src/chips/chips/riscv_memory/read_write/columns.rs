@@ -136,8 +136,8 @@ pub struct MemoryInstructionCols<T> {
     pub is_sd: T, // New for RV64
 
     pub op_a_access: MemoryReadWriteCols<T>,
-    pub op_b_access: MemoryReadCols<T>,
-    pub op_c_access: MemoryReadCols<T>,
+    pub op_b_access: Word<T>,
+    pub op_c_access: Word<T>,
 }
 
 impl<F: Field> MemoryInstructionCols<F> {
@@ -164,18 +164,18 @@ impl<F: Field> MemoryInstructionCols<F> {
         // For u64 upgrade: values are no longer narrowed to u32.
         // op_a/b/c are now native u64 → Word (4×u16).
         *self.op_a_access.value_mut() = event.a.into();
-        *self.op_b_access.value_mut() = event.b.into();
-        *self.op_c_access.value_mut() = event.c.into();
+        self.op_b_access = event.b.into();
+        self.op_c_access = event.c.into();
 
         // Set memory accesses for a, b, and c.
         if let Some(record) = event.a_record {
             *self.op_a_access.value_mut() = record.value().into();
         }
         if let Some(MemoryRecordEnum::Read(record)) = event.b_record {
-            *self.op_b_access.value_mut() = record.value.into();
+            self.op_b_access = record.value.into();
         }
         if let Some(MemoryRecordEnum::Read(record)) = event.c_record {
-            *self.op_c_access.value_mut() = record.value.into();
+            self.op_c_access = record.value.into();
         }
     }
 }
@@ -188,12 +188,12 @@ impl<T: Copy> MemoryInstructionCols<T> {
 
     /// Gets the value of the second operand.
     pub fn op_b_val(&self) -> Word<T> {
-        *self.op_b_access.value()
+        self.op_b_access
     }
 
     /// Gets the value of the third operand.
     pub fn op_c_val(&self) -> Word<T> {
-        *self.op_c_access.value()
+        self.op_c_access
     }
 }
 
