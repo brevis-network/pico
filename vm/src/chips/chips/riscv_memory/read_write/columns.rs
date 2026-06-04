@@ -35,10 +35,6 @@ pub struct MemoryChipValueCols<F> {
     /// The 4th limb is constrained to be zero.
     pub addr_word: Word<F>,
 
-    /// This is the aligned memory address used for memory lookups, it's muliple of 8, since uint64.
-    /// TODO: add constraints to fix soundness
-    pub addr_aligned: Word<F>,
-
     /// The 3 binary offset bits: addr[0] & 1, (addr[0]>>1) & 1, (addr[0]>>2) & 1.
     /// These replace the old one-hot offset_is_one/two/three flags.
     pub offset_bit: [F; 3],

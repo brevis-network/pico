@@ -193,7 +193,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let inv_8 = CB::F::from_canonical_u8(8).inverse();
         builder.looking_byte(
             CB::Expr::from_canonical_u8(ByteOpcode::BitRange as u8),
-            (CB::Expr::ZERO + local.addr_word.0[0] - offset_sum) * CB::Expr::from(inv_8),
+            (CB::Expr::ZERO + local.addr_word.0[0] - offset_sum.clone()) * CB::Expr::from(inv_8),
             CB::Expr::from_canonical_u8(13),
             CB::Expr::ZERO,
             is_mem.clone(),
@@ -216,14 +216,15 @@ impl<F: Field> MemoryReadWriteChip<F> {
             );
 
         // ---- C3: Timestamp + Regional Lookup ----
+        // addr_aligned is computed inline as addr_word - offset, avoiding a free witness column.
         // eval_memory_access handles timestamp monotonicity and 9-element Regional lookup.
         builder.eval_memory_access(
             local.chunk,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::Memory as u32),
             [
-                local.addr_aligned.0[0],
-                local.addr_aligned.0[1],
-                local.addr_aligned.0[2],
+                CB::Expr::ZERO + local.addr_word.0[0] - offset_sum,
+                local.addr_word.0[1].into(),
+                local.addr_word.0[2].into(),
             ],
             &local.memory_access,
             is_mem.clone(),
