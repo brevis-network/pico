@@ -389,6 +389,14 @@ impl<F: Field> MemoryReadWriteChip<F> {
 
         builder.assert_bool(local.instruction.op_a_0);
 
+        // When rd = x0, pin op_a to zero regardless of load type.
+        for i in 0..4 {
+            builder.assert_eq(
+                local.instruction.op_a_0 * local.op_a_val()[i],
+                CB::Expr::ZERO,
+            );
+        }
+
         // mem_value_is_neg_not_x0 = (is_lb + is_lh + is_lw) * msb * (1 - op_a_0)
         builder.assert_eq(
             local.mem_value_is_neg_not_x0,
