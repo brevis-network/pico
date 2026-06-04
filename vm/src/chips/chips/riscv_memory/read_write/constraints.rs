@@ -281,8 +281,22 @@ impl<F: Field> MemoryReadWriteChip<F> {
             CB::Expr::ZERO + bit0 * byte1 + (CB::Expr::ONE - bit0) * byte0,
         );
 
-        // Range check: selected_limb_low_byte ∈ [0, 255]
-        builder.slice_range_check_u8(&[local.selected_limb_low_byte], is_byte_load.clone());
+        // Range check: both bytes of selected_limb ∈ [0, 255].
+        // The high byte is never a witness column — it is computed inline as
+        // (selected_limb - selected_limb_low_byte) * inv_256. Without this check
+        // a prover can supply a fake selected_limb_low_byte that makes the high
+        // byte an arbitrary field element, breaking the u8 bound on selected_byte.
+        let high_byte: CB::Expr = (CB::Expr::ZERO + local.selected_limb
+            - local.selected_limb_low_byte)
+            * CB::Expr::from(inv_256);
+        builder.looking_rangecheck(
+            ByteOpcode::U8Range,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            local.selected_limb_low_byte,
+            high_byte,
+            is_byte_load.clone(),
+        );
 
         // LB/LBU: unsigned_mem_val = [selected_byte, 0, 0, 0]
         let byte_word = Word([

@@ -280,8 +280,8 @@ impl<F: Field> MemoryReadWriteChip<F> {
                     let selected_byte = if bit0 == 1 { high_byte } else { low_byte };
                     cols.selected_byte = F::from_canonical_u8(selected_byte);
 
-                    // Range check for selected_limb_low_byte
-                    blu_events.add_u8_range_check(low_byte, 0);
+                    // Range check both bytes of selected_limb.
+                    blu_events.add_u8_range_check(low_byte, high_byte);
 
                     // unsigned_mem_val = [selected_byte, 0, 0, 0]
                     cols.unsigned_mem_val = Word([
