@@ -1,12 +1,14 @@
 use crate::emulator::AotEmulatorCore;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use hashbrown::HashMap;
-use k256::{elliptic_curve::ff::PrimeField, FieldBytes, FieldElement, Scalar as K256Scalar};
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
-use pico_vm::chips::gadgets::{
-    curves::{edwards::ed25519::decompress, weierstrass::bls381::Bls381BaseField},
-    utils::field_params::FieldParameters,
+use pico_vm::{
+    chips::gadgets::{
+        curves::{edwards::ed25519::decompress, weierstrass::bls381::Bls381BaseField},
+        utils::field_params::FieldParameters,
+    },
+    emulator::riscv::hook::ecrecover_bytes,
 };
 
 pub type Hook = fn(&AotEmulatorCore, &[u8]) -> Vec<Vec<u8>>;
@@ -30,12 +32,6 @@ pub fn default_hook_map() -> HashMap<u32, Hook> {
     HashMap::from_iter(hooks)
 }
 
-const NQR: [u8; 32] = {
-    let mut nqr = [0; 32];
-    nqr[31] = 3;
-    nqr
-};
-
 const NQR_BLS12_381: [u8; 48] = {
     let mut nqr = [0; 48];
     nqr[47] = 2;
@@ -50,45 +46,7 @@ fn pad_to_be(val: &BigUint, len: usize) -> Vec<u8> {
 }
 
 pub fn ecrecover(_: &AotEmulatorCore, buf: &[u8]) -> Vec<Vec<u8>> {
-    if buf.len() != 65 {
-        return vec![vec![0]];
-    }
-
-    let r_is_y_odd = buf[0] & 0b1000_0000 != 0;
-
-    let r_bytes: [u8; 32] = buf[1..33].try_into().unwrap();
-    let alpha_bytes: [u8; 32] = buf[33..65].try_into().unwrap();
-
-    let r = FieldElement::from_bytes(&FieldBytes::from(r_bytes)).unwrap();
-    let alpha = FieldElement::from_bytes(&FieldBytes::from(alpha_bytes)).unwrap();
-
-    if bool::from(r.is_zero()) || bool::from(alpha.is_zero()) {
-        return vec![vec![0]];
-    }
-
-    if let Some(mut y_coord) = alpha.sqrt().into_option().map(|y| y.normalize()) {
-        let r = K256Scalar::from_repr(r.to_bytes()).unwrap();
-        let r_inv = r.invert().expect("Non zero r scalar");
-
-        if r_is_y_odd != bool::from(y_coord.is_odd()) {
-            y_coord = y_coord.negate(1);
-            y_coord = y_coord.normalize();
-        }
-
-        vec![
-            vec![1],
-            y_coord.to_bytes().to_vec(),
-            r_inv.to_bytes().to_vec(),
-        ]
-    } else {
-        let nqr_field = FieldElement::from_bytes(&FieldBytes::from(NQR)).unwrap();
-        let qr = alpha * nqr_field;
-        let root = qr
-            .sqrt()
-            .expect("if alpha is not a square, then qr should be a square");
-
-        vec![vec![0], root.to_bytes().to_vec()]
-    }
+    ecrecover_bytes(buf)
 }
 
 #[must_use]

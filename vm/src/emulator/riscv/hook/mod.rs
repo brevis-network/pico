@@ -3,6 +3,8 @@ mod ecrecover;
 mod ed_decompress;
 mod fp;
 
+pub use ecrecover::ecrecover_bytes;
+
 use super::riscv_emulator::RiscvEmulator;
 use hashbrown::HashMap;
 
