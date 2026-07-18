@@ -76,6 +76,9 @@ where
             .chain(once(local.opcode_selector.is_sh))
             .chain(once(local.opcode_selector.is_sw))
             .chain(once(local.opcode_selector.is_sd))
+            // Bind the data-memory access to this CPU row's execution time.
+            .chain(once(local.chunk))
+            .chain(once(local.clk))
             .map(Into::into);
         // Memory lookup
         builder.looking(SymbolicLookup::new(

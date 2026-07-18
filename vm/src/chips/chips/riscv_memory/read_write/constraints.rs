@@ -63,6 +63,9 @@ where
                 .chain(once(local_memory_chip_value_cols.instruction.is_sh))
                 .chain(once(local_memory_chip_value_cols.instruction.is_sw))
                 .chain(once(local_memory_chip_value_cols.instruction.is_sd))
+                // Authenticate the memory row's time against the dispatching CPU row.
+                .chain(once(local_memory_chip_value_cols.chunk))
+                .chain(once(local_memory_chip_value_cols.clk))
                 .map(Into::into);
 
             builder.looked(SymbolicLookup::new(
