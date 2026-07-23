@@ -16,15 +16,23 @@ use pico_vm::chips::gadgets::{
 };
 use typenum::Unsigned;
 
-// k256 imports for optimized secp256k1 operations
-use k256::{
-    elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint},
-    AffinePoint as K256AffinePoint, ProjectivePoint as K256ProjectivePoint,
-};
+// libsecp256k1 (the `secp256k1` crate) for the hot secp256k1 add/double precompiles. Its field +
+// safegcd variable-time inversion are ~2-4x faster than k256's constant-time addition-chain
+// inversion (which dominated the snapshot-emulator producer: profiling showed secp256k1 add+double
+// = 33% of producer time, ~93% of which was the modular inversion in `to_affine`). The emulator
+// does not need constant-time crypto. Point-at-infinity never occurs for this ABI (the previous
+// k256 path already `.expect()`-panicked on a coordinate-less identity), so `combine`'s
+// infinity→Err can never fire here; outputs are the identical canonical affine (x, y).
 
-// p256 imports for optimized secp256r1 operations
+// p256 imports for optimized secp256r1 operations.
+// NOTE: the sec1 `FromEncodedPoint`/`ToEncodedPoint` traits (used by the secp256r1 path below) were
+// previously brought into scope by the now-removed k256 import; re-import them here via p256.
 use p256::{
-    elliptic_curve::Group, AffinePoint as P256AffinePoint, EncodedPoint as P256EncodedPoint,
+    elliptic_curve::{
+        sec1::{FromEncodedPoint, ToEncodedPoint},
+        Group,
+    },
+    AffinePoint as P256AffinePoint, EncodedPoint as P256EncodedPoint,
     ProjectivePoint as P256ProjectivePoint,
 };
 
@@ -247,15 +255,12 @@ pub fn weierstrass_decompress<E: EllipticCurve>(
 }
 
 // ============================================================================
-// k256-Optimized Secp256k1 Operations
+// libsecp256k1-Optimized Secp256k1 Operations
 // ============================================================================
 
-/// Optimized secp256k1 point addition using k256 native operations.
-/// This provides 10-50x speedup over generic BigUint arithmetic by leveraging:
-/// - Montgomery form arithmetic
-/// - Optimized modular inversion
-/// - Constant-time operations
-/// - Page-aware span memory operations
+/// secp256k1 point addition via libsecp256k1 (`PublicKey::combine`).
+/// Its hand-optimized field + safegcd variable-time inversion are ~2-4x faster than k256's
+/// constant-time addition-chain inversion (the emulator does not need constant-time crypto).
 pub fn secp256k1_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
     assert!(q_ptr.is_multiple_of(8), "q_ptr is unaligned");
@@ -271,22 +276,19 @@ pub fn secp256k1_add_optimized(core: &mut AotEmulatorCore, p_ptr: u64, q_ptr: u6
     read_packed_words_snapshot(core, p_ptr, &mut p_words);
     read_packed_words_at_clk(core, q_ptr, &mut q_words, clk);
 
-    // Convert to k256 format
-    let p_k256 = words_to_k256_affine(&p_words);
-    let q_k256 = words_to_k256_affine(&q_words);
-
-    // Perform addition using k256's optimized implementation
-    let result_k256 =
-        (K256ProjectivePoint::from(p_k256) + K256ProjectivePoint::from(q_k256)).to_affine();
-
-    // Convert back to words
-    let result_words = k256_affine_to_words(&result_k256);
+    // Group addition via libsecp256k1 (`combine(p, q)` = p + q).
+    let p = words_to_secp256k1_pubkey(&p_words);
+    let q = words_to_secp256k1_pubkey(&q_words);
+    let result = p
+        .combine(&q)
+        .expect("secp256k1 add produced the point at infinity");
+    let result_words = secp256k1_pubkey_to_words(&result);
 
     // Write result back using span operation
     write_packed_words_at_clk(core, p_ptr, &result_words, clk + 1);
 }
 
-/// Optimized secp256k1 point doubling using k256 native operations with span memory.
+/// Optimized secp256k1 point doubling via libsecp256k1 with span memory.
 pub fn secp256k1_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
     assert!(p_ptr.is_multiple_of(8), "p_ptr is unaligned");
 
@@ -297,85 +299,66 @@ pub fn secp256k1_double_optimized(core: &mut AotEmulatorCore, p_ptr: u64) {
     let mut p_words = [0u32; NUM_WORDS];
     read_packed_words_snapshot(core, p_ptr, &mut p_words);
 
-    // Convert to k256 format
-    let p_k256 = words_to_k256_affine(&p_words);
-
-    // Perform doubling using k256's optimized implementation
-    let result_k256 = (K256ProjectivePoint::from(p_k256).double()).to_affine();
-
-    // Convert back to words
-    let result_words = k256_affine_to_words(&result_k256);
+    // Doubling = adding the point to itself (`combine` uses the doubling formula when equal).
+    let p = words_to_secp256k1_pubkey(&p_words);
+    let result = p
+        .combine(&p)
+        .expect("secp256k1 double produced the point at infinity");
+    let result_words = secp256k1_pubkey_to_words(&result);
 
     // Write result back using span operation
     write_packed_words_at_clk(core, p_ptr, &result_words, clk);
 }
 
-/// Convert 16 u32 words (x, y coordinates) to k256::AffinePoint.
+/// Convert 16 u32 words (x, y coordinates) to a libsecp256k1 `PublicKey`.
 /// Memory layout: [x0..x7, y0..y7] where each coordinate is 8 u32 words (32 bytes) in LE.
+/// (Identical encoding to the former k256 path: SEC1 uncompressed `0x04 || x_be || y_be`.)
 #[inline(always)]
-fn words_to_k256_affine(words: &[u32]) -> K256AffinePoint {
+fn words_to_secp256k1_pubkey(words: &[u32]) -> secp256k1::PublicKey {
     assert!(words.len() >= 16, "Need 16 words for secp256k1 point");
 
-    // Extract x and y coordinates (each 32 bytes = 8 words)
     let mut x_bytes = [0u8; 32];
     let mut y_bytes = [0u8; 32];
-
     for i in 0..8 {
-        let x_word = words[i];
-        let y_word = words[i + 8];
-        x_bytes[i * 4..(i + 1) * 4].copy_from_slice(&x_word.to_le_bytes());
-        y_bytes[i * 4..(i + 1) * 4].copy_from_slice(&y_word.to_le_bytes());
+        x_bytes[i * 4..(i + 1) * 4].copy_from_slice(&words[i].to_le_bytes());
+        y_bytes[i * 4..(i + 1) * 4].copy_from_slice(&words[i + 8].to_le_bytes());
     }
-
-    // k256 uses big-endian for field elements, so we need to reverse
+    // Field elements are big-endian on the wire, so reverse the LE bytes.
     x_bytes.reverse();
     y_bytes.reverse();
 
-    // Create encoded point (uncompressed format: 0x04 || x || y)
     let mut encoded = [0u8; 65];
     encoded[0] = 0x04; // Uncompressed point tag
     encoded[1..33].copy_from_slice(&x_bytes);
     encoded[33..65].copy_from_slice(&y_bytes);
 
-    K256AffinePoint::from_encoded_point(
-        &k256::EncodedPoint::from_bytes(encoded).expect("Invalid point encoding"),
-    )
-    .expect("Invalid secp256k1 point")
+    secp256k1::PublicKey::from_slice(&encoded).expect("Invalid secp256k1 point")
 }
 
-/// Convert k256::AffinePoint to 16 u32 words (x, y coordinates in LE).
+/// Convert a libsecp256k1 `PublicKey` to 16 u32 words (x, y coordinates in LE).
 #[inline(always)]
-fn k256_affine_to_words(point: &K256AffinePoint) -> [u32; 16] {
-    let encoded = point.to_encoded_point(false); // Uncompressed format
-    let x_bytes = encoded.x().expect("Point has no x coordinate");
-    let y_bytes = encoded.y().expect("Point has no y coordinate");
+fn secp256k1_pubkey_to_words(point: &secp256k1::PublicKey) -> [u32; 16] {
+    // SEC1 uncompressed: 0x04 || x_be(32) || y_be(32).
+    let encoded = point.serialize_uncompressed();
+    let x_bytes = &encoded[1..33];
+    let y_bytes = &encoded[33..65];
 
     let mut result = [0u32; 16];
-
-    // Convert x coordinate (BE to LE words)
-    for (i, slot) in result.iter_mut().enumerate().take(8) {
-        let be_idx = 28 - i * 4; // Read from end in groups of 4
-        let word = u32::from_be_bytes([
+    for i in 0..8 {
+        let be_idx = 28 - i * 4; // most-significant word first in BE
+        result[i] = u32::from_be_bytes([
             x_bytes[be_idx],
             x_bytes[be_idx + 1],
             x_bytes[be_idx + 2],
             x_bytes[be_idx + 3],
         ]);
-        *slot = word;
-    }
-
-    // Convert y coordinate (BE to LE words)
-    for i in 0..8 {
-        let be_idx = 28 - i * 4;
-        let word = u32::from_be_bytes([
+        result[i + 8] = u32::from_be_bytes([
             y_bytes[be_idx],
             y_bytes[be_idx + 1],
             y_bytes[be_idx + 2],
             y_bytes[be_idx + 3],
         ]);
-        result[i + 8] = word;
     }
-
     result
 }
 

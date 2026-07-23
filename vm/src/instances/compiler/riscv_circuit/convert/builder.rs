@@ -233,8 +233,18 @@ where
                 let log_degree_cpu = proofs[0].log_degree_cpu();
                 assert!(log_degree_cpu <= MAX_LOG_CHUNK_SIZE);
 
-                // At least limb0 is nonzero (valid RISC-V PC >= 4).
-                builder.assert_felt_ne(public_values.start_pc[0], CC::F::ZERO);
+                // A running CPU chunk must not start at pc == 0 (pc == 0 is the halted
+                // sentinel). Check the *whole* pc is nonzero, not just limb0: each pc limb is a
+                // range-checked 16-bit value, so their sum is < 3*2^16 << p and is zero iff all
+                // three limbs are zero (i.e. pc == 0). The previous `start_pc[0] != 0` check
+                // wrongly assumed limb0 is always nonzero, and spuriously failed whenever a chunk
+                // began at a 0x10000-aligned pc (limb0 == 0, pc != 0).
+                builder.assert_felt_ne(
+                    public_values.start_pc[0]
+                        + public_values.start_pc[1]
+                        + public_values.start_pc[2],
+                    CC::F::ZERO,
+                );
             }
         }
 

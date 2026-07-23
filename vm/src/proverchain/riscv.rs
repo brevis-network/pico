@@ -623,7 +623,7 @@ where
                 #[cfg(feature = "aot-emulator")]
                 match witness.opts.expect("witness.opts not set").snapshot_main {
                     SnapshotMainMode::Aot => {
-                        info!("snapshot main mode: AOT");
+                        println!("########## [AOT] snapshot-main = AotMetaEmulator (running AOT-compiled chunks) ##########");
                         let mut emu = AotMetaEmulator::<SC, C>::setup_riscv(witness);
                         run_snapshot_main_loop(
                             &mut emu,
@@ -696,6 +696,18 @@ where
                     batch_idx,
                     t_recover_and_emu.elapsed().as_secs_f64() * 1000.0
                 );
+
+                // Return this batch's pooled snapshot memory to the recycler so the
+                // bounded GLOBAL_MEMORY_POOL doesn't drain and block the snapshot-main
+                // producer (`build_snapshot_state` recv()s one block per batch). Same
+                // recycle semantics as gpu-base's worker teardown
+                // (GLOBAL_MEMORY_RECYCLER.send((memory, true))) and the standalone AOT
+                // bins' recycle_snapshot_memory(). This CPU pipeline rebuilds `emu` per
+                // batch, so we recycle per batch instead of once at teardown.
+                if let Some(emulator) = emu.emulator.take() {
+                    let _ = crate::emulator::riscv::memory::GLOBAL_MEMORY_RECYCLER
+                        .send((emulator.state.memory, true));
+                }
             }
         });
         drop(snapshot_msg_tx);

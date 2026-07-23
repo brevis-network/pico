@@ -68,6 +68,7 @@ impl RiscvEmulator {
         }
     }
 
+    #[inline]
     pub fn is_unconstrained(&self) -> bool {
         self.mode.is_unconstrained()
     }
@@ -126,6 +127,8 @@ impl RiscvEmulator {
         arg1: RvValue,
         arg2: RvValue,
     ) {
+        self.chunk_split_state.num_syscall_events += 1;
+
         let syscall_event = self.syscall_event(clk, syscall_id, arg1, arg2);
 
         self.record.syscall_events.push(syscall_event);

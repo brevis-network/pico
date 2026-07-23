@@ -34,7 +34,7 @@ use pico_vm::{
             kb_bn254_poseidon2::KoalaBearBn254Poseidon2, BabyBearPoseidon2, KoalaBearPoseidon2,
         },
     },
-    emulator::opts::EmulatorOpts,
+    emulator::opts::{EmulatorOpts, SnapshotMainMode},
     instances::{
         chiptype::recursion_chiptype::RecursionChipType,
         compiler::{
@@ -86,6 +86,11 @@ struct Args {
 
     #[clap(long, default_value = "false")]
     simple: bool,
+
+    /// Drive the RISCV prove through the AOT-capable snapshot pipeline
+    /// (SnapshotMainMode::Aot). Requires building with `--features aot`.
+    #[clap(long, default_value = "false")]
+    aot: bool,
 }
 
 fn time_operation<T, F: FnOnce() -> T>(operation: F) -> (T, Duration) {
@@ -95,12 +100,15 @@ fn time_operation<T, F: FnOnce() -> T>(operation: F) -> (T, Duration) {
     (result, duration)
 }
 
-fn bench_bb(bench_program: &BenchProgram) -> Result<PerformanceReport> {
+fn bench_bb(bench_program: &BenchProgram, aot: bool) -> Result<PerformanceReport> {
     let vk_manager = <BabyBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
     let vk_enabled = vk_manager.vk_verification_enabled();
 
     let (elf, stdin) = load::<_, BabyBearPoseidon2>(bench_program)?;
-    let riscv_opts = EmulatorOpts::bench_riscv_ops();
+    let mut riscv_opts = EmulatorOpts::bench_riscv_ops();
+    if aot {
+        riscv_opts = riscv_opts.with_snapshot_main(SnapshotMainMode::Aot);
+    }
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
     info!(
@@ -218,12 +226,15 @@ fn bench_bb(bench_program: &BenchProgram) -> Result<PerformanceReport> {
     })
 }
 
-fn bench_kb(bench_program: &BenchProgram) -> Result<PerformanceReport> {
+fn bench_kb(bench_program: &BenchProgram, aot: bool) -> Result<PerformanceReport> {
     let vk_manager = <KoalaBearPoseidon2 as HasStaticVkManager>::static_vk_manager();
     let vk_enabled = vk_manager.vk_verification_enabled();
 
     let (elf, stdin) = load::<_, KoalaBearPoseidon2>(bench_program)?;
-    let riscv_opts = EmulatorOpts::bench_riscv_ops();
+    let mut riscv_opts = EmulatorOpts::bench_riscv_ops();
+    if aot {
+        riscv_opts = riscv_opts.with_snapshot_main(SnapshotMainMode::Aot);
+    }
     let recursion_opts = EmulatorOpts::bench_recursion_opts();
 
     info!(
@@ -502,10 +513,11 @@ where
 fn run_benchmark(
     bench_program: &BenchProgram,
     bench_field: BenchField,
+    aot: bool,
 ) -> Result<PerformanceReport> {
     match bench_field {
-        BenchField::BabyBear => bench_bb(bench_program),
-        BenchField::KoalaBear => bench_kb(bench_program),
+        BenchField::BabyBear => bench_bb(bench_program, aot),
+        BenchField::KoalaBear => bench_kb(bench_program, aot),
     }
 }
 
@@ -555,6 +567,19 @@ fn main() -> Result<()> {
         programs = PROGRAMS.to_vec();
     }
 
+    // Register the AOT factory once, up front, when --aot is requested.
+    if args.aot {
+        #[cfg(feature = "aot")]
+        {
+            aot_common::register_with_vm();
+            println!("########## [AOT] bench: AOT factory registered (--aot) ##########");
+        }
+        #[cfg(not(feature = "aot"))]
+        anyhow::bail!(
+            "--aot requires building bench with `--features aot` (enables pico-vm/aot-emulator + pico-aot-dispatch)"
+        );
+    }
+
     // Run benchmarks.
     let mut results = Vec::with_capacity(programs.len());
 
@@ -574,7 +599,7 @@ fn main() -> Result<()> {
         }
     } else {
         for bench_program in programs {
-            results.push(run_benchmark(&bench_program, bench_type)?);
+            results.push(run_benchmark(&bench_program, bench_type, args.aot)?);
         }
     }
 
