@@ -8,3 +8,6 @@ mod traces;
 pub struct ExtAluChip<F> {
     pub _phantom: PhantomData<fn(F) -> F>,
 }
+
+#[cfg(test)]
+mod tests;

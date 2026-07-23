@@ -40,3 +40,6 @@ impl<F: Field, LinearLayers, Config: Poseidon2Config> Default
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

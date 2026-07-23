@@ -8,3 +8,6 @@ use std::marker::PhantomData;
 pub struct SelectChip<F> {
     pub _phantom: PhantomData<fn(F) -> F>,
 }
+
+#[cfg(test)]
+mod tests;

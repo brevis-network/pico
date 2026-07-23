@@ -6,3 +6,6 @@ pub mod traces;
 
 #[derive(Default)]
 pub struct MemoryLocalChip<F>(PhantomData<F>);
+
+#[cfg(test)]
+mod tests;

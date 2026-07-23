@@ -7,3 +7,6 @@ pub mod traces;
 /// A chip that implements addition for the opcodes ADD and ADDI.
 #[derive(Default)]
 pub struct ProgramChip<F>(PhantomData<F>);
+
+#[cfg(test)]
+mod tests;

@@ -9,3 +9,6 @@ pub(crate) const PUB_VALUES_LOG_HEIGHT: usize = 4;
 pub struct PublicValuesChip<F> {
     _phantom: PhantomData<F>,
 }
+
+#[cfg(test)]
+mod tests;

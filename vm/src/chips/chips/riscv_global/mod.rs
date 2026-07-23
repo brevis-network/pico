@@ -7,3 +7,6 @@ pub mod traces;
 
 #[derive(Default)]
 pub struct GlobalChip<F>(PhantomData<F>);
+
+#[cfg(test)]
+mod tests;

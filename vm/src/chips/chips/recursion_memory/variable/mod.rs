@@ -6,3 +6,6 @@ use std::marker::PhantomData;
 
 #[derive(Default)]
 pub struct MemoryVarChip<F>(PhantomData<F>);
+
+#[cfg(test)]
+mod tests;
