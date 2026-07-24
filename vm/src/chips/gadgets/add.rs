@@ -91,7 +91,7 @@ mod tests {
             local.a,
             local.b,
             local.add_gadget,
-            local.is_real.into(),
+            local.is_real,
         );
 
         assert_eq!(builder.num_constraints(), 5);
