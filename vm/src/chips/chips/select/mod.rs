@@ -1,8 +1,6 @@
-pub mod columns;
-pub mod constraints;
-#[cfg(test)]
-mod tests;
-pub mod trace;
+mod columns;
+mod constraints;
+mod trace;
 
 use std::marker::PhantomData;
 
@@ -10,3 +8,6 @@ use std::marker::PhantomData;
 pub struct SelectChip<F> {
     pub _phantom: PhantomData<fn(F) -> F>,
 }
+
+#[cfg(test)]
+mod tests;

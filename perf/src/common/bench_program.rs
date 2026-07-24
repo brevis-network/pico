@@ -76,6 +76,11 @@ pub const PROGRAMS: &[BenchProgram] = &[
         input: Some("./perf/bench_data/reth-23993050.bin"),
     },
     BenchProgram {
+        name: "reth-24600825",
+        elf: "./perf/bench_data/reth-elf",
+        input: Some("./perf/bench_data/reth-24600825.bin"),
+    },
+    BenchProgram {
         name: "simple-fib",
         elf: "./examples/fibonacci/app/elf/riscv32im-pico-zkvm-elf",
         input: None,

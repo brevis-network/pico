@@ -33,6 +33,9 @@ impl AotEmulatorCore {
 
         if !self.memory_snapshot.has_accessed(addr) {
             self.memory_snapshot.insert_u64(addr, *prev_record);
+            // This is the single site that writes into `memory_snapshot`, so mark it dirty
+            // here (first-touch slow path only) instead of relying on callers to do it.
+            self.memory_snapshot_clean = false;
         }
     }
 
@@ -341,11 +344,32 @@ impl AotEmulatorCore {
     /// This variant skips the per-operation is_unconstrained_mode() check because the
     /// generated block has already verified we're not in unconstrained mode at entry.
     /// Always increments the memory RW event counter.
+    ///
+    /// Fused read-modify-write: a 32-bit store into a 64-bit dword slot needs the current dword
+    /// to merge the word in. The previous two-step path (`read_mem_dword_constrained_impl` then
+    /// `write_mem_dword_constrained`) ran the per-access bookkeeping TWICE for the same dword —
+    /// `track_chunk_split_address`, `snapshot_addr_if_needed`, the metadata update and the
+    /// accessed-bit mark were all duplicated. Fuse them so each runs once. Semantics are identical:
+    /// same final value+metadata; same snapshot pre-state (the read half never mutated the value);
+    /// same event counts (the read half added no memory_rw_event, and the second `track_address`
+    /// was a no-op once the dword's bit was already set).
     #[inline(always)]
     pub fn write_mem_word_constrained(&mut self, addr: u64, value: u64) {
         let dword_addr = Self::dword_addr(addr);
-        let current = self.read_mem_dword_constrained_impl(dword_addr);
-        self.write_mem_dword_constrained(dword_addr, Self::insert_word(current, addr, value));
+        self.track_chunk_split_address(dword_addr);
+        self.chunk_split_state.add_memory_rw_events(1);
+        // Pre-write dword (used both to merge in the 32-bit word and as the snapshot pre-value).
+        let current = self.memory.peek_dword(dword_addr);
+        let merged = Self::insert_word(current, addr, value);
+        let (_prev_value, prev_chunk, prev_timestamp) =
+            self.memory
+                .write_and_capture_prev(dword_addr, merged, self.current_chunk, self.clk);
+        let prev_record = MemoryRecord {
+            value: current,
+            chunk: prev_chunk,
+            timestamp: prev_timestamp,
+        };
+        self.snapshot_addr_if_needed(dword_addr, &prev_record);
     }
 
     /// Write a word to memory in syscall mode (syscall path only).

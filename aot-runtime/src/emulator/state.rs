@@ -72,6 +72,11 @@ pub struct AotEmulatorCore {
     pub accessed_regs: [bool; 32],
     /// Memory snapshot of pre-batch values (only addresses accessed in this batch).
     pub memory_snapshot: ContiguousRiscvMemory,
+    /// True iff `memory_snapshot`'s bitmap is currently all-zero (clean). Maintained at batch
+    /// granularity (off the per-access hot path) so `save_batch_start_state` can skip the
+    /// redundant ~31.5 MB `clear()` bitmap scan: after each batch `fill_snapshot_memory_*` swaps in
+    /// a fresh (clean) pooled memory, so the next batch starts clean and the scan finds nothing.
+    pub memory_snapshot_clean: bool,
     /// Bitmap of registers snapshotted in this batch (0-31).
     pub snapshot_registers_bitmap: u32,
     /// A stream of public values from the program (global to entire program).
@@ -144,6 +149,7 @@ impl AotEmulatorCore {
             batch_start_register_records: [RegisterRecord::default(); 32],
             accessed_regs: [false; 32],
             memory_snapshot: ContiguousRiscvMemory::new(),
+            memory_snapshot_clean: true,
             snapshot_registers_bitmap: 0,
             public_values_stream: Vec::new(),
             committed_value_digest: [0; PV_DIGEST_NUM_WORDS],
@@ -188,7 +194,13 @@ impl AotEmulatorCore {
         self.batch_start_registers = self.registers;
         self.batch_start_reg_present = self.reg_present;
         self.batch_start_register_records = self.register_records;
-        self.memory_snapshot.clear();
+        // `memory_snapshot` is normally already clean here (the previous batch's
+        // `fill_snapshot_memory_*` swapped in fresh pooled memory), so skip the redundant
+        // ~31.5 MB bitmap scan. Only clear when the flag says it may be dirty (defensive).
+        if !self.memory_snapshot_clean {
+            self.memory_snapshot.clear();
+            self.memory_snapshot_clean = true;
+        }
         self.clear_accessed_regs();
         self.snapshot_registers_bitmap = 0;
     }

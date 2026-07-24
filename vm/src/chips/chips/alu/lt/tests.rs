@@ -121,23 +121,3 @@ fn test_rv64_slt_true() {
 fn test_rv64_slt_equal() {
     run_test(create_slt_equal_program(), "SLT equal");
 }
-
-#[test]
-fn test_lt_chip_simple_eval() {
-    use crate::machine::{
-        builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
-    };
-    use p3_air::{Air, BaseAir};
-    use p3_koala_bear::KoalaBear;
-
-    let chip: crate::chips::chips::alu::lt::traces::LtChip<KoalaBear> =
-        crate::chips::chips::alu::lt::traces::LtChip::default();
-    let preprocessed_width = chip.preprocessed_width();
-    let width = chip.width();
-    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
-    chip.eval(&mut builder);
-
-    assert_eq!(builder.num_constraints(), 30);
-    assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 4);
-}

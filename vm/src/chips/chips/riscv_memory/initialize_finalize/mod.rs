@@ -2,8 +2,6 @@ use std::marker::PhantomData;
 
 pub mod columns;
 pub mod constraints;
-#[cfg(test)]
-mod tests;
 pub mod traces;
 
 /// The type of memory chip that is being initialized.
@@ -28,3 +26,6 @@ impl<F> MemoryInitializeFinalizeChip<F> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

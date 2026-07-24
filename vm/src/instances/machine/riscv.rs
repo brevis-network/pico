@@ -1,10 +1,7 @@
 use crate::{
     compiler::{riscv::program::Program, word::Word},
     configs::config::{Com, StarkGenericConfig, Val},
-    emulator::{
-        emulator::MetaEmulator,
-        riscv::{public_values::PublicValues, record::EmulationRecord},
-    },
+    emulator::riscv::{public_values::PublicValues, record::EmulationRecord},
     instances::compiler::{
         shapes::riscv_shape::RiscvShapeConfig, vk_merkle::vk_verification_enabled,
     },
@@ -77,6 +74,8 @@ where
                 >,
             > + Air<ProverConstraintFolder<SC>>,
         <SC as StarkGenericConfig>::Domain: Send,
+        // Required by `emulate_snapshot_pipeline` (aot-emulator path); satisfied by all real configs.
+        SC: Sync,
     {
         let start_global = Instant::now();
 
@@ -87,9 +86,6 @@ where
         let pk = witness.pk();
         pk.observed_by(&mut challenger);
 
-        // Initialize the emulator.
-        let mut emulator = MetaEmulator::setup_riscv(witness, None);
-
         let channel_capacity = (4 * witness
             .opts
             .as_ref()
@@ -98,49 +94,98 @@ where
         // Initialize the channel for sending emulation records from the emulator thread to prover.
         let (record_sender, record_receiver): (Sender<_>, Receiver<_>) = bounded(channel_capacity);
 
-        // Start the emulator thread.
-        let emulator_handle = thread::spawn(move || {
-            let mut batch_num = 1;
-            let mut all_reports = Vec::new();
-            loop {
-                let start_local = Instant::now();
-
-                let report = emulator.next_record_batch(&mut |record| {
-                    record_sender.send(record).expect(
-                        "Failed to send an emulation record from emulator thread to prover thread",
+        // When the `aot-emulator` feature is enabled, drive record generation through
+        // `emulate_snapshot_pipeline` (the AOT-capable snapshot pipeline) instead of the single
+        // interpreter thread. Whether the pipeline actually runs AOT vs interpreter is decided at
+        // runtime by `EmulatorOpts::snapshot_main` (`SnapshotMainMode::Aot`). Records are fed into
+        // the SAME channel, so `prove_local` and everything downstream are unchanged. Feature OFF
+        // keeps the original interpreter path verbatim.
+        #[cfg(feature = "aot-emulator")]
+        let (all_proofs, all_reports, pv_stream, total_cycles) = {
+            let snapshot_main = witness
+                .opts
+                .as_ref()
+                .expect("witness.opts not set")
+                .snapshot_main;
+            println!("========== [AOT-PIPELINE] RISCV prove via emulate_snapshot_pipeline (snapshot_main={snapshot_main:?}) ==========");
+            thread::scope(|s| {
+                // Producer: the snapshot pipeline (borrows `witness`, hence the scoped thread).
+                let producer = s.spawn(move || {
+                    crate::proverchain::emulate_snapshot_pipeline::<SC, C, _>(
+                        witness,
+                        move |record, _done| {
+                            let _ = record_sender.send(record);
+                        },
                     )
                 });
-                let done = report.done;
-                all_reports.push(report);
-
-                debug!(
-                    "--- Generate riscv records for batch-{} in {:?}",
-                    batch_num,
-                    start_local.elapsed(),
+                // Consumer: unchanged prover loop, on this thread.
+                let all_proofs = self.prove_local(
+                    pk,
+                    &challenger,
+                    shape_config,
+                    record_receiver,
+                    &start_global,
                 );
+                let (all_reports, total_cycles, pv_stream) = producer
+                    .join()
+                    .expect("snapshot pipeline thread panicked")
+                    .expect("emulate_snapshot_pipeline failed");
+                (all_proofs, all_reports, pv_stream, total_cycles)
+            })
+        };
 
-                if done {
-                    break;
+        #[cfg(not(feature = "aot-emulator"))]
+        let (all_proofs, all_reports, pv_stream, total_cycles) = {
+            // Initialize the emulator.
+            let mut emulator = crate::emulator::emulator::MetaEmulator::setup_riscv(witness, None);
+
+            // Start the emulator thread.
+            let emulator_handle = thread::spawn(move || {
+                let mut batch_num = 1;
+                let mut all_reports = Vec::new();
+                loop {
+                    let start_local = Instant::now();
+
+                    let report = emulator.next_record_batch(&mut |record| {
+                        record_sender.send(record).expect(
+                            "Failed to send an emulation record from emulator thread to prover thread",
+                        )
+                    });
+                    let done = report.done;
+                    all_reports.push(report);
+
+                    debug!(
+                        "--- Generate riscv records for batch-{} in {:?}",
+                        batch_num,
+                        start_local.elapsed(),
+                    );
+
+                    if done {
+                        break;
+                    }
+
+                    batch_num += 1;
                 }
 
-                batch_num += 1;
-            }
+                // Move and return the emulator for futher usage.
+                (emulator, all_reports)
 
-            // Move and return the emulator for futher usage.
-            (emulator, all_reports)
+                // `record_sender` will be dropped when the emulator thread completes.
+            });
 
-            // `record_sender` will be dropped when the emulator thread completes.
-        });
+            let all_proofs = self.prove_local(
+                pk,
+                &challenger,
+                shape_config,
+                record_receiver,
+                &start_global,
+            );
 
-        let all_proofs = self.prove_local(
-            pk,
-            &challenger,
-            shape_config,
-            record_receiver,
-            &start_global,
-        );
-
-        let (mut emulator, all_reports) = emulator_handle.join().unwrap();
+            let (mut emulator, all_reports) = emulator_handle.join().unwrap();
+            let pv_stream = emulator.get_pv_stream();
+            let total_cycles = emulator.emulator.as_ref().unwrap().state.global_clk;
+            (all_proofs, all_reports, pv_stream, total_cycles)
+        };
 
         debug!("--- Finish riscv in {:?}", start_global.elapsed());
 
@@ -160,17 +205,12 @@ where
                 });
         });
 
-        let pv_stream = emulator.get_pv_stream();
-        let riscv_emulator = emulator.emulator.unwrap();
-
+        let report_opts = witness.opts.as_ref().expect("witness.opts not set");
         info!("RiscV execution report:");
-        info!("|- cycles:           {}", riscv_emulator.state.global_clk);
+        info!("|- cycles:           {}", total_cycles);
         info!("|- chunk_num:        {}", all_proofs.len());
-        info!("|- chunk_size:       {}", riscv_emulator.opts.chunk_size);
-        info!(
-            "|- chunk_batch_size: {}",
-            riscv_emulator.opts.chunk_batch_size
-        );
+        info!("|- chunk_size:       {}", report_opts.chunk_size);
+        info!("|- chunk_batch_size: {}", report_opts.chunk_batch_size);
 
         (
             MetaProof::new(all_proofs.into(), vks.into(), Some(pv_stream)),

@@ -163,6 +163,9 @@ impl AotEmulatorCore {
         // Swap the accessed snapshot memory into the outgoing snapshot to avoid
         // iterating the full bitmap every batch (matches simple-mode strategy).
         std::mem::swap(&mut snapshot.memory, &mut self.memory_snapshot);
+        // `self.memory_snapshot` now holds the fresh (clean) pooled memory that was in
+        // `snapshot.memory`, so the next batch can skip its `clear()` bitmap scan.
+        self.memory_snapshot_clean = true;
         self.restore_touched_snapshot_registers(snapshot);
     }
 
@@ -181,5 +184,8 @@ impl AotEmulatorCore {
         self.restore_touched_snapshot_registers(snapshot);
         batch_memory_snapshot.reset();
         self.memory_snapshot = batch_memory_snapshot;
+        // `batch_memory_snapshot` was just `reset()` (clean), so the flag is honest even on
+        // the final/`done` batch.
+        self.memory_snapshot_clean = true;
     }
 }

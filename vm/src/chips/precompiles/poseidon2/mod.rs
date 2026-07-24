@@ -1,7 +1,5 @@
 mod columns;
 mod constraints;
-#[cfg(test)]
-mod tests;
 mod traces;
 
 use crate::{
@@ -35,3 +33,6 @@ impl<F: Field, LinearLayers, Config: Poseidon2Config> Default
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

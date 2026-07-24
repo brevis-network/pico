@@ -21,6 +21,17 @@ tracing.workspace = true
 strum.workspace = true
 pprof = { version = "0.15", features = ["flamegraph", "protobuf", "protobuf-codec"] }
 
+# Optional AOT glue (enabled by the `aot` feature). `aot-common` provides
+# register_with_vm(), which registers the AOT factory backed by the generated
+# `pico-aot-dispatch` crate (repo-root `aot-generated`, produced by generate_crates).
+aot-common = { path = "../examples/aot_common", optional = true }
+
+[features]
+jemalloc = ["pico-vm/jemalloc"]
+nightly-features = ["pico-vm/nightly-features"]
+# AOT-capable prove path: pico-vm's aot-emulator + the AOT dispatch/factory.
+aot = ["pico-vm/aot-emulator", "dep:aot-common", "aot-common/aot"]
+
 [[bin]]
 name = "bench"
 path = "src/bin/bench.rs"

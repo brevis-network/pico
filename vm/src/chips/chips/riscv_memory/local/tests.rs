@@ -12,8 +12,15 @@ fn test_memory_local_chip_simple_eval() {
     let width = chip.width();
     let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
     chip.eval(&mut builder);
+    let num_public_values = builder.public_values().len();
+    let num_constraints = builder.constraints().len();
 
-    assert_eq!(builder.num_constraints(), 16);
-    assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 68);
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+    let (looking, looked) = builder.lookups();
+    let num_lookups = looking.len() + looked.len();
+
+    assert_eq!(num_constraints, 16);
+    assert_eq!(num_public_values, 119);
+    assert_eq!(num_lookups, 68);
 }
