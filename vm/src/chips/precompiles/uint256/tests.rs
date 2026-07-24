@@ -91,3 +91,22 @@ fn test_reth_uint256_mul_prove_verify() {
     run_extra_records(&chips, &mut record);
     test_rv64_prove_and_verify_chunk(program, chips, record);
 }
+
+#[test]
+fn test_uint256_mul_chip_simple_eval() {
+    use super::Uint256MulChip;
+    use crate::machine::{
+        builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder,
+    };
+    use p3_air::{Air, BaseAir};
+    use p3_koala_bear::KoalaBear;
+
+    let chip: Uint256MulChip<KoalaBear> = Uint256MulChip::default();
+    let (preprocessed_width, width) = (chip.preprocessed_width(), chip.width());
+    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
+    chip.eval(&mut builder);
+
+    assert_eq!(builder.num_constraints(), 270);
+    assert_eq!(builder.public_values().len(), 119);
+    assert_eq!(builder.num_lookups(), 231);
+}
