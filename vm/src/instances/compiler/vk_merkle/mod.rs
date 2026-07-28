@@ -18,6 +18,7 @@ use crate::{
     primitives::consts::DIGEST_SIZE,
 };
 use once_cell::sync::Lazy;
+use p3_util::log2_ceil_usize;
 use std::{collections::BTreeMap, env};
 use tracing::{debug, info};
 
@@ -101,10 +102,28 @@ where
             .map(|vk| {
                 let vk_digest = vk.hash_field(); // Compute the vk digest
                 debug!("vk digest in add_vk_merkle_proof: {:?}", vk_digest);
-                let index = self
-                    .allowed_vk_map
-                    .get(&vk_digest)
-                    .unwrap_or_else(|| panic!("vk not allowed: {:?}", vk_digest));
+                let index = self.allowed_vk_map.get(&vk_digest).unwrap_or_else(|| {
+                    // The bare digest is close to undebuggable: it names neither the chip
+                    // nor the shape. Print what distinguishes one entry from another, plus
+                    // the map size, so the two very different causes can be told apart.
+                    let shape = vk
+                        .preprocessed_info
+                        .iter()
+                        .map(|(name, _, dims)| (name.as_str(), log2_ceil_usize(dims.height)))
+                        .collect::<Vec<_>>();
+                    panic!(
+                        "vk not allowed: {vk_digest:?}\n  \
+                         preprocessed shape (chip, log2 height): {shape:?}\n  \
+                         allowed_vk_map holds {} entries\n  \
+                         The proof's shape is absent from the embedded vk map. Either the \
+                         map is stale with respect to the circuit (any change to a chip's \
+                         columns or lookups invalidates every digest -- rebuild with \
+                         build_vk_map, and delete riscv_proofshape_map_*.bin first, since \
+                         that cache is keyed only on chip names and heights), or the shape \
+                         set no longer enumerates this shape (check RiscvShapeConfig).",
+                        self.allowed_vk_map.len()
+                    )
+                });
                 (*index, vk_digest)
             })
             .unzip();

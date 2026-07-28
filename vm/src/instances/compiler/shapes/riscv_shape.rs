@@ -748,7 +748,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
 impl<F: PrimeField32 + FieldSpecificPoseidon2Config> Default for RiscvShapeConfig<F> {
     fn default() -> Self {
         // Preprocessed chip heights.
-        let program_heights = vec![Some(18), Some(19), Some(20), Some(22)];
+        // let program_heights = vec![Some(18), Some(19), Some(20), Some(22)];
+        let program_heights = vec![Some(18), Some(20), Some(22)];
 
         let allowed_preprocessed_log_heights = HashMap::from([
             (
