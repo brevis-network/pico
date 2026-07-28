@@ -352,7 +352,7 @@ fn test_ws_secp256k1_decompress_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 691);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 658);
+    assert_eq!(builder.num_lookups(), 674);
 }
 
 #[test]

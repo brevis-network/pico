@@ -29,7 +29,10 @@ use crate::{
             },
             syscall_addr::SyscallAddrGadget,
             utils::{
-                conversions::{generate_limbs_from_read_cols_u8, limbs_to_words},
+                conversions::{
+                    generate_limbs_from_read_cols_u8, generate_limbs_from_write_cols_u8,
+                    limbs_to_words,
+                },
                 field_params::{limbs_from_slice, FieldParameters, NumLimbs, NumWords},
                 limbs::Limbs,
                 polynomial::Polynomial,
@@ -458,6 +461,15 @@ where
         // Extract byte limbs from u16 word limbs via U16→U8 conversion.
         let x_limbs =
             generate_limbs_from_read_cols_u8(builder, &local.x_access[..], local.is_real.into());
+
+        // `y_access.prev_value_u8` is populated by the trace, which emits u8 range checks;
+        // they need a matching evaluation here or the byte table is over-received. The
+        // returned limbs are unused — `y_access`'s value is constrained below against
+        // `sqrt_y`/`neg_y` — so this call exists to balance those lookups and to pin the
+        // byte decomposition. It is a write access, hence the `write` helper, which reads
+        // `inner.prev_value` just as the trace did.
+        let _ =
+            generate_limbs_from_write_cols_u8(builder, &local.y_access[..], local.is_real.into());
         let x: Limbs<CB::Expr, <E::BaseField as NumLimbs>::Limbs> =
             Limbs(Array::try_from_iter(x_limbs).expect("failed to convert x limbs"));
         let max_num_limbs = E::BaseField::to_limbs_field_slice(&E::BaseField::modulus());
