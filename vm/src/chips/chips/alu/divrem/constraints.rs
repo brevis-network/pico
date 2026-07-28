@@ -466,7 +466,7 @@ where
                         .assert_eq(local_c[i], local_abs_c[i]);
                     builder
                         .when_not(local_rem_neg)
-                        .assert_eq(local_remainder[i], local_abs_remainder[i]);
+                        .assert_eq(local_remainder_comp[i], local_abs_remainder[i]);
                 }
                 // In the case that `c` or `rem` is negative, instead check that their sum is zero by
                 // sending an AddEvent.
@@ -597,6 +597,14 @@ where
                         is_word_operation.clone(),
                     );
                 }
+
+                // If word operation, we check the second limb of quotient.
+                U16MSBGadget::<CB::F>::eval(
+                    builder,
+                    local_quotient[WORD_SIZE / 2 - 1].into(),
+                    local_quot_msb,
+                    is_word_operation.clone(),
+                );
             }
 
             // Range check all the u16 limbs and boolean carries.

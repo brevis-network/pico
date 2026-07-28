@@ -22,9 +22,9 @@ fn test_divrem_chip_simple_eval() {
     let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
     chip.eval(&mut builder);
 
-    assert_eq!(builder.num_constraints(), 337);
+    assert_eq!(builder.num_constraints(), 339);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 120);
+    assert_eq!(builder.num_lookups(), 121);
 }
 
 /// Construct a Program with DIV/REM (signed 64-bit) instructions.
