@@ -39,6 +39,6 @@ bb = []     # BabyBear
 kb = []     # KoalaBear
 m31 = []    # Mersenne31
 # Enable the AOT snapshot-main emulator in pico-vm. Consumers must also
-# register an AOT factory (e.g. via examples/aot_common::register_with_vm)
+# register an AOT factory (see `prover/src/aot_glue.rs` in a generated project)
 # before constructing a prover client for the mode flip to take effect.
 aot = ["pico-vm/aot-emulator"]

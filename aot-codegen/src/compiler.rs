@@ -53,11 +53,11 @@ fn run_table_word_u32(word_offset: u64) -> u32 {
 
 /// Emit the `pico-aot-runtime = { ... }` line for a generated Cargo.toml.
 ///
-/// Defaults to a relative `path = "{default_path}"` so the brevis-vm
-/// in-tree layout keeps working. When `PICO_AOT_RUNTIME_SPEC` is set and
+/// Defaults to a relative `path = "{default_path}"` so the in-tree layout
+/// keeps working. When `PICO_AOT_RUNTIME_SPEC` is set and
 /// non-empty, its value is inlined as the dep body verbatim, letting
-/// downstream consumers generate `aot-generated/` outside the brevis-vm
-/// workspace (e.g. at a template's root) and wire the runtime via git.
+/// downstream consumers generate `aot-generated/` outside this workspace
+/// (e.g. at a template's root) and wire the runtime via git.
 ///
 /// Example:
 ///   PICO_AOT_RUNTIME_SPEC='git = "https://github.com/brevis-network/pico", branch = "X"'

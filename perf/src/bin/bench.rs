@@ -571,7 +571,7 @@ fn main() -> Result<()> {
     if args.aot {
         #[cfg(feature = "aot")]
         {
-            aot_common::register_with_vm();
+            pico_perf::aot_glue::register_with_vm();
             println!("########## [AOT] bench: AOT factory registered (--aot) ##########");
         }
         #[cfg(not(feature = "aot"))]

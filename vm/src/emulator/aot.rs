@@ -1,12 +1,9 @@
 //! AOT snapshot emulator factory.
 //!
-//! This is the cpu-u64 variant — its `AotFactory` signature intentionally
-//! diverges from the gpu-u64 sibling: it does NOT take an
-//! `Arc<RecordFinalPvsState>`. Cpu-u64 has no `Condvar`-based cross-thread
-//! waiter for the final committed digest; the sequencer derives the public
-//! values from replayed worker records via
-//! `EmulationDeferredState::update_public_values`. A future "unify with
-//! gpu-u64" pass should reconcile this divergence.
+//! `AotFactory` deliberately does not carry the final committed digest: there
+//! is no cross-thread waiter for it here. The sequencer instead derives the
+//! public values from replayed worker records via
+//! `EmulationDeferredState::update_public_values`.
 
 use crate::{
     compiler::riscv::program::Program,

@@ -52,7 +52,7 @@ impl AotEmulatorCore {
     #[inline(always)]
     fn account_memory_access(&mut self, _addr: u64) {
         // NOTE: Simple-mode tracks unique addresses via chunk_split_state.memory_access_addrs.
-        // AOT must mirror this to keep chunk boundary detection consistent with gpu-base.
+        // AOT must mirror this to keep chunk boundary detection consistent.
         if self.in_syscall() {
             self.chunk_split_state.add_syscall_memory_events(1);
         } else {
