@@ -231,15 +231,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "aot-common"
-version = "0.1.0"
-dependencies = [
- "pico-aot-dispatch",
- "pico-vm",
- "tracing",
-]
-
-[[package]]
 name = "ark-bls12-381"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1794,7 +1785,7 @@ checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "field-ffi"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "p3-baby-bear 0.1.0",
  "p3-field 0.1.0",
@@ -3817,7 +3808,7 @@ dependencies = [
 
 [[package]]
 name = "pico-aot-runtime"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -3849,7 +3840,7 @@ dependencies = [
 
 [[package]]
 name = "pico-cli"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -3876,7 +3867,7 @@ dependencies = [
 
 [[package]]
 name = "pico-derive"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3885,7 +3876,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "bincode",
  "elliptic-curve",
@@ -3894,10 +3885,9 @@ dependencies = [
 
 [[package]]
 name = "pico-perf"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
- "aot-common",
  "bincode",
  "clap",
  "log",
@@ -3906,6 +3896,7 @@ dependencies = [
  "p3-field 0.1.0",
  "p3-koala-bear",
  "p3-symmetric 0.1.0",
+ "pico-aot-dispatch",
  "pico-sdk",
  "pico-vm",
  "pprof",
@@ -3917,7 +3908,7 @@ dependencies = [
 
 [[package]]
 name = "pico-scripts"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "bincode",
  "clap",
@@ -3931,7 +3922,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3958,7 +3949,7 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "anyhow",
  "arrayref",
