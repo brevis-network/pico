@@ -96,6 +96,8 @@ where
             a: local_a,
             b: local_b,
             c: local_c,
+            b_raw: local_b_raw,
+            c_raw: local_c_raw,
             quotient: local_quotient,
             quotient_comp: local_quotient_comp,
             remainder: local_remainder,
@@ -164,6 +166,33 @@ where
                     let msb = msb_sign_pair.0;
                     let is_negative = msb_sign_pair.1;
                     builder.assert_eq(msb * is_signed_type.clone(), is_negative);
+                }
+            }
+
+            // Assert that the truncated / sign-extended `b`, `c` align with the raw
+            // register values the CPU put on the ALU bus.
+            //
+            // RV64 word operations only read the low 32 bits of their operands, so the
+            // upper 32 bits of the register are whatever happened to be there (LLVM
+            // materialises `0xFFFF_FFFFu32` as `li -1`, leaving them all ones). The bus
+            // therefore has to carry `*_raw`, and `b`/`c` are derived from it here.
+            {
+                let u16_max = CB::F::from_canonical_u16(u16::MAX);
+                for i in 0..WORD_SIZE / 2 {
+                    builder.assert_eq(local_b_raw[i], local_b[i]);
+                    builder.assert_eq(local_c_raw[i], local_c[i]);
+                }
+                for i in WORD_SIZE / 2..WORD_SIZE {
+                    builder.assert_eq(
+                        local_b[i],
+                        local_b_raw[i] * (one.clone() - is_word_operation.clone())
+                            + local_b_neg * is_word_operation.clone() * u16_max,
+                    );
+                    builder.assert_eq(
+                        local_c[i],
+                        local_c_raw[i] * (one.clone() - is_word_operation.clone())
+                            + local_c_neg * is_word_operation.clone() * u16_max,
+                    );
                 }
             }
 
@@ -466,7 +495,7 @@ where
                         .assert_eq(local_c[i], local_abs_c[i]);
                     builder
                         .when_not(local_rem_neg)
-                        .assert_eq(local_remainder[i], local_abs_remainder[i]);
+                        .assert_eq(local_remainder_comp[i], local_abs_remainder[i]);
                 }
                 // In the case that `c` or `rem` is negative, instead check that their sum is zero by
                 // sending an AddEvent.
@@ -597,6 +626,14 @@ where
                         is_word_operation.clone(),
                     );
                 }
+
+                // If word operation, we check the second limb of quotient.
+                U16MSBGadget::<CB::F>::eval(
+                    builder,
+                    local_quotient[WORD_SIZE / 2 - 1].into(),
+                    local_quot_msb,
+                    is_word_operation.clone(),
+                );
             }
 
             // Range check all the u16 limbs and boolean carries.
@@ -672,7 +709,8 @@ where
                         + local_is_remuw * remuw
                 };
 
-                builder.looked_alu(opcode, local_a, local_b, local_c, local_is_real);
+                // The bus must carry the *raw* register values — that is what the CPU sent.
+                builder.looked_alu(opcode, local_a, local_b_raw, local_c_raw, local_is_real);
             }
         }
     }

@@ -96,6 +96,9 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
                     cols.a = Word::from(event.a);
                     cols.b = Word::from(b);
                     cols.c = Word::from(c);
+                    // Raw register values, as sent by the CPU on the ALU bus.
+                    cols.b_raw = Word::from(event.b);
+                    cols.c_raw = Word::from(event.c);
 
                     cols.is_real = F::ONE;
 
@@ -390,6 +393,9 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
             // 0 divided by 1. quotient = remainder = 0.
             cols.is_divu = F::ONE;
             cols.c[0] = F::ONE;
+            // Padding is a non-word op, so the b/c alignment constraints require
+            // `*_raw == *` on every limb.
+            cols.c_raw[0] = F::ONE;
             cols.abs_c[0] = F::ONE;
             cols.max_abs_c_or_1[0] = F::ONE;
             cols.b_not_neg_not_overflow = F::ONE;

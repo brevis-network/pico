@@ -28,11 +28,23 @@ pub struct DivRemValueCols<F: Copy> {
     /// The output operand.
     pub a: Word<F>,
 
-    /// The first input operand.
+    /// The first input operand, in *computational* form: for word operations this is
+    /// the low 32 bits zero-extended (unsigned) or sign-extended (signed).
     pub b: Word<F>,
 
-    /// The second input operand.
+    /// The second input operand, in *computational* form (see `b`).
     pub c: Word<F>,
+
+    /// The first input operand exactly as the CPU read it from the register.
+    ///
+    /// For word operations RV64 leaves the upper 32 bits of a register undefined
+    /// (e.g. LLVM materialises `0xFFFF_FFFFu32` as `li -1`), so `b_raw` and the
+    /// computational `b` genuinely differ. The ALU bus must carry `b_raw` — that is
+    /// what the CPU sends — while the arithmetic uses `b`.
+    pub b_raw: Word<F>,
+
+    /// The second input operand exactly as the CPU read it from the register (see `b_raw`).
+    pub c_raw: Word<F>,
 
     /// Results of dividing `b` by `c`.
     pub quotient: Word<F>,
