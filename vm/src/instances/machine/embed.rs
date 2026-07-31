@@ -10,7 +10,7 @@ use crate::{
     machine::{
         chip::{ChipBehavior, MetaChip},
         folder::{DebugConstraintFolder, ProverConstraintFolder, VerifierConstraintFolder},
-        keys::HashableKey,
+        keys::{BaseVerifyingKey, HashableKey},
         machine::{BaseMachine, MachineBehavior},
         proof::MetaProof,
         utils::assert_riscv_vk_digest,
@@ -19,7 +19,7 @@ use crate::{
 };
 use p3_air::Air;
 use p3_field::{FieldAlgebra, PrimeField32};
-use std::{any::type_name, borrow::Borrow, marker::PhantomData};
+use std::{any::type_name, borrow::Borrow, marker::PhantomData, sync::OnceLock};
 use tracing::{debug, debug_span, instrument};
 
 pub struct EmbedMachine<PrevSC, SC, C, I>
@@ -27,7 +27,7 @@ where
     SC: StarkGenericConfig,
 {
     base_machine: BaseMachine<SC, C>,
-
+    vk: OnceLock<BaseVerifyingKey<SC>>,
     phantom: std::marker::PhantomData<(PrevSC, I)>,
 }
 
@@ -74,7 +74,9 @@ where
             .in_scope(|| self.base_machine.prove_ensemble(witness.pk(), &records));
 
         // construct meta proof
-        let vks = vec![witness.vk.clone().unwrap()].into();
+        let vk = witness.vk.clone().unwrap();
+        self.vk.get_or_init(|| vk.clone());
+        let vks = vec![vk].into();
 
         debug!("EMBED chip log degrees:");
         proofs.iter().enumerate().for_each(|(i, proof)| {
@@ -102,8 +104,6 @@ where
     where
         C: for<'a> Air<VerifierConstraintFolder<'a, EmbedSC>>,
     {
-        let vk = proof.vks().first().unwrap();
-
         assert_eq!(proof.num_proofs(), 1);
 
         let public_values: &RecursionPublicValues<_> =
@@ -118,6 +118,11 @@ where
         assert_embed_public_values_valid(&PrevSC::new(), public_values);
 
         assert_riscv_vk_digest(proof, riscv_vk);
+
+        let vk = self
+            .vk
+            .get()
+            .unwrap_or_else(|| proof.vks().first().unwrap());
 
         // verify
         self.base_machine.verify_ensemble(vk, &proof.proofs())?;
@@ -138,6 +143,7 @@ where
     pub fn new(config: SC, chips: Vec<MetaChip<Val<SC>, C>>, num_public_values: usize) -> Self {
         Self {
             base_machine: BaseMachine::<SC, C>::new(config, chips, num_public_values),
+            vk: OnceLock::new(),
             phantom: PhantomData,
         }
     }
