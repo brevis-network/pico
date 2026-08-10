@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+
 	"github.com/brevis-network/pico/gnark/babybear_verifier"
 	"github.com/brevis-network/pico/gnark/koalabear_verifier"
 	"github.com/brevis-network/pico/gnark/utils"
@@ -16,9 +17,10 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/labstack/echo"
 
-	"golang.org/x/crypto/sha3"
 	"net/http"
 	"sync"
+
+	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -28,7 +30,6 @@ var (
 	ccsPath  = flag.String("ccs", "./data/vm_ccs", "path of ccs")
 
 	Pk  = groth16.NewProvingKey(ecc.BN254)
-	Vk  = groth16.NewVerifyingKey(ecc.BN254)
 	Ccs = new(bn254cs.R1CS)
 
 	loadReady = false
