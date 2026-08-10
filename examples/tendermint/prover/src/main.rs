@@ -30,7 +30,7 @@ fn main() {
     println!("elf length: {}", elf.len());
 
     let client = DefaultProverClient::new(&elf);
-    let stdin_builder = client.get_stdin_builder(); // Shared instance
+    let mut stdin_builder = client.new_stdin_builder();
 
     // Load light blocks from the `files` subdirectory
     let (light_block_1, light_block_2) = get_light_blocks();
@@ -43,10 +43,10 @@ fn main() {
     println!("encode_1 length: {}", encoded_1.len());
     println!("encode_2 length: {}", encoded_2.len());
 
-    stdin_builder.borrow_mut().write_slice(&encoded_1);
-    stdin_builder.borrow_mut().write_slice(&encoded_2);
+    stdin_builder.write_slice(&encoded_1);
+    stdin_builder.write_slice(&encoded_2);
 
-    let proof = client.prove_fast().expect("proving failed");
+    let proof = client.prove_fast(stdin_builder).expect("proving failed");
 
     // Verify the public values
     let mut expected_public_values: Vec<u8> = Vec::new();
