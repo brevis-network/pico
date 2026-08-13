@@ -42,6 +42,7 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
+            cols.chunk = F::from_canonical_u32(syscall_event.chunk);
             cols.clk = F::from_canonical_u32(u32::try_from(syscall_event.clk).unwrap());
             cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
             // Convert u64 arg1/arg2 to Addr (48-bit, 3 x 16-bit limbs)
@@ -108,7 +109,7 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
                                 arg2_0,                          // element 4: arg2[0]
                                 arg2_1,                          // element 5: arg2[1]
                                 arg2_2,                          // element 6: arg2[2]
-                                0,                               // element 7: zero padding
+                                event.chunk,                     // element 7: chunk
                             ],
                             is_receive: self.chunk_kind == SyscallChunkKind::Precompile,
                             kind: LookupType::Syscall as u8,

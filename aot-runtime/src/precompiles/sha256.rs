@@ -35,7 +35,13 @@ pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u64, h_ptr: u64) {
     let mut g = hx[6];
     let mut h = hx[7];
     let mut w = [0u32; 64];
-    core.read_mem_low32_slot_span_at_clk(w_ptr, &mut w, clk);
+    // `w` reads take their own timestamp so that a `w`/`h` overlap stays provable.
+    // Must mirror the interpreter exactly
+    // (`vm/src/emulator/riscv/syscalls/precompiles/sha256/compress.rs`) -- the AOT
+    // emulator stamps this clk into the per-dword memory metadata that is handed to the
+    // prover via `RiscvEmulationState` snapshots, so any disagreement shows up as a
+    // non-zero global memory cumulative sum at a batch boundary.
+    core.read_mem_low32_slot_span_at_clk(w_ptr, &mut w, clk + 1);
     for i in 0..64 {
         let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
         let ch = (e & f) ^ (!e & g);
@@ -65,7 +71,7 @@ pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u64, h_ptr: u64) {
     for i in 0..8 {
         result[i] = hx[i].wrapping_add(v[i]);
     }
-    core.write_mem_low32_slot_span_at_clk(h_ptr, &result, clk + 1);
+    core.write_mem_low32_slot_span_at_clk(h_ptr, &result, clk + 2);
 }
 
 /// SHA256 extend syscall implementation.

@@ -215,9 +215,14 @@ pub(crate) fn precompile_syscall_code(chip_name: &str) -> SyscallCode {
         "Bn254Fp2AddSub" => SyscallCode::BN254_FP2_ADD,
         "Bn254Fp2Mul" => SyscallCode::BN254_FP2_MUL,
         "Bn254FpOp" => SyscallCode::BN254_FP_ADD,
+        // Unreachable while the two Ed25519 chips are out of `all_chip_variants` -- this lookup is
+        // only ever called with the name of a chip that is in the machine. Kept so the mapping is
+        // still here if either chip is restored.
         "EdAddAssign" => SyscallCode::ED_ADD,
         "EdDecompress" => SyscallCode::ED_DECOMPRESS,
         "KeccakPermute" => SyscallCode::KECCAK_PERMUTE,
+        // Unreachable while the poseidon2 precompile chip is out of `all_chip_variants`, for the
+        // same reason as the two Ed25519 entries above. Kept so the mapping survives.
         "Poseidon2Permute" => SyscallCode::POSEIDON2_PERMUTE,
         "Secp256k1AddAssign" => SyscallCode::SECP256K1_ADD,
         "Secp256k1Decompress" => SyscallCode::SECP256K1_DECOMPRESS,

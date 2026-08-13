@@ -105,9 +105,16 @@ impl RiscvEmulatorMode {
     }
 
     /// Emit a ALU event.
+    ///
+    /// `op_a` is the destination register index. When it is `x0` the result is discarded
+    /// by the register file, and the CPU AIR correspondingly does **not** dispatch an ALU
+    /// lookup for the row (`riscv_cpu/constraints.rs`, gated on `1 - op_a_0`). Emitting an
+    /// event here anyway would leave the ALU chip supplying a row nobody looks up
+    /// => regional cumulative sum != 0 => `verifier.rs:391`.
     #[allow(clippy::too_many_arguments)]
     pub fn emit_alu(
         &self,
+        op_a: u8,
         clk: RvClk,
         a: RvValue,
         b: RvValue,
@@ -116,6 +123,9 @@ impl RiscvEmulatorMode {
         is_imm: bool,
         events: &mut Vec<AluEvent>,
     ) {
+        if op_a == 0 {
+            return;
+        }
         if let Self::Trace = self {
             let event = AluEvent::new(clk, opcode, a, b, c, is_imm);
             events.push(event);

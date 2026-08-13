@@ -83,6 +83,7 @@ impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
         builder.assert_eq(local.receive_ecall, first_step * local.is_real);
 
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::KECCAK_PERMUTE.syscall_id()),
             state_addr.map(Into::into),

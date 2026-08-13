@@ -41,6 +41,27 @@ where
         let local: &MemoryChipCols<CB::Var> = (*local).borrow();
 
         for local_memory_chip_value_cols in local.values {
+            // Each selector must be boolean individually. The sum alone is not enough:
+            // `{-1, +1}` sums to 0, a valid boolean, which drops the row off the memory
+            // bus while the byte-bus lookups below still fire at multiplicity -1 with
+            // free operands, cancelling a range check elsewhere.
+            let instruction = &local_memory_chip_value_cols.instruction;
+            for selector in [
+                instruction.is_lb,
+                instruction.is_lbu,
+                instruction.is_lh,
+                instruction.is_lhu,
+                instruction.is_lw,
+                instruction.is_lwu,
+                instruction.is_ld,
+                instruction.is_sb,
+                instruction.is_sh,
+                instruction.is_sw,
+                instruction.is_sd,
+            ] {
+                builder.assert_bool(selector);
+            }
+
             let is_memory_instruction: CB::Expr =
                 self.is_memory_instruction::<CB>(&local_memory_chip_value_cols.instruction);
 
@@ -63,6 +84,9 @@ where
                 .chain(once(local_memory_chip_value_cols.instruction.is_sh))
                 .chain(once(local_memory_chip_value_cols.instruction.is_sw))
                 .chain(once(local_memory_chip_value_cols.instruction.is_sd))
+                // Authenticate the memory row's time against the dispatching CPU row.
+                .chain(once(local_memory_chip_value_cols.chunk))
+                .chain(once(local_memory_chip_value_cols.clk))
                 .map(Into::into);
 
             builder.looked(SymbolicLookup::new(
@@ -193,7 +217,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let inv_8 = CB::F::from_canonical_u8(8).inverse();
         builder.looking_byte(
             CB::Expr::from_canonical_u8(ByteOpcode::BitRange as u8),
-            (CB::Expr::ZERO + local.addr_word.0[0] - offset_sum) * CB::Expr::from(inv_8),
+            (CB::Expr::ZERO + local.addr_word.0[0] - offset_sum.clone()) * CB::Expr::from(inv_8),
             CB::Expr::from_canonical_u8(13),
             CB::Expr::ZERO,
             is_mem.clone(),
@@ -216,14 +240,15 @@ impl<F: Field> MemoryReadWriteChip<F> {
             );
 
         // ---- C3: Timestamp + Regional Lookup ----
+        // addr_aligned is computed inline as addr_word - offset, avoiding a free witness column.
         // eval_memory_access handles timestamp monotonicity and 9-element Regional lookup.
         builder.eval_memory_access(
             local.chunk,
             local.clk + CB::F::from_canonical_u32(MemoryAccessPosition::Memory as u32),
             [
-                local.addr_aligned.0[0],
-                local.addr_aligned.0[1],
-                local.addr_aligned.0[2],
+                CB::Expr::ZERO + local.addr_word.0[0] - offset_sum,
+                local.addr_word.0[1].into(),
+                local.addr_word.0[2].into(),
             ],
             &local.memory_access,
             is_mem.clone(),
@@ -280,8 +305,22 @@ impl<F: Field> MemoryReadWriteChip<F> {
             CB::Expr::ZERO + bit0 * byte1 + (CB::Expr::ONE - bit0) * byte0,
         );
 
-        // Range check: selected_limb_low_byte ∈ [0, 255]
-        builder.slice_range_check_u8(&[local.selected_limb_low_byte], is_byte_load.clone());
+        // Range check: both bytes of selected_limb ∈ [0, 255].
+        // The high byte is never a witness column — it is computed inline as
+        // (selected_limb - selected_limb_low_byte) * inv_256. Without this check
+        // a prover can supply a fake selected_limb_low_byte that makes the high
+        // byte an arbitrary field element, breaking the u8 bound on selected_byte.
+        let high_byte: CB::Expr = (CB::Expr::ZERO + local.selected_limb
+            - local.selected_limb_low_byte)
+            * CB::Expr::from(inv_256);
+        builder.looking_rangecheck(
+            ByteOpcode::U8Range,
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+            local.selected_limb_low_byte,
+            high_byte,
+            is_byte_load.clone(),
+        );
 
         // LB/LBU: unsigned_mem_val = [selected_byte, 0, 0, 0]
         let byte_word = Word([

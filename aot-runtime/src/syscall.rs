@@ -4,15 +4,11 @@
 
 use super::emulator::AotEmulatorCore;
 use crate::precompiles;
-use p3_koala_bear::KoalaBear;
 use pico_vm::{
     chips::{
         chips::riscv_memory::event::MemoryRecord,
         gadgets::{
-            curves::{
-                edwards::ed25519::{Ed25519, Ed25519Parameters},
-                weierstrass::{bls381::Bls12381, secp256k1::Secp256k1, secp256r1::Secp256r1},
-            },
+            curves::weierstrass::{bls381::Bls12381, secp256k1::Secp256k1, secp256r1::Secp256r1},
             field::{
                 bls381::Bls381BaseField, bn254::Bn254BaseField, field_op::FieldOperation,
                 secp256k1::Secp256k1BaseField,
@@ -35,6 +31,10 @@ const fn build_extra_cycles_table() -> [u32; 256] {
     // These values come from byte 2 of the syscall encoding
     table[0x05] = 0x30; // SHA_EXTEND
     table[0x06] = 0x01; // SHA_COMPRESS
+
+    // ED_ADD / ED_DECOMPRESS are not dispatched -- their chips are out of the machine, so a
+    // proof for a guest that called one could not be produced. Kept in the table so the cycle
+    // costs stay recorded, but the dispatch arms below are removed to match the interpreter.
     table[0x07] = 0x01; // ED_ADD
     table[0x08] = 0x00; // ED_DECOMPRESS
     table[0x09] = 0x01; // KECCAK_PERMUTE
@@ -62,6 +62,9 @@ const fn build_extra_cycles_table() -> [u32; 256] {
     table[0x2C] = 0x01; // SECP256K1_FP_ADD
     table[0x2D] = 0x01; // SECP256K1_FP_SUB
     table[0x2E] = 0x01; // SECP256K1_FP_MUL
+
+    // POSEIDON2_PERMUTE is not dispatched -- see the note in the match below. Kept here so the
+    // cycle cost stays recorded.
     table[0x2F] = 0x01; // POSEIDON2_PERMUTE
     table[0x30] = 0x01; // SECP256R1_ADD
     table[0x31] = 0x00; // SECP256R1_DOUBLE
@@ -377,28 +380,13 @@ impl AotEmulatorCore {
                 precompiles::keccak256::keccak_permute(self, arg1);
                 Ok((syscall_return, next_pc, extra_cycles, false))
             }
-            id if id == SyscallCode::POSEIDON2_PERMUTE as u32 => {
-                precompiles::poseidon2::poseidon2_permute::<KoalaBear>(
-                    self,
-                    Self::syscall_leaf_u32(arg1, "poseidon input_ptr")?,
-                    Self::syscall_leaf_u32(arg2, "poseidon output_ptr")?,
-                );
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
+            // POSEIDON2_PERMUTE is deliberately not dispatched -- its chip is out of the machine
+            // and the interpreter no longer registers it, so a proof for a guest that called it
+            // could not be produced. Both execution paths have to agree, or AOT would run the
+            // syscall and only the trace pass would reject it. The implementation stays in
+            // `precompiles::poseidon2`.
             id if id == SyscallCode::UINT256_MUL as u32 => {
                 precompiles::uint256::uint256_mul(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::ED_ADD as u32 => {
-                precompiles::ec::edwards_add::<Ed25519>(self, arg1, arg2);
-                Ok((syscall_return, next_pc, extra_cycles, false))
-            }
-            id if id == SyscallCode::ED_DECOMPRESS as u32 => {
-                precompiles::ec::edwards_decompress::<Ed25519Parameters>(
-                    self,
-                    arg1,
-                    Self::syscall_leaf_u32(arg2, "ed decompress sign")?,
-                );
                 Ok((syscall_return, next_pc, extra_cycles, false))
             }
             id if id == SyscallCode::SECP256K1_ADD as u32 => {

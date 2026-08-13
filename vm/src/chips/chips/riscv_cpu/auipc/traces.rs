@@ -13,7 +13,10 @@ impl<F: Field> CpuChip<F> {
         event: &CpuEvent,
         alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
     ) {
-        if matches!(event.instruction.opcode, Opcode::AUIPC) {
+        // `auipc x0, imm` discards its result, and the AIR does not dispatch an ALU
+        // lookup for it (`auipc/constraints.rs`, gated on `1 - op_a_0`). Emitting the event
+        // anyway would leave the Add chip supplying an unmatched row.
+        if matches!(event.instruction.opcode, Opcode::AUIPC) && event.instruction.op_a != 0 {
             // Create ALU event with full 64-bit values
             let add_event = AluEvent {
                 clk: event.clk,

@@ -56,6 +56,13 @@ where
             builder.looked_single(addrs.in2, in2, is_real);
             builder.looking_single(addrs.out1, out1, mult1);
             builder.looking_single(addrs.out2, out2, mult2);
+
+            // Without this the equalities below express no choice: rearranged, the first is
+            // `out1 = in1 + bit * (in2 - in1)`, so a non-boolean `bit` makes `out1` arbitrary
+            // whenever `in1 != in2`. Ungated -- padding rows are zero-initialised, and leaving
+            // the gate off keeps the constraint stronger.
+            builder.assert_bool(bit);
+
             builder.assert_eq(out1, bit * in2 + (CB::Expr::ONE - bit) * in1);
             builder.assert_eq(out2, bit * in1 + (CB::Expr::ONE - bit) * in2);
         }

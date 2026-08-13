@@ -7,7 +7,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use core::borrow::Borrow;
-use p3_air::Air;
+use p3_air::{Air, AirBuilder};
 use p3_field::Field;
 use p3_matrix::Matrix;
 
@@ -46,6 +46,20 @@ where
             builder.assert_zero(a[1]);
             builder.assert_zero(a[2]);
             builder.assert_zero(a[3]);
+
+            // Bind a[0] to the comparison the gadget actually computed.
+            //
+            // Without this, `a` was pinned only in its upper three limbs while the outcome sat
+            // unused in `lt_signed.result.bit`, so a prover could put any u16 in `a[0]` and the
+            // ALU bus would carry it as the result of the comparison.
+            //
+            // Gated by `is_real`. The ungated form is equivalent here, not stronger: on a
+            // padding row the bus multiplicity is `is_real = 0` so
+            // nothing is emitted, and `result.bit` is itself a free column there (the gadget's
+            // own eval is gated), so an ungated equality would only tie two free columns together.
+            builder
+                .when(is_real.clone())
+                .assert_eq(a[0], lt_signed.result.bit);
 
             // SLT looked
             let lt_op_code = *is_slt * CB::F::from_canonical_u32(Opcode::SLT as u32)

@@ -9,7 +9,9 @@ use crate::{
     },
     compiler::word::Word,
     emulator::riscv::{public_values::PublicValues, syscalls::SyscallCode},
-    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
+    machine::builder::{
+        ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder,
+    },
     primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
 use p3_air::AirBuilder;
@@ -87,6 +89,7 @@ impl<F: Field> CpuChip<F> {
         let arg2: [_; 3] = [op_c_val[0], op_c_val[1], op_c_val[2]];
 
         builder.looking_syscall(
+            local.chunk,
             local.clk,
             syscall_id.clone(),
             arg1,
@@ -215,6 +218,8 @@ impl<F: Field> CpuChip<F> {
 
         let digest_word = local.op_c_access.prev_value();
         let commit_cond = local.opcode_selector.is_ecall * is_commit;
+        let commit_cond_for_range = commit_cond.clone();
+        let ecall_columns_for_range = local.opcode_specific.ecall();
 
         // low u16: bytes[0] + bytes[1] * 256 == digest_word[0]
         builder.when(commit_cond.clone()).assert_eq(
@@ -228,6 +233,35 @@ impl<F: Field> CpuChip<F> {
                 + expected_pv_digest_bytes.0[3].clone() * CB::Expr::from_canonical_u32(1 << 8),
             digest_word[1],
         );
+
+        // The four selected bytes must actually be bytes.
+        //
+        // The two equations above are all that ties them to anything, and over a field each
+        // has many solutions: move 256 from one byte into the next and the sum is unchanged.
+        // Without a range check a prover can publish a digest whose limbs exceed 255 while
+        // both equations still hold, and nothing truncates them downstream --
+        // `felt_bytes_to_bn254_var` keeps bits 8..30 of every felt -- so the digest an EVM
+        // verifier ends up accepting is attacker-chosen.
+        //
+        // Two mechanical constraints of the lookup layer shape how this is written.
+        //
+        // The check cannot name the public values directly: lookup arguments go through
+        // `eval_symbolic_to_virtual_pair` (`machine/utils.rs:142-155`), which accepts only
+        // preprocessed and current-row main columns and panics on `Entry::Public`. So the
+        // bytes are pinned into a column first and the column is checked.
+        //
+        // And the multiplicity must be degree 1 (`lookup.rs:119`), so it cannot be
+        // `is_ecall * is_commit`. It is `is_ecall` instead, with the column holding zeros on
+        // every non-COMMIT ecall row -- zeros are bytes, so the check is vacuous there. This
+        // mirrors how `ecall_range_check_operand` handles the same restriction by keeping the
+        // product in a column of its own.
+        let digest_bytes_col = ecall_columns_for_range.expected_public_values_digest;
+        for i in 0..4 {
+            builder
+                .when(commit_cond_for_range.clone())
+                .assert_eq(expected_pv_digest_bytes.0[i].clone(), digest_bytes_col[i]);
+        }
+        builder.slice_range_check_u8(&digest_bytes_col, local.opcode_selector.is_ecall);
 
         let expected_deferred_proofs_digest_element =
             builder.index_array(&deferred_proofs_digest, &ecall_columns.index_bitmap);

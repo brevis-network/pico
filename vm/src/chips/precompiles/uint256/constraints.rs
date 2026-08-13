@@ -205,6 +205,7 @@ where
 
         // Receive the arguments.
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::UINT256_MUL.syscall_id()),
             x_ptr.map(Into::into),

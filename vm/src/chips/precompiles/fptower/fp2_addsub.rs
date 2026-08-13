@@ -112,6 +112,13 @@ where
     ) {
         let modulus_bytes = P::MODULUS;
         let modulus = BigUint::from_bytes_le(modulus_bytes);
+
+        // Reject non-reduced operands here, as `fp.rs` and `fp2_mul.rs` do. Otherwise the
+        // limbs are silently truncated and SUB becomes unsatisfiable with no clue why.
+        for (name, v) in [("p.x", &p_x), ("p.y", &p_y), ("q.x", &q_x), ("q.y", &q_y)] {
+            assert!(*v < modulus, "fp2 coordinate {name} must be < modulus");
+        }
+
         let c0 = cols
             .c0
             .populate_with_modulus(blu_events, &p_x, &q_x, &modulus, op);
@@ -481,6 +488,10 @@ where
                 &access.inner,
                 local.is_real,
             );
+            // NOTE: `.inner` is `FilteredAirBuilder::inner`, the *unfiltered* builder, so the
+            // `when` below is discarded and this equality also applies to padding rows. Left as-is
+            // deliberately -- an ungated constraint is soundness-stronger, so adding the gate would
+            // weaken the constraint set.
             let do_check: CB::Expr = local.is_real.into();
             for (v, w) in access.inner.value().0.iter().zip(result_words[i].0.iter()) {
                 builder
@@ -506,6 +517,7 @@ where
             local.is_add * add_syscall_id + (CB::Expr::ONE - local.is_add) * sub_syscall_id;
 
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             syscall_id_felt,
             x_ptr.map(Into::into),

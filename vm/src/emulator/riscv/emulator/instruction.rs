@@ -62,6 +62,7 @@ impl RiscvEmulator {
                 a = b.wrapping_add(c);
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -76,6 +77,7 @@ impl RiscvEmulator {
                 a = b.wrapping_sub(c);
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -90,6 +92,7 @@ impl RiscvEmulator {
                 a = b ^ c;
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -104,6 +107,7 @@ impl RiscvEmulator {
                 a = b | c;
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -118,6 +122,7 @@ impl RiscvEmulator {
                 a = b & c;
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -132,6 +137,7 @@ impl RiscvEmulator {
                 a = b.wrapping_shl((c & 0x3f) as u32);
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -146,6 +152,7 @@ impl RiscvEmulator {
                 a = b.wrapping_shr((c & 0x3f) as u32);
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -160,6 +167,7 @@ impl RiscvEmulator {
                 a = (b as i64).wrapping_shr((c & 0x3f) as u32) as u64;
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -174,6 +182,7 @@ impl RiscvEmulator {
                 a = if (b as i64) < (c as i64) { 1 } else { 0 };
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -188,6 +197,7 @@ impl RiscvEmulator {
                 a = if b < c { 1 } else { 0 };
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -479,6 +489,7 @@ impl RiscvEmulator {
                 a = b.wrapping_mul(c);
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -493,6 +504,7 @@ impl RiscvEmulator {
                 a = (((b as i64) as i128).wrapping_mul((c as i64) as i128) >> 64) as u64;
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -507,6 +519,7 @@ impl RiscvEmulator {
                 a = ((b as u128).wrapping_mul(c as u128) >> 64) as u64;
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -521,6 +534,7 @@ impl RiscvEmulator {
                 a = (((b as i64) as i128).wrapping_mul(c as i128) >> 64) as u64;
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -539,6 +553,7 @@ impl RiscvEmulator {
                 }
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -557,6 +572,7 @@ impl RiscvEmulator {
                 }
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -575,6 +591,7 @@ impl RiscvEmulator {
                 }
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -593,6 +610,7 @@ impl RiscvEmulator {
                 }
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     a,
                     b,
@@ -614,6 +632,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -635,6 +654,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -656,6 +676,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -677,6 +698,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -698,6 +720,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -719,6 +742,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -744,6 +768,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -769,6 +794,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -794,6 +820,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,
@@ -819,6 +846,7 @@ impl RiscvEmulator {
                 compat_cpu_event_c_u64 = Some(compat_c_u64);
                 self.rw(rd, result);
                 self.mode.emit_alu(
+                    instruction.op_a,
                     self.state.clk,
                     result,
                     compat_b_u64,

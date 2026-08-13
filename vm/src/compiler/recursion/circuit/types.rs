@@ -104,17 +104,21 @@ where
     }
 
     /// Hash the verifying key + prep domains into a single digest.
-    /// poseidon2( commit[0..8] || pc_start || prep_domains[N].{log_n, .size, .shift, .g})
+    /// poseidon2( commit[0..8] || pc_start || initial_global_cumulative_sum ||
+    /// prep_domains[N].{log_n, .size, .shift, .g})
     pub fn hash_field(&self, builder: &mut Builder<CC>) -> SC::DigestVariable
     where
         CC::F: TwoAdicField,
         SC::DigestVariable: IntoIterator<Item = Felt<CC::F>>,
     {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 3 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 3 + 14 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit);
         inputs.extend(self.pc_start);
+        // Must mirror the native `hash_field` in `machine/keys.rs` element for element.
+        inputs.extend(self.initial_global_cumulative_sum.0.x.0);
+        inputs.extend(self.initial_global_cumulative_sum.0.y.0);
         for domain in prep_domains {
             inputs.push(builder.eval(CC::F::from_canonical_usize(domain.log_n)));
             let size = 1 << domain.log_n;

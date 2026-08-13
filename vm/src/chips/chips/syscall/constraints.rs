@@ -35,12 +35,28 @@ where
             local.is_real * local.is_real * local.is_real,
         );
 
+        // On both global messages below, `message[7]` carries `chunk`.
+        //
+        // It used to be a zero pad ("Pico uses single clk"). The local syscall bus now carries
+        // `chunk` too, which makes each side internally consistent -- the CPU agrees with
+        // SyscallRiscv, and the precompile agrees with SyscallPrecompile. But that alone does not
+        // make the precompile run in the chunk the CPU asked for: the two sides live in different
+        // chunk proofs and meet only here, on the global bus. Carrying `chunk` in the message is
+        // what forces SyscallRiscv's chunk to equal SyscallPrecompile's, and so pins the
+        // precompile's memory effects to the point in time the syscall was actually issued.
         match self.chunk_kind {
             SyscallChunkKind::Riscv => {
                 // arg1 and arg2 are now Addr<T> = [T; 3]
                 let arg1: [_; 3] = [local.arg1[0], local.arg1[1], local.arg1[2]];
                 let arg2: [_; 3] = [local.arg2[0], local.arg2[1], local.arg2[2]];
-                builder.looked_syscall(local.clk, local.syscall_id, arg1, arg2, local.is_real);
+                builder.looked_syscall(
+                    local.chunk,
+                    local.clk,
+                    local.syscall_id,
+                    arg1,
+                    arg2,
+                    local.is_real,
+                );
 
                 // Send the "send interaction" to the global table.
                 // Format: [msg[0..7], is_send, is_receive, kind] — 11 elements matching GlobalChip.
@@ -54,9 +70,9 @@ where
                         local.arg2[0].into(),
                         local.arg2[1].into(),
                         local.arg2[2].into(),
-                        CB::Expr::ZERO, // message[7] padding (Pico uses single clk)
-                        CB::Expr::ONE,  // is_send = 1
-                        CB::Expr::ZERO, // is_receive = 0
+                        local.chunk.into(), // message[7]: chunk -- see below
+                        CB::Expr::ONE,      // is_send = 1
+                        CB::Expr::ZERO,     // is_receive = 0
                         CB::Expr::from_canonical_u8(LookupType::Syscall as u8), // kind
                     ],
                     local.is_real.into(),
@@ -68,7 +84,14 @@ where
                 // arg1 and arg2 are now Addr<T> = [T; 3], pass as arrays
                 let arg1: [_; 3] = [local.arg1[0], local.arg1[1], local.arg1[2]];
                 let arg2: [_; 3] = [local.arg2[0], local.arg2[1], local.arg2[2]];
-                builder.looking_syscall(local.clk, local.syscall_id, arg1, arg2, local.is_real);
+                builder.looking_syscall(
+                    local.chunk,
+                    local.clk,
+                    local.syscall_id,
+                    arg1,
+                    arg2,
+                    local.is_real,
+                );
 
                 // Send the "receive interaction" to the global table.
                 // Format: [msg[0..7], is_send, is_receive, kind] — 11 elements matching GlobalChip.
@@ -82,9 +105,9 @@ where
                         local.arg2[0].into(),
                         local.arg2[1].into(),
                         local.arg2[2].into(),
-                        CB::Expr::ZERO, // message[7] padding
-                        CB::Expr::ZERO, // is_send = 0
-                        CB::Expr::ONE,  // is_receive = 1
+                        local.chunk.into(), // message[7]: chunk -- see below
+                        CB::Expr::ZERO,     // is_send = 0
+                        CB::Expr::ONE,      // is_receive = 1
                         CB::Expr::from_canonical_u8(LookupType::Syscall as u8), // kind
                     ],
                     local.is_real.into(),

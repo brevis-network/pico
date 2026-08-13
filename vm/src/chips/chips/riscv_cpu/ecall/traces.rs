@@ -76,20 +76,55 @@ impl<F: Field> CpuChip<F> {
                 ecall_cols.index_bitmap[digest_idx] = F::ONE;
             }
 
+            // Pair the `slice_range_check_u8` the AIR emits over `expected_public_values_digest`
+            // (`ecall/constraints.rs`, `eval_commit`). Its multiplicity is **`is_ecall`**, so every
+            // ecall row is looked up: COMMIT rows carry the selected digest's bytes, every other
+            // ecall row carries zeros.
+            //
+            // The bytes come from `event.c` because that is what is reachable here, and the two
+            // equations in `eval_commit` force the public values to agree with `op_c`'s byte
+            // decomposition on any honest trace. A forged public value therefore falls outside
+            // what these events cover, which is exactly the intent.
+            let digest_bytes =
+                if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT.syscall_id()) {
+                    let word = event.c as u32;
+                    [
+                        (word & 0xFF) as u8,
+                        ((word >> 8) & 0xFF) as u8,
+                        ((word >> 16) & 0xFF) as u8,
+                        ((word >> 24) & 0xFF) as u8,
+                    ]
+                } else {
+                    [0u8; 4]
+                };
+            for (slot, b) in ecall_cols
+                .expected_public_values_digest
+                .iter_mut()
+                .zip(digest_bytes)
+            {
+                *slot = F::from_canonical_u8(b);
+            }
+            blu_events.add_u8_range_check(digest_bytes[0], digest_bytes[1]);
+            blu_events.add_u8_range_check(digest_bytes[2], digest_bytes[3]);
+
             is_halt = syscall_id == F::from_canonical_u32(SyscallCode::HALT.syscall_id());
 
             // For halt and commit deferred proofs syscalls, we need to baby bear range check one of
             // it's operands.
             if is_halt {
                 ecall_cols.operand_to_check = event.b.into();
-                ecall_cols.operand_range_check_cols.populate(event.b as u32);
+                ecall_cols
+                    .operand_range_check_cols
+                    .populate(blu_events, event.b);
                 cols.ecall_range_check_operand = F::ONE;
             }
 
             if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
             {
                 ecall_cols.operand_to_check = event.c.into();
-                ecall_cols.operand_range_check_cols.populate(event.c as u32);
+                ecall_cols
+                    .operand_range_check_cols
+                    .populate(blu_events, event.c);
                 cols.ecall_range_check_operand = F::ONE;
             }
         }

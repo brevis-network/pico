@@ -591,6 +591,11 @@ where
                     local_remainder_lt_gadget,
                     local_remainder_check_multiplicity.into(),
                 );
+                // Enforce that the LT relation actually holds (bit = 1 means a < b).
+                // Without this, a prover could set bit = 0 and claim remainder >= divisor.
+                builder
+                    .when(local_remainder_check_multiplicity)
+                    .assert_one(local_remainder_lt_gadget.bit);
             }
 
             // Check that the MSBs are correct.

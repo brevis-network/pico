@@ -56,6 +56,24 @@ impl Syscall for Sha256CompressSyscall {
             hx[i] = u32::try_from(value).unwrap();
         }
 
+        // Give the `w` reads their own timestamp.
+        //
+        // The memory argument requires strictly increasing timestamps per address. Reading
+        // `h` and `w` at the same clk makes any *overlap* between the two buffers
+        // unprovable — the second read of a shared address would carry
+        // `current_ts == prev_ts`. `assert_ne!(w_ptr, h_ptr)` above only rules out exact
+        // equality; partial overlap such as `h_ptr = w_ptr + 32` slips through, emulates
+        // fine, and then fails at proving time. Hence three distinct timestamps, one per
+        // phase.
+        //
+        // This costs no extra CPU cycle and no syscall-ABI change: a syscall instruction
+        // advances `state.clk` by `4 + num_extra_cycles` (= 5 here, see
+        // `chunk_clk/constraints.rs:48`), while `SyscallContext::clk` is a private copy
+        // used only for record timestamps. Offsets 0/1/2 all stay below the next
+        // instruction's clk, so `num_extra_cycles` (encoded in byte 2 of the syscall id,
+        // which the guest SDK hardcodes) stays at 1.
+        ctx.clk += 1;
+
         let mut original_w = Vec::new();
         // Execute the "compress" phase.
         let mut a = hx[0];
@@ -91,8 +109,8 @@ impl Syscall for Sha256CompressSyscall {
             b = a;
             a = temp1.wrapping_add(temp2);
         }
-        // Increment the clk by 1 before writing to h, since we've already read h at the start_clk
-        // during the initialization phase.
+        // Increment the clk again before writing to h: `h` was read at `start_clk` and `w`
+        // at `start_clk + 1`, so the writes land on `start_clk + 2`.
         ctx.clk += 1;
 
         // Execute the "finalize" phase.

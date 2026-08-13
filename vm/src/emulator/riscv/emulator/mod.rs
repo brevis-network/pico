@@ -1753,16 +1753,23 @@ impl RiscvEmulator {
         // We handle x0 separately, as we constrain it to be 0 in the first row
         // of the memory finalize table so it must be first in the array of events.
         let addr_0_record = self.state.registers[0];
+        // The payload of x0's finalize event when x0 was never accessed. It must be the exact
+        // tuple the initialize event sends, because with no access in between there is nothing
+        // else on the memory bus to bridge the two: MemoryInitialize sends a hardcoded
+        // `(chunk = 0, timestamp = 0)` (`initialize_finalize/constraints.rs:73-74`) while
+        // MemoryFinalize receives `(local.chunk, local.timestamp)` (`:93-94`). A timestamp of 1
+        // here left the global bus unbalanced. Nothing constrains the Finalize chip's timestamp
+        // (only the Initialize chip's, at `:247-250`), so 0 is admissible.
         let default_0_rec = RuntimeRegisterRecord {
             value: 0,
             chunk: 0,
-            timestamp: 1,
+            timestamp: 0,
         };
 
-        let (addr_0_final_record, used_0) = if is_used(&addr_0_record) {
-            (&addr_0_record, true)
+        let addr_0_final_record = if is_used(&addr_0_record) {
+            &addr_0_record
         } else {
-            (&default_0_rec, false)
+            &default_0_rec
         };
 
         let addr_0_final_record = MemoryRecord {
@@ -1775,7 +1782,15 @@ impl RiscvEmulator {
             &addr_0_final_record,
         ));
 
-        let addr_0_initialize_event = MemoryInitializeFinalizeEvent::initialize(0, 0, used_0);
+        // `used` must be true unconditionally. This event is pushed first, and the AIR requires
+        // the first row of MemoryInitialize to be real
+        // (`initialize_finalize/constraints.rs:195`, `when_first_row().assert_one(is_real)`).
+        // Deriving it from `is_used(registers[0])` made an honest program that never references
+        // register 0 unprovable. The value stays 0, which is what the first row is pinned to
+        // anyway (`:258-262`, value zero when `is_comp == 0`), and the matching finalize event
+        // above is already unconditionally `used: 1` (`riscv_memory/event.rs:185`) — so this
+        // also removes an initialize/finalize asymmetry.
+        let addr_0_initialize_event = MemoryInitializeFinalizeEvent::initialize(0, 0, true);
         memory_initialize_events.push(addr_0_initialize_event);
 
         // Handle x1..x31 registers from dedicated register storage.

@@ -65,6 +65,14 @@ where
                 is_real.clone(),
             );
 
+            let not_sllw = is_sll;
+            for i in 0..4 {
+                builder.when(shift_u16[i]).assert_eq(
+                    c_bits[4] + c_bits[5] * CB::F::from_canonical_u32(2) * not_sllw,
+                    CB::F::from_canonical_u32(i as u32),
+                );
+                builder.assert_bool(shift_u16[i]);
+            }
             builder.when(is_real.clone()).assert_eq(
                 shift_u16[0] + shift_u16[1] + shift_u16[2] + shift_u16[3],
                 CB::F::from_canonical_u32(1),

@@ -135,6 +135,22 @@ where
             local.is_comp.into(),
         );
 
+        // Require the comparison to have come out strictly less-than.
+        //
+        // `LtWordU16Gadget::eval` only proves the `bit` witness is *consistent* with the
+        // comparison: it checks `bit` is boolean and that
+        // `diff = prev_comp - comp + bit * 2^16` lands in u16 range. Both `bit = 1` with
+        // `prev < addr` and `bit = 0` with `prev >= addr` satisfy that, so the gadget alone
+        // proves nothing about the direction. Whoever calls it to mean "less than" has to say
+        // so, and this is the caller that means it: the init/finalize tables are sorted by
+        // address, and equal or descending neighbours would let the same address appear twice
+        // — which is what makes an arbitrary memory image forgeable.
+        //
+        // Gated on `is_comp`, matching the gadget's own gate: the first row skips the
+        // comparison when `prev_addr` is zero (the x0 slot), and padding rows have
+        // `is_comp = 0`.
+        builder.when(local.is_comp).assert_one(local.lt_cols.bit);
+
         // ──────────────────────────────────────────────
         // is_prev_addr_zero: check if prev_addr is all zeros
         // ──────────────────────────────────────────────

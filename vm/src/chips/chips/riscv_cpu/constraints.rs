@@ -76,6 +76,9 @@ where
             .chain(once(local.opcode_selector.is_sh))
             .chain(once(local.opcode_selector.is_sw))
             .chain(once(local.opcode_selector.is_sd))
+            // Bind the data-memory access to this CPU row's execution time.
+            .chain(once(local.chunk))
+            .chain(once(local.clk))
             .map(Into::into);
         // Memory lookup
         builder.looking(SymbolicLookup::new(
@@ -85,13 +88,24 @@ where
             LookupScope::Regional,
         ));
 
-        // ALU instructions
+        // ALU instructions.
+        //
+        // Skip the dispatch when the destination is `x0`. The register file pins
+        // `op_a_val()` to zero in that case (`register/constraints.rs`), so dispatching
+        // would ask the ALU chip for `(opcode, 0, b, c)` while the chip supplies
+        // `(opcode, b op c, b, c)` -- an imbalance for any instruction whose result is
+        // non-zero. The emulator correspondingly stops emitting the event (`mode.rs`).
+        // `op_a_0` comes from the preprocessed program table, so it cannot be lied about.
+        builder.assert_eq(
+            local.is_alu_not_x0,
+            is_alu_instruction * (CB::Expr::ONE - local.instruction.op_a_0),
+        );
         builder.looking_alu(
             local.instruction.opcode,
             local.op_a_val(),
             local.op_b_val(),
             local.op_c_val(),
-            is_alu_instruction,
+            local.is_alu_not_x0,
         );
 
         // Branch instructions.
@@ -129,6 +143,13 @@ where
 
         // Check that the is_real flag is correct.
         self.eval_is_real(builder, local, next);
+
+        // UNIMP / EBREAK must be unsatisfiable, not merely chunk-ending. The emulator
+        // aborts on both, but `is_sequential_instr` does not subtract `is_unimpl`, so
+        // without this the row is a no-op taking `next_pc = pc + 4` past the trap.
+        builder
+            .when(local.is_real)
+            .assert_zero(local.opcode_selector.is_unimpl);
 
         // Constrain all carry columns as boolean (degree 2, unconditional).
         for &c in local.pc_carry_a.iter().chain(local.pc_carry_b.iter()) {

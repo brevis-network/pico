@@ -1,3 +1,9 @@
+//! Unused by `default_syscall_map`: this syscall is not registered while its chip is out of the
+//! machine, so nothing here is reachable from a non-test build. Kept whole so the implementation
+//! is ready if it returns, and constructed directly by the poseidon2 tests in `chips/tests.rs` so
+//! it stays exercised meanwhile. See `syscalls/mod.rs`.
+#![allow(dead_code)]
+
 use super::event::Poseidon2PermuteEvent;
 use crate::{
     chips::chips::riscv_memory::event::{MemoryReadRecord, MemoryWriteRecord},
@@ -133,6 +139,17 @@ where
         let clk_init = ctx.clk;
         let input_memory_ptr = arg1;
         let output_memory_ptr = arg2;
+
+        // Both pointers must be 8-byte aligned, same as every other precompile.
+        //
+        // The AIR requires it: `SyscallAddrGadget::eval` range checks `addr[0] * 8^-1` to 13 bits,
+        // which only holds when `addr[0]` is a multiple of 8 (a non-multiple maps to a field
+        // element on the order of p/8). Without this assertion the two sides disagreed -- the
+        // helpers below align down and track a 4-byte offset, so an unaligned pointer emulated
+        // fine and then had no provable trace. Failing here says why; failing in the prover
+        // showed up only as an unbalanced bus.
+        SyscallContext::assert_dword_aligned_precompile(input_memory_ptr, "poseidon2 input_ptr");
+        SyscallContext::assert_dword_aligned_precompile(output_memory_ptr, "poseidon2 output_ptr");
 
         let (state_records, state_values) =
             read_word_records_via_dwords(ctx, input_memory_ptr, PERMUTATION_WIDTH);

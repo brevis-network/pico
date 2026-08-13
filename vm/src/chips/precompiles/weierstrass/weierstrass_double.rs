@@ -16,6 +16,7 @@ use crate::{
                 conversions::{generate_limbs_from_write_cols_u8, limbs_to_words},
                 field_params::{FieldParameters, NumLimbs, NumWords},
                 limbs::Limbs,
+                polynomial::Polynomial,
             },
         },
         precompiles::checked_u64_to_u32,
@@ -63,6 +64,7 @@ pub struct WeierstrassDoubleAssignCols<T, P: FieldParameters + NumWords> {
     pub p_addrs: Array<AddrAddGadget<T>, P::WordsCurvePoint>,
     pub p_access: Array<MemoryWriteColsU8<T>, P::WordsCurvePoint>,
     pub(crate) slope_denominator: FieldOpCols<T, P>,
+    pub(crate) inverse_check: FieldOpCols<T, P>,
     pub(crate) slope_numerator: FieldOpCols<T, P>,
     pub(crate) slope: FieldOpCols<T, P>,
     pub(crate) p_x_squared: FieldOpCols<T, P>,
@@ -98,6 +100,23 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
     ) {
         // This populates necessary field operations to double a point on a Weierstrass curve.
 
+        // Reject a coordinate at or above the modulus here, before any field op runs.
+        //
+        // This is a *domain* error and the message should say so. Without this check the same
+        // input trips `populate_carry_and_witness`' internal `debug_assert!(&carry < modulus)`
+        // several layers down inside `p_x_squared`, which reports a symptom rather than the cause.
+        //
+        // Trace-side only, deliberately: the AIR does not constrain the operands and does not need
+        // to. Each field op asserts `a op b == result + carry * modulus`, which holds mod p for any
+        // representative, and both outputs are pinned -- to the memory bus and, by
+        // `x3_range`/`y3_range`, below the modulus -- so the value written back is unique whatever
+        // representative the operands use. The only non-arithmetic predicate here, `inverse_check`,
+        // asks a field question (is the denominator invertible), so it too is insensitive to the
+        // representative.
+        let modulus = E::BaseField::modulus();
+        assert!(p_x < modulus, "curve coordinate p.x must be < modulus");
+        assert!(p_y < modulus, "curve coordinate p.y must be < modulus");
+
         let a = E::a_int();
 
         // slope = slope_numerator / slope_denominator.
@@ -127,6 +146,20 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> WeierstrassDoubl
                 &BigUint::from(2u32),
                 &p_y,
                 FieldOperation::Mul,
+            );
+
+            // inverse_check: verify denominator is non-zero by computing 1 / denom.
+            // For padding rows (all zeros), denominator is 0 — use 0/0=0 (allowed by field_op).
+            let inverse_numerator = if slope_denominator == BigUint::zero() {
+                BigUint::zero()
+            } else {
+                BigUint::one()
+            };
+            cols.inverse_check.populate(
+                blu_events,
+                &inverse_numerator,
+                &slope_denominator,
+                FieldOperation::Div,
             );
 
             cols.slope.populate(
@@ -385,6 +418,16 @@ where
         let p_y: Limbs<CB::Expr, <E::BaseField as NumLimbs>::Limbs> =
             Limbs(Array::try_from_iter(p_y_limbs).expect("failed to convert p_y limbs"));
 
+        // Bound the input coordinates before any field op consumes them.
+        //
+        // `generate_limbs_from_write_cols_u8` only pins each limb to a byte, i.e. the point to
+        // `[0, 2^{8 * NUM_LIMBS})²` — the range `FieldOpCols`' safety comment assumes, which is
+        // weaker than what its carry budget needs. `p_x_squared`'s carry has to represent
+        // `floor(p.x² / modulus)`, and for `p.x` near `2^{8 * NUM_LIMBS}` that exceeds
+        // `NUM_LIMBS` bytes.
+        let modulus_limbs =
+            E::BaseField::to_limbs_field::<CB::Expr, CB::F>(&E::BaseField::modulus());
+
         // `a` in the Weierstrass form: y^2 = x^3 + a * x + b.
         let a = E::BaseField::to_limbs_field::<CB::Expr, _>(&E::a_int());
 
@@ -419,6 +462,31 @@ where
                 &E::BaseField::to_limbs_field::<CB::Expr, _>(&BigUint::from(2u32)),
                 &p_y,
                 FieldOperation::Mul,
+                local.is_real,
+            );
+
+            // Check `2 * y` is non-zero by computing 1 / (2 * y).
+            //
+            // Without this the `Div` below is `slope * (2 * y) == 3 * x^2 + a`, which pins
+            // `slope` only while the denominator is non-zero: at `2 * y == 0` and
+            // `3 * x^2 + a == 0` it degenerates to `slope * 0 == 0` and every `slope`
+            // satisfies it, making the doubled point prover-chosen. Nothing here checks the
+            // input point is on the curve, so such a point is reachable from guest memory.
+            //
+            // `Div` is constrained as `result * b == a`, so with `a = 1` this is unsatisfiable
+            // exactly when `b == 0`. Same guard as `weierstrass_add`. Completeness is not at
+            // risk: a point with `y = 0` has order 2, and all four curves here have odd group
+            // order, so no legitimate curve point has `y = 0` — and the padding row uses
+            // `(x = 0, y = 1)` deliberately, keeping `2 * y = 2`.
+            let mut coeff_1 = vec![CB::Expr::ZERO; <E::BaseField as NumLimbs>::Limbs::USIZE];
+            coeff_1[0] = CB::Expr::ONE;
+            let one_polynomial = Polynomial::from_coefficients(&coeff_1);
+
+            local.inverse_check.eval(
+                builder,
+                &one_polynomial,
+                &local.slope_denominator.result,
+                FieldOperation::Div,
                 local.is_real,
             );
 
@@ -473,13 +541,12 @@ where
         }
 
         // Range check x3 and y3 against the field modulus.
-        let modulus = E::BaseField::to_limbs_field::<CB::Expr, CB::F>(&E::BaseField::modulus());
         local
             .x3_range
-            .eval(builder, &local.x3_ins.result, &modulus, local.is_real);
+            .eval(builder, &local.x3_ins.result, &modulus_limbs, local.is_real);
         local
             .y3_range
-            .eval(builder, &local.y3_ins.result, &modulus, local.is_real);
+            .eval(builder, &local.y3_ins.result, &modulus_limbs, local.is_real);
 
         // Reconstruct byte-level results into Words for memory write constraints.
         let x3_result_words = limbs_to_words(
@@ -563,6 +630,7 @@ where
         };
 
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             syscall_id_felt,
             p_ptr.map(Into::into),

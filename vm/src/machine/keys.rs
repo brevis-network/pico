@@ -143,10 +143,15 @@ where
 {
     fn hash_field(&self) -> [BabyBear; DIGEST_SIZE] {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 3 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 3 + 14 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit.as_ref());
         inputs.extend(self.pc_start);
+        // Commits the initial memory image; without it two programs with identical
+        // instructions but different `.data`/`.rodata` share a digest. Must stay in
+        // lockstep with the in-circuit `hash_field`.
+        inputs.extend(self.initial_global_cumulative_sum.0.x.0);
+        inputs.extend(self.initial_global_cumulative_sum.0.y.0);
         for domain in prep_domains {
             inputs.push(BabyBear::from_canonical_usize(domain.log_n));
             let size = 1 << domain.log_n;
@@ -167,10 +172,12 @@ where
 {
     fn hash_field(&self) -> [KoalaBear; DIGEST_SIZE] {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 3 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 3 + 14 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit.as_ref());
         inputs.extend(self.pc_start);
+        inputs.extend(self.initial_global_cumulative_sum.0.x.0);
+        inputs.extend(self.initial_global_cumulative_sum.0.y.0);
         for domain in prep_domains {
             inputs.push(KoalaBear::from_canonical_usize(domain.log_n));
             let size = 1 << domain.log_n;
@@ -191,10 +198,12 @@ where
 {
     fn hash_field(&self) -> [Mersenne31; DIGEST_SIZE] {
         let prep_domains = self.preprocessed_info.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 3 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 3 + 14 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commit.as_ref());
         inputs.extend(self.pc_start);
+        inputs.extend(self.initial_global_cumulative_sum.0.x.0);
+        inputs.extend(self.initial_global_cumulative_sum.0.y.0);
         for domain in prep_domains {
             inputs.push(Mersenne31::from_canonical_usize(domain.log_n));
             inputs.push(Mersenne31::from_canonical_usize(domain.size()));

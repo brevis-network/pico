@@ -36,17 +36,11 @@ pub fn type_name_of<T>(_: &T) -> String {
     type_name::<T>().to_string()
 }
 
-pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(
-    values: &mut Vec<T>,
-    log_size: Option<usize>,
-) {
-    debug_assert!(values.len().is_multiple_of(N));
-    let mut n_real_rows = values.len() / N;
-    if n_real_rows < 16 {
-        n_real_rows = 16;
-    }
+/// Row count to pad up to: a power of two, at least 16, or the fixed size when one is given.
+fn padded_row_count(n_rows: usize, log_size: Option<usize>) -> usize {
+    let n_real_rows = n_rows.max(16);
 
-    let target_rows = if let Some(log) = log_size {
+    if let Some(log) = log_size {
         let specified_size = 1 << log; // 2^log
         if specified_size < n_real_rows {
             panic!(
@@ -57,9 +51,44 @@ pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(
         specified_size
     } else {
         n_real_rows.next_power_of_two()
-    };
+    }
+}
+
+pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(
+    values: &mut Vec<T>,
+    log_size: Option<usize>,
+) {
+    debug_assert!(values.len().is_multiple_of(N));
+    let target_rows = padded_row_count(values.len() / N, log_size);
 
     values.resize(target_rows * N, T::default());
+}
+
+/// Pad by repeating the first row instead of filling with zeros.
+///
+/// For a preprocessed table that is looked up by key, a zero-filled pad row is not inert: it
+/// is a syntactically valid entry, and anything that can be looked up can be claimed. Repeating
+/// row 0 keeps every row a genuine entry, so the set of lookupable keys stays exactly the set
+/// of real ones.
+pub fn pad_to_power_of_two_repeating_first_row<const N: usize, T: Clone + Default>(
+    values: &mut Vec<T>,
+    log_size: Option<usize>,
+) {
+    debug_assert!(values.len().is_multiple_of(N));
+    let n_rows = values.len() / N;
+    let target_rows = padded_row_count(n_rows, log_size);
+
+    if n_rows == 0 {
+        // Nothing to repeat; fall back to the zero fill.
+        values.resize(target_rows * N, T::default());
+        return;
+    }
+
+    let first_row: Vec<T> = values[..N].to_vec();
+    values.reserve((target_rows - n_rows) * N);
+    for _ in n_rows..target_rows {
+        values.extend_from_slice(&first_row);
+    }
 }
 
 pub fn pad_to_power_of_two_noconst<T: Clone + Default>(

@@ -12,7 +12,7 @@ use crate::{
     },
     compiler::{riscv::opcode::ByteOpcode, word::Word},
     machine::{
-        builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+        builder::{ChipBuilder, ChipLookupBuilder, ChipWordBuilder, RiscVMemoryBuilder},
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
@@ -36,7 +36,8 @@ where
         builder.assert_bool(local.is_real);
 
         // Receive the state.
-        let receive_values = once(local.clk.into())
+        let receive_values = once(local.chunk.into())
+            .chain(once(local.clk.into()))
             .chain(local.w_ptr.map(Into::into))
             .chain(once(local.i.into()))
             .collect::<Vec<_>>();
@@ -48,7 +49,8 @@ where
         ));
 
         // Send the next state, with incremented `local.i`.
-        let send_values = once(local.clk.into() + CB::Expr::ONE)
+        let send_values = once(local.chunk.into())
+            .chain(once(local.clk.into() + CB::Expr::ONE))
             .chain(local.w_ptr.map(Into::into))
             .chain(once(local.i + CB::Expr::ONE))
             .collect::<Vec<_>>();
@@ -283,6 +285,28 @@ where
             local.w_i_ptr,
             local.is_real.into(),
         );
+
+        // Bind the written word to the computed schedule value.
+        //
+        // `eval_memory_access` puts the four limbs on the memory bus verbatim and constrains
+        // nothing about them, so without this the value written back is a free column and any
+        // digest computed through this precompile is forgeable. `local.s2` is the only place
+        // the result of `w[i] = w[i-16] + s0 + w[i-7] + s1` lives, and it was never connected
+        // to memory -- the comment that used to sit here named an `s2_value_word` that did not
+        // exist in the file.
+        //
+        // `s2` carries the 32-bit result as two u16 limbs, so limbs 2 and 3 are pinned to zero,
+        // which is the other half of what was missing: nothing previously stopped the upper
+        // limbs of a written schedule word from being arbitrary.
+        let s2_value_word = Word([
+            local.s2.value[0].into(),
+            local.s2.value[1].into(),
+            CB::Expr::ZERO,
+            CB::Expr::ZERO,
+        ]);
+        builder
+            .when(local.is_real)
+            .assert_word_eq(*local.w_i.value(), s2_value_word);
 
         // Write `s2_value_word` into `w[i]`.
         builder.eval_memory_access(

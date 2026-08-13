@@ -2,7 +2,7 @@ use super::is_zero::IsZeroGadget;
 use crate::{
     chips::chips::byte::event::ByteRecordBehavior,
     compiler::riscv::opcode::ByteOpcode,
-    machine::builder::{ChipBuilder, ChipLookupBuilder},
+    machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
     primitives::consts::u64_to_u16_limbs,
 };
 use p3_air::AirBuilder;
@@ -31,7 +31,17 @@ impl<F: Field> SyscallAddrGadget<F> {
         self.addr[0] = F::from_canonical_u16(addr_limbs[0]);
         self.addr[1] = F::from_canonical_u16(addr_limbs[1]);
         self.addr[2] = F::from_canonical_u16(addr_limbs[2]);
-        self.top_two_limb_min = sum_top_two_limb.inverse();
+        // A zero sum has no inverse, and `inverse()` panics on it. That happens for every
+        // pointer below 2^16 -- precisely the range this gadget's 64KB stack guard exists to
+        // reject. Panicking here would crash the prover on attacker-controlled input, since the
+        // emulator only floors addresses at 0x100 and accepts the whole window [0x100, 2^16).
+        //
+        // Witness zero instead. `eval`'s guard is
+        //     when(is_real): top_two_limb_min * (addr[1] + addr[2]) == is_real
+        // which with a zero sum and a zero witness reads `0 == 1` on a real row, so the row is
+        // unsatisfiable and verification rejects it cleanly at `verifier.rs:384` -- the intended
+        // outcome, reached without a crash. Padding rows have `is_real = 0` and are unaffected.
+        self.top_two_limb_min = sum_top_two_limb.try_inverse().unwrap_or(F::ZERO);
         let is_max = self.top_two_limb_max.populate_from_field_element(
             sum_top_two_limb - F::from_canonical_u16(u16::MAX) * F::TWO,
         );
@@ -40,13 +50,15 @@ impl<F: Field> SyscallAddrGadget<F> {
         } else {
             record.add_bit_range_check(addr_limbs[0] / 8, 13);
         }
+        // Matches the `slice_range_check_u16` in `eval`.
+        record.add_u16_range_checks(&addr_limbs[..3]);
     }
 }
 
 impl<F: Field> SyscallAddrGadget<F> {
     /// The memory address is constrained to be aligned, `>= 2^16` and less than `2^48 - len`.
     /// The `cols.addr` is assumed to be composed of valid 3 u16 limbs.
-    pub fn eval<CB: ChipBuilder<F> + ChipLookupBuilder<F>>(
+    pub fn eval<CB: ChipBuilder<F> + ChipLookupBuilder<F> + ChipRangeBuilder<F>>(
         builder: &mut CB,
         len: u32,
         cols: SyscallAddrGadget<CB::Var>,
@@ -57,6 +69,19 @@ impl<F: Field> SyscallAddrGadget<F> {
 
         // Check that `is_real` and offset bits are boolean.
         builder.assert_bool(is_real.clone());
+
+        // Range check the limbs before anything reads them.
+        //
+        // Everything below treats the upper two limbs only as a *sum*: the stack guard asserts
+        // `addr[1] + addr[2] != 0` and the IsZeroGadget compares that same sum against
+        // `2 * u16::MAX`. Neither pins the limbs individually, and `addr[0]` is only bounded
+        // indirectly, by the BitRange(13) check on `addr[0] / 8`. So without this the doc comment's
+        // "assumed to be composed of valid 3 u16 limbs" is an assumption the caller has to supply,
+        // and a non-canonical pair with the right weighted value passes.
+        //
+        // Same order as `read_write/constraints.rs:146-153`, which range checks immediately before
+        // a byte-for-byte identical stack guard.
+        builder.slice_range_check_u16(&cols.addr, is_real.clone());
 
         let sum_top_two_limb = cols.addr[1] + cols.addr[2];
 

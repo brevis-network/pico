@@ -219,7 +219,8 @@ impl<F> CpuChip<F> {
         if event.instruction.is_jump_instruction() {
             add_events += 1;
         }
-        if matches!(event.instruction.opcode, Opcode::AUIPC) {
+        // Must track `populate_auipc`, which skips `auipc x0`.
+        if matches!(event.instruction.opcode, Opcode::AUIPC) && event.instruction.op_a != 0 {
             add_events += 1;
         }
 
@@ -278,6 +279,22 @@ impl<F: PrimeField32> CpuChip<F> {
             cols.op_c_access.populate(record, blu_events);
         }
 
+        // Pair the `slice_range_check_u16(&op_a_access.access.value.0, is_real)` the AIR
+        // emits in `register/constraints.rs`. The AIR looks these limbs up on every real
+        // row, so without the matching events here the byte table has no multiplicity to
+        // answer with and even an honest trace fails on the regional cumulative sum.
+        //
+        // ⚠️ Must come **after** `op_a_access.populate` above, not before. `populate_access`
+        // (`read_write/traces.rs`) does `self.value = current_record.value.into()`, and the
+        // emulator zeroes writes to `x0` (`rw()`), while `event.a` keeps the computed result.
+        // Reading the column first therefore requested `U16Range` on `event.a`'s limbs while the
+        // AIR looked up four zeros -- a Byte-bus imbalance on every `rd == x0` instruction with a
+        // non-zero result (`j`, `ret`, `auipc x0`, `add x0, ..`). Regression:
+        // `x0_destination_with_nonzero_result`.
+        for limb in cols.op_a_access.value().0.iter() {
+            blu_events.add_u16_range_check(limb.as_canonical_u32() as u16);
+        }
+
         // num_extra_clk is stored in the 3rd-byte of syscall code
         // which comes from the syscall's num_extra_cycles() return value.
         // For non-ecall instructions, this is 0.
@@ -290,7 +307,7 @@ impl<F: PrimeField32> CpuChip<F> {
         cols.num_extra_clk = num_extra_clk;
 
         self.populate_branch(cols, event, &mut new_alu_events);
-        self.populate_jump(event, &mut new_alu_events);
+        self.populate_jump(event, &mut new_alu_events, blu_events);
         self.populate_auipc(event, &mut new_alu_events);
         let is_halt = self.populate_ecall(cols, event, blu_events);
 
@@ -351,6 +368,18 @@ impl<F: PrimeField32> CpuChip<F> {
 
         // Assert that the instruction is not a no-op.
         cols.is_real = F::ONE;
+
+        // Dispatch multiplicities, zero when the destination is `x0`.
+        let not_x0 = F::from_bool(event.instruction.op_a != 0);
+        cols.is_alu_not_x0 = F::from_bool(event.instruction.is_alu_instruction()) * not_x0;
+        cols.is_auipc_not_x0 = F::from_bool(event.instruction.opcode == Opcode::AUIPC) * not_x0;
+
+        // Bit 0 of the unmasked target, which the emulator masked out of `next_pc`.
+        cols.jalr_lsb = if event.instruction.opcode == Opcode::JALR {
+            F::from_canonical_u64(event.b.wrapping_add(event.c) & 1)
+        } else {
+            F::ZERO
+        };
 
         new_alu_events
     }
