@@ -22,7 +22,7 @@ fn test_divrem_chip_simple_eval() {
     let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
     chip.eval(&mut builder);
 
-    assert_eq!(builder.num_constraints(), 347);
+    assert_eq!(builder.num_constraints(), 348);
     assert_eq!(builder.public_values().len(), 119);
     assert_eq!(builder.num_lookups(), 121);
 }

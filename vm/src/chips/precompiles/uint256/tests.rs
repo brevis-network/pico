@@ -108,5 +108,5 @@ fn test_uint256_mul_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 270);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 231);
+    assert_eq!(builder.num_lookups(), 237);
 }

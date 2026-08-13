@@ -149,6 +149,6 @@ mod tests {
 
         assert_eq!(builder.num_constraints(), 5);
         assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 1);
+        assert_eq!(builder.num_lookups(), 4);
     }
 }

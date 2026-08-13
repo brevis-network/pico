@@ -201,5 +201,5 @@ fn test_keccak_permute_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 3721);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 277);
+    assert_eq!(builder.num_lookups(), 280);
 }

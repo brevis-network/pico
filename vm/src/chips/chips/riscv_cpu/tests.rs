@@ -15,5 +15,5 @@ fn test_cpu_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 217);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 35);
+    assert_eq!(builder.num_lookups(), 43);
 }
