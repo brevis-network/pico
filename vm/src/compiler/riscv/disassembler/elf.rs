@@ -165,7 +165,10 @@ impl Elf {
 
                 // If we are reading past the end of the file, then break.
                 if i >= file_size {
-                    image.insert(addr - addr % 8, 0);
+                    // Create the block only when absent: `insert` replaces the whole 8-byte entry,
+                    // so a segment whose file-backed data ends mid-block would have it erased by
+                    // the BSS pass over the other half. The half covered here is already zero.
+                    image.entry(addr - addr % 8).or_insert(0);
                 } else {
                     // Get the word as an u32 but make sure we don't read past the end of the file.
                     let mut word = 0u32;
@@ -239,5 +242,185 @@ impl Elf {
             preprocessed_shape: None,
         }
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use elf::abi::{PF_R, PF_W};
+
+    const EHDR_SIZE: usize = 64;
+    const PHENT_SIZE: usize = 56;
+
+    /// One `PT_LOAD` program header plus its file-backed bytes.
+    struct Seg {
+        flags: u32,
+        vaddr: u64,
+        /// File-backed bytes; `p_filesz` is its length.
+        data: Vec<u8>,
+        /// `p_memsz`; anything past `data.len()` is BSS.
+        mem_size: u64,
+    }
+
+    impl Seg {
+        fn text(vaddr: u64, words: &[u32]) -> Self {
+            let data = words
+                .iter()
+                .flat_map(|w| w.to_le_bytes())
+                .collect::<Vec<_>>();
+            let mem_size = data.len() as u64;
+            Self {
+                flags: PF_R | PF_X,
+                vaddr,
+                data,
+                mem_size,
+            }
+        }
+
+        fn data(vaddr: u64, data: Vec<u8>, mem_size: u64) -> Self {
+            Self {
+                flags: PF_R | PF_W,
+                vaddr,
+                data,
+                mem_size,
+            }
+        }
+    }
+
+    /// Assemble a minimal little-endian ELF64 executable out of `segs`.
+    fn build_elf(entry: u64, segs: &[Seg]) -> Vec<u8> {
+        let phoff = EHDR_SIZE;
+        let data_off = phoff + PHENT_SIZE * segs.len();
+
+        let mut out = Vec::new();
+        // e_ident: magic, ELFCLASS64, ELFDATA2LSB, EV_CURRENT, then padding.
+        out.extend_from_slice(&[0x7F, b'E', b'L', b'F', 2, 1, 1, 0]);
+        out.extend_from_slice(&[0u8; 8]);
+        out.extend_from_slice(&ET_EXEC.to_le_bytes());
+        out.extend_from_slice(&EM_RISCV.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes()); // e_version
+        out.extend_from_slice(&entry.to_le_bytes());
+        out.extend_from_slice(&(phoff as u64).to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes()); // e_shoff
+        out.extend_from_slice(&0u32.to_le_bytes()); // e_flags
+        out.extend_from_slice(&(EHDR_SIZE as u16).to_le_bytes());
+        out.extend_from_slice(&(PHENT_SIZE as u16).to_le_bytes());
+        out.extend_from_slice(&(segs.len() as u16).to_le_bytes());
+        out.extend_from_slice(&64u16.to_le_bytes()); // e_shentsize
+        out.extend_from_slice(&0u16.to_le_bytes()); // e_shnum
+        out.extend_from_slice(&0u16.to_le_bytes()); // e_shstrndx
+        assert_eq!(out.len(), EHDR_SIZE, "ELF64 header must be 64 bytes");
+
+        let mut off = data_off as u64;
+        for seg in segs {
+            out.extend_from_slice(&PT_LOAD.to_le_bytes());
+            out.extend_from_slice(&seg.flags.to_le_bytes());
+            out.extend_from_slice(&off.to_le_bytes());
+            out.extend_from_slice(&seg.vaddr.to_le_bytes());
+            out.extend_from_slice(&seg.vaddr.to_le_bytes()); // p_paddr
+            out.extend_from_slice(&(seg.data.len() as u64).to_le_bytes());
+            out.extend_from_slice(&seg.mem_size.to_le_bytes());
+            out.extend_from_slice(&8u64.to_le_bytes()); // p_align
+            off += seg.data.len() as u64;
+        }
+        assert_eq!(out.len(), data_off, "program headers must be contiguous");
+
+        for seg in segs {
+            out.extend_from_slice(&seg.data);
+        }
+        out
+    }
+
+    /// The image the ELF *means*: file bytes below `p_filesz`, zeros above. Built byte-wise and
+    /// only then folded into 8-byte blocks, so it cannot mirror a block-level loader mistake.
+    fn expected_image(segs: &[Seg]) -> BTreeMap<u64, u64> {
+        let mut image = BTreeMap::new();
+        for seg in segs {
+            let mut bytes = seg.data.clone();
+            bytes.resize(seg.mem_size as usize, 0);
+
+            let mut i = 0u64;
+            while i < seg.mem_size {
+                let addr = seg.vaddr + i;
+                let mut word = 0u32;
+                for j in 0..WORD_SIZE_U64 {
+                    if let Some(byte) = bytes.get((i + j) as usize) {
+                        word |= u32::from(*byte) << (j * 8);
+                    }
+                }
+                let entry = image.entry(addr - addr % 8).or_insert(0u64);
+                if addr.is_multiple_of(8) {
+                    *entry |= u64::from(word);
+                } else {
+                    *entry |= u64::from(word) << 32;
+                }
+                i += WORD_SIZE_U64;
+            }
+        }
+        image
+    }
+
+    /// A two-instruction text segment, enough to give the ELF a `pc_base`.
+    fn text_at(vaddr: u64) -> Seg {
+        Seg::text(vaddr, &[0x0000_0013, 0x0000_0013]) // two `nop`s
+    }
+
+    /// BSS zero-fill must not erase file bytes sharing an 8-byte block. All `p_filesz % 8` are
+    /// covered: only 1..=4 put the boundary mid-block, and the rest are the control.
+    #[test]
+    fn bss_zero_fill_preserves_file_backed_bytes_for_every_filesz_mod_8() {
+        for file_size in 1..=16usize {
+            // Nonzero bytes only: a zero byte cannot show the clobber.
+            let data: Vec<u8> = (0..file_size).map(|i| 0xA1 + i as u8).collect();
+            let segs = vec![text_at(0x1000), Seg::data(0x2000, data, 24)];
+            let elf = build_elf(0x1000, &segs);
+
+            let parsed = Elf::new(&elf).unwrap_or_else(|e| {
+                panic!(
+                    "p_filesz = {file_size} (mod 8 = {}) failed to parse: {e}",
+                    file_size % 8
+                )
+            });
+
+            assert_eq!(
+                *parsed.memory_image,
+                expected_image(&segs),
+                "p_filesz = {file_size} (mod 8 = {}): committed image differs from the ELF",
+                file_size % 8,
+            );
+        }
+    }
+
+    /// The same clobber across a segment boundary: `vaddr` need only be 4-aligned, so a segment at
+    /// `4 (mod 8)` shares its first block with whatever precedes it.
+    #[test]
+    fn bss_zero_fill_does_not_clobber_the_preceding_segment() {
+        let segs = vec![
+            Seg::text(0x1000, &[0xDEAD_BEEF]), // occupies [0x1000, 0x1004)
+            Seg::data(0x1004, Vec::new(), 4),  // pure BSS, shares block 0x1000
+        ];
+        let elf = build_elf(0x1000, &segs);
+        let parsed = Elf::new(&elf).expect("adjacent segments are legal");
+
+        assert_eq!(
+            parsed.memory_image.get(&0x1000),
+            Some(&0xDEAD_BEEFu64),
+            "the BSS segment erased the preceding segment's word",
+        );
+        assert_eq!(*parsed.memory_image, expected_image(&segs));
+    }
+
+    /// Completeness control: the ordinary text + data-with-BSS shape a guest build produces.
+    #[test]
+    fn ordinary_text_plus_data_with_bss_is_accepted() {
+        let segs = vec![
+            text_at(0x1000),
+            Seg::data(0x2000, vec![0xEF, 0xBE, 0xAD, 0xDE], 4096),
+        ];
+        let parsed = Elf::new(&build_elf(0x1000, &segs)).expect("the ordinary layout is legal");
+
+        assert_eq!(parsed.memory_image.get(&0x2000), Some(&0xDEAD_BEEFu64));
+        assert_eq!(*parsed.memory_image, expected_image(&segs));
     }
 }
