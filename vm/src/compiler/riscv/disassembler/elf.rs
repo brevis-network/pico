@@ -24,6 +24,14 @@ const EMULATOR_MEMORY_SIZE_BYTES: u64 = 0x7800_0000;
 /// The last valid *word* start address for 4-byte reads/writes.
 const MAX_GUEST_WORD_ADDR: u64 = EMULATOR_MEMORY_SIZE_BYTES - WORD_SIZE as u64;
 
+/// The lowest address a `PT_LOAD` segment may start at.
+///
+/// `[0, NUM_REGISTERS)` is the register file, and the memory chip's stack guard
+/// (`addr[1] + addr[2] != 0`, `riscv_memory/read_write/constraints.rs`) makes every data access
+/// below `2^16` unprovable. A segment placed lower either aliases a register or lands where no
+/// provable access can reach it.
+const MIN_SEGMENT_ADDR: u64 = 1 << 16;
+
 /// RISC-V ELF (Executable and Linkable Format) File.
 ///
 /// This file represents a binary in the ELF format for RISC-V (ELF32 or ELF64) with
@@ -146,6 +154,12 @@ impl Elf {
 
             if !vaddr.is_multiple_of(WORD_SIZE_U64) {
                 eyre::bail!("vaddr {vaddr:08x} is unaligned");
+            }
+
+            if vaddr < MIN_SEGMENT_ADDR {
+                eyre::bail!(
+                    "segment at 0x{vaddr:08x} starts below the lowest usable address 0x{MIN_SEGMENT_ADDR:08x}"
+                );
             }
 
             let segment_end = vaddr
@@ -406,8 +420,8 @@ mod tests {
         for file_size in 1..=16usize {
             // Nonzero bytes only: a zero byte cannot show the clobber.
             let data: Vec<u8> = (0..file_size).map(|i| 0xA1 + i as u8).collect();
-            let segs = vec![text_at(0x1000), Seg::data(0x2000, data, 24)];
-            let elf = build_elf(0x1000, &segs);
+            let segs = vec![text_at(0x10000), Seg::data(0x20000, data, 24)];
+            let elf = build_elf(0x10000, &segs);
 
             let parsed = Elf::new(&elf).unwrap_or_else(|e| {
                 panic!(
@@ -430,14 +444,14 @@ mod tests {
     #[test]
     fn bss_zero_fill_does_not_clobber_the_preceding_segment() {
         let segs = vec![
-            Seg::text(0x1000, &[0xDEAD_BEEF]), // occupies [0x1000, 0x1004)
-            Seg::data(0x1004, Vec::new(), 4),  // pure BSS, shares block 0x1000
+            Seg::text(0x10000, &[0xDEAD_BEEF]), // occupies [0x10000, 0x10004)
+            Seg::data(0x10004, Vec::new(), 4),  // pure BSS, shares block 0x10000
         ];
-        let elf = build_elf(0x1000, &segs);
+        let elf = build_elf(0x10000, &segs);
         let parsed = Elf::new(&elf).expect("adjacent segments are legal");
 
         assert_eq!(
-            parsed.memory_image.get(&0x1000),
+            parsed.memory_image.get(&0x10000),
             Some(&0xDEAD_BEEFu64),
             "the BSS segment erased the preceding segment's word",
         );
@@ -448,32 +462,36 @@ mod tests {
     #[test]
     fn ordinary_text_plus_data_with_bss_is_accepted() {
         let segs = vec![
-            text_at(0x1000),
-            Seg::data(0x2000, vec![0xEF, 0xBE, 0xAD, 0xDE], 4096),
+            text_at(0x10000),
+            Seg::data(0x20000, vec![0xEF, 0xBE, 0xAD, 0xDE], 4096),
         ];
-        let parsed = Elf::new(&build_elf(0x1000, &segs)).expect("the ordinary layout is legal");
+        let parsed = Elf::new(&build_elf(0x10000, &segs)).expect("the ordinary layout is legal");
 
-        assert_eq!(parsed.memory_image.get(&0x2000), Some(&0xDEAD_BEEFu64));
+        assert_eq!(parsed.memory_image.get(&0x20000), Some(&0xDEAD_BEEFu64));
         assert_eq!(*parsed.memory_image, expected_image(&segs));
     }
 
     #[test]
     fn overlapping_segments_are_rejected() {
         let segs = vec![
-            text_at(0x1000),                     // [0x1000, 0x1008)
-            Seg::data(0x1004, vec![0xFF; 4], 4), // starts inside the previous segment
+            text_at(0x10000),                     // [0x10000, 0x10008)
+            Seg::data(0x10004, vec![0xFF; 4], 4), // starts inside the previous segment
         ];
-        let err = Elf::new(&build_elf(0x1000, &segs)).unwrap_err().to_string();
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("overlaps"), "unexpected error: {err}");
     }
 
     #[test]
     fn descending_segments_are_rejected() {
         let segs = vec![
-            text_at(0x2000),
-            Seg::data(0x1000, vec![0xFF; 8], 8), // below the previous segment
+            text_at(0x20000),
+            Seg::data(0x10000, vec![0xFF; 8], 8), // below the previous segment
         ];
-        let err = Elf::new(&build_elf(0x1000, &segs)).unwrap_err().to_string();
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("overlaps or precedes"),
             "unexpected error: {err}"
@@ -484,10 +502,12 @@ mod tests {
     #[test]
     fn non_contiguous_executable_segments_are_rejected() {
         let segs = vec![
-            text_at(0x1000), // instructions cover [0x1000, 0x1008)
-            text_at(0x1010), // gap: should start at 0x1008
+            text_at(0x10000), // instructions cover [0x10000, 0x10008)
+            text_at(0x10010), // gap: should start at 0x10008
         ];
-        let err = Elf::new(&build_elf(0x1000, &segs)).unwrap_err().to_string();
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("does not continue the instruction stream"),
             "unexpected error: {err}"
@@ -497,10 +517,12 @@ mod tests {
     /// A BSS tail is a gap too: it takes address space but pushes no instructions.
     #[test]
     fn executable_segment_with_bss_tail_breaks_instruction_contiguity() {
-        let mut head = text_at(0x1000);
+        let mut head = text_at(0x10000);
         head.mem_size = 16; // 8 file-backed bytes, 8 bytes of BSS
-        let segs = vec![head, text_at(0x1010)];
-        let err = Elf::new(&build_elf(0x1000, &segs)).unwrap_err().to_string();
+        let segs = vec![head, text_at(0x10010)];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
         assert!(
             err.contains("does not continue the instruction stream"),
             "unexpected error: {err}"
@@ -511,16 +533,38 @@ mod tests {
     #[test]
     fn adjacent_executable_segments_are_accepted() {
         let segs = vec![
-            Seg::text(0x1000, &[0x0000_0013, 0x0000_0093]),
-            Seg::text(0x1008, &[0x0000_0113, 0x0000_0193]),
+            Seg::text(0x10000, &[0x0000_0013, 0x0000_0093]),
+            Seg::text(0x10008, &[0x0000_0113, 0x0000_0193]),
         ];
-        let parsed = Elf::new(&build_elf(0x1000, &segs)).expect("a gapless run is legal");
+        let parsed = Elf::new(&build_elf(0x10000, &segs)).expect("a gapless run is legal");
 
-        assert_eq!(parsed.pc_base, 0x1000);
+        assert_eq!(parsed.pc_base, 0x10000);
         assert_eq!(
             parsed.instructions,
             vec![0x0000_0013, 0x0000_0093, 0x0000_0113, 0x0000_0193],
         );
         assert_eq!(*parsed.memory_image, expected_image(&segs));
+    }
+
+    /// Segments below `MIN_SEGMENT_ADDR` alias the register file or land where the memory chip's
+    /// stack guard makes every data access unprovable.
+    #[test]
+    fn segment_below_the_usable_range_is_rejected() {
+        for vaddr in [0x4, 0x20, 0x1000, MIN_SEGMENT_ADDR - 4] {
+            let segs = vec![Seg::text(vaddr, &[0x0000_0013, 0x0000_0013])];
+            let err = Elf::new(&build_elf(vaddr, &segs)).unwrap_err().to_string();
+            assert!(
+                err.contains("below the lowest usable address"),
+                "vaddr 0x{vaddr:x}: unexpected error: {err}"
+            );
+        }
+    }
+
+    /// Completeness control for the bound itself: the first usable address must load.
+    #[test]
+    fn segment_at_the_minimum_address_is_accepted() {
+        let segs = vec![text_at(MIN_SEGMENT_ADDR)];
+        let parsed = Elf::new(&build_elf(MIN_SEGMENT_ADDR, &segs)).expect("the boundary is usable");
+        assert_eq!(parsed.pc_base, MIN_SEGMENT_ADDR);
     }
 }
