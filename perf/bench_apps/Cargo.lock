@@ -3747,7 +3747,7 @@ dependencies = [
 
 [[package]]
 name = "pico-derive"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3756,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "pico-patch-libs"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "bincode",
  "elliptic-curve",
@@ -3765,7 +3765,7 @@ dependencies = [
 
 [[package]]
 name = "pico-sdk"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3790,7 +3790,7 @@ dependencies = [
 
 [[package]]
 name = "pico-vm"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "anyhow",
  "arrayref",
