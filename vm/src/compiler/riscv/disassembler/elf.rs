@@ -32,6 +32,12 @@ const MAX_GUEST_WORD_ADDR: u64 = EMULATOR_MEMORY_SIZE_BYTES - WORD_SIZE as u64;
 /// provable access can reach it.
 const MIN_SEGMENT_ADDR: u64 = 1 << 16;
 
+/// The most instructions the preprocessed program table can hold.
+///
+/// It carries one row per instruction, and the tallest `program_heights` entry across
+/// `RiscvShapeConfig` is `2^22` rows, so a larger program has no shape to fit into.
+const MAX_INSTRUCTIONS: usize = 1 << 22;
+
 /// RISC-V ELF (Executable and Linkable Format) File.
 ///
 /// This file represents a binary in the ELF format for RISC-V (ELF32 or ELF64) with
@@ -266,6 +272,18 @@ impl Elf {
             base_address.ok_or_else(|| eyre::eyre!("no executable segment found"))?,
             "executable segment base address",
         )?;
+
+        // An executable segment with no file-backed bytes leaves `pc_base` set but the instruction
+        // table empty, so every `Program::fetch` would index out of bounds.
+        if instructions.is_empty() {
+            eyre::bail!("no instructions found");
+        }
+        if instructions.len() > MAX_INSTRUCTIONS {
+            eyre::bail!(
+                "program has {} instructions, more than the {MAX_INSTRUCTIONS} the preprocessed table can hold",
+                instructions.len()
+            );
+        }
 
         Ok(Self {
             instructions,
@@ -566,5 +584,35 @@ mod tests {
         let segs = vec![text_at(MIN_SEGMENT_ADDR)];
         let parsed = Elf::new(&build_elf(MIN_SEGMENT_ADDR, &segs)).expect("the boundary is usable");
         assert_eq!(parsed.pc_base, MIN_SEGMENT_ADDR);
+    }
+
+    /// An executable segment with no file-backed bytes sets `pc_base` but leaves the instruction
+    /// table empty, so every `Program::fetch` would index out of bounds.
+    #[test]
+    fn executable_segment_without_instructions_is_rejected() {
+        let segs = vec![Seg {
+            flags: PF_R | PF_X,
+            vaddr: 0x10000,
+            data: Vec::new(),
+            mem_size: 8,
+        }];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no instructions found"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// One instruction past what the preprocessed program table can be shaped to hold.
+    #[test]
+    fn program_larger_than_the_preprocessed_table_is_rejected() {
+        let words = vec![0x0000_0013u32; MAX_INSTRUCTIONS + 1];
+        let segs = vec![Seg::text(0x10000, &words)];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("more than the"), "unexpected error: {err}");
     }
 }
