@@ -165,12 +165,27 @@ impl Elf {
             }
             prev_segment_end = Some(segment_end);
 
-            // If the virtual address is less than the first memory address, then update the first
-            // memory address.
-            if (segment.p_flags & PF_X) != 0
-                && (base_address.is_none() || vaddr < base_address.unwrap())
-            {
-                base_address = Some(vaddr);
+            // `Program::fetch` indexes `instructions` as `(pc - pc_base) / 4`, so the executable
+            // segments must form one gapless run. A gap -- including one left by a BSS tail, which
+            // takes address space but pushes no words -- would map later instructions to the wrong
+            // addresses, and the preprocessed table would commit to that.
+            if (segment.p_flags & PF_X) != 0 {
+                match base_address {
+                    None => base_address = Some(vaddr),
+                    Some(base) => {
+                        let stream_len = (instructions.len() as u64)
+                            .checked_mul(WORD_SIZE_U64)
+                            .ok_or_else(|| eyre::eyre!("instruction stream length overflow"))?;
+                        let stream_end = base
+                            .checked_add(stream_len)
+                            .ok_or_else(|| eyre::eyre!("instruction stream end overflow"))?;
+                        if vaddr != stream_end {
+                            eyre::bail!(
+                                "executable segment at 0x{vaddr:08x} does not continue the instruction stream, which ends at 0x{stream_end:08x}"
+                            );
+                        }
+                    }
+                }
             }
 
             // Read the segment and decode each word as an instruction.
@@ -463,5 +478,49 @@ mod tests {
             err.contains("overlaps or precedes"),
             "unexpected error: {err}"
         );
+    }
+
+    /// A gap between executable segments would shift every later instruction's address.
+    #[test]
+    fn non_contiguous_executable_segments_are_rejected() {
+        let segs = vec![
+            text_at(0x1000), // instructions cover [0x1000, 0x1008)
+            text_at(0x1010), // gap: should start at 0x1008
+        ];
+        let err = Elf::new(&build_elf(0x1000, &segs)).unwrap_err().to_string();
+        assert!(
+            err.contains("does not continue the instruction stream"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// A BSS tail is a gap too: it takes address space but pushes no instructions.
+    #[test]
+    fn executable_segment_with_bss_tail_breaks_instruction_contiguity() {
+        let mut head = text_at(0x1000);
+        head.mem_size = 16; // 8 file-backed bytes, 8 bytes of BSS
+        let segs = vec![head, text_at(0x1010)];
+        let err = Elf::new(&build_elf(0x1000, &segs)).unwrap_err().to_string();
+        assert!(
+            err.contains("does not continue the instruction stream"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Completeness control: a gapless run must load, with every instruction at its real address.
+    #[test]
+    fn adjacent_executable_segments_are_accepted() {
+        let segs = vec![
+            Seg::text(0x1000, &[0x0000_0013, 0x0000_0093]),
+            Seg::text(0x1008, &[0x0000_0113, 0x0000_0193]),
+        ];
+        let parsed = Elf::new(&build_elf(0x1000, &segs)).expect("a gapless run is legal");
+
+        assert_eq!(parsed.pc_base, 0x1000);
+        assert_eq!(
+            parsed.instructions,
+            vec![0x0000_0013, 0x0000_0093, 0x0000_0113, 0x0000_0193],
+        );
+        assert_eq!(*parsed.memory_image, expected_image(&segs));
     }
 }
