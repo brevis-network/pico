@@ -135,6 +135,7 @@ impl Elf {
 
         let mut instructions: Vec<u32> = Vec::new();
         let mut base_address = None;
+        let mut prev_segment_end: Option<u64> = None;
 
         // Only read segments that are executable instructions that are also PT_LOAD.
         for segment in segments.iter().filter(|x| x.p_type == PT_LOAD) {
@@ -146,6 +147,23 @@ impl Elf {
             if !vaddr.is_multiple_of(WORD_SIZE_U64) {
                 eyre::bail!("vaddr {vaddr:08x} is unaligned");
             }
+
+            let segment_end = vaddr
+                .checked_add(mem_size)
+                .ok_or_else(|| eyre::eyre!("segment end address overflow"))?;
+
+            // Segments must be disjoint and ascending. `memory_image` stores 8-byte blocks while
+            // this loop walks 4 bytes at a time, and the merge below is an addition, so two
+            // segments sharing a block would silently sum instead of overwrite. The ELF spec
+            // already requires PT_LOAD entries sorted on p_vaddr.
+            if let Some(prev_end) = prev_segment_end {
+                if prev_end > vaddr {
+                    eyre::bail!(
+                        "segment at 0x{vaddr:08x} overlaps or precedes the previous segment, which ends at 0x{prev_end:08x}"
+                    );
+                }
+            }
+            prev_segment_end = Some(segment_end);
 
             // If the virtual address is less than the first memory address, then update the first
             // memory address.
@@ -422,5 +440,28 @@ mod tests {
 
         assert_eq!(parsed.memory_image.get(&0x2000), Some(&0xDEAD_BEEFu64));
         assert_eq!(*parsed.memory_image, expected_image(&segs));
+    }
+
+    #[test]
+    fn overlapping_segments_are_rejected() {
+        let segs = vec![
+            text_at(0x1000),                     // [0x1000, 0x1008)
+            Seg::data(0x1004, vec![0xFF; 4], 4), // starts inside the previous segment
+        ];
+        let err = Elf::new(&build_elf(0x1000, &segs)).unwrap_err().to_string();
+        assert!(err.contains("overlaps"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn descending_segments_are_rejected() {
+        let segs = vec![
+            text_at(0x2000),
+            Seg::data(0x1000, vec![0xFF; 8], 8), // below the previous segment
+        ];
+        let err = Elf::new(&build_elf(0x1000, &segs)).unwrap_err().to_string();
+        assert!(
+            err.contains("overlaps or precedes"),
+            "unexpected error: {err}"
+        );
     }
 }
