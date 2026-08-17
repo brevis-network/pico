@@ -136,7 +136,7 @@ fn test_bls381_fp_op_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 341);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 278);
+    assert_eq!(builder.num_lookups(), 284);
 }
 
 #[test]
@@ -158,7 +158,7 @@ fn test_bls381_fp2_addsub_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 664);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 553);
+    assert_eq!(builder.num_lookups(), 559);
 }
 
 #[test]
@@ -180,5 +180,5 @@ fn test_bls381_fp2_mul_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 1043);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 1121);
+    assert_eq!(builder.num_lookups(), 1127);
 }

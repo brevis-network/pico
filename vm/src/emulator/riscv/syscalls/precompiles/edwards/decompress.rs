@@ -22,6 +22,9 @@ pub(crate) struct EdwardsDecompressSyscall<E: EdwardsParameters> {
     _phantom: PhantomData<E>,
 }
 
+// Unused: the Edwards syscalls are not registered while their chips are out of the machine.
+// Kept so the implementation is ready if they return. See `syscalls/mod.rs`.
+#[allow(dead_code)]
 impl<E: EdwardsParameters> EdwardsDecompressSyscall<E> {
     /// Create a new instance of the [`EdwardsDecompressSyscall`].
     pub const fn new() -> Self {

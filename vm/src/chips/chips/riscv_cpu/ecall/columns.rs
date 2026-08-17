@@ -33,6 +33,15 @@ pub struct EcallCols<T> {
     /// Whether the current ecall is a COMMIT.
     pub is_commit_deferred_proofs: IsZeroGadget<T>,
 
+    /// The four bytes of the digest word this COMMIT selects.
+    ///
+    /// Exists so the bytes can be range checked. The values themselves come from the public
+    /// values, and `eval_symbolic_to_virtual_pair` (`machine/utils.rs:142-155`) accepts only
+    /// preprocessed and current-row main columns in a lookup argument — `Entry::Public`
+    /// panics. So a public value cannot be range checked directly; it has to be copied into a
+    /// column, pinned there by a constraint, and the column checked.
+    pub expected_public_values_digest: [T; 4],
+
     /// Field to store the word index passed into the COMMIT ecall.  index_bitmap[word index]
     /// should be set to 1 and everything else set to 0.
     pub index_bitmap: [T; PV_DIGEST_NUM_WORDS],

@@ -11,6 +11,11 @@ use core::arch::asm;
 /// byte boundary.
 #[allow(unused_variables)]
 #[no_mangle]
+#[deprecated(
+    note = "The Ed25519 precompile is not available: its chips are not in the prover's machine and \
+            the syscall is unregistered, so a guest that calls this cannot be proved. Use a \
+            software ed25519 implementation instead."
+)]
 pub extern "C" fn syscall_ed_add(p: *mut [u64; 8], q: *const [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -38,6 +43,11 @@ pub extern "C" fn syscall_ed_add(p: *mut [u64; 8], q: *const [u64; 8]) {
 /// boundary.
 #[allow(unused_variables)]
 #[no_mangle]
+#[deprecated(
+    note = "The Ed25519 precompile is not available: its chips are not in the prover's machine and \
+            the syscall is unregistered, so a guest that calls this cannot be proved. Use a \
+            software ed25519 implementation instead."
+)]
 pub extern "C" fn syscall_ed_decompress(point: &mut [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     {

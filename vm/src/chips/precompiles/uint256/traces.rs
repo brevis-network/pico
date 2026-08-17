@@ -81,6 +81,22 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                         .collect::<Vec<u8>>(),
                 );
 
+                // Reject an operand at or above the modulus here -- a *domain* error, named as
+                // such, rather than the `debug_assert!(&carry < modulus)` several layers below that
+                // the same input would otherwise trip.
+                //
+                // Trace-side only, deliberately: the AIR asserts `x * y == result + carry * modulus`
+                // and the result is pinned both to the memory bus and below the modulus by the
+                // existing exit check, so the value written back is unique whatever representative
+                // the operands use.
+                //
+                // Skipped when the modulus is zero: that is a legal call the chip gates its field
+                // ops off for, and `x < 0` is not a meaningful requirement.
+                if modulus != BigUint::ZERO {
+                    assert!(x < modulus, "uint256 operand x must be < modulus");
+                    assert!(y < modulus, "uint256 operand y must be < modulus");
+                }
+
                 // Assign basic values to the columns.
                 cols.is_real = F::ONE;
 
@@ -149,6 +165,8 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                 } else {
                     modulus.clone()
                 };
+                cols.modulus_is_not_zero = F::ONE - cols.modulus_is_zero.result;
+
                 let result = cols.output.populate_with_modulus(
                     &mut new_byte_lookup_events,
                     &x,
@@ -157,7 +175,6 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                     FieldOperation::Mul,
                 );
 
-                cols.modulus_is_not_zero = F::ONE - cols.modulus_is_zero.result;
                 if cols.modulus_is_not_zero == F::ONE {
                     cols.output_range_check.populate(
                         &mut new_byte_lookup_events,

@@ -80,6 +80,27 @@ pub struct CpuCols<T: Copy> {
     /// instructions may move the program counter to a non sequential instruction.
     pub is_sequential_instr: T,
 
+    /// `is_alu_instruction * (1 - op_a_0)` — multiplicity of the ALU dispatch.
+    ///
+    /// Precomputed because a lookup multiplicity must have degree ≤ 1
+    /// (`machine/lookup.rs:117` panics otherwise), and the product of the selector sum
+    /// with `1 - op_a_0` is degree 2.
+    pub is_alu_not_x0: T,
+
+    /// `is_auipc * (1 - op_a_0)` — multiplicity of the AUIPC dispatch.
+    pub is_auipc_not_x0: T,
+
+    /// Bit 0 of the *unmasked* JALR target `rs1 + imm`.
+    ///
+    /// RISC-V clears the low bit of a JALR target. The emulator does so
+    /// (`instruction.rs`: `next_pc = b.wrapping_add(c) & !1`), so `next_pc` is the masked
+    /// value, while `populate_jump` supplies the Add chip with the *unmasked* sum. The AIR
+    /// therefore has to reconstruct the unmasked sum as `next_pc + lsb` when it dispatches.
+    ///
+    /// `add_operation` computes the unmasked sum and the CPU state advances to
+    /// `next_pc[0] - lsb`.
+    pub jalr_lsb: T,
+
     /// Carry columns for cross-row PC constraints (`pc + 4 = next_row.pc`).
     /// Used by: sequential transition (#1), branch not-taken transition (#3),
     /// and jump return address `pc + 4 = op_a` (#5).

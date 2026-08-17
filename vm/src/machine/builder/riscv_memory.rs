@@ -18,6 +18,31 @@ pub trait RiscVMemoryBuilder<F: Field>: ChipBuilder<F> {
     /// previous access's timestamp.  It will also add to the memory argument.
     ///
     /// `addr` is a 3-element array of u16 limbs representing the full 48-bit address.
+    ///
+    /// # Contract for writes: this does NOT constrain the written value
+    ///
+    /// `memory_access.value()` is placed on the memory bus verbatim. Nothing here ties it to
+    /// whatever the caller computed, so **for a write it is a free column unless the caller adds
+    /// the equality itself**:
+    ///
+    /// ```ignore
+    /// builder.eval_memory_access(chunk, clk, addr, &access, is_real);
+    /// for (v, w) in access.value().0.iter().zip(computed.0.iter()) {
+    ///     builder.when(is_real).assert_eq((*v).into(), w.clone());
+    /// }
+    /// ```
+    ///
+    /// Omitting that second step is a soundness hole: the prover may write any value it likes.
+    /// It has happened twice, in both cases with correct arithmetic that was simply never wired
+    /// to memory:
+    ///
+    /// - `sha_extend` computed `w[i]` into `local.s2` and never bound it to the written word.
+    ///   The `s2_value_word` named in a comment there did not exist.
+    /// - Every constraint in `sha_compress` acted on `mem.prev_value`, the value *read*;
+    ///   `mem.access.value` was referenced nowhere.
+    ///
+    /// [`Self::eval_memory_access_slice_write`] bundles both steps, but only for callers whose
+    /// addresses follow `initial_addr + i * addr_offset`.
     fn eval_memory_access<E: Into<Self::Expr> + Clone>(
         &mut self,
         chunk: impl Into<Self::Expr>,

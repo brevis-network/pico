@@ -1,7 +1,10 @@
-use super::{columns::num_poseidon2_cols, Poseidon2PermuteChip};
+use super::{columns::num_poseidon2_cols, Poseidon2PermuteChip, STATE_NUM_BYTES, STATE_NUM_DWORDS};
 use crate::{
     chips::{
-        chips::{byte::event::ByteRecordBehavior, events::ByteLookupEvent},
+        chips::{
+            byte::event::ByteRecordBehavior, events::ByteLookupEvent,
+            riscv_memory::event::MemoryWriteRecord,
+        },
         gadgets::poseidon2::traces::populate_perm,
         precompiles::{checked_u64_to_u32, poseidon2::columns::Poseidon2Cols},
         utils::pad_rows_fixed,
@@ -180,18 +183,30 @@ impl<
         // cols.value_cols.is_real is populated in the following populate_perm
         cols.chunk = F::from_canonical_u32(event.chunk);
         cols.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "poseidon2 clk"));
-        cols.input_memory_ptr = F::from_canonical_u32(checked_u64_to_u32(
-            event.input_memory_ptr,
-            "poseidon2 input_memory_ptr proof boundary",
-        ));
-        cols.output_memory_ptr = F::from_canonical_u32(checked_u64_to_u32(
-            event.output_memory_ptr,
-            "poseidon2 output_memory_ptr proof boundary",
-        ));
 
-        // Populate memory columns.
-        for (i, read_record) in event.state_read_records.iter().enumerate() {
-            cols.input_memory[i].populate(*read_record, blu);
+        // The pointers are 48-bit addresses, split into 3 u16 limbs by the gadget. `populate`
+        // also emits the byte lookups the AIR's range checks and alignment check consume, so
+        // this is the trace half of those constraints -- without it the honest proof fails on
+        // the Byte bus rather than on a constraint.
+        cols.input_memory_ptr
+            .populate(blu, event.input_memory_ptr, STATE_NUM_BYTES as u64);
+        cols.output_memory_ptr
+            .populate(blu, event.output_memory_ptr, STATE_NUM_BYTES as u64);
+        for i in 0..STATE_NUM_DWORDS {
+            cols.input_addrs[i].populate(blu, event.input_memory_ptr, 8 * i as u64);
+            cols.output_addrs[i].populate(blu, event.output_memory_ptr, 8 * i as u64);
+        }
+
+        // Populate memory columns, one per dword.
+        //
+        // The event carries one record per 32-bit state *word*, but the emulator only performed
+        // one memory access per dword: `read_word_records_via_dwords` pushes the same
+        // `MemoryReadRecord` into slots `2k` and `2k + 1`, so slot `2k` is the dword record.
+        for i in 0..STATE_NUM_DWORDS {
+            cols.input_memory[i].populate(event.state_read_records[2 * i], blu);
+            // `populate` only emits the byte lookups for the timestamp diff, never for the value
+            // itself -- but the AIR range checks the value's limbs, so this is that trace half.
+            blu.add_u16_range_checks_field(&cols.input_memory[i].access.value.0);
         }
 
         let state: [F; PERMUTATION_WIDTH] = event
@@ -207,8 +222,29 @@ impl<
 
         populate_perm::<F, LinearLayers, Config>(F::ONE, perm, state, None, &self.constants);
 
-        for (i, write_record) in event.state_write_records.iter().enumerate() {
-            cols.output_memory[i].populate(*write_record, blu);
+        // Same story on the write side, except `write_word_records_via_dwords` splits one dword
+        // write into two synthetic half-word records: slot `2k` carries the dword's original
+        // `prev_value` and slot `2k + 1` carries its final `value`. The single access the
+        // emulator actually performed is the composition of the two.
+        for i in 0..STATE_NUM_DWORDS {
+            let first = event.state_write_records[2 * i];
+            let last = event.state_write_records[2 * i + 1];
+            debug_assert!(
+                first.chunk == last.chunk
+                    && first.timestamp == last.timestamp
+                    && first.prev_chunk == last.prev_chunk
+                    && first.prev_timestamp == last.prev_timestamp,
+                "the two half-word write records of one dword must share its timestamp"
+            );
+            cols.output_memory[i].populate(
+                MemoryWriteRecord {
+                    value: last.value,
+                    prev_value: first.prev_value,
+                    ..first
+                },
+                blu,
+            );
+            blu.add_u16_range_checks_field(&cols.output_memory[i].access.value.0);
         }
 
         if let Some(input_row) = input_row {

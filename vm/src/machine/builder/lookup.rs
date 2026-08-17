@@ -211,14 +211,22 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
     #[allow(clippy::too_many_arguments)]
     fn looking_syscall(
         &mut self,
+        chunk: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr> + Clone,
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: [impl Into<Self::Expr> + Clone; 3],
         arg2: [impl Into<Self::Expr> + Clone; 3],
         multiplicity: impl Into<Self::Expr>,
     ) {
-        // 7 values: [clk, syscall_id+arg1[0]*256, arg1[1], arg1[2], arg2[0], arg2[1], arg2[2]]
-        let values: Vec<_> = once(clk.clone().into())
+        // 8 values:
+        //   [chunk, clk, syscall_id+arg1[0]*256, arg1[1], arg1[2], arg2[0], arg2[1], arg2[2]]
+        //
+        // `chunk` leads, matching the memory bus convention. Without it the tuple cannot tell two
+        // chunks apart, because `clk` restarts at zero in each one -- and this bus is the only
+        // link between the CPU's view of a syscall and the precompile's, so it is the only place
+        // the precompile's chunk can be pinned down.
+        let values: Vec<_> = once(chunk.clone().into())
+            .chain(once(clk.clone().into()))
             .chain(once(
                 syscall_id.clone().into()
                     + arg1[0].clone().into() * Self::Expr::from_canonical_u32(1 << 8),
@@ -241,14 +249,22 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
     #[allow(clippy::too_many_arguments)]
     fn looked_syscall(
         &mut self,
+        chunk: impl Into<Self::Expr> + Clone,
         clk: impl Into<Self::Expr> + Clone,
         syscall_id: impl Into<Self::Expr> + Clone,
         arg1: [impl Into<Self::Expr> + Clone; 3],
         arg2: [impl Into<Self::Expr> + Clone; 3],
         multiplicity: impl Into<Self::Expr>,
     ) {
-        // 7 values: [clk, syscall_id+arg1[0]*256, arg1[1], arg1[2], arg2[0], arg2[1], arg2[2]]
-        let values: Vec<_> = once(clk.clone().into())
+        // 8 values:
+        //   [chunk, clk, syscall_id+arg1[0]*256, arg1[1], arg1[2], arg2[0], arg2[1], arg2[2]]
+        //
+        // `chunk` leads, matching the memory bus convention. Without it the tuple cannot tell two
+        // chunks apart, because `clk` restarts at zero in each one -- and this bus is the only
+        // link between the CPU's view of a syscall and the precompile's, so it is the only place
+        // the precompile's chunk can be pinned down.
+        let values: Vec<_> = once(chunk.clone().into())
+            .chain(once(clk.clone().into()))
             .chain(once(
                 syscall_id.clone().into()
                     + arg1[0].clone().into() * Self::Expr::from_canonical_u32(1 << 8),

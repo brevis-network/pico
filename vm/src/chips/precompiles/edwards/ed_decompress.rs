@@ -270,6 +270,7 @@ impl<V: Copy> EdDecompressCols<V> {
             .assert_zero(self.sign); // sign must be 0
 
         builder.looked_syscall(
+            self.chunk,
             self.clk,
             CB::F::from_canonical_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
             // TODO: Need to convert ptr columns to Addr type to support full 48-bit address representation

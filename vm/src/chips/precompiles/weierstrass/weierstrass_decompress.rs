@@ -95,7 +95,6 @@ pub struct WeierstrassDecompressCols<T, P: FieldParameters + NumWords> {
 #[repr(C)]
 pub struct LexicographicChoiceCols<T, P: FieldParameters + NumWords> {
     pub comparison_lt_cols: FieldLtCols<T, P>,
-    pub neg_y_range_check: FieldLtCols<T, P>,
     pub is_y_eq_sqrt_y_result: T,
     pub when_sqrt_y_res_is_lt: T,
     pub when_neg_y_res_is_lt: T,
@@ -317,19 +316,6 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                     F::from_canonical_u8((event.decompressed_y_words[0] & 1) as u8) == lsb;
                 choice_cols.is_y_eq_sqrt_y_result = F::from_bool(is_y_eq_sqrt_y_result);
 
-                if is_y_eq_sqrt_y_result {
-                    choice_cols.neg_y_range_check.populate(
-                        &mut new_byte_lookup_events,
-                        &neg_y,
-                        &modulus,
-                    );
-                } else {
-                    choice_cols.neg_y_range_check.populate(
-                        &mut new_byte_lookup_events,
-                        &decompressed_y,
-                        &modulus,
-                    );
-                }
                 if event.sign_bit {
                     assert!(neg_y < decompressed_y);
                     choice_cols.when_sqrt_y_res_is_lt = F::from_bool(!is_y_eq_sqrt_y_result);
@@ -574,19 +560,6 @@ where
                             + size_of::<LexicographicChoiceCols<u8, E::BaseField>>()]
                     .borrow();
 
-                // Range check the neg_y value since we are now using a lexicographic comparison.
-                let modulus_limbs = E::BaseField::to_limbs_field_slice(&E::BaseField::modulus());
-                let modulus_limbs =
-                    limbs_from_slice::<CB::Expr, <E::BaseField as NumLimbs>::Limbs, CB::F>(
-                        modulus_limbs,
-                    );
-                choice_cols.neg_y_range_check.eval(
-                    builder,
-                    &local.neg_y.result,
-                    &modulus_limbs,
-                    local.is_real,
-                );
-
                 // Assert that the flags are booleans.
                 builder.assert_bool(choice_cols.is_y_eq_sqrt_y_result);
                 builder.assert_bool(choice_cols.when_sqrt_y_res_is_lt);
@@ -789,6 +762,7 @@ where
 
         let sign_bit_expr: CB::Expr = local.sign_bit.into();
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             syscall_id,
             ptr.map(Into::into),

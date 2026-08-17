@@ -112,6 +112,20 @@ where
     ) {
         let modulus_bytes = P::MODULUS;
         let modulus = BigUint::from_bytes_le(modulus_bytes);
+
+        // Reject an operand at or above the modulus here, before any field op runs -- this is a
+        // *domain* error and the message should say so. Without it the same input trips
+        // `populate_carry_and_witness`' internal `debug_assert!(&carry < modulus)` several layers
+        // down, which reports a symptom rather than the cause.
+        //
+        // Trace-side only, deliberately: the AIR does not constrain the operands and does not need
+        // to. Each field op asserts `a op b == result + carry * modulus`, which holds mod p for any
+        // representative, and the result is pinned twice -- to the memory bus, and below the modulus
+        // by the existing exit range check -- so the value written back is unique whatever
+        // representative the operands use.
+        assert!(p < modulus, "fp operand x must be < modulus");
+        assert!(q < modulus, "fp operand y must be < modulus");
+
         let output = cols
             .output
             .populate_with_modulus(blu_events, &p, &q, &modulus, op);
@@ -167,9 +181,15 @@ impl<F: PrimeField32, P: FpOpField> ChipBehavior<F> for FpOpChip<F, P> {
             let mut row = vec![F::ZERO; num_fp_cols::<P>()];
             let cols: &mut FpOpCols<F, P> = row.as_mut_slice().borrow_mut();
 
-            let modulus = &BigUint::from_bytes_le(P::MODULUS);
-            let p = BigUint::from_bytes_le(&words_to_bytes_le_slice(&event.x)) % modulus;
-            let q = BigUint::from_bytes_le(&words_to_bytes_le_slice(&event.y)) % modulus;
+            // Read exactly what the AIR reads: the raw memory limbs.
+            //
+            // These used to be reduced (`% modulus`) here, which the AIR never mirrors — it feeds
+            // `x_access`/`y_access` straight into `FieldOpCols` (see `eval` below). For an operand
+            // at or above the modulus the two therefore disagreed about `carry`, and the row could
+            // not be proved even though the emulator had accepted the syscall. The reduction also
+            // hid the missing entrance check, since `populate` never saw an out-of-range operand.
+            let p = BigUint::from_bytes_le(&words_to_bytes_le_slice(&event.x));
+            let q = BigUint::from_bytes_le(&words_to_bytes_le_slice(&event.y));
 
             cols.is_add = F::from_canonical_u8((event.op == FieldOperation::Add) as u8);
             cols.is_sub = F::from_canonical_u8((event.op == FieldOperation::Sub) as u8);
@@ -426,6 +446,10 @@ where
                 &access.inner,
                 local.is_real,
             );
+            // NOTE: `.inner` is `FilteredAirBuilder::inner`, the *unfiltered* builder, so the
+            // `when` below is discarded and this equality also applies to padding rows. Left as-is
+            // deliberately -- an ungated constraint is soundness-stronger, so adding the gate would
+            // weaken the constraint set.
             let do_check: CB::Expr = local.is_real.into();
             for (v, w) in access.inner.value().0.iter().zip(result_words[i].0.iter()) {
                 builder
@@ -460,6 +484,7 @@ where
             + local.is_mul * mul_syscall_id;
 
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             syscall_id_felt,
             x_ptr.map(Into::into),

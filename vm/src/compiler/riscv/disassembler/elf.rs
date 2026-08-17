@@ -24,6 +24,20 @@ const EMULATOR_MEMORY_SIZE_BYTES: u64 = 0x7800_0000;
 /// The last valid *word* start address for 4-byte reads/writes.
 const MAX_GUEST_WORD_ADDR: u64 = EMULATOR_MEMORY_SIZE_BYTES - WORD_SIZE as u64;
 
+/// The lowest address a `PT_LOAD` segment may start at.
+///
+/// `[0, NUM_REGISTERS)` is the register file, and the memory chip's stack guard
+/// (`addr[1] + addr[2] != 0`, `riscv_memory/read_write/constraints.rs`) makes every data access
+/// below `2^16` unprovable. A segment placed lower either aliases a register or lands where no
+/// provable access can reach it.
+const MIN_SEGMENT_ADDR: u64 = 1 << 16;
+
+/// The most instructions the preprocessed program table can hold.
+///
+/// It carries one row per instruction, and the tallest `program_heights` entry across
+/// `RiscvShapeConfig` is `2^22` rows, so a larger program has no shape to fit into.
+const MAX_INSTRUCTIONS: usize = 1 << 22;
+
 /// RISC-V ELF (Executable and Linkable Format) File.
 ///
 /// This file represents a binary in the ELF format for RISC-V (ELF32 or ELF64) with
@@ -135,6 +149,7 @@ impl Elf {
 
         let mut instructions: Vec<u32> = Vec::new();
         let mut base_address = None;
+        let mut prev_segment_end: Option<u64> = None;
 
         // Only read segments that are executable instructions that are also PT_LOAD.
         for segment in segments.iter().filter(|x| x.p_type == PT_LOAD) {
@@ -147,12 +162,50 @@ impl Elf {
                 eyre::bail!("vaddr {vaddr:08x} is unaligned");
             }
 
-            // If the virtual address is less than the first memory address, then update the first
-            // memory address.
-            if (segment.p_flags & PF_X) != 0
-                && (base_address.is_none() || vaddr < base_address.unwrap())
-            {
-                base_address = Some(vaddr);
+            if vaddr < MIN_SEGMENT_ADDR {
+                eyre::bail!(
+                    "segment at 0x{vaddr:08x} starts below the lowest usable address 0x{MIN_SEGMENT_ADDR:08x}"
+                );
+            }
+
+            let segment_end = vaddr
+                .checked_add(mem_size)
+                .ok_or_else(|| eyre::eyre!("segment end address overflow"))?;
+
+            // Segments must be disjoint and ascending. `memory_image` stores 8-byte blocks while
+            // this loop walks 4 bytes at a time, and the merge below is an addition, so two
+            // segments sharing a block would silently sum instead of overwrite. The ELF spec
+            // already requires PT_LOAD entries sorted on p_vaddr.
+            if let Some(prev_end) = prev_segment_end {
+                if prev_end > vaddr {
+                    eyre::bail!(
+                        "segment at 0x{vaddr:08x} overlaps or precedes the previous segment, which ends at 0x{prev_end:08x}"
+                    );
+                }
+            }
+            prev_segment_end = Some(segment_end);
+
+            // `Program::fetch` indexes `instructions` as `(pc - pc_base) / 4`, so the executable
+            // segments must form one gapless run. A gap -- including one left by a BSS tail, which
+            // takes address space but pushes no words -- would map later instructions to the wrong
+            // addresses, and the preprocessed table would commit to that.
+            if (segment.p_flags & PF_X) != 0 {
+                match base_address {
+                    None => base_address = Some(vaddr),
+                    Some(base) => {
+                        let stream_len = (instructions.len() as u64)
+                            .checked_mul(WORD_SIZE_U64)
+                            .ok_or_else(|| eyre::eyre!("instruction stream length overflow"))?;
+                        let stream_end = base
+                            .checked_add(stream_len)
+                            .ok_or_else(|| eyre::eyre!("instruction stream end overflow"))?;
+                        if vaddr != stream_end {
+                            eyre::bail!(
+                                "executable segment at 0x{vaddr:08x} does not continue the instruction stream, which ends at 0x{stream_end:08x}"
+                            );
+                        }
+                    }
+                }
             }
 
             // Read the segment and decode each word as an instruction.
@@ -165,7 +218,10 @@ impl Elf {
 
                 // If we are reading past the end of the file, then break.
                 if i >= file_size {
-                    image.insert(addr - addr % 8, 0);
+                    // Create the block only when absent: `insert` replaces the whole 8-byte entry,
+                    // so a segment whose file-backed data ends mid-block would have it erased by
+                    // the BSS pass over the other half. The half covered here is already zero.
+                    image.entry(addr - addr % 8).or_insert(0);
                 } else {
                     // Get the word as an u32 but make sure we don't read past the end of the file.
                     let mut word = 0u32;
@@ -217,6 +273,18 @@ impl Elf {
             "executable segment base address",
         )?;
 
+        // An executable segment with no file-backed bytes leaves `pc_base` set but the instruction
+        // table empty, so every `Program::fetch` would index out of bounds.
+        if instructions.is_empty() {
+            eyre::bail!("no instructions found");
+        }
+        if instructions.len() > MAX_INSTRUCTIONS {
+            eyre::bail!(
+                "program has {} instructions, more than the {MAX_INSTRUCTIONS} the preprocessed table can hold",
+                instructions.len()
+            );
+        }
+
         Ok(Self {
             instructions,
             pc_start: entry,
@@ -239,5 +307,312 @@ impl Elf {
             preprocessed_shape: None,
         }
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use elf::abi::{PF_R, PF_W};
+
+    const EHDR_SIZE: usize = 64;
+    const PHENT_SIZE: usize = 56;
+
+    /// One `PT_LOAD` program header plus its file-backed bytes.
+    struct Seg {
+        flags: u32,
+        vaddr: u64,
+        /// File-backed bytes; `p_filesz` is its length.
+        data: Vec<u8>,
+        /// `p_memsz`; anything past `data.len()` is BSS.
+        mem_size: u64,
+    }
+
+    impl Seg {
+        fn text(vaddr: u64, words: &[u32]) -> Self {
+            let data = words
+                .iter()
+                .flat_map(|w| w.to_le_bytes())
+                .collect::<Vec<_>>();
+            let mem_size = data.len() as u64;
+            Self {
+                flags: PF_R | PF_X,
+                vaddr,
+                data,
+                mem_size,
+            }
+        }
+
+        fn data(vaddr: u64, data: Vec<u8>, mem_size: u64) -> Self {
+            Self {
+                flags: PF_R | PF_W,
+                vaddr,
+                data,
+                mem_size,
+            }
+        }
+    }
+
+    /// Assemble a minimal little-endian ELF64 executable out of `segs`.
+    fn build_elf(entry: u64, segs: &[Seg]) -> Vec<u8> {
+        let phoff = EHDR_SIZE;
+        let data_off = phoff + PHENT_SIZE * segs.len();
+
+        let mut out = Vec::new();
+        // e_ident: magic, ELFCLASS64, ELFDATA2LSB, EV_CURRENT, then padding.
+        out.extend_from_slice(&[0x7F, b'E', b'L', b'F', 2, 1, 1, 0]);
+        out.extend_from_slice(&[0u8; 8]);
+        out.extend_from_slice(&ET_EXEC.to_le_bytes());
+        out.extend_from_slice(&EM_RISCV.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes()); // e_version
+        out.extend_from_slice(&entry.to_le_bytes());
+        out.extend_from_slice(&(phoff as u64).to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes()); // e_shoff
+        out.extend_from_slice(&0u32.to_le_bytes()); // e_flags
+        out.extend_from_slice(&(EHDR_SIZE as u16).to_le_bytes());
+        out.extend_from_slice(&(PHENT_SIZE as u16).to_le_bytes());
+        out.extend_from_slice(&(segs.len() as u16).to_le_bytes());
+        out.extend_from_slice(&64u16.to_le_bytes()); // e_shentsize
+        out.extend_from_slice(&0u16.to_le_bytes()); // e_shnum
+        out.extend_from_slice(&0u16.to_le_bytes()); // e_shstrndx
+        assert_eq!(out.len(), EHDR_SIZE, "ELF64 header must be 64 bytes");
+
+        let mut off = data_off as u64;
+        for seg in segs {
+            out.extend_from_slice(&PT_LOAD.to_le_bytes());
+            out.extend_from_slice(&seg.flags.to_le_bytes());
+            out.extend_from_slice(&off.to_le_bytes());
+            out.extend_from_slice(&seg.vaddr.to_le_bytes());
+            out.extend_from_slice(&seg.vaddr.to_le_bytes()); // p_paddr
+            out.extend_from_slice(&(seg.data.len() as u64).to_le_bytes());
+            out.extend_from_slice(&seg.mem_size.to_le_bytes());
+            out.extend_from_slice(&8u64.to_le_bytes()); // p_align
+            off += seg.data.len() as u64;
+        }
+        assert_eq!(out.len(), data_off, "program headers must be contiguous");
+
+        for seg in segs {
+            out.extend_from_slice(&seg.data);
+        }
+        out
+    }
+
+    /// The image the ELF *means*: file bytes below `p_filesz`, zeros above. Built byte-wise and
+    /// only then folded into 8-byte blocks, so it cannot mirror a block-level loader mistake.
+    fn expected_image(segs: &[Seg]) -> BTreeMap<u64, u64> {
+        let mut image = BTreeMap::new();
+        for seg in segs {
+            let mut bytes = seg.data.clone();
+            bytes.resize(seg.mem_size as usize, 0);
+
+            let mut i = 0u64;
+            while i < seg.mem_size {
+                let addr = seg.vaddr + i;
+                let mut word = 0u32;
+                for j in 0..WORD_SIZE_U64 {
+                    if let Some(byte) = bytes.get((i + j) as usize) {
+                        word |= u32::from(*byte) << (j * 8);
+                    }
+                }
+                let entry = image.entry(addr - addr % 8).or_insert(0u64);
+                if addr.is_multiple_of(8) {
+                    *entry |= u64::from(word);
+                } else {
+                    *entry |= u64::from(word) << 32;
+                }
+                i += WORD_SIZE_U64;
+            }
+        }
+        image
+    }
+
+    /// A two-instruction text segment, enough to give the ELF a `pc_base`.
+    fn text_at(vaddr: u64) -> Seg {
+        Seg::text(vaddr, &[0x0000_0013, 0x0000_0013]) // two `nop`s
+    }
+
+    /// BSS zero-fill must not erase file bytes sharing an 8-byte block. All `p_filesz % 8` are
+    /// covered: only 1..=4 put the boundary mid-block, and the rest are the control.
+    #[test]
+    fn bss_zero_fill_preserves_file_backed_bytes_for_every_filesz_mod_8() {
+        for file_size in 1..=16usize {
+            // Nonzero bytes only: a zero byte cannot show the clobber.
+            let data: Vec<u8> = (0..file_size).map(|i| 0xA1 + i as u8).collect();
+            let segs = vec![text_at(0x10000), Seg::data(0x20000, data, 24)];
+            let elf = build_elf(0x10000, &segs);
+
+            let parsed = Elf::new(&elf).unwrap_or_else(|e| {
+                panic!(
+                    "p_filesz = {file_size} (mod 8 = {}) failed to parse: {e}",
+                    file_size % 8
+                )
+            });
+
+            assert_eq!(
+                *parsed.memory_image,
+                expected_image(&segs),
+                "p_filesz = {file_size} (mod 8 = {}): committed image differs from the ELF",
+                file_size % 8,
+            );
+        }
+    }
+
+    /// The same clobber across a segment boundary: `vaddr` need only be 4-aligned, so a segment at
+    /// `4 (mod 8)` shares its first block with whatever precedes it.
+    #[test]
+    fn bss_zero_fill_does_not_clobber_the_preceding_segment() {
+        let segs = vec![
+            Seg::text(0x10000, &[0xDEAD_BEEF]), // occupies [0x10000, 0x10004)
+            Seg::data(0x10004, Vec::new(), 4),  // pure BSS, shares block 0x10000
+        ];
+        let elf = build_elf(0x10000, &segs);
+        let parsed = Elf::new(&elf).expect("adjacent segments are legal");
+
+        assert_eq!(
+            parsed.memory_image.get(&0x10000),
+            Some(&0xDEAD_BEEFu64),
+            "the BSS segment erased the preceding segment's word",
+        );
+        assert_eq!(*parsed.memory_image, expected_image(&segs));
+    }
+
+    /// Completeness control: the ordinary text + data-with-BSS shape a guest build produces.
+    #[test]
+    fn ordinary_text_plus_data_with_bss_is_accepted() {
+        let segs = vec![
+            text_at(0x10000),
+            Seg::data(0x20000, vec![0xEF, 0xBE, 0xAD, 0xDE], 4096),
+        ];
+        let parsed = Elf::new(&build_elf(0x10000, &segs)).expect("the ordinary layout is legal");
+
+        assert_eq!(parsed.memory_image.get(&0x20000), Some(&0xDEAD_BEEFu64));
+        assert_eq!(*parsed.memory_image, expected_image(&segs));
+    }
+
+    #[test]
+    fn overlapping_segments_are_rejected() {
+        let segs = vec![
+            text_at(0x10000),                     // [0x10000, 0x10008)
+            Seg::data(0x10004, vec![0xFF; 4], 4), // starts inside the previous segment
+        ];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("overlaps"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn descending_segments_are_rejected() {
+        let segs = vec![
+            text_at(0x20000),
+            Seg::data(0x10000, vec![0xFF; 8], 8), // below the previous segment
+        ];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("overlaps or precedes"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// A gap between executable segments would shift every later instruction's address.
+    #[test]
+    fn non_contiguous_executable_segments_are_rejected() {
+        let segs = vec![
+            text_at(0x10000), // instructions cover [0x10000, 0x10008)
+            text_at(0x10010), // gap: should start at 0x10008
+        ];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("does not continue the instruction stream"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// A BSS tail is a gap too: it takes address space but pushes no instructions.
+    #[test]
+    fn executable_segment_with_bss_tail_breaks_instruction_contiguity() {
+        let mut head = text_at(0x10000);
+        head.mem_size = 16; // 8 file-backed bytes, 8 bytes of BSS
+        let segs = vec![head, text_at(0x10010)];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("does not continue the instruction stream"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Completeness control: a gapless run must load, with every instruction at its real address.
+    #[test]
+    fn adjacent_executable_segments_are_accepted() {
+        let segs = vec![
+            Seg::text(0x10000, &[0x0000_0013, 0x0000_0093]),
+            Seg::text(0x10008, &[0x0000_0113, 0x0000_0193]),
+        ];
+        let parsed = Elf::new(&build_elf(0x10000, &segs)).expect("a gapless run is legal");
+
+        assert_eq!(parsed.pc_base, 0x10000);
+        assert_eq!(
+            parsed.instructions,
+            vec![0x0000_0013, 0x0000_0093, 0x0000_0113, 0x0000_0193],
+        );
+        assert_eq!(*parsed.memory_image, expected_image(&segs));
+    }
+
+    /// Segments below `MIN_SEGMENT_ADDR` alias the register file or land where the memory chip's
+    /// stack guard makes every data access unprovable.
+    #[test]
+    fn segment_below_the_usable_range_is_rejected() {
+        for vaddr in [0x4, 0x20, 0x1000, MIN_SEGMENT_ADDR - 4] {
+            let segs = vec![Seg::text(vaddr, &[0x0000_0013, 0x0000_0013])];
+            let err = Elf::new(&build_elf(vaddr, &segs)).unwrap_err().to_string();
+            assert!(
+                err.contains("below the lowest usable address"),
+                "vaddr 0x{vaddr:x}: unexpected error: {err}"
+            );
+        }
+    }
+
+    /// Completeness control for the bound itself: the first usable address must load.
+    #[test]
+    fn segment_at_the_minimum_address_is_accepted() {
+        let segs = vec![text_at(MIN_SEGMENT_ADDR)];
+        let parsed = Elf::new(&build_elf(MIN_SEGMENT_ADDR, &segs)).expect("the boundary is usable");
+        assert_eq!(parsed.pc_base, MIN_SEGMENT_ADDR);
+    }
+
+    /// An executable segment with no file-backed bytes sets `pc_base` but leaves the instruction
+    /// table empty, so every `Program::fetch` would index out of bounds.
+    #[test]
+    fn executable_segment_without_instructions_is_rejected() {
+        let segs = vec![Seg {
+            flags: PF_R | PF_X,
+            vaddr: 0x10000,
+            data: Vec::new(),
+            mem_size: 8,
+        }];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("no instructions found"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// One instruction past what the preprocessed program table can be shaped to hold.
+    #[test]
+    fn program_larger_than_the_preprocessed_table_is_rejected() {
+        let words = vec![0x0000_0013u32; MAX_INSTRUCTIONS + 1];
+        let segs = vec![Seg::text(0x10000, &words)];
+        let err = Elf::new(&build_elf(0x10000, &segs))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("more than the"), "unexpected error: {err}");
     }
 }

@@ -92,7 +92,8 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         builder.assert_eq(local.is_finalize, local.octet_num[9] * local.is_real);
 
         // Receive state.
-        let receive_values = once(local.clk.into())
+        let receive_values = once(local.chunk.into())
+            .chain(once(local.clk.into()))
             .chain(local.w_ptr.map(Into::into))
             .chain(local.h_ptr.map(Into::into))
             .chain(once(local.index.into()))
@@ -113,7 +114,8 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         ));
 
         // Send state, for initialize and finalize.
-        let send_values = once(local.clk.into())
+        let send_values = once(local.chunk.into())
+            .chain(once(local.clk.into()))
             .chain(local.w_ptr.map(Into::into))
             .chain(local.h_ptr.map(Into::into))
             .chain(once(local.index.into() + CB::Expr::ONE))
@@ -142,7 +144,8 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         // c := b
         // b := a
         // a := temp1 + temp2
-        let compression_send_values = once(local.clk.into())
+        let compression_send_values = once(local.chunk.into())
+            .chain(once(local.clk.into()))
             .chain(local.w_ptr.map(Into::into))
             .chain(local.h_ptr.map(Into::into))
             .chain(once(local.index.into() + CB::Expr::ONE))
@@ -176,14 +179,34 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         // Extend the `mem_value` to a `Word` by appending zeroes before writing to memory.
         let mem_value_word = Word::extend_half::<CB>(&local.mem_value);
 
-        // The `clk` only increments at finalize.
+        // Three distinct timestamps -- `h` reads at `clk`, `w` reads at `clk + 1`,
+        // `h` writes at `clk + 2`. Sharing a timestamp between the `h` and `w` reads makes
+        // any overlap of the two buffers unprovable, since the memory argument requires
+        // strictly increasing timestamps per address.
         builder.eval_memory_access(
             local.chunk,
-            local.clk + local.is_finalize,
+            local.clk + local.is_compression + local.is_finalize * CB::Expr::from_canonical_u32(2),
             local.mem_addr.map(Into::into),
             &local.mem,
             local.is_initialize + local.is_compression + local.is_finalize,
         );
+
+        // Bind the value written back to memory.
+        //
+        // Every constraint below acts on `mem.prev_value` -- the value read -- while
+        // `mem.access.value`, the post-state the memory bus carries, was referenced nowhere.
+        // `eval_memory_access` puts it on the bus verbatim, so it was a free column on every
+        // row: an arbitrary memory write during the read phases, and an arbitrary
+        // sha256_compress output at finalize.
+        //
+        // One assertion covers all three phases because `mem_value` already plays both roles:
+        // during initialize and compression it is the value read (pinned to `prev_value` just
+        // below), and at finalize it is the computed output (pinned to `finalize_add.value`).
+        // So requiring the written word to equal it means "reads do not change memory" and
+        // "finalize writes what was computed" at once, under the same gate as the access.
+        builder
+            .when(local.is_initialize + local.is_compression + local.is_finalize)
+            .assert_word_eq(local.mem.access.value, mem_value_word.clone());
 
         // During initialize and compression, verify that memory is read only and does not change.
         builder

@@ -33,6 +33,11 @@ pub const NUM_SHA_EXTEND_CONTROL_COLS: usize = size_of::<ShaExtendControlCols<u8
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShaExtendControlCols<T> {
+    /// The chunk this syscall was executed in.
+    ///
+    /// Carried on the ShaExtend state bus so the state machine is pinned to one chunk. `clk`
+    /// restarts at zero every chunk, so without this the bus cannot tell two chunks apart.
+    pub chunk: T,
     pub clk: T,
     pub w_ptr: SyscallAddrGadget<T>,
     pub w_16th_addr: AddrAddGadget<T>,
@@ -134,6 +139,7 @@ impl<F: PrimeField32> ShaExtendControlChip<F> {
         let mut row = [F::ZERO; NUM_SHA_EXTEND_CONTROL_COLS];
         let cols: &mut ShaExtendControlCols<F> = row.as_mut_slice().borrow_mut();
 
+        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.clk = F::from_canonical_u32(u32::try_from(event.clk).unwrap());
         // This precompile accesses 64 words, which is 512 bytes.
         cols.w_ptr.populate(blu, event.w_ptr, 512);
@@ -225,6 +231,7 @@ where
 
         // Receive the syscall.
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::SHA_EXTEND.syscall_id()),
             w_ptr.map(Into::into),
@@ -233,7 +240,8 @@ where
         );
 
         // Send the initial state, with the starting index being 16.
-        let send_values = once(local.clk.into())
+        let send_values = once(local.chunk.into())
+            .chain(once(local.clk.into()))
             .chain(w_ptr.map(Into::into))
             .chain(once(CB::Expr::from_canonical_u32(16)))
             .collect::<Vec<_>>();
@@ -245,7 +253,8 @@ where
         ));
 
         // Receive the final state, with the final index being 64.
-        let receive_values = once(local.clk.into() + CB::Expr::from_canonical_u8(48))
+        let receive_values = once(local.chunk.into())
+            .chain(once(local.clk.into() + CB::Expr::from_canonical_u8(48)))
             .chain(w_ptr.map(Into::into))
             .chain(once(CB::Expr::from_canonical_u32(64)))
             .collect::<Vec<_>>();

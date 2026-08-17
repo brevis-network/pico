@@ -1,7 +1,7 @@
 use super::super::{columns::CpuCols, CpuChip};
 use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
-    machine::builder::{ChipBuilder, ChipWordBuilder, RiscVMemoryBuilder},
+    machine::builder::{ChipBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder},
 };
 use p3_field::{Field, FieldAlgebra};
 
@@ -64,6 +64,22 @@ impl<F: Field> CpuChip<F> {
             &local.op_a_access,
             local.is_real,
         );
+
+        // The written word must have canonical u16 limbs.
+        //
+        // `eval_memory_access` puts the four limbs on the memory bus verbatim and range
+        // checks nothing but the timestamp difference, so without this a prover can write a
+        // Word whose limb exceeds 2^16 into the register file. That breaks the u16-limb
+        // invariant everything downstream assumes: `LtWordU16Gadget` then reports a
+        // comparison that does not hold over the integers, so a branch can be made to take
+        // either way, and `SyscallAddrGadget`'s `addr >= 2^16` stack guard — which relies on
+        // its limbs already being canonical — can be walked past.
+        //
+        // Gated on `is_real` to match the access above. Rows where `op_a_0` holds are
+        // already pinned to zero, and branch/store rows carry the previous value, which was
+        // itself checked when it was written — so the invariant is inductive once this is in
+        // place.
+        builder.slice_range_check_u16(&local.op_a_access.access.value.0, local.is_real);
 
         // If we are performing a branch or a store, then the value of `a` is the previous value.
         builder

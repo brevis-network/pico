@@ -9,7 +9,10 @@ use crate::{
     compiler::{addr::Addr, riscv::program::Program},
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator},
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::{
+        chip::ChipBehavior,
+        utils::{pad_to_power_of_two, pad_to_power_of_two_repeating_first_row},
+    },
 };
 use hashbrown::HashMap;
 use p3_field::PrimeField32;
@@ -54,8 +57,14 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
         );
 
         let log_size = program.fixed_log2_rows(&self.name());
-        // Pad the trace to a power of two.
-        pad_to_power_of_two::<NUM_PROGRAM_PREPROCESSED_COLS, F>(&mut trace.values, log_size);
+        // Pad by repeating instruction 0, not with zeros. A zero row is a valid entry in this
+        // table -- it reads as "pc = 0 holds an instruction with no opcode selected and
+        // op_a_0 = 0" -- and the multiplicity column is prover-supplied and ungated, so a CPU
+        // row could claim to execute it. Repeating a real instruction leaves nothing to claim.
+        pad_to_power_of_two_repeating_first_row::<NUM_PROGRAM_PREPROCESSED_COLS, F>(
+            &mut trace.values,
+            log_size,
+        );
 
         Some(trace)
     }

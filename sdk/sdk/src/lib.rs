@@ -17,6 +17,12 @@ pub mod m31_client;
 
 #[cfg(all(target_os = "zkvm", feature = "libm"))]
 mod libm;
+#[deprecated(
+    note = "the poseidon2 precompile is shelved: its proving chip is out of the machine and the \
+            syscall is unregistered, so a guest that hashes with this stops at UnsupportedSyscall. \
+            See instances/chiptype/riscv_chiptype.rs in pico-vm for what has to be finished before \
+            it returns."
+)]
 pub mod poseidon2_hash;
 pub mod riscv_ecalls;
 
@@ -28,6 +34,18 @@ pub mod verify;
 /// The number of 32 bit words that the public values digest is composed of.
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 pub const POSEIDON_NUM_WORDS: usize = 8;
+
+// The coprocessor integration is shelved along with the poseidon2 precompile it depends on: the
+// zkCoprocessor input commitment is a Poseidon2 Merkle root computed through
+// `syscall_poseidon2_permute`, and that syscall is no longer served. The feature is kept declared
+// but empty so the `#[cfg(feature = "coprocessor")]` blocks below stay valid source rather than
+// becoming unexpected-cfg warnings; turning it on lands here instead of failing on a missing crate.
+#[cfg(feature = "coprocessor")]
+compile_error!(
+    "the `coprocessor` feature is shelved -- it needs the poseidon2 precompile, whose chip is out \
+     of the machine and whose syscall is unregistered. Restore the coprocessor-sdk dependency and \
+     the original feature definition in Cargo.toml, and re-enable the precompile, to bring it back."
+);
 
 #[cfg(all(feature = "bb", any(feature = "kb", feature = "m31")))]
 compile_error!("Select exactly one of: --features bb | kb | m31");

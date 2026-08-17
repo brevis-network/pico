@@ -113,6 +113,21 @@ where
     ) {
         let modulus_bytes = P::MODULUS;
         let modulus = BigUint::from_bytes_le(modulus_bytes);
+
+        // Reject an operand at or above the modulus here, before any field op runs -- this is a
+        // *domain* error and the message should say so. Without it the same input trips
+        // `populate_carry_and_witness`' internal `debug_assert!(&carry < modulus)` several layers
+        // down, which reports a symptom rather than the cause.
+        //
+        // Trace-side only, deliberately: the AIR does not constrain the operands and does not need
+        // to. Each field op asserts `a op b == result + carry * modulus`, which holds mod p for any
+        // representative, and the result is pinned twice -- to the memory bus, and below the modulus
+        // by the existing exit range check -- so the value written back is unique whatever
+        // representative the operands use.
+        for (name, v) in [("p.x", &p_x), ("p.y", &p_y), ("q.x", &q_x), ("q.y", &q_y)] {
+            assert!(*v < modulus, "fp2 coordinate {name} must be < modulus");
+        }
+
         let a0_mul_b0 = cols.a0_mul_b0.populate_with_modulus(
             blu_events,
             &p_x,
@@ -515,6 +530,10 @@ where
                 &access.inner,
                 local.is_real,
             );
+            // NOTE: `.inner` is `FilteredAirBuilder::inner`, the *unfiltered* builder, so the
+            // `when` below is discarded and this equality also applies to padding rows. Left as-is
+            // deliberately -- an ungated constraint is soundness-stronger, so adding the gate would
+            // weaken the constraint set.
             let do_check: CB::Expr = local.is_real.into();
             for (v, w) in access.inner.value().0.iter().zip(result_words[i].0.iter()) {
                 builder
@@ -533,6 +552,7 @@ where
         };
 
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             syscall_id_felt,
             x_ptr.map(Into::into),

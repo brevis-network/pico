@@ -39,6 +39,11 @@ const OFFSET_LAST_ELEM_H: u64 = 7;
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct ShaCompressControlCols<T> {
+    /// The chunk this syscall was executed in.
+    ///
+    /// Carried on the ShaCompress state bus so the state machine is pinned to one chunk. `clk`
+    /// restarts at zero every chunk, so without this the bus cannot tell two chunks apart.
+    pub chunk: T,
     pub clk: T,
     pub w_ptr: SyscallAddrGadget<T>,
     pub h_ptr: SyscallAddrGadget<T>,
@@ -141,6 +146,7 @@ impl<F: PrimeField32> ShaCompressControlChip<F> {
         let mut row = [F::ZERO; NUM_SHA_COMPRESS_CONTROL_COLS];
         let cols: &mut ShaCompressControlCols<F> = row.as_mut_slice().borrow_mut();
 
+        cols.chunk = F::from_canonical_u32(event.chunk);
         cols.clk = F::from_canonical_u32(u32::try_from(event.clk).unwrap());
         // `w_ptr` has 64 words, so 512 bytes - but only 256 bytes are actually used.
         cols.w_ptr.populate(blu, event.w_ptr, 512);
@@ -215,6 +221,7 @@ where
 
         // Receive the syscall.
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             CB::F::from_canonical_u32(SyscallCode::SHA_COMPRESS.syscall_id()),
             w_ptr.map(Into::into),
@@ -224,7 +231,8 @@ where
 
         // Send the initial state. The initial index is 0.
         // The initial state will be constrained by the `ShaCompressChip`.
-        let send_values = once(local.clk.into())
+        let send_values = once(local.chunk.into())
+            .chain(once(local.clk.into()))
             .chain(w_ptr.map(Into::into))
             .chain(h_ptr.map(Into::into))
             .chain(once(CB::Expr::from_canonical_u32(0)))
@@ -245,7 +253,8 @@ where
 
         // Receive the final state. The final index is 80.
         // The final state will be constrained by the `ShaCompressChip`.
-        let receive_values = once(local.clk.into())
+        let receive_values = once(local.chunk.into())
+            .chain(once(local.clk.into()))
             .chain(w_ptr.map(Into::into))
             .chain(h_ptr.map(Into::into))
             .chain(once(CB::Expr::from_canonical_u32(80)))

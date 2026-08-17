@@ -13,7 +13,7 @@ fn test_poseidon2_permute_chip_simple_eval() {
     let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
     chip.eval(&mut builder);
 
-    assert_eq!(builder.num_constraints(), 309);
+    assert_eq!(builder.num_constraints(), 335);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 129);
+    assert_eq!(builder.num_lookups(), 185);
 }

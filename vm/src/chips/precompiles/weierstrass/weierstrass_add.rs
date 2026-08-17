@@ -105,6 +105,15 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
         q_x: BigUint,
         q_y: BigUint,
     ) {
+        // Reject a coordinate at or above the modulus before any field op runs, as the
+        // sibling `weierstrass_double.rs` does. Trace-side only: the outputs are already
+        // pinned to the memory bus and below the modulus by `x3_range`/`y3_range`.
+        let modulus = E::BaseField::modulus();
+        assert!(p_x < modulus, "curve coordinate p.x must be < modulus");
+        assert!(p_y < modulus, "curve coordinate p.y must be < modulus");
+        assert!(q_x < modulus, "curve coordinate q.x must be < modulus");
+        assert!(q_y < modulus, "curve coordinate q.y must be < modulus");
+
         // slope = (q.y - p.y) / (q.x - p.x).
         let slope = {
             let slope_numerator =
@@ -591,6 +600,7 @@ where
         };
 
         builder.looked_syscall(
+            local.chunk,
             local.clk,
             syscall_id_felt,
             p_ptr.map(Into::into),

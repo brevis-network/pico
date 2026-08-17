@@ -14,10 +14,7 @@ mod write;
 
 use crate::{
     chips::gadgets::{
-        curves::{
-            edwards::ed25519::{Ed25519, Ed25519Parameters},
-            weierstrass::{Bls12381, Bn254, Secp256k1, Secp256r1},
-        },
+        curves::weierstrass::{Bls12381, Bn254, Secp256k1, Secp256r1},
         field::field_op::FieldOperation,
     },
     emulator::riscv::{
@@ -35,10 +32,8 @@ use hint::{HintLenSyscall, HintReadSyscall};
 use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
 use precompiles::{
-    edwards::{add::EdwardsAddAssignSyscall, decompress::EdwardsDecompressSyscall},
     fptower::{fp::FpSyscall, fp2_addsub::Fp2AddSubSyscall, fp2_mul::Fp2MulSyscall},
     keccak256::permute::Keccak256PermuteSyscall,
-    poseidon2::permute::Poseidon2PermuteSyscall,
     sha256::{compress::Sha256CompressSyscall, extend::Sha256ExtendSyscall},
     uint256::syscall::Uint256MulSyscall,
     weierstrass::{
@@ -47,7 +42,7 @@ use precompiles::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 use unconstrained::{EnterUnconstrainedSyscall, ExitUnconstrainedSyscall};
 use write::WriteSyscall;
 
@@ -195,15 +190,17 @@ where
         Arc::new(FpSyscall::<Secp256k1BaseField>::new(FieldOperation::Mul)),
     );
 
-    // edwards
-    syscall_map.insert(
-        SyscallCode::ED_ADD,
-        Arc::new(EdwardsAddAssignSyscall::<Ed25519>::new()),
-    );
-    syscall_map.insert(
-        SyscallCode::ED_DECOMPRESS,
-        Arc::new(EdwardsDecompressSyscall::<Ed25519Parameters>::new()),
-    );
+    // Edwards is deliberately NOT registered.
+    //
+    // The two Ed25519 chips are absent from `RiscvChipType::all_chip_variants`, so nothing on the
+    // prover side consumes an Edwards precompile event. Registering the syscalls anyway made every
+    // guest that called one *unprovable* rather than rejected: the syscall chip emits a bus row for
+    // each precompile event, and with no consuming chip the multiset never balances.
+    //
+    // Leaving them out is also what keeps re-enabling deliberate -- see the note beside the
+    // commented-out chips in `instances/chiptype/riscv_chiptype.rs` for what has to be finished
+    // first. The syscall implementations themselves are still in
+    // `syscalls/precompiles/edwards/`, unused.
 
     syscall_map.insert(SyscallCode::UINT256_MUL, Arc::new(Uint256MulSyscall));
 
@@ -254,10 +251,18 @@ where
         Arc::new(WeierstrassDecompressSyscall::<Secp256r1>::new()),
     );
 
-    syscall_map.insert(
-        SyscallCode::POSEIDON2_PERMUTE,
-        Arc::new(Poseidon2PermuteSyscall::<F>(PhantomData)),
-    );
+    // Poseidon2 is deliberately NOT registered.
+    //
+    // Its chip is absent from `RiscvChipType::all_chip_variants`, so nothing on the prover side
+    // consumes a poseidon2 precompile event. Registering the syscall anyway would make every
+    // guest that called it *unprovable* rather than rejected: the syscall chip emits a bus row
+    // per precompile event, and with no consuming chip the multiset never balances. Unregistered,
+    // the call fails immediately with `UnsupportedSyscall`.
+    //
+    // See the note beside the commented-out chip in `instances/chiptype/riscv_chiptype.rs` for
+    // what has to be finished before it goes back in. The syscall implementation itself is still
+    // in `syscalls/precompiles/poseidon2/`, unused here but exercised by the poseidon2 tests in
+    // `chips/tests.rs`, which insert it into `syscall_map` themselves.
 
     syscall_map
 }

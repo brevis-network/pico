@@ -32,7 +32,7 @@ use crate::{
         chip::ChipBehavior,
         estimator::{EventCapture, EventSizeCapture},
     },
-    primitives::consts::{MEMORY_RW_DATAPAR, WORD_BYTE_SIZE},
+    primitives::consts::MEMORY_RW_DATAPAR,
 };
 use hashbrown::HashMap;
 use p3_field::{Field, PrimeField32};
@@ -183,14 +183,6 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let memory_addr = event.b.wrapping_add(event.c);
         // addr_word = Word from ALU ADD result (4×u16 limbs)
         cols.addr_word = memory_addr.into();
-        let aligned_addr = memory_addr - memory_addr % WORD_BYTE_SIZE as u64;
-        cols.addr_aligned = Word::from(aligned_addr);
-        assert_eq!(
-            cols.addr_aligned[3],
-            F::ZERO,
-            "memory address must be less than 2^48",
-        );
-
         // Add ALU ADD event
         let add_event = AluEvent {
             clk: event.clk,
@@ -288,8 +280,8 @@ impl<F: Field> MemoryReadWriteChip<F> {
                     let selected_byte = if bit0 == 1 { high_byte } else { low_byte };
                     cols.selected_byte = F::from_canonical_u8(selected_byte);
 
-                    // Range check for selected_limb_low_byte
-                    blu_events.add_u8_range_check(low_byte, 0);
+                    // Range check both bytes of selected_limb.
+                    blu_events.add_u8_range_check(low_byte, high_byte);
 
                     // unsigned_mem_val = [selected_byte, 0, 0, 0]
                     cols.unsigned_mem_val = Word([

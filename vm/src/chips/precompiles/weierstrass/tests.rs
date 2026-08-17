@@ -306,7 +306,7 @@ fn test_ws_secp256k1_add_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 950);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 1121);
+    assert_eq!(builder.num_lookups(), 1127);
 }
 
 #[test]
@@ -327,9 +327,9 @@ fn test_ws_secp256k1_double_chip_simple_eval() {
     let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
     chip.eval(&mut builder);
 
-    assert_eq!(builder.num_constraints(), 936);
+    assert_eq!(builder.num_constraints(), 999);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 1126);
+    assert_eq!(builder.num_lookups(), 1223);
 }
 
 #[test]
@@ -352,7 +352,7 @@ fn test_ws_secp256k1_decompress_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 691);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 674);
+    assert_eq!(builder.num_lookups(), 677);
 }
 
 #[test]
@@ -374,7 +374,7 @@ fn test_ws_bls12381_add_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 1422);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 1689);
+    assert_eq!(builder.num_lookups(), 1695);
 }
 
 #[test]
@@ -396,5 +396,5 @@ fn test_ws_bn254_add_chip_simple_eval() {
 
     assert_eq!(builder.num_constraints(), 950);
     assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 1121);
+    assert_eq!(builder.num_lookups(), 1127);
 }
