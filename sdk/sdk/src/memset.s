@@ -203,7 +203,11 @@
 // obstacle to adoption, that text has been removed.
 	.text
 	.attribute	4, 16
-	.attribute	5, "rv32im"
+	// This file was generated for rv32im (see the header); its instructions are valid RV64IM and
+	// run on the RV64 VM. Keep the arch attribute, which is what enables M for this module-level
+	// asm, but rv64: LLVM 23 switches the assembler to RV32 on "rv32im" and then rejects the `ld`
+	// in `_start` that follows in the same module.
+	.attribute	5, "rv64i2p1_m2p0_zmmul1p0"
 	.file	"musl_memset.c"
 	.globl	memset
 	.p2align	2
