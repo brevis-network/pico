@@ -154,8 +154,9 @@ pub enum SyscallCode {
 }
 
 impl SyscallCode {
+    /// The non-panicking half of [`Self::from_u32`], for an unvalidated value.
     #[inline(always)]
-    fn try_from_u32(value: u32) -> Option<Self> {
+    pub fn try_from_u32(value: u32) -> Option<Self> {
         Some(match value {
             0x00_00_00_00 => SyscallCode::HALT,
             0x00_00_00_02 => SyscallCode::WRITE,
@@ -291,6 +292,23 @@ impl std::fmt::Display for SyscallCode {
 #[cfg(test)]
 mod tests {
     use super::SyscallCode;
+
+    /// Every syscall's extra-cycle byte must fit the Ecall chip's `BitRange(NUM_EXTRA_CLK_BITS)`
+    /// cap, or an honest ecall row becomes unprovable; the cap in turn is part of the Cpu
+    /// row-chain clk bound (`riscv_cpu/chunk_clk/constraints.rs`).
+    #[test]
+    fn num_cycles_fit_the_ecall_cap() {
+        use crate::chips::chips::riscv_ecall::NUM_EXTRA_CLK_BITS;
+        use strum::IntoEnumIterator;
+        for code in SyscallCode::iter() {
+            assert!(
+                code.num_cycles() < (1 << NUM_EXTRA_CLK_BITS),
+                "{code:?} has {} extra cycles, above the {}-bit cap",
+                code.num_cycles(),
+                NUM_EXTRA_CLK_BITS
+            );
+        }
+    }
 
     #[test]
     fn from_rv64_accepts_zero_extended_encoding() {

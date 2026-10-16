@@ -230,6 +230,12 @@ impl ContiguousRiscvMemory {
     }
 }
 impl ContiguousRiscvMemory {
+    /// Get a raw pointer to the packed metadata array (low 32 bits = chunk, high 32 = timestamp).
+    #[inline(always)]
+    pub fn metadata_ptr(&mut self) -> *mut u64 {
+        self.backing.metadata.as_mut_ptr()
+    }
+
     /// Returns true if this memory instance uses mmap-based storage.
     #[inline(always)]
     pub const fn is_mmap_backed() -> bool {

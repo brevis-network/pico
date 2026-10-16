@@ -9,7 +9,7 @@ use crate::{
         precompiles::{checked_u64_to_u32, poseidon2::columns::Poseidon2Cols},
         utils::pad_rows_fixed,
     },
-    compiler::riscv::program::Program,
+    compiler::{riscv::program::Program, word::Word},
     configs::config::Poseidon2Config,
     emulator::{
         record::RecordBehavior,
@@ -32,6 +32,17 @@ use p3_poseidon2::GenericPoseidon2LinearLayers;
 use std::borrow::BorrowMut;
 use tracing::debug;
 
+/// The two 32-bit state words a memory dword carries, widened to the `u64` operand
+/// [`FieldWordRangeChecker::populate`](crate::chips::gadgets::field_range_check::word_range::FieldWordRangeChecker::populate)
+/// takes -- it reads bits 0..15 and 16..31 and requires the rest to be zero.
+///
+/// Limbs 0-1 are the low state word and limbs 2-3 the high one, the same split the AIR's
+/// input and output bindings use.
+fn halves_of<F: PrimeField32>(word: &Word<F>) -> [u64; 2] {
+    let limb = |i: usize| u64::from(word[i].as_canonical_u32());
+    [limb(0) | (limb(1) << 16), limb(2) | (limb(3) << 16)]
+}
+
 impl<F: Field, LinearLayers, Config: Poseidon2Config> BaseAir<F>
     for Poseidon2PermuteChip<F, LinearLayers, Config>
 {
@@ -42,7 +53,7 @@ impl<F: Field, LinearLayers, Config: Poseidon2Config> BaseAir<F>
 
 impl<
         F: PrimeField32,
-        LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
         Config: Poseidon2Config,
     > ChipBehavior<F> for Poseidon2PermuteChip<F, LinearLayers, Config>
 {
@@ -166,7 +177,7 @@ impl<
 
 impl<
         F: PrimeField32,
-        LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
         Config: Poseidon2Config,
     > Poseidon2PermuteChip<F, LinearLayers, Config>
 {
@@ -181,8 +192,8 @@ impl<
         let cols: &mut Poseidon2Cols<F, Config> = row.as_mut_slice().borrow_mut();
 
         // cols.value_cols.is_real is populated in the following populate_perm
-        cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "poseidon2 clk"));
+        cols.chunk = F::from_u32(event.chunk);
+        cols.clk = F::from_u32(checked_u64_to_u32(event.clk, "poseidon2 clk"));
 
         // The pointers are 48-bit addresses, split into 3 u16 limbs by the gadget. `populate`
         // also emits the byte lookups the AIR's range checks and alignment check consume, so
@@ -207,13 +218,20 @@ impl<
             // `populate` only emits the byte lookups for the timestamp diff, never for the value
             // itself -- but the AIR range checks the value's limbs, so this is that trace half.
             blu.add_u16_range_checks_field(&cols.input_memory[i].access.value.0);
+
+            // The canonicality half. Read the two 32-bit values back out of the memory columns
+            // rather than off `event.state_values`: those columns are what the AIR compares
+            // against, so taking the witness from anywhere else would let the two drift.
+            let [lo, hi] = halves_of(&cols.input_memory[i].access.value);
+            cols.input_range_checkers[2 * i].populate(blu, lo);
+            cols.input_range_checkers[2 * i + 1].populate(blu, hi);
         }
 
         let state: [F; PERMUTATION_WIDTH] = event
             .state_values
             .clone()
             .into_iter()
-            .map(F::from_canonical_u32)
+            .map(F::from_u32)
             .collect::<Vec<F>>()
             .try_into()
             .unwrap();
@@ -245,6 +263,10 @@ impl<
                 blu,
             );
             blu.add_u16_range_checks_field(&cols.output_memory[i].access.value.0);
+
+            let [lo, hi] = halves_of(&cols.output_memory[i].access.value);
+            cols.output_range_checkers[2 * i].populate(blu, lo);
+            cols.output_range_checkers[2 * i + 1].populate(blu, hi);
         }
 
         if let Some(input_row) = input_row {

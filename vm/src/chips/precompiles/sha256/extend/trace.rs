@@ -114,13 +114,13 @@ impl<F: PrimeField32> ShaExtendChip<F> {
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
             cols.is_real = F::ONE;
             let i = j as u64 + 16;
-            cols.i = F::from_canonical_u64(i);
-            cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(u32::try_from(start_clk + j as u64).unwrap());
+            cols.i = F::from_u64(i);
+            cols.chunk = F::from_u32(event.chunk);
+            cols.clk = F::from_u32(u32::try_from(start_clk + j as u64).unwrap());
             cols.w_ptr = [
-                F::from_canonical_u64(event.w_ptr & 0xFFFF),
-                F::from_canonical_u64((event.w_ptr >> 16) & 0xFFFF),
-                F::from_canonical_u64((event.w_ptr >> 32) & 0xFFFF),
+                F::from_u64(event.w_ptr & 0xFFFF),
+                F::from_u64((event.w_ptr >> 16) & 0xFFFF),
+                F::from_u64((event.w_ptr >> 32) & 0xFFFF),
             ];
             cols.w_i_minus_15_ptr
                 .populate(blu, event.w_ptr, (i - 15) * 8);

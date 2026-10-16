@@ -1,0 +1,22 @@
+{
+  "circuit_sha256": "056e14a5946054aa1c3e40eb7ab0d2ebb9580dfc80323dcded43bdc48e3d4a7c",
+  "nb_constraints": 7751800,
+  "nb_public_inputs": 2,
+  "gnark": "v0.14.0",
+  "files": {
+    "ccs": "db136a7f14dfd5b1c3dd3f8e73b33dfad2f88d89b8d1d26a3345ac5576bb41fe",
+    "pk": "f85f9659bb88675c3c5c946ff187f55c98a2a1339e66267109a5149446d760ea",
+    "solidity": "c5f2cb8a1bdeaf33024bdeb44c48bc49629eb69ce005c5f05ff1c6eaa5682f7f",
+    "vk": "17d1215fd33eea1cb52d88c7b91bbe522397825f717f6366499be37bcc3ca448"
+  },
+  "vk_root": [
+    822417522,
+    744100887,
+    1298155482,
+    1623973239,
+    734555938,
+    1733333192,
+    935892639,
+    781849437
+  ]
+}

@@ -1,0 +1,6 @@
+# MLE whitelist artifact mle_vk_map_kb.bin: 15643 convert VKs (one per riscv shape) + 36 combine node VKs + 1 deferred node VK = 15680 leaves in a depth-15 Merkle tree,
+# built 2026-10-15 with mle_build_vk_map for the riscv machine whose whitelist-mode vk pre_hash is [1637860507, 1212602631, 1565435972, 48146571, 1551481270, 147555558, 1005401967, 1195247747] (program table at 2^20).
+# The digest is the shape config the artifact was built for and the root is the verifier's pinned constant; MleVkMap::load re-checks both, and the unit test
+# the_shipped_artifact_matches_this_binary fails when the code no longer matches this file. Rebuild it with the mle_build_vk_map example.
+config digest = [1975609551, 1859906434, 1777904351, 1853999698, 127256026, 525587560, 180678728, 1676705615]
+MLE_VK_ROOT="822417522 744100887 1298155482 1623973239 734555938 1733333192 935892639 781849437"

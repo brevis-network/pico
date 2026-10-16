@@ -14,6 +14,7 @@ use crate::{
             },
             byte::ByteChip,
             riscv_cpu::CpuChip,
+            riscv_ecall::EcallChip,
             riscv_global::GlobalChip,
             riscv_memory::{
                 initialize_finalize::{
@@ -40,7 +41,7 @@ use crate::{
         precompiles::{
             edwards::{EdAddAssignChip, EdDecompressChip},
             fptower::{fp::FpOpChip, fp2_addsub::Fp2AddSubChip, fp2_mul::Fp2MulChip},
-            keccak256::KeccakPermuteChip,
+            keccak256::{KeccakControlChip, KeccakPermuteChip},
             sha256::{
                 compress::{ShaCompressChip, ShaCompressControlChip},
                 extend::{ShaExtendChip, ShaExtendControlChip},
@@ -97,6 +98,7 @@ define_chip_type!(
     [
         (Program, ProgramChip),
         (Cpu, CpuChip),
+        (Ecall, EcallChip),
         (ShaCompress, ShaCompressChip),
         (ShaCompressControl, ShaCompressControlChip),
         (Ed25519Add, EdAddAssignChip),
@@ -129,6 +131,7 @@ define_chip_type!(
         (Subw, SubwChip),
         (Bitwise, BitwiseChip),
         (KeecakP, KeccakPermuteChip),
+        (KeccakControl, KeccakControlChip),
         (FpBn254, FpOpBn254),
         (Fp2AddSubBn254, Fp2AddSubBn254),
         (Fp2MulBn254, Fp2MulBn254),
@@ -164,24 +167,29 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Cpu(Default::default()),
             Self::ShaCompress(Default::default()),
             Self::ShaCompressControl(Default::default()),
-            // The two Ed25519 chips are deliberately out of the machine, and both need work
-            // before either goes back in. Do not simply uncomment.
+            // Both Ed25519 chips, back in the machine after their RV64 port. What they needed:
             //
-            // - `EdAddAssignChip`'s `eval` is `todo!()`, so it constrains nothing.
-            // - `EdDecompressChip` was never ported to the u16-limb memory model this VM uses.
-            // - `EdDecompressChip` writes `neg_x.result` back to guest memory while only bounding
-            //   its limbs to u8. `2p - x` satisfies the same subtraction identity as `p - x`, so a
-            //   prover can store a non-canonical value; the canonicality check that would stop it
-            //   is missing (compare `neg_y_range_check` in `weierstrass_decompress.rs`, which does
-            //   have one). **This one is a soundness gap, not just an unfinished port** -- it
-            //   becomes exploitable the moment the chip is in the machine.
-            // - `EdDecompressChip` also rejects any `y >= p` that the emulator happily accepts, so
-            //   re-enabling it turns a class of guest input into a prover-side abort.
+            // - `EdAddAssignChip`'s `eval` was `todo!()` and its columns still described the
+            //   32-bit memory model; both now follow `weierstrass_add.rs` (48-bit address
+            //   gadgets, u16 word cells with a u8 decomposition, per-word addresses).
+            // - Output canonicality. Both chips write a field element back to guest memory while
+            //   the arithmetic gadget pins it only up to the identity it satisfies, which the
+            //   representative plus `p` satisfies alike: `x3_range`/`y3_range` on the adder and
+            //   `neg_x_range` on the decompressor close that, matching `x3_range`/`y3_range` in
+            //   `weierstrass_add.rs` and `neg_y_range_check` in `weierstrass_decompress.rs`.
+            // - `y >= p`. The decompressor constrains `y < p`; the `FD_EDDECOMPRESS` hook now
+            //   reports a non-canonical `y` as not decompressable, so a guest going through a
+            //   patched curve25519 crate takes the software path instead of reaching a syscall
+            //   whose trace cannot be satisfied. The syscall asserts it as well.
             //
-            // The matching syscalls are unregistered in `emulator/riscv/syscalls/mod.rs`; putting a
-            // chip back requires restoring that registration too.
-            //Self::Ed25519Add(Default::default()),
-            //Self::Ed25519Decompress(Default::default()),
+            // The matching syscalls are registered in `emulator/riscv/syscalls/mod.rs`.
+            //
+            // The MLE air table carries both (air ids 48 and 49, after the poseidon2 precompile
+            // at 47). Every convert program absorbs one presence flag per optional air, so each
+            // new air changes every convert VK; the three came in together so that one rebuild
+            // of the convert VK whitelist covers all of them.
+            Self::Ed25519Add(Default::default()),
+            Self::Ed25519Decompress(Default::default()),
             Self::WsBn254Add(Default::default()),
             Self::WsBls381Add(Default::default()),
             Self::WsSecp256k1Add(Default::default()),
@@ -212,6 +220,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Subw(Default::default()),
             Self::Bitwise(Default::default()),
             Self::KeecakP(Default::default()),
+            Self::KeccakControl(Default::default()),
             Self::FpBn254(Default::default()),
             Self::Fp2AddSubBn254(Default::default()),
             Self::Fp2MulBn254(Default::default()),
@@ -220,35 +229,21 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             Self::Fp2MulBls381(Default::default()),
             Self::FpSecp256k1(Default::default()),
             Self::U256Mul(Default::default()),
-            // The poseidon2 precompile is deliberately out of the machine. Unlike the Ed25519
-            // chips below, this one works -- what is missing is a usable way to call it and a
-            // reason to keep paying for it:
-            //
-            // - The syscall ABI hands over `*const [u32; 16]` / `*mut [u32; 16]`, which Rust
-            //   aligns to 4 bytes, but this VM's memory is 8-byte granular and the address gadget
-            //   range checks `addr[0] / 8`. A buffer that happens to land 4 mod 8 -- roughly half
-            //   of them, and every stack-local `[u32; 16]` in the SDK's own hasher -- cannot be
-            //   proved. That is a leftover of the 32-bit origin of this ABI.
-            // - Each written-back half word is pinned only modulo the field order, so
-            //   `state[j] + p` (and sometimes `+ 2p`) satisfies the same equation. Making the
-            //   written value unique needs a `value < p` check on all 16 inputs and 16 outputs,
-            //   which `gadgets/field_range_check/word_range.rs` can now supply. Until that lands,
-            //   the written value is not unique -- a soundness gap, not an unfinished port.
-            //
-            // Re-enabling means: fix the alignment on the caller side (or relax the gadget),
-            // add the canonicality checks, restore the syscall registration in
-            // `emulator/riscv/syscalls/mod.rs` and the AOT dispatch arm in
-            // `aot-runtime/src/syscall.rs`, and un-deprecate the SDK entry points. The chip's own
-            // AIR, columns and trace generation are untouched and still compiled -- and still
-            // tested, see the poseidon2 tests in `chips/tests.rs`, which register the syscall
-            // themselves so this code cannot rot while it is shelved.
-            //
-            // Self::Poseidon2P(Default::default()),
+            // The poseidon2 precompile, back in the machine. It was shelved for two reasons,
+            // both now closed: the written-back state words were pinned only modulo the field
+            // order, so the prover rather than the permutation chose which representative
+            // reached guest memory (`input_range_checkers` / `output_range_checkers` close
+            // that; see `chips/precompiles/poseidon2/tests.rs`), and the syscall ABI handed
+            // over buffers Rust aligns to 4 while this VM's memory is 8-byte granular
+            // (`pico_patch_libs::Poseidon2State` carries the alignment now).
+            Self::Poseidon2P(Default::default()),
             Self::SyscallRiscv(SyscallChip::riscv()),
             Self::SyscallPrecompile(SyscallChip::precompile()),
             Self::Global(Default::default()),
             Self::Byte(Default::default()),
             Self::Poseidon2(Default::default()),
+            // Ecall: appended last so the hard-coded batch indices (0..=44) stay valid.
+            Self::Ecall(Default::default()),
         ]
     }
 
@@ -259,12 +254,13 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 Self::Program(Default::default()).name(),
                 program.instructions.len(),
             ),
-            (Self::Byte(Default::default()).name(), 1 << 16),
+            (Self::Byte(Default::default()).name(), 1 << 17),
         ]
     }
 
     /// Get the heights of the chips for a given execution record.
-    pub(crate) fn riscv_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
+    /// Public for the MLE shape probe (`examples/mle_shape_probe.rs`) and coarse-bucket tuning.
+    pub fn riscv_heights(record: &EmulationRecord) -> Vec<(String, usize)> {
         let num_global_events =
             2 * record.get_local_mem_events().count() + record.syscall_events.len();
         vec![
@@ -348,10 +344,15 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                     .count()
                     .div_ceil(MEMORY_RW_DATAPAR),
             ),
-            (Self::Global(Default::default()).name(), num_global_events),
+            // `+ 1`: the Global trace always ends with one padding row (its accumulation
+            // constraints require it); Poseidon2 follows so the log-height gap stays 2.
+            (
+                Self::Global(Default::default()).name(),
+                num_global_events + 1,
+            ),
             (
                 <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                num_global_events.div_ceil(RISCV_POSEIDON2_DATAPAR),
+                (num_global_events + 1).div_ceil(RISCV_POSEIDON2_DATAPAR),
             ),
             (
                 Self::SyscallRiscv(SyscallChip::riscv()).name(),
@@ -374,7 +375,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
             ),
             (
                 Self::Global(GlobalChip::default()).name(),
-                num_global_events,
+                num_global_events + 1,
             ),
             (
                 <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
@@ -387,7 +388,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
                 // under-reported the height by one row and the generated trace did not fit the
                 // shape. Every sibling entry in this list already uses `div_ceil`; this was the
                 // only one left.
-                num_global_events.div_ceil(RISCV_POSEIDON2_DATAPAR),
+                (num_global_events + 1).div_ceil(RISCV_POSEIDON2_DATAPAR),
             ),
         ]
     }
@@ -418,6 +419,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
     pub(crate) fn get_all_riscv_chips() -> Vec<MetaChip<F, Self>> {
         [
             Self::Cpu(Default::default()),
+            Self::Ecall(Default::default()),
             Self::Add(Default::default()),
             Self::Sub(Default::default()),
             Self::Addw(Default::default()),
@@ -472,6 +474,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvChipType<F> {
         // the parent ShaCompress/ShaExtend shape in `get_precompile_shapes`.
         excluded_chip_names.insert(Self::ShaCompressControl(Default::default()).name());
         excluded_chip_names.insert(Self::ShaExtendControl(Default::default()).name());
+        excluded_chip_names.insert(Self::KeccakControl(Default::default()).name());
 
         all_chips
             .into_iter()

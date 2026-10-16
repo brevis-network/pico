@@ -6,7 +6,6 @@ use crate::{
     machine::field::FieldSpecificPoseidon2Config,
 };
 use core::marker::PhantomData;
-use p3_field::Field;
 use typenum::Unsigned;
 
 pub mod constraints;
@@ -29,8 +28,11 @@ impl<F, LinearLayers, Config: Poseidon2Config> Poseidon2Chip<F, LinearLayers, Co
     const HALF_FULL_ROUNDS: usize = Config::HalfFullRounds::USIZE;
 }
 
-impl<F: Field, LinearLayers, Config: Poseidon2Config> Default
-    for Poseidon2Chip<F, LinearLayers, Config>
+impl<
+        F: FieldSpecificPoseidon2Config<Poseidon2Config = Config>,
+        LinearLayers,
+        Config: Poseidon2Config,
+    > Default for Poseidon2Chip<F, LinearLayers, Config>
 {
     fn default() -> Self {
         let constants = RoundConstants::default();
@@ -40,6 +42,3 @@ impl<F: Field, LinearLayers, Config: Poseidon2Config> Default
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -64,6 +64,9 @@ impl Syscall for ExitUnconstrainedSyscall {
                 ctx.rt.state.memory.insert_u64(addr, record);
             }
             ctx.rt.record = core::mem::take(&mut state.record);
+            // The record's digest rolls back, so the flag its COMMITs raised rolls back with it.
+            ctx.rt.chunk_split_state.commit_in_flight = state.commit_in_flight;
+            ctx.rt.chunk_split_state.deferred_commits = state.deferred_commits;
             ctx.rt.memory_accesses = core::mem::take(&mut state.op_record);
         }
         Some(0)

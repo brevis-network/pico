@@ -1,0 +1,17 @@
+[package]
+name = "patch-test-coprocessor"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+pico-sdk = { workspace = true, features = ["coprocessor"] }
+# The same source and `rev` as `pico-sdk`'s own dependency, character for character, so the two
+# resolve to one crate: `commit_coprocessor_bytes` takes this crate's `SDK`. A shortened hash would
+# be a second source, and a second `SDK` type.
+coprocessor-sdk = { git = "https://github.com/brevis-network/Pico-zkCoprocessor", rev = "0c5a781fd0bc73f2706748a04d4cccf167a19654" }
+# The branch `coprocessor-sdk` builds against: its receipts carry this crate's `U256`.
+crypto-bigint = { git = "https://github.com/brevis-network/crypto-bigint", branch = "patch-v1.0.0", features = ["serde", "alloc"] }
+serde = { version = "1.0", features = ["derive"] }

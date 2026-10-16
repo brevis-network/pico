@@ -4,7 +4,6 @@ use crate::{
             alu::{
                 bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::traces::ShiftRightChip,
             },
-            riscv_cpu::CpuChip,
             riscv_global::GlobalChip,
             riscv_memory::{
                 initialize_finalize::MemoryInitializeFinalizeChip, local::MemoryLocalChip,
@@ -156,8 +155,6 @@ impl<'a> EventSizeCapture<'a> {
             field,
             ..Self::default()
         };
-
-        CpuChip::<()>::count_extra_records(record, &mut result);
 
         MemoryInitializeFinalizeChip::<()>::count_extra_records(record, &mut result);
 
@@ -364,8 +361,10 @@ impl<'a> EventSizeCapture<'a> {
         data[CHIP_SYSCALLPRECOMPILE] = self.num_precompile_syscall_events;
         let nb_rows = record.shape_chip_size("SyscallPrecompile");
         data[CHIP_SYSCALLPRECOMPILE] = next_power_of_two(data[CHIP_SYSCALLPRECOMPILE], nb_rows);
-        // riscv global: 1 row per event
-        data[CHIP_GLOBAL] = self.num_global_lookup_events;
+        // riscv global: 1 row per event, plus the trailing padding row the accumulation
+        // constraints require (`riscv_global/traces.rs`): a power-of-two event count lands one
+        // row above the boundary and the trace doubles.
+        data[CHIP_GLOBAL] = self.num_global_lookup_events + 1;
         let nb_rows = record.shape_chip_size("Global");
         data[CHIP_GLOBAL] = next_power_of_two(data[CHIP_GLOBAL], nb_rows);
         // byte: fixed 2^16
@@ -539,7 +538,20 @@ struct Scaler {
 
 #[cfg(test)]
 mod tests {
-    use super::{EstimatorJson, EstimatorModel};
+    use super::{EstimatorJson, EstimatorModel, EventSizeCapture, CHIP_GLOBAL};
+    use crate::emulator::riscv::record::EmulationRecord;
+
+    /// The Global trace always ends in one padding row, so its estimated height must follow
+    /// the trace generator across a power-of-two event count.
+    #[test]
+    fn global_height_estimate_includes_the_padding_row() {
+        let record = EmulationRecord::default();
+        let mut capture = EventSizeCapture::snapshot(&record, "kb");
+        capture.num_global_lookup_events = 1 << 20;
+        assert_eq!(capture.estimate().data[CHIP_GLOBAL], 1 << 21);
+        capture.num_global_lookup_events = (1 << 20) - 1;
+        assert_eq!(capture.estimate().data[CHIP_GLOBAL], 1 << 20);
+    }
 
     #[test]
     fn test_model_deserialize() {

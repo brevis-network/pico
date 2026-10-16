@@ -6,16 +6,19 @@ pub mod unconstrained;
 pub mod util;
 
 use crate::{
-    chips::chips::events::{
-        MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord,
-        MemoryRecord, MemoryWriteRecord,
+    chips::chips::{
+        events::{
+            MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
+            MemoryReadRecord, MemoryRecord, MemoryWriteRecord,
+        },
+        riscv_memory::event::fresh_local_mem_verdict,
     },
     compiler::riscv::{instruction::Instruction, program::Program, register::Register},
     emulator::{
         opts::{EmulatorOpts, SplitOpts},
         record::RecordBehavior,
         riscv::{
-            chunk_split::ChunkSplitConfig,
+            chunk_split::{self, ChunkSplitConfig},
             event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
             hook::{default_hook_map, Hook},
             public_values::PublicValues,
@@ -29,18 +32,15 @@ use crate::{
     },
     machine::{
         estimator::{CycleEstimator, EventSizeCapture},
-        field::same_field,
+        field::{same_field, FieldSpecificPoseidon2Config},
         report::EmulationReport,
     },
-    primitives::Poseidon2Init,
+    primitives::consts::CHUNK_CLK_START,
 };
 use alloc::sync::Arc;
 use hashbrown::HashMap;
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
-use p3_mersenne_31::Mersenne31;
-use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use std::{sync::Mutex, time::Instant};
 use tracing::{debug, error, instrument};
@@ -55,6 +55,19 @@ pub const MIN_MAIN_MEMORY_ADDR: u64 = 0x100;
 
 // TODO: try parking_lot
 pub type SharedDeferredState = Arc<Mutex<EmulationDeferredState>>;
+
+/// `CHUNK_SPLIT_DEBUG=1`: the chunk counter a tail record ends up proving under.
+///
+/// The probe in `EmulationRecord::split` cannot print this — it sees the records before their
+/// public values exist. The records reach here in the order that probe listed them.
+fn maybe_debug_tail_chunk_pv(record: &EmulationRecord) {
+    if !record.is_cpu_chunk && chunk_split::split_debug() {
+        tracing::info!(
+            "[chunk-split] tail-chunk pvs.chunk={}",
+            record.public_values.chunk
+        );
+    }
+}
 
 /// The state for saving deferred information
 pub struct EmulationDeferredState {
@@ -105,6 +118,10 @@ impl EmulationDeferredState {
     }
 
     /// Update the public values, split and return the deferred records.
+    ///
+    /// # Arguments
+    /// * `committed_batch_idx` - The current batch_idx that sequencer has processed.
+    ///   Use `u32::MAX` to disable filtering (legacy behavior).
     pub fn split_and_return_deferred_records<F>(
         &mut self,
         emulation_done: bool,
@@ -112,11 +129,14 @@ impl EmulationDeferredState {
         is_trace: bool,
         callback: &mut F,
         pc: u64,
+        committed_batch_idx: u32,
     ) where
         F: FnMut(EmulationRecord),
     {
         // Get the deferred records.
-        let mut records = self.deferred.split(emulation_done, opts);
+        let mut records = self
+            .deferred
+            .split(emulation_done, opts, committed_batch_idx);
         debug!("split-chunks len: {:?}", records.len());
 
         if emulation_done {
@@ -138,8 +158,11 @@ impl EmulationDeferredState {
         &mut self,
         emulation_done: bool,
         opts: SplitOpts,
+        committed_batch_idx: u32,
     ) -> Vec<EmulationRecord> {
-        let mut records = self.deferred.split(emulation_done, opts);
+        let mut records = self
+            .deferred
+            .split(emulation_done, opts, committed_batch_idx);
         debug!("split-chunks len: {:?}", records.len());
         if emulation_done {
             if let Some(last) = records.last_mut() {
@@ -170,14 +193,36 @@ impl EmulationDeferredState {
             self.pvs.execution_chunk =
                 encode_public_value_chunk_counter(self.pvs.execution_chunk + 1);
         }
-        // cpu chunk in Simple Mode has no cpu_events
-        if !record.cpu_events.is_empty() {
-            self.pvs.start_pc = encode_public_value_pc_limbs(record.cpu_events.first().unwrap().pc);
-            self.pvs.next_pc =
-                encode_public_value_pc_limbs(record.cpu_events.last().unwrap().next_pc);
-            self.pvs.exit_code = record.cpu_events.last().unwrap().exit_code;
-            self.pvs.committed_value_digest = record.public_values.committed_value_digest;
-            self.pvs.deferred_proofs_digest = record.public_values.deferred_proofs_digest;
+        if record.is_cpu_chunk {
+            // The pc and the exit code are read back off the chunk's own cpu events, and a chunk
+            // emulated in Simple Mode carries none -- there is nothing to adopt from it.
+            if let (Some(first), Some(last)) = (record.cpu_events.first(), record.cpu_events.last())
+            {
+                self.pvs.start_pc = encode_public_value_pc_limbs(first.pc);
+                self.pvs.next_pc = encode_public_value_pc_limbs(last.next_pc);
+                self.pvs.exit_code = last.exit_code;
+            }
+            // The two digests are monotonic: zero until the guest's COMMIT ecall, then held for
+            // every later chunk. gpu-base needs this because its out-of-order sequencer hands
+            // records standalone public values; here `bump_record` copies the previous record's
+            // values onto the next one, so the zero never arrives. Carried anyway, so the branches
+            // read the same and a future path that builds its own values cannot reintroduce it.
+            if record
+                .public_values
+                .committed_value_digest
+                .iter()
+                .any(|&w| w != 0)
+            {
+                self.pvs.committed_value_digest = record.public_values.committed_value_digest;
+            }
+            if record
+                .public_values
+                .deferred_proofs_digest
+                .iter()
+                .any(|&w| w != 0)
+            {
+                self.pvs.deferred_proofs_digest = record.public_values.deferred_proofs_digest;
+            }
         }
 
         record.public_values = self.pvs;
@@ -214,6 +259,7 @@ impl EmulationDeferredState {
         self.pvs.last_finalize_addr_limbs = record.public_values.last_finalize_addr_limbs;
 
         record.public_values = self.pvs;
+        maybe_debug_tail_chunk_pv(record);
         debug!(
             "riscv record index: {:?}, record.public_values.deferred_proofs_digest: {:?}",
             record.chunk_index(),
@@ -224,19 +270,38 @@ impl EmulationDeferredState {
     #[allow(dead_code)]
     pub fn update_public_values(&mut self, emulation_done: bool, record: &mut EmulationRecord) {
         self.pvs.chunk = encode_public_value_chunk_counter(self.pvs.chunk + 1);
-        if !record.cpu_events.is_empty() {
+        if record.is_cpu_chunk {
             if !self.flag_active {
                 self.flag_active = true;
             } else {
                 self.pvs.execution_chunk =
                     encode_public_value_chunk_counter(self.pvs.execution_chunk + 1);
             }
-            self.pvs.start_pc = encode_public_value_pc_limbs(record.cpu_events.first().unwrap().pc);
-            self.pvs.next_pc =
-                encode_public_value_pc_limbs(record.cpu_events.last().unwrap().next_pc);
-            self.pvs.exit_code = record.cpu_events.last().unwrap().exit_code;
-            self.pvs.committed_value_digest = record.public_values.committed_value_digest;
-            self.pvs.deferred_proofs_digest = record.public_values.deferred_proofs_digest;
+            // As in `update_public_values_cpu_chunk`: a Simple-mode chunk carries no cpu events,
+            // so there is no pc to adopt from it.
+            if let (Some(first), Some(last)) = (record.cpu_events.first(), record.cpu_events.last())
+            {
+                self.pvs.start_pc = encode_public_value_pc_limbs(first.pc);
+                self.pvs.next_pc = encode_public_value_pc_limbs(last.next_pc);
+                self.pvs.exit_code = last.exit_code;
+            }
+            // Monotonic digests, adopt non-zero only -- see `update_public_values_cpu_chunk`.
+            if record
+                .public_values
+                .committed_value_digest
+                .iter()
+                .any(|&w| w != 0)
+            {
+                self.pvs.committed_value_digest = record.public_values.committed_value_digest;
+            }
+            if record
+                .public_values
+                .deferred_proofs_digest
+                .iter()
+                .any(|&w| w != 0)
+            {
+                self.pvs.deferred_proofs_digest = record.public_values.deferred_proofs_digest;
+            }
         } else {
             // Make execution chunk consistent.
             if self.flag_active && !emulation_done {
@@ -254,6 +319,7 @@ impl EmulationDeferredState {
         }
 
         record.public_values = self.pvs;
+        maybe_debug_tail_chunk_pv(record);
         debug!(
             "riscv record index: {:?}, record.public_values.deferred_proofs_digest: {:?}",
             record.chunk_index(),
@@ -318,6 +384,21 @@ pub struct RiscvEmulator {
 
     /// Shared event-based counters for the current chunk.
     pub chunk_split_state: crate::emulator::riscv::chunk_split::ChunkSplitState,
+
+    /// Set when a snapshot worker reaches its target, to end the batch loop.
+    ///
+    /// The loop otherwise ends on the chunk counter moving, and a segment that is not the last
+    /// one deliberately leaves that counter alone — without its own signal it would replay
+    /// straight past its target.
+    pub segment_complete: bool,
+
+    /// Whether this replay ends the chunk, rather than one of its segments.
+    ///
+    /// A chunk's replay can be split across threads; only the segment that reaches the chunk's
+    /// own boundary may advance the chunk counters. A middle segment that reset `clk` would
+    /// restart the chunk-local clock inside the chunk, and every event after the seam would
+    /// carry the wrong one.
+    pub final_segment: bool,
 
     /// Local memory access events.
     pub local_memory_access: HashMap<u64, MemoryLocalEvent>,
@@ -410,6 +491,19 @@ impl RiscvEmulator {
             .expect("chunk-local clock exceeds u32 during chunk split evaluation")
     }
 
+    /// Log why the current chunk closed (silent unless `CHUNK_SPLIT_DEBUG=1`).
+    #[inline(always)]
+    fn maybe_debug_split_snapshot(&self) {
+        chunk_split::maybe_debug_split_snapshot(
+            self.state.current_chunk,
+            self.chunk_clk_u32(),
+            self.max_syscall_cycles_u32(),
+            self.state.global_clk,
+            &self.chunk_split_state,
+            &self.chunk_split_config,
+        );
+    }
+
     #[inline(always)]
     fn refresh_chunk_split_config(&mut self) {
         self.chunk_split_config =
@@ -435,8 +529,7 @@ impl RiscvEmulator {
         par_opts: Option<ParOptions>,
     ) -> Self
     where
-        F: PrimeField32 + Poseidon2Init,
-        F::Poseidon2: Permutation<[F; 16]>,
+        F: PrimeField32 + FieldSpecificPoseidon2Config,
     {
         let deferred_state = Arc::new(Mutex::new(EmulationDeferredState::new(program.clone())));
         Self::new::<F>(program, opts, par_opts, deferred_state, false)
@@ -451,8 +544,7 @@ impl RiscvEmulator {
         shared_ds: SharedDeferredState,
     ) -> Self
     where
-        F: PrimeField32 + Poseidon2Init,
-        F::Poseidon2: Permutation<[F; 16]>,
+        F: PrimeField32 + FieldSpecificPoseidon2Config,
     {
         Self::new::<F>(program, opts, par_opts, shared_ds, true)
     }
@@ -466,8 +558,7 @@ impl RiscvEmulator {
         defer_only: bool,
     ) -> Self
     where
-        F: PrimeField32 + Poseidon2Init,
-        F::Poseidon2: Permutation<[F; 16]>,
+        F: PrimeField32 + FieldSpecificPoseidon2Config,
     {
         let record = EmulationRecord::new(program.clone());
 
@@ -500,6 +591,8 @@ impl RiscvEmulator {
                 u32::try_from(max_syscall_cycles).expect("syscall cycle budget exceeds u32"),
             ),
             chunk_split_state: Default::default(),
+            segment_complete: false,
+            final_segment: true,
             local_memory_access: Default::default(),
             mode: RiscvEmulatorMode::Trace,
             stdout: Default::default(),
@@ -512,12 +605,8 @@ impl RiscvEmulator {
             log_syscalls,
             par_opts,
             emu_fn: RiscvEmulator::emulate_instruction,
-            field: if same_field::<F, BabyBear, 4>() {
-                "BabyBear"
-            } else if same_field::<F, KoalaBear, 4>() {
+            field: if same_field::<F, KoalaBear, 4>() {
                 "KoalaBear"
-            } else if same_field::<F, Mersenne31, 3>() {
-                "Mersenne31"
             } else {
                 panic!("Unsupported field type");
             },
@@ -532,7 +621,7 @@ impl RiscvEmulator {
     #[inline(always)]
     fn initialize_if_needed(&mut self) {
         if self.state.global_clk == 0 {
-            self.state.clk = 0;
+            self.state.clk = u64::from(CHUNK_CLK_START);
             debug!("loading memory image");
             for (addr, value) in self.program.memory_image.iter() {
                 self.state.memory.insert(
@@ -574,11 +663,11 @@ impl RiscvEmulator {
     #[inline(always)]
     fn flush(&mut self) {
         if !self.stdout.is_empty() {
-            log::info!("stdout (remaining)> {}", &self.stdout);
+            log::info!("stdout (remaining)> {}", self.stdout);
             self.stdout.clear();
         }
         if !self.stderr.is_empty() {
-            log::info!("stderr (remaining)> {}", &self.stderr);
+            log::info!("stderr (remaining)> {}", self.stderr);
             self.stderr.clear();
         }
     }
@@ -647,9 +736,14 @@ impl RiscvEmulator {
                                 self.state.global_clk, target_global_clk,
                                 "snapshot worker overshot target_global_clk"
                             );
-                            self.chunk_split_state.clear();
-                            self.state.current_chunk += 1;
-                            self.state.clk = 0;
+                            // Only the segment that ends the chunk closes it out; a middle one
+                            // just hands its record over and leaves the chunk running.
+                            if self.final_segment {
+                                self.chunk_split_state.clear();
+                                self.state.current_chunk += 1;
+                                self.state.clk = u64::from(CHUNK_CLK_START);
+                            }
+                            self.segment_complete = true;
 
                             let elapsed = last_record_time.elapsed();
                             let tid = self.par_opts.unwrap_or_default().thread_id;
@@ -674,9 +768,10 @@ impl RiscvEmulator {
                     ) =>
                 {
                     // Check if there's enough cycles or move to the next chunk.
+                    self.maybe_debug_split_snapshot();
                     self.chunk_split_state.clear();
                     self.state.current_chunk += 1;
-                    self.state.clk = 0;
+                    self.state.clk = u64::from(CHUNK_CLK_START);
 
                     let elapsed = last_record_time.elapsed();
                     let tid = self.par_opts.unwrap_or_default().thread_id;
@@ -729,11 +824,14 @@ impl RiscvEmulator {
             match self.chunk_boundary_mode() {
                 ChunkBoundaryMode::ReplayToTarget => {
                     if let Some(target_global_clk) = self.target_global_clk {
-                        if self.state.global_clk >= target_global_clk {
+                        // The `final_segment` test mirrors the batch path's, but this one does not
+                        // raise `segment_complete` with it: single-stepping has no batch loop to
+                        // end, and its caller drives one instruction at a time.
+                        if self.state.global_clk >= target_global_clk && self.final_segment {
                             debug_assert_eq!(self.state.global_clk, target_global_clk);
                             self.chunk_split_state.clear();
                             self.state.current_chunk += 1;
-                            self.state.clk = 0;
+                            self.state.clk = u64::from(CHUNK_CLK_START);
                         }
                     }
                 }
@@ -744,9 +842,10 @@ impl RiscvEmulator {
                         &self.chunk_split_config,
                     ) =>
                 {
+                    self.maybe_debug_split_snapshot();
                     self.chunk_split_state.clear();
                     self.state.current_chunk += 1;
-                    self.state.clk = 0;
+                    self.state.clk = u64::from(CHUNK_CLK_START);
                 }
                 ChunkBoundaryMode::ChunkSplit => {}
             }
@@ -803,6 +902,9 @@ impl RiscvEmulator {
 
         let mut is_trace_mode = matches!(self.mode, RiscvEmulatorMode::Trace);
 
+        // `target_global_clk` is only set on a snapshot worker.
+        let is_snapshot_worker = self.target_global_clk.is_some();
+
         // Loop until we've emulated CHUNK_BATCH_SIZE chunks.
         loop {
             if self.emulate_cycle(
@@ -819,6 +921,16 @@ impl RiscvEmulator {
             )? {
                 done = true;
                 break;
+            }
+
+            if is_snapshot_worker && self.segment_complete {
+                self.segment_complete = false;
+                // A middle segment leaves the chunk counter alone, so the test below cannot see
+                // that it is done. A final segment still leaves through that test, so the
+                // unsplit path keeps exactly the behaviour it had.
+                if !self.final_segment {
+                    break;
+                }
             }
 
             if self.opts.chunk_batch_size > 0 && current_chunk != self.state.current_chunk {
@@ -876,6 +988,7 @@ impl RiscvEmulator {
                     is_trace,
                     &mut real_callback,
                     self.state.pc,
+                    u32::MAX, // disable committed_batch_idx filtering (single-machine)
                 );
         }
 
@@ -986,6 +1099,7 @@ impl RiscvEmulator {
                             self.mode == RiscvEmulatorMode::Trace,
                             &mut real_callback,
                             self.state.pc,
+                            u32::MAX, // disable committed_batch_idx filtering (single-machine)
                         );
                 }
             }
@@ -1015,14 +1129,14 @@ impl RiscvEmulator {
         // Fast clone: uses vec![0; size] for memory instead of copying 12GB
         let mut snapshot = self.state.clone_without_memory();
 
-        println!(
+        debug!(
             "state clone duration: {:?}ms",
             t_clone.elapsed().as_secs_f64() * 1000.0
         );
 
         let t_emu_snapshot = Instant::now();
         let report = self.emulate_batch_snapshot_main(record_callback)?;
-        println!(
+        debug!(
             "t_emu_snapshot: {:?}ms",
             t_emu_snapshot.elapsed().as_secs_f64() * 1000.0
         );
@@ -1080,7 +1194,7 @@ impl RiscvEmulator {
         self.register_snapshot_bitmap = 0;
         self.register_snapshot = [RuntimeRegisterRecord::default(); 32];
 
-        println!(
+        debug!(
             "state mem rollback duration: {:?}ms",
             t_rollback.elapsed().as_secs_f64() * 1000.0
         );
@@ -1646,14 +1760,15 @@ impl RiscvEmulator {
         opts: EmulatorOpts,
         shared_ds: SharedDeferredState,
         target_global_clk: u64,
+        final_segment: bool,
     ) -> Self
     where
-        F: PrimeField32 + Poseidon2Init,
-        F::Poseidon2: Permutation<[F; 16]>,
+        F: PrimeField32 + FieldSpecificPoseidon2Config,
     {
         let mut runtime = Self::new_snapshot_worker::<F>(program, opts, None, shared_ds);
         runtime.state = state;
         runtime.target_global_clk = Some(target_global_clk);
+        runtime.final_segment = final_segment;
         runtime
     }
 
@@ -1828,27 +1943,78 @@ impl RiscvEmulator {
         // accessed_addrs = the union set of (memory_image_addrs, global_accessed_addrs)
         let accessed_addrs: Vec<RvAddr> = self.state.memory.accessed_keys().collect();
         debug!("postprocess: accessed_addrs len: {}", accessed_addrs.len());
+
+        // Preallocate: the loop below pushes at most one finalize event per accessed dword and
+        // at most one initialize event per dword (far fewer than that: a zero-initial word
+        // outside the image gets none, see below). These can
+        // number in the hundreds of thousands, so reserve up front to avoid the repeated
+        // grow-and-memmove of the event Vecs.
+        memory_finalize_events.reserve(accessed_addrs.len());
+
+        // `accessed_keys()` yields addresses in strictly ascending order and `memory_image` keys
+        // are sorted, so we replace the per-dword O(log n) `contains_key` lookup with a single
+        // forward cursor advanced in lock-step (ordered merge: amortized O(1) per addr instead
+        // of O(log n)). `memory_image` keys are always 8-byte aligned (see Gen-1 note /
+        // disassembler/elf.rs), so an exact `key == addr` test is equivalent to the previous
+        // `contains_key(&addr)`.
+        let mut img_iter = self
+            .record
+            .program
+            .memory_image
+            .range(MIN_MAIN_MEMORY_ADDR..)
+            .peekable();
         for addr in accessed_addrs {
             if addr < MIN_MAIN_MEMORY_ADDR {
                 continue;
             }
 
-            // With 8-byte-aligned addresses, check if either 4-byte half is in the image.
-            let lo_in_image = self.record.program.memory_image.contains_key(&addr);
-            let hi_in_image = self.record.program.memory_image.contains_key(&(addr + 4));
-            let is_in_image = lo_in_image || hi_in_image;
-            // Program memory is initialized in the MemoryProgram chip and doesn't require any
-            // events, so we only send init events for other memory addresses.
+            // Advance the cursor to the first image key >= addr (monotonic: addr is ascending).
+            while img_iter.peek().is_some_and(|(k, _)| **k < addr) {
+                img_iter.next();
+            }
+            let is_in_image = img_iter.peek().is_some_and(|(k, _)| **k == addr);
+            let record = self.state.memory.get(addr);
+
+            // Which events a main-memory word gets, in this order:
+            //
+            // 1. Image word: finalize only. Its initial state is sent by the vk's image digest
+            //    (`compiler/riscv/program.rs`), for every image word -- including the ones the
+            //    program never touched, whose record is still `(0, 0, image value)` (bulk-load
+            //    marks them accessed), so their finalize event is what balances the digest.
+            // 2. Outside the image, record still at `(chunk 0, timestamp 0)`: no event at all.
+            //    No constrained access ever reached the word (chunks start at 1, clks at
+            //    `CHUNK_CLK_START`): only a hint wrote it (`syscalls/hint.rs` inserts
+            //    `(word, 0, 0)` and marks it accessed) or an unconstrained rollback restored
+            //    it. No MemoryLocal entry anywhere names it, so an init / finalize pair would
+            //    only cancel against itself on the Global bus.
+            // 3. Outside the image, starting at zero: finalize only. The word's first-touch
+            //    MemoryLocal entry declares the zero initial state itself
+            //    (`riscv_memory/event.rs`, `is_fresh_local_mem`; `has_initial = 0` on the AIR),
+            //    so there is no MemoryInitialize row to receive from.
+            // 4. Outside the image, nonzero initial value (a hint wrote it): initialize and
+            //    finalize, as before. The entry receives the value from the MemoryInitialize
+            //    row, which is where a nonzero initial state has to come from.
+            //
+            // Registers (above) keep their initialize events unconditionally.
             if !is_in_image {
-                let initial_value = self.state.uninitialized_memory.get(addr).unwrap_or(&0);
-                memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
-                    addr,
-                    *initial_value,
-                    true,
-                ));
+                if record.chunk == 0 && record.timestamp == 0 {
+                    continue;
+                }
+                let initial_value = *self.state.uninitialized_memory.get(addr).unwrap_or(&0);
+                let initial = MemoryRecord {
+                    chunk: 0,
+                    timestamp: 0,
+                    value: initial_value,
+                };
+                if !fresh_local_mem_verdict(addr, &initial, false) {
+                    memory_initialize_events.push(MemoryInitializeFinalizeEvent::initialize(
+                        addr,
+                        initial_value,
+                        true,
+                    ));
+                }
             }
 
-            let record = self.state.memory.get(addr);
             memory_finalize_events.push(MemoryInitializeFinalizeEvent::finalize_from_record(
                 addr, &record,
             ));
@@ -1966,34 +2132,11 @@ impl RiscvEmulator {
             }
         }
     }
-
-    /// Collect signatures from memory between the given begin and end addresses.
-    ///
-    /// The guest-facing address surface is RV64, but the signature collection format remains the
-    /// retained legacy 32-bit word stream used by the current proverchain harness.
-    pub fn collect_signatures(&mut self, begin: RvAddr, end: RvAddr) -> Vec<RvValue> {
-        if begin >= end {
-            return Vec::new();
-        }
-
-        let size = usize::try_from(end - begin).unwrap_or_else(|_| {
-            panic!("collect_signatures range too large: begin={begin}, end={end}")
-        });
-        let mut signatures = Vec::with_capacity(size / 4);
-
-        for offset in (0..size).step_by(4) {
-            let addr = begin + offset as u64;
-            let word = self.word(addr);
-            signatures.push(word);
-        }
-
-        signatures
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Program, RiscvEmulator};
+    use super::{Program, RiscvEmulator, CHUNK_CLK_START};
     use crate::{
         compiler::riscv::{
             compiler::{Compiler, SourceType},
@@ -2005,7 +2148,8 @@ mod tests {
         emulator::{opts::EmulatorOpts, riscv::state::RuntimeRegisterRecord, stdin::EmulatorStdin},
     };
     use alloc::sync::Arc;
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
+    use std::time::Instant;
 
     #[allow(dead_code)]
     const FIBONACCI_ELF: &[u8] =
@@ -2042,6 +2186,98 @@ mod tests {
 
     const MAX_FIBONACCI_NUM_IN_ONE_CHUNK: u32 = 836789u32;
 
+    /// Only the segment that ends the chunk may close it. A middle one that advanced the chunk
+    /// counter and reset `clk` would restart the chunk-local clock inside the chunk, and every
+    /// event after the seam would carry the wrong one — which a whole-run proof does not catch,
+    /// because each segment replays from its own snapshot and never sees the others' state.
+    #[test]
+    fn only_the_final_segment_closes_the_chunk() {
+        let opts = EmulatorOpts {
+            chunk_size: 4,
+            chunk_batch_size: 1,
+            max_cycles: Some(32),
+            ..EmulatorOpts::default()
+        };
+
+        let mut middle = RiscvEmulator::new_single::<KoalaBear>(tiny_program(), opts, None);
+        middle.initialize_if_needed();
+        middle.final_segment = false;
+        middle.target_global_clk = Some(middle.state.global_clk + 1);
+        let chunk_before = middle.state.current_chunk;
+        middle
+            .emulate_cycle(|_, _| {}, &mut Instant::now())
+            .expect("emulate_cycle failed");
+        assert_eq!(
+            middle.state.current_chunk, chunk_before,
+            "a middle segment leaves the chunk running"
+        );
+
+        let mut last = RiscvEmulator::new_single::<KoalaBear>(tiny_program(), opts, None);
+        last.initialize_if_needed();
+        last.target_global_clk = Some(last.state.global_clk + 1);
+        let chunk_before = last.state.current_chunk;
+        last.emulate_cycle(|_, _| {}, &mut Instant::now())
+            .expect("emulate_cycle failed");
+        assert_eq!(
+            last.state.current_chunk,
+            chunk_before + 1,
+            "the segment that ends the chunk closes it"
+        );
+        assert_eq!(last.state.clk, u64::from(CHUNK_CLK_START));
+    }
+
+    #[test]
+    fn cycle_only_chunk_rollover_exact_fit_in_baseline() {
+        let opts = EmulatorOpts {
+            chunk_size: 4,
+            chunk_batch_size: 1,
+            max_cycles: Some(32),
+            ..EmulatorOpts::default()
+        };
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(tiny_program(), opts, None);
+        emulator.initialize_if_needed();
+        emulator.state.clk = 12;
+        emulator.max_syscall_cycles = 4;
+
+        emulator.refresh_chunk_split_config();
+
+        let done = emulator
+            .emulate_cycle(|_, _| {}, &mut Instant::now())
+            .expect("emulate_cycle failed");
+
+        assert!(!done);
+        assert_eq!(emulator.state.current_chunk, 2);
+        assert_eq!(emulator.state.clk, u64::from(CHUNK_CLK_START));
+    }
+
+    #[test]
+    fn cycle_only_chunk_rollover_stays_suppressed_in_unconstrained_mode() {
+        let opts = EmulatorOpts {
+            chunk_size: 4,
+            chunk_batch_size: 1,
+            max_cycles: Some(32),
+            ..EmulatorOpts::default()
+        };
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(tiny_program(), opts, None);
+        emulator.initialize_if_needed();
+        emulator.state.clk = 12;
+        emulator.max_syscall_cycles = 4;
+        emulator.mode = super::RiscvEmulatorMode::Simple;
+        emulator.update_mode_deps();
+        emulator.mode =
+            super::RiscvEmulatorMode::Unconstrained(super::UnconstrainedState::new(&mut emulator));
+
+        emulator.refresh_chunk_split_config();
+
+        let done = emulator
+            .emulate_cycle(|_, _| {}, &mut Instant::now())
+            .expect("emulate_cycle failed");
+
+        assert!(!done);
+        assert_eq!(emulator.state.current_chunk, 1);
+        assert_eq!(emulator.state.clk, 16);
+    }
+
     #[test]
     fn snapshot_worker_stops_at_target_global_clk_before_cycle_rollover() {
         let opts = EmulatorOpts {
@@ -2050,7 +2286,7 @@ mod tests {
             max_cycles: Some(64),
             ..EmulatorOpts::default()
         };
-        let mut emulator = RiscvEmulator::new_single::<BabyBear>(tiny_program(), opts, None);
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(tiny_program(), opts, None);
         emulator.target_global_clk = Some(1);
 
         let mut records = 0usize;
@@ -2064,7 +2300,7 @@ mod tests {
         assert_eq!(report.current_cycle, 1);
         assert_eq!(emulator.state.global_clk, 1);
         assert_eq!(emulator.state.current_chunk, 2);
-        assert_eq!(emulator.state.clk, 0);
+        assert_eq!(emulator.state.clk, u64::from(CHUNK_CLK_START));
         assert_eq!(emulator.state.pc, 0x1004);
         assert_eq!(records, 1);
     }
@@ -2077,7 +2313,7 @@ mod tests {
             max_cycles: Some(64),
             ..EmulatorOpts::default()
         };
-        let mut emulator = RiscvEmulator::new_single::<BabyBear>(tiny_program(), opts, None);
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(tiny_program(), opts, None);
         emulator.target_global_clk = Some(2);
         emulator.chunk_split_state.num_memory_read_write_events = 8;
         emulator.chunk_split_state.num_global_lookup_base = 5;
@@ -2093,7 +2329,7 @@ mod tests {
         assert_eq!(report.current_cycle, 2);
         assert_eq!(emulator.state.global_clk, 2);
         assert_eq!(emulator.state.current_chunk, 2);
-        assert_eq!(emulator.state.clk, 0);
+        assert_eq!(emulator.state.clk, u64::from(CHUNK_CLK_START));
         assert_eq!(emulator.state.pc, 0x1008);
         assert!(records >= 1);
     }
@@ -2106,7 +2342,7 @@ mod tests {
             max_cycles: Some(64),
             ..EmulatorOpts::default()
         };
-        let mut emulator = RiscvEmulator::new_single::<BabyBear>(tiny_program(), opts, None);
+        let mut emulator = RiscvEmulator::new_single::<KoalaBear>(tiny_program(), opts, None);
         emulator.chunk_split_state.num_memory_read_write_events = 7;
         emulator.chunk_split_state.num_global_lookup_base = 5;
 
@@ -2121,7 +2357,7 @@ mod tests {
         assert_eq!(report.current_cycle, 1);
         assert_eq!(emulator.state.global_clk, 1);
         assert_eq!(emulator.state.current_chunk, 2);
-        assert_eq!(emulator.state.clk, 0);
+        assert_eq!(emulator.state.clk, u64::from(CHUNK_CLK_START));
         assert_eq!(emulator.state.pc, 0x1004);
         assert_eq!(records, 1);
         assert_eq!(emulator.chunk_split_state.num_memory_read_write_events, 0);
@@ -2136,8 +2372,8 @@ mod tests {
         let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
         stdin.write(&MAX_FIBONACCI_NUM_IN_ONE_CHUNK);
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
-        let (stdin, _) = stdin.finalize();
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
+        let stdin = stdin.finalize();
         emulator.run(Some(stdin)).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
@@ -2150,8 +2386,8 @@ mod tests {
         let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
         stdin.write(&n);
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
-        let (stdin, _) = stdin.finalize();
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
+        let stdin = stdin.finalize();
         emulator.run(Some(stdin)).unwrap();
         // println!("{:x?}", emulator.state.public_values_stream)
     }
@@ -2160,7 +2396,7 @@ mod tests {
     fn test_phase2a_register_and_memory_paths_are_explicit() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         emulator.rw(Register::X5, 0xCAFE_BABE);
         assert_eq!(emulator.register(Register::X5), 0xCAFE_BABE);
@@ -2183,7 +2419,7 @@ mod tests {
     fn test_rw_unconstrained_keeps_no_mark_behavior() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         let reg_idx = Register::X7 as u32;
         let reg_byte_addr = (reg_idx * 4) as u64;
@@ -2197,7 +2433,7 @@ mod tests {
     fn test_register_access_does_not_mark_state_bitmap() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         let reg_idx = Register::X5 as u32;
         let reg_byte_addr = (reg_idx * 4) as u64;
@@ -2211,7 +2447,7 @@ mod tests {
     fn test_simple_register_access_does_not_emit_local_memory_events() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
         emulator.mode = super::RiscvEmulatorMode::Simple;
         emulator.update_mode_deps();
 
@@ -2228,7 +2464,7 @@ mod tests {
     fn test_register_and_memory_are_isolated() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         emulator.rw(Register::X5, 0xABCD_1234);
         emulator.mw_cpu(
@@ -2245,7 +2481,7 @@ mod tests {
     fn test_memory_floor_accepts_boundary_address() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         emulator.mw_cpu(
             0x100,
@@ -2260,7 +2496,7 @@ mod tests {
     fn test_memory_floor_rejects_low_address() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
         let _ = emulator.word(0xFC);
     }
 
@@ -2268,7 +2504,7 @@ mod tests {
     fn test_register_snapshot_is_consumed_during_rollback() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         // Simulate pre-batch snapshot state.
         let mut snapshot = emulator.state.clone_without_memory();
@@ -2331,7 +2567,7 @@ mod tests {
     fn test_phase_3r3_w_ops_semantics() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         set_reg_raw(&mut emulator, Register::X1, 0xFFFF_FFFF);
         set_reg_raw(&mut emulator, Register::X2, 1);
@@ -2446,7 +2682,7 @@ mod tests {
     fn test_phase_3r3_lwu_ld_sd_semantics() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         set_reg_raw(&mut emulator, Register::X1, 0x1000);
         set_reg_raw(&mut emulator, Register::X2, 0x1122_3344_5566_7788);
@@ -2473,7 +2709,7 @@ mod tests {
     fn test_phase_3r5_cpu_event_payload_preserves_rv64_ld_sd_values() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         set_reg_raw(&mut emulator, Register::X1, 0x1000);
         set_reg_raw(&mut emulator, Register::X2, 0xCAFE_BABE_DEAD_BEEF);
@@ -2497,7 +2733,7 @@ mod tests {
     fn test_phase_3r5_cpu_event_payload_preserves_rv64_w_op_values() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         set_reg_raw(&mut emulator, Register::X5, 0xAAAA_BBBB_FFFF_FFFF);
         set_reg_raw(&mut emulator, Register::X6, 1);
@@ -2519,7 +2755,7 @@ mod tests {
     fn test_phase_3r6_alu_event_payload_preserves_rv64_w_op_operands() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         set_reg_raw(&mut emulator, Register::X5, 0xAAAA_BBBB_FFFF_FFFF);
         set_reg_raw(&mut emulator, Register::X6, 1);
@@ -2541,7 +2777,7 @@ mod tests {
     fn test_phase_3r6_alu_event_payload_preserves_rv64_w_op_result() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         set_reg_raw(&mut emulator, Register::X5, 0xFFFF_FFFF_8000_0001);
         set_reg_raw(&mut emulator, Register::X6, 0);
@@ -2563,7 +2799,7 @@ mod tests {
     fn test_phase_3r6_alu_event_payload_preserves_rv64_mulw_inputs() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         set_reg_raw(&mut emulator, Register::X5, 0x1234_5678_FFFF_FFFE);
         set_reg_raw(&mut emulator, Register::X6, 0xAAAA_BBBB_0000_0002);
@@ -2584,7 +2820,7 @@ mod tests {
     fn test_phase_3r3_lwu_ld_sd_alignment_errors() {
         let program = simple_fibo_program();
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         // Use addresses in different 8-byte dwords to avoid timestamp collisions
         // (failed instructions don't advance the clock but still touch memory metadata).
@@ -2622,9 +2858,9 @@ mod tests {
     fn test_phase_3r3_trace_simple_parity_for_rv64_ops() {
         let program = simple_fibo_program();
         let mut trace_emulator =
-            RiscvEmulator::new_single::<BabyBear>(program.clone(), EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program.clone(), EmulatorOpts::default(), None);
         let mut simple_emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
 
         trace_emulator.mode = super::RiscvEmulatorMode::Trace;
         trace_emulator.update_mode_deps();
@@ -2665,6 +2901,90 @@ mod tests {
         assert_eq!(trace_emulator.word(0x1204), simple_emulator.word(0x1204));
     }
 
+    #[test]
+    fn test_stage1_postprocess_memory_events_follow_the_ga3_rules() {
+        use crate::chips::chips::riscv_memory::event::MemoryRecord;
+        use std::collections::BTreeMap;
+        // Two image words: one zero-valued and never touched, one the program overwrites.
+        let program = {
+            let mut program = Program::new(
+                vec![
+                    Instruction::new(Opcode::ADD, 1, 0, 0, false, false),
+                    Instruction::new(Opcode::ADD, 2, 0, 0, false, false),
+                ],
+                0x1000,
+                0x1000,
+            );
+            program.memory_image = Arc::new(BTreeMap::from([(0x118u64, 0u64), (0x120u64, 7u64)]));
+            Arc::new(program)
+        };
+        let mut emulator =
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
+        let rec = |value: u64, chunk: u32, timestamp: u32| MemoryRecord {
+            value,
+            chunk,
+            timestamp,
+        };
+
+        // 0x100: hinted, never accessed by the program (record still (0, 0)): no events.
+        emulator
+            .state
+            .uninitialized_memory
+            .insert(0x100, 0x0807_0605_0403_0201);
+        emulator
+            .state
+            .memory
+            .insert(0x100, rec(0x0807_0605_0403_0201, 0, 0));
+        // 0x108: hinted and then accessed: its non-zero initial value needs a MemoryInitialize
+        // row, so both events, the init value exact.
+        emulator
+            .state
+            .uninitialized_memory
+            .insert(0x108, 0x0000_0000_0000_0A09);
+        emulator
+            .state
+            .memory
+            .insert(0x108, rec(0x0000_0000_0000_0A09, 1, 8));
+        // 0x110: accessed, started at zero: the first-touch MemoryLocal entry declares the zero
+        // initial state, so finalize only.
+        emulator.state.memory.insert(0x110, rec(0x42, 1, 12));
+        // 0x118 / 0x120: image words (the bulk load leaves the record at (chunk 0, timestamp 0)
+        // until the program touches it). Their initial state is sent by the image digest, so
+        // finalize only -- whether the word stayed at its image value (even zero) or was
+        // overwritten.
+        emulator.state.memory.insert(0x118, rec(0, 0, 0));
+        emulator.state.memory.insert(0x120, rec(9, 1, 20));
+
+        emulator.postprocess();
+
+        let inits = &emulator.record.memory_initialize_events;
+        let finals = &emulator.record.memory_finalize_events;
+        assert!(inits.iter().all(|e| e.addr != 0x100));
+        assert!(finals.iter().all(|e| e.addr != 0x100));
+        let init_108 = inits
+            .iter()
+            .find(|e| e.addr == 0x108)
+            .expect("missing init event for the accessed hinted dword");
+        assert_eq!(init_108.value, 0x0000_0000_0000_0A09);
+        assert!(finals.iter().any(|e| e.addr == 0x108));
+        assert!(inits.iter().all(|e| e.addr != 0x110));
+        let final_110 = finals
+            .iter()
+            .find(|e| e.addr == 0x110)
+            .expect("missing finalize event for the zero-initial dword");
+        assert_eq!(final_110.value, 0x42);
+        for (addr, value) in [(0x118u64, 0u64), (0x120, 9)] {
+            assert!(inits.iter().all(|e| e.addr != addr));
+            let fin = finals
+                .iter()
+                .find(|e| e.addr == addr)
+                .expect("missing finalize event for the image word");
+            assert_eq!(fin.value, value);
+        }
+        // Registers keep their initialize rows unconditionally (x0 at least).
+        assert!(inits.iter().any(|e| e.addr == 0));
+    }
+
     const RV64IM_FIBONACCI_ELF: &[u8] =
         include_bytes!("../../../compiler/test_elf/riscv64im-pico-fibnacci-elf");
 
@@ -2682,8 +3002,8 @@ mod tests {
         let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
         stdin.write(&10u64);
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
-        let (stdin, _) = stdin.finalize();
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
+        let stdin = stdin.finalize();
         emulator.run(Some(stdin)).unwrap();
         println!("public_values: {:x?}", emulator.state.public_values_stream);
     }
@@ -2714,10 +3034,10 @@ mod tests {
 
         let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
         stdin.write_slice(&input_bytes);
-        let (stdin, _) = stdin.finalize();
+        let stdin = stdin.finalize();
 
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
         emulator.run(Some(stdin)).unwrap();
 
         println!("block {block}: cycles = {}", emulator.state.global_clk);
@@ -2733,10 +3053,10 @@ mod tests {
 
         let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
         stdin.write_slice(&input_bytes);
-        let (stdin, _) = stdin.finalize();
+        let stdin = stdin.finalize();
 
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
         emulator.mode = super::RiscvEmulatorMode::Simple;
         emulator.update_mode_deps();
         if let Err(err) = emulator.run(Some(stdin)) {
@@ -2762,7 +3082,7 @@ mod tests {
         let program =
             single_instruction_program(Instruction::new(Opcode::JAL, 0, 4, 0, false, true));
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
         emulator.run(None).unwrap();
 
         assert_eq!(emulator.chunk_split_state.num_memory_read_write_events, 1);
@@ -2773,7 +3093,7 @@ mod tests {
         let program =
             single_instruction_program(Instruction::new(Opcode::JALR, 0, 1, 0, false, true));
         let mut emulator =
-            RiscvEmulator::new_single::<BabyBear>(program, EmulatorOpts::default(), None);
+            RiscvEmulator::new_single::<KoalaBear>(program, EmulatorOpts::default(), None);
         emulator.state.registers[1] = RuntimeRegisterRecord {
             value: 0,
             chunk: 0,

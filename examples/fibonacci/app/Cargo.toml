@@ -8,6 +8,9 @@ categories = { workspace = true }
 
 
 [dependencies]
-pico-sdk = { path = "../../../sdk/sdk", default-features = false, features = ["bb"] }
+pico-sdk = { path = "../../../sdk/sdk" }
 alloy-sol-types = "0.8.0"
-fibonacci-lib ={ path = "../lib"}
+fibonacci-lib = { path = "../lib" }
+tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak.git", features = [
+    "keccak",
+], branch = "patch-v1.0.0" }

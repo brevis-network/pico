@@ -22,9 +22,9 @@ use crate::{
     primitives::consts::u32_to_half_word,
 };
 use core::borrow::Borrow;
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::ParallelSlice;
 use pico_derive::AlignedBorrow;
 use std::{borrow::BorrowMut, iter::once};
@@ -146,8 +146,8 @@ impl<F: PrimeField32> ShaCompressControlChip<F> {
         let mut row = [F::ZERO; NUM_SHA_COMPRESS_CONTROL_COLS];
         let cols: &mut ShaCompressControlCols<F> = row.as_mut_slice().borrow_mut();
 
-        cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.clk = F::from_canonical_u32(u32::try_from(event.clk).unwrap());
+        cols.chunk = F::from_u32(event.chunk);
+        cols.clk = F::from_u32(u32::try_from(event.clk).unwrap());
         // `w_ptr` has 64 words, so 512 bytes - but only 256 bytes are actually used.
         cols.w_ptr.populate(blu, event.w_ptr, 512);
         // `h_ptr` has 8 words, so 64 bytes - but only 32 bytes are actually used.
@@ -180,7 +180,7 @@ where
     fn eval(&self, builder: &mut CB) {
         // Initialize columns.
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ShaCompressControlCols<CB::Var> = (*local).borrow();
 
         // Constrain that `is_real` is boolean.
@@ -223,7 +223,7 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            CB::F::from_canonical_u32(SyscallCode::SHA_COMPRESS.syscall_id()),
+            CB::F::from_u32(SyscallCode::SHA_COMPRESS.syscall_id()),
             w_ptr.map(Into::into),
             h_ptr.map(Into::into),
             local.is_real,
@@ -235,7 +235,7 @@ where
             .chain(once(local.clk.into()))
             .chain(w_ptr.map(Into::into))
             .chain(h_ptr.map(Into::into))
-            .chain(once(CB::Expr::from_canonical_u32(0)))
+            .chain(once(CB::Expr::from_u32(0)))
             .chain(
                 local
                     .initial_state
@@ -257,7 +257,7 @@ where
             .chain(once(local.clk.into()))
             .chain(w_ptr.map(Into::into))
             .chain(h_ptr.map(Into::into))
-            .chain(once(CB::Expr::from_canonical_u32(80)))
+            .chain(once(CB::Expr::from_u32(80)))
             .chain(
                 local
                     .final_state

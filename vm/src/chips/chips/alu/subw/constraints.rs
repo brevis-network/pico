@@ -9,9 +9,8 @@ use crate::{
     compiler::{riscv::opcode::Opcode, word::Word},
     machine::builder::{ChipBuilder, ChipLookupBuilder, ScopedBuilder},
 };
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
 impl<F: Field> BaseAir<F> for SubwChip<F> {
@@ -26,7 +25,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SubwCols<CB::Var> = (*local).borrow();
 
         for (
@@ -54,7 +53,7 @@ where
 
                 // Sign-extend the 32-bit result to 64 bits by filling upper two u16 limbs with
                 // 0x0000 (positive) or 0xFFFF (negative) according to the MSB.
-                let max_u16 = CB::F::from_canonical_u32((1 << 16) - 1);
+                let max_u16 = CB::F::from_u32((1 << 16) - 1);
                 let a_val = Word([
                     subw_operation.value[0].into(),
                     subw_operation.value[1].into(),

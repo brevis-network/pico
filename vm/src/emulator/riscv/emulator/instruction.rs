@@ -400,6 +400,23 @@ impl RiscvEmulator {
             }
 
             // Upper immediate instructions.
+            //
+            // Unreachable since X12: the transpiler re-encodes `AUIPC rd, imm` as the
+            // two-immediate `ADD rd, imm, pc` (`disassembler/rrs.rs`), so no compiled `Program`
+            // carries this opcode. The arm stays because `Instruction` is public and a
+            // hand-built `Program` may still hold one -- keeping it preserves the emulation
+            // semantics. Such a program is fail-closed rather than under-constrained on the
+            // proving side: the Cpu AIR has no `is_auipc` selector any more, so `populate` sets
+            // no class selector and the row falls into the derived ALU class. With `rd != x0`
+            // the honest trace then fails the definitional constraint
+            // `is_alu_not_x0 == is_alu_instruction * (1 - op_a_0)` -- the AIR reads
+            // `is_alu_instruction = 1` while `riscv_cpu/traces.rs` writes `is_alu_not_x0 = 0`,
+            // because `Instruction::is_alu_instruction` does not list AUIPC -- so it is rejected
+            // before any bus is reached. Only a prover that forges that column to 1 gets as far
+            // as dispatching `(AUIPC, a, b, c)` on the Alu bus, where no ALU chip receives
+            // opcode 27 and the regional cumulative sum stops balancing. `auipc x0, imm` is the
+            // one case that still proves, and correctly so: it is a genuine no-op, with the
+            // result pinned to zero and the pc advancing by 4.
             Opcode::AUIPC => {
                 let (rd, imm) = instruction.u_type();
                 (b, c) = (imm, imm);
@@ -443,9 +460,13 @@ impl RiscvEmulator {
                         // Executing a syscall optionally returns a value to write to the t0
                         // register. If it returns None, we just keep the
                         // syscall_id in t0.
-                        let ret_value = syscall_impl
-                            .emulate(&mut precompile_rt, syscall, b, c)
-                            .unwrap_or(u64::from(syscall_id));
+                        let returned = syscall_impl.emulate(&mut precompile_rt, syscall, b, c);
+                        // Checked before `returned` is used: on the failing path it is a
+                        // placeholder, not a result.
+                        if let Some(error) = precompile_rt.take_error() {
+                            return Err(error);
+                        }
+                        let ret_value = returned.unwrap_or(u64::from(syscall_id));
 
                         // If the syscall is `HALT` and the exit code is non-zero, return an error.
                         if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
@@ -565,11 +586,7 @@ impl RiscvEmulator {
             }
             Opcode::DIVU => {
                 (rd, b, c) = self.alu_rr(instruction);
-                if c == 0 {
-                    a = u64::MAX;
-                } else {
-                    a = b / c;
-                }
+                a = b.checked_div(c).unwrap_or(u64::MAX);
                 self.alu_rw(rd, a);
                 self.mode.emit_alu(
                     instruction.op_a,
@@ -783,11 +800,9 @@ impl RiscvEmulator {
                 rd = rd_tmp;
                 b = compat_b_u64;
                 c = compat_c_u64;
-                let result = if c as u32 == 0 {
-                    u64::MAX
-                } else {
-                    ((b as u32 / c as u32) as i32) as i64 as u64
-                };
+                let result = (b as u32)
+                    .checked_div(c as u32)
+                    .map_or(u64::MAX, |quotient| quotient as i32 as i64 as u64);
                 a = result;
                 compat_cpu_event_a_u64 = Some(result);
                 compat_cpu_event_b_u64 = Some(compat_b_u64);

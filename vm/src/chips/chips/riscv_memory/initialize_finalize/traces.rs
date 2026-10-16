@@ -13,7 +13,7 @@ use crate::{
     iter::{IntoPicoIterator, PicoIterator},
     machine::{
         chip::ChipBehavior,
-        estimator::{EventCapture, EventSizeCapture},
+        estimator::EventCapture,
         lookup::{LookupScope, LookupType},
         utils::pad_to_power_of_two,
     },
@@ -67,22 +67,22 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                 let cols: &mut MemoryInitializeFinalizeCols<F> = row.as_mut_slice().borrow_mut();
 
                 // Address: 3×u16 limbs
-                cols.addr[0] = F::from_canonical_u16((addr & 0xFFFF) as u16);
-                cols.addr[1] = F::from_canonical_u16(((addr >> 16) & 0xFFFF) as u16);
-                cols.addr[2] = F::from_canonical_u16(((addr >> 32) & 0xFFFF) as u16);
+                cols.addr[0] = F::from_u16((addr & 0xFFFF) as u16);
+                cols.addr[1] = F::from_u16(((addr >> 16) & 0xFFFF) as u16);
+                cols.addr[2] = F::from_u16(((addr >> 32) & 0xFFFF) as u16);
 
                 // Chunk and timestamp
-                cols.chunk = F::from_canonical_u32(chunk);
-                cols.timestamp = F::from_canonical_u32(timestamp);
+                cols.chunk = F::from_u32(chunk);
+                cols.timestamp = F::from_u32(timestamp);
 
                 // Value: Word<F> (4×u16 limbs)
                 cols.value = Word::from(value);
 
                 // v2 packing columns
-                cols.value_lower = F::from_canonical_u32((value >> 32 & 0xFF) as u32);
-                cols.value_upper = F::from_canonical_u32((value >> 40 & 0xFF) as u32);
+                cols.value_lower = F::from_u32((value >> 32 & 0xFF) as u32);
+                cols.value_upper = F::from_u32((value >> 40 & 0xFF) as u32);
 
-                cols.is_real = F::from_canonical_u32(used);
+                cols.is_real = F::from_u32(used);
 
                 // Previous address
                 let prev_addr = if i == 0 {
@@ -91,9 +91,9 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                     memory_events[i - 1].addr
                 };
 
-                cols.prev_addr[0] = F::from_canonical_u16((prev_addr & 0xFFFF) as u16);
-                cols.prev_addr[1] = F::from_canonical_u16(((prev_addr >> 16) & 0xFFFF) as u16);
-                cols.prev_addr[2] = F::from_canonical_u16(((prev_addr >> 32) & 0xFFFF) as u16);
+                cols.prev_addr[0] = F::from_u16((prev_addr & 0xFFFF) as u16);
+                cols.prev_addr[1] = F::from_u16(((prev_addr >> 16) & 0xFFFF) as u16);
+                cols.prev_addr[2] = F::from_u16(((prev_addr >> 32) & 0xFFFF) as u16);
 
                 // is_prev_addr_zero (first row only uses PV prev_addr)
                 if i == 0 {
@@ -106,7 +106,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
                     cols.is_comp = if prev_addr != 0 { F::ONE } else { F::ZERO };
                 } else {
                     // On non-first rows, is_comp = is_real (always compare if real).
-                    cols.is_comp = F::from_canonical_u32(used);
+                    cols.is_comp = F::from_u32(used);
                 }
 
                 // LtWordU16Gadget: populate when comparison is active.
@@ -241,11 +241,4 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryInitializeFinalizeChip<F> {
     }
 }
 
-impl<F> EventCapture for MemoryInitializeFinalizeChip<F> {
-    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
-        event_counter.num_memory_initialize_events += record.memory_initialize_events.len();
-        event_counter.num_memory_finalize_events += record.memory_finalize_events.len();
-        event_counter.num_global_lookup_events += record.memory_initialize_events.len();
-        event_counter.num_global_lookup_events += record.memory_finalize_events.len();
-    }
-}
+impl<F> EventCapture for MemoryInitializeFinalizeChip<F> {}

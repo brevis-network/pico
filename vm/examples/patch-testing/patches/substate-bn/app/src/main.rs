@@ -1,8 +1,8 @@
 #![no_main]
 pico_sdk::entrypoint!(main);
 
-use substrate_bn::{pairing, pairing_batch, AffineG1, Fq, Fq2, Fr, Group, G1, G2};
 use pico_sdk::io::commit_bytes;
+use substrate_bn::{pairing, pairing_batch, AffineG1, Fq, Fq2, Fr, Group, Gt, G1, G2};
 
 const ITERATIONS: usize = 6000;
 
@@ -19,7 +19,9 @@ pub fn main() {
         }
 
         let mut bytes = [0u8; 32];
-        val.x().to_big_endian(&mut bytes).expect("Serialization failed");
+        val.x()
+            .to_big_endian(&mut bytes)
+            .expect("Serialization failed");
         commit_bytes(&bytes);
     }
 
@@ -34,7 +36,9 @@ pub fn main() {
         }
 
         let mut bytes = [0u8; 32];
-        val.x().to_big_endian(&mut bytes).expect("Serialization failed");
+        val.x()
+            .to_big_endian(&mut bytes)
+            .expect("Serialization failed");
         commit_bytes(&bytes);
     }
 
@@ -136,25 +140,33 @@ pub fn main() {
         println!("cycle-tracker-end: bn254-mul-g2");
     }
 
-    // Pairing
+    // Pairing. The results of the field syscalls surface only here, so bilinearity is what checks
+    // them: e(5P, 7Q) = e(7P, 5Q), and neither is the identity.
+    let five = Fr::from_str("5").unwrap();
+    let seven = Fr::from_str("7").unwrap();
     {
-        let p1 = G1::one();
-        let p2 = G2::one();
+        let p1 = G1::one() * five;
+        let p2 = G2::one() * seven;
 
         println!("cycle-tracker-start: bn254-pairing");
-        let _ = pairing(p1, p2);
+        let e = pairing(p1, p2);
         println!("cycle-tracker-end: bn254-pairing");
+
+        assert_eq!(e, pairing(G1::one() * seven, G2::one() * five));
+        assert_ne!(e, Gt::one());
     }
 
-    // Batch pairing
+    // Batch pairing: e(5P, 7Q) * e(-7P, 5Q) = 1. `pairing_batch` applies the final exponentiation.
     {
-        let p1 = G1::one();
-        let q1 = G2::one();
-        let p2 = G1::one();
-        let q2 = G2::one();
+        let p1 = G1::one() * five;
+        let q1 = G2::one() * seven;
+        let p2 = -(G1::one() * seven);
+        let q2 = G2::one() * five;
 
         println!("cycle-tracker-start: bn254-pairing-check");
-        pairing_batch(&[(p1, q1), (p2, q2)]).final_exponentiation();
+        let product = pairing_batch(&[(p1, q1), (p2, q2)]);
         println!("cycle-tracker-end: bn254-pairing-check");
+
+        assert_eq!(product, Gt::one());
     }
 }

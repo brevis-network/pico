@@ -8,7 +8,5 @@ categories = { workspace = true }
 
 [dependencies]
 pico-sdk = { workspace = true }
-p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", features = [
-    "nightly-features",
-], rev = "411a80d" }
-p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "411a80d" }
+p3-koala-bear = { git = "https://github.com/brevis-network/Plonky3.git", rev = "da6ca12c" }
+p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "da6ca12c" }

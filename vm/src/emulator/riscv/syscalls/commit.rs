@@ -1,6 +1,7 @@
 use super::{Syscall, SyscallCode, SyscallContext};
 use crate::{
     emulator::riscv::{
+        chunk_split::commit_tail_in_flight,
         event_types::RvValue,
         syscalls::abi::{decode_u32_abi_index, decode_u32_abi_word},
     },
@@ -25,6 +26,11 @@ impl Syscall for CommitSyscall {
         let rt = &mut ctx.rt;
 
         rt.record.public_values.committed_value_digest[word_idx] = public_values_digest_word;
+        // A commit tail in flight holds the chunk cut until it lands (see `should_split`).
+        rt.chunk_split_state.commit_in_flight = commit_tail_in_flight(
+            &rt.record.public_values.committed_value_digest,
+            rt.chunk_split_state.deferred_commits,
+        );
 
         None
     }

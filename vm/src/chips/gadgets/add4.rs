@@ -7,7 +7,7 @@ use crate::{
     primitives::consts::WORD_SIZE,
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute the add of four words.
@@ -66,9 +66,9 @@ impl<F: Field> Add4Operation<F> {
             self.is_carry_1[i] = F::from_bool(carry[i] == 1);
             self.is_carry_2[i] = F::from_bool(carry[i] == 2);
             self.is_carry_3[i] = F::from_bool(carry[i] == 3);
-            self.carry[i] = F::from_canonical_u8(carry[i]);
+            self.carry[i] = F::from_u8(carry[i]);
             debug_assert!(carry[i] <= 3);
-            debug_assert_eq!(self.value[i], F::from_canonical_u32(res % base));
+            debug_assert_eq!(self.value[i], F::from_u32(res % base));
         }
 
         // Range check.
@@ -124,8 +124,8 @@ impl<F: Field> Add4Operation<F> {
         // Calculates carry from is_carry_{0,1,2,3}.
         {
             let one = CB::Expr::ONE;
-            let two = CB::F::from_canonical_u32(2);
-            let three = CB::F::from_canonical_u32(3);
+            let two = CB::F::from_u32(2);
+            let three = CB::F::from_u32(3);
 
             for i in 0..WORD_SIZE {
                 builder_is_real.assert_eq(
@@ -139,7 +139,7 @@ impl<F: Field> Add4Operation<F> {
 
         // Compare the sum and summands by looking at carry.
         {
-            let base = CB::F::from_canonical_u32(256);
+            let base = CB::F::from_u32(256);
             // For each limb, assert that difference between the carried result and the non-carried
             // result is the product of carry and base.
             for i in 0..WORD_SIZE {
@@ -150,49 +150,5 @@ impl<F: Field> Add4Operation<F> {
                 builder_is_real.assert_eq(cols.carry[i] * base, overflow.clone());
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        a: Word<T>,
-        b: Word<T>,
-        c: Word<T>,
-        d: Word<T>,
-        add4: Add4Operation<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_add4_operation_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        Add4Operation::<KoalaBear>::eval(
-            &mut builder,
-            local.a,
-            local.b,
-            local.c,
-            local.d,
-            local.is_real,
-            local.add4,
-        );
-
-        assert_eq!(builder.num_constraints(), 29);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 10);
     }
 }

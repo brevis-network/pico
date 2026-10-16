@@ -9,12 +9,44 @@ pub mod secp256r1;
 pub mod unconstrained;
 pub mod utils;
 pub mod verify;
-/// Enum representing the different Precompile Poseidon2 permutation syscall types.
-#[repr(u32)]
-pub enum SyscallType {
-    BabyBear = 0,
-    KoalaBear = 1,
-    M31 = 2,
+
+/// Field elements in one Poseidon2 permutation state.
+pub const POSEIDON2_WIDTH: usize = 16;
+
+/// A Poseidon2 permutation state, in the layout the precompile reads and writes.
+///
+/// # Why this is a type and not a bare `[u32; 16]`
+///
+/// The alignment is load-bearing. This VM's memory is 8-byte granular, and the precompile's
+/// address gadget range checks `addr / 8`, so a buffer that lands 4 mod 8 has no provable
+/// trace at all -- the syscall rejects such a pointer up front rather than emulating into a
+/// proof that cannot be produced. Rust aligns a bare `[u32; 16]` to 4, so roughly half of
+/// them -- including every stack local -- were unusable. Carrying the alignment in the type
+/// makes an unaligned buffer unrepresentable instead of merely discouraged.
+///
+/// # Layout
+///
+/// `repr(C)` pins the array to offset 0, which is what the pointer handed to the syscall
+/// means. The sixteen 32-bit words are **packed**: the chip reads them as eight dwords of two
+/// words each (`STATE_NUM_DWORDS = POSEIDON2_WIDTH / 2` in `pico-vm`), so this must stay 64
+/// bytes. Widening it to `[u64; 16]` -- the shape the sha256 syscalls use, where each 32-bit
+/// word gets its own 8-byte slot -- would align just as well and silently break the chip.
+#[repr(C, align(8))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Poseidon2State(pub [u32; POSEIDON2_WIDTH]);
+
+impl Poseidon2State {
+    /// An all-zero state.
+    #[must_use]
+    pub const fn zero() -> Self {
+        Self([0; POSEIDON2_WIDTH])
+    }
+}
+
+impl Default for Poseidon2State {
+    fn default() -> Self {
+        Self::zero()
+    }
 }
 
 extern "C" {
@@ -154,6 +186,48 @@ extern "C" {
     pub fn syscall_secp256k1_fp_mulmod(p: *mut u32, q: *const u32);
     */
 
-    /// Executes an poseidon2 permute on the given inputs.
-    pub fn syscall_poseidon2_permute(x: *const [u32; 16], y: *mut [u32; 16]);
+    /// Executes a poseidon2 permutation, reading the state from `x` and writing it to `y`.
+    ///
+    /// Both pointers must be 8-byte aligned, which [`Poseidon2State`] guarantees; see its docs
+    /// for why that is a correctness requirement and not a performance hint.
+    pub fn syscall_poseidon2_permute(x: *const Poseidon2State, y: *mut Poseidon2State);
+}
+
+#[cfg(test)]
+mod poseidon2_state_tests {
+    use super::{Poseidon2State, POSEIDON2_WIDTH};
+    use core::mem::{align_of, size_of};
+
+    /// The two properties the precompile depends on, neither of which is visible at the call
+    /// site once a caller has a value of this type.
+    ///
+    /// Alignment: the VM's memory is 8-byte granular and the address gadget range checks
+    /// `addr / 8`, so a 4-aligned buffer has no provable trace.
+    ///
+    /// Size: the chip reads the state as eight dwords of two 32-bit words each. Giving every
+    /// word its own 8-byte slot -- the shape the sha256 syscalls use, and a natural-looking way
+    /// to "fix" alignment -- would align correctly and write the wrong thing. That regression
+    /// would be silent at this boundary, so it is pinned here.
+    #[test]
+    fn the_state_is_dword_aligned_and_packed() {
+        assert_eq!(align_of::<Poseidon2State>(), 8, "must be 8-byte aligned");
+        assert_eq!(
+            size_of::<Poseidon2State>(),
+            4 * POSEIDON2_WIDTH,
+            "the words are packed two per dword; widening them breaks the chip's layout"
+        );
+    }
+
+    /// `repr(C)` pins the array to offset 0, which is what the pointer passed to the syscall
+    /// is taken to mean.
+    #[test]
+    fn the_words_start_at_the_struct_address() {
+        let state = Poseidon2State::zero();
+        assert_eq!(
+            core::ptr::addr_of!(state).cast::<u32>(),
+            state.0.as_ptr(),
+            "the array must start at the struct's own address"
+        );
+        assert_eq!(state.0.as_ptr() as usize % 8, 0);
+    }
 }

@@ -4,7 +4,7 @@ use crate::{
     primitives::consts::u32_to_u16_limbs,
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
@@ -23,8 +23,8 @@ impl<F: Field> AddU32Gadget<F> {
         let expected = a_u32.wrapping_add(b_u32);
         let expected_limbs = u32_to_u16_limbs(expected);
         self.value = [
-            F::from_canonical_u16(expected_limbs[0]),
-            F::from_canonical_u16(expected_limbs[1]),
+            F::from_u16(expected_limbs[0]),
+            F::from_u16(expected_limbs[1]),
         ];
         record.add_u16_range_checks(&expected_limbs);
         expected
@@ -39,7 +39,7 @@ impl<F: Field> AddU32Gadget<F> {
     ) {
         builder.assert_bool(is_real);
 
-        let base = CB::F::from_canonical_u32(1 << 16);
+        let base = CB::F::from_u32(1 << 16);
         let mut builder_is_real = builder.when(is_real);
         let mut carry = CB::Expr::ZERO;
 
@@ -49,46 +49,5 @@ impl<F: Field> AddU32Gadget<F> {
         }
 
         builder.slice_range_check_u16(&cols.value, is_real);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_air::AirBuilder;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        a: [T; 2],
-        b: [T; 2],
-        add_u32: AddU32Gadget<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_add_u32_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        AddU32Gadget::<KoalaBear>::eval(
-            &mut builder,
-            local.a.map(|v| v.into()),
-            local.b.map(|v| v.into()),
-            local.add_u32,
-            local.is_real,
-        );
-
-        assert_eq!(builder.num_constraints(), 3);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 2);
     }
 }

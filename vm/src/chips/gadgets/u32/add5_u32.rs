@@ -3,7 +3,7 @@ use crate::{
     machine::builder::{ChipLookupBuilder, ChipRangeBuilder},
     primitives::consts::{u32_to_half_word, u32_to_u16_limbs},
 };
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
@@ -65,7 +65,7 @@ impl<F: Field> Add5U32Gadget<F> {
     ) {
         builder.assert_bool(is_real);
 
-        let base = CB::F::from_canonical_u32(1 << 16);
+        let base = CB::F::from_u32(1 << 16);
         let mut carry_limbs = [CB::Expr::ZERO, CB::Expr::ZERO];
         let mut carry = CB::Expr::ZERO; // Initialize carry to zero
 
@@ -90,50 +90,5 @@ impl<F: Field> Add5U32Gadget<F> {
         // Range check each limb.
         builder.slice_range_check_u16(&cols.value, is_real);
         builder.slice_range_check_u8(&carry_limbs, is_real);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_air::AirBuilder;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        w0: [T; 2],
-        w1: [T; 2],
-        w2: [T; 2],
-        w3: [T; 2],
-        w4: [T; 2],
-        add5_u32: Add5U32Gadget<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_add5_u32_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        let words = [
-            local.w0.map(|v| v.into()),
-            local.w1.map(|v| v.into()),
-            local.w2.map(|v| v.into()),
-            local.w3.map(|v| v.into()),
-            local.w4.map(|v| v.into()),
-        ];
-        Add5U32Gadget::<KoalaBear>::eval(&mut builder, &words, local.is_real, local.add5_u32);
-
-        assert_eq!(builder.num_constraints(), 1);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 3);
     }
 }

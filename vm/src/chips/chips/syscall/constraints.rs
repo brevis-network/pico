@@ -7,9 +7,8 @@ use crate::{
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
-use p3_air::{Air, BaseAir};
-use p3_field::{Field, FieldAlgebra};
-use p3_matrix::Matrix;
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing};
 use std::borrow::Borrow;
 
 impl<F: Field, CB> Air<CB> for SyscallChip<F>
@@ -18,7 +17,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SyscallCols<CB::Var> = (*local).borrow();
 
         // ensure is_real is boolean
@@ -63,8 +62,7 @@ where
                 builder.looking(SymbolicLookup::new(
                     vec![
                         local.clk.into(),
-                        local.syscall_id.into()
-                            + local.arg1[0].into() * CB::Expr::from_canonical_u32(1 << 8),
+                        local.syscall_id.into() + local.arg1[0].into() * CB::Expr::from_u32(1 << 8),
                         local.arg1[1].into(),
                         local.arg1[2].into(),
                         local.arg2[0].into(),
@@ -73,7 +71,7 @@ where
                         local.chunk.into(), // message[7]: chunk -- see below
                         CB::Expr::ONE,      // is_send = 1
                         CB::Expr::ZERO,     // is_receive = 0
-                        CB::Expr::from_canonical_u8(LookupType::Syscall as u8), // kind
+                        CB::Expr::from_u8(LookupType::Syscall as u8), // kind
                     ],
                     local.is_real.into(),
                     LookupType::Global,
@@ -98,8 +96,7 @@ where
                 builder.looking(SymbolicLookup::new(
                     vec![
                         local.clk.into(),
-                        local.syscall_id.into()
-                            + local.arg1[0].into() * CB::Expr::from_canonical_u32(1 << 8),
+                        local.syscall_id.into() + local.arg1[0].into() * CB::Expr::from_u32(1 << 8),
                         local.arg1[1].into(),
                         local.arg1[2].into(),
                         local.arg2[0].into(),
@@ -108,7 +105,7 @@ where
                         local.chunk.into(), // message[7]: chunk -- see below
                         CB::Expr::ZERO,     // is_send = 0
                         CB::Expr::ONE,      // is_receive = 1
-                        CB::Expr::from_canonical_u8(LookupType::Syscall as u8), // kind
+                        CB::Expr::from_u8(LookupType::Syscall as u8), // kind
                     ],
                     local.is_real.into(),
                     LookupType::Global,

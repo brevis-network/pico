@@ -38,7 +38,8 @@ pub enum SnapshotMainMode {
 
 impl Default for EmulatorOpts {
     fn default() -> Self {
-        let sys = System::new_all();
+        let mut sys = System::new();
+        sys.refresh_memory(); // only need memory info
         let total_available_mem = sys.total_memory() / (1024 * 1024 * 1024);
         let auto_chunk_size = chunk_size(total_available_mem);
         let auto_chunk_batch_size = chunk_batch_size(total_available_mem);
@@ -70,7 +71,33 @@ impl Default for EmulatorOpts {
     }
 }
 
+/// `CHUNK_SIZE` if it names a usable chunk size, else `default_chunk_size`.
+///
+/// Zero is rejected with the unparseable values: `max_cycles` is derived from the chunk size, so a
+/// zero would cap the run at zero cycles and every emulation would fail on its first instruction.
+fn resolve_chunk_size(raw: Option<&str>, default_chunk_size: u32) -> u32 {
+    raw.and_then(|s| s.parse::<u32>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(default_chunk_size)
+}
+
 impl EmulatorOpts {
+    /// [`Self::default`] with `chunk_size` falling back to `default_chunk_size` rather than to the
+    /// machine's RAM-derived size, and `max_cycles` re-paired with whichever one wins.
+    ///
+    /// `CHUNK_SIZE` still outranks the argument, but only when it parses: an empty or non-numeric
+    /// value leaves `default_chunk_size` standing instead of silently reverting to the RAM-derived
+    /// size. Callers that must not read the environment at all build the struct field by field.
+    pub fn from_env_chunk_size(default_chunk_size: u32) -> Self {
+        let chunk_size =
+            resolve_chunk_size(env::var("CHUNK_SIZE").ok().as_deref(), default_chunk_size);
+        Self {
+            chunk_size,
+            max_cycles: Some((chunk_size as u64) * (2 << MAX_LOG_NUMBER_OF_CHUNKS)),
+            ..Default::default()
+        }
+    }
+
     pub fn test_opts() -> Self {
         Self {
             chunk_size: env::var("CHUNK_SIZE").map_or_else(
@@ -173,6 +200,19 @@ mod tests {
         assert_eq!(opts.snapshot_main, SnapshotMainMode::Interpreter);
     }
 
+    /// An unusable `CHUNK_SIZE` leaves the caller's value standing. Falling back to the
+    /// RAM-derived default instead would break the chunk_size/log_stacked_height pairing the
+    /// caller stated.
+    #[test]
+    fn an_unusable_chunk_size_env_keeps_the_callers_value() {
+        assert_eq!(resolve_chunk_size(Some("2048"), 1 << 22), 2048);
+        assert_eq!(resolve_chunk_size(None, 1 << 22), 1 << 22);
+        assert_eq!(resolve_chunk_size(Some(""), 1 << 22), 1 << 22);
+        assert_eq!(resolve_chunk_size(Some("8M"), 1 << 22), 1 << 22);
+        assert_eq!(resolve_chunk_size(Some("-1"), 1 << 22), 1 << 22);
+        assert_eq!(resolve_chunk_size(Some("0"), 1 << 22), 1 << 22);
+    }
+
     #[test]
     fn serde_backward_compat_deserializes_without_snapshot_main() {
         // Build a serialized blob from current opts, then strip the snapshot_main field
@@ -208,10 +248,10 @@ impl SplitOpts {
     pub fn new(deferred_shift_threshold: usize) -> Self {
         Self {
             deferred: deferred_shift_threshold,
-            keccak: deferred_shift_threshold / 24,
-            sha_extend: deferred_shift_threshold / 48,
-            sha_compress: deferred_shift_threshold / 80,
-            memory: deferred_shift_threshold * 4,
+            keccak: 4 * deferred_shift_threshold / 24,
+            sha_extend: 16 * deferred_shift_threshold / 48,
+            sha_compress: 16 * deferred_shift_threshold / 80,
+            memory: 8 * deferred_shift_threshold * 4,
         }
     }
 }
@@ -225,12 +265,15 @@ fn chunk_size(total_available_mem: u64) -> u32 {
     std::cmp::min(1 << log_shard_size, BENCH_MAX_CHUNK_SIZE)
 }
 
-fn chunk_batch_size(total_available_mem: u64) -> u32 {
-    match total_available_mem {
-        0..16 => 1,
-        16..48 => 2,
-        48..128 => 4,
-        128..512 => 8,
-        _ => BENCH_MAX_CHUNK_BATCH_SIZE,
-    }
+/// One chunk per batch, whatever the host has.
+///
+/// The sequencer hands `EmulationRecord::split` the batch index it has committed, and
+/// `SyscallEvent.chunk` counts chunks, so the `chunk <= committed + 1` filter admits a batch's
+/// own precompile events only while a batch is a single chunk -- a larger batch would drop the
+/// rest of them in silence. The single-machine emulator turns that filter off instead, so this
+/// pin is for the sequencer, which asserts on what it is handed. The `bench_*` constructors do
+/// not come through here and keep their own batch size; their only callers are the AOT emulation
+/// harnesses, which never reach the sequencer.
+fn chunk_batch_size(_total_available_mem: u64) -> u32 {
+    1
 }

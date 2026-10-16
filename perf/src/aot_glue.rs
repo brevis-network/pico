@@ -19,8 +19,8 @@ use pico_vm::{
         aot::{register_aot_factory, AotSnapshotEmulator},
         opts::EmulatorOpts,
         riscv::{
-            chunk_split::ChunkSplitConfig, riscv_emulator::EmulationError,
-            state::RiscvEmulationState,
+            chunk_split::ChunkSplitConfig, public_values::RecordFinalPvsState,
+            riscv_emulator::EmulationError, state::RiscvEmulationState,
         },
     },
     machine::report::EmulationReport,
@@ -100,6 +100,9 @@ fn aot_factory(
     program: Arc<Program>,
     input_stream: Vec<Vec<u8>>,
     opts: EmulatorOpts,
+    // This adapter runs the AOT core directly and produces no record of its own, so it has
+    // nothing to publish into the shared final-pvs cell the factory signature carries.
+    _final_pvs_state: Arc<RecordFinalPvsState>,
 ) -> Box<dyn AotSnapshotEmulator> {
     Box::new(VmAotAdapter {
         core: AotEmulatorCore::new(program, input_stream),

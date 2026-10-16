@@ -47,9 +47,9 @@ use core::{
 use hybrid_array::Array;
 use itertools::Itertools;
 use num::{BigUint, Zero};
-use p3_air::{Air, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
 use tracing::debug;
 
@@ -191,12 +191,12 @@ impl<F: PrimeField32, P: FpOpField> ChipBehavior<F> for FpOpChip<F, P> {
             let p = BigUint::from_bytes_le(&words_to_bytes_le_slice(&event.x));
             let q = BigUint::from_bytes_le(&words_to_bytes_le_slice(&event.y));
 
-            cols.is_add = F::from_canonical_u8((event.op == FieldOperation::Add) as u8);
-            cols.is_sub = F::from_canonical_u8((event.op == FieldOperation::Sub) as u8);
-            cols.is_mul = F::from_canonical_u8((event.op == FieldOperation::Mul) as u8);
+            cols.is_add = F::from_u8((event.op == FieldOperation::Add) as u8);
+            cols.is_sub = F::from_u8((event.op == FieldOperation::Sub) as u8);
+            cols.is_mul = F::from_u8((event.op == FieldOperation::Mul) as u8);
             cols.is_real = F::ONE;
-            cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "fptower fp clk"));
+            cols.chunk = F::from_u32(event.chunk);
+            cols.clk = F::from_u32(checked_u64_to_u32(event.clk, "fptower fp clk"));
 
             cols.x_ptr.populate(
                 &mut new_byte_lookup_events,
@@ -246,7 +246,7 @@ impl<F: PrimeField32, P: FpOpField> ChipBehavior<F> for FpOpChip<F, P> {
                 let mut row = vec![F::ZERO; num_fp_cols::<P>()];
                 let cols: &mut FpOpCols<F, P> = row.as_mut_slice().borrow_mut();
                 let zero = BigUint::zero();
-                cols.is_add = F::from_canonical_u8(1);
+                cols.is_add = F::from_u8(1);
                 Self::populate_field_ops(
                     &mut vec![],
                     cols,
@@ -329,7 +329,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &FpOpCols<CB::Var, P> = (*local).borrow();
 
         // Check that operations flags are boolean.
@@ -352,7 +352,7 @@ where
 
         let modulus_coeffs = P::MODULUS
             .iter()
-            .map(|&limbs| CB::Expr::from_canonical_u8(limbs))
+            .map(|&limbs| CB::Expr::from_u8(limbs))
             .collect_vec();
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
@@ -379,8 +379,7 @@ where
             .copied()
             .map(|x| x.into())
             .collect();
-        let result_words =
-            limbs_to_words::<CB::Expr>(&result_limbs, CB::F::from_canonical_u32(256).into());
+        let result_words = limbs_to_words::<CB::Expr>(&result_limbs, CB::F::from_u32(256).into());
 
         let x_ptr = SyscallAddrGadget::<CB::F>::eval(
             builder,
@@ -464,19 +463,19 @@ where
         // *Remark*: If support for division is added, we will need to add the division syscall id.
         let (add_syscall_id, sub_syscall_id, mul_syscall_id) = match P::FIELD_TYPE {
             FieldType::Bn254 => (
-                CB::F::from_canonical_u32(SyscallCode::BN254_FP_ADD.syscall_id()),
-                CB::F::from_canonical_u32(SyscallCode::BN254_FP_SUB.syscall_id()),
-                CB::F::from_canonical_u32(SyscallCode::BN254_FP_MUL.syscall_id()),
+                CB::F::from_u32(SyscallCode::BN254_FP_ADD.syscall_id()),
+                CB::F::from_u32(SyscallCode::BN254_FP_SUB.syscall_id()),
+                CB::F::from_u32(SyscallCode::BN254_FP_MUL.syscall_id()),
             ),
             FieldType::Bls381 => (
-                CB::F::from_canonical_u32(SyscallCode::BLS12381_FP_ADD.syscall_id()),
-                CB::F::from_canonical_u32(SyscallCode::BLS12381_FP_SUB.syscall_id()),
-                CB::F::from_canonical_u32(SyscallCode::BLS12381_FP_MUL.syscall_id()),
+                CB::F::from_u32(SyscallCode::BLS12381_FP_ADD.syscall_id()),
+                CB::F::from_u32(SyscallCode::BLS12381_FP_SUB.syscall_id()),
+                CB::F::from_u32(SyscallCode::BLS12381_FP_MUL.syscall_id()),
             ),
             FieldType::Secp256k1 => (
-                CB::F::from_canonical_u32(SyscallCode::SECP256K1_FP_ADD.syscall_id()),
-                CB::F::from_canonical_u32(SyscallCode::SECP256K1_FP_SUB.syscall_id()),
-                CB::F::from_canonical_u32(SyscallCode::SECP256K1_FP_MUL.syscall_id()),
+                CB::F::from_u32(SyscallCode::SECP256K1_FP_ADD.syscall_id()),
+                CB::F::from_u32(SyscallCode::SECP256K1_FP_SUB.syscall_id()),
+                CB::F::from_u32(SyscallCode::SECP256K1_FP_MUL.syscall_id()),
             ),
         };
         let syscall_id_felt = local.is_add * add_syscall_id

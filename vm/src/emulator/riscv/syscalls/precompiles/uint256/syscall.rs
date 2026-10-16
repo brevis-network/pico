@@ -81,7 +81,9 @@ impl Syscall for Uint256MulSyscall {
         // Convert the result to four packed little-endian u64 words.
         let result = bytes_to_words_le::<8>(&result_bytes);
         let result_u64: Vec<u64> = result
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
             .collect();
 

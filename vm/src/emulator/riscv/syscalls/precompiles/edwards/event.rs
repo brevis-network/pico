@@ -1,3 +1,4 @@
+use hybrid_array::Array;
 use serde::{Deserialize, Serialize};
 use typenum::Unsigned;
 
@@ -5,8 +6,11 @@ use crate::{
     chips::{
         chips::riscv_memory::event::{MemoryLocalEvent, MemoryReadRecord, MemoryWriteRecord},
         gadgets::{
-            curves::{edwards::WORDS_FIELD_ELEMENT, AffinePoint, EllipticCurve},
-            utils::field_params::NumWords,
+            curves::{
+                edwards::WORDS_FIELD_ELEMENT, AffinePoint, EllipticCurve, COMPRESSED_POINT_BYTES,
+                NUM_BYTES_FIELD_ELEMENT,
+            },
+            utils::field_params::{FieldParameters, NumWords},
         },
     },
     emulator::riscv::{
@@ -19,6 +23,7 @@ use crate::{
 ///
 /// This event is emitted when an elliptic curve addition operation is performed.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[repr(C)]
 pub struct EllipticCurveAddEvent {
     /// The chunk number.
     pub chunk: RvChunk,
@@ -38,6 +43,107 @@ pub struct EllipticCurveAddEvent {
     pub q_memory_records: Vec<MemoryReadRecord>,
     /// The local memory access records.
     pub local_mem_access: Vec<MemoryLocalEvent>,
+}
+
+/// Memory write record for EC FFI events (u64 values).
+#[derive(Default, Debug, Clone, Copy)]
+#[repr(C)]
+pub struct FfiEcMemoryWriteRecord {
+    pub value: u64,
+    pub prev_value: u64,
+    pub chunk: u32,
+    pub timestamp: u32,
+    pub prev_chunk: u32,
+    pub prev_timestamp: u32,
+}
+
+/// Memory read record for EC FFI events (u64 value).
+#[derive(Default, Debug, Clone, Copy)]
+#[repr(C)]
+pub struct FfiEcMemoryReadRecord {
+    pub value: u64,
+    pub chunk: u32,
+    pub timestamp: u32,
+    pub prev_chunk: u32,
+    pub prev_timestamp: u32,
+}
+
+/// FFI version of EllipticCurveAddEvent.
+///
+/// Point data is passed through as u64 dwords (same count as `WordsCurvePoint`).
+/// Memory records are split from u64 into paired u32 records (2 per dword).
+/// The GPU code reinterprets the u64 dwords as u32 word pairs.
+#[derive(Debug, Clone)]
+#[repr(C)]
+pub struct EllipticCurveAddEventFFI<P: FieldParameters + NumWords> {
+    pub chunk: u32,
+    pub clk: u32,
+    pub p_ptr: u32,
+    /// Point data as u64 dwords (WordsCurvePoint elements).
+    /// GPU code reinterprets each u64 as two u32 words.
+    pub p: Array<u64, P::WordsCurvePoint>,
+    pub q_ptr: u32,
+    /// Point data as u64 dwords (WordsCurvePoint elements).
+    pub q: Array<u64, P::WordsCurvePoint>,
+    /// Memory write records, 2 per dword (lo/hi u32 halves).
+    /// Total = 2 * WordsCurvePoint entries.
+    pub p_memory_records: Array<FfiEcMemoryWriteRecord, P::WordsCurvePoint>,
+    /// Memory read records, 2 per dword (lo/hi u32 halves).
+    pub q_memory_records: Array<FfiEcMemoryReadRecord, P::WordsCurvePoint>,
+}
+
+impl<P: FieldParameters + NumWords> From<EllipticCurveAddEvent> for EllipticCurveAddEventFFI<P> {
+    fn from(event: EllipticCurveAddEvent) -> Self {
+        Self::from(&event)
+    }
+}
+
+impl<P: FieldParameters + NumWords> From<&EllipticCurveAddEvent> for EllipticCurveAddEventFFI<P> {
+    fn from(event: &EllipticCurveAddEvent) -> Self {
+        let n = P::WordsCurvePoint::USIZE;
+
+        // Point data: copy u64 dwords directly.
+        let p = Array::<u64, P::WordsCurvePoint>::try_from(event.p.as_slice()).unwrap();
+        let q = Array::<u64, P::WordsCurvePoint>::try_from(event.q.as_slice()).unwrap();
+
+        // Memory write records: one per dword.
+        let mut p_memory_records = Array::<FfiEcMemoryWriteRecord, P::WordsCurvePoint>::default();
+        for i in 0..n {
+            let rec = event.p_memory_records[i];
+            p_memory_records[i] = FfiEcMemoryWriteRecord {
+                value: rec.value,
+                prev_value: rec.prev_value,
+                chunk: rec.chunk,
+                timestamp: rec.timestamp,
+                prev_chunk: rec.prev_chunk,
+                prev_timestamp: rec.prev_timestamp,
+            };
+        }
+
+        // Memory read records: one per dword.
+        let mut q_memory_records = Array::<FfiEcMemoryReadRecord, P::WordsCurvePoint>::default();
+        for i in 0..n {
+            let rec = event.q_memory_records[i];
+            q_memory_records[i] = FfiEcMemoryReadRecord {
+                value: rec.value,
+                chunk: rec.chunk,
+                timestamp: rec.timestamp,
+                prev_chunk: rec.prev_chunk,
+                prev_timestamp: rec.prev_timestamp,
+            };
+        }
+
+        Self {
+            chunk: event.chunk,
+            clk: event.clk as u32,
+            p_ptr: event.p_ptr as u32,
+            p,
+            q_ptr: event.q_ptr as u32,
+            q,
+            p_memory_records,
+            q_memory_records,
+        }
+    }
 }
 
 /// Edwards Decompress Event.
@@ -63,6 +169,48 @@ pub struct EdDecompressEvent {
     pub y_memory_records: [MemoryReadRecord; WORDS_FIELD_ELEMENT],
     /// The local memory access events.
     pub local_mem_access: Vec<MemoryLocalEvent>,
+}
+
+/// Edwards Decompress Event FFI.
+///
+/// This event is emitted when an edwards decompression operation is performed.
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[repr(C)]
+pub struct EdDecompressEventFFI {
+    /// The chunk number.
+    pub chunk: u32,
+    /// The clock cycle.
+    pub clk: u32,
+    /// The pointer to the point.
+    pub ptr: u32,
+    /// The sign bit of the point.
+    pub sign: bool,
+    /// The comprssed y coordinate as a list of bytes.
+    pub y_bytes: [u8; COMPRESSED_POINT_BYTES],
+    /// The decompressed x coordinate as a list of bytes.
+    pub decompressed_x_bytes: [u8; NUM_BYTES_FIELD_ELEMENT],
+    /// The memory records for the x coordinate.
+    pub x_memory_records: [MemoryWriteRecord; WORDS_FIELD_ELEMENT],
+    /// The memory records for the y coordinate.
+    pub y_memory_records: [MemoryReadRecord; WORDS_FIELD_ELEMENT],
+}
+
+impl From<&EdDecompressEvent> for EdDecompressEventFFI {
+    fn from(_value: &EdDecompressEvent) -> Self {
+        todo!("fix required fields to u64");
+        /*
+        Self {
+            chunk: value.chunk,
+            clk: value.clk.try_into().unwrap(),
+            ptr: value.ptr.try_into().unwrap(),
+            sign: value.sign,
+            y_bytes: value.y_bytes,
+            decompressed_x_bytes: value.decompressed_x_bytes,
+            x_memory_records: value.x_memory_records,
+            y_memory_records: value.y_memory_records,
+        }
+        */
+    }
 }
 
 /// Create an elliptic curve add event. It takes two pointers to memory locations, reads the points
@@ -105,7 +253,9 @@ pub fn create_ec_add_event<E: EllipticCurve>(
 
     let result_words = result_affine.to_words_le();
     let result_dwords = result_words
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
         .collect::<Vec<u64>>();
 

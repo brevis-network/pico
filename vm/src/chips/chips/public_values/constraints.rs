@@ -5,9 +5,8 @@ use crate::{
     machine::builder::{ChipBuilder, RecursionBuilder},
     primitives::consts::RECURSION_NUM_PVS,
 };
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
 impl<F: Field> BaseAir<F> for PublicValuesChip<F> {
@@ -19,10 +18,10 @@ impl<F: Field> BaseAir<F> for PublicValuesChip<F> {
 impl<F: Field, CB: ChipBuilder<F>> Air<CB> for PublicValuesChip<F> {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &PublicValuesCols<CB::Var> = (*local).borrow();
-        let preprocessed = builder.preprocessed();
-        let local_preprocessed = preprocessed.row_slice(0);
+        let preprocessed = builder.preprocessed().clone();
+        let local_preprocessed = preprocessed.current_slice();
         let local_preprocessed: &PublicValuesPreprocessedCols<CB::Var> =
             (*local_preprocessed).borrow();
         let pv = builder.public_values();

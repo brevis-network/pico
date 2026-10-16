@@ -1,5 +1,5 @@
 use super::{super::SepticExtension, utils::*};
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 use p3_koala_bear::KoalaBear;
 
 #[test]
@@ -24,13 +24,13 @@ fn test_kb_ext_sqrt() {
 
 #[test]
 fn test_kb_ext_z_pow_p() {
-    let z = SepticExtension::<KoalaBear>::GENERATOR - SepticExtension::<KoalaBear>::FIVE;
+    let z = SepticExtension::<KoalaBear>::GENERATOR - SepticExtension::<KoalaBear>::from_u8(5);
     test_ext_z_pow_p(z);
 }
 
 #[test]
 fn test_kb_ext_z_pow_p2() {
-    let z = SepticExtension::<KoalaBear>::GENERATOR - SepticExtension::<KoalaBear>::FIVE;
+    let z = SepticExtension::<KoalaBear>::GENERATOR - SepticExtension::<KoalaBear>::from_u8(5);
     test_ext_z_pow_p2(z);
 }
 
@@ -41,18 +41,19 @@ fn test_kb_ext_z_pow_exp() {
 
 #[test]
 fn test_kb_curve_double() {
-    let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(
-        &[0x2013, 0x2015, 0x2016, 0x2023, 0x2024, 0x2016, 0x2017]
-            .map(KoalaBear::from_canonical_u32),
-    );
+    let x: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_slice(
+        &[0x2013, 0x2015, 0x2016, 0x2023, 0x2024, 0x2016, 0x2017].map(KoalaBear::from_u32),
+    )
+    .unwrap();
     test_curve_double(x);
 }
 
 #[test]
 fn test_kb_curve_lift_x() {
-    let x: SepticExtension<KoalaBear> = SepticExtension::from_base_slice(
-        &[0x2013, 0x2015, 0x2016, 0x2023, 0x2024, 0x2016, 0x1].map(KoalaBear::from_canonical_u32),
-    );
+    let x: SepticExtension<KoalaBear> = SepticExtension::from_basis_coefficients_slice(
+        &[0x2013, 0x2015, 0x2016, 0x2023, 0x2024, 0x2016, 0x1].map(KoalaBear::from_u32),
+    )
+    .unwrap();
     test_curve_lift_x(x);
 }
 
@@ -71,4 +72,14 @@ fn test_kb_curve_simple_sum() {
 #[ignore]
 fn test_kb_curve_parallel_sum() {
     test_curve_parallel_sum::<KoalaBear>();
+}
+
+#[test]
+fn test_kb_ext_square_textbook() {
+    test_ext_square_mul_textbook::<KoalaBear>();
+}
+
+#[test]
+fn test_kb_ext_coeffs_signed() {
+    test_ext_coeffs_signed_consistent::<KoalaBear>();
 }

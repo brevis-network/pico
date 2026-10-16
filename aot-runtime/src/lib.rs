@@ -40,16 +40,26 @@
 //! // Use the generated dispatch crate to execute AOT blocks
 //! // (see pico-aot-dispatch for the generated run/lookup entry points).
 //! ```
+//!
+//! # Registration
+//!
+//! A generated `pico-aot-dispatch` crate exports its program as `AOT`, an [`AotProgram`], and
+//! [`register`] hands it to the VM's snapshot pipeline: one program per process, keyed by the
+//! SHA-256 of the ELF it was generated from.
 
 mod dispatch;
 pub mod emulator;
 mod hook;
 pub mod interpreter;
 pub mod precompiles;
+mod program;
+mod snapshot_runtime;
 pub mod syscall;
 pub mod types;
 
 // Re-export core types
 pub use dispatch::{lookup_block_fn, set_lookup_block_fn};
 pub use emulator::AotEmulatorCore;
+pub use program::{AotError, AotProgram};
+pub use snapshot_runtime::{register, register_snapshot_aot_factory};
 pub use types::{BlockClock, BlockFn, ClockUpdate, NextStep};

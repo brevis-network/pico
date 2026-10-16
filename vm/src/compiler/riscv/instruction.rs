@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// Field widths: `op_a` is `u8` (register index 0-31), `op_b`/`op_c` are `u64` to hold
 /// full-width RV64 immediates without truncation.
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+#[repr(C)]
 pub struct Instruction {
     /// The operation to emulate.
     pub opcode: Opcode,
@@ -130,7 +131,9 @@ impl Debug for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mnemonic = self.opcode.mnemonic();
         let op_a_formatted = format!("%x{}", self.op_a);
-        let op_b_formatted = if self.imm_b || self.opcode == Opcode::AUIPC {
+        // The old `|| self.opcode == Opcode::AUIPC` term was already redundant: the transpiler
+        // always set `imm_b` on AUIPC, and since X12 it emits no AUIPC at all.
+        let op_b_formatted = if self.imm_b {
             format!("{}", self.op_b as i64)
         } else {
             format!("%x{}", self.op_b)

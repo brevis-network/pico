@@ -4,12 +4,12 @@ use crate::{
     machine::field::{FieldBehavior, FieldType},
     primitives::consts::NUM_BITS,
 };
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 
 impl<FC: FieldGenericConfig> Builder<FC> {
     /// Converts a variable to LE bits.
     pub fn num2bits_v(&mut self, num: Var<FC::N>) -> Array<FC, Var<FC::N>> {
-        // This function is only used when the native field is Babybear.
+        // This function is only used when the native field is KoalaBear.
         assert!(FC::N::bits() == NUM_BITS);
 
         let output = self.dyn_array::<Var<_>>(NUM_BITS);
@@ -19,7 +19,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         for i in 0..NUM_BITS {
             let bit = self.get(&output, i);
             self.assert_var_eq(bit * (bit - FC::N::ONE), FC::N::ZERO);
-            self.assign(sum, sum + bit * FC::N::from_canonical_u32(1 << i));
+            self.assign(sum, sum + bit * FC::N::from_u32(1 << i));
         }
 
         self.assert_var_eq(sum, num);
@@ -69,7 +69,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         self.range(0, bits.len()).for_each(|i, builder| {
             let bit = builder.get(bits, i);
             builder.assign(num, num + bit * power);
-            builder.assign(power, power * FC::N::from_canonical_u32(2));
+            builder.assign(power, power * FC::N::from_u32(2));
         });
         num
     }
@@ -78,7 +78,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     pub fn bits2num_v_circuit(&mut self, bits: &[Var<FC::N>]) -> Var<FC::N> {
         let result: Var<_> = self.eval(FC::N::ZERO);
         for i in 0..bits.len() {
-            self.assign(result, result + bits[i] * FC::N::from_canonical_u32(1 << i));
+            self.assign(result, result + bits[i] * FC::N::from_u32(1 << i));
         }
         result
     }
@@ -131,13 +131,10 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         result_bits
     }
 
-    /// Checks that the LE bit decomposition of a number is less than the babybear/koalabear modulus.
+    /// Checks that the LE bit decomposition of a number is less than the koalabear modulus.
     ///
     /// SAFETY: This function assumes that the num_bits values are already verified to be boolean.
     ///
-    /// The babybear modulus in LE bits is: 100_000_000_000_000_000_000_000_000_111_1.
-    /// To check that the num_bits array is less than that value, we first check if the most
-    /// significant bits are all 1.  If it is, then we assert that the other bits are all 0.
     /// The koalabear modulus in LE bits is: 100_000_000_000_000_000_000_000_111_111_1.
     /// To check that the num_bits array is less than that value, we first check if the most
     /// significant bits are all 1.  If it is, then we assert that the other bits are all 0.
@@ -145,25 +142,26 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         let one: Var<_> = self.eval(FC::N::ONE);
         let zero: Var<_> = self.eval(FC::N::ZERO);
 
-        let one_start_id = match FC::F::field_type() {
-            FieldType::TypeBabyBear => 3,
-            FieldType::TypeKoalaBear => 0,
-            _ => unreachable!(),
-        };
+        // A guard, not an offset: the 24 below is KoalaBear's split, and another field would
+        // need a different one.
+        match FC::F::field_type() {
+            FieldType::TypeKoalaBear => (),
+            _ => unimplemented!("Unsupported field type"),
+        }
 
         let mut most_sig_bits = one;
-        for i in (24 + one_start_id)..NUM_BITS {
+        for i in 24..NUM_BITS {
             let bit = self.get(&num_bits, i);
             most_sig_bits = self.eval(bit * most_sig_bits);
         }
 
         let mut sum_least_sig_bits = zero;
-        for i in 0..(24 + one_start_id) {
+        for i in 0..24 {
             let bit = self.get(&num_bits, i);
             sum_least_sig_bits = self.eval(bit + sum_least_sig_bits);
         }
 
-        // If the most significant 4 bits are all 1, then check the sum of the least significant
+        // If the most significant 7 bits are all 1, then check the sum of the least significant
         // bits, else return zero.
         let check: Var<_> =
             self.eval(most_sig_bits * sum_least_sig_bits + (one - most_sig_bits) * zero);

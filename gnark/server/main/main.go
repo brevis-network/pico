@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/brevis-network/pico/gnark/babybear_verifier"
 	"github.com/brevis-network/pico/gnark/koalabear_verifier"
 	"github.com/brevis-network/pico/gnark/utils"
 	"github.com/celer-network/goutils/log"
@@ -23,7 +22,7 @@ import (
 
 var (
 	httpPort = flag.Int("httpport", 9099, "http json listening port")
-	field    = flag.String("field", "kb", "field: kb, bb")
+	field    = flag.String("field", "kb", "field for proving; only kb is supported")
 	pkPath   = flag.String("pk", "./data/vm_pk", "path of proving key")
 	ccsPath  = flag.String("ccs", "./data/vm_ccs", "path of ccs")
 
@@ -38,7 +37,11 @@ func main() {
 	flag.Parse()
 	e := echo.New()
 
-	log.Infof("use field: %s", *field)
+	// Reject at startup, not per request: a deployment still passing `-field bb` would
+	// otherwise boot, report ready, and 500 every proof it is handed.
+	if *field != "kb" {
+		log.Fatalf("unsupported field %q: only kb is served", *field)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -111,17 +114,6 @@ func Prove(c echo.Context) error {
 func GetWitnessFromHex(inputs utils.WitnessInput) (fullWitness witness.Witness, pubWitness witness.Witness, err error) {
 	if *field == "kb" {
 		assigment := koalabear_verifier.NewCircuit(inputs)
-
-		fullWitness, err = frontend.NewWitness(assigment, ecc.BN254.ScalarField())
-		if err != nil {
-			return
-		}
-		pubWitness, err = fullWitness.Public()
-		if err != nil {
-			return
-		}
-	} else if *field == "bb" {
-		assigment := babybear_verifier.NewCircuit(inputs)
 
 		fullWitness, err = frontend.NewWitness(assigment, ecc.BN254.ScalarField())
 		if err != nil {

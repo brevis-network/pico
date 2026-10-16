@@ -17,6 +17,11 @@ type Circuit struct {
 	Vars                  []frontend.Variable
 	Felts                 []koalabear.Variable
 	Exts                  []koalabear.ExtensionVariable
+	// Plain Go config, not a witness value: the MLE and FRI paths permute with DIFFERENT
+	// KoalaBear-Poseidon2 tables and each one's honest witness is unsatisfiable under the other's,
+	// so the chip has to be chosen per proof. Both shapes expose the same two public inputs, so
+	// this cannot be inferred from the circuit's signature.
+	UseMleKoalaBearConstants bool
 }
 
 func NewCircuit(witnessInput utils.WitnessInput) *Circuit {
@@ -33,11 +38,12 @@ func NewCircuit(witnessInput utils.WitnessInput) *Circuit {
 		exts[i] = koalabear.NewE(witnessInput.Exts[i])
 	}
 	return &Circuit{
-		VkeyHash:              witnessInput.VkeyHash,
-		CommittedValuesDigest: witnessInput.CommittedValuesDigest,
-		Vars:                  vars,
-		Felts:                 felts,
-		Exts:                  exts,
+		VkeyHash:                 witnessInput.VkeyHash,
+		CommittedValuesDigest:    witnessInput.CommittedValuesDigest,
+		UseMleKoalaBearConstants: witnessInput.Backend == "mle",
+		Vars:                     vars,
+		Felts:                    felts,
+		Exts:                     exts,
 	}
 }
 
@@ -53,14 +59,8 @@ type Proof struct {
 }
 
 func (circuit *Circuit) Define(api frontend.API) error {
-	// Get the file name from an environment variable.
-	fileName := os.Getenv("CONSTRAINTS_JSON")
-	if fileName == "" {
-		fileName = "constraints.json"
-	}
-
 	// Read the file.
-	data, err := os.ReadFile(fileName)
+	data, err := os.ReadFile(utils.ConstraintsPath())
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
@@ -74,27 +74,31 @@ func (circuit *Circuit) Define(api frontend.API) error {
 
 	hashAPI := poseidon2.NewChip(api)
 	hashKoalaBearAPI := poseidon2.NewKoalaBearChip(api)
+	if circuit.UseMleKoalaBearConstants {
+		hashKoalaBearAPI = poseidon2.NewKoalaBearMleChip(api)
+	}
 	fieldAPI := koalabear.NewChip(api)
 	vars := make(map[string]frontend.Variable)
 	felts := make(map[string]koalabear.Variable)
 	exts := make(map[string]koalabear.ExtensionVariable)
 
-	// Iterate through the witnesses and range check them, if necessary.
+	// Canonical witness felts. Each one is range checked on entry anyway, so the 2^32 bound
+	// that NewF hands out is pure waste: it is wider than p, so a reduction fires on every
+	// single raw witness purely to canonicalise an input we are already constraining. One
+	// extra lookup on the shifted value turns "< 2^31" into "< p", which is far cheaper than
+	// the reduction it removes.
+	//
+	// The checks and the tightened bound both come out of Chip.RangeCheckWitness, which is
+	// the only way to get either. Lazy canonicality leans on this: with the bound tightened to
+	// p - 1 here, ReduceCanonical at the felt -> integer boundaries has nothing left to prove,
+	// which is why lazy canonicality costs nothing at those boundaries on this tape.
+	witnessFelts := make([]koalabear.Variable, len(circuit.Felts))
 	for i := 0; i < len(circuit.Felts); i++ {
-		if os.Getenv("GROTH16") != "1" {
-			fieldAPI.RangeChecker.Check(circuit.Felts[i].Value, 31)
-		} else {
-			api.ToBinary(circuit.Felts[i].Value, 31)
-		}
+		witnessFelts[i] = fieldAPI.RangeCheckWitness(circuit.Felts[i])
 	}
+	witnessExts := make([]koalabear.ExtensionVariable, len(circuit.Exts))
 	for i := 0; i < len(circuit.Exts); i++ {
-		for j := 0; j < 4; j++ {
-			if os.Getenv("GROTH16") != "1" {
-				fieldAPI.RangeChecker.Check(circuit.Exts[i].Value[j].Value, 31)
-			} else {
-				api.ToBinary(circuit.Exts[i].Value[j].Value, 31)
-			}
-		}
+		witnessExts[i] = fieldAPI.RangeCheckWitnessE(circuit.Exts[i])
 	}
 
 	// Iterate through the instructions and handle each opcode.
@@ -104,9 +108,12 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		case "ImmV":
 			vars[cs.Args[0][0]] = frontend.Variable(cs.Args[1][0])
 		case "ImmF":
-			felts[cs.Args[0][0]] = koalabear.NewF(cs.Args[1][0])
+			// The literal is known at compile time, so bound it exactly instead of
+			// assuming 2^32. An inflated bound is not merely imprecise -- it propagates through
+			// every downstream operation and forces reductions that the literal never needed.
+			felts[cs.Args[0][0]] = koalabear.NewFConst(cs.Args[1][0])
 		case "ImmE":
-			exts[cs.Args[0][0]] = koalabear.NewE(cs.Args[1])
+			exts[cs.Args[0][0]] = koalabear.NewEConst(cs.Args[1])
 		case "AddV":
 			vars[cs.Args[0][0]] = api.Add(vars[cs.Args[1][0]], vars[cs.Args[2][0]])
 		case "AddF":
@@ -192,14 +199,15 @@ func (circuit *Circuit) Define(api frontend.API) error {
 		case "PrintV":
 			api.Println(vars[cs.Args[0][0]])
 		case "PrintF":
-			f := fieldAPI.ReduceSlow(felts[cs.Args[0][0]])
-			api.Println(f.Value)
+			// Canonical, so that what gets printed is the field element and not an
+			// arbitrary 31-bit representative of it.
+			api.Println(fieldAPI.Felt2Var(felts[cs.Args[0][0]]))
 		case "PrintE":
-			e := fieldAPI.ReduceE(exts[cs.Args[0][0]])
-			api.Println(e.Value[0].Value)
-			api.Println(e.Value[1].Value)
-			api.Println(e.Value[2].Value)
-			api.Println(e.Value[3].Value)
+			// Same reasoning as PrintF: ReduceE only promises a 31-bit representative.
+			e := exts[cs.Args[0][0]]
+			for j := 0; j < 4; j++ {
+				api.Println(fieldAPI.Felt2Var(e.Value[j]))
+			}
 		case "WitnessV":
 			i, err := strconv.Atoi(cs.Args[1][0])
 			if err != nil {
@@ -211,23 +219,34 @@ func (circuit *Circuit) Define(api frontend.API) error {
 			if err != nil {
 				panic(err)
 			}
-			felts[cs.Args[0][0]] = circuit.Felts[i]
+			felts[cs.Args[0][0]] = witnessFelts[i]
 		case "WitnessE":
 			i, err := strconv.Atoi(cs.Args[1][0])
 			if err != nil {
 				panic(err)
 			}
-			exts[cs.Args[0][0]] = circuit.Exts[i]
+			exts[cs.Args[0][0]] = witnessExts[i]
 		case "CommitVkeyHash":
 			element := vars[cs.Args[0][0]]
 			api.AssertIsEqual(circuit.VkeyHash, element)
 		case "CommitCommitedValuesDigest":
 			element := vars[cs.Args[0][0]]
 			api.AssertIsEqual(circuit.CommittedValuesDigest, element)
+		case utils.AssertVkRootOpcode:
+			if len(cs.Args) != 2 || len(cs.Args[0]) != 8 || len(cs.Args[1]) != 8 {
+				return fmt.Errorf("%s takes 8 felts and 8 root limbs", cs.Opcode)
+			}
+			for i := 0; i < 8; i++ {
+				fieldAPI.AssertIsEqualF(felts[cs.Args[0][i]], koalabear.NewFConst(cs.Args[1][i]))
+			}
 		case "CircuitFelts2Ext":
 			exts[cs.Args[0][0]] = koalabear.Felts2Ext(felts[cs.Args[1][0]], felts[cs.Args[2][0]], felts[cs.Args[3][0]], felts[cs.Args[4][0]])
 		case "CircuitFelt2Var":
-			vars[cs.Args[0][0]] = fieldAPI.ReduceSlow(felts[cs.Args[1][0]]).Value
+			// Lazy canonicality: this is the boundary where a felt stops being a mod-p value and
+			// becomes a BN254 integer -- it goes on to be hashed by the Poseidon2-BN254
+			// sponge and compared against VkeyHash / CommittedValuesDigest. v and v + p are
+			// the same felt but different digests, so the canonical form is required here.
+			vars[cs.Args[0][0]] = fieldAPI.Felt2Var(felts[cs.Args[1][0]])
 		case "ReduceE":
 			exts[cs.Args[0][0]] = fieldAPI.ReduceE(exts[cs.Args[0][0]])
 		default:

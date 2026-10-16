@@ -1,5 +1,5 @@
 use hashbrown::HashMap;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 // set it temporarily for now
 
@@ -10,7 +10,7 @@ pub trait RecordBehavior: Default + Send + Sync {
 
     fn append(&mut self, extra: &mut Self);
 
-    fn public_values<F: FieldAlgebra>(&self) -> Vec<F>;
+    fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F>;
 
     fn chunk_index(&self) -> usize;
 

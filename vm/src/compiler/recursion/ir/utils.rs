@@ -3,18 +3,17 @@ use crate::{
     configs::config::FieldGenericConfig,
     machine::field::{FieldBehavior, FieldType},
 };
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use std::ops::{Add, Mul, MulAssign};
 
 impl<FC: FieldGenericConfig> Builder<FC> {
     /// The generator for the field.
     ///
-    /// Reference: [p3_baby_bear::BabyBear] and [p3_koala_bear::KoalaBear]
+    /// Reference: [p3_koala_bear::KoalaBear]
     pub fn generator(&mut self) -> Felt<FC::F> {
         match FC::F::field_type() {
-            FieldType::TypeBabyBear => self.eval(FC::F::from_canonical_u32(31)),
-            FieldType::TypeKoalaBear => self.eval(FC::F::from_canonical_u32(3)),
-            _ => unreachable!(),
+            FieldType::TypeKoalaBear => self.eval(FC::F::from_u32(3)),
+            _ => unimplemented!("Unsupported field type"),
         }
     }
 
@@ -63,7 +62,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     /// Exponentializes a variable to an array of bits in little endian.
     pub fn exp_bits<V>(&mut self, x: V, power_bits: &Array<FC, Var<FC::N>>) -> V
     where
-        V::Expression: FieldAlgebra,
+        V::Expression: PrimeCharacteristicRing,
         V: Copy + Mul<Output = V::Expression> + Variable<FC>,
     {
         let result = self.eval(V::Expression::ONE);
@@ -97,7 +96,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         x: Ext<FC::F, FC::EF>,
         power_bits: Vec<Var<FC::N>>,
     ) -> Ext<FC::F, FC::EF> {
-        let mut result = self.eval(SymbolicExt::from_f(FC::EF::ONE));
+        let mut result = self.eval(SymbolicExt::Const(FC::EF::ONE));
         let mut power_f: Ext<_, _> = self.eval(x);
         for i in 0..power_bits.len() {
             let bit = power_bits[i];
@@ -118,7 +117,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
         bit_len: impl Into<Usize<FC::N>>,
     ) -> V
     where
-        V::Expression: FieldAlgebra,
+        V::Expression: PrimeCharacteristicRing,
         V: Copy + Mul<Output = V::Expression> + Variable<FC>,
     {
         let result = self.eval(V::Expression::ONE);
@@ -228,10 +227,10 @@ impl<FC: FieldGenericConfig> Builder<FC> {
 
     /// Creates an ext from a slice of felts.
     pub fn ext_from_base_slice(&mut self, arr: &[Felt<FC::F>]) -> Ext<FC::F, FC::EF> {
-        assert!(arr.len() <= <FC::EF as FieldExtensionAlgebra::<FC::F>>::D);
-        let mut res = SymbolicExt::from_f(FC::EF::ZERO);
+        assert!(arr.len() <= <FC::EF as BasedVectorSpace::<FC::F>>::DIMENSION);
+        let mut res = SymbolicExt::Const(FC::EF::ZERO);
         for i in 0..arr.len() {
-            res += arr[i] * SymbolicExt::from_f(FC::EF::monomial(i));
+            res += arr[i] * SymbolicExt::Const(FC::EF::ith_basis_element(i).unwrap());
         }
         self.eval(res)
     }

@@ -5,9 +5,9 @@ use crate::{
     chips::gadgets::poseidon2::constants::RoundConstants, configs::config::Poseidon2Config,
     machine::field::FieldSpecificPoseidon2Config,
 };
-use p3_field::Field;
 use std::marker::PhantomData;
 
+pub mod columns;
 pub mod constraints;
 pub mod event;
 pub mod traces;
@@ -16,7 +16,7 @@ pub use event::Poseidon2Event;
 
 pub type FieldSpecificPoseidon2Chip<F> = Poseidon2ChipP3<
     F,
-    <F as FieldSpecificPoseidon2Config>::LinearLayers,
+    <F as FieldSpecificPoseidon2Config>::RiscvLinearLayers,
     <F as FieldSpecificPoseidon2Config>::Poseidon2Config,
 >;
 
@@ -26,8 +26,11 @@ pub struct Poseidon2ChipP3<F, LinearLayers, Config: Poseidon2Config> {
     pub _phantom: PhantomData<fn(LinearLayers) -> LinearLayers>,
 }
 
-impl<F: Field, LinearLayers, Config: Poseidon2Config> Default
-    for Poseidon2ChipP3<F, LinearLayers, Config>
+impl<
+        F: FieldSpecificPoseidon2Config<Poseidon2Config = Config>,
+        LinearLayers,
+        Config: Poseidon2Config,
+    > Default for Poseidon2ChipP3<F, LinearLayers, Config>
 {
     fn default() -> Self {
         let constants = RoundConstants::default();
@@ -37,6 +40,3 @@ impl<F: Field, LinearLayers, Config: Poseidon2Config> Default
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

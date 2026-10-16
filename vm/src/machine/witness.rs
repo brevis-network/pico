@@ -1,26 +1,14 @@
 use crate::{
-    compiler::{
-        recursion::{circuit::hash::FieldHasher, program::RecursionProgram},
-        riscv::program::Program,
-    },
     configs::config::{StarkGenericConfig, Val},
-    emulator::{
-        opts::EmulatorOpts, recursion::emulator::RecursionRecord, riscv::record::EmulationRecord,
-        stdin::EmulatorStdin,
-    },
-    instances::compiler::{
-        riscv_circuit::stdin::{ConvertStdin, DeferredStdin},
-        vk_merkle::stdin::RecursionStdinVariant,
-    },
-    machine::{
-        chip::ChipBehavior,
-        keys::{BaseProvingKey, BaseVerifyingKey},
-        proof::BaseProof,
-    },
+    emulator::{opts::EmulatorOpts, stdin::EmulatorStdin},
+    machine::chip::ChipBehavior,
     primitives::consts::DIGEST_SIZE,
 };
 use alloc::sync::Arc;
 
+/// What the emulators need to run a program: the program, its stdin and the emulator options,
+/// plus the records they produce. The FRI proving/verifying keys and proofs that used to ride
+/// along were removed with the FRI path (see tag `legacy-fri-last`); the MLE backend keys itself.
 #[derive(Default)]
 pub struct ProvingWitness<SC, C, I>
 where
@@ -28,12 +16,6 @@ where
     C: ChipBehavior<Val<SC>>,
 {
     pub program: Option<Arc<C::Program>>,
-
-    pub pk: Option<BaseProvingKey<SC>>,
-
-    pub vk: Option<BaseVerifyingKey<SC>>,
-
-    pub proof: Option<BaseProof<SC>>,
 
     pub vk_root: Option<[Val<SC>; DIGEST_SIZE]>,
 
@@ -56,43 +38,13 @@ where
     pub fn setup_with_records(records: Vec<C::Record>) -> Self {
         Self {
             program: None,
-            pk: None,
-            vk: None,
-            proof: None,
             vk_root: None,
             stdin: None,
             flag_empty_stdin: false,
-            opts: None,
             config: None,
+            opts: None,
             records,
         }
-    }
-
-    pub fn setup_with_keys_and_records(
-        pk: BaseProvingKey<SC>,
-        vk: BaseVerifyingKey<SC>,
-        records: Vec<C::Record>,
-    ) -> Self {
-        Self {
-            program: None,
-            pk: Some(pk),
-            vk: Some(vk),
-            proof: None,
-            vk_root: None,
-            stdin: None,
-            flag_empty_stdin: false,
-            opts: None,
-            config: None,
-            records,
-        }
-    }
-
-    pub fn pk(&self) -> &BaseProvingKey<SC> {
-        self.pk.as_ref().unwrap()
-    }
-
-    pub fn vk(&self) -> &BaseVerifyingKey<SC> {
-        self.vk.as_ref().unwrap()
     }
 
     pub fn records(&self) -> &[C::Record] {
@@ -106,127 +58,20 @@ where
     SC: StarkGenericConfig,
     C: ChipBehavior<Val<SC>>,
 {
-    pub fn setup_for_riscv(
+    /// Keyless witness for the MLE single-node path: drives emulation only (reads
+    /// `program`/`stdin`/`opts`). The MLE backend proves with its own key.
+    pub fn setup_for_mle_riscv(
         program: Arc<C::Program>,
         stdin: EmulatorStdin<C::Program, Vec<u8>>,
         opts: EmulatorOpts,
-        pk: BaseProvingKey<SC>,
-        vk: BaseVerifyingKey<SC>,
     ) -> Self {
         Self {
             program: Some(program),
-            pk: Some(pk),
-            vk: Some(vk),
-            proof: None,
             vk_root: None,
             stdin: Some(stdin),
             flag_empty_stdin: false,
             opts: Some(opts),
             config: None,
-            records: vec![],
-        }
-    }
-}
-
-// implement Witness for riscv-recursion machine
-impl<C, PrevC, SC> ProvingWitness<SC, C, ConvertStdin<SC, PrevC>>
-where
-    SC: StarkGenericConfig,
-    PrevC: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
-    C: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
-{
-    pub fn setup_for_convert(
-        stdin: EmulatorStdin<C::Program, ConvertStdin<SC, PrevC>>,
-        config: Arc<SC>,
-        opts: EmulatorOpts,
-    ) -> Self {
-        Self {
-            program: None,
-            pk: None,
-            vk: None,
-            proof: None,
-            vk_root: None,
-            stdin: Some(stdin),
-            flag_empty_stdin: false,
-            opts: Some(opts),
-            config: Some(config),
-            records: vec![],
-        }
-    }
-}
-
-impl<C, PrevC, SC> ProvingWitness<SC, C, DeferredStdin<SC, PrevC>>
-where
-    SC: StarkGenericConfig + FieldHasher<Val<SC>>,
-    PrevC: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
-    C: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
-{
-    pub fn setup_for_deferred(
-        stdin: EmulatorStdin<C::Program, DeferredStdin<SC, PrevC>>,
-        config: Arc<SC>,
-        opts: EmulatorOpts,
-    ) -> Self {
-        Self {
-            program: None,
-            pk: None,
-            vk: None,
-            proof: None,
-            vk_root: None,
-            stdin: Some(stdin),
-            flag_empty_stdin: false,
-            opts: Some(opts),
-            config: Some(config),
-            records: vec![],
-        }
-    }
-}
-
-// implement Witness for recursion-recursion machine
-impl<'a, C, SC, PrevC> ProvingWitness<SC, C, RecursionStdinVariant<'a, SC, PrevC>>
-where
-    SC: StarkGenericConfig + FieldHasher<Val<SC>>,
-    PrevC: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
-    C: ChipBehavior<
-        Val<SC>,
-        Program = RecursionProgram<Val<SC>>,
-        Record = RecursionRecord<Val<SC>>,
-    >,
-{
-    pub fn setup_for_combine(
-        vk_root: [Val<SC>; DIGEST_SIZE],
-        stdin: EmulatorStdin<C::Program, RecursionStdinVariant<'a, SC, PrevC>>,
-        last_vk: Option<BaseVerifyingKey<SC>>,
-        last_proof: Option<BaseProof<SC>>,
-        config: Arc<SC>,
-        opts: EmulatorOpts,
-    ) -> Self {
-        let flag_empty_stdin = stdin.flag_empty;
-        Self {
-            program: None,
-            pk: None,
-            vk: last_vk,
-            proof: last_proof,
-            vk_root: Some(vk_root),
-            stdin: Some(stdin),
-            flag_empty_stdin,
-            opts: Some(opts),
-            config: Some(config),
             records: vec![],
         }
     }

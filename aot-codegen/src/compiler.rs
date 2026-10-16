@@ -51,34 +51,53 @@ fn run_table_word_u32(word_offset: u64) -> u32 {
     u32::try_from(word_offset).expect("run-table word offset exceeds u32")
 }
 
-/// Emit the `pico-aot-runtime = { ... }` line for a generated Cargo.toml.
+/// Which `pico-aot-runtime` the generated crates depend on.
 ///
-/// Defaults to a relative `path = "{default_path}"` so the in-tree layout
-/// keeps working. When `PICO_AOT_RUNTIME_SPEC` is set and
-/// non-empty, its value is inlined as the dep body verbatim, letting
-/// downstream consumers generate `aot-generated/` outside this workspace
-/// (e.g. at a template's root) and wire the runtime via git.
-///
-/// Example:
-///   PICO_AOT_RUNTIME_SPEC='git = "https://github.com/brevis-network/pico", branch = "X"'
-fn runtime_dep_line(default_path: &str) -> String {
-    match std::env::var("PICO_AOT_RUNTIME_SPEC").ok() {
-        Some(spec) if !spec.trim().is_empty() => {
-            let trimmed = spec.trim();
+/// It has to be the one the host's `pico-vm` resolves to: a second copy is a second `AotProgram`
+/// type, and the host's use of the generated `AOT` then fails to typecheck.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum RuntimeSpec {
+    /// `aot-runtime/` beside the output directory: the layout of `aot-generated/` at the root of a
+    /// Pico checkout.
+    #[default]
+    InTree,
+    /// The body of the dependency entry, written verbatim into every generated manifest, e.g.
+    /// `git = "https://github.com/brevis-network/pico", tag = "v3.0.0"`. A `path` here must be
+    /// absolute: the chunk crates sit two directories below the dispatch crate.
+    Entry(String),
+}
+
+impl RuntimeSpec {
+    /// `PICO_AOT_RUNTIME_SPEC` when it is set and non-empty, else [`RuntimeSpec::InTree`]: what
+    /// [`AotCompiler::compile`] uses, so a script that exports it keeps working.
+    pub fn from_env() -> Self {
+        match std::env::var("PICO_AOT_RUNTIME_SPEC") {
+            Ok(spec) if !spec.trim().is_empty() => Self::Entry(spec),
+            _ => Self::InTree,
+        }
+    }
+}
+
+/// Emit the `pico-aot-runtime = { ... }` line for a generated Cargo.toml. `in_tree_path` is
+/// [`RuntimeSpec::InTree`]'s path, relative to that manifest.
+fn runtime_dep_line(runtime: &RuntimeSpec, in_tree_path: &str) -> String {
+    match runtime {
+        RuntimeSpec::InTree => format!("pico-aot-runtime = {{ path = \"{}\" }}\n", in_tree_path),
+        RuntimeSpec::Entry(entry) => {
+            let trimmed = entry.trim();
             // Sanity check: a valid Cargo dep fragment always contains `=`
             // (e.g. `git = "..."`, `path = "..."`). A value missing `=` will
             // produce a cryptic Cargo parse error at the consumer; warn now
             // so the cause is obvious.
             if !trimmed.contains('=') {
                 eprintln!(
-                    "warning: PICO_AOT_RUNTIME_SPEC={:?} does not look like a Cargo dep \
+                    "warning: runtime spec {:?} does not look like a Cargo dep \
                      fragment (expected `key = value`); emitting anyway",
                     trimmed
                 );
             }
             format!("pico-aot-runtime = {{ {} }}\n", trimmed)
         }
-        _ => format!("pico-aot-runtime = {{ path = \"{}\" }}\n", default_path),
     }
 }
 
@@ -178,13 +197,20 @@ impl AotCompiler {
         }
     }
 
-    /// Main compilation entry point
+    /// Main compilation entry point, against the runtime `PICO_AOT_RUNTIME_SPEC` names
+    /// ([`RuntimeSpec::from_env`])
     pub fn compile(&self) -> Result<(), String> {
-        self.compile_crates()
+        self.compile_with(&RuntimeSpec::from_env())
+    }
+
+    /// Compile against the `pico-aot-runtime` that `runtime` names. Nothing here reads the
+    /// environment for it, so a host may generate from any thread.
+    pub fn compile_with(&self, runtime: &RuntimeSpec) -> Result<(), String> {
+        self.compile_crates(runtime)
     }
 
     /// Compile to chunk crates + a dispatcher crate for parallel compilation
-    fn compile_crates(&self) -> Result<(), String> {
+    fn compile_crates(&self, runtime: &RuntimeSpec) -> Result<(), String> {
         // Phase 1: Block Analysis
         let analyzer = BlockAnalyzer::new(&self.program);
         let leaders = analyzer.analyze();
@@ -232,14 +258,14 @@ impl AotCompiler {
             } else {
                 None
             };
-            self.write_chunk_crate(chunk, &chunks_dir, &pred_counts, &succ_map)?;
+            self.write_chunk_crate(chunk, &chunks_dir, &pred_counts, &succ_map, runtime)?;
             if let Some(metric) = chunk_metric {
                 chunk_metrics_vec.push(metric);
             }
         }
 
         // Phase 6: Generate dispatch crate
-        self.write_dispatch_crate(&chunks, output_dir)?;
+        self.write_dispatch_crate(&chunks, output_dir, runtime)?;
 
         // Save metrics if enabled
         if save_metrics {
@@ -326,7 +352,7 @@ impl AotCompiler {
                                 if emu.should_yield() {
                                     return Ok(crate::NextStep::Dynamic(emu.pc));
                             }
-                            return Ok(crate::NextStep::Direct(#next_block_name));
+                            Ok(crate::NextStep::Direct(#next_block_name))
                         });
                     }
 
@@ -446,7 +472,7 @@ impl AotCompiler {
                     });
                 }
                 current_block_tokens.extend(quote! {
-                    return Ok(crate::NextStep::Halt);
+                    Ok(crate::NextStep::Halt)
                 });
             }
 
@@ -901,6 +927,7 @@ impl AotCompiler {
         chunks_dir: &std::path::Path,
         pred_counts: &HashMap<u64, usize>,
         succ_map: &HashMap<u64, Vec<u64>>,
+        runtime: &RuntimeSpec,
     ) -> Result<(), String> {
         let crate_dir = chunks_dir.join(format!("chunk_{:03}", chunk.chunk_idx));
         let src_dir = crate_dir.join("src");
@@ -911,7 +938,7 @@ impl AotCompiler {
         let cargo_toml = format!(
             "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}",
             crate_name,
-            runtime_dep_line("../../../aot-runtime"),
+            runtime_dep_line(runtime, "../../../aot-runtime"),
         );
         fs::write(crate_dir.join("Cargo.toml"), cargo_toml).map_err(|e| {
             format!(
@@ -1061,6 +1088,7 @@ impl AotCompiler {
         &self,
         chunks: &[ChunkInfo],
         output_dir: &std::path::Path,
+        runtime: &RuntimeSpec,
     ) -> Result<(), String> {
         let src_dir = output_dir.join("src");
         fs::create_dir_all(&src_dir)
@@ -1078,7 +1106,7 @@ impl AotCompiler {
 
         let cargo_toml = format!(
             "[package]\nname = \"pico-aot-dispatch\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{}{}\n\n[features]\nbigint-rug = [\"pico-aot-runtime/bigint-rug\"]\nmmap-memory = [\"pico-aot-runtime/mmap-memory\"]\n",
-            runtime_dep_line("../aot-runtime"),
+            runtime_dep_line(runtime, "../aot-runtime"),
             chunk_deps.join("\n")
         );
         fs::write(output_dir.join("Cargo.toml"), cargo_toml)
@@ -1181,68 +1209,13 @@ impl AotCompiler {
             }
         };
 
-        let dispatch_code = quote! {
-            // AUTO-GENERATED by AOT compiler - Dispatch crate
-            // DO NOT EDIT MANUALLY
-
-            pub use pico_aot_runtime::AotEmulatorCore;
-            use pico_aot_runtime::{set_lookup_block_fn, BlockFn, NextStep};
-
-            pub fn run_aot(emu: &mut AotEmulatorCore) -> Result<(), String> {
-                set_lookup_block_fn(lookup_block);
-                let mut next = if emu.pc == 0 {
-                    NextStep::Halt
-                } else if let Some(func) = lookup_block(emu.pc) {
-                    NextStep::Direct(func)
-                } else {
-                    NextStep::Dynamic(emu.pc)
-                };
-
-                loop {
-                    if emu.should_yield() {
-                        break;
-                    }
-                    match next {
-                        NextStep::Direct(func) => {
-                            next = func(emu)?;
-                        }
-                        NextStep::Dynamic(pc) => {
-                            emu.pc = pc;
-                            if emu.pc == 0 {
-                                next = NextStep::Halt;
-                            } else if let Some(func) = lookup_block(pc) {
-                                next = NextStep::Direct(func);
-                            } else {
-                                next = emu.interpret_from_current_pc()?;
-                            }
-                        }
-                        NextStep::Halt => break,
-                    }
-                }
-                Ok(())
+        let lookup_block_body = if chunks.is_empty() {
+            quote! {
+                let _ = pc;
+                None
             }
-
-            type ChunkLookupFn = fn(u64) -> Option<BlockFn>;
-
-            #[repr(C)]
-            struct ChunkDesc {
-                pc_min: u64,
-                pc_max: u64,
-                lookup: ChunkLookupFn,
-            }
-
-            const CHUNKS: &[ChunkDesc] = &[
-                #(#chunk_descs)*
-            ];
-
-            #page_hint_code
-
-            fn lookup_block(pc: u64) -> Option<BlockFn> {
-                if CHUNKS.is_empty() {
-                    return None;
-                }
-
-                // Use page hint for O(1) initial guess
+        } else {
+            quote! {
                 if pc < GLOBAL_PC_MIN {
                     return None;
                 }
@@ -1271,6 +1244,48 @@ impl AotCompiler {
                 }
 
                 (c.lookup)(pc)
+            }
+        };
+
+        let elf_sha256 = self.program.elf_sha256;
+        let elf_sha256_hex: String = elf_sha256.iter().map(|b| format!("{b:02x}")).collect();
+        let aot_doc = format!(
+            " This crate's program: the code generated from the ELF with SHA-256 `{elf_sha256_hex}`."
+        );
+        let elf_sha256 = elf_sha256.iter();
+
+        let dispatch_code = quote! {
+            // AUTO-GENERATED by AOT compiler - Dispatch crate
+            // DO NOT EDIT MANUALLY
+
+            pub use pico_aot_runtime::AotEmulatorCore;
+            use pico_aot_runtime::{set_lookup_block_fn, AotProgram, BlockFn};
+
+            #[doc = #aot_doc]
+            pub static AOT: AotProgram = AotProgram::new([#(#elf_sha256),*], run_aot);
+
+            pub fn run_aot(emu: &mut AotEmulatorCore) -> Result<(), String> {
+                set_lookup_block_fn(lookup_block);
+                emu.run_blocks(lookup_block)
+            }
+
+            type ChunkLookupFn = fn(u64) -> Option<BlockFn>;
+
+            #[repr(C)]
+            struct ChunkDesc {
+                pc_min: u64,
+                pc_max: u64,
+                lookup: ChunkLookupFn,
+            }
+
+            const CHUNKS: &[ChunkDesc] = &[
+                #(#chunk_descs)*
+            ];
+
+            #page_hint_code
+
+            fn lookup_block(pc: u64) -> Option<BlockFn> {
+                #lookup_block_body
             }
         };
 
@@ -1358,7 +1373,7 @@ impl AotCompiler {
                     #(#idx_entries)*
                 ];
 
-                if pc < #pc_min || pc > #pc_max {
+                if !(#pc_min..=#pc_max).contains(&pc) {
                     return None;
                 }
                 let word_offset = match usize::try_from((pc - #pc_min) >> 2) {
@@ -1440,7 +1455,7 @@ impl AotCompiler {
                 #(#run_entries)*
             ];
 
-            if pc < #pc_min || pc > #pc_max {
+            if !(#pc_min..=#pc_max).contains(&pc) {
                 return None;
             }
             let word_offset = run_table_word_u32((pc - #pc_min) >> 2);
@@ -1989,7 +2004,13 @@ mod tests {
         fs::create_dir_all(&chunks_dir).expect("create temp chunk root");
 
         compiler
-            .write_chunk_crate(&chunk, &chunks_dir, &HashMap::new(), &HashMap::new())
+            .write_chunk_crate(
+                &chunk,
+                &chunks_dir,
+                &HashMap::new(),
+                &HashMap::new(),
+                &RuntimeSpec::InTree,
+            )
             .expect("write_chunk_crate should succeed");
 
         let lib_rs = fs::read_to_string(chunks_dir.join("chunk_000/src/lib.rs"))

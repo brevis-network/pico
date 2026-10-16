@@ -45,7 +45,7 @@ pub enum FieldOperation {
 ///
 /// **Warning**: The constraints do not check for division by zero. The caller is responsible for
 /// ensuring that the division operation is valid.
-#[derive(Clone, AlignedBorrow)]
+#[derive(Clone, AlignedBorrow, Eq, PartialEq)]
 #[repr(C)]
 pub struct FieldOpCols<T, P: FieldParameters> {
     /// The result of `a op b`, where a, b are field elements
@@ -89,7 +89,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         let p_modulus_limbs = modulus
             .to_bytes_le()
             .iter()
-            .map(|x| F::from_canonical_u8(*x))
+            .map(|x| F::from_u8(*x))
             .collect::<Vec<F>>();
         let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
@@ -133,7 +133,9 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
             FieldOperation::Sub | FieldOperation::Div => unreachable!(),
         };
         debug_assert!(&result < modulus);
-        debug_assert!(&carry < modulus);
+        // The carry has the result's limbs. It stays below the modulus when the operands do, but
+        // the uint256 chip takes operands at or above it, so what has to hold is that it fits.
+        debug_assert!(carry.bits() <= (P::NUM_BITS_PER_LIMB * P::NUM_LIMBS) as u64);
         match op {
             FieldOperation::Add => debug_assert_eq!(&carry * modulus, a + b - &result),
             FieldOperation::Mul => debug_assert_eq!(&carry * modulus, a * b - &result),
@@ -146,7 +148,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldOpCols<F, P> {
         let p_modulus_limbs = modulus
             .to_bytes_le()
             .iter()
-            .map(|x| F::from_canonical_u8(*x))
+            .map(|x| F::from_u8(*x))
             .collect::<Vec<F>>();
         let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
@@ -391,8 +393,8 @@ pub fn eval_field_operation<F: Field, CB: ChipBuilder<F>, P: FieldParameters>(
 ) {
     // Shift down the witness polynomial. Shifting is needed to range check that each
     // coefficient w_i of the witness polynomial satisfies |w_i| < 2^WITNESS_OFFSET.
-    let limb: CB::Expr = CB::F::from_canonical_u32(2u32.pow(P::NUM_BITS_PER_LIMB as u32)).into();
-    let offset: CB::Expr = CB::F::from_canonical_u32(P::WITNESS_OFFSET as u32).into();
+    let limb: CB::Expr = CB::F::from_u32(2u32.pow(P::NUM_BITS_PER_LIMB as u32)).into();
+    let offset: CB::Expr = CB::F::from_u32(P::WITNESS_OFFSET as u32).into();
     let len = p_witness.coefficients().len();
     let p_witness = p_witness - &Polynomial::new(vec![offset; len]);
 

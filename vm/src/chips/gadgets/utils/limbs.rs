@@ -14,7 +14,25 @@ pub const BITS_PER_LIMB: usize = 8;
 /// witness limbs associated in NumLimbs / FieldParameters.
 /// See: https://github.com/RustCrypto/traits/issues/1481
 #[derive(Clone, Default)]
+#[repr(C)]
 pub struct Limbs<T, N: ArraySize>(pub Array<T, N>);
+
+impl<T, N> PartialEq for Limbs<T, N>
+where
+    T: PartialEq,
+    N: ArraySize,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl<T, N> Eq for Limbs<T, N>
+where
+    T: Eq,
+    N: ArraySize,
+{
+}
 
 impl<T: Debug, N: ArraySize> Debug for Limbs<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> core::fmt::Result {

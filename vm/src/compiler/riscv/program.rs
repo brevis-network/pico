@@ -71,8 +71,7 @@ impl Program {
 
 impl<F: PrimeField32> ProgramBehavior<F> for Program {
     fn pc_start(&self) -> [F; 3] {
-        encode_proof_addr_to_u32_limbs_48(self.pc_start, "program start pc")
-            .map(F::from_canonical_u32)
+        encode_proof_addr_to_u32_limbs_48(self.pc_start, "program start pc").map(F::from_u32)
     }
 
     fn clone(&self) -> Self {
@@ -107,20 +106,21 @@ impl<F: PrimeField32> ProgramBehavior<F> for Program {
                 let v2_upper = (v2 >> 8) & 0xFF;
 
                 let values: [F; 8] = [
-                    // slot0: kind << 24 (chunk=0 for initialization, clk=0)
-                    F::from_canonical_u32((LookupType::Memory as u32) << 24),
+                    // slot0: kind << 25 (chunk=0 for initialization, clk=0). Must stay in
+                    // lockstep with GlobalInteractionOperation's packing.
+                    F::from_u32((LookupType::Memory as u32) << 25),
                     // slot1: clk = 0
                     F::ZERO,
                     // slot2-4: addr 3×u16
-                    F::from_canonical_u32(addr_0),
-                    F::from_canonical_u32(addr_1),
-                    F::from_canonical_u32(addr_2),
+                    F::from_u32(addr_0),
+                    F::from_u32(addr_1),
+                    F::from_u32(addr_2),
                     // slot5: v0 + v2_lower << 16
-                    F::from_canonical_u32(v0 + (v2_lower << 16)),
+                    F::from_u32(v0 + (v2_lower << 16)),
                     // slot6: v1 + v2_upper << 16
-                    F::from_canonical_u32(v1 + (v2_upper << 16)),
+                    F::from_u32(v1 + (v2_upper << 16)),
                     // slot7: v3
-                    F::from_canonical_u32(v3),
+                    F::from_u32(v3),
                 ];
                 let (point, _, _, _) = SepticCurve::<F>::lift_x(values);
                 SepticCurveComplete::Affine(point.neg())

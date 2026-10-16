@@ -27,7 +27,6 @@ func TestSolveVerifierCircuit(t *testing.T) {
 
 	os.Setenv("WITNESS_JSON", "./groth16_witness.json")
 	os.Setenv("CONSTRAINTS_JSON", "./constraints.json")
-	os.Setenv("GROTH16", "1")
 
 	doSolve(assert)
 	fmt.Printf("done koala bear verify \n")
@@ -39,7 +38,6 @@ func TestSetupVerifierCircuit(t *testing.T) {
 
 	os.Setenv("WITNESS_JSON", "./groth16_witness.json")
 	os.Setenv("CONSTRAINTS_JSON", "./constraints.json")
-	os.Setenv("GROTH16", "1")
 
 	circuit, assigment := doSolve(assert)
 

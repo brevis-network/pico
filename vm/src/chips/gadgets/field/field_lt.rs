@@ -4,7 +4,7 @@ use core::fmt::Debug;
 use itertools::izip;
 use num::BigUint;
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use pico_derive::AlignedBorrow;
 
 use crate::{
@@ -17,7 +17,7 @@ use crate::{
 };
 
 /// Operation columns for verifying that `lhs < rhs`.
-#[derive(Clone, AlignedBorrow)]
+#[derive(Clone, AlignedBorrow, PartialEq, Eq)]
 #[repr(C)]
 pub struct FieldLtCols<T, P: FieldParameters> {
     /// Boolean flags to indicate the first byte in which the element is smaller than the modulus.
@@ -51,8 +51,8 @@ impl<F: PrimeField32, P: FieldParameters> FieldLtCols<F, P> {
             assert!(byte <= modulus_byte);
             if byte < modulus_byte {
                 *flag = 1;
-                self.lhs_comparison_byte = F::from_canonical_u8(*byte);
-                self.rhs_comparison_byte = F::from_canonical_u8(*modulus_byte);
+                self.lhs_comparison_byte = F::from_u8(*byte);
+                self.rhs_comparison_byte = F::from_u8(*modulus_byte);
                 record.add_byte_lookup_event(ByteLookupEvent {
                     opcode: ByteOpcode::LTU,
                     a1: 1,
@@ -65,7 +65,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldLtCols<F, P> {
         }
 
         for (byte, flag) in izip!(byte_flags.iter(), self.byte_flags.0.iter_mut()) {
-            *flag = F::from_canonical_u8(*byte);
+            *flag = F::from_u8(*byte);
         }
     }
 }

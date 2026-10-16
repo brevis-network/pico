@@ -1,5 +1,6 @@
 use common::run_proof;
 
 fn main() {
-    run_proof!("../app/elf/riscv32im-pico-zkvm-elf");
+    // The guest asserts its own result and commits nothing.
+    run_proof!([SECP256K1_ADD, SECP256K1_DOUBLE], commits = b"");
 }

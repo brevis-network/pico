@@ -16,8 +16,10 @@ pub fn words_to_bytes_le_vec(words: &[u32]) -> Vec<u8> {
 pub fn bytes_to_words_le<const W: usize>(bytes: &[u8]) -> [u32; W] {
     debug_assert_eq!(bytes.len(), W * 4);
     bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| u32::from_le_bytes(*chunk))
         .collect::<Vec<_>>()
         .try_into()
         .unwrap()
@@ -26,8 +28,10 @@ pub fn bytes_to_words_le<const W: usize>(bytes: &[u8]) -> [u32; W] {
 /// Converts a byte array in little endian to a vector of words.
 pub fn bytes_to_words_le_vec(bytes: &[u8]) -> Vec<u32> {
     bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| u32::from_le_bytes(*chunk))
         .collect::<Vec<_>>()
 }
 
@@ -125,9 +129,9 @@ pub fn generate_limbs_from_write_cols_u8<F: Field, CB: ChipLookupBuilder<F>>(
 pub fn addr_to_u16_limbs<F: PrimeField32>(addr: u64) -> [F; 3] {
     let limbs = u64_to_u16_limbs(addr);
     [
-        F::from_canonical_u16(limbs[0]),
-        F::from_canonical_u16(limbs[1]),
-        F::from_canonical_u16(limbs[2]),
+        F::from_u16(limbs[0]),
+        F::from_u16(limbs[1]),
+        F::from_u16(limbs[2]),
     ]
 }
 

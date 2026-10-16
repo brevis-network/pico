@@ -28,7 +28,7 @@ pub trait FieldParameters: Copy + 'static + Serialize + DeserializeOwned + NumLi
     fn modulus_field_iter<F: Field>() -> impl Iterator<Item = F> {
         Self::MODULUS
             .iter()
-            .map(|x| F::from_canonical_u8(*x))
+            .map(|x| F::from_u8(*x))
             .take(Self::NUM_LIMBS)
     }
 
@@ -43,14 +43,14 @@ pub trait FieldParameters: Copy + 'static + Serialize + DeserializeOwned + NumLi
     fn to_limbs_field_slice<E: From<F>, F: Field>(x: &BigUint) -> Box<[E]> {
         Self::to_limbs(x)
             .iter()
-            .map(|x| F::from_canonical_u8(*x).into())
+            .map(|x| F::from_u8(*x).into())
             .collect::<Box<[_]>>()
     }
 
     /// Convert a BigUint to Limbs<E, Self::Limbs> after coercing through F.
     fn to_limbs_field<E: From<F>, F: Field>(x: &BigUint) -> Limbs<E, Self::Limbs> {
         let limbs = Self::to_limbs(x);
-        let iter = limbs.iter().map(|x| F::from_canonical_u8(*x).into());
+        let iter = limbs.iter().map(|x| F::from_u8(*x).into());
         let result = Array::try_from_iter(iter).expect("wrong number of limbs in iter");
         Limbs(result)
     }
@@ -69,8 +69,8 @@ pub fn limbs_from_slice<E: From<F>, N: ArraySize, F: Field>(limbs: impl AsRef<[F
 
 /// Trait that holds the typenum values for # of limbs and # of witness limbs.
 pub trait NumLimbs: Clone {
-    type Limbs: ArraySize;
-    type Witness: ArraySize;
+    type Limbs: ArraySize + Eq;
+    type Witness: ArraySize + Eq;
 }
 
 /// Trait that holds number of words needed to represent a field element and a curve point.

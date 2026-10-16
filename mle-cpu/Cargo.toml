@@ -1,0 +1,38 @@
+[package]
+name = "pico-mle-cpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Optimized row-major CPU device backend for the Pico MLE/WHIR prover (KoalaBear-only)"
+
+[dependencies]
+pico-mle-core = { path = "../mle-core", default-features = false }
+
+# Used by bare `p3_*` paths in this crate; the workspace pins them to the same fork revision
+# `pico-mle-core` is built against.
+p3-dft.workspace = true
+p3-field.workspace = true
+p3-matrix.workspace = true
+p3-maybe-rayon = { workspace = true, features = [] }
+p3-util.workspace = true
+
+# misc
+cfg-if.workspace = true
+derive-new.workspace = true
+getset.workspace = true
+itertools.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+pico-mle-core = { path = "../mle-core", default-features = false, features = ["test-utils"] }
+p3-koala-bear.workspace = true
+p3-symmetric.workspace = true
+rand.workspace = true
+
+[features]
+default = ["parallel"]
+# This crate has its own `cfg(feature = "parallel")` arms, so enabling the flag only on
+# `pico-mle-core` silently drops this crate to the serial path.
+parallel = ["pico-mle-core/parallel", "p3-maybe-rayon/parallel"]

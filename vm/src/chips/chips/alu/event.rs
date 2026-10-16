@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// This object encapsulated the information needed to prove an ALU operation. This includes its
 /// opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[repr(C)]
 pub struct AluEvent {
     /// The clock cycle.
     pub clk: RvClk,
@@ -23,6 +24,12 @@ pub struct AluEvent {
     /// Whether the instruction uses an immediate value (for shifts: SRLI/SRAI vs SRL/SRA).
     #[serde(default)]
     pub is_imm: bool,
+    /// Merged branch comparison (Cpu-emitted, lt family only): one Lt row pins both strict
+    /// comparison bits, `a = [b < c] | [b > c] << 16`, and the Lt message opcode carries
+    /// `LT_CMP_OPCODE_TAG`. Occupies a former padding byte (offset 41), so the `#[repr(C)]`
+    /// layout mirrored by the CUDA `AluEventU64` keeps its 48-byte size.
+    #[serde(default)]
+    pub is_cmp: bool,
 }
 
 impl Default for AluEvent {
@@ -34,6 +41,7 @@ impl Default for AluEvent {
             b: 0,
             c: 0,
             is_imm: false,
+            is_cmp: false,
         }
     }
 }
@@ -56,6 +64,7 @@ impl AluEvent {
             b,
             c,
             is_imm,
+            is_cmp: false,
         }
     }
 }

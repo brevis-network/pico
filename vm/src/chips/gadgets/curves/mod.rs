@@ -40,7 +40,7 @@ pub const COMPRESSED_POINT_BYTES: usize = 32;
 /// words needed to represent a field element as a point consists of the x and y coordinates.
 pub const NUM_WORDS_EC_POINT: usize = 2 * NUM_WORDS_FIELD_ELEMENT;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CurveType {
     Secp256k1,
     Secp256r1,

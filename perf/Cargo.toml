@@ -6,20 +6,13 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 bincode.workspace = true
-clap.workspace = true
 log.workspace = true
-p3-air.workspace = true
-p3-baby-bear.workspace = true
-p3-koala-bear.workspace = true
-p3-field.workspace = true
-p3-symmetric.workspace = true
 pico-vm.workspace = true
 pico-sdk.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 tracing.workspace = true
 strum.workspace = true
-pprof = { version = "0.15", features = ["flamegraph", "protobuf", "protobuf-codec"] }
 
 # Optional AOT glue (enabled by the `aot` feature). The factory lives in
 # `src/aot_glue.rs` and is backed by the generated `pico-aot-dispatch` crate
@@ -28,15 +21,5 @@ pico-aot-dispatch = { path = "../aot-generated", optional = true }
 
 [features]
 jemalloc = ["pico-vm/jemalloc"]
-nightly-features = ["pico-vm/nightly-features"]
 # AOT-capable prove path: pico-vm's aot-emulator + the AOT dispatch/factory.
 aot = ["pico-vm/aot-emulator", "dep:pico-aot-dispatch"]
-
-[[bin]]
-name = "bench"
-path = "src/bin/bench.rs"
-
-
-[[bin]]
-name = "gnarkctl"
-path = "src/bin/gnarkctl.rs"

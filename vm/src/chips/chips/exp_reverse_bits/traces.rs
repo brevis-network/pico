@@ -47,7 +47,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ExpReverseBitsLenChip<F> {
                 row_add.iter_mut().enumerate().for_each(|(i, row)| {
                     let row: &mut ExpReverseBitsLenPreprocessedCols<F> =
                         row.as_mut_slice().borrow_mut();
-                    row.iteration_num = F::from_canonical_u32(i as u32);
+                    row.iteration_num = F::from_u32(i as u32);
                     row.is_first = F::from_bool(i == 0);
                     row.is_last = F::from_bool(i == addrs.exp.len() - 1);
                     row.is_real = F::ONE;

@@ -2,7 +2,7 @@ use crate::{
     chips::chips::recursion_memory::MemoryAccessCols,
     compiler::recursion::types::Address,
     configs::config::Poseidon2Config,
-    primitives::consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR, RISCV_POSEIDON2_DATAPAR},
+    primitives::consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR},
 };
 use core::mem::size_of;
 use hybrid_array::Array;
@@ -13,7 +13,7 @@ Preprocessed columns
 pub const NUM_PREPROCESSED_POSEIDON2_COLS: usize =
     NUM_PREPROCESSED_POSEIDON2_VALUE_COLS * POSEIDON2_DATAPAR;
 
-#[derive(AlignedBorrow, Clone, Copy, Debug)]
+#[derive(AlignedBorrow, Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(C)]
 pub struct Poseidon2PreprocessedCols<T: Copy> {
     pub values: [Poseidon2PreprocessedValueCols<T>; POSEIDON2_DATAPAR],
@@ -22,7 +22,7 @@ pub struct Poseidon2PreprocessedCols<T: Copy> {
 pub const NUM_PREPROCESSED_POSEIDON2_VALUE_COLS: usize =
     size_of::<Poseidon2PreprocessedValueCols<u8>>();
 
-#[derive(AlignedBorrow, Clone, Copy, Debug)]
+#[derive(AlignedBorrow, Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(C)]
 pub struct Poseidon2PreprocessedValueCols<T: Copy> {
     pub input: [Address<T>; PERMUTATION_WIDTH],
@@ -32,24 +32,11 @@ pub struct Poseidon2PreprocessedValueCols<T: Copy> {
 
 /*
 Main columns
+
+The riscv wrapper's rate-8 layout (`RiscvPoseidon2Cols` / `RiscvPoseidon2ValueCols`) lives in
+`chips::chips::riscv_poseidon2::columns`; the full-width `Poseidon2ValueCols` below is shared by the
+recursion Poseidon2 chips and the riscv Poseidon2 precompile.
 */
-
-pub const RISCV_NUM_POSEIDON2_COLS<Config: Poseidon2Config>: usize =
-    NUM_POSEIDON2_VALUE_COLS::<Config> * RISCV_POSEIDON2_DATAPAR;
-
-#[derive(AlignedBorrow, Clone, Debug)]
-#[repr(C)]
-pub struct RiscvPoseidon2Cols<T, Config: Poseidon2Config> {
-    pub(crate) values: [Poseidon2ValueCols<T, Config>; RISCV_POSEIDON2_DATAPAR],
-}
-
-impl<T, Config> Copy for RiscvPoseidon2Cols<T, Config>
-where
-    T: Copy,
-    Config: Poseidon2Config,
-    Poseidon2ValueCols<T, Config>: Copy,
-{
-}
 
 pub const NUM_POSEIDON2_COLS<Config: Poseidon2Config>: usize =
     NUM_POSEIDON2_VALUE_COLS::<Config> * POSEIDON2_DATAPAR;
@@ -68,7 +55,8 @@ where
 {
 }
 
-pub const NUM_POSEIDON2_VALUE_COLS<Config: Poseidon2Config>: usize = size_of::<Poseidon2ValueCols<u8, Config>>();
+pub const NUM_POSEIDON2_VALUE_COLS<Config: Poseidon2Config>: usize =
+    size_of::<Poseidon2ValueCols<u8, Config>>();
 
 #[derive(AlignedBorrow, Clone, Debug)]
 #[repr(C)]
@@ -135,10 +123,10 @@ where
 
 /// Possible intermediate results within an S-box.
 ///
-/// Use this column-set for an S-box that can be computed with `REGISTERS`-many intermediate results
-/// (not counting the final output). The S-box is checked to ensure that `REGISTERS` is the optimal
-/// number of registers for the given `DEGREE` for the degrees given in the Poseidon2 paper:
-/// `3`, `5`, `7`, and `11`. See `eval_sbox` for more information.
+/// Holds the `Config::SBoxRegisters`-many intermediate results an S-box needs, not counting its
+/// output. The only shape left is KoalaBear's `(F::FIELD_SBOX_DEGREE, Config::SBoxRegisters) =
+/// (3, 0)`, a cube that needs no intermediate, so the column is zero-width; `eval_sbox` and
+/// `populate_sbox` panic on anything else.
 #[derive(AlignedBorrow, Clone, Debug)]
 #[repr(C)]
 pub struct SBox<T, Config: Poseidon2Config>(pub Array<T, Config::SBoxRegisters>);

@@ -9,4 +9,4 @@ categories = { workspace = true }
 [dependencies]
 pico-sdk = { workspace = true }
 alloy-sol-types = { workspace = true }
-ed25519-consensus = { git = "https://github.com/brevis-network/ed25519-consensus.git", branch = "patch-v1.0.1" }
+ed25519-consensus = { git = "https://github.com/brevis-network/ed25519-consensus.git", rev = "576f7def57fdfcc349f4fc33a8bf15c903927a64" } # patch-v1.0.1

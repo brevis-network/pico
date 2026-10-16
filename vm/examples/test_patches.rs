@@ -1,3 +1,27 @@
+//! Build each patch guest under `vm/examples/patch-testing/patches` and run its prover. Run from
+//! the repository root, with this tree's `cargo pico` on `PATH` (`cargo build --release -p pico-cli`
+//! puts it in `target/release`). An older install fails every guest: `pico-sdk` pulls getrandom 0.4,
+//! whose backend cfg only the current CLI passes.
+//!
+//! `secp256k1-sys` cross-compiles C, so a full run needs a RISC-V C compiler named for the guest
+//! target, which the driver passes through rather than guesses, since its name depends on how it
+//! was installed. Ubuntu's `gcc-riscv64-unknown-elf`:
+//!
+//! ```text
+//! CC_riscv64im_pico_zkvm_elf=riscv64-unknown-elf-gcc
+//! AR_riscv64im_pico_zkvm_elf=riscv64-unknown-elf-ar
+//! CFLAGS_riscv64im_pico_zkvm_elf=-ffreestanding
+//! ```
+//!
+//! Homebrew's is `riscv64-elf-gcc` / `riscv64-elf-ar`. `-ffreestanding` keeps gcc off the hosted
+//! headers it does not ship, and `AR` matters on macOS, where the system `ar` writes an archive
+//! index `rust-lld` cannot read.
+//!
+//! `PATCH_ELF_DIR`, when set, skips every guest build and runs each prover on
+//! `$PATCH_ELF_DIR/<patch>/riscv64im-pico-zkvm-elf`, for a host that cannot build guests. Nothing
+//! checks that those ELFs were built from the current sources, so build them from the revision
+//! under test.
+
 use std::{
     fs,
     io::{self, Write},
@@ -61,6 +85,9 @@ fn run_command(
         .map_err(|e| format!("Failed to execute command: {}", e))
 }
 
+const ELF_NAME: &str = "riscv64im-pico-zkvm-elf";
+const GUEST_CC: &str = "CC_riscv64im_pico_zkvm_elf";
+
 fn build_app(app_dir: &Path) -> Result<Output, String> {
     run_command("cargo", &["pico", "build"], app_dir, None)
 }
@@ -116,7 +143,12 @@ where
     }
 }
 
-fn test_patch(patch_path: &Path, total_patches: usize, current_index: usize) -> Result<(), String> {
+fn test_patch(
+    patch_path: &Path,
+    total_patches: usize,
+    current_index: usize,
+    prebuilt: Option<&Path>,
+) -> Result<(), String> {
     let patch_name = patch_path.file_name().unwrap().to_string_lossy();
     println!(
         "\n{}[{}/{}] Testing patch: {}{}",
@@ -130,24 +162,51 @@ fn test_patch(patch_path: &Path, total_patches: usize, current_index: usize) -> 
 
     let app_dir = patch_path.join("app");
     let prover_dir = patch_path.join("prover");
-    let elf_path = app_dir.join("elf").join("riscv32im-pico-zkvm-elf");
 
-    // Building ELF
-    execute_step("Building ELF", false, || {
-        let output = build_app(&app_dir)?;
-        if !output.status.success() {
+    let elf_path = match prebuilt {
+        Some(dir) => {
+            let elf_path = dir.join(&*patch_name).join(ELF_NAME);
             println!(
-                "│  {}Build failed for patch: {}{}",
-                COLORS.red,
-                patch_path.display(),
-                COLORS.reset
+                "├── Building ELF [skipped: PATCH_ELF_DIR gives {}]",
+                elf_path.display()
             );
-            print_command_output(&output).map_err(|e| format!("Failed printing output: {}", e))?;
-            Err("Build step failed".to_string())
-        } else {
-            Ok(())
+            elf_path
         }
-    })?;
+        None => {
+            let elf_path = app_dir.join("elf").join(ELF_NAME);
+            // A stale ELF would pass validation even when this build produced nothing.
+            match fs::remove_file(&elf_path) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => {
+                    return Err(format!("Failed to remove {}: {}", elf_path.display(), e));
+                }
+                _ => {}
+            }
+
+            execute_step("Building ELF", false, || {
+                let output = build_app(&app_dir)?;
+                if !output.status.success() {
+                    println!(
+                        "│  {}Build failed for patch: {}{}",
+                        COLORS.red,
+                        patch_path.display(),
+                        COLORS.reset
+                    );
+                    if std::env::var_os(GUEST_CC).is_none() {
+                        println!(
+                            "│  {} is unset; the guest C toolchain is in vm/examples/test_patches.rs",
+                            GUEST_CC
+                        );
+                    }
+                    print_command_output(&output)
+                        .map_err(|e| format!("Failed printing output: {}", e))?;
+                    Err("Build step failed".to_string())
+                } else {
+                    Ok(())
+                }
+            })?;
+            elf_path
+        }
+    };
 
     // Validating ELF
     execute_step("Validating ELF", false, || {
@@ -177,6 +236,12 @@ fn test_patch(patch_path: &Path, total_patches: usize, current_index: usize) -> 
             print_command_output(&output).map_err(|e| format!("Failed printing output: {}", e))?;
             Err("Prover step failed".to_string())
         } else {
+            for line in String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| line.starts_with("patch result:"))
+            {
+                println!("    {}", line);
+            }
             Ok(())
         }
     })?;
@@ -204,9 +269,29 @@ fn find_patch_directories(base_dir: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// Arguments, if any, name the patches to run; with none, every patch runs.
 fn main() {
     let patches_dir = PathBuf::from("vm/examples/patch-testing/patches");
-    let patch_dirs = find_patch_directories(&patches_dir);
+    let mut patch_dirs = find_patch_directories(&patches_dir);
+    patch_dirs.sort();
+
+    let wanted: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(unknown) = wanted
+        .iter()
+        .find(|name| !patch_dirs.iter().any(|dir| dir.ends_with(name.as_str())))
+    {
+        eprintln!(
+            "{}No patch named {} in {}{}",
+            COLORS.red,
+            unknown,
+            patches_dir.display(),
+            COLORS.reset
+        );
+        std::process::exit(1);
+    }
+    if !wanted.is_empty() {
+        patch_dirs.retain(|dir| wanted.iter().any(|name| dir.ends_with(name.as_str())));
+    }
 
     if patch_dirs.is_empty() {
         eprintln!(
@@ -221,26 +306,52 @@ fn main() {
     println!("{}== Patch Testing Summary =={}", COLORS.cyan, COLORS.reset);
     println!("Found {} patches to test", patch_dirs.len());
 
-    // Process each patch and exit if any step fails.
+    let prebuilt = std::env::var_os("PATCH_ELF_DIR").map(PathBuf::from);
+    let mut failed = Vec::new();
     for (i, patch_path) in patch_dirs.iter().enumerate() {
-        if let Err(err) = test_patch(patch_path, patch_dirs.len(), i) {
-            eprintln!(
-                "{}Error testing patch {}: {}{}",
-                COLORS.red,
+        match test_patch(patch_path, patch_dirs.len(), i, prebuilt.as_deref()) {
+            Ok(()) => println!(
+                "{}✓ Patch {} tested successfully.{}",
+                COLORS.green,
                 patch_path.display(),
-                err,
                 COLORS.reset
-            );
-            std::process::exit(1);
+            ),
+            Err(err) => {
+                eprintln!(
+                    "{}Error testing patch {}: {}{}",
+                    COLORS.red,
+                    patch_path.display(),
+                    err,
+                    COLORS.reset
+                );
+                failed.push(
+                    patch_path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
         }
-        println!(
-            "{}✓ Patch {} tested successfully.{}",
-            COLORS.green,
-            patch_path.display(),
-            COLORS.reset
-        );
     }
 
     println!("\n{}== Testing Complete =={}", COLORS.cyan, COLORS.reset);
-    println!("Results: {} all patches tested successfully.", COLORS.green);
+    if failed.is_empty() {
+        println!(
+            "Results: {}all {} patches tested successfully.{}",
+            COLORS.green,
+            patch_dirs.len(),
+            COLORS.reset
+        );
+    } else {
+        println!(
+            "Results: {}{} of {} patches failed: {}{}",
+            COLORS.red,
+            failed.len(),
+            patch_dirs.len(),
+            failed.join(", "),
+            COLORS.reset
+        );
+        std::process::exit(1);
+    }
 }

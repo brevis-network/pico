@@ -11,16 +11,17 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryLocalEvent,
     emulator::riscv::syscalls::{SyscallCode, SyscallEvent},
 };
+use hashbrown::{hash_map::IterMut, HashMap};
+use serde::{Deserialize, Serialize};
+use strum::{EnumIter, IntoEnumIterator};
+use tracing::info;
+
 pub use ec::event::{EllipticCurveDecompressEvent, EllipticCurveDoubleEvent};
 pub use edwards::event::{EdDecompressEvent, EllipticCurveAddEvent};
 pub use fptower::event::{Fp2AddSubEvent, Fp2MulEvent, FpEvent};
-use hashbrown::{hash_map::IterMut, HashMap};
 pub use keccak256::event::KeccakPermuteEvent;
 pub use poseidon2::event::Poseidon2PermuteEvent;
-use serde::{Deserialize, Serialize};
 pub use sha256::event::{ShaCompressEvent, ShaExtendEvent};
-use strum::{EnumIter, IntoEnumIterator};
-use tracing::info;
 pub use uint256::event::Uint256MulEvent;
 
 #[derive(Clone, Debug, Serialize, Deserialize, EnumIter)]
@@ -153,7 +154,7 @@ impl PrecompileLocalMemory for Vec<(SyscallEvent, PrecompileEvent)> {
 /// A record of all the precompile events.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PrecompileEvents {
-    pub(crate) events: HashMap<SyscallCode, Vec<(SyscallEvent, PrecompileEvent)>>,
+    pub events: HashMap<SyscallCode, Vec<(SyscallEvent, PrecompileEvent)>>,
 }
 
 impl Default for PrecompileEvents {
@@ -172,6 +173,20 @@ impl Default for PrecompileEvents {
 impl PrecompileEvents {
     pub fn iter_mut(&mut self) -> IterMut<'_, SyscallCode, Vec<(SyscallEvent, PrecompileEvent)>> {
         self.events.iter_mut()
+    }
+
+    /// The non-empty groups, ordered by `syscall_code`.
+    ///
+    /// `events` is a `HashMap` with a randomly-seeded hasher, so its iteration order differs from
+    /// run to run. A merged catch-all record holds several syscalls at once, so any consumer that
+    /// flattened the map directly would let that order reach the trace rows, and the commitment
+    /// with them — proofs would stop being reproducible across machines. (Lookup balance and the
+    /// global cumulative sum are order-invariant, so this would pass verification.) Flatten
+    /// through here instead of iterating `events`.
+    pub fn sorted_groups(&self) -> Vec<(&SyscallCode, &Vec<(SyscallEvent, PrecompileEvent)>)> {
+        let mut groups: Vec<_> = self.events.iter().filter(|(_, v)| !v.is_empty()).collect();
+        groups.sort_by_key(|(code, _)| **code);
+        groups
     }
 
     pub fn retain<F>(&mut self, f: F)
@@ -211,11 +226,13 @@ impl PrecompileEvents {
             .push((syscall_event, event));
     }
 
-    /// Checks if the precompile events are empty.
+    /// Whether any group holds an event. `Default` pre-inserts an empty `Vec` for every sendable
+    /// syscall code, so the map is never key-empty — asking the map would answer `false` for a
+    /// record that raised no precompile event at all.
     #[inline]
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        self.events.values().all(|v| v.is_empty())
     }
 
     /// Get all the precompile events.
@@ -276,5 +293,22 @@ impl PrecompileEvents {
         }
 
         iterators.into_iter().flatten()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `is_empty` answers about events, not about map keys. `Default` pre-inserts a group for
+    /// every sendable syscall code, so a map-level answer would be `false` for a record that
+    /// raised nothing — which is what kept the precompile syscall receiver active in
+    /// memory-only chunks.
+    #[test]
+    fn default_holds_no_events() {
+        let events = PrecompileEvents::default();
+        assert!(!events.events.is_empty(), "the groups are pre-inserted");
+        assert!(events.is_empty(), "but none of them holds an event");
+        assert_eq!(events.sorted_groups().len(), 0);
     }
 }

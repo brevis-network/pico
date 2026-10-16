@@ -1,51 +1,27 @@
+#[cfg(feature = "aot-emulator")]
+use crate::emulator::{aot::create_aot_emulator, riscv::public_values::RecordFinalPvsState};
 use crate::{
-    compiler::{
-        recursion::{circuit::witness::witnessable::Witnessable, program::RecursionProgram},
-        riscv::program::Program,
-    },
-    configs::{
-        config::{Challenge, StarkGenericConfig, Val},
-        field_config::{BabyBearSimple, KoalaBearSimple},
-        stark_config::{BabyBearPoseidon2, KoalaBearPoseidon2},
-    },
+    compiler::riscv::program::Program,
+    configs::config::{StarkGenericConfig, Val},
     emulator::{
-        recursion::emulator::{RecursionRecord, Runtime},
         riscv::{
             emulator::{ParOptions, SharedDeferredState},
             record::EmulationRecord,
             riscv_emulator::{EmulationError, RiscvEmulator},
             state::RiscvEmulationState,
         },
+        snapshot::SnapshotEmulator,
         stdin::EmulatorStdin,
     },
-    instances::{
-        chiptype::{recursion_chiptype::RecursionChipType, riscv_chiptype::RiscvChipType},
-        compiler::{
-            riscv_circuit::stdin::{ConvertStdin, DeferredStdin},
-            vk_merkle::stdin::RecursionStdinVariant,
-        },
-    },
     machine::{
-        chip::ChipBehavior,
-        keys::{BaseProvingKey, BaseVerifyingKey},
-        machine::BaseMachine,
-        report::EmulationReport,
+        chip::ChipBehavior, field::FieldSpecificPoseidon2Config, report::EmulationReport,
         witness::ProvingWitness,
     },
-    primitives::{
-        consts::{BABYBEAR_S_BOX_DEGREE, KOALABEAR_S_BOX_DEGREE},
-        Poseidon2Init,
-    },
 };
-use alloc::sync::Arc;
 use p3_field::PrimeField32;
-use p3_symmetric::Permutation;
 use std::marker::PhantomData;
-use tracing::debug_span;
-
 #[cfg(feature = "aot-emulator")]
-use crate::emulator::aot::create_aot_emulator;
-use crate::emulator::snapshot::SnapshotEmulator;
+use std::sync::Arc;
 
 // Meta emulator that encapsulates multiple emulators
 // SC and C for configs in the emulated machine
@@ -66,8 +42,7 @@ where
 impl<SC, C> MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>
 where
     SC: StarkGenericConfig,
-    SC::Val: PrimeField32 + Poseidon2Init,
-    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
+    SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
     pub fn setup_riscv(
@@ -97,12 +72,18 @@ where
         par_opts: Option<ParOptions>,
         shared_ds: SharedDeferredState,
         target_clk: u64,
+        final_segment: bool,
     ) -> Self {
         let mut me = MetaEmulator::setup_riscv(witness, par_opts);
         let opts = me.emulator.as_ref().unwrap().opts;
         let prog = me.emulator.as_ref().unwrap().program.clone();
         me.emulator = Some(RiscvEmulator::recover::<SC::Val>(
-            prog, state, opts, shared_ds, target_clk,
+            prog,
+            state,
+            opts,
+            shared_ds,
+            target_clk,
+            final_segment,
         ));
         me
     }
@@ -111,8 +92,19 @@ where
     where
         F: FnMut(EmulationRecord),
     {
+        self.try_next_record_batch(record_callback).unwrap()
+    }
+
+    /// [`Self::next_record_batch`], with the emulator's failure returned rather than unwrapped.
+    pub fn try_next_record_batch<F>(
+        &mut self,
+        record_callback: &mut F,
+    ) -> Result<EmulationReport, EmulationError>
+    where
+        F: FnMut(EmulationRecord),
+    {
         let emulator = self.emulator.as_mut().unwrap();
-        emulator.emulate_batch(record_callback).unwrap()
+        emulator.emulate_batch(record_callback)
     }
 
     pub fn set_cost_estimator(&mut self, enabled: bool) {
@@ -162,381 +154,6 @@ where
     }
 }
 
-// Recursion emulator
-pub struct RecursionEmulator<SC>
-where
-    SC: StarkGenericConfig,
-{
-    pub recursion_program: Arc<RecursionProgram<Val<SC>>>,
-    pub config: Arc<SC>,
-}
-
-macro_rules! impl_emulator {
-    ($emul_name:ident, $riscv_sc:ident, $recur_cc:ident, $recur_sc:ident, $s_box_degree:ident) => {
-        // Meta emulator for recursive circuits.
-        // P and I for the native program and input types
-        // E for the emulator type
-        pub struct $emul_name<'a, C, P, I, E>
-        where
-            C: ChipBehavior<Val<$recur_sc>>,
-        {
-            pub stdin: &'a EmulatorStdin<P, I>,
-            pub emulator: Option<E>,
-            pub batch_size: u32, // max parallelism
-            pointer: usize,
-            machine: Option<&'a BaseMachine<$recur_sc, C>>, // used for setting-up and generating keys
-        }
-
-        // MetaEmulator for convert
-        impl<'a, C>
-            $emul_name<
-                'a,
-                C,
-                RecursionProgram<Val<$recur_sc>>,
-                ConvertStdin<$riscv_sc, RiscvChipType<Val<$riscv_sc>>>,
-                RecursionEmulator<$recur_sc>,
-            >
-        where
-            C: ChipBehavior<
-                Val<$recur_sc>,
-                Program = RecursionProgram<Val<$recur_sc>>,
-                Record = RecursionRecord<Val<$recur_sc>>,
-            >,
-        {
-            pub fn setup_convert(
-                proving_witness: &'a ProvingWitness<
-                    $recur_sc,
-                    C,
-                    ConvertStdin<$riscv_sc, RiscvChipType<Val<$riscv_sc>>>,
-                >,
-                machine: &'a BaseMachine<$recur_sc, C>,
-            ) -> Self {
-                let batch_size = match proving_witness.opts {
-                    Some(opts) => opts.chunk_batch_size,
-                    None => 0,
-                };
-                Self {
-                    stdin: proving_witness.stdin.as_ref().unwrap(),
-                    emulator: None,
-                    batch_size,
-                    pointer: 0,
-                    machine: Some(machine),
-                }
-            }
-
-            #[allow(clippy::should_implement_trait)]
-            pub fn next_record_keys(
-                &mut self,
-            ) -> (
-                RecursionRecord<Val<$recur_sc>>,
-                BaseProvingKey<$recur_sc>,
-                BaseVerifyingKey<$recur_sc>,
-                bool,
-            ) {
-                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-                let (pk, vk) = self.machine.unwrap().setup_keys(program);
-                let mut emulator = RecursionEmulator::<$recur_sc> {
-                    recursion_program: program.clone().into(),
-                    config: self.machine.unwrap().config(),
-                };
-                let record = debug_span!("emulator run").in_scope(|| emulator.run_riscv(input));
-                self.pointer += 1;
-                (record, pk, vk, done)
-            }
-
-            #[allow(clippy::type_complexity)]
-            pub fn next_record_keys_batch(
-                &mut self,
-            ) -> (
-                Vec<RecursionRecord<Val<$recur_sc>>>,
-                Vec<BaseProvingKey<$recur_sc>>,
-                Vec<BaseVerifyingKey<$recur_sc>>,
-                bool,
-            ) {
-                let mut batch_records = vec![];
-                let mut batch_pks = vec![];
-                let mut batch_vks = vec![];
-                loop {
-                    let (record, pk, vk, done) =
-                        debug_span!("emulate record").in_scope(|| self.next_record_keys());
-                    batch_records.push(record);
-                    batch_pks.push(pk);
-                    batch_vks.push(vk);
-                    if done {
-                        return (batch_records, batch_pks, batch_vks, true);
-                    }
-                    if batch_records.len() >= self.batch_size as usize {
-                        break;
-                    }
-                }
-                (batch_records, batch_pks, batch_vks, false)
-            }
-        }
-
-        // MetaEmulator for deferred
-        impl<'a, C>
-            $emul_name<
-                'a,
-                C,
-                RecursionProgram<Val<$recur_sc>>,
-                DeferredStdin<$recur_sc, RecursionChipType<Val<$riscv_sc>>>,
-                RecursionEmulator<$recur_sc>,
-            >
-        where
-            C: ChipBehavior<
-                Val<$recur_sc>,
-                Program = RecursionProgram<Val<$recur_sc>>,
-                Record = RecursionRecord<Val<$recur_sc>>,
-            >,
-        {
-            pub fn setup_deferred(
-                proving_witness: &'a ProvingWitness<
-                    $recur_sc,
-                    C,
-                    DeferredStdin<$recur_sc, RecursionChipType<Val<$recur_sc>>>,
-                >,
-                machine: &'a BaseMachine<$recur_sc, C>,
-            ) -> Self {
-                let batch_size = match proving_witness.opts {
-                    Some(opts) => opts.chunk_batch_size,
-                    None => 0,
-                };
-                Self {
-                    stdin: proving_witness.stdin.as_ref().unwrap(),
-                    emulator: None,
-                    batch_size,
-                    pointer: 0,
-                    machine: Some(machine),
-                }
-            }
-
-            #[allow(clippy::should_implement_trait)]
-            pub fn next_record_keys(
-                &mut self,
-            ) -> (
-                RecursionRecord<Val<$recur_sc>>,
-                BaseProvingKey<$recur_sc>,
-                BaseVerifyingKey<$recur_sc>,
-                bool,
-            ) {
-                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-                let (pk, vk) = self.machine.unwrap().setup_keys(program);
-                let mut emulator = RecursionEmulator::<$recur_sc> {
-                    recursion_program: program.clone().into(),
-                    config: self.machine.unwrap().config(),
-                };
-                let record = debug_span!("emulator run").in_scope(|| emulator.run_deferred(input));
-                self.pointer += 1;
-                (record, pk, vk, done)
-            }
-
-            #[allow(clippy::type_complexity)]
-            pub fn next_record_keys_batch(
-                &mut self,
-            ) -> (
-                Vec<RecursionRecord<Val<$recur_sc>>>,
-                Vec<BaseProvingKey<$recur_sc>>,
-                Vec<BaseVerifyingKey<$recur_sc>>,
-                bool,
-            ) {
-                let mut batch_records = vec![];
-                let mut batch_pks = vec![];
-                let mut batch_vks = vec![];
-                loop {
-                    let (record, pk, vk, done) =
-                        debug_span!("emulate record").in_scope(|| self.next_record_keys());
-                    batch_records.push(record);
-                    batch_pks.push(pk);
-                    batch_vks.push(vk);
-                    if done {
-                        return (batch_records, batch_pks, batch_vks, true);
-                    }
-                    if batch_records.len() >= self.batch_size as usize {
-                        break;
-                    }
-                }
-                (batch_records, batch_pks, batch_vks, false)
-            }
-        }
-
-        // MetaEmulator for recursion combine
-        impl<'a, C, PrevC>
-            $emul_name<
-                'a,
-                C,
-                RecursionProgram<Val<$recur_sc>>,
-                RecursionStdinVariant<'a, $recur_sc, PrevC>,
-                RecursionEmulator<$recur_sc>,
-            >
-        where
-            PrevC: ChipBehavior<
-                Val<$recur_sc>,
-                Program = RecursionProgram<Val<$recur_sc>>,
-                Record = RecursionRecord<Val<$recur_sc>>,
-            >,
-            C: ChipBehavior<
-                Val<$recur_sc>,
-                Program = RecursionProgram<Val<$recur_sc>>,
-                Record = RecursionRecord<Val<$recur_sc>>,
-            >,
-        {
-            pub fn setup_combine(
-                proving_witness: &'a ProvingWitness<
-                    $recur_sc,
-                    C,
-                    RecursionStdinVariant<'a, $recur_sc, PrevC>,
-                >,
-                machine: &'a BaseMachine<$recur_sc, C>,
-            ) -> Self {
-                let batch_size = match proving_witness.opts {
-                    Some(opts) => opts.chunk_batch_size,
-                    None => 0,
-                };
-                Self {
-                    stdin: proving_witness.stdin.as_ref().unwrap(),
-                    emulator: None,
-                    batch_size,
-                    pointer: 0,
-                    machine: Some(machine),
-                }
-            }
-            #[allow(clippy::should_implement_trait)]
-            pub fn next_record_keys(
-                &mut self,
-            ) -> (
-                RecursionRecord<Val<$recur_sc>>,
-                BaseProvingKey<$recur_sc>,
-                BaseVerifyingKey<$recur_sc>,
-                bool,
-            ) {
-                let (program, input, done) = self.stdin.get_program_and_input(self.pointer);
-                let (pk, vk) = self.machine.unwrap().setup_keys(program);
-                let mut emulator = RecursionEmulator::<$recur_sc> {
-                    recursion_program: program.clone().into(),
-                    config: self.machine.unwrap().config(),
-                };
-                let record = debug_span!("emulator run").in_scope(|| emulator.run_recursion(input));
-                self.pointer += 1;
-                (record, pk, vk, done)
-            }
-            #[allow(clippy::type_complexity)]
-            pub fn next_record_keys_batch(
-                &mut self,
-            ) -> (
-                Vec<RecursionRecord<Val<$recur_sc>>>,
-                Vec<BaseProvingKey<$recur_sc>>,
-                Vec<BaseVerifyingKey<$recur_sc>>,
-                bool,
-            ) {
-                let mut batch_records = vec![];
-                let mut batch_pks = vec![];
-                let mut batch_vks = vec![];
-                loop {
-                    let (record, pk, vk, done) =
-                        debug_span!("emulate record").in_scope(|| self.next_record_keys());
-                    batch_records.push(record);
-                    batch_pks.push(pk);
-                    batch_vks.push(vk);
-                    if done {
-                        return (batch_records, batch_pks, batch_vks, true);
-                    }
-                    if batch_records.len() >= self.batch_size as usize {
-                        break;
-                    }
-                }
-                (batch_records, batch_pks, batch_vks, false)
-            }
-        }
-
-        impl RecursionEmulator<$recur_sc> {
-            pub fn run_riscv<RiscvC>(
-                &mut self,
-                stdin: &ConvertStdin<$riscv_sc, RiscvC>,
-            ) -> RecursionRecord<Val<$recur_sc>>
-            where
-                RiscvC: ChipBehavior<Val<$riscv_sc>, Program = Program, Record = EmulationRecord>,
-            {
-                let mut witness_stream = Vec::new();
-                Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
-
-                let mut runtime =
-                    Runtime::<Val<$recur_sc>, Challenge<$recur_sc>, _, _, $s_box_degree>::new(
-                        self.recursion_program.clone(),
-                        self.config.perm.clone(),
-                    );
-
-                runtime.witness_stream = witness_stream.into();
-                runtime.run().unwrap();
-                runtime.record
-            }
-
-            pub fn run_deferred<RecursionC>(
-                &mut self,
-                stdin: &DeferredStdin<$recur_sc, RecursionC>,
-            ) -> RecursionRecord<Val<$recur_sc>>
-            where
-                RecursionC: ChipBehavior<
-                    Val<$recur_sc>,
-                    Program = RecursionProgram<Val<$recur_sc>>,
-                    Record = RecursionRecord<Val<$recur_sc>>,
-                >,
-            {
-                let mut witness_stream = Vec::new();
-                Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
-
-                let mut runtime =
-                    Runtime::<Val<$recur_sc>, Challenge<$recur_sc>, _, _, $s_box_degree>::new(
-                        self.recursion_program.clone(),
-                        self.config.perm.clone(),
-                    );
-
-                runtime.witness_stream = witness_stream.into();
-                runtime.run().unwrap();
-                runtime.record
-            }
-
-            pub fn run_recursion<RecursionC>(
-                &mut self,
-                stdin: &RecursionStdinVariant<$recur_sc, RecursionC>,
-            ) -> RecursionRecord<Val<$recur_sc>>
-            where
-                RecursionC: ChipBehavior<
-                    Val<$recur_sc>,
-                    Program = RecursionProgram<Val<$recur_sc>>,
-                    Record = RecursionRecord<Val<$recur_sc>>,
-                >,
-            {
-                let mut witness_stream = Vec::new();
-                Witnessable::<$recur_cc>::write(&stdin, &mut witness_stream);
-                let mut runtime =
-                    Runtime::<Val<$recur_sc>, Challenge<$recur_sc>, _, _, $s_box_degree>::new(
-                        self.recursion_program.clone(),
-                        self.config.perm.clone(),
-                    );
-                runtime.witness_stream = witness_stream.into();
-                runtime.run().unwrap();
-                runtime.record
-            }
-        }
-    };
-}
-
-impl_emulator!(
-    BabyBearMetaEmulator,
-    BabyBearPoseidon2,
-    BabyBearSimple,
-    BabyBearPoseidon2,
-    BABYBEAR_S_BOX_DEGREE
-);
-
-impl_emulator!(
-    KoalaBearMetaEmulator,
-    KoalaBearPoseidon2,
-    KoalaBearSimple,
-    KoalaBearPoseidon2,
-    KOALABEAR_S_BOX_DEGREE
-);
-
 #[cfg(feature = "aot-emulator")]
 pub struct AotMetaEmulator<SC, C>
 where
@@ -551,8 +168,7 @@ where
 impl<SC, C> AotMetaEmulator<SC, C>
 where
     SC: StarkGenericConfig,
-    SC::Val: PrimeField32 + Poseidon2Init,
-    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
+    SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
     pub fn setup_riscv(proving_witness: &ProvingWitness<SC, C, Vec<u8>>) -> Self {
@@ -568,7 +184,11 @@ where
             .expect("witness.stdin not set")
             .inputs
             .to_vec();
-        let emulator = create_aot_emulator(program, input_stream, *opts)
+        // The factory takes the shared final-pvs cell the AOT runtime writes its last record's
+        // digests into. Nothing on this branch reads it back, so there is no shared cell to pass
+        // and one is made here.
+        let final_pvs_state = Arc::new(RecordFinalPvsState::default());
+        let emulator = create_aot_emulator(program, input_stream, *opts, final_pvs_state)
             .expect("AOT emulator factory not registered");
         Self {
             emulator,
@@ -580,6 +200,13 @@ where
         &mut self,
     ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
         self.emulator.next_state_batch()
+    }
+
+    /// See [`crate::emulator::aot::AotSnapshotEmulator::next_state_batch_segments`].
+    pub fn next_state_batch_segments(
+        &mut self,
+    ) -> Result<(Vec<(RiscvEmulationState, u64)>, EmulationReport), EmulationError> {
+        self.emulator.next_state_batch_segments()
     }
 
     pub fn cycles(&self) -> u64 {
@@ -594,8 +221,7 @@ where
 impl<SC, C> SnapshotEmulator for MetaEmulator<SC, C, Program, Vec<u8>, RiscvEmulator>
 where
     SC: StarkGenericConfig,
-    SC::Val: PrimeField32 + Poseidon2Init,
-    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
+    SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
     fn next_state_batch(
@@ -617,14 +243,19 @@ where
 impl<SC, C> SnapshotEmulator for AotMetaEmulator<SC, C>
 where
     SC: StarkGenericConfig,
-    SC::Val: PrimeField32 + Poseidon2Init,
-    <SC::Val as Poseidon2Init>::Poseidon2: Permutation<[SC::Val; 16]>,
+    SC::Val: PrimeField32 + FieldSpecificPoseidon2Config,
     C: ChipBehavior<Val<SC>, Program = Program, Record = EmulationRecord>,
 {
     fn next_state_batch(
         &mut self,
     ) -> Result<(RiscvEmulationState, EmulationReport), EmulationError> {
         AotMetaEmulator::next_state_batch(self)
+    }
+
+    fn next_state_batch_segments(
+        &mut self,
+    ) -> Result<(Vec<(RiscvEmulationState, u64)>, EmulationReport), EmulationError> {
+        AotMetaEmulator::next_state_batch_segments(self)
     }
 
     fn cycles(&self) -> u64 {

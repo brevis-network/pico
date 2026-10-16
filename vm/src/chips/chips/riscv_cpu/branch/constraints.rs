@@ -1,10 +1,11 @@
 use super::super::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCols, CpuChip};
 use crate::{
+    chips::chips::alu::lt::LT_CMP_OPCODE_TAG,
     compiler::{riscv::opcode::Opcode, word::Word},
-    machine::builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipWordBuilder},
+    machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 
 impl<F: Field> CpuChip<F> {
     /// Computes whether the opcode is a branch instruction.
@@ -20,179 +21,99 @@ impl<F: Field> CpuChip<F> {
             + opcode_selectors.is_bgeu
     }
 
-    /// Verifies all the branching related columns.
+    /// Verifies the branch rows: the target equation and the comparison bits `a_lt_b`/`a_gt_b`.
+    /// (There is no `branching` column any more; the taken predicate is `branch_taken_expr`.)
     ///
     /// It does this in few parts:
-    /// 1. It verifies that the next pc is correct based on the branching column.  That column is a
-    ///    boolean that indicates whether the branch condition is true.
-    /// 2. It verifies the correct value of branching based on the helper bool columns (a_eq_b,
-    ///    a_gt_b, a_lt_b).
-    /// 3. It verifier the correct values of the helper bool columns based on op_a and op_b.
+    /// 1. It verifies the branch target `next_pc = pc + c` on taken rows; the not-taken `pc + 4`
+    ///    step is folded into the sequential-row equation in `eval_pc`.
+    /// 2. It requires every branch row to be an immediate-c row, so the Program table's sign bit
+    ///    describes the operand the target equation reads.
+    /// 3. It verifies the helper comparison bits against op_a and op_b via one tagged CMP lookup
+    ///    to the Lt chip, whose row carries both strict bits (`a = [a_lt_b, a_gt_b, 0, 0]`).
     pub(crate) fn eval_branch_ops<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
         is_branch_instruction: CB::Expr,
         local: &CpuCols<CB::Var>,
-        next: &CpuCols<CB::Var>,
     ) {
-        // Get the branch specific columns.
-        let branch_cols = local.opcode_specific.branch();
+        // `a_eq_b` is derived, not committed. On branch rows the single CMP lookup below
+        // proves `a_lt_b` and `a_gt_b` are the (mutually exclusive) strict-comparison bits of
+        // one Lt row, so `1 - a_lt_b - a_gt_b` is exactly the equality indicator (trichotomy).
 
-        // Evaluate program counter constraints.
+        // Evaluate program counter constraints. The hand-off to the successor's `pc` is not
+        // repeated here: the row chain pins it limb by limb (`eval_row_chain`, N1).
         {
-            // When we are branching, assert that next.pc <==> local.next_pc.
-            builder
-                .when_transition()
-                .when(next.is_real)
-                .when(local.branching)
-                .assert_addr_eq(local.next_pc, next.pc);
-
             // When we are branching, calculate local.next_pc <==> local.pc + c.
-            // Convert Addr to Word (zero-extend to 64-bit)
-            let pc_as_word = Word([
-                local.pc[0].into(),
-                local.pc[1].into(),
-                local.pc[2].into(),
-                F::ZERO.into(),
-            ]);
-            let next_pc_as_word = Word([
-                local.next_pc[0].into(),
-                local.next_pc[1].into(),
-                local.next_pc[2].into(),
-                F::ZERO.into(),
-            ]);
-            builder.looking_alu(
-                Opcode::ADD.as_field::<CB::F>(),
-                next_pc_as_word,
-                pc_as_word,
-                local.op_c_val(),
-                local.branching,
-            );
-
-            // When local.not_branching is true, assert that local.is_real is true.
-            builder.when(local.not_branching).assert_one(local.is_real);
-
-            // When we are not branching, assert that local.pc + 4 <==> next.pc.
-            let condition = builder.is_transition() * next.is_real * local.not_branching;
-            local.pc.add_limb_with_carry(
-                builder,
-                condition,
-                CB::Expr::from_canonical_u8(4),
-                next.pc,
-                &local.pc_carry_a[0..4],
-            );
-
-            // When the last row is real and local.not_branching, assert that local.pc + 4 <==>
-            // local.next_pc.
-            let condition = local.is_real * local.not_branching;
-            local.pc.add_limb_with_carry(
-                builder,
-                condition,
-                CB::Expr::from_canonical_u8(4),
-                local.next_pc,
-                &local.pc_carry_b,
-            );
-
-            // Assert that either we are branching or not branching when the instruction is a
-            // branch.
+            //
+            // `op_c` is the offset sign-extended to 64 bits (the emulator does
+            // `pc.wrapping_add(c)`), so a backward branch has every limb above the offset set:
+            // for `c = -d` the word is `2^64 - d`, i.e. `op_c[2] == op_c[3] == 0xFFFF`. The
+            // Program table carries that sign as `op_c.sign`, and the 64-bit wrap collapses to
+            // one field equation:
+            //
+            //     next_pc = pc + (op_c[0] + op_c[1]*2^16) - sign*2^32
+            //
+            // which is the integer identity `pc - d` for a backward branch and `pc + d` for a
+            // forward one. Both sides land in `[0, 2^31) ⊂ [0, p)`, so the field arithmetic is
+            // exact -- no carry witnesses and no ALU dispatch.
+            //
+            // Soundness: this drops the Add chip's output range check as the anchor for
+            // `next_pc`'s canonicity, so membership carries it instead -- the row chain (N1)
+            // makes this row's `next_pc` the successor's `pc`, which the Program table pins, and
+            // the last real row's becomes PV.next_pc, which the recursion chain pins. `reduce()`
+            // is exact because a pc fits in two limbs (guest space is 1.875 GiB).
+            let op_c = local.op_c_val();
+            // The sign is preprocessed, not read off the operand word: on an immediate-c row
+            // `register/constraints.rs` pins `op_c_val()`'s limbs 2 and 3 to `0xFFFF * sign`, so
+            // the fill needs no separate shape constraints here. Fail-closed:
+            // every branch row must be an immediate-c row for that to hold. The decoder builds
+            // every branch with `imm_c = true` (`compiler/riscv/disassembler/rrs.rs`); a
+            // hand-built Program with a register-operand branch is rejected here rather than
+            // proven with a sign that describes nothing.
             builder
                 .when(is_branch_instruction.clone())
-                .assert_one(local.branching + local.not_branching);
+                .assert_zero(CB::Expr::ONE - local.opcode_selector.imm_c);
+            let sign: CB::Expr = local.instruction.op_c.sign.into();
             builder
-                .when(is_branch_instruction.clone())
-                .assert_bool(local.branching);
-            builder
-                .when(is_branch_instruction.clone())
-                .assert_bool(local.not_branching);
+                .when(Self::branch_taken_expr::<CB>(local))
+                .assert_eq(
+                    local.next_pc.reduce::<CB>(),
+                    local.pc.reduce::<CB>()
+                        + op_c[0]
+                        + Into::<CB::Expr>::into(op_c[1]) * CB::Expr::from_u32(1 << 16)
+                        - sign * CB::Expr::from_u64(1u64 << 32),
+                );
         }
 
-        // Evaluate branching value constraints.
-        {
-            // When the opcode is BEQ and we are branching, assert that a_eq_b is true.
-            builder
-                .when(local.opcode_selector.is_beq * local.branching)
-                .assert_one(branch_cols.a_eq_b);
+        // The taken predicate is no longer committed: `branch_taken_expr` builds it from the
+        // opcode selectors and the comparison bits wherever it is needed, and the column it used
+        // to occupy became `is_last`. The former definitional constraint disappears with it.
+        //
+        // The `is_branch * a_eq_b => op_a == op_b` check is gone too: it was already implied by
+        // the CMP lookup below. That lookup pins `a[1] = is_cmp * (sum_flags - bit)` on the Lt
+        // row, so `1 - a_lt_b - a_gt_b = 1 - sum_flags`, and a zero flag sum makes the gadget
+        // assert every limb of the two operands equal -- which is exactly what this said.
 
-            // When the opcode is BEQ and we are not branching, assert that either a_gt_b or a_lt_b
-            // is true.
-            builder
-                .when(local.opcode_selector.is_beq)
-                .when_not(local.branching)
-                .assert_one(branch_cols.a_gt_b + branch_cols.a_lt_b);
-
-            // When the opcode is BNE and we are branching, assert that either a_gt_b or a_lt_b is
-            // true.
-            builder
-                .when(local.opcode_selector.is_bne * local.branching)
-                .assert_one(branch_cols.a_gt_b + branch_cols.a_lt_b);
-
-            // When the opcode is BNE and we are not branching, assert that a_eq_b is true.
-            builder
-                .when(local.opcode_selector.is_bne)
-                .when_not(local.branching)
-                .assert_one(branch_cols.a_eq_b);
-
-            // When the opcode is BLT or BLTU and we are branching, assert that a_lt_b is true.
-            builder
-                .when(
-                    (local.opcode_selector.is_blt + local.opcode_selector.is_bltu)
-                        * local.branching,
-                )
-                .assert_one(branch_cols.a_lt_b);
-
-            // When the opcode is BLT or BLTU and we are not branching, assert that either a_eq_b
-            // or a_gt_b is true.
-            builder
-                .when(local.opcode_selector.is_blt + local.opcode_selector.is_bltu)
-                .when_not(local.branching)
-                .assert_one(branch_cols.a_eq_b + branch_cols.a_gt_b);
-
-            // When the opcode is BGE or BGEU and we are branching, assert that a_gt_b is true.
-            builder
-                .when(
-                    (local.opcode_selector.is_bge + local.opcode_selector.is_bgeu)
-                        * local.branching,
-                )
-                .assert_one(branch_cols.a_gt_b + branch_cols.a_eq_b);
-
-            // When the opcode is BGE or BGEU and we are not branching, assert that either a_eq_b
-            // or a_lt_b is true.
-            builder
-                .when(local.opcode_selector.is_bge + local.opcode_selector.is_bgeu)
-                .when_not(local.branching)
-                .assert_one(branch_cols.a_lt_b);
-        }
-
-        // When it's a branch instruction and a_eq_b, assert that a == b.
-        builder
-            .when(is_branch_instruction.clone() * branch_cols.a_eq_b)
-            .assert_word_eq(local.op_a_val(), local.op_b_val());
-
-        //  To prevent this ALU send to be arbitrarily large when is_branch_instruction is false.
-        builder
-            .when_not(is_branch_instruction.clone())
-            .assert_zero(local.branching);
-
-        // Calculate a_lt_b <==> a < b (using appropriate signedness).
+        // One merged CMP lookup pins both comparison bits (using appropriate signedness): the
+        // Lt row's `a[0]` is `[op_a < op_b]` and its `a[1]` is `[op_a > op_b]`, boolean and
+        // mutually exclusive on that single row, so `a_eq_b = 1 - a_lt_b - a_gt_b` is exact
+        // without a second dispatch. The opcode carries `LT_CMP_OPCODE_TAG`, so this message can
+        // only pair with a merged Lt row (`is_cmp = 1`), never with a plain SLT/SLTU result.
         let use_signed_comparison = local.opcode_selector.is_blt + local.opcode_selector.is_bge;
         builder.looking_alu(
             use_signed_comparison.clone() * Opcode::SLT.as_field::<CB::F>()
-                + (CB::Expr::ONE - use_signed_comparison.clone())
-                    * Opcode::SLTU.as_field::<CB::F>(),
-            Word::extend_var::<CB>(branch_cols.a_lt_b),
+                + (CB::Expr::ONE - use_signed_comparison) * Opcode::SLTU.as_field::<CB::F>()
+                + CB::F::from_u32(LT_CMP_OPCODE_TAG),
+            Word([
+                local.a_lt_b.into(),
+                local.a_gt_b.into(),
+                CB::Expr::ZERO,
+                CB::Expr::ZERO,
+            ]),
             local.op_a_val(),
             local.op_b_val(),
-            is_branch_instruction.clone(),
-        );
-
-        // Calculate a_gt_b <==> a > b (using appropriate signedness).
-        builder.looking_alu(
-            use_signed_comparison.clone() * Opcode::SLT.as_field::<CB::F>()
-                + (CB::Expr::ONE - use_signed_comparison) * Opcode::SLTU.as_field::<CB::F>(),
-            Word::extend_var::<CB>(branch_cols.a_gt_b),
-            local.op_b_val(),
-            local.op_a_val(),
-            is_branch_instruction.clone(),
+            is_branch_instruction,
         );
     }
 }

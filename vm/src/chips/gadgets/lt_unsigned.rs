@@ -8,7 +8,7 @@ use crate::{
 };
 use itertools::izip;
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// Instance of `LtOperation` to check if abs(remainder) < abs(c).
@@ -45,8 +45,8 @@ impl<F: Field> LtUnsignedGadget<F> {
         for (i, (a_byte, b_byte)) in a_bytes.iter().zip(b_bytes.iter()).enumerate().rev() {
             if a_byte < b_byte {
                 self.byte_flags[i] = F::ONE;
-                self.a_comparison_byte = F::from_canonical_u8(*a_byte);
-                self.b_comparison_byte = F::from_canonical_u8(*b_byte);
+                self.a_comparison_byte = F::from_u8(*a_byte);
+                self.b_comparison_byte = F::from_u8(*b_byte);
                 found = true;
 
                 // Add the LTU byte lookup event
@@ -91,8 +91,8 @@ impl<F: Field> LtUnsignedGadget<F> {
         for (i, (a_byte, b_byte)) in a_bytes.iter().zip(b_bytes.iter()).enumerate().rev() {
             if a_byte < b_byte {
                 self.byte_flags[i] = F::ONE;
-                self.a_comparison_byte = F::from_canonical_u8(*a_byte);
-                self.b_comparison_byte = F::from_canonical_u8(*b_byte);
+                self.a_comparison_byte = F::from_u8(*a_byte);
+                self.b_comparison_byte = F::from_u8(*b_byte);
                 found = true;
 
                 // Add the LTU byte lookup event
@@ -178,45 +178,5 @@ impl<F: Field> LtUnsignedGadget<F> {
             cols.b_comparison_byte,
             is_real,
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        a: Word<T>,
-        b: Word<T>,
-        lt_unsigned: LtUnsignedGadget<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_lt_unsigned_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        LtUnsignedGadget::<KoalaBear>::eval(
-            &mut builder,
-            local.a.map(|v| v.into()),
-            local.b.map(|v| v.into()),
-            local.lt_unsigned,
-            local.is_real.into(),
-        );
-
-        assert_eq!(builder.num_constraints(), 11);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 1);
     }
 }

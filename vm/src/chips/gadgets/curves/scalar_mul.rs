@@ -18,7 +18,7 @@ impl<E: EllipticCurve> AffinePoint<E> {
             if scalar.bit(bit) {
                 result = result.map_or_else(|| Some(temp.clone()), |r| Some(&r + &temp));
             }
-            temp = &temp + &temp;
+            temp = E::ec_double(&temp);
         }
         result.expect("Scalar multiplication failed")
     }

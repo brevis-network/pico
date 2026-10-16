@@ -4,7 +4,6 @@ use super::{
     MemoryVarChip,
 };
 use crate::{
-    chips::utils::next_power_of_two,
     compiler::recursion::{
         instruction::{
             HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, Instruction,
@@ -13,7 +12,10 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSliceMut},
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::{
+        chip::{ChipBehavior, PreprocessedRows},
+        utils::pad_to_power_of_two,
+    },
     primitives::consts::VAR_MEM_DATAPAR,
 };
 use p3_field::PrimeField32;
@@ -30,6 +32,12 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
 
     fn preprocessed_width(&self) -> usize {
         NUM_MEM_PREPROCESSED_INIT_COLS
+    }
+
+    fn preprocessed_rows(&self, program: &Self::Program) -> Option<PreprocessedRows> {
+        Some(PreprocessedRows::Unpadded(
+            program.prep_row_counts().memory_var,
+        ))
     }
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
@@ -62,10 +70,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryVarChip<F> {
             .collect::<Vec<_>>();
 
         let nb_rows = accesses.len().div_ceil(VAR_MEM_DATAPAR);
-        let padded_nb_rows = match program.fixed_log2_rows(&self.name()) {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
-        };
+        let padded_nb_rows = program.padded_prep_rows(&self.name(), nb_rows);
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_MEM_PREPROCESSED_INIT_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.

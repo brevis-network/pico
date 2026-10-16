@@ -13,9 +13,8 @@ use crate::{
     primitives::consts::MAX_NUM_PVS,
 };
 use core::borrow::Borrow;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra};
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing};
 use std::array;
 
 impl<F: Field> BaseAir<F> for MemoryInitializeFinalizeChip<F> {
@@ -30,9 +29,9 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MemoryInitializeFinalizeCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
+        let next = main.next_slice();
         let next: &MemoryInitializeFinalizeCols<CB::Var> = (*next).borrow();
 
         builder.assert_bool(local.is_real);
@@ -50,7 +49,7 @@ where
         // ──────────────────────────────────────────────
         builder.assert_eq(
             local.value.0[2],
-            local.value_lower + local.value_upper * CB::F::from_canonical_u32(256),
+            local.value_lower + local.value_upper * CB::F::from_u32(256),
         );
         // Range check value_lower and value_upper as u8
         builder.slice_range_check_u8(&[local.value_lower, local.value_upper], local.is_real);
@@ -61,9 +60,9 @@ where
 
         // v0 + v2_lower<<16, v1 + v2_upper<<16, v3
         let slot5: CB::Expr =
-            local.value.0[0].into() + local.value_lower * CB::F::from_canonical_u32(1 << 16);
+            local.value.0[0].into() + local.value_lower * CB::F::from_u32(1 << 16);
         let slot6: CB::Expr =
-            local.value.0[1].into() + local.value_upper * CB::F::from_canonical_u32(1 << 16);
+            local.value.0[1].into() + local.value_upper * CB::F::from_u32(1 << 16);
         let slot7: CB::Expr = local.value.0[3].into();
 
         if self.kind == MemoryChipType::Initialize {
@@ -80,7 +79,7 @@ where
                     slot7.clone(),        // slot7: v3
                     CB::Expr::ONE,        // is_send = 1
                     CB::Expr::ZERO,       // is_receive = 0
-                    CB::Expr::from_canonical_u8(LookupType::Memory as u8),
+                    CB::Expr::from_u8(LookupType::Memory as u8),
                 ],
                 local.is_real.into(),
                 LookupType::Global,
@@ -100,7 +99,7 @@ where
                     slot7.clone(),          // slot7: v3
                     CB::Expr::ZERO,         // is_send = 0
                     CB::Expr::ONE,          // is_receive = 1
-                    CB::Expr::from_canonical_u8(LookupType::Memory as u8),
+                    CB::Expr::from_u8(LookupType::Memory as u8),
                 ],
                 local.is_real.into(),
                 LookupType::Global,
@@ -270,8 +269,6 @@ where
 
         // The last real row's addr must match the PV last_addr.
         // "Last real row" = either last row & is_real, or transition where is_real but next not.
-        let is_last_addr: CB::Expr = local.is_real * (CB::Expr::ONE - next.is_real);
-
         for i in 0..3 {
             builder
                 .when_last_row()
@@ -279,10 +276,15 @@ where
                 .assert_eq(local.addr[i], last_addr_limbs[i].clone());
         }
 
+        // On a transition row `is_real - next.is_real` is 1 exactly on the last real row: real
+        // rows are packed at the top (`(1 - is_real) * next.is_real == 0` above), so the only
+        // (is_real, next.is_real) patterns are (1,1), (1,0) and (0,0). The difference is
+        // equivalent to `is_real * (1 - next.is_real)` under that packing constraint and keeps
+        // this constraint at degree 3 (same idiom as the Cpu chip's public-value hand-off).
         for i in 0..3 {
             builder
                 .when_transition()
-                .when(is_last_addr.clone())
+                .when(local.is_real - next.is_real)
                 .assert_eq(local.addr[i], last_addr_limbs[i].clone());
         }
 

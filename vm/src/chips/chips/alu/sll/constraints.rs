@@ -7,9 +7,8 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder},
     primitives::consts::WORD_SIZE,
 };
-use p3_air::{Air, AirBuilder};
-use p3_field::{Field, FieldAlgebra};
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing};
 
 impl<F: Field, CB> Air<CB> for SLLChip<F>
 where
@@ -17,7 +16,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ShiftLeftCols<CB::Var> = (*local).borrow();
 
         let zero: CB::Expr = CB::F::ZERO.into();
@@ -50,17 +49,20 @@ where
 
             let mut c_lower_bits = zero.clone();
             let mut bit_shift = zero.clone();
+            // Must use `acc = acc + ...`, not `acc += ...`: AddAssign is
+            // unreachable!() on the CUDA codegen expression types.
+            #[allow(clippy::assign_op_pattern)]
             for i in 0..6 {
-                c_lower_bits += c_bits[i] * CB::F::from_canonical_u32(1 << i);
+                c_lower_bits = c_lower_bits + c_bits[i] * CB::F::from_u32(1 << i);
                 if i == 3 {
                     bit_shift = c_lower_bits.clone();
                 }
             }
-            let inverse_64 = CB::F::from_canonical_u32(64).inverse();
+            let inverse_64 = CB::F::from_u32(64).inverse();
             builder.looking_byte(
-                CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                CB::F::from_u32(ByteOpcode::BitRange as u32),
                 (c[0] - c_lower_bits) * inverse_64,
-                CB::F::from_canonical_u32(10),
+                CB::F::from_u32(10),
                 zero.clone(),
                 is_real.clone(),
             );
@@ -68,20 +70,20 @@ where
             let not_sllw = is_sll;
             for i in 0..4 {
                 builder.when(shift_u16[i]).assert_eq(
-                    c_bits[4] + c_bits[5] * CB::F::from_canonical_u32(2) * not_sllw,
-                    CB::F::from_canonical_u32(i as u32),
+                    c_bits[4] + c_bits[5] * CB::F::from_u32(2) * not_sllw,
+                    CB::F::from_u32(i as u32),
                 );
                 builder.assert_bool(shift_u16[i]);
             }
             builder.when(is_real.clone()).assert_eq(
                 shift_u16[0] + shift_u16[1] + shift_u16[2] + shift_u16[3],
-                CB::F::from_canonical_u32(1),
+                CB::F::from_u32(1),
             );
 
-            let one = CB::F::from_canonical_u32(1);
-            let three = CB::F::from_canonical_u32(3);
-            let fifteen = CB::F::from_canonical_u32(15);
-            let two_fifty_five = CB::F::from_canonical_u32(255);
+            let one = CB::F::from_u32(1);
+            let three = CB::F::from_u32(3);
+            let fifteen = CB::F::from_u32(15);
+            let two_fifty_five = CB::F::from_u32(255);
             builder.assert_eq(v_01, (c_bits[0] + one) * (c_bits[1] * three + one));
             builder.assert_eq(v_012, v_01 * (c_bits[2] * fifteen + one));
             builder.assert_eq(v_0123, v_012 * (c_bits[3] * two_fifty_five + one));
@@ -90,15 +92,15 @@ where
                 let limb = b[i];
                 // Check that `lower_limb < 2^(16 - bit_shift)`
                 builder.looking_byte(
-                    CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                    CB::F::from_u32(ByteOpcode::BitRange as u32),
                     lower_limb[i],
-                    CB::Expr::from_canonical_u32(16) - bit_shift.clone(),
+                    CB::Expr::from_u32(16) - bit_shift.clone(),
                     zero.clone(),
                     is_real.clone(),
                 );
                 // Check that `higher_limb < 2^(bit_shift)`
                 builder.looking_byte(
-                    CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                    CB::F::from_u32(ByteOpcode::BitRange as u32),
                     higher_limb[i],
                     bit_shift.clone(),
                     zero.clone(),
@@ -109,7 +111,7 @@ where
                 // This is possible, since `2^(bit_shift)` is not zero.
                 builder.assert_eq(
                     limb * v_0123,
-                    higher_limb[i] * CB::F::from_canonical_u32(1 << 16) + lower_limb[i] * v_0123,
+                    higher_limb[i] * CB::F::from_u32(1 << 16) + lower_limb[i] * v_0123,
                 );
             }
 
@@ -148,7 +150,7 @@ where
                     }
                 }
             }
-            let u16_max = CB::F::from_canonical_u16(u16::MAX);
+            let u16_max = CB::F::from_u16(u16::MAX);
             for i in WORD_SIZE / 2..WORD_SIZE {
                 builder
                     .when(is_sllw)
@@ -157,8 +159,8 @@ where
 
             U16MSBGadget::<CB::F>::eval(builder, a[1].into(), sllw_msb, is_sllw.into());
 
-            let opcode = is_sll * CB::F::from_canonical_u32(Opcode::SLL as u32)
-                + is_sllw * CB::F::from_canonical_u32(Opcode::SLLW as u32);
+            let opcode = is_sll * CB::F::from_u32(Opcode::SLL as u32)
+                + is_sllw * CB::F::from_u32(Opcode::SLLW as u32);
 
             builder.looked_alu(opcode, a, b, c, is_real);
         }

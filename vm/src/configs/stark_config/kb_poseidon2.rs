@@ -1,37 +1,20 @@
 use crate::{
-    configs::config::{Com, SimpleFriConfig, StarkGenericConfig, Val, ZeroCommitment},
-    primitives::{consts::DIGEST_SIZE, PicoPoseidon2KoalaBear, Poseidon2Init},
+    configs::config::StarkGenericConfig, machine::field::FieldSpecificPoseidon2Config,
+    primitives::PicoPoseidon2KoalaBear,
 };
-use p3_challenger::DuplexChallenger;
-use p3_commit::{ExtensionMmcs, Pcs};
-use p3_dft::Radix2DitParallel;
-use p3_field::{extension::BinomialExtensionField, Field, FieldAlgebra};
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_field::extension::BinomialExtensionField;
 use p3_koala_bear::KoalaBear;
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{CryptographicHasher, PaddingFreeSponge, TruncatedPermutation};
 use serde::Serialize;
 
 pub type SC_Val = KoalaBear;
 pub type SC_Perm = PicoPoseidon2KoalaBear;
-pub type SC_Hash = PaddingFreeSponge<SC_Perm, 16, 8, 8>;
-pub type SC_Compress = TruncatedPermutation<SC_Perm, 2, 8, 16>;
-pub type SC_ValMmcs =
-    MerkleTreeMmcs<<SC_Val as Field>::Packing, <SC_Val as Field>::Packing, SC_Hash, SC_Compress, 8>;
 pub type SC_Challenge = BinomialExtensionField<SC_Val, 4>;
-pub type SC_ChallengeMmcs = ExtensionMmcs<SC_Val, SC_Challenge, SC_ValMmcs>;
 
-pub type SC_Challenger = DuplexChallenger<SC_Val, SC_Perm, 16, 8>;
-pub type SC_Dft = Radix2DitParallel<SC_Val>;
-pub type SC_Pcs = TwoAdicFriPcs<SC_Val, SC_Dft, SC_ValMmcs, SC_ChallengeMmcs>;
-pub type SC_DigestHash = p3_symmetric::Hash<SC_Val, SC_Val, DIGEST_SIZE>;
-
+/// Field-level config tag for KoalaBear + Poseidon2. The FRI PCS / challenger plumbing that used
+/// to live here was removed with the FRI proving path (tag `legacy-fri-last`).
 #[derive(Clone)]
 pub struct KoalaBearPoseidon2 {
     pub perm: SC_Perm,
-    simple_fri_config: SimpleFriConfig,
-    log_blowup: usize,
-    num_queries: usize,
 }
 
 impl Serialize for KoalaBearPoseidon2 {
@@ -51,119 +34,15 @@ impl Default for KoalaBearPoseidon2 {
 
 impl StarkGenericConfig for KoalaBearPoseidon2 {
     type Val = SC_Val;
-    type Domain = <SC_Pcs as Pcs<SC_Challenge, SC_Challenger>>::Domain;
     type Challenge = SC_Challenge;
-    type Challenger = SC_Challenger;
-    type Pcs = SC_Pcs;
 
-    /// Targeting 100 bits of security.
     fn new() -> Self {
-        let perm = Self::init();
-        let num_queries = match std::env::var("FRI_QUERIES") {
-            Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 84,
-        };
-
-        let log_blowup = 1;
-        let simple_fri_config = SimpleFriConfig {
-            log_blowup,
-            num_queries,
-            proof_of_work_bits: 16,
-        };
-
         Self {
-            perm,
-            simple_fri_config,
-            log_blowup,
-            num_queries,
+            perm: KoalaBear::permutation(),
         }
-    }
-
-    fn pcs(&self) -> Self::Pcs {
-        let hash = SC_Hash::new(self.perm.clone());
-        let compress = SC_Compress::new(self.perm.clone());
-        let val_mmcs = SC_ValMmcs::new(hash, compress);
-        let fri_config = FriConfig {
-            log_blowup: self.log_blowup,
-            num_queries: self.num_queries,
-            proof_of_work_bits: 16,
-            mmcs: SC_ChallengeMmcs::new(val_mmcs.clone()),
-        };
-        SC_Pcs::new(SC_Dft::default(), val_mmcs.clone(), fri_config)
-    }
-
-    fn challenger(&self) -> Self::Challenger {
-        SC_Challenger::new(self.perm.clone())
     }
 
     fn name(&self) -> String {
         "KoalaBearPoseidon2".to_string()
-    }
-
-    fn hash_slice(&self, input: &[Val<Self>]) -> [Val<Self>; DIGEST_SIZE] {
-        let hash = SC_Hash::new(self.perm.clone());
-        hash.hash_slice(input)
-    }
-}
-
-impl KoalaBearPoseidon2 {
-    /// Targeting 100 bits of security.
-    pub fn compress() -> Self {
-        let perm = Self::init();
-        let num_queries = match std::env::var("FRI_QUERIES") {
-            Ok(num_queries) => num_queries.parse().unwrap(),
-            // fix from log_blowup=3 and num_queries=28 to log_blowup=4 and num_queries=21 to
-            // reduce the compress proof size
-            // Err(_) => 28,
-            Err(_) => 21,
-        };
-
-        // let log_blowup = 3;
-        let log_blowup = 4;
-        let simple_fri_config = SimpleFriConfig {
-            log_blowup,
-            num_queries,
-            proof_of_work_bits: 16,
-        };
-
-        Self {
-            perm,
-            simple_fri_config,
-            log_blowup,
-            num_queries,
-        }
-    }
-
-    /// Create a config for testing with higher blowup factor.
-    pub fn test() -> Self {
-        let perm = Self::init();
-        let num_queries = match std::env::var("FRI_QUERIES") {
-            Ok(num_queries) => num_queries.parse().unwrap(),
-            Err(_) => 21,
-        };
-
-        let log_blowup = 1;
-        let simple_fri_config = SimpleFriConfig {
-            log_blowup,
-            num_queries,
-            proof_of_work_bits: 16,
-        };
-
-        Self {
-            perm,
-            simple_fri_config,
-            log_blowup,
-            num_queries,
-        }
-    }
-
-    pub fn fri_config(&self) -> &SimpleFriConfig {
-        &self.simple_fri_config
-    }
-}
-
-impl ZeroCommitment<KoalaBearPoseidon2> for SC_Pcs {
-    fn zero_commitment(&self) -> Com<KoalaBearPoseidon2> {
-        SC_DigestHash::from([SC_Val::ZERO; DIGEST_SIZE])
     }
 }

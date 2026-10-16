@@ -16,9 +16,8 @@ use crate::{
     primitives::consts::u32_to_half_word,
 };
 use core::borrow::Borrow;
-use p3_air::Air;
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::Matrix;
+use p3_air::{Air, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use std::iter::once;
 
 impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for ShaCompressChip<F>
@@ -27,7 +26,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ShaCompressCols<CB::Var> = (*local).borrow();
 
         self.eval_control_flow_flags(builder, local);
@@ -53,8 +52,8 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         for i in 0..8 {
             builder.assert_bool(local.octet[i]);
             octet_sum = octet_sum.clone() + local.octet[i].into();
-            computed_index = computed_index.clone()
-                + local.octet[i].into() * CB::Expr::from_canonical_u32(i as u32);
+            computed_index =
+                computed_index.clone() + local.octet[i].into() * CB::Expr::from_u32(i as u32);
         }
         builder.assert_one(octet_sum);
 
@@ -64,7 +63,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             builder.assert_bool(local.octet_num[i]);
             octet_num_sum = octet_num_sum.clone() + local.octet_num[i].into();
             computed_index = computed_index.clone()
-                + local.octet_num[i].into() * CB::Expr::from_canonical_u32(8 * i as u32);
+                + local.octet_num[i].into() * CB::Expr::from_u32(8 * i as u32);
         }
         builder.assert_one(octet_num_sum);
 
@@ -185,7 +184,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
         // strictly increasing timestamps per address.
         builder.eval_memory_access(
             local.chunk,
-            local.clk + local.is_compression + local.is_finalize * CB::Expr::from_canonical_u32(2),
+            local.clk + local.is_compression + local.is_finalize * CB::Expr::from_u32(2),
             local.mem_addr.map(Into::into),
             &local.mem,
             local.is_initialize + local.is_compression + local.is_finalize,
@@ -236,7 +235,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
                 local.h_ptr[2].into(),
                 CB::Expr::ZERO,
             ]),
-            Word::extend_expr::<CB>(local.index * CB::Expr::from_canonical_u32(8)),
+            Word::extend_expr::<CB>(local.index * CB::Expr::from_u32(8)),
             local.mem_addr_init,
             local.is_initialize.into(),
         );
@@ -250,9 +249,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
                 local.w_ptr[2].into(),
                 CB::Expr::ZERO,
             ]),
-            Word::extend_expr::<CB>(
-                (local.index - CB::Expr::from_canonical_u32(8)) * CB::Expr::from_canonical_u32(8),
-            ),
+            Word::extend_expr::<CB>((local.index - CB::Expr::from_u32(8)) * CB::Expr::from_u32(8)),
             local.mem_addr_compress,
             local.is_compression.into(),
         );
@@ -266,9 +263,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
                 local.h_ptr[2].into(),
                 CB::Expr::ZERO,
             ]),
-            Word::extend_expr::<CB>(
-                (local.index - CB::Expr::from_canonical_u32(72)) * CB::Expr::from_canonical_u32(8),
-            ),
+            Word::extend_expr::<CB>((local.index - CB::Expr::from_u32(72)) * CB::Expr::from_u32(8)),
             local.mem_addr_finalize,
             local.is_finalize.into(),
         );

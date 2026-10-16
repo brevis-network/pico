@@ -1,5 +1,8 @@
 use crate::types::{BlockClock, NextStep};
-use pico_vm::emulator::riscv::chunk_split::should_check_fast;
+use pico_vm::{
+    emulator::riscv::chunk_split::{maybe_debug_split_snapshot, should_check_fast},
+    primitives::consts::CHUNK_CLK_START,
+};
 
 use super::{constants::CLOCK_INCREMENT_PER_INSN, AotEmulatorCore};
 
@@ -24,9 +27,18 @@ impl AotEmulatorCore {
             self.max_syscall_cycles,
             &self.chunk_split_config,
         ) {
+            // Report before `clear()` drops the counts this reads.
+            maybe_debug_split_snapshot(
+                self.current_chunk,
+                self.clk,
+                self.max_syscall_cycles,
+                self.insn_count,
+                &self.chunk_split_state,
+                &self.chunk_split_config,
+            );
             self.chunk_split_state.clear();
             self.current_chunk = self.current_chunk.wrapping_add(1);
-            self.clk = 0;
+            self.clk = CHUNK_CLK_START;
             self.batch_chunks_emulated = self.batch_chunks_emulated.wrapping_add(1);
             if self.batch_chunk_target > 0 && self.batch_chunks_emulated >= self.batch_chunk_target
             {
@@ -52,10 +64,21 @@ impl AotEmulatorCore {
         self.check_chunk_boundary()
     }
 
-    /// Check if execution should yield.
+    /// Whether the generated dispatch should hand control back.
+    ///
+    /// The sub-yield rides here rather than on `check_chunk_boundary`, because that one sits
+    /// behind a fast path that skips the whole check when the counters are far from their
+    /// thresholds — a cut point expressed in instructions would be missed. This line runs once
+    /// per block, and with split replay off the added comparison is against `u64::MAX`.
+    ///
+    /// It does have to borrow that one's unconstrained rule: the replaying interpreter only
+    /// tests its target outside unconstrained mode, so a cut landing inside such a region would
+    /// hand out a target the worker runs straight past — and the next segment would replay what
+    /// it already did, silently.
     #[inline(always)]
     pub fn should_yield(&self) -> bool {
-        self.batch_stop && self.pc != 0
+        let sub_yield = self.insn_count >= self.next_sub_yield && !self.is_unconstrained_mode();
+        (self.batch_stop || sub_yield) && self.pc != 0
     }
 
     /// Predict if a block can fit in current chunk without crossing a split boundary.
@@ -105,7 +128,7 @@ impl AotEmulatorCore {
 
 #[cfg(test)]
 mod tests {
-    use super::AotEmulatorCore;
+    use super::{AotEmulatorCore, CHUNK_CLK_START};
     use pico_vm::compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program};
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -129,8 +152,30 @@ mod tests {
             memory_rw_threshold: 4,
             global_lookup_base_threshold: 2,
             event_fast_threshold: 3,
+            commit_tail_reserve: 0,
+            commit_tail_overrun: 0,
         };
         emu
+    }
+
+    #[test]
+    fn chunk_boundary_waits_for_a_half_written_digest() {
+        let mut emu = test_emu();
+        emu.chunk_split_config.commit_tail_reserve = 16;
+        emu.clk = 240;
+        assert!(emu.check_chunk_boundary());
+
+        let mut emu = test_emu();
+        emu.chunk_split_config.commit_tail_reserve = 16;
+        emu.chunk_split_state.commit_in_flight = true;
+        emu.clk = 240;
+        assert!(!emu.check_chunk_boundary());
+        emu.clk = 256;
+        assert!(emu.check_chunk_boundary());
+        assert!(
+            !emu.chunk_split_state.commit_in_flight,
+            "the cut clears the flag"
+        );
     }
 
     #[test]
@@ -140,7 +185,7 @@ mod tests {
 
         assert!(emu.check_chunk_boundary());
         assert_eq!(emu.current_chunk, 2);
-        assert_eq!(emu.clk, 0);
+        assert_eq!(emu.clk, CHUNK_CLK_START);
     }
 
     #[test]

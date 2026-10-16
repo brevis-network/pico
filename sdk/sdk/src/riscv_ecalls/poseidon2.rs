@@ -1,21 +1,20 @@
 #[cfg(target_os = "zkvm")]
 use core::arch::asm;
+use pico_patch_libs::Poseidon2State;
 
-/// Executes the Poseidon2 permutation on the given state.
+/// Executes the Poseidon2 permutation, reading the state from `x` and writing it to `y`.
 ///
 /// ### Safety
 ///
-/// The caller must ensure that `state` is valid pointer to data that is aligned along a four
-/// byte boundary.
-///
-/// Shelved: the proving chip for this precompile is out of the machine and the syscall is
-/// unregistered, so a guest reaching here stops at `UnsupportedSyscall`. The definition stays
-/// because it is the only one of the `#[no_mangle]` symbol that `pico-patch-libs` declares -- but
-/// nothing in this VM will serve the call. The compile-time signal for guests is on
-/// `pico_sdk::poseidon2_hash`; code that declares the symbol itself gets no signal at all.
+/// The caller must ensure that `x` and `y` are valid pointers. Their **eight**-byte alignment
+/// is carried by [`Poseidon2State`] rather than left to the caller: this VM's memory is 8-byte
+/// granular and the precompile's address gadget range checks `addr / 8`, so a 4-aligned buffer
+/// has no provable trace and the syscall rejects it. (This used to say "four byte boundary",
+/// which was a leftover of the 32-bit origin of this ABI and was the reason the SDK's own
+/// hasher could not be proved.)
 #[allow(unused_variables)]
 #[no_mangle]
-pub extern "C" fn syscall_poseidon2_permute(x: *const [u32; 16], y: *mut [u32; 16]) {
+pub extern "C" fn syscall_poseidon2_permute(x: *const Poseidon2State, y: *mut Poseidon2State) {
     let syscall_id = crate::riscv_ecalls::POSEIDON2_PERMUTE;
 
     #[cfg(target_os = "zkvm")]

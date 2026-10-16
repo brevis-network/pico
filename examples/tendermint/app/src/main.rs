@@ -1,10 +1,8 @@
 #![no_main]
 
 use pico_sdk::io::{commit_bytes, read_vec};
-use std::time::Duration;
-use tendermint_light_client_verifier::{
-    options::Options, types::LightBlock, ProdVerifier, Verdict, Verifier,
-};
+use tendermint_lib::verify_update;
+use tendermint_light_client_verifier::{types::LightBlock, Verdict};
 
 pico_sdk::entrypoint!(main);
 
@@ -43,19 +41,7 @@ fn main() {
     println!("cycle-tracker-end: public input headers");
 
     println!("cycle-tracker-start: verify");
-    let vp = ProdVerifier::default();
-    let opt = Options {
-        trust_threshold: Default::default(),
-        trusting_period: Duration::from_secs(500),
-        clock_drift: Default::default(),
-    };
-    let verify_time = light_block_2.time() + Duration::from_secs(20);
-    let verdict = vp.verify_update_header(
-        light_block_2.as_untrusted_state(),
-        light_block_1.as_trusted_state(),
-        &opt,
-        verify_time.unwrap(),
-    );
+    let verdict = verify_update(&light_block_1, &light_block_2).unwrap();
     println!("cycle-tracker-end: verify");
 
     println!("cycle-tracker-start: public inputs verdict");

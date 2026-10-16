@@ -9,9 +9,8 @@ use crate::{
     compiler::recursion::types::BaseAluIo,
     machine::builder::{ChipBuilder, RecursionBuilder},
 };
-use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 use std::{borrow::Borrow, iter::zip};
 
 impl<F> BaseAir<F> for BaseAluChip<F> {
@@ -26,10 +25,10 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &BaseAluCols<CB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &BaseAluPreprocessedCols<CB::Var> = (*prep_local).borrow();
 
         for (
@@ -53,6 +52,11 @@ where
             builder.when(is_add).assert_eq(in1 + in2, out);
             builder.when(is_sub).assert_eq(in1, in2 + out);
             builder.when(is_mul).assert_eq(out, in1 * in2);
+            // NOTE: division is constrained as in2 * out == in1, which leaves `out` free when
+            // in2 == 0 (only in1 == 0 is forced then). Safe today because the recursion lowering
+            // emits no consumed division whose divisor an adversary could drive to zero (every
+            // inverse used is a compile-time-constant nonzero value). Re-audit if a consumed
+            // division over an adversary-controlled divisor is ever emitted.
             builder.when(is_div).assert_eq(in2 * out, in1);
 
             builder.looked_single(addrs.in1, in1, is_real.clone());

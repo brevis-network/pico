@@ -11,7 +11,10 @@ use crate::{
     },
     emulator::recursion::emulator::RecursionRecord,
     iter::IntoPicoRefIterator,
-    machine::{chip::ChipBehavior, utils::pad_to_power_of_two},
+    machine::{
+        chip::{ChipBehavior, PreprocessedRows},
+        utils::pad_to_power_of_two,
+    },
     primitives::consts::CONST_MEM_DATAPAR,
 };
 use itertools::Itertools;
@@ -30,6 +33,12 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
 
     fn preprocessed_width(&self) -> usize {
         NUM_MEM_PREPROCESSED_INIT_COLS
+    }
+
+    fn preprocessed_rows(&self, program: &Self::Program) -> Option<PreprocessedRows> {
+        Some(PreprocessedRows::Unpadded(
+            program.prep_row_counts().memory_const,
+        ))
     }
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
@@ -69,7 +78,8 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryConstChip<F> {
                 let mut row = [F::ZERO; NUM_MEM_PREPROCESSED_INIT_COLS];
                 let cols: &mut MemoryPreprocessedCols<_> = row.as_mut_slice().borrow_mut();
                 for (cell, access) in zip(&mut cols.values_and_accesses, row_vs_as) {
-                    *cell = *access;
+                    cell.value = access.0;
+                    cell.access = access.1;
                 }
                 row
             })

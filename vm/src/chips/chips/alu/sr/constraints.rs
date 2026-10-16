@@ -7,9 +7,8 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder},
     primitives::consts::WORD_SIZE,
 };
-use p3_air::{Air, AirBuilder};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
 impl<F: Field, CB> Air<CB> for ShiftRightChip<F>
@@ -18,7 +17,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ShiftRightCols<CB::Var> = (*local).borrow();
         let zero: CB::Expr = CB::F::ZERO.into();
         let one: CB::Expr = CB::F::ONE.into();
@@ -82,27 +81,27 @@ where
             let mut c_lower_bits = zero.clone();
             let mut bit_shift = zero.clone();
             for i in 0..6 {
-                c_lower_bits = c_lower_bits + c_bits[i] * CB::F::from_canonical_u32(1 << i);
+                c_lower_bits = c_lower_bits + c_bits[i] * CB::F::from_u32(1 << i);
                 if i == 3 {
                     bit_shift = c_lower_bits.clone();
                 }
             }
 
             // Check that bits 6-15 of c are zero
-            let inverse_64: CB::Expr = CB::F::from_canonical_u32(64).inverse().into();
+            let inverse_64: CB::Expr = CB::F::from_u32(64).inverse().into();
             builder.looking_byte(
-                CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                CB::F::from_u32(ByteOpcode::BitRange as u32),
                 (c - c_lower_bits) * inverse_64,
-                CB::F::from_canonical_u32(10),
+                CB::F::from_u32(10),
                 zero.clone(),
                 is_real.clone(),
             );
 
             // Check v_01, v_012, v_0123 constraints
-            let two = CB::F::from_canonical_u32(2);
-            let three = CB::F::from_canonical_u32(3);
-            let fifteen = CB::F::from_canonical_u32(15);
-            let two_fifty_five = CB::F::from_canonical_u32(255);
+            let two = CB::F::from_u32(2);
+            let three = CB::F::from_u32(3);
+            let fifteen = CB::F::from_u32(15);
+            let two_fifty_five = CB::F::from_u32(255);
 
             builder.assert_eq(
                 v_01,
@@ -121,8 +120,8 @@ where
             // Check shift_u16 constraints (Var types - no clone needed)
             for i in 0..4 {
                 builder.when(shift_u16[i]).assert_eq(
-                    c_bits[4] + c_bits[5] * CB::F::from_canonical_u32(2) * not_word.clone(),
-                    CB::F::from_canonical_u32(i as u32),
+                    c_bits[4] + c_bits[5] * CB::F::from_u32(2) * not_word.clone(),
+                    CB::F::from_u32(i as u32),
                 );
                 builder.assert_bool(shift_u16[i]);
             }
@@ -132,17 +131,17 @@ where
             );
 
             // Check that lower_limb < 2^bit_shift and higher_limb < 2^(16 - bit_shift)
-            let sixteen: CB::Expr = CB::F::from_canonical_u32(16).into();
+            let sixteen: CB::Expr = CB::F::from_u32(16).into();
             for i in 0..WORD_SIZE {
                 builder.looking_byte(
-                    CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                    CB::F::from_u32(ByteOpcode::BitRange as u32),
                     lower_limb[i],
                     bit_shift.clone(),
                     zero.clone(),
                     is_real.clone(),
                 );
                 builder.looking_byte(
-                    CB::F::from_canonical_u32(ByteOpcode::BitRange as u32),
+                    CB::F::from_u32(ByteOpcode::BitRange as u32),
                     higher_limb[i],
                     sixteen.clone() - bit_shift.clone(),
                     zero.clone(),
@@ -169,7 +168,7 @@ where
             // an honest `srlw`/`sraw` with a dirty high half unprovable -- and RV64 makes that
             // the common case, since word shifts read only the low 32 bits so LLVM never clears
             // the high half.
-            let two_pow_16 = CB::F::from_canonical_u32(1 << 16);
+            let two_pow_16 = CB::F::from_u32(1 << 16);
             for i in 0..WORD_SIZE {
                 builder.assert_eq(
                     b[i] * v_0123,
@@ -197,8 +196,8 @@ where
             U16MSBGadget::eval(builder, a.0[1].into(), srw_msb, is_word.clone());
             builder.when(not_word.clone()).assert_zero(srw_msb.msb);
 
-            let base = CB::F::from_canonical_u32(1 << 16);
-            let base_minus_one = CB::F::from_canonical_u16(u16::MAX);
+            let base = CB::F::from_u32(1 << 16);
+            let base_minus_one = CB::F::from_u16(u16::MAX);
 
             // Constrain the final result based on shift amount
             // For 64-bit operations (SRL/SRA)
@@ -265,10 +264,10 @@ where
 
             // Receive the arguments via ALU lookup
             builder.looked_alu(
-                is_srl * CB::F::from_canonical_u32(Opcode::SRL as u32)
-                    + is_sra * CB::F::from_canonical_u32(Opcode::SRA as u32)
-                    + is_srlw * CB::F::from_canonical_u32(Opcode::SRLW as u32)
-                    + is_sraw * CB::F::from_canonical_u32(Opcode::SRAW as u32),
+                is_srl * CB::F::from_u32(Opcode::SRL as u32)
+                    + is_sra * CB::F::from_u32(Opcode::SRA as u32)
+                    + is_srlw * CB::F::from_u32(Opcode::SRLW as u32)
+                    + is_sraw * CB::F::from_u32(Opcode::SRAW as u32),
                 a,
                 b,
                 c_for_lookup,

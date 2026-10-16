@@ -2,7 +2,11 @@ use crate::primitives::consts::WORD_SIZE;
 use arrayref::array_ref;
 use itertools::Itertools;
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
+use rand::{
+    distr::{Distribution, StandardUniform},
+    Rng, RngExt,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     array::IntoIter,
@@ -14,6 +18,15 @@ use std::{
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Word<T>(pub [T; WORD_SIZE]);
+
+impl<T> Distribution<Word<T>> for StandardUniform
+where
+    StandardUniform: Distribution<T> + Distribution<[T; WORD_SIZE]>,
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Word<T> {
+        Word(rng.random())
+    }
+}
 
 impl<T> Word<T> {
     /// Applies `f` to each element of the word.
@@ -48,7 +61,7 @@ impl<T> Word<T> {
     }
 }
 
-impl<T: FieldAlgebra> Word<T> {
+impl<T: PrimeCharacteristicRing> Word<T> {
     /// Extends a variable to a word.
     pub fn extend_expr<AB: AirBuilder<Expr = T>>(expr: T) -> Word<AB::Expr> {
         Word([
@@ -123,7 +136,7 @@ impl<V: Copy> Word<V> {
     /// Reduces a word to a single variable.
     /// Uses 4×16-bit limbs: [1, 2^16, 2^32, 2^48]
     pub fn reduce<AB: AirBuilder<Var = V>>(&self) -> AB::Expr {
-        let base = [1u64, 1 << 16, 1 << 32, 1 << 48].map(AB::Expr::from_wrapped_u64);
+        let base = [1u64, 1 << 16, 1 << 32, 1 << 48].map(AB::Expr::from_u64);
         self.0
             .iter()
             .enumerate()
@@ -143,9 +156,10 @@ impl<V: Clone> Word<V> {
         result: Self,
     ) where
         AB: AirBuilder,
+        AB::F: Field,
         V: Into<AB::Expr>,
     {
-        let base_inverse = AB::F::from_canonical_u32(1 << 16).inverse();
+        let base_inverse = AB::F::from_u32(1 << 16).inverse();
 
         let mut carry = AB::Expr::ZERO;
 
@@ -192,21 +206,17 @@ impl<V: Clone> Word<V> {
         AB: AirBuilder,
         V: Into<AB::Expr>,
     {
-        let base = AB::Expr::from_canonical_u32(1 << 16);
+        let base = AB::Expr::from_u32(1 << 16);
 
+        // NOTE: carry_cols needs exactly 4 elements (one per limb).
+        // The final carry must be 0 (no 64-bit overflow), which is enforced by
+        // assert_zero(prev_carry) below.  The formerly-separate 5th "overflow carry"
+        // slot was always 0 and has been removed.
         let mut prev_carry: AB::Expr = AB::Expr::ZERO;
 
-        for i in 0..5 {
-            let lhs: AB::Expr = if i < 4 {
-                self[i].clone().into()
-            } else {
-                AB::Expr::ZERO
-            };
-            let rhs: AB::Expr = if i < 4 {
-                result[i].clone().into()
-            } else {
-                AB::Expr::ZERO
-            };
+        for i in 0..4 {
+            let lhs: AB::Expr = self[i].clone().into();
+            let rhs: AB::Expr = result[i].clone().into();
             let inc = if i == 0 {
                 increment.clone()
             } else {
@@ -239,32 +249,27 @@ impl<T> IndexMut<usize> for Word<T> {
     }
 }
 
-impl<F: FieldAlgebra> From<u32> for Word<F> {
+impl<F: PrimeCharacteristicRing> From<u32> for Word<F> {
     fn from(value: u32) -> Self {
         let low = (value & 0xFFFF) as u16;
         let high = (value >> 16) as u16;
-        Word([
-            F::from_canonical_u16(low),
-            F::from_canonical_u16(high),
-            F::ZERO,
-            F::ZERO,
-        ])
+        Word([F::from_u16(low), F::from_u16(high), F::ZERO, F::ZERO])
     }
 }
 
-impl<F: FieldAlgebra> From<i32> for Word<F> {
+impl<F: PrimeCharacteristicRing> From<i32> for Word<F> {
     fn from(value: i32) -> Self {
-        Word((value as u32).to_le_bytes().map(F::from_canonical_u8))
+        Word((value as u32).to_le_bytes().map(F::from_u8))
     }
 }
 
-impl<F: FieldAlgebra> From<u64> for Word<F> {
+impl<F: PrimeCharacteristicRing> From<u64> for Word<F> {
     fn from(value: u64) -> Self {
         Word([
-            F::from_canonical_u16((value & 0xFFFF) as u16),
-            F::from_canonical_u16((value >> 16) as u16),
-            F::from_canonical_u16((value >> 32) as u16),
-            F::from_canonical_u16((value >> 48) as u16),
+            F::from_u16((value & 0xFFFF) as u16),
+            F::from_u16((value >> 16) as u16),
+            F::from_u16((value >> 32) as u16),
+            F::from_u16((value >> 48) as u16),
         ])
     }
 }

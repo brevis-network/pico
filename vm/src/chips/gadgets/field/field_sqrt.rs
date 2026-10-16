@@ -26,12 +26,9 @@ use super::{field_lt::FieldLtCols, field_op::FieldOpCols};
 ///
 /// *Safety*: The `FieldSqrtCols` asserts that `multiplication.result` is a square root of the given
 /// input lying within the range `[0, modulus)` with the least significant bit `lsb`.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, PartialEq, Eq)]
 #[repr(C)]
-pub struct FieldSqrtCols<T, P: FieldParameters>
-where
-    P: FieldParameters,
-{
+pub struct FieldSqrtCols<T, P: FieldParameters> {
     /// The multiplication operation to verify that the sqrt and the input match.
     ///
     /// In order to save space, we actually store the sqrt of the input in `multiplication.result`
@@ -78,7 +75,7 @@ where
         self.range.populate(blu, &sqrt, &modulus);
 
         let sqrt_bytes = P::to_limbs(&sqrt);
-        self.lsb = F::from_canonical_u8(sqrt_bytes[0] & 1);
+        self.lsb = F::from_u8(sqrt_bytes[0] & 1);
 
         let and_event = ByteLookupEvent {
             opcode: ByteOpcode::AND,

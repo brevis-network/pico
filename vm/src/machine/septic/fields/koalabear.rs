@@ -1,5 +1,5 @@
 use super::super::extension::SepticExtension;
-use p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::PrimeCharacteristicRing;
 use std::any::Any;
 
 pub const TOP_BITS: usize = 7;
@@ -77,16 +77,18 @@ pub const DIGEST_SUM_START_Y: [u32; 7] = [
 ];
 
 // y^2 = x^3 + 2x + 611*z^5
-pub fn curve_formula<F: Any + FieldAlgebra>(x: SepticExtension<F>) -> SepticExtension<F> {
+pub fn curve_formula<F: Any + PrimeCharacteristicRing>(
+    x: SepticExtension<F>,
+) -> SepticExtension<F> {
     x.cube()
         + x * F::TWO
-        + SepticExtension::from_base_slice(&[
+        + SepticExtension([
             F::ZERO,
             F::ZERO,
             F::ZERO,
             F::ZERO,
             F::ZERO,
-            F::from_canonical_u32(611),
+            F::from_u32(611),
             F::ZERO,
         ])
 }

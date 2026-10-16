@@ -58,7 +58,7 @@ fn u32_words_to_packed_dwords(words: &[u32; UINT256_NUM_WORDS * 2]) -> [u64; UIN
             .collect::<Vec<u8>>(),
     );
     let mut dwords = [0u64; UINT256_NUM_WORDS];
-    for (index, pair) in result.chunks_exact(2).enumerate() {
+    for (index, pair) in result.as_chunks::<2>().0.iter().enumerate() {
         dwords[index] = u64::from(pair[0]) | (u64::from(pair[1]) << 32);
     }
     dwords

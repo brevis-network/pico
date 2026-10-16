@@ -87,6 +87,12 @@ impl<F: PrimeField32> ChipBehavior<F> for AddwChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
+        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
+        // depends on the chunk kind rather than on its opcode mix. Without a shape the
+        // chip is event-driven, which is what the natural-height path wants.
+        if let Some(shape) = record.shape.as_ref() {
+            return shape.included::<F, _>(self);
+        }
         record.add_events.iter().any(|e| e.opcode == Opcode::ADDW)
     }
 

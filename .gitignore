@@ -6,6 +6,8 @@
 tmp
 /logs
 /examples/target
+/examples/Cargo.lock
+/perf/aot/target
 
 # AOT generated dispatch crate:
 # Track only the minimal bootstrap skeleton needed after fresh clone.
@@ -16,8 +18,47 @@ tmp
 !/aot-generated/src/lib.rs
 
 # AOT related
-examples/Cargo.lock
+perf/aot/Cargo.lock
 vm/examples/patch-testing/Cargo.lock
 vm/examples/patch-testing/aot/Cargo.lock
 
 docs/archive/
+
+# gnark circuit + witness JSON emitted into the working directory by test_outer_twins and by
+# `test_mle_e2e --step wrap`. The wrap constraints file is ~140 MB — never commit it.
+/outer_twins_constraints.json
+/outer_twins_groth16_witness.json
+/wrap_constraints.json
+/wrap_groth16_witness.json
+/gnark/koalabear_verifier/constraints.json
+/gnark/koalabear_verifier/groth16_witness.json
+
+# Groth16 setup output for the wrap circuit: the proving key alone is ~1.7 GB.
+/gnark/wrap_data/
+
+# Local agent-skill scaffolding (not shared)
+/CLAUDE.md
+/WORKLOG-*.md
+/docs/adr/
+/docs/agents/
+/CONTEXT.md
+/.scratch/
+
+# Merged from the gpu branch: artifacts either branch can leave behind.
+libgpu_api.so
+nohup.out
+**/subblock_proof_*.bin
+perf/bench_data/block*/
+gpu_memory_log.json
+block_*.db
+__pycache__/
+*.tar.gz
+private-pico-gpu/
+aot-generated/chunks/
+.mle_jit_cache/
+/perf/bench_data/bins/*.bin
+/*.txt
+/*.csv
+/perf/*.csv
+/temp/
+/opt-history/

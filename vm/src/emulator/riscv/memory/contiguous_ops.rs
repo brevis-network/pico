@@ -275,7 +275,7 @@ impl ContiguousRiscvMemory {
     // Compatibility methods for MemoryRecord-based API (byte-address based).
     // ------------------------------------------------------------------------
 
-    // Kaiwei: Three core api for RiscvEmulator, get, insert, get_mut_or_create
+    // Three core api for RiscvEmulator, get, insert, get_mut_or_create
     // TODO: rename get to peek
     /// Get a MemoryRecord at the given 8-byte-aligned address.
     #[inline(always)]
@@ -356,8 +356,9 @@ impl ContiguousRiscvMemory {
         prev
     }
 
-    // Kaiwei: replace entry (checked: all entry in pico should mark_accessed in original code)
-    // Kaiwei: in snapshot_addr_if_needed, snapshot_record_if_needed, HintReadSyscall, we do not use get_mut_or_create (original use entry)
+    // replace entry (checked: all entry in pico should mark_accessed in original code)
+    // in snapshot_addr_if_needed, snapshot_record_if_needed, HintReadSyscall, we do not use
+    // get_mut_or_create (original use entry)
     /// Get or create a mutable-like access to memory at the given 8-byte-aligned address.
     #[inline(always)]
     pub fn get_mut_or_create(&mut self, addr: RvAddr) -> MemoryRecordRef<'_> {

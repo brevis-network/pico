@@ -16,4 +16,6 @@ pub fn main() {
         // This prevents the compiler from skipping iterations
         a = a.mul_mod_special(&b, c);
     }
+
+    pico_sdk::io::commit_bytes(&a.to_be_bytes());
 }

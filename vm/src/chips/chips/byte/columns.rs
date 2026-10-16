@@ -8,7 +8,7 @@ pub const NUM_BYTE_PREPROCESSED_COLS: usize = size_of::<BytePreprocessedCols<u8>
 /// The number of multiplicity columns for `ByteChip`.
 pub const NUM_BYTE_MULT_COLS: usize = size_of::<ByteMultCols<u8>>();
 
-#[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
+#[derive(AlignedBorrow, Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(C)]
 pub struct BytePreprocessedCols<T> {
     /// The first byte operand.
@@ -48,7 +48,7 @@ pub struct BytePreprocessedCols<T> {
 
 /// For each byte operation in the preprocessed table, a corresponding ByteMultCols row tracks the
 /// number of times the operation is used.
-#[derive(Debug, Clone, Copy, AlignedBorrow)]
+#[derive(Debug, Clone, Copy, AlignedBorrow, Eq, PartialEq)]
 #[repr(C)]
 pub struct ByteMultCols<T> {
     /// The multiplicities of each byte operation.

@@ -11,7 +11,7 @@ use pico_vm::chips::gadgets::{
     },
     utils::{
         conversions::{bytes_to_words_le, words_to_bytes_le},
-        field_params::{NumLimbs, NumWords},
+        field_params::{FieldParameters, NumLimbs, NumWords},
     },
 };
 use typenum::Unsigned;
@@ -74,7 +74,9 @@ fn unpack_packed_dwords_into_words(dwords: &[u64], out: &mut [u32]) {
 
 fn pack_words_to_packed_dwords(words: &[u32]) -> Vec<u64> {
     words
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
         .collect()
 }
@@ -101,6 +103,19 @@ pub fn edwards_add<E: EllipticCurve + EdwardsParameters>(
 
     let p_affine = AffinePoint::<E>::from_words_le(&p_buf[..num_u32_words]);
     let q_affine = AffinePoint::<E>::from_words_le(&q_buf[..num_u32_words]);
+    // Same canonicality check the interpreter makes in
+    // `emulator/riscv/syscalls/precompiles/edwards/add.rs`: the chip's field gadgets assume
+    // operands below the modulus, and the two emulators have to reject the same inputs or a
+    // guest's behaviour depends on which one ran it.
+    let modulus = E::BaseField::modulus();
+    for (which, point) in [("p", &p_affine), ("q", &q_affine)] {
+        for (name, coord) in [("x", &point.x), ("y", &point.y)] {
+            assert!(
+                *coord < modulus,
+                "edwards add: {which}.{name} is not a canonical field element (>= {modulus})"
+            );
+        }
+    }
     let result_affine = p_affine + q_affine;
     let result_words = result_affine.to_words_le();
 
@@ -115,7 +130,7 @@ pub fn edwards_decompress<E: EdwardsParameters>(
 ) {
     assert!(
         slice_ptr.is_multiple_of(8),
-        "Pointer must be 4-byte aligned."
+        "edwards decompress slice_ptr must be 8-byte aligned"
     );
     assert!(sign <= 1, "Sign bit must be 0 or 1.");
 
@@ -128,6 +143,13 @@ pub fn edwards_decompress<E: EdwardsParameters>(
     read_packed_words_at_clk(core, y_ptr, &mut y_buf, clk);
 
     let y_bytes: [u8; COMPRESSED_POINT_BYTES] = words_to_bytes_le(&y_buf);
+
+    // Same canonicality check the interpreter makes; see `edwards_add` above.
+    let modulus = E::BaseField::modulus();
+    assert!(
+        num::BigUint::from_bytes_le(&y_bytes) < modulus,
+        "edwards decompress: y is not a canonical field element (>= {modulus})"
+    );
 
     // Re-insert sign bit into last bit of Y for CompressedEdwardsY format
     let mut compressed_edwards_y: [u8; COMPRESSED_POINT_BYTES] = y_bytes;
@@ -681,7 +703,12 @@ fn words_to_bls12381_affine(words: &[u32]) -> Bls12381G1Affine {
     uncompressed[..48].reverse();
     uncompressed[48..].reverse();
 
-    Bls12381G1Affine::from_uncompressed(&uncompressed).unwrap()
+    // The add and double syscalls take any point on the curve, as pico-vm's interpreter and the AIR
+    // do, and guests pass points outside the prime-order subgroup: map_to_curve output before the
+    // cofactor is cleared (EIP-2537 MAP_FP_TO_G1), and the point a subgroup check is testing (kzg-rs
+    // parsing a commitment). `from_uncompressed` also checks subgroup membership and panicked on
+    // those; the unchecked decode only checks the encoding.
+    Bls12381G1Affine::from_uncompressed_unchecked(&uncompressed).unwrap()
 }
 
 /// Convert bls12_381 G1Affine to 24 u32 words (x, y coordinates in LE).
@@ -718,4 +745,38 @@ fn bls12381_affine_to_words(point: &Bls12381G1Affine) -> [u32; 24] {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// (0, 2) is on y^2 = x^3 + 4 but has order 3, so it lies outside the prime-order subgroup. The
+    /// interpreter doubles it with the affine formula (slope 0) to (0, -2); this decode used to
+    /// panic on it instead.
+    #[test]
+    fn bls12381_g1_point_outside_the_subgroup_doubles_like_the_interpreter() {
+        let mut p = [0u32; 24];
+        p[12] = 2; // x = 0, y = 2, little-endian words
+        let doubled = bls12381_affine_to_words(&Bls12381G1Affine::from(
+            Bls12381G1Projective::from(words_to_bls12381_affine(&p)).double(),
+        ));
+        // (0, p - 2)
+        let mut neg_p = [0u32; 24];
+        neg_p[12..].copy_from_slice(&[
+            0xffff_aaa9,
+            0xb9fe_ffff,
+            0xb153_ffff,
+            0x1eab_fffe,
+            0xf6b0_f624,
+            0x6730_d2a0,
+            0xf385_12bf,
+            0x6477_4b84,
+            0x434b_acd7,
+            0x4b1b_a7b6,
+            0x397f_e69a,
+            0x1a01_11ea,
+        ]);
+        assert_eq!(doubled, neg_p);
+    }
 }

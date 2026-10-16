@@ -9,9 +9,8 @@ use crate::{
     compiler::recursion::types::SelectIo,
     machine::builder::{ChipBuilder, RecursionBuilder},
 };
-use p3_air::{Air, BaseAir};
-use p3_field::{Field, FieldAlgebra};
-use p3_matrix::Matrix;
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing};
 use std::{borrow::Borrow, iter::zip};
 
 impl<F> BaseAir<F> for SelectChip<F> {
@@ -26,10 +25,10 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SelectCols<CB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &SelectPreprocessedCols<CB::Var> = (*prep_local).borrow();
 
         for (

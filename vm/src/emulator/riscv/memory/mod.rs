@@ -16,4 +16,7 @@ pub use contiguous_ops::MemoryRecordRef;
 pub use paged::{
     Addr, Memory, Memory32, Memory64, PagedMemory, PagedMemory32, PagedMemory64, Registers,
 };
-pub use pool::{init_memory_pool, GLOBAL_MEMORY_POOL, GLOBAL_MEMORY_RECYCLER};
+pub use pool::{
+    init_memory_pool, memory_pool_capacity, memory_pool_size, memory_recycler_threads,
+    RecvTimeoutError, GLOBAL_MEMORY_POOL, GLOBAL_MEMORY_RECYCLER, POOL_WAIT,
+};

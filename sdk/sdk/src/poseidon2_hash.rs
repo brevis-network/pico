@@ -1,16 +1,19 @@
 use p3_field::PrimeField32;
-use pico_patch_libs::syscall_poseidon2_permute;
+use pico_patch_libs::POSEIDON2_WIDTH;
+
+use crate::poseidon2::permuted;
+
 /// A stateful hasher for Poseidon2.
 pub struct Poseidon2<F: PrimeField32> {
-    state: [F; 16],      // Poseidon2 works with a 16-element state.
-    buffer_count: usize, // Number of elements currently buffered.
+    state: [F; POSEIDON2_WIDTH], // Poseidon2 works with a 16-element state.
+    buffer_count: usize,         // Number of elements currently buffered.
 }
 
 impl<F: PrimeField32> Poseidon2<F> {
     /// Creates a new Poseidon2 hasher with an empty state.
     pub fn new() -> Self {
         Self {
-            state: [F::ZERO; 16],
+            state: [F::ZERO; POSEIDON2_WIDTH],
             buffer_count: 0,
         }
     }
@@ -43,47 +46,24 @@ impl<F: PrimeField32> Poseidon2<F> {
 
     /// Computes the Poseidon2 permutation on the state.
     fn permute(&mut self) {
-        let mut ret = [0_u32; 16];
-
-        unsafe {
-            syscall_poseidon2_permute(
-                &self.state.map(|f| f.as_canonical_u32()) as *const _,
-                &mut ret as *mut _,
-            );
-        }
-        self.state = ret.map(F::from_wrapped_u32);
+        self.state = permuted(&self.state);
     }
 
     /// A convenience function to hash two elements.
     pub fn hash_two(x: F, y: F) -> F {
-        let mut state = [F::ZERO; 16];
+        let mut state = [F::ZERO; POSEIDON2_WIDTH];
         state[0] += x;
         state[1] += y;
 
-        let mut ret = [0_u32; 16];
-
-        unsafe {
-            syscall_poseidon2_permute(
-                &state.map(|f| f.as_canonical_u32()) as *const _,
-                &mut ret as *mut _,
-            );
-        }
-        F::from_wrapped_u32(ret[0])
+        permuted(&state)[0]
     }
 
     /// A convenience function to hash a single element.
     pub fn hash_single(x: F) -> F {
-        let mut state = [F::ZERO; 16];
+        let mut state = [F::ZERO; POSEIDON2_WIDTH];
         state[0] += x;
 
-        let mut ret = [0_u32; 16];
-        unsafe {
-            syscall_poseidon2_permute(
-                &state.map(|f| f.as_canonical_u32()) as *const _,
-                &mut ret as *mut _,
-            );
-        }
-        F::from_wrapped_u32(ret[0])
+        permuted(&state)[0]
     }
 
     /// A convenience function to hash multiple elements.

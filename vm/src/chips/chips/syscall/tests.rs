@@ -1,19 +1,40 @@
 use crate::{
-    chips::chips::syscall::SyscallChip,
-    machine::{builder::PublicValuesBuilder, chip::ChipBehavior, folder::SymbolicConstraintFolder},
+    chips::chips::syscall::SyscallChunkKind,
+    emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
+    machine::chip::ChipBehavior,
 };
-use p3_air::{Air, BaseAir};
 use p3_koala_bear::KoalaBear;
 
 #[test]
-fn test_syscall_chip_simple_eval() {
-    let chip: SyscallChip<KoalaBear> = SyscallChip::riscv();
-    let preprocessed_width = chip.preprocessed_width();
-    let width = chip.width();
-    let mut builder = SymbolicConstraintFolder::new(preprocessed_width, width);
-    chip.eval(&mut builder);
+#[should_panic(expected = "frozen 48-bit proof address contract")]
+fn syscall_extra_record_rejects_arg1_above_48_bits() {
+    let chip = crate::chips::chips::syscall::SyscallChip::<KoalaBear>::new(SyscallChunkKind::Riscv);
+    let mut record = EmulationRecord::default();
+    let mut complete_record = EmulationRecord::default();
+    record.syscall_events.push(SyscallEvent {
+        chunk: 0,
+        clk: 1,
+        syscall_id: 7,
+        arg1: 1u64 << 48,
+        arg2: 0,
+    });
 
-    assert_eq!(builder.num_constraints(), 2);
-    assert_eq!(builder.public_values().len(), 119);
-    assert_eq!(builder.num_lookups(), 4);
+    chip.extra_record(&record, &mut complete_record);
+}
+
+#[test]
+#[should_panic(expected = "frozen 48-bit proof address contract")]
+fn syscall_extra_record_rejects_arg2_above_48_bits() {
+    let chip = crate::chips::chips::syscall::SyscallChip::<KoalaBear>::new(SyscallChunkKind::Riscv);
+    let mut record = EmulationRecord::default();
+    let mut complete_record = EmulationRecord::default();
+    record.syscall_events.push(SyscallEvent {
+        chunk: 0,
+        clk: 1,
+        syscall_id: 7,
+        arg1: 0,
+        arg2: 1u64 << 48,
+    });
+
+    chip.extra_record(&record, &mut complete_record);
 }

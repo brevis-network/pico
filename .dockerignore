@@ -1,0 +1,20 @@
+target
+.git
+# Proving outputs: wrap circuits are hundreds of MB and Groth16 key sets gigabytes.
+wrap_constraints.json
+wrap_groth16_witness.json
+outer_twins_constraints.json
+outer_twins_groth16_witness.json
+pico_out
+gnark/data
+gnark/wrap_data
+contracts/out
+contracts/cache
+*.log
+*.rs.bk
+*.swp
+.DS_Store
+*.tmp
+__pycache__/
+.idea/
+.vscode/

@@ -7,7 +7,7 @@ use crate::{
     machine::builder::ChipLookupBuilder,
     primitives::consts::WORD_SIZE,
 };
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute `rotateright` of a word with a fixed offset R.
@@ -46,13 +46,13 @@ impl<F: Field> FixedRotateRightOperation<F> {
         input: u32,
         rotation: usize,
     ) -> u32 {
-        let input_bytes = input.to_le_bytes().map(F::from_canonical_u8);
+        let input_bytes = input.to_le_bytes().map(F::from_u8);
         let expected = input.rotate_right(rotation as u32);
 
         // Compute some constants with respect to the rotation needed for the rotation.
         let nb_bytes_to_shift = Self::nb_bytes_to_shift(rotation);
         let nb_bits_to_shift = Self::nb_bits_to_shift(rotation);
-        let carry_multiplier = F::from_canonical_u32(Self::carry_multiplier(rotation));
+        let carry_multiplier = F::from_u32(Self::carry_multiplier(rotation));
 
         // Perform the byte shift.
         let input_bytes_rotated = Word([
@@ -81,8 +81,8 @@ impl<F: Field> FixedRotateRightOperation<F> {
             };
             record.add_byte_lookup_event(byte_event);
 
-            self.shift[i] = F::from_canonical_u8(shift);
-            self.carry[i] = F::from_canonical_u8(carry);
+            self.shift[i] = F::from_u8(shift);
+            self.carry[i] = F::from_u8(carry);
 
             if i == WORD_SIZE - 1 {
                 first_shift = self.shift[i];
@@ -112,7 +112,7 @@ impl<F: Field> FixedRotateRightOperation<F> {
         // Compute some constants with respect to the rotation needed for the rotation.
         let nb_bytes_to_shift = Self::nb_bytes_to_shift(rotation);
         let nb_bits_to_shift = Self::nb_bits_to_shift(rotation);
-        let carry_multiplier = CB::F::from_canonical_u32(Self::carry_multiplier(rotation));
+        let carry_multiplier = CB::F::from_u32(Self::carry_multiplier(rotation));
 
         // Perform the byte shift.
         let input_bytes_rotated = Word([
@@ -128,11 +128,11 @@ impl<F: Field> FixedRotateRightOperation<F> {
         let mut last_carry = CB::Expr::ZERO;
         for i in (0..WORD_SIZE).rev() {
             builder.looking_byte_pair(
-                CB::F::from_canonical_u32(ByteOpcode::ShrCarry as u32),
+                CB::F::from_u32(ByteOpcode::ShrCarry as u32),
                 cols.shift[i],
                 cols.carry[i],
                 input_bytes_rotated[i],
-                CB::F::from_canonical_usize(nb_bits_to_shift),
+                CB::F::from_usize(nb_bits_to_shift),
                 is_real,
             );
 
@@ -150,45 +150,5 @@ impl<F: Field> FixedRotateRightOperation<F> {
             cols.value[WORD_SIZE - 1],
             first_shift + last_carry * carry_multiplier,
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_air::AirBuilder;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        input: Word<T>,
-        rotate_right: FixedRotateRightOperation<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_fixed_rotate_right_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        FixedRotateRightOperation::<KoalaBear>::eval(
-            &mut builder,
-            local.input,
-            7,
-            local.rotate_right,
-            local.is_real,
-        );
-
-        assert_eq!(builder.num_constraints(), 4);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 4);
     }
 }

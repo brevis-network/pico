@@ -6,13 +6,14 @@ use crate::{
     configs::config::Poseidon2Config,
     primitives::{consts::PERMUTATION_WIDTH, poseidon2::FieldPoseidon2},
 };
+use hybrid_array::Array;
 use p3_field::PrimeField;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 use typenum::Unsigned;
 
 pub(crate) fn populate_perm<
     F: PrimeField,
-    LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+    LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
     Config: Poseidon2Config,
 >(
     is_real: F,
@@ -27,31 +28,13 @@ pub(crate) fn populate_perm<
         *inputs_i += state_i;
     }
 
-    LinearLayers::external_linear_layer(&mut state);
-
-    for (full_round, constants) in perm
-        .beginning_full_rounds
-        .iter_mut()
-        .zip(&constants.beginning_full_round_constants)
-    {
-        populate_full_round::<F, LinearLayers, Config>(&mut state, full_round, constants);
-    }
-
-    for (partial_round, constant) in perm
-        .partial_rounds
-        .iter_mut()
-        .zip(&constants.partial_round_constants)
-    {
-        populate_partial_round::<F, LinearLayers, Config>(&mut state, partial_round, *constant);
-    }
-
-    for (full_round, constants) in perm
-        .ending_full_rounds
-        .iter_mut()
-        .zip(&constants.ending_full_round_constants)
-    {
-        populate_full_round::<F, LinearLayers, Config>(&mut state, full_round, constants);
-    }
+    populate_perm_rounds::<F, LinearLayers, Config>(
+        &mut state,
+        &mut perm.beginning_full_rounds,
+        &mut perm.partial_rounds,
+        &mut perm.ending_full_rounds,
+        constants,
+    );
 
     if let Some(expected_output) = expected_output {
         for i in 0..PERMUTATION_WIDTH {
@@ -60,10 +43,49 @@ pub(crate) fn populate_perm<
     }
 }
 
+/// Runs the permutation on `state` in place (external linear layer, then the three round groups),
+/// recording the per-round witnesses. Used by the full-width `Poseidon2ValueCols`
+/// (`populate_perm`); the riscv rate-8 layout has its own driver
+/// (`riscv_poseidon2::traces::populate_perm_rounds_riscv`, built from the per-round helpers below).
+pub(crate) fn populate_perm_rounds<
+    F: PrimeField,
+    LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
+    Config: Poseidon2Config,
+>(
+    state: &mut [F; PERMUTATION_WIDTH],
+    beginning_full_rounds: &mut Array<FullRound<F, Config>, Config::HalfFullRounds>,
+    partial_rounds: &mut Array<PartialRound<F, Config>, Config::PartialRounds>,
+    ending_full_rounds: &mut Array<FullRound<F, Config>, Config::HalfFullRounds>,
+    constants: &RoundConstants<F, Config>,
+) {
+    LinearLayers::external_linear_layer(state);
+
+    for (full_round, constants) in beginning_full_rounds
+        .iter_mut()
+        .zip(&constants.beginning_full_round_constants)
+    {
+        populate_full_round::<F, LinearLayers, Config>(state, full_round, constants);
+    }
+
+    for (partial_round, constant) in partial_rounds
+        .iter_mut()
+        .zip(&constants.partial_round_constants)
+    {
+        populate_partial_round::<F, LinearLayers, Config>(state, partial_round, *constant);
+    }
+
+    for (full_round, constants) in ending_full_rounds
+        .iter_mut()
+        .zip(&constants.ending_full_round_constants)
+    {
+        populate_full_round::<F, LinearLayers, Config>(state, full_round, constants);
+    }
+}
+
 #[inline]
 pub(crate) fn populate_full_round<
     F: PrimeField,
-    LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+    LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
     Config: Poseidon2Config,
 >(
     state: &mut [F; PERMUTATION_WIDTH],
@@ -86,7 +108,7 @@ pub(crate) fn populate_full_round<
 #[inline]
 pub(crate) fn populate_partial_round<
     F: PrimeField,
-    LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+    LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
     Config: Poseidon2Config,
 >(
     state: &mut [F; PERMUTATION_WIDTH],
@@ -99,26 +121,15 @@ pub(crate) fn populate_partial_round<
     LinearLayers::internal_linear_layer(state);
 }
 
+/// `sbox` is unused for the same reason as in `constraints::eval_sbox`: KoalaBear's cube needs
+/// no committed intermediate, and the zero-width `SBox` column stays in the layout.
 #[inline]
 pub(crate) fn populate_sbox<F: PrimeField, Config: Poseidon2Config>(
-    sbox: &mut SBox<F, Config>,
+    _sbox: &mut SBox<F, Config>,
     x: &mut F,
 ) {
     *x = match (F::FIELD_SBOX_DEGREE, Config::SBoxRegisters::USIZE) {
         (3, 0) => x.cube(), // case for koalabear
-        (5, 1) => {
-            // case for m31
-            let x2 = x.square();
-            let x3 = x2 * *x;
-            sbox.0[0] = x3;
-            x3 * x2
-        }
-        (7, 1) => {
-            // case for babybear
-            let x3 = x.cube();
-            sbox.0[0] = x3;
-            x3 * x3 * *x
-        }
         (deg, reg) => panic!(
             "Unexpected (SBOX_DEGREE, SBOX_REGISTERS) of ({}, {})",
             deg, reg,

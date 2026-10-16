@@ -79,6 +79,12 @@ impl<F: PrimeField32> ChipBehavior<F> for LtChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
+        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
+        // depends on the chunk kind rather than on its opcode mix. Without a shape the
+        // chip is event-driven, which is what the natural-height path wants.
+        if let Some(shape) = record.shape.as_ref() {
+            return shape.included::<F, _>(self);
+        }
         !record.lt_events.is_empty()
     }
 
@@ -103,14 +109,17 @@ impl<F: PrimeField32> LtChip<F> {
         let b_limbs = u64_to_u16_limbs(b_u64);
         let c_limbs = u64_to_u16_limbs(c_u64);
 
-        cols.a = Word(a_limbs.map(F::from_canonical_u16));
-        cols.b = Word(b_limbs.map(F::from_canonical_u16));
-        cols.c = Word(c_limbs.map(F::from_canonical_u16));
+        cols.a = Word(a_limbs.map(F::from_u16));
+        cols.b = Word(b_limbs.map(F::from_u16));
+        cols.c = Word(c_limbs.map(F::from_u16));
 
         // Set the opcode selectors
         let is_signed = event.opcode == Opcode::SLT;
         cols.is_slt = F::from_bool(is_signed);
         cols.is_slt_u = F::from_bool(event.opcode == Opcode::SLTU);
+        // Merged branch comparison: `a = lt | gt << 16`, so `cols.a = [lt, gt, 0, 0]` and the
+        // gadget below still takes its `bit` from limb 0.
+        cols.is_cmp = F::from_bool(event.is_cmp);
 
         // Populate the signed less-than gadget
         cols.lt_signed

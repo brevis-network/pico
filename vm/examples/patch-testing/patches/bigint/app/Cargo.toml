@@ -8,4 +8,4 @@ categories = { workspace = true }
 
 [dependencies]
 pico-sdk = { workspace = true }
-crypto-bigint = { git = "https://github.com/brevis-network/crypto-bigint.git", branch = "patch-v1.0.0" }
+crypto-bigint = { git = "https://github.com/brevis-network/crypto-bigint.git", rev = "61fb45572f00538583b842088a3802c195fa3e15" } # patch-v1.0.0

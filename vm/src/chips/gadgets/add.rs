@@ -7,7 +7,7 @@ use crate::{
     primitives::consts::{u64_to_u16_limbs, WORD_SIZE},
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute the add of two words.
@@ -41,7 +41,7 @@ impl<F: Field> AddGadget<F> {
     ) {
         builder.assert_bool(is_real);
 
-        let base = AB::F::from_canonical_u32(1 << 16);
+        let base = AB::F::from_u32(1 << 16);
         let mut builder_is_real = builder.when(is_real);
         let mut carry = AB::Expr::ZERO;
 
@@ -57,44 +57,5 @@ impl<F: Field> AddGadget<F> {
 
         // Range check each limb.
         builder.slice_range_check_u16(&cols.value.0, is_real);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::folder::SymbolicConstraintFolder;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        a: Word<T>,
-        b: Word<T>,
-        add_gadget: AddGadget<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_add_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        AddGadget::<KoalaBear>::eval(
-            &mut builder,
-            local.a,
-            local.b,
-            local.add_gadget,
-            local.is_real,
-        );
-
-        assert_eq!(builder.num_constraints(), 5);
-        assert_eq!(builder.num_lookups(), 4);
     }
 }

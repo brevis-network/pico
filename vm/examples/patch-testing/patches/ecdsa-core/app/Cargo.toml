@@ -10,5 +10,5 @@ categories = { workspace = true }
 # pico-sdk = { git = "https://github.com/brevis-network/pico", branch = "rv64" }
 pico-sdk.workspace = true
 alloy-primitives = "0.8.19"
-k256 = { git = "https://github.com/brevis-network/elliptic-curves", branch = "k256-0.13.4-rv64" }
-tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak", features = ["keccak"], branch = "patch-v1.0.0-rv64" }
+k256 = { git = "https://github.com/brevis-network/elliptic-curves", rev = "d0c56392e728fd0df321820fb0cb495272d38673" } # k256-0.13.4-rv64
+tiny-keccak = { git = "https://github.com/brevis-network/tiny-keccak", features = ["keccak"], rev = "804f077a9a8b31e11f08b5cc039536f3ffded877" } # patch-v1.0.0-rv64

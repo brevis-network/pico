@@ -10,7 +10,6 @@ require (
 	github.com/consensys/gnark-crypto v0.19.0
 	github.com/ethereum/go-ethereum v1.11.5
 	github.com/labstack/echo v3.3.10+incompatible
-	github.com/labstack/gommon v0.4.2
 	github.com/rs/zerolog v1.34.0
 	golang.org/x/crypto v0.41.0
 )
@@ -22,6 +21,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/google/pprof v0.0.0-20250820193118-f64d9cf942d6 // indirect
 	github.com/ingonyama-zk/icicle-gnark/v3 v3.2.2 // indirect
+	github.com/labstack/gommon v0.4.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

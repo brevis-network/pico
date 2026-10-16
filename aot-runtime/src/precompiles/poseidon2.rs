@@ -1,7 +1,9 @@
 use crate::emulator::AotEmulatorCore;
 use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
-use pico_vm::primitives::{consts::PERMUTATION_WIDTH, Poseidon2Init};
+use pico_vm::{
+    machine::field::FieldSpecificPoseidon2Config, primitives::consts::PERMUTATION_WIDTH,
+};
 
 #[inline(always)]
 fn extract_word(dword: u64, word_index: usize) -> u32 {
@@ -78,25 +80,48 @@ pub fn poseidon2_permute<F>(
     input_memory_ptr: u32,
     output_memory_ptr: u32,
 ) where
-    F: PrimeField32 + Poseidon2Init,
-    F::Poseidon2: Permutation<[F; 16]>,
+    F: PrimeField32 + FieldSpecificPoseidon2Config,
 {
     let clk = core.clk;
+
+    // The two execution paths have to accept exactly the same calls, or a guest passes under one
+    // and fails under the other. Both assertions below mirror the interpreter's
+    // (`vm/src/emulator/riscv/syscalls/precompiles/poseidon2/permute.rs`); adding one there
+    // without adding it here is the failure mode this comment exists to prevent.
+    assert!(
+        input_memory_ptr.is_multiple_of(8),
+        "poseidon2 input_ptr must be 8-byte aligned, got 0x{input_memory_ptr:08x}"
+    );
+    assert!(
+        output_memory_ptr.is_multiple_of(8),
+        "poseidon2 output_ptr must be 8-byte aligned, got 0x{output_memory_ptr:08x}"
+    );
 
     // Stack-allocated buffer (16 words = 64 bytes)
     let mut state_values = [0u32; PERMUTATION_WIDTH];
     read_word_span_via_dwords_at_clk(core, u64::from(input_memory_ptr), &mut state_values, clk);
 
+    // `F::from_u32` is a quotient map, so a word at or above `p` would be reduced in silence --
+    // while the chip's `input_range_checkers` reject it. Fail here, where the cause is nameable.
+    for (j, &v) in state_values.iter().enumerate() {
+        assert!(
+            v < F::ORDER_U32,
+            "poseidon2 input word {j} = {v} is not canonical (>= {}); \
+             the permutation operates on field elements, so the guest must reduce first",
+            F::ORDER_U32
+        );
+    }
+
     // Convert to field elements (directly map without intermediate Vec)
     let state: [F; PERMUTATION_WIDTH] = {
-        let mut arr = [F::from_canonical_u32(0); PERMUTATION_WIDTH];
+        let mut arr = [F::from_u32(0); PERMUTATION_WIDTH];
         for i in 0..PERMUTATION_WIDTH {
-            arr[i] = F::from_canonical_u32(state_values[i]);
+            arr[i] = F::from_u32(state_values[i]);
         }
         arr
     };
 
-    let state = F::init().permute(state);
+    let state = F::permutation().permute(state);
 
     // Convert back to u32 and write using span operation
     let output = state.map(|f| f.as_canonical_u32());

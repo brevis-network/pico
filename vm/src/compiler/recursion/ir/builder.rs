@@ -1,5 +1,5 @@
 use backtrace::Backtrace;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use std::{cell::UnsafeCell, iter::Zip, ptr, vec::IntoIter};
 
 use super::{
@@ -7,7 +7,7 @@ use super::{
     SymbolicExt, SymbolicFelt, SymbolicUsize, SymbolicVar, Usize, Var, VarHandle, VarOperations,
     Variable,
 };
-use crate::configs::config::FieldGenericConfig;
+use crate::{configs::config::FieldGenericConfig, primitives::consts::DIGEST_SIZE};
 
 /// TracedVec is a Vec wrapper that records a trace whenever an element is pushed. When extending
 /// from another TracedVec, the traces are copied over.
@@ -361,7 +361,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     }
 
     pub fn print_debug(&mut self, val: usize) {
-        let constant = self.eval(FC::N::from_canonical_usize(val));
+        let constant = self.eval(FC::N::from_usize(val));
         self.print_v(constant);
     }
 
@@ -444,7 +444,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     /// Materializes a usize into a variable.
     pub fn materialize(&mut self, num: Usize<FC::N>) -> Var<FC::N> {
         match num {
-            Usize::Const(num) => self.eval(FC::N::from_canonical_usize(num)),
+            Usize::Const(num) => self.eval(FC::N::from_usize(num)),
             Usize::Var(num) => num,
         }
     }
@@ -475,6 +475,14 @@ impl<FC: FieldGenericConfig> Builder<FC> {
 
     pub fn commit_committed_values_digest_circuit(&mut self, var: Var<FC::N>) {
         self.push_op(DslIr::CircuitCommitCommittedValuesDigest(var));
+    }
+
+    pub fn assert_vk_root_circuit(
+        &mut self,
+        felts: [Felt<FC::F>; DIGEST_SIZE],
+        root: [FC::F; DIGEST_SIZE],
+    ) {
+        self.push_op(DslIr::CircuitAssertVkRoot(Box::new((felts, root))));
     }
 
     pub fn reduce_e(&mut self, ext: Ext<FC::F, FC::EF>) {
@@ -718,7 +726,7 @@ impl<FC: FieldGenericConfig> RangeBuilder<'_, FC> {
     }
 
     pub fn for_each(self, mut f: impl FnMut(Var<FC::N>, &mut Builder<FC>)) {
-        let step_size = FC::N::from_canonical_usize(self.step_size);
+        let step_size = FC::N::from_usize(self.step_size);
         let loop_variable: Var<FC::N> = self.builder.uninit();
         let mut loop_body_builder = Builder::<FC>::new_sub_builder(
             self.builder.variable_count(),

@@ -2,10 +2,13 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::emulator::riscv::{
-    event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
-    memory::Memory64,
-    syscalls::SyscallCode,
+use crate::{
+    emulator::riscv::{
+        event_types::{RvAddr, RvChunk, RvClk, RvTimestamp, RvValue},
+        memory::{Memory64, RecvTimeoutError, GLOBAL_MEMORY_POOL, POOL_WAIT},
+        syscalls::SyscallCode,
+    },
+    primitives::consts::CHUNK_CLK_START,
 };
 
 // Re-export ContiguousRiscvMemory for use in other modules
@@ -72,7 +75,7 @@ impl RiscvEmulationState {
             current_batch: 0,
             // Start at chunk 1 since chunk 0 is reserved for memory initialization.
             current_chunk: 1,
-            clk: 0,
+            clk: RvClk::from(CHUNK_CLK_START),
             pc: pc_start,
             registers: [RuntimeRegisterRecord::default(); 32],
             memory: ContiguousRiscvMemory::new(),
@@ -80,10 +83,10 @@ impl RiscvEmulationState {
         }
     }
 
-    /// Clone the state without copying memory data (fast, ~1ms).
+    /// Clone the state without copying memory data.
     ///
-    /// The `memory` field will be a fresh zeroed memory (using `new()`)
-    /// instead of copying the full memory data from the original.
+    /// The `memory` field is handed out by the global pool instead of being copied from the
+    /// original, so this costs a pool handout — and waits while the pool is empty.
     ///
     /// This is useful for snapshot states where memory will be populated
     /// separately from a snapshot or rolled back.
@@ -93,12 +96,26 @@ impl RiscvEmulationState {
         let public_values_stream = self.public_values_stream.clone();
         let syscall_counts = self.syscall_counts.clone();
 
-        // Get a pre-allocated memory from the pool (blocking wait).
-        // This will block if the pool is empty (e.g. all items in use).
-        let memory = crate::emulator::riscv::memory::GLOBAL_MEMORY_POOL
-            .1
-            .recv()
-            .expect("Global memory pool channel closed");
+        // Get a pre-allocated memory from the pool (blocking wait). Keep waiting however long it
+        // takes, and only say so once the wait stops looking normal.
+        let mut reported = false;
+        let memory = loop {
+            match GLOBAL_MEMORY_POOL.1.recv_timeout(POOL_WAIT) {
+                Ok(memory) => break memory,
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("Global memory pool channel closed")
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if !std::mem::replace(&mut reported, true) {
+                        tracing::warn!(
+                            "waiting on the memory pool for over {}s; if nothing is proving, \
+                             raise MEMORY_POOL_SIZE",
+                            POOL_WAIT.as_secs()
+                        );
+                    }
+                }
+            }
+        };
 
         Self {
             global_clk: self.global_clk,
@@ -111,7 +128,6 @@ impl RiscvEmulationState {
             input_stream,
             input_stream_ptr: self.input_stream_ptr,
             public_values_stream,
-            // Use pooled memory or new() for fast zeroed allocation
             memory,
             syscall_counts,
         }

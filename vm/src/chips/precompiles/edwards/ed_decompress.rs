@@ -2,12 +2,13 @@ use crate::{
     chips::{
         chips::{
             byte::event::ByteRecordBehavior,
-            riscv_memory::read_write::columns::{MemoryReadCols, MemoryWriteCols},
+            riscv_memory::read_write::columns::{MemoryCols, MemoryReadColsU8, MemoryWriteColsU8},
         },
         gadgets::{
+            addr_add::AddrAddGadget,
             curves::edwards::{
                 ed25519::{ed25519_sqrt, Ed25519BaseField},
-                EdwardsParameters, WordsFieldElement,
+                EdwardsParameters, WordsFieldElement, NUM_LIMBS, WORDS_FIELD_ELEMENT,
             },
             field::{
                 field_lt::FieldLtCols,
@@ -15,18 +16,20 @@ use crate::{
                 field_sqrt::FieldSqrtCols,
             },
             is_zero::IsZeroGadget,
+            syscall_addr::SyscallAddrGadget,
             utils::{
-                field_params::{limbs_from_slice, FieldParameters},
+                conversions::{
+                    generate_limbs_from_read_cols_u8, generate_limbs_from_write_cols_u8,
+                    limbs_to_words,
+                },
+                field_params::{FieldParameters, NumLimbs},
                 limbs::Limbs,
             },
         },
-        precompiles::{
-            checked_u64_to_u32, split_dword_read_records_to_word_records,
-            split_dword_words_to_legacy_u32_words, split_dword_write_records_to_word_records,
-        },
+        precompiles::checked_u64_to_u32,
         utils::pad_rows_fixed,
     },
-    compiler::riscv::program::Program,
+    compiler::{riscv::program::Program, word::Word},
     emulator::{
         record::RecordBehavior,
         riscv::{
@@ -40,7 +43,6 @@ use crate::{
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
-        utils::{limbs_from_access, limbs_from_prev_access},
     },
 };
 use core::{
@@ -49,31 +51,35 @@ use core::{
 };
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
 use std::marker::PhantomData;
 use tracing::debug;
-use typenum::U32;
 
 pub const NUM_ED_DECOMPRESS_COLS: usize = size_of::<EdDecompressCols<u8>>();
 
-/// A set of columns to compute `EdDecompress` given a pointer to a 16 word slice formatted as such:
-/// The 31st byte of the slice is the sign bit. The second half of the slice is the 255-bit
-/// compressed Y (without sign bit).
-///
-/// After `EdDecompress`, the first 32 bytes of the slice are overwritten with the decompressed X.
+/// The 32 u8 limbs an Ed25519 base-field element decomposes into.
+type EdLimbs<T> = Limbs<T, <Ed25519BaseField as NumLimbs>::Limbs>;
+
+/// A set of columns to compute `EdDecompress`, given a pointer to a 64-byte slice: the second
+/// half holds the 255-bit compressed Y (the sign bit having been stripped by the caller and
+/// passed in `arg2`), and the first half is overwritten with the decompressed X.
 #[derive(Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct EdDecompressCols<T> {
     pub is_real: T,
     pub chunk: T,
     pub clk: T,
-    pub ptr: T,
+    pub ptr: SyscallAddrGadget<T>,
+    pub x_addrs: Array<AddrAddGadget<T>, WordsFieldElement>,
+    pub y_addrs: Array<AddrAddGadget<T>, WordsFieldElement>,
     pub sign: T,
-    pub x_access: Array<MemoryWriteCols<T>, WordsFieldElement>,
-    pub y_access: Array<MemoryReadCols<T>, WordsFieldElement>,
+    pub x_access: Array<MemoryWriteColsU8<T>, WordsFieldElement>,
+    pub y_access: Array<MemoryReadColsU8<T>, WordsFieldElement>,
+    /// `y < p`. The guest contract is that a non-canonical `y` is *not* decompressable: the
+    /// `FD_EDDECOMPRESS` hook rejects `y >= p` so the guest never reaches the syscall with one.
     pub(crate) y_range: FieldLtCols<T, Ed25519BaseField>,
     pub(crate) yy: FieldOpCols<T, Ed25519BaseField>,
     pub(crate) u: FieldOpCols<T, Ed25519BaseField>,
@@ -82,45 +88,52 @@ pub struct EdDecompressCols<T> {
     pub(crate) u_div_v: FieldOpCols<T, Ed25519BaseField>,
     pub(crate) x: FieldSqrtCols<T, Ed25519BaseField>,
     pub(crate) neg_x: FieldOpCols<T, Ed25519BaseField>,
+    /// `neg_x < p`. `neg_x` is pinned only by `neg_x + x == 0 (mod p)`, which `p - x` and
+    /// `2p - x` satisfy alike, and one of the two is written back to guest memory. Without this
+    /// the prover chooses which. Matches `neg_y_range_check` in `weierstrass_decompress.rs`.
+    pub(crate) neg_x_range: FieldLtCols<T, Ed25519BaseField>,
     /// Gadget to check if x is zero. This is used to ensure that when x is zero, sign must be 0.
     pub(crate) x_is_zero: IsZeroGadget<T>,
 }
 
 impl<F: PrimeField32> EdDecompressCols<F> {
-    pub fn populate<P: FieldParameters, E: EdwardsParameters>(
+    pub fn populate<E: EdwardsParameters>(
         &mut self,
-        event: EdDecompressEvent,
-        record: &mut EmulationRecord,
+        event: &EdDecompressEvent,
+        blu: &mut impl ByteRecordBehavior,
     ) {
-        let mut new_byte_lookup_events = Vec::new();
-        // This chip still consumes decompression payloads as legacy 32-bit word rows.
-        let legacy_y_words = split_dword_words_to_legacy_u32_words(&event.y_words);
-        let legacy_x_memory_records =
-            split_dword_write_records_to_word_records(&event.x_memory_records);
-        let legacy_y_memory_records =
-            split_dword_read_records_to_word_records(&event.y_memory_records);
         self.is_real = F::from_bool(true);
-        self.chunk = F::from_canonical_u32(event.chunk);
-        self.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "edwards decompress clk"));
-        self.ptr = F::from_canonical_u32(checked_u64_to_u32(
-            event.ptr,
-            "edwards decompress ptr proof boundary",
-        ));
+        self.chunk = F::from_u32(event.chunk);
+        self.clk = F::from_u32(checked_u64_to_u32(event.clk, "edwards decompress clk"));
         self.sign = F::from_bool(event.sign);
-        for i in 0..8 {
-            self.x_access[i].populate(legacy_x_memory_records[i], &mut new_byte_lookup_events);
-            self.y_access[i].populate(legacy_y_memory_records[i], &mut new_byte_lookup_events);
+        self.ptr.populate(blu, event.ptr, NUM_LIMBS as u64 * 2);
+
+        for i in 0..WORDS_FIELD_ELEMENT {
+            self.x_access[i]
+                .inner
+                .populate(event.x_memory_records[i], blu);
+            self.x_access[i]
+                .prev_value_u8
+                .populate_u16_to_u8_safe(blu, event.x_memory_records[i].prev_value);
+            self.x_addrs[i].populate(blu, event.ptr, 8 * i as u64);
+
+            self.y_access[i]
+                .inner
+                .populate(event.y_memory_records[i], blu);
+            self.y_access[i]
+                .prev_value_u8
+                .populate_u16_to_u8_safe(blu, event.y_memory_records[i].value);
+            self.y_addrs[i].populate(blu, event.ptr + NUM_LIMBS as u64, 8 * i as u64);
         }
 
-        let y = &BigUint::from_bytes_le(
-            &legacy_y_words
+        let y = BigUint::from_bytes_le(
+            &event
+                .y_words
                 .iter()
                 .flat_map(|word| word.to_le_bytes())
                 .collect::<Vec<u8>>(),
         );
-        self.populate_field_ops::<E>(&mut new_byte_lookup_events, y);
-
-        record.add_byte_lookup_events(new_byte_lookup_events);
+        self.populate_field_ops::<E>(blu, &y);
     }
 
     fn populate_field_ops<E: EdwardsParameters>(
@@ -143,8 +156,11 @@ impl<F: PrimeField32> EdDecompressCols<F> {
         let x = self.x.populate(blu_events, &u_div_v, |p| {
             ed25519_sqrt(p).expect("ed25519_sqrt failed, syscall invariant violated")
         });
-        self.neg_x
+        let neg_x = self
+            .neg_x
             .populate(blu_events, &BigUint::zero(), &x, FieldOperation::Sub);
+        self.neg_x_range
+            .populate(blu_events, &neg_x, &Ed25519BaseField::modulus());
 
         // Check if x is zero by checking if all limbs sum to zero.
         // Since all limbs are non-negative (range checked), if their sum is zero, all limbs are zero.
@@ -161,7 +177,7 @@ impl<F: PrimeField32> EdDecompressCols<F> {
 }
 
 impl<V: Copy> EdDecompressCols<V> {
-    pub fn eval<F: Field, CB: ChipBuilder<F, Var = V>, P: FieldParameters, E: EdwardsParameters>(
+    pub fn eval<F: Field, CB: ChipBuilder<F, Var = V>, E: EdwardsParameters>(
         &self,
         builder: &mut CB,
     ) where
@@ -169,14 +185,21 @@ impl<V: Copy> EdDecompressCols<V> {
     {
         builder.assert_bool(self.sign);
 
-        let y: Limbs<V, U32> = limbs_from_prev_access(&self.y_access);
-        let max_num_limbs = P::to_limbs_field_slice(&Ed25519BaseField::modulus());
-        self.y_range.eval(
-            builder,
-            &y,
-            &limbs_from_slice::<CB::Expr, P::Limbs, CB::F>(max_num_limbs),
-            self.is_real,
-        );
+        // Extract byte limbs from the u16 word limbs.
+        let y_limbs =
+            generate_limbs_from_read_cols_u8(builder, &self.y_access[..], self.is_real.into());
+        let y: EdLimbs<CB::Expr> =
+            Limbs(Array::try_from_iter(y_limbs).expect("failed to convert y limbs"));
+
+        // `x_access.prev_value_u8` is populated by the trace, which emits u8 range checks; they
+        // need a matching evaluation here or the byte table is over-received. The returned limbs
+        // are unused — `x_access`'s value is constrained below against `x`/`neg_x`.
+        let _ = generate_limbs_from_write_cols_u8(builder, &self.x_access[..], self.is_real.into());
+
+        let modulus =
+            Ed25519BaseField::to_limbs_field::<CB::Expr, CB::F>(&Ed25519BaseField::modulus());
+        self.y_range.eval(builder, &y, &modulus, self.is_real);
+
         self.yy
             .eval(builder, &y, &y, FieldOperation::Mul, self.is_real);
         self.u.eval(
@@ -187,7 +210,7 @@ impl<V: Copy> EdDecompressCols<V> {
             self.is_real,
         );
         let d_biguint = E::d_biguint();
-        let d_const = E::BaseField::to_limbs_field::<CB::F, _>(&d_biguint);
+        let d_const = Ed25519BaseField::to_limbs_field::<CB::Expr, CB::F>(&d_biguint);
         self.dyy.eval(
             builder,
             &d_const,
@@ -218,40 +241,89 @@ impl<V: Copy> EdDecompressCols<V> {
             FieldOperation::Sub,
             self.is_real,
         );
+        // Whichever of the two is written back has to be the canonical representative.
+        self.neg_x_range
+            .eval(builder, &self.neg_x.result, &modulus, self.is_real);
 
-        // TODO: addr
-        builder.eval_memory_access_slice(
-            self.chunk,
-            self.clk,
-            [self.ptr.into(), CB::Expr::ZERO, CB::Expr::ZERO],
-            &self.x_access,
-            4,
-            self.is_real,
+        // Address alignment constraints, over the whole 64-byte slice.
+        let ptr = SyscallAddrGadget::<CB::F>::eval(
+            builder,
+            NUM_LIMBS as u32 * 2,
+            self.ptr,
+            self.is_real.into(),
         );
-        // TODO: addr
-        builder.eval_memory_access_slice(
-            self.chunk,
-            self.clk,
-            [
-                self.ptr.into() + CB::F::from_canonical_u32(32),
-                CB::Expr::ZERO,
-                CB::Expr::ZERO,
-            ],
-            &self.y_access,
-            4,
-            self.is_real,
-        );
+        let base = |ptr: &[CB::Var; 3]| {
+            Word([ptr[0].into(), ptr[1].into(), ptr[2].into(), CB::Expr::ZERO])
+        };
+        // x_addrs[i] = ptr + 8*i
+        for i in 0..self.x_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                base(&ptr),
+                Word::from(8 * i as u64),
+                self.x_addrs[i],
+                self.is_real.into(),
+            );
+        }
+        // y_addrs[i] = ptr + NUM_LIMBS + 8*i
+        for i in 0..self.y_addrs.len() {
+            AddrAddGadget::<CB::F>::eval(
+                builder,
+                base(&ptr),
+                Word::from(NUM_LIMBS as u64 + 8 * i as u64),
+                self.y_addrs[i],
+                self.is_real.into(),
+            );
+        }
 
-        // Constrain that the correct result is written into x.
-        let x_limbs: Limbs<V, U32> = limbs_from_access(&self.x_access);
-        builder
-            .when(self.is_real)
-            .when(self.sign)
-            .assert_all_eq(self.neg_x.result, x_limbs);
-        builder
-            .when(self.is_real)
-            .when_not(self.sign)
-            .assert_all_eq(self.x.multiplication.result, x_limbs);
+        // Reconstruct byte-level results into Words for the memory write constraints.
+        let as_words = |limbs: &Limbs<CB::Var, _>| {
+            limbs_to_words(
+                &limbs
+                    .0
+                    .iter()
+                    .map(|v| (*v).into())
+                    .collect::<Vec<CB::Expr>>(),
+                CB::F::from_u32(256).into(),
+            )
+        };
+        let x_words = as_words(&self.x.multiplication.result);
+        let neg_x_words = as_words(&self.neg_x.result);
+
+        // Memory access constraints.
+        for (i, y_col) in self.y_access.iter().enumerate() {
+            builder.eval_memory_access(
+                self.chunk,
+                self.clk.into(),
+                self.y_addrs[i].value.map(Into::into),
+                &y_col.inner,
+                self.is_real,
+            );
+        }
+        for (i, x_col) in self.x_access.iter().enumerate() {
+            builder.eval_memory_access(
+                self.chunk,
+                self.clk.into(),
+                self.x_addrs[i].value.map(Into::into),
+                &x_col.inner,
+                self.is_real,
+            );
+
+            // Constrain that the correct result is written into x.
+            let do_check: CB::Expr = self.is_real.into();
+            for (v, w) in x_col.inner.value().0.iter().zip(neg_x_words[i].0.iter()) {
+                builder
+                    .when(do_check.clone())
+                    .when(self.sign)
+                    .assert_eq((*v).into(), w.clone());
+            }
+            for (v, w) in x_col.inner.value().0.iter().zip(x_words[i].0.iter()) {
+                builder
+                    .when(do_check.clone())
+                    .when_not(self.sign)
+                    .assert_eq((*v).into(), w.clone());
+            }
+        }
 
         // Constraint: if x is zero, then sign must be 0.
         // This prevents the case where x = 0 and sign = 1, which would result in x = mod - 0 = mod.
@@ -272,10 +344,9 @@ impl<V: Copy> EdDecompressCols<V> {
         builder.looked_syscall(
             self.chunk,
             self.clk,
-            CB::F::from_canonical_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
-            // TODO: Need to convert ptr columns to Addr type to support full 48-bit address representation
-            [self.ptr, self.ptr, self.ptr],
-            [self.sign, self.sign, self.sign],
+            CB::F::from_u32(SyscallCode::ED_DECOMPRESS.syscall_id()),
+            ptr.map(Into::into),
+            [self.sign.into(), CB::Expr::ZERO, CB::Expr::ZERO],
             self.is_real,
         );
     }
@@ -292,6 +363,20 @@ impl<F: Field, E: EdwardsParameters> EdDecompressChip<F, E> {
             _phantom: PhantomData,
         }
     }
+
+    fn events(input: &EmulationRecord) -> Vec<&EdDecompressEvent> {
+        input
+            .get_precompile_events(SyscallCode::ED_DECOMPRESS)
+            .iter()
+            .filter_map(|(_, event)| {
+                if let PrecompileEvent::EdDecompress(event) = event {
+                    Some(event)
+                } else {
+                    unreachable!()
+                }
+            })
+            .collect()
+    }
 }
 
 impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip<F, E> {
@@ -304,7 +389,13 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
-        self.generate_main(input, extra);
+        let mut blu_events = Vec::new();
+        for event in Self::events(input) {
+            let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
+            let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
+            cols.populate::<E>(event, &mut blu_events);
+        }
+        extra.add_byte_lookup_events(blu_events);
     }
 
     fn generate_main(
@@ -312,18 +403,7 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
         input: &EmulationRecord,
         output: &mut EmulationRecord,
     ) -> RowMajorMatrix<F> {
-        let mut rows = Vec::new();
-        let events: Vec<_> = input
-            .get_precompile_events(SyscallCode::ED_DECOMPRESS)
-            .iter()
-            .filter_map(|(_, event)| {
-                if let PrecompileEvent::EdDecompress(event) = event {
-                    Some(event)
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect();
+        let events = Self::events(input);
 
         debug!(
             "record {} ed decompress precompile events {:?}",
@@ -331,13 +411,15 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
             events.len()
         );
 
+        let mut blu_events = Vec::new();
+        let mut rows = Vec::new();
         for event in events {
             let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
             let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
-            cols.populate::<E::BaseField, E>(event.clone(), output);
-
+            cols.populate::<E>(event, &mut blu_events);
             rows.push(row);
         }
+        output.add_byte_lookup_events(blu_events);
 
         let log_rows = input.shape_chip_size(&self.name());
         pad_rows_fixed(
@@ -345,8 +427,14 @@ impl<F: PrimeField32, E: EdwardsParameters> ChipBehavior<F> for EdDecompressChip
             || {
                 let mut row = [F::ZERO; NUM_ED_DECOMPRESS_COLS];
                 let cols: &mut EdDecompressCols<F> = row.as_mut_slice().borrow_mut();
-                let zero = BigUint::zero();
-                cols.populate_field_ops::<E>(&mut vec![], &zero);
+                // `y = 0`, because the memory columns of a padding row are zero and `eval`
+                // reads `y` out of them. The polynomial identity each field gadget asserts is
+                // **not** gated by `is_real` (`eval_field_operation` calls `assert_zero`
+                // directly), so a witness written for a `y` the memory columns do not hold
+                // fails on every padding row -- see the same note in `weierstrass_add.rs`.
+                // `y = 0` stays inside the gadgets' domain: `u/v` is then `-1`, which is a
+                // square mod `2^255 - 19`, so `ed25519_sqrt` returns rather than failing.
+                cols.populate_field_ops::<E>(&mut vec![], &BigUint::zero());
                 row
             },
             log_rows,
@@ -387,9 +475,9 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &EdDecompressCols<CB::Var> = (*local).borrow();
 
-        local.eval::<F, CB, E::BaseField, E>(builder);
+        local.eval::<F, CB, E>(builder);
     }
 }

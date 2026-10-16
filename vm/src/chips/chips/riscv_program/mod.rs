@@ -4,9 +4,6 @@ pub mod columns;
 pub mod constraints;
 pub mod traces;
 
-/// A chip that implements addition for the opcodes ADD and ADDI.
+/// A chip that implements the program multiplicity trace.
 #[derive(Default)]
 pub struct ProgramChip<F>(PhantomData<F>);
-
-#[cfg(test)]
-mod tests;

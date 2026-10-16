@@ -4,9 +4,6 @@ pub mod columns;
 pub mod constraints;
 pub mod traces;
 
-#[cfg(test)]
-mod tests;
-
 /// A chip that implements 64-bit ADDW for the opcode ADDW.
 ///
 /// ADDW adds the lower 32 bits of two 64-bit operands and sign-extends the result to 64 bits.

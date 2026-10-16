@@ -77,9 +77,7 @@ pub fn sha256_compress(core: &mut AotEmulatorCore, w_ptr: u64, h_ptr: u64) {
 /// SHA256 extend syscall implementation.
 pub fn sha256_extend(core: &mut AotEmulatorCore, w_ptr: u64) {
     assert!(w_ptr.is_multiple_of(8), "w_ptr is unaligned");
-    let mut clk = core.clk;
-
-    for i in 16u64..64 {
+    for (clk, i) in (core.clk..).zip(16u64..64) {
         // Read w[i-15].
         let w_i_minus_15 = core.read_mem_low32_slot_at_clk(w_ptr + (i - 15) * 8, clk);
 
@@ -106,6 +104,5 @@ pub fn sha256_extend(core: &mut AotEmulatorCore, w_ptr: u64) {
 
         // Write w[i].
         core.write_mem_low32_slot_at_clk(w_ptr + i * 8, w_i, clk);
-        clk += 1;
     }
 }

@@ -10,9 +10,8 @@ use crate::{
     machine::builder::{ChipBuilder, RecursionBuilder},
     primitives::consts::PERMUTATION_WIDTH,
 };
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 use std::borrow::Borrow;
 
@@ -29,16 +28,16 @@ where
 impl<F, LinearLayers, CB, Config> Air<CB> for Poseidon2Chip<F, LinearLayers, Config>
 where
     F: Field,
-    LinearLayers: GenericPoseidon2LinearLayers<CB::Expr, PERMUTATION_WIDTH>,
+    LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
     CB: ChipBuilder<F>,
     Config: Poseidon2Config,
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &Poseidon2Cols<CB::Var, Config> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &Poseidon2PreprocessedCols<CB::Var> = (*prep_local).borrow();
 
         for (local, prep_local) in local.values.iter().zip(prep_local.values.iter()) {

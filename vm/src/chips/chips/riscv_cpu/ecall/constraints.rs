@@ -1,21 +1,22 @@
+//! Cpu-side remains of the ECALL logic after the hoist to the dedicated Ecall chip.
+//!
+//! The syscall decode gadgets (U16ToU8 + IsZero), the syscall-table send, the operand range
+//! check and the ecall-driven public-value constraints (exit_code, commit digests) now live in
+//! the dedicated [`EcallChip`](crate::chips::chips::riscv_ecall::EcallChip). The Cpu chip keeps
+//! three committed scalars — `is_ecall` (selector), `num_extra_clk` and `is_halt` — and sends
+//! one fat lookup message per ecall row to the Ecall chip, which re-derives the decode and
+//! thereby certifies `num_extra_clk`/`is_halt`.
+
 use super::super::{columns::CpuCols, opcode_selector::columns::OpcodeSelectorCols, CpuChip};
 use crate::{
-    chips::{
-        chips::riscv_memory::read_write::columns::MemoryCols,
-        gadgets::{
-            field_range_check::word_range::FieldWordRangeChecker, is_zero::IsZeroGadget,
-            u16_to_u8::U16ToU8Gadget,
-        },
+    chips::chips::riscv_memory::read_write::columns::MemoryLiteCols,
+    machine::{
+        builder::{ChipBuilder, ChipWordBuilder},
+        lookup::{LookupScope, LookupType, SymbolicLookup},
     },
-    compiler::word::Word,
-    emulator::riscv::{public_values::PublicValues, syscalls::SyscallCode},
-    machine::builder::{
-        ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder,
-    },
-    primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::Field;
 
 impl<F: Field> CpuChip<F> {
     /// Whether the instruction is an ECALL instruction.
@@ -26,385 +27,88 @@ impl<F: Field> CpuChip<F> {
         opcode_selectors.is_ecall.into()
     }
 
-    /// Constraints related to the ECALL opcode.
+    /// Constraints related to the ECALL opcode (slim version).
     ///
-    /// This method will do the following:
-    /// 1. Send the syscall to the precompile table, if needed.
-    /// 2. Check for valid op_a values.
+    /// 1. Force `is_halt` and `num_extra_clk` to zero on non-ecall rows (padding rows are
+    ///    covered because all selectors are forced to zero there), so the pc-advance and
+    ///    clk-transition constraints stay sound.
+    /// 2. Send the fat message to the Ecall chip with multiplicity `is_ecall`. The Ecall chip
+    ///    re-derives the syscall decode from `op_a` prev_value and constrains that the
+    ///    `num_extra_clk` and `is_halt` values in the message are correct, which makes the two
+    ///    committed columns sound on ecall rows.
     pub(crate) fn eval_ecall<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
+        chunk: CB::Expr,
     ) {
-        let ecall_cols = local.opcode_specific.ecall();
         let is_ecall_instruction = self.is_ecall_instruction::<CB>(&local.opcode_selector);
 
-        // The syscall code is the read-in value of op_a at the start of the instruction.
-        let syscall_code = local.op_a_access.prev_value();
+        // `is_halt` and `num_extra_clk` may only be set on ecall rows; their values there are
+        // pinned by the lookup. Pinning `num_extra_clk` to zero off ecall rows lets the clk
+        // transition (`chunk_clk/constraints.rs`) read it directly instead of multiplying by the
+        // ecall selector, which is what keeps that constraint at degree 3.
+        builder
+            .when_not(is_ecall_instruction.clone())
+            .assert_zero(local.is_halt);
+        builder
+            .when_not(is_ecall_instruction.clone())
+            .assert_zero(local.num_extra_clk);
 
-        // Under the u64 (u16-limb) model, syscall_code[0] is a 16-bit limb containing
-        // both syscall_id (low 8 bits) and send_to_table (high 8 bits).
-        // Use U16ToU8Gadget to decompose the Word into individual bytes.
-        let syscall_code_u16: [CB::Expr; 4] = syscall_code.0.map(Into::into);
-        let syscall_bytes = U16ToU8Gadget::<CB::F>::eval_u16_to_u8_safe(
-            builder,
-            syscall_code_u16,
-            ecall_cols.syscall_code_bytes,
-            is_ecall_instruction.clone(),
+        // Fat message: [chunk, clk, op_a_prev(4), op_a_val(4), op_b_val(4), op_c_val(4),
+        // num_extra_clk, is_halt] -- 20 elements. The chunk element is the `execution_chunk`
+        // public value, not a committed column; the `clk` element is the committed `clk` column
+        // (`clk_expr`). Positions and values are those the Ecall chip expects.
+        let clk = Self::clk_expr::<CB>(local);
+        let mut values: Vec<CB::Expr> = Vec::with_capacity(20);
+        values.push(chunk);
+        values.push(clk);
+        values.extend(
+            (*local.op_a_access.prev_value())
+                .into_iter()
+                .map(Into::into),
         );
-        let syscall_id = syscall_bytes[0].clone();
-        let send_to_table = syscall_bytes[1].clone();
+        values.extend(local.op_a_val().into_iter().map(Into::into));
+        values.extend(local.op_b_val().into_iter().map(Into::into));
+        values.extend(local.op_c_val().into_iter().map(Into::into));
+        values.push(local.num_extra_clk.into());
+        values.push(local.is_halt.into());
 
-        // Constrain send_to_table to be boolean (0 or 1).
-        builder
-            .when(is_ecall_instruction.clone())
-            .assert_bool(send_to_table.clone());
-
-        // Constrain num_extra_clk to equal byte 2 of the syscall code.
-        // In u16-limb model, byte 2 is the low byte of limb[1]. Using the decomposed
-        // byte from U16ToU8Gadget is more precise than using the full u16 limb.
-        builder
-            .when(is_ecall_instruction.clone())
-            .assert_eq(local.num_extra_clk, syscall_bytes[2].clone());
-
-        // Handle cases:
-        // - is_ecall_instruction = 1 => ecall_mul_send_to_table == send_to_table
-        // - is_ecall_instruction = 0 => ecall_mul_send_to_table == 0
-        builder.assert_eq(
-            local.ecall_mul_send_to_table,
-            send_to_table * is_ecall_instruction.clone(),
-        );
-
-        // Assert that op_b and op_c are 48-bit values (upper 16 bits = 0).
-        builder
-            .when(local.ecall_mul_send_to_table)
-            .assert_zero(local.op_b_val()[3].into());
-        builder
-            .when(local.ecall_mul_send_to_table)
-            .assert_zero(local.op_c_val()[3].into());
-
-        let op_b_val = local.op_b_val();
-        let op_c_val = local.op_c_val();
-        let arg1: [_; 3] = [op_b_val[0], op_b_val[1], op_b_val[2]];
-        let arg2: [_; 3] = [op_c_val[0], op_c_val[1], op_c_val[2]];
-
-        builder.looking_syscall(
-            local.chunk,
-            local.clk,
-            syscall_id.clone(),
-            arg1,
-            arg2,
-            local.ecall_mul_send_to_table,
-        );
-
-        // Compute whether this ecall is ENTER_UNCONSTRAINED.
-        let is_enter_unconstrained = {
-            IsZeroGadget::<CB::F>::eval(
-                builder,
-                syscall_id.clone()
-                    - CB::Expr::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
-                ecall_cols.is_enter_unconstrained,
-                is_ecall_instruction.clone(),
-            );
-            ecall_cols.is_enter_unconstrained.result
-        };
-
-        // Compute whether this ecall is HINT_LEN.
-        let is_hint_len = {
-            IsZeroGadget::<CB::F>::eval(
-                builder,
-                syscall_id - CB::Expr::from_canonical_u32(SyscallCode::HINT_LEN.syscall_id()),
-                ecall_cols.is_hint_len,
-                is_ecall_instruction.clone(),
-            );
-            ecall_cols.is_hint_len.result
-        };
-
-        // When syscall_id is ENTER_UNCONSTRAINED, the new value of op_a should be 0.
-        let zero_word = Word([CB::Expr::ZERO; 4]);
-        builder
-            .when(is_ecall_instruction.clone() * is_enter_unconstrained)
-            .assert_word_eq(local.op_a_val(), zero_word);
-
-        // When the syscall is not one of ENTER_UNCONSTRAINED or HINT_LEN, op_a shouldn't change.
-        builder
-            .when(is_ecall_instruction.clone())
-            .when_not(is_enter_unconstrained + is_hint_len)
-            .assert_word_eq(local.op_a_val(), local.op_a_access.prev_value);
-
-        // Verify value of ecall_range_check_operand column.
-        builder.assert_eq(
-            local.ecall_range_check_operand,
-            is_ecall_instruction
-                * (ecall_cols.is_halt.result + ecall_cols.is_commit_deferred_proofs.result),
-        );
-
-        // Range check the operand_to_check word.
-        FieldWordRangeChecker::<CB::F>::range_check::<CB>(
-            builder,
-            ecall_cols.operand_to_check,
-            ecall_cols.operand_range_check_cols,
-            local.ecall_range_check_operand.into(),
-        );
+        builder.looking(SymbolicLookup::new(
+            values,
+            is_ecall_instruction,
+            LookupType::Ecall,
+            LookupScope::Regional,
+        ));
     }
 
-    /// Constraints related to the COMMIT instruction.
-    pub(crate) fn eval_commit<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        local: &CpuCols<CB::Var>,
-        commit_digest: [Word<CB::Expr>; PV_DIGEST_NUM_WORDS],
-        deferred_proofs_digest: [CB::Expr; DIGEST_SIZE],
-    ) {
-        let (is_commit, is_commit_deferred_proofs) =
-            self.get_is_commit_related_syscall(builder, local);
-
-        // Get the ecall specific columns.
-        let ecall_columns = local.opcode_specific.ecall();
-
-        // Verify the index bitmap.
-        let mut bitmap_sum = CB::Expr::ZERO;
-        // They should all be bools.
-        for bit in ecall_columns.index_bitmap.iter() {
-            builder
-                .when(local.opcode_selector.is_ecall)
-                .assert_bool(*bit);
-            bitmap_sum = bitmap_sum.clone() + (*bit).into();
-        }
-        // When the syscall is COMMIT, there should be one set bit.
-        builder
-            .when(
-                local.opcode_selector.is_ecall
-                    * (is_commit.clone() + is_commit_deferred_proofs.clone()),
-            )
-            .assert_one(bitmap_sum.clone());
-        // When it's some other syscall, there should be no set bits.
-        builder
-            .when(
-                local.opcode_selector.is_ecall
-                    * (CB::Expr::ONE - (is_commit.clone() + is_commit_deferred_proofs.clone())),
-            )
-            .assert_zero(bitmap_sum);
-
-        // Verify that word_idx corresponds to the set bit in index bitmap.
-        for (i, bit) in ecall_columns.index_bitmap.iter().enumerate() {
-            builder
-                .when(*bit * local.opcode_selector.is_ecall)
-                .assert_eq(
-                    local.op_b_access.prev_value()[0],
-                    CB::Expr::from_canonical_u32(i as u32),
-                );
-        }
-
-        // Verify that the 3 upper bytes of the word_idx are 0.
-        for i in 0..3 {
-            builder
-                .when(
-                    local.opcode_selector.is_ecall
-                        * (is_commit.clone() + is_commit_deferred_proofs.clone()),
-                )
-                .assert_eq(
-                    local.op_b_access.prev_value()[i + 1],
-                    CB::Expr::from_canonical_u32(0),
-                );
-        }
-
-        // committed_value_digest is a u32 value (occupies the lower 2 u16 limbs of
-        // the register). Each PV `Word` slot stores 4 little-endian *bytes* (not u16
-        // limbs), so we recompose byte pairs into u16 limbs before comparing against
-        // the register word.
-        let expected_pv_digest_bytes =
-            builder.index_word_array(&commit_digest, &ecall_columns.index_bitmap);
-
-        let digest_word = local.op_c_access.prev_value();
-        let commit_cond = local.opcode_selector.is_ecall * is_commit;
-        let commit_cond_for_range = commit_cond.clone();
-        let ecall_columns_for_range = local.opcode_specific.ecall();
-
-        // low u16: bytes[0] + bytes[1] * 256 == digest_word[0]
-        builder.when(commit_cond.clone()).assert_eq(
-            expected_pv_digest_bytes.0[0].clone()
-                + expected_pv_digest_bytes.0[1].clone() * CB::Expr::from_canonical_u32(1 << 8),
-            digest_word[0],
-        );
-        // high u16: bytes[2] + bytes[3] * 256 == digest_word[1]
-        builder.when(commit_cond).assert_eq(
-            expected_pv_digest_bytes.0[2].clone()
-                + expected_pv_digest_bytes.0[3].clone() * CB::Expr::from_canonical_u32(1 << 8),
-            digest_word[1],
-        );
-
-        // The four selected bytes must actually be bytes.
-        //
-        // The two equations above are all that ties them to anything, and over a field each
-        // has many solutions: move 256 from one byte into the next and the sum is unchanged.
-        // Without a range check a prover can publish a digest whose limbs exceed 255 while
-        // both equations still hold, and nothing truncates them downstream --
-        // `felt_bytes_to_bn254_var` keeps bits 8..30 of every felt -- so the digest an EVM
-        // verifier ends up accepting is attacker-chosen.
-        //
-        // Two mechanical constraints of the lookup layer shape how this is written.
-        //
-        // The check cannot name the public values directly: lookup arguments go through
-        // `eval_symbolic_to_virtual_pair` (`machine/utils.rs:142-155`), which accepts only
-        // preprocessed and current-row main columns and panics on `Entry::Public`. So the
-        // bytes are pinned into a column first and the column is checked.
-        //
-        // And the multiplicity must be degree 1 (`lookup.rs:119`), so it cannot be
-        // `is_ecall * is_commit`. It is `is_ecall` instead, with the column holding zeros on
-        // every non-COMMIT ecall row -- zeros are bytes, so the check is vacuous there. This
-        // mirrors how `ecall_range_check_operand` handles the same restriction by keeping the
-        // product in a column of its own.
-        let digest_bytes_col = ecall_columns_for_range.expected_public_values_digest;
-        for i in 0..4 {
-            builder
-                .when(commit_cond_for_range.clone())
-                .assert_eq(expected_pv_digest_bytes.0[i].clone(), digest_bytes_col[i]);
-        }
-        builder.slice_range_check_u8(&digest_bytes_col, local.opcode_selector.is_ecall);
-
-        let expected_deferred_proofs_digest_element =
-            builder.index_array(&deferred_proofs_digest, &ecall_columns.index_bitmap);
-
-        // Verify that the operand that was range checked is digest_word.
-        builder
-            .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs.clone())
-            .assert_word_eq(*digest_word, ecall_columns.operand_to_check);
-
-        builder
-            .when(local.opcode_selector.is_ecall * is_commit_deferred_proofs)
-            .assert_eq(
-                expected_deferred_proofs_digest_element,
-                // TODO: check if operand is u32 for commit_deferred_proofs
-                digest_word.reduce::<CB>(),
-            );
-    }
-
-    /// Constraint related to the halt and unimpl instruction.
+    /// Constraints related to the halt ecall. (UNIMP / EBREAK need none: a trap pc has no
+    /// Program-table row, see `eval`.)
+    ///
+    /// Uses the committed `is_halt` column (backed by the Ecall-chip lookup). The exit_code
+    /// public-value constraint moved to the Ecall chip.
     pub(crate) fn eval_halt_unimpl<CB: ChipBuilder<F>>(
         &self,
         builder: &mut CB,
         local: &CpuCols<CB::Var>,
-        next: &CpuCols<CB::Var>,
-        public_values: &PublicValues<Word<CB::Expr>, CB::Expr>,
     ) {
-        let is_halt = self.get_is_halt_syscall(builder, local);
+        // A halting row ends the chunk, so it is the chain's last row. Stated on the row itself
+        // instead of on its successor's `is_real`: the old form was vacuous when the halt landed
+        // on the physically last row, this one is not.
+        // (There is no `is_unimpl` selector: a trap pc has no Program-table row, see `eval`.)
+        builder.when(local.is_halt).assert_one(local.is_last);
 
-        // If we're halting and it's a transition, then the next.is_real should be 0.
-        builder
-            .when_transition()
-            .when(is_halt.clone() + local.opcode_selector.is_unimpl)
-            .assert_zero(next.is_real);
-
-        builder
-            .when(is_halt.clone())
-            .assert_addr_zero(local.next_pc);
-
-        // Verify that the operand that was range checked is op_b.
-        let ecall_columns = local.opcode_specific.ecall();
-        builder
-            .when(is_halt.clone())
-            .assert_word_eq(local.op_b_val(), ecall_columns.operand_to_check);
-
-        // TODO: check if operand is u32 for halt
-        builder.when(is_halt.clone()).assert_eq(
-            local.op_b_access.value().reduce::<CB>(),
-            public_values.exit_code.clone(),
-        );
-    }
-
-    /// Returns a boolean expression indicating whether the instruction is a HALT instruction.
-    pub(crate) fn get_is_halt_syscall<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        local: &CpuCols<CB::Var>,
-    ) -> CB::Expr {
-        let ecall_cols = local.opcode_specific.ecall();
-        let is_ecall_instruction = self.is_ecall_instruction::<CB>(&local.opcode_selector);
-
-        // The syscall code is the read-in value of op_a at the start of the instruction.
-        let syscall_code = local.op_a_access.prev_value();
-
-        // Use U16ToU8Gadget (unsafe variant — range check already done in eval_ecall).
-        let syscall_code_u16: [CB::Expr; 4] = syscall_code.0.map(Into::into);
-        let syscall_bytes = U16ToU8Gadget::<CB::F>::eval_u16_to_u8_unsafe(
-            builder,
-            syscall_code_u16,
-            ecall_cols.syscall_code_bytes,
-        );
-        let syscall_id = syscall_bytes[0].clone();
-
-        // Compute whether this ecall is HALT.
-        let is_halt = {
-            IsZeroGadget::<CB::F>::eval(
-                builder,
-                syscall_id - CB::Expr::from_canonical_u32(SyscallCode::HALT.syscall_id()),
-                ecall_cols.is_halt,
-                is_ecall_instruction.clone(),
-            );
-            ecall_cols.is_halt.result
-        };
-
-        is_halt * is_ecall_instruction
-    }
-
-    /// Returns boolean expression indicating whether the instruction is a COMMIT instruction.
-    pub(crate) fn get_is_commit_related_syscall<CB: ChipBuilder<F>>(
-        &self,
-        builder: &mut CB,
-        local: &CpuCols<CB::Var>,
-    ) -> (CB::Expr, CB::Expr) {
-        let ecall_cols = local.opcode_specific.ecall();
-
-        let is_ecall_instruction = self.is_ecall_instruction::<CB>(&local.opcode_selector);
-
-        // The syscall code is the read-in value of op_a at the start of the instruction.
-        let syscall_code = local.op_a_access.prev_value();
-
-        // Use U16ToU8Gadget (unsafe variant — range check already done in eval_ecall).
-        let syscall_code_u16: [CB::Expr; 4] = syscall_code.0.map(Into::into);
-        let syscall_bytes = U16ToU8Gadget::<CB::F>::eval_u16_to_u8_unsafe(
-            builder,
-            syscall_code_u16,
-            ecall_cols.syscall_code_bytes,
-        );
-        let syscall_id = syscall_bytes[0].clone();
-
-        // Compute whether this ecall is COMMIT.
-        let is_commit = {
-            IsZeroGadget::<CB::F>::eval(
-                builder,
-                syscall_id.clone() - CB::Expr::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
-                ecall_cols.is_commit,
-                is_ecall_instruction.clone(),
-            );
-            ecall_cols.is_commit.result
-        };
-
-        // Compute whether this ecall is COMMIT_DEFERRED_PROOFS.
-        let is_commit_deferred_proofs = {
-            IsZeroGadget::<CB::F>::eval(
-                builder,
-                syscall_id
-                    - CB::Expr::from_canonical_u32(
-                        SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id(),
-                    ),
-                ecall_cols.is_commit_deferred_proofs,
-                is_ecall_instruction.clone(),
-            );
-            ecall_cols.is_commit_deferred_proofs.result
-        };
-
-        (is_commit.into(), is_commit_deferred_proofs.into())
+        builder.when(local.is_halt).assert_pc_zero(local.next_pc);
     }
 
     /// Returns the number of extra cycles from an ECALL instruction.
+    ///
+    /// Degree 1: `num_extra_clk` is asserted zero off ecall rows in `eval_ecall`, so no
+    /// multiplication by the ecall selector is needed here.
     pub(crate) fn get_num_extra_ecall_cycles<CB: ChipBuilder<F>>(
         &self,
         local: &CpuCols<CB::Var>,
     ) -> CB::Expr {
-        let is_ecall_instruction = self.is_ecall_instruction::<CB>(&local.opcode_selector);
-
-        local.num_extra_clk * is_ecall_instruction.clone()
+        local.num_extra_clk.into()
     }
 }

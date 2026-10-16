@@ -9,9 +9,8 @@ use crate::{
     compiler::riscv::opcode::Opcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder, ScopedBuilder},
 };
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
 impl<F: Field> BaseAir<F> for AddChip<F> {
@@ -26,7 +25,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &AddCols<CB::Var> = (*local).borrow();
 
         for (

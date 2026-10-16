@@ -17,31 +17,20 @@ Before you begin, please ensure that you have installed all the [requirements](.
 ## Key Features
 Pico's design is rooted in the need for adaptable, high-performance ZK systems that can keep up with the rapidly evolving cryptography research. Rather than relying on a "one size fits all" solution, Pico's modular architecture lets you:
 
-- **Leverage Interchangeable Proving Backends**: Select from multiple proving backends to achieve the best performance and efficiency.
 - **Integrate App-Specific Circuits**: Seamlessly incorporate specialized circuits/coprocessors to accelerate domain-specific computations.
 - **Customize Proving Workflows**: Assemble and fine-tune proof generation pipelines tailored to your application's specific requirements.
 
-## Supported Proving Backends
-One of Pico's most innovative features is its ability to seamlessly switch between multiple proving backends.
-Currently, Pico supports generating proofs in [all phases](https://pico-docs.brevis.network/writing-apps/advanced/proverchain) — RISCV, CONVERT (RECURSION), COMBINE (RECURSION), COMPRESS (RECURSION) 
-and ONCHAIN (for EVM) — with both STARK on KoalaBear and STARK on BabyBear.
-For CircleSTARK on Mersenne31, Pico currently supports the RISCV-Phase, with RECURSION and EVM phases coming soon.
+## Proof System
+Pico 3.0 proves with a multilinear (MLE) STARK on the KoalaBear field (prime $p = 2^{31} - 2^{24} + 1$): LogUp-GKR for lookups, ZeroCheck for constraints and WHIR as the polynomial commitment. A proof runs through [five phases](https://pico-docs.brevis.network/writing-apps/advanced/proverchain) — RISCV → CONVERT → COMBINE → EMBED → WRAP — and the WRAP output is proved with Groth16 on BN254 for on-chain verification.
 
-- STARK on KoalaBear (prime field $p = 2^{31} - 2^{24} + 1$): Supports generating proofs for
-  - [x] RISCV-Phase
-  - [x] RECURSION-Phase
-  - [x] EVM-Phase
-- STARK on BabyBear (prime field $p = 2^{31} - 2^{27} + 1$): Supports generating proofs for
-  - [x] RISCV-Phase
-  - [x] RECURSION-Phase
-  - [x] EVM-Phase
-- CircleSTARK on Mersenne31 where $p = 2^{31} - 1$). Supports generating proofs for
-  - [x] RISCV-Phase
-  - [ ] RECURSION-Phase
-  - [ ] EVM-Phase
+Pico 3.0 is a breaking release: 2.x proofs, keys and verifier contracts do not carry over. See the [release notes](./docs/release-notes/3.0.md), the [migration guide](./docs/migration-2.x-to-3.0.md) and the [support matrix](./docs/support-matrix.md).
 
 ## Security
-Pico has undergone a security review from [Sherlock](https://sherlock.xyz/) and is recommended for production use. The audit report is available [here](./audits).
+Pico 3.0 targets 100 bits of provable round-by-round soundness under the random-oracle model, through the recursion root; the on-chain Groth16 step is held to BN254's security level. This is a computed bound, not a formal verification.
+
+The verifier in [`contracts/test/dev`](./contracts/test/dev) comes from a test setup: a deployment needs keys and a verifier from a real setup ceremony.
+
+A security review of Pico 2.x by Sherlock is available in [`audits/`](./audits); it predates and does not cover the 3.0 proof system.
 
 ## For Contributors
 
@@ -53,7 +42,7 @@ Before getting started, please review our [Repo Layout](./docs/layout.md) to und
 ## Acknowledgements
 
 Pico draws inspiration from the following projects, each representing cutting-edge advancements in zero-knowledge proof systems. 
-- [Plonky3](https://github.com/Plonky3/Plonky3): Pico's proving backend is based on Plonky3, extending its modularity to the zkVM layer to enable the flexible selection of proving fields and systems that best fit each use case.
+- [Plonky3](https://github.com/Plonky3/Plonky3): Pico's proving backend is built on Plonky3's field, hash and matrix primitives.
 - [SP1](https://github.com/succinctlabs/sp1): Pico derives significant inspiration from SP1's chip design and their constraints. Its recursion compiler and precompiles originate from SP1.
 - [Valida](https://github.com/valida-xyz/valida): Pico's implementation of cross-table lookups is inspired by Valida's pioneering work in this area.
 - [RISC0](https://github.com/risc0/risc0): Pico's Rust toolchain is based on the one originally developed by RISC0.

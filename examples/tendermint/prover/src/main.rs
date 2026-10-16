@@ -1,83 +1,124 @@
-use pico_sdk::{client::DefaultProverClient, init_logger};
-use tendermint_light_client_verifier::{options::Options, ProdVerifier, Verdict, Verifier};
+//! Prove a Tendermint light-client update, and hold what the guest committed to the host's own
+//! verification of the same two blocks.
+//!
+//! ```text
+//! (cd ../app && cargo pico build)
+//! cargo run --release
+//! ```
+//!
+//! It emulates first, which costs seconds and no keygen, and checks the emulated output against the
+//! host before spending minutes proving. Then `Prover::prove` proves the whole chain to one combine
+//! root and verifies it in process.
+//!
+//! It needs a large machine: at the prover's defaults it peaks near 200 GB. `examples/README.md`
+//! has the measurements, and the options that trade proving time for memory.
+//!
+//! This runs in dev mode, as the fibonacci example does, so this prover's program id is not the one
+//! a contract pins.
 
-use std::error::Error;
+use std::{error::Error, process::ExitCode};
 
-use std::{fs, fs::File, io::Read, time::Duration};
-
+use pico_prover::{Prover, Stdin};
+use tendermint_lib::verify_update;
 use tendermint_light_client_verifier::types::LightBlock;
 
-fn get_light_blocks() -> (LightBlock, LightBlock) {
-    let light_block_1 = load_light_block(2279100).expect("Failed to generate light block 1");
-    let light_block_2 = load_light_block(2279130).expect("Failed to generate light block 2");
-    (light_block_1, light_block_2)
+/// Where `cargo pico build` writes the guest.
+const ELF_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../app/elf/riscv64im-pico-zkvm-elf"
+);
+
+/// The guest's three commits, in the order it makes them.
+const SEGMENTS: [&str; 3] = ["trusted header hash", "untrusted header hash", "verdict"];
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
-pub fn load_light_block(block_height: u64) -> Result<LightBlock, Box<dyn Error>> {
-    let mut file = File::open(format!("files/block_{}.json", block_height))?;
-    let mut block_response_raw = String::new();
-    file.read_to_string(&mut block_response_raw)
-        .unwrap_or_else(|_| panic!("Failed to read block number {}", block_height));
-    Ok(serde_json::from_str(&block_response_raw)?)
+fn run() -> Result<(), Box<dyn Error>> {
+    let elf = std::fs::read(ELF_PATH).map_err(|e| {
+        format!("{ELF_PATH}: {e}; build the guest with `cargo pico build` in ../app")
+    })?;
+    let trusted = load_light_block(2279100)?;
+    let untrusted = load_light_block(2279130)?;
+    let expected = expected_commits(&trusted, &untrusted)?;
+    let stdin = guest_input(&trusted, &untrusted)?;
+
+    let execution = Prover::builder(&elf).execute(stdin.clone())?;
+    check(&execution.committed_bytes, &expected, "the emulation")?;
+    println!(
+        "executed {} cycle(s) in {} chunk(s); the emulated commits match the host",
+        execution.cycles, execution.chunks
+    );
+
+    let mut prover = Prover::new(&elf)?;
+    let proof = prover.prove(stdin)?;
+    check(proof.committed().as_bytes(), &expected, "the proof")?;
+    println!(
+        "proved and verified the update from block {} to block {}; all three commits match the host",
+        trusted.height(),
+        untrusted.height()
+    );
+    println!(
+        "program id (dev mode, not the id an on-chain verifier pins): {}",
+        proof.program_id()
+    );
+    Ok(())
 }
 
-fn main() {
-    // Initialize logger
-    init_logger();
-
-    // Load the ELF file
-    let elf = load_elf("../app/elf/riscv32im-pico-zkvm-elf");
-    println!("elf length: {}", elf.len());
-
-    let client = DefaultProverClient::new(&elf);
-    let stdin_builder = client.get_stdin_builder(); // Shared instance
-
-    // Load light blocks from the `files` subdirectory
-    let (light_block_1, light_block_2) = get_light_blocks();
-
-    let expected_verdict = verify_blocks(light_block_1.clone(), light_block_2.clone());
-
-    let encoded_1 = serde_cbor::to_vec(&light_block_1).unwrap();
-    let encoded_2 = serde_cbor::to_vec(&light_block_2).unwrap();
-
-    println!("encode_1 length: {}", encoded_1.len());
-    println!("encode_2 length: {}", encoded_2.len());
-
-    stdin_builder.borrow_mut().write_slice(&encoded_1);
-    stdin_builder.borrow_mut().write_slice(&encoded_2);
-
-    let proof = client.prove_fast().expect("proving failed");
-
-    // Verify the public values
-    let mut expected_public_values: Vec<u8> = Vec::new();
-    expected_public_values.extend(light_block_1.signed_header.header.hash().as_bytes());
-    expected_public_values.extend(light_block_2.signed_header.header.hash().as_bytes());
-    expected_public_values.extend(serde_cbor::to_vec(&expected_verdict).unwrap());
-
-    assert_eq!(proof.pv_stream.unwrap(), expected_public_values);
-
-    println!("successfully generated and verified proof for the program!")
+fn load_light_block(height: u64) -> Result<LightBlock, Box<dyn Error>> {
+    let path = format!("{}/files/block_{height}.json", env!("CARGO_MANIFEST_DIR"));
+    Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?)
 }
 
-fn verify_blocks(light_block_1: LightBlock, light_block_2: LightBlock) -> Verdict {
-    let vp = ProdVerifier::default();
-    let opt = Options {
-        trust_threshold: Default::default(),
-        trusting_period: Duration::from_secs(500),
-        clock_drift: Default::default(),
-    };
-    let verify_time = light_block_2.time() + Duration::from_secs(20);
-    vp.verify_update_header(
-        light_block_2.as_untrusted_state(),
-        light_block_1.as_trusted_state(),
-        &opt,
-        verify_time.unwrap(),
-    )
+/// The two blocks as the guest reads them: CBOR, trusted first.
+fn guest_input(trusted: &LightBlock, untrusted: &LightBlock) -> Result<Stdin, Box<dyn Error>> {
+    let mut stdin = Stdin::new();
+    stdin
+        .write_bytes(&serde_cbor::to_vec(trusted)?)
+        .write_bytes(&serde_cbor::to_vec(untrusted)?);
+    Ok(stdin)
 }
 
-/// Loads an ELF file from the specified path.
-pub fn load_elf(path: &str) -> Vec<u8> {
-    fs::read(path).unwrap_or_else(|err| {
-        panic!("Failed to load ELF file from {}: {}", path, err);
-    })
+/// What the guest commits for these two blocks, recomputed here: both header hashes, then the
+/// verdict of the same `verify_update` the guest calls, CBOR-encoded.
+fn expected_commits(
+    trusted: &LightBlock,
+    untrusted: &LightBlock,
+) -> Result<[Vec<u8>; 3], Box<dyn Error>> {
+    let verdict = verify_update(trusted, untrusted)?;
+    Ok([
+        trusted.signed_header.header.hash().as_bytes().to_vec(),
+        untrusted.signed_header.header.hash().as_bytes().to_vec(),
+        serde_cbor::to_vec(&verdict)?,
+    ])
+}
+
+/// Compare the committed stream segment by segment, so a mismatch names the one that differs.
+/// `source` says what produced the bytes, an emulation or a proof.
+fn check(committed: &[u8], expected: &[Vec<u8>; 3], source: &str) -> Result<(), String> {
+    let total: usize = expected.iter().map(Vec::len).sum();
+    if committed.len() != total {
+        return Err(format!(
+            "{source} commits {} byte(s); the host expects {total}",
+            committed.len()
+        ));
+    }
+    let mut rest = committed;
+    for (name, want) in SEGMENTS.iter().zip(expected) {
+        let (got, tail) = rest.split_at(want.len());
+        if got != want.as_slice() {
+            return Err(format!(
+                "{name}: {source} commits {got:02x?}, the host computes {want:02x?}"
+            ));
+        }
+        rest = tail;
+    }
+    Ok(())
 }

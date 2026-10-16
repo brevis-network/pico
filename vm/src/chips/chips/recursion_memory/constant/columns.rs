@@ -16,6 +16,13 @@ pub const NUM_MEM_PREPROCESSED_INIT_COLS: usize =
 
 #[derive(AlignedBorrow, Debug, Clone, Copy)]
 #[repr(C)]
-pub struct MemoryPreprocessedCols<F: Copy> {
-    pub values_and_accesses: [(Block<F>, MemoryAccessCols<F>); CONST_MEM_DATAPAR],
+pub struct MemoryPreprocessedCols<F> {
+    pub values_and_accesses: [MemoryValueAccess<F>; CONST_MEM_DATAPAR],
+}
+
+#[derive(AlignedBorrow, Debug, Clone, Copy)]
+#[repr(C)]
+pub struct MemoryValueAccess<F> {
+    pub value: Block<F>,
+    pub access: MemoryAccessCols<F>,
 }

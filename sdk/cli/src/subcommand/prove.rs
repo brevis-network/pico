@@ -1,201 +1,354 @@
-use anyhow::{Error, Result};
-use clap::{ArgAction, Parser};
-use hex;
-use log::{debug, info};
-use std::{env, fs::File, io::Read, path::PathBuf};
+use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use clap::{Parser, ValueEnum};
+use pico_prover::{Phase, Proof, ProveError, ProverBuilder};
 
 use crate::{
-    build::{
-        build::{get_package, is_docker_installed},
-        client::SDKProverClient,
-    },
-    get_target_directory, DEFAULT_ELF_DIR,
+    guest::{encode_hex, GuestArgs},
+    options::{self, ProverArgs},
 };
 
-fn parse_input(s: &str) -> Result<Input, String> {
-    // First try to parse as hex if it starts with 0x
-    #[allow(clippy::manual_strip)]
-    if s.starts_with("0x") {
-        debug!("Parsing input as hex: {}", s);
-        return hex::decode(&s[2..])
-            .map(Input::HexBytes)
-            .map_err(|e| format!("Invalid hex string: {}", e));
-    }
-
-    // Validate file path
-    let path = PathBuf::from(s);
-    if !path.exists() {
-        return Err(format!("File path does not exist: {}", s));
-    }
-
-    Ok(Input::FilePath(path))
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-enum Input {
-    FilePath(PathBuf),
-    HexBytes(Vec<u8>),
-}
-
 #[derive(Parser)]
-#[command(name = "prove", about = "prove program to get proof")]
+#[command(
+    name = "prove",
+    about = "Prove an ELF, verify the proof, and write it out"
+)]
 pub struct ProveCmd {
-    #[clap(long, help = "ELF file path")]
-    elf: Option<String>,
+    #[clap(flatten)]
+    guest: GuestArgs,
 
-    #[clap(long, value_parser = parse_input, help = "Input bytes or file path")]
-    input: Option<Input>,
+    #[clap(flatten)]
+    prover: ProverArgs,
 
-    #[clap(long, action, help = "proof output dir")]
-    output: Option<String>,
+    /// Where the proving chain stops. `riscv` and `combine` write `proof-<phase>.pico`, `wrap`
+    /// writes `wrap_constraints.json` and `wrap_groth16_witness.json`, and `convert` and `embed`
+    /// write nothing
+    #[clap(long, value_enum, default_value_t = PhaseArg::Combine)]
+    phase: PhaseArg,
 
-    #[clap(long, action = ArgAction::SetTrue, help = "Perform a fast prove")]
-    fast: bool,
+    /// Directory the proof is written to. A `riscv` proof file verifies in any process that has the
+    /// ELF and proves at the same `--log-stacked-height` and mode; a `combine` one only when both
+    /// processes are in whitelist mode
+    #[clap(long, value_name = "DIR", default_value = "pico_out")]
+    output: PathBuf,
 
-    #[clap(long, action = ArgAction::SetTrue, help = "prove with evm mode to get g16 proof")]
+    /// Prove through wrap to a Groth16 proof for the on-chain verifier, with gnark from
+    /// $PICO_GNARK_BIN or $PICO_GNARK_IMAGE. The verifier accepts whitelist-mode proofs only, so
+    /// this needs `VK_VERIFICATION=true`, `MLE_VK_MAP` and `MLE_VK_ROOT`. Writes the wrap files,
+    /// `proof.data` and `inputs.json`
+    #[clap(long, conflicts_with = "phase")]
     evm: bool,
 
-    #[clap(long, action = ArgAction::SetTrue, help = "groth16 circuit setup, it must be used with --evm")]
+    /// The Groth16 key directory for `--evm`: `pk`, `vk`, `ccs` and `manifest.json`, as a setup
+    /// writes them [default: $PICO_GROTH16_KEYS, or `<output>/groth16` with `--setup`]. Never
+    /// downloaded
+    #[clap(long, value_name = "DIR", requires = "evm")]
+    keys: Option<PathBuf>,
+
+    /// Run a Groth16 setup for the wrap circuit into the key directory first, which also writes
+    /// `Groth16Verifier.sol`. An operator action, not a first-run step: the setup's randomness is
+    /// known to whoever runs it, so its keys are for testing, not for a deployed verifier
+    #[clap(long, requires = "evm")]
     setup: bool,
 
-    // Field to work on.
-    // bb | m31 | kb
-    #[clap(long, default_value = "kb")]
-    pub field: String,
+    #[clap(long, hide = true)]
+    fast: bool,
+
+    #[clap(long, hide = true, num_args = 0..=1, default_missing_value = "")]
+    field: Option<String>,
+}
+
+/// [`Phase`], as a value on the command line.
+#[derive(Clone, Copy, ValueEnum)]
+enum PhaseArg {
+    Riscv,
+    Convert,
+    Combine,
+    #[cfg_attr(not(feature = "multi-field-transcript"), value(hide = true))]
+    Embed,
+    #[cfg_attr(not(feature = "multi-field-transcript"), value(hide = true))]
+    Wrap,
+}
+
+impl From<PhaseArg> for Phase {
+    fn from(phase: PhaseArg) -> Self {
+        match phase {
+            PhaseArg::Riscv => Phase::Riscv,
+            PhaseArg::Convert => Phase::Convert,
+            PhaseArg::Combine => Phase::Combine,
+            PhaseArg::Embed => Phase::Embed,
+            PhaseArg::Wrap => Phase::Wrap,
+        }
+    }
 }
 
 impl ProveCmd {
-    fn get_input_bytes(input: &Option<Input>) -> Result<Vec<u8>> {
-        match input {
-            Some(Input::FilePath(path)) => {
-                let mut file = File::open(path)?;
-                let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes)?;
-                Ok(bytes)
-            }
-            Some(Input::HexBytes(bytes)) => Ok(bytes.clone()),
-            None => Ok(Vec::new()),
-        }
+    pub(crate) fn aot_elf(&self) -> Option<&Path> {
+        self.prover.aot.then_some(self.guest.elf.as_path())
     }
 
     pub fn run(&self) -> Result<()> {
-        #[cfg(not(debug_assertions))]
-        {
-            info!("Running in release mode!");
+        self.refuse_removed_flags()?;
+        if self.evm {
+            return self.run_evm();
         }
-        let elf_path = match self.elf {
-            Some(ref elf) => PathBuf::from(elf),
-            None => {
-                let program_dir = std::env::current_dir().unwrap();
-                let program_pkg = get_package(program_dir);
-                let target_dir: PathBuf = get_target_directory(program_pkg.manifest_path.as_ref())?;
-                target_dir
-                    .parent()
-                    .unwrap()
-                    .join(DEFAULT_ELF_DIR)
-                    .join("riscv64im-pico-zkvm-elf")
+
+        let phase = Phase::from(self.phase);
+        // Checked before keygen, which is otherwise spent before the prover refuses the phase.
+        phase.ensure_available().map_err(reinstall_hint)?;
+
+        let builder = self.builder()?;
+        if !builder.whitelist_mode() {
+            outside_whitelist_mode(phase);
+        }
+        let mut prover = options::build(builder)?;
+        if matches!(phase, Phase::Riscv | Phase::Combine | Phase::Wrap) {
+            self.create_output()?;
+        }
+        let proof = prover.prove_to(self.guest.stdin(), phase)?;
+
+        report(&proof, false);
+        match phase {
+            Phase::Riscv | Phase::Combine => {
+                let path = self.output.join(format!("proof-{phase}.pico"));
+                proof.write(&path)?;
+                report_written(&path)?;
             }
-        };
-        let elf: Vec<u8> = std::fs::read(elf_path)?;
-        let bytes = Self::get_input_bytes(&self.input)?;
-        debug!("input data: {:0x?}", bytes);
+            Phase::Wrap => write_wrap(&proof, &self.output)?,
+            Phase::Convert | Phase::Embed => {
+                eprintln!("note: a {phase} proof has no file form; nothing was written")
+            }
+        }
+        Ok(())
+    }
 
-        let client = SDKProverClient::new(&elf, &self.field);
+    /// The options from flags and the environment, echoed, then the ELF.
+    fn builder(&self) -> Result<ProverBuilder> {
+        let options = self.prover.resolve()?;
+        let elf = self.guest.read_elf()?;
+        Ok(options.builder(&elf))
+    }
 
+    fn create_output(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.output)
+            .with_context(|| format!("cannot create `{}`", self.output.display()))
+    }
+
+    fn refuse_removed_flags(&self) -> Result<()> {
         if self.fast {
-            return prove_fast(client, bytes.as_slice());
+            bail!(
+                "`--fast` has been removed: the RISC-V phase is full-security, not a faster proof. \
+                 Use `--phase riscv` to stop after it"
+            );
         }
-
-        if self.setup && !self.evm {
-            return Err(Error::msg(
-                "The --setup option must be used with the --evm option",
-            ));
+        if self.field.is_some() {
+            bail!("`--field` has been removed: proving is KoalaBear-only. Drop the flag");
         }
+        Ok(())
+    }
 
-        let program_dir = std::env::current_dir().unwrap();
-        let program_pkg = get_package(program_dir);
-        let target_dir: PathBuf = get_target_directory(program_pkg.manifest_path.as_ref())?;
-
-        let pico_dir = match self.output {
-            Some(ref output) => PathBuf::from(output),
-            None => {
-                let output_dir = target_dir.join("pico_out");
-                if !output_dir.exists() {
-                    std::fs::create_dir_all(output_dir.clone())?;
-                    debug!("create dir: {:?}", output_dir.clone().display());
-                }
-                output_dir
-            }
+    /// `--evm`: prove to wrap in whitelist mode, then to Groth16 with gnark.
+    ///
+    /// Everything that can be refused is refused before keygen, which costs minutes: no gnark, no
+    /// keys, a directory that is not a key set, a setup over an existing one, and a mode the
+    /// on-chain verifier is not set up for.
+    #[cfg(feature = "multi-field-transcript")]
+    fn run_evm(&self) -> Result<()> {
+        use crate::{
+            groth16::{
+                self, Gnark, Keys, WrapFiles, INPUTS_FILE, KEYS_ENV, MANIFEST_FILE, PROOF_FILE,
+                VERIFIER_FILE,
+            },
+            options::mapped,
         };
 
-        if self.evm && !is_docker_installed() {
-            return Err(Error::msg(
-                "Docker is not available on this system. please install docker first.",
-            ));
+        let gnark = Gnark::from_env()?;
+        let dir = match &self.keys {
+            Some(dir) => Some(dir.clone()),
+            None => mapped(KEYS_ENV, "keys", |v| Ok(PathBuf::from(v)))?,
+        };
+        let keys = if self.setup {
+            Keys::fresh(dir.unwrap_or_else(|| self.output.join("groth16")))?
+        } else {
+            let dir = dir.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "`--evm` proves with a Groth16 key directory: pass `--keys DIR` or set \
+                     {KEYS_ENV}, or `--setup` to make one"
+                )
+            })?;
+            Keys::existing(dir)?
+        };
+
+        let builder = self.builder()?;
+        if !builder.whitelist_mode() {
+            bail!(
+                "`--evm` proves in whitelist mode only: the on-chain verifier is set up for the \
+                 wrap circuit that bakes in the whitelist root. Set `VK_VERIFICATION=true`, \
+                 `MLE_VK_MAP` and `MLE_VK_ROOT`"
+            );
         }
-        prove(client, self.evm, self.setup, &bytes, pico_dir, &self.field)
+        self.create_output()?;
+        let mut prover = options::build(builder)?;
+        let bundle = prover.prove_evm(self.guest.stdin())?;
+        bundle.write_to(&self.output)?;
+        let wrap = WrapFiles {
+            constraints: self.output.join(pico_prover::WRAP_CONSTRAINTS_FILE),
+            witness: self.output.join(pico_prover::WRAP_WITNESS_FILE),
+        };
+
+        if self.setup {
+            gnark.setup(&wrap, &keys)?;
+            eprintln!(
+                "note: `--setup` made these keys on this machine, which knew the setup's \
+                 randomness: they are for testing, and a verifier deployed for them proves nothing"
+            );
+        }
+        let proof_path = self.output.join(PROOF_FILE);
+        let proof = gnark.prove(&wrap, &keys, &proof_path)?;
+        // gnark read its public inputs from the witness; the bundle has them from the proof.
+        let expected = [
+            bundle.program_id().vkey_hash(),
+            bundle.committed_value_digest(),
+        ];
+        if proof.public_inputs() != expected {
+            let [vkey, digest] = proof.public_inputs();
+            bail!(
+                "gnark proved public inputs 0x{} and 0x{}, and the proof's are 0x{} and 0x{}: the \
+                 witness in `{}` is not this proof's",
+                encode_hex(&vkey),
+                encode_hex(&digest),
+                encode_hex(&expected[0]),
+                encode_hex(&expected[1]),
+                self.output.display()
+            );
+        }
+        let inputs = self.output.join(INPUTS_FILE);
+        groth16::write_inputs(&inputs, expected[0], bundle.committed().as_bytes(), &proof)?;
+
+        report(bundle.proof(), true);
+        for path in [&wrap.constraints, &wrap.witness] {
+            report_written(path)?;
+        }
+        if self.setup {
+            for file in [MANIFEST_FILE, VERIFIER_FILE] {
+                report_written(&keys.path(file))?;
+            }
+        }
+        report_written(&proof_path)?;
+        report_written(&inputs)?;
+        Ok(())
+    }
+
+    #[cfg(not(feature = "multi-field-transcript"))]
+    fn run_evm(&self) -> Result<()> {
+        Phase::Wrap.ensure_available().map_err(reinstall_hint)
     }
 }
 
-fn prove_fast(sdk_client: SDKProverClient, stdin_bytes: &[u8]) -> Result<()> {
-    env::set_var("FRI_QUERIES", "1");
-    info!("proving in fast mode.");
-    match sdk_client {
-        SDKProverClient::KoalaBearProver(client) => {
-            let mut stdin = client.new_stdin_builder();
-            stdin.write_slice(stdin_bytes);
-            client.prove_fast(stdin)?;
-            Ok(())
-        }
-        SDKProverClient::BabyBearProver(client) => {
-            let mut stdin = client.new_stdin_builder();
-            stdin.write_slice(stdin_bytes);
-            client.prove_fast(stdin)?;
-            Ok(())
-        }
-        SDKProverClient::M31Prover(client) => {
-            let mut stdin = client.new_stdin_builder();
-            stdin.write_slice(stdin_bytes);
-            client.prove_fast(stdin)?;
-            Ok(())
-        }
+/// The prover's refusal of a phase this build lacks, with the fix: the prover names the feature,
+/// but what the user does about it is reinstall `cargo pico`.
+fn reinstall_hint(error: ProveError) -> anyhow::Error {
+    let ProveError::FeatureMissing { phase, feature } = &error else {
+        return error.into();
+    };
+    let context = format!(
+        "this cargo-pico was built without its default `{feature}` feature, so it cannot prove to \
+         `{phase}`: reinstall it without `--no-default-features`"
+    );
+    anyhow::Error::from(error).context(context)
+}
+
+/// What a proof of `phase` made outside whitelist mode cannot be used for. The options decide it,
+/// so it is said before keygen rather than after the proof.
+fn outside_whitelist_mode(phase: Phase) {
+    match phase {
+        // A fresh process refuses a combine file made outside whitelist mode whichever mode it is
+        // in: outside it, it has no honest recursion key, and inside it, the modes differ.
+        Phase::Combine => eprintln!(
+            "note: no other process can verify a combine proof made outside whitelist mode. \
+             `VK_VERIFICATION=true`, `MLE_VK_MAP` and `MLE_VK_ROOT`, at the default stacked \
+             height, make one that can; `--phase riscv` makes a file another process verifies \
+             from the ELF at the same height, but it proves each chunk, not one complete execution"
+        ),
+        Phase::Wrap => eprintln!(
+            "warning: outside whitelist mode the wrap circuit pins no whitelist root, so no \
+             deployed verifier accepts a proof of it; this output is for testing"
+        ),
+        Phase::Riscv | Phase::Convert | Phase::Embed => {}
     }
 }
 
-fn prove(
-    sdk_client: SDKProverClient,
-    is_evm: bool,
-    need_setup: bool,
-    bytes: &[u8],
-    output: PathBuf,
-    field_type: &str,
-) -> Result<(), Error> {
-    match sdk_client {
-        SDKProverClient::KoalaBearProver(client) => {
-            let mut stdin = client.new_stdin_builder();
-            stdin.write_slice(bytes);
-            if is_evm {
-                client.prove_evm(stdin, need_setup, &output, field_type)?;
-            } else {
-                let (riscv_proof, embed_proof) = client.prove(stdin)?;
-                client.write_onchain_data(&output, &riscv_proof, &embed_proof)?;
-            }
-            Ok(())
+/// `groth16`: the wrap proof went on to a Groth16 proof, which gnark verified before writing it.
+fn report(proof: &Proof, groth16: bool) {
+    // The wrap phase compiles a circuit and its witness from the verified embed proof; the Groth16
+    // proof of that circuit is made outside this prover, by gnark under `--evm`.
+    let reached = match (proof.phase(), groth16) {
+        (Phase::Wrap, true) => {
+            "embed, built the wrap circuit and witness, and gnark proved and verified them to \
+             Groth16"
+                .into()
         }
-        SDKProverClient::BabyBearProver(client) => {
-            let mut stdin = client.new_stdin_builder();
-            stdin.write_slice(bytes);
-            if is_evm {
-                client.prove_evm(stdin, need_setup, &output, field_type)?;
-            } else {
-                let (riscv_proof, embed_proof) = client.prove(stdin)?;
-                client.write_onchain_data(&output, &riscv_proof, &embed_proof)?;
-            }
-            Ok(())
+        (Phase::Wrap, false) => {
+            "embed, and built the wrap circuit and witness (no Groth16 proof)".into()
         }
-        _ => Err(Error::msg(
-            "not support config for prove, please check your config",
-        )),
+        (phase, _) => phase.to_string(),
+    };
+    // One chunk proof per emulation record; the deferred split adds records after the guest halts,
+    // so this runs ahead of the chunk count `execute` reports.
+    println!(
+        "proved and verified to {reached}: {} chunk proof(s), {} proof(s)",
+        proof
+            .chunk_count()
+            .map_or_else(|| "unknown".into(), |n| n.to_string()),
+        proof.proof_count()
+    );
+    let committed = proof.committed();
+    println!(
+        "committed ({} byte(s)): {}",
+        committed.as_bytes().len(),
+        encode_hex(committed.as_bytes())
+    );
+    println!(
+        "committed_value_digest: {}",
+        encode_hex(&proof.committed_value_digest())
+    );
+    if !proof.binds_complete_execution() {
+        eprintln!(
+            "note: a {} proof binds each chunk, not one complete execution; prove to combine for \
+             that",
+            proof.phase()
+        );
     }
+    // Whitelist mode pads the program table before committing to it, so one ELF has a different id
+    // in each mode.
+    let mode = if proof.verify_keys() {
+        "whitelist mode"
+    } else {
+        "outside whitelist mode, so not the id an on-chain verifier pins"
+    };
+    println!("program id ({mode}): {}", proof.program_id());
+}
+
+fn report_written(path: &Path) -> Result<()> {
+    let size = std::fs::metadata(path)
+        .with_context(|| format!("cannot stat `{}`", path.display()))?
+        .len();
+    println!("wrote {} ({size} bytes)", path.display());
+    Ok(())
+}
+
+#[cfg(feature = "multi-field-transcript")]
+fn write_wrap(proof: &Proof, dir: &Path) -> Result<()> {
+    let constraints = dir.join(pico_prover::WRAP_CONSTRAINTS_FILE);
+    let witness = dir.join(pico_prover::WRAP_WITNESS_FILE);
+    proof.write_wrap_artifacts(&constraints, &witness)?;
+    report_written(&constraints)?;
+    report_written(&witness)?;
+    Ok(())
+}
+
+#[cfg(not(feature = "multi-field-transcript"))]
+fn write_wrap(_proof: &Proof, _dir: &Path) -> Result<()> {
+    Phase::Wrap.ensure_available().map_err(reinstall_hint)
 }

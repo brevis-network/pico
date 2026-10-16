@@ -132,7 +132,7 @@ impl AotPostProcessor {
     fn remove_dead_pc_assignments(&self, block: &mut Block) {
         let mut pc_live = true;
         let mut new_stmts = Vec::new();
-        let stmts: Vec<Stmt> = block.stmts.drain(..).collect();
+        let stmts: Vec<Stmt> = std::mem::take(&mut block.stmts);
         for stmt in stmts.into_iter().rev() {
             if stmt_reads_pc(&stmt) {
                 pc_live = true;

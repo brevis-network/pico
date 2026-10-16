@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
-mod columns;
+pub mod columns;
 mod constraints;
-mod controller;
+pub mod controller;
 mod trace;
 
 #[derive(Default)]

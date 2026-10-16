@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
 use std::sync::Arc;
 
 /// unidirectional unbounded channel, sender -> receiver
@@ -20,6 +20,14 @@ impl<T> Default for SingleUnboundedChannel<T> {
 }
 
 impl<T> SingleUnboundedChannel<T> {
+    pub fn new_bounded(cap: usize) -> Self {
+        let (sender, receiver) = bounded(cap);
+        Self {
+            sender: Arc::new(sender),
+            receiver: Arc::new(receiver),
+        }
+    }
+
     pub fn sender(&self) -> Arc<Sender<T>> {
         self.sender.clone()
     }

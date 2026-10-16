@@ -64,7 +64,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ShaCompressChip<F> {
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
             cols.octet_num[octet_num] = F::ONE;
             cols.octet[octet] = F::ONE;
-            cols.index = F::from_canonical_u32((8 * octet_num + octet) as u32);
+            cols.index = F::from_u32((8 * octet_num + octet) as u32);
 
             // If in the compression phase, set the k value.
             if octet_num != 0 && octet_num != 9 {
@@ -141,18 +141,18 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(u32::try_from(event.clk).unwrap());
+            cols.chunk = F::from_u32(event.chunk);
+            cols.clk = F::from_u32(u32::try_from(event.clk).unwrap());
 
             cols.w_ptr = [
-                F::from_canonical_u16((event.w_ptr & 0xFFFF) as u16),
-                F::from_canonical_u16((event.w_ptr >> 16) as u16),
-                F::from_canonical_u16((event.w_ptr >> 32) as u16),
+                F::from_u16((event.w_ptr & 0xFFFF) as u16),
+                F::from_u16((event.w_ptr >> 16) as u16),
+                F::from_u16((event.w_ptr >> 32) as u16),
             ];
             cols.h_ptr = [
-                F::from_canonical_u16((event.h_ptr & 0xFFFF) as u16),
-                F::from_canonical_u16((event.h_ptr >> 16) as u16),
-                F::from_canonical_u16((event.h_ptr >> 32) as u16),
+                F::from_u16((event.h_ptr & 0xFFFF) as u16),
+                F::from_u16((event.h_ptr >> 16) as u16),
+                F::from_u16((event.h_ptr >> 32) as u16),
             ];
 
             cols.octet[j] = F::ONE;
@@ -174,7 +174,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             cols.g = u32_to_half_word(event.h_read_records[6].value as u32);
             cols.h = u32_to_half_word(event.h_read_records[7].value as u32);
 
-            cols.index = F::from_canonical_u32(j as u32);
+            cols.index = F::from_u32(j as u32);
 
             cols.is_real = F::ONE;
 
@@ -193,18 +193,18 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(u32::try_from(event.clk).unwrap());
+            cols.chunk = F::from_u32(event.chunk);
+            cols.clk = F::from_u32(u32::try_from(event.clk).unwrap());
 
             cols.w_ptr = [
-                F::from_canonical_u16((event.w_ptr & 0xFFFF) as u16),
-                F::from_canonical_u16((event.w_ptr >> 16) as u16),
-                F::from_canonical_u16((event.w_ptr >> 32) as u16),
+                F::from_u16((event.w_ptr & 0xFFFF) as u16),
+                F::from_u16((event.w_ptr >> 16) as u16),
+                F::from_u16((event.w_ptr >> 32) as u16),
             ];
             cols.h_ptr = [
-                F::from_canonical_u16((event.h_ptr & 0xFFFF) as u16),
-                F::from_canonical_u16((event.h_ptr >> 16) as u16),
-                F::from_canonical_u16((event.h_ptr >> 32) as u16),
+                F::from_u16((event.h_ptr & 0xFFFF) as u16),
+                F::from_u16((event.h_ptr >> 16) as u16),
+                F::from_u16((event.h_ptr >> 32) as u16),
             ];
 
             cols.k = u32_to_half_word(SHA_COMPRESS_K[j]);
@@ -218,7 +218,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
                 .populate(MemoryRecordEnum::Read(event.w_i_read_records[j]), blu);
             cols.mem_value = u32_to_half_word(event.w_i_read_records[j].value as u32);
             cols.mem_addr = cols.mem_addr_compress.value;
-            cols.index = F::from_canonical_u32(j as u32 + 8);
+            cols.index = F::from_u32(j as u32 + 8);
 
             let a = h_array[0];
             let b = h_array[1];
@@ -297,18 +297,18 @@ impl<F: PrimeField32> ShaCompressChip<F> {
             let mut row = [F::ZERO; NUM_SHA_COMPRESS_COLS];
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(u32::try_from(event.clk).unwrap());
+            cols.chunk = F::from_u32(event.chunk);
+            cols.clk = F::from_u32(u32::try_from(event.clk).unwrap());
 
             cols.w_ptr = [
-                F::from_canonical_u16((event.w_ptr & 0xFFFF) as u16),
-                F::from_canonical_u16((event.w_ptr >> 16) as u16),
-                F::from_canonical_u16((event.w_ptr >> 32) as u16),
+                F::from_u16((event.w_ptr & 0xFFFF) as u16),
+                F::from_u16((event.w_ptr >> 16) as u16),
+                F::from_u16((event.w_ptr >> 32) as u16),
             ];
             cols.h_ptr = [
-                F::from_canonical_u16((event.h_ptr & 0xFFFF) as u16),
-                F::from_canonical_u16((event.h_ptr >> 16) as u16),
-                F::from_canonical_u16((event.h_ptr >> 32) as u16),
+                F::from_u16((event.h_ptr & 0xFFFF) as u16),
+                F::from_u16((event.h_ptr >> 16) as u16),
+                F::from_u16((event.h_ptr >> 32) as u16),
             ];
 
             cols.octet[j] = F::ONE;
@@ -321,7 +321,7 @@ impl<F: PrimeField32> ShaCompressChip<F> {
                 .populate(MemoryRecordEnum::Write(event.h_write_records[j]), blu);
             cols.mem_value = u32_to_half_word(event.h_write_records[j].value as u32);
             cols.mem_addr = cols.mem_addr_finalize.value;
-            cols.index = F::from_canonical_u32(j as u32 + 72);
+            cols.index = F::from_u32(j as u32 + 72);
             cols.finalize_add.populate(blu, og_h[j], h_array[j]);
 
             v[j] = h_array[j];

@@ -8,3 +8,5 @@ categories = { workspace = true }
 
 [dependencies]
 common = { path = "../../../common" }
+# For its Plonky3 re-exports: the field and permutation traits the host reference calls.
+pico-mle-core = { path = "../../../../../../mle-core", default-features = false }

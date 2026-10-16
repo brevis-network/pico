@@ -1,22 +1,14 @@
-//! Elliptic Curve `y^2 = x^3 + 2x + 26z^5` over the `F_{p^7} = F_p[z]/(z^7 - 2z - 5)` extension field.
+//! Elliptic Curve `y^2 = x^3 + 2x + 611z^5` over the `F_{p^7} = F_p[z]/(z^7 + 2z^6 - 2)` extension field.
 
-use super::{
-    fields::{babybear, koalabear, mersenne31},
-    FieldSepticCurve, SepticExtension,
-};
-use crate::{
-    machine::field::{same_field, FieldBehavior, FieldType},
-    primitives::Poseidon2Init,
-};
-use p3_baby_bear::BabyBear;
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use super::{fields::koalabear, FieldSepticCurve, SepticExtension};
+use crate::machine::field::{same_field, FieldBehavior, FieldSpecificPoseidon2Config, FieldType};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
-use p3_mersenne_31::Mersenne31;
 use p3_symmetric::Permutation;
 use serde::{Deserialize, Serialize};
 use std::{any::Any, ops::Add};
 
-/// A septic elliptic curve point on y^2 = x^3 + 2x + 26z^5 over field `F_{p^7} = F_p[z]/(z^7 - 2z - 5)`.
+/// A septic elliptic curve point on y^2 = x^3 + 2x + 611z^5 over field `F_{p^7} = F_p[z]/(z^7 + 2z^6 - 2)`.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[repr(C)]
 pub struct SepticCurve<F> {
@@ -31,11 +23,11 @@ impl<F: Field> SepticCurve<F> {
     #[must_use]
     pub fn dummy() -> Self {
         Self {
-            x: SepticExtension::from_base_fn(|i| {
-                F::from_canonical_u32(F::CURVE_WITNESS_DUMMY_POINT_X[i])
+            x: SepticExtension::from_basis_coefficients_fn(|i| {
+                F::from_u32(F::CURVE_WITNESS_DUMMY_POINT_X[i])
             }),
-            y: SepticExtension::from_base_fn(|i| {
-                F::from_canonical_u32(F::CURVE_WITNESS_DUMMY_POINT_Y[i])
+            y: SepticExtension::from_basis_coefficients_fn(|i| {
+                F::from_u32(F::CURVE_WITNESS_DUMMY_POINT_Y[i])
             }),
         }
     }
@@ -99,15 +91,11 @@ impl<F: Field> SepticCurve<F> {
     }
 }
 
-impl<F: FieldAlgebra + Any> SepticCurve<F> {
-    /// Evaluates the curve formula x^3 + 2x + 26z^5
+impl<F: PrimeCharacteristicRing + Any> SepticCurve<F> {
+    /// Evaluates the curve formula x^3 + 2x + 611z^5
     pub fn curve_formula(x: SepticExtension<F>) -> SepticExtension<F> {
-        if same_field::<F, BabyBear, 4>() {
-            babybear::curve_formula(x)
-        } else if same_field::<F, KoalaBear, 4>() {
+        if same_field::<F, KoalaBear, 4>() {
             koalabear::curve_formula(x)
-        } else if same_field::<F, Mersenne31, 3>() {
-            mersenne31::curve_formula(x)
         } else {
             panic!("Unsupported field type");
         }
@@ -132,7 +120,7 @@ impl<F: PrimeField32 + FieldBehavior> SepticCurve<F> {
                 m[4],
                 m[5],
                 m[6],
-                m[7] + F::from_canonical_u32(1 << 16) * F::from_canonical_u8(offset),
+                m[7] + F::from_u32(1 << 16) * F::from_u8(offset),
                 F::ZERO,
                 F::ZERO,
                 F::ZERO,
@@ -144,26 +132,10 @@ impl<F: PrimeField32 + FieldBehavior> SepticCurve<F> {
             ];
 
             let m_hash = match F::field_type() {
-                FieldType::TypeBabyBear => {
-                    let perm = crate::configs::stark_config::BabyBearPoseidon2::init();
-                    perm.permute(
-                        m_trial.map(|x| BabyBear::from_canonical_u32(x.as_canonical_u32())),
-                    )
-                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
-                }
                 FieldType::TypeKoalaBear => {
-                    let perm = crate::configs::stark_config::KoalaBearPoseidon2::init();
-                    perm.permute(
-                        m_trial.map(|x| KoalaBear::from_canonical_u32(x.as_canonical_u32())),
-                    )
-                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
-                }
-                FieldType::TypeMersenne31 => {
-                    let perm = crate::configs::stark_config::M31Poseidon2::init();
-                    perm.permute(
-                        m_trial.map(|x| Mersenne31::from_canonical_u32(x.as_canonical_u32())),
-                    )
-                    .map(|x| F::from_canonical_u32(x.as_canonical_u32()))
+                    let perm = KoalaBear::permutation();
+                    perm.permute(m_trial.map(|x| KoalaBear::from_u32(x.as_canonical_u32())))
+                        .map(|x| F::from_u32(x.as_canonical_u32()))
                 }
                 _ => unimplemented!("Unsupported field type"),
             };
@@ -185,7 +157,7 @@ impl<F: PrimeField32 + FieldBehavior> SepticCurve<F> {
     }
 }
 
-impl<F: FieldAlgebra + Any> SepticCurve<F> {
+impl<F: PrimeCharacteristicRing + Any> SepticCurve<F> {
     /// Given three points p1, p2, p3, the function is zero if and only if p3.x == (p1 + p2).x assuming that p1 != p2.
     pub fn sum_checker_x(
         p1: SepticCurve<F>,
@@ -217,7 +189,7 @@ impl<T> SepticCurve<T> {
     }
 }
 
-/// A septic elliptic curve point on y^2 = x^3 + 2x + 26z^5 over field `F_{p^7} = F_p[z]/(z^7 - 2z - 5)`, including the point at infinity.
+/// A septic elliptic curve point on y^2 = x^3 + 2x + 611z^5 over field `F_{p^7} = F_p[z]/(z^7 + 2z^6 - 2)`, including the point at infinity.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SepticCurveComplete<T> {
     /// The point at infinity.

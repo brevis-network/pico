@@ -4,7 +4,7 @@ use super::{
 };
 use crate::configs::config::FieldGenericConfig;
 use alloc::format;
-use p3_field::{ExtensionField, Field, FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 
 /// A variable that represents a native field element.
@@ -56,6 +56,14 @@ pub struct Witness<FC: FieldGenericConfig> {
     pub exts: Vec<FC::EF>,
     pub vkey_hash: FC::N,
     pub committed_values_digest: FC::N,
+    /// Which proving backend produced this witness, when the gnark side has to branch on it.
+    ///
+    /// `Some("mle")` marks a wrap witness; `None` is the FRI path. The two use DIFFERENT
+    /// KoalaBear-Poseidon2 round-constant tables and each one's honest witness is unsatisfiable
+    /// under the other's, so the interpreter has to pick the right chip — and the witness is the
+    /// only thing that knows. Both shapes have the same two public inputs, so nothing else
+    /// distinguishes them.
+    pub backend: Option<String>,
 }
 
 impl<FC: FieldGenericConfig> Witness<FC> {
@@ -87,7 +95,7 @@ impl<N: Field> Usize<N> {
         builder: &mut Builder<FC>,
     ) -> Var<FC::N> {
         match self {
-            Usize::Const(c) => builder.eval(FC::N::from_canonical_usize(*c)),
+            Usize::Const(c) => builder.eval(FC::N::from_usize(*c)),
             Usize::Var(v) => *v,
         }
     }
@@ -176,7 +184,7 @@ impl<FC: FieldGenericConfig> Variable<FC> for Usize<FC::N> {
             }
             Usize::Var(v) => match src {
                 SymbolicUsize::Const(src) => {
-                    builder.assign(*v, FC::N::from_canonical_usize(src));
+                    builder.assign(*v, FC::N::from_usize(src));
                 }
                 SymbolicUsize::Var(src) => {
                     builder.assign(*v, src);
@@ -198,10 +206,10 @@ impl<FC: FieldGenericConfig> Variable<FC> for Usize<FC::N> {
                 assert_eq!(lhs, rhs, "constant usizes do not match");
             }
             (SymbolicUsize::Const(lhs), SymbolicUsize::Var(rhs)) => {
-                builder.assert_var_eq(FC::N::from_canonical_usize(lhs), rhs);
+                builder.assert_var_eq(FC::N::from_usize(lhs), rhs);
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Const(rhs)) => {
-                builder.assert_var_eq(lhs, FC::N::from_canonical_usize(rhs));
+                builder.assert_var_eq(lhs, FC::N::from_usize(rhs));
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Var(rhs)) => builder.assert_var_eq(lhs, rhs),
         }
@@ -220,10 +228,10 @@ impl<FC: FieldGenericConfig> Variable<FC> for Usize<FC::N> {
                 assert_ne!(lhs, rhs, "constant usizes do not match");
             }
             (SymbolicUsize::Const(lhs), SymbolicUsize::Var(rhs)) => {
-                builder.assert_var_ne(FC::N::from_canonical_usize(lhs), rhs);
+                builder.assert_var_ne(FC::N::from_usize(lhs), rhs);
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Const(rhs)) => {
-                builder.assert_var_ne(lhs, FC::N::from_canonical_usize(rhs));
+                builder.assert_var_ne(lhs, FC::N::from_usize(rhs));
             }
             (SymbolicUsize::Var(lhs), SymbolicUsize::Var(rhs)) => {
                 builder.assert_var_ne(lhs, rhs);
@@ -427,7 +435,7 @@ impl<FC: FieldGenericConfig> Variable<FC> for Ext<FC::F, FC::EF> {
             }
             SymbolicExt::Base(src) => match src {
                 SymbolicFelt::Const(src) => {
-                    builder.push_op(DslIr::ImmE(*self, FC::EF::from_base(src)));
+                    builder.push_op(DslIr::ImmE(*self, FC::EF::from(src)));
                 }
                 SymbolicFelt::Val(src) => {
                     builder.push_op(DslIr::AddEFFI(*self, src, FC::EF::ZERO));

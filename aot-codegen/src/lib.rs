@@ -16,7 +16,7 @@ pub mod types;
 
 // Re-export key types for convenience
 pub use block_analysis::BlockAnalyzer;
-pub use compiler::AotCompiler;
+pub use compiler::{AotCompiler, RuntimeSpec};
 pub use config::AotConfig;
 pub use elf_parser::parse_elf;
 pub use instruction_translator::InstructionTranslator;

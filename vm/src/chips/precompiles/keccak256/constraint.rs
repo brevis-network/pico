@@ -1,29 +1,24 @@
 use core::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_keccak_air::{KeccakAir, NUM_ROUNDS, U64_LIMBS};
 
-use super::{columns::KeccakMemCols, KeccakPermuteChip, STATE_NUM_WORDS, STATE_SIZE};
-use crate::{
-    chips::{
-        chips::riscv_memory::read_write::columns::MemoryCols,
-        gadgets::{addr_add::AddrAddGadget, syscall_addr::SyscallAddrGadget},
-    },
-    compiler::word::Word,
-    emulator::riscv::syscalls::SyscallCode,
-    machine::builder::{
-        ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder, RiscVMemoryBuilder,
-        SubAirBuilder,
-    },
+use super::{
+    columns::{KeccakMemCols, NUM_KECCAK_PERM_COLS},
+    p3_eval, KeccakPermuteChip, KECCAK_STATE_BUS_INPUT_TAG, KECCAK_STATE_BUS_OUTPUT_TAG,
+    STATE_SIZE,
+};
+use crate::machine::{
+    builder::{ChipBuilder, SubAirBuilder},
+    lookup::{LookupScope, LookupType, SymbolicLookup},
 };
 
 impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
 
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &KeccakMemCols<CB::Var> = (*local).borrow();
         let next: &KeccakMemCols<CB::Var> = (*next).borrow();
 
@@ -31,119 +26,77 @@ impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for KeccakPermuteChip<F> {
         let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
         let not_final_step = CB::Expr::ONE - final_step;
 
-        // Constrain memory in the first and last cycles.
-        builder.assert_eq(
-            (first_step + final_step) * local.is_real,
-            local.do_memory_check,
-        );
+        // The syscall receive, the address gadgets and the state memory accesses live in
+        // `KeccakControlChip` (one row per permutation). What is left here is the p3 permutation
+        // AIR plus the state bus that ties the two together.
+        builder.assert_bool(local.is_real);
 
-        // Address alignment constraints.
-        let state_addr = SyscallAddrGadget::<CB::F>::eval(
-            builder,
-            200, // 25 words × 8 bytes
-            local.state_addr,
-            local.is_real.into(),
-        );
+        // The state bus fires exactly once per real permutation, on its final step. p3 already
+        // constrains `export` to be boolean and zero off the final step; this pins it on the final
+        // step too, so a dummy permutation (`is_real = 0`) never sends.
+        builder.assert_eq(local.keccak.export, final_step * local.is_real);
 
-        for i in 0..STATE_NUM_WORDS {
-            AddrAddGadget::<CB::F>::eval(
-                builder,
-                Word([
-                    state_addr[0].into(),
-                    state_addr[1].into(),
-                    state_addr[2].into(),
-                    CB::Expr::ZERO,
-                ]),
-                Word::from(8 * i as u64),
-                local.state_addrs[i],
-                local.do_memory_check.into(),
-            );
-        }
-
-        // Constrain memory
-        for i in 0..STATE_NUM_WORDS as u32 {
-            // At the first cycle, verify that the memory has not changed since it's a memory read.
-            builder
-                .when(local.keccak.step_flags[0] * local.is_real)
-                .assert_word_eq(
-                    *local.state_mem[i as usize].value(),
-                    *local.state_mem[i as usize].prev_value(),
-                );
-
-            builder.eval_memory_access(
-                local.chunk,
-                local.clk + final_step, // The clk increments by 1 after a final step
-                local.state_addrs[i as usize].value.map(Into::into),
-                &local.state_mem[i as usize],
-                local.do_memory_check,
-            );
-        }
-
-        // Receive the syscall in the first row of each 24-cycle
-        builder.assert_eq(local.receive_ecall, first_step * local.is_real);
-
-        builder.looked_syscall(
-            local.chunk,
-            local.clk,
-            CB::F::from_canonical_u32(SyscallCode::KECCAK_PERMUTE.syscall_id()),
-            state_addr.map(Into::into),
-            [CB::F::ZERO, CB::F::ZERO, CB::F::ZERO],
-            local.receive_ecall,
-        );
+        // The input is exported from the first step, where `a` is the permutation input; the
+        // flag is pinned the same way, so it fires exactly once per real permutation and never
+        // on a dummy one. The round flags put exactly one first step and one final step in every
+        // 24-row cycle, and `chunk / clk / is_real` are copied across the cycle below, so the
+        // input and the output message of a permutation carry the same key.
+        builder.assert_eq(local.export_in, first_step * local.is_real);
 
         // Constrain that the inputs stay the same throughout the 24 rows of each cycle
         let mut transition_builder = builder.when_transition();
         let mut transition_not_final_builder = transition_builder.when(not_final_step);
         transition_not_final_builder.assert_eq(local.chunk, next.chunk);
         transition_not_final_builder.assert_eq(local.clk, next.clk);
-        transition_not_final_builder.assert_eq(local.state_addr.addr[0], next.state_addr.addr[0]);
-        transition_not_final_builder.assert_eq(local.state_addr.addr[1], next.state_addr.addr[1]);
-        transition_not_final_builder.assert_eq(local.state_addr.addr[2], next.state_addr.addr[2]);
         transition_not_final_builder.assert_eq(local.is_real, next.is_real);
 
         // The last row must be nonreal because NUM_ROUNDS is not a power of 2. This constraint
         // ensures that the table does not end abruptly.
         builder.when_last_row().assert_zero(local.is_real);
 
-        // Verify that local.a values are equal to the memory values in the 0 and 23rd rows of each
-        // cycle. Memory values are 64-bit words (4 u16 limbs), which directly match
-        // the keccak state's 4 u16 limbs per u64 element.
-        for i in 0..STATE_SIZE as u32 {
-            // Word is 4×u16 limbs, directly matching keccak.a's u16 limbs
-            let memory_limbs = local.state_mem[i as usize].value();
-
-            let y_idx = i / 5;
-            let x_idx = i % 5;
-
-            // On a first step row, verify memory matches with local.p3_keccak_cols.a
-            let a_value_limbs = local.keccak.a[y_idx as usize][x_idx as usize];
-            for j in 0..U64_LIMBS {
-                builder
-                    .when(first_step * local.is_real)
-                    .assert_eq(memory_limbs[j], a_value_limbs[j]);
-            }
-
-            // On a final step row, verify memory matches with
-            // local.p3_keccak_cols.a_prime_prime_prime
-            for j in 0..U64_LIMBS {
-                builder.when(final_step * local.is_real).assert_eq(
-                    memory_limbs[j],
-                    local
-                        .keccak
-                        .a_prime_prime_prime(y_idx as usize, x_idx as usize, j),
-                )
+        // Receive the permutation's input (on the first step) and output (on the final step) from
+        // the control AIR, as two tagged messages `[chunk, clk, tag, 100 limbs]` (a single message
+        // would exceed the logUp message-length limit of 128). Word `i` of the state (memory
+        // `state_addr + 8 * i`) is `(y, x) = (i / 5, i % 5)` in the p3 y-major layout; each word
+        // is 4 u16 limbs. On the first step `a` is the permutation input and on the final step
+        // `a'''` is the permutation output; both are pinned to u16 limbs by the p3 bit
+        // decompositions (theta_4 for `a`), which is what makes the control side's memory values
+        // u16 too. The two messages of one permutation share the `(chunk, clk)` key, which the
+        // syscall bus makes unique per control row.
+        let mut input: Vec<CB::Expr> = Vec::with_capacity(3 + STATE_SIZE * U64_LIMBS);
+        input.push(local.chunk.into());
+        input.push(local.clk.into());
+        input.push(CB::Expr::from_u32(KECCAK_STATE_BUS_INPUT_TAG));
+        let mut output: Vec<CB::Expr> = Vec::with_capacity(3 + STATE_SIZE * U64_LIMBS);
+        output.push(local.chunk.into());
+        output.push(local.clk.into());
+        output.push(CB::Expr::from_u32(KECCAK_STATE_BUS_OUTPUT_TAG));
+        for i in 0..STATE_SIZE {
+            let (y, x) = (i / 5, i % 5);
+            for limb in 0..U64_LIMBS {
+                input.push(local.keccak.a[y][x][limb].into());
+                output.push(local.keccak.a_prime_prime_prime(y, x, limb).into());
             }
         }
-
-        // Range check all the values in `state_mem` to be u16 limbs.
-        for i in 0..STATE_NUM_WORDS {
-            builder.slice_range_check_u16(&local.state_mem[i].value().0, local.do_memory_check);
-        }
+        builder.looked(SymbolicLookup::new(
+            input,
+            local.export_in.into(),
+            LookupType::KeccakPermute,
+            LookupScope::Regional,
+        ));
+        builder.looked(SymbolicLookup::new(
+            output,
+            local.keccak.export.into(),
+            LookupType::KeccakPermute,
+            LookupScope::Regional,
+        ));
 
         let mut sub_builder =
-            SubAirBuilder::<CB, KeccakAir, CB::Var>::new(builder, 0..NUM_KECCAK_COLS);
+            SubAirBuilder::<CB, KeccakAir, CB::Var>::new(builder, 0..NUM_KECCAK_PERM_COLS);
 
-        // Eval the plonky3 keccak air
-        self.p3_keccak.eval(&mut sub_builder);
+        // Eval the keccak permutation air. `KeccakAir` is the `SubAir` type parameter only (its
+        // own width is the upstream 2633 and is not read); the column window is the local
+        // permutation layout given by the range above.
+        p3_eval::eval_keccak(&mut sub_builder);
     }
 }

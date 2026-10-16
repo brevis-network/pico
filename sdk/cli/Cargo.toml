@@ -7,9 +7,6 @@ repository = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 
-[build-dependencies]
-vergen.workspace = true
-
 [dependencies]
 anyhow.workspace = true
 cargo_metadata.workspace = true
@@ -19,15 +16,38 @@ env_logger.workspace = true
 futures.workspace = true
 hex.workspace = true
 indicatif.workspace = true
-log.workspace = true
 num-bigint.workspace = true
 num-traits.workspace = true
+pico-aot-codegen.workspace = true
+# The type `run_with_aot` takes, which `pico-prover` does not re-export; without its default
+# features, as `pico-prover` takes it.
+pico-aot-runtime = { path = "../../aot-runtime", default-features = false, optional = true }
+# Without its default features, so that this crate's own `multi-field-transcript` decides.
+pico-prover = { path = "../prover", default-features = false }
 pico-sdk.workspace = true
-pico-vm.workspace = true
-rand.workspace = true
+# The global allocator the SDK's own prover build uses, through `pico-sdk/prover`.
+# TODO(onchain): back to `workspace = true` once `multi-field-transcript` is unconditional.
+pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict", "jemalloc"] }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10.8"
 target-lexicon.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["time"] }
 yansi.workspace = true
+
+[dev-dependencies]
+# Reads `AOT`'s digest back out of a generated dispatch crate.
+syn = { version = "2.0", features = ["full"] }
+tempfile = "3"
+# The installer tests' HTTP server, and a clock their retry back-off sleeps on without waiting.
+tokio = { workspace = true, features = ["io-util", "net", "test-util"] }
+tracing.workspace = true
+
+[features]
+default = ["multi-field-transcript"]
+# The embed and wrap machines. Without it (`--no-default-features`), `prove --phase embed` and
+# `--phase wrap` are refused before keygen with `ProveError::FeatureMissing`.
+multi-field-transcript = ["pico-prover/multi-field-transcript"]
+# `run_with_aot`, the entry point of the helper binary `--aot` builds.
+aot = ["pico-prover/aot", "dep:pico-aot-runtime"]

@@ -345,7 +345,9 @@ fn dwords_to_bytes(values: &[u64]) -> Vec<u8> {
 
 fn pack_words_to_packed_dwords(words: &[u32]) -> Vec<u64> {
     words
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
         .collect()
 }

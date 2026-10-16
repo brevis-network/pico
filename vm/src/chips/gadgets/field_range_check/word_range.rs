@@ -18,7 +18,7 @@
 //!
 //! # Current formulation
 //!
-//! For BabyBear and KoalaBear the modulus satisfies `(p - 1) % 2^16 == 0`, so writing
+//! The KoalaBear modulus satisfies `(p - 1) % 2^16 == 0`, so writing
 //! `TOP_LIMB = (p - 1) >> 16` gives
 //!
 //! ```text
@@ -26,9 +26,6 @@
 //!                     AND ( value[1] < TOP_LIMB
 //!                           OR (value[1] == TOP_LIMB AND value[0] == 0) )
 //! ```
-//!
-//! Mersenne31 does not satisfy that divisibility (`p - 1 = 0x7FFF_FFFE`), so its final
-//! case is `value[0] != 0xFFFF` instead of `value[0] == 0`.
 //!
 //! The `value[1] < TOP_LIMB` decision uses the standard one-bit trick: `bit` is boolean
 //! and `value[1] - TOP_LIMB + bit * 2^16` is range checked as a u16, which is only
@@ -43,7 +40,7 @@ use crate::{
     },
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// Columns needed to prove that a `Word` is a canonical field element.
@@ -53,53 +50,48 @@ pub struct FieldWordRangeChecker<T> {
     /// `1` iff `value[1] < TOP_LIMB`.
     pub ms_limb_lt_top: T,
 
-    /// Mersenne31 only: the inverse witnessing `value[0] != 0xFFFF` on the rows where the
-    /// most significant limb is maxed, i.e. `is_real * (1 - ms_limb_lt_top) / (value[0] -
-    /// 0xFFFF)`.
-    ///
-    /// BabyBear and KoalaBear close that case with a plain `value[0] == 0` assertion and
-    /// need no witness, so there the column is pinned to zero rather than left free.
+    /// Vestigial: the witness a Mersenne31 base field needed to rule out `value[0] == 0xFFFF`
+    /// on the rows where the most significant limb is maxed. KoalaBear closes that case with a
+    /// plain `value[0] == 0` assertion and needs no witness, so the column is pinned to zero
+    /// rather than left free.
     pub low_limb_not_max_inv: T,
 }
 
 /// `(p - 1) >> 16`, the largest value the most significant u16 limb may take.
 fn top_limb<F: Field + FieldBehavior>() -> u16 {
     match F::field_type() {
-        // 2^31 - 2^27 + 1 => (p - 1) >> 16 == 0x7800
-        FieldType::TypeBabyBear => 0x7800,
         // 2^31 - 2^24 + 1 => (p - 1) >> 16 == 0x7F00
         FieldType::TypeKoalaBear => 0x7F00,
-        // 2^31 - 1 => (p - 1) >> 16 == 0x7FFF
-        FieldType::TypeMersenne31 => 0x7FFF,
         _ => unimplemented!("Unsupported field type"),
     }
 }
 
 impl<F: Field + FieldBehavior> FieldWordRangeChecker<F> {
+    /// The byte event `range_check`'s lookup needs, without the column population.
+    ///
+    /// Split out because a chip whose trace generator banks byte events in a pass separate from
+    /// column filling (`EcallChip::extra_record`, and its GPU kernel) has to emit this from that
+    /// other pass. Only the event's value is shared — each caller still writes its own gate, and
+    /// getting either wrong is a bus imbalance at prove time, not a compile error.
+    pub fn range_check_event(record: &mut impl ByteRecordBehavior, value: u64) {
+        let top = top_limb::<F>();
+        let ms_limb = ((value >> 16) & 0xFFFF) as u16;
+        // `ms_limb - top + lt * 2^16` as a u16; the wrapping subtraction produces exactly
+        // that in both branches.
+        record.add_u16_range_check(ms_limb.wrapping_sub(top));
+    }
+
     /// `value` is the full 64-bit operand; only its low 32 bits may be non-zero for the
     /// constraints to be satisfiable.
     pub fn populate(&mut self, record: &mut impl ByteRecordBehavior, value: u64) {
         let top = top_limb::<F>();
         let ms_limb = ((value >> 16) & 0xFFFF) as u16;
-        let ls_limb = (value & 0xFFFF) as u16;
 
-        let lt = ms_limb < top;
-        self.ms_limb_lt_top = F::from_bool(lt);
-        // `ms_limb - top + lt * 2^16` as a u16; the wrapping subtraction produces exactly
-        // that in both branches.
-        record.add_u16_range_check(ms_limb.wrapping_sub(top));
+        self.ms_limb_lt_top = F::from_bool(ms_limb < top);
+        Self::range_check_event(record, value);
 
-        // Only reached with `is_real = 1` (the caller sets the gate in the same branch that
-        // calls this), so the `eval` side's `is_real * (1 - ms_limb_lt_top)` is just `!lt`.
-        // On the `lt` rows that product is zero, and the witness has to be zero with it --
-        // supplying the inverse there would assert `1 == 0`.
-        self.low_limb_not_max_inv = if F::field_type() == FieldType::TypeMersenne31 && !lt {
-            (F::from_canonical_u16(ls_limb) - F::from_canonical_u16(u16::MAX))
-                .try_inverse()
-                .unwrap_or(F::ZERO)
-        } else {
-            F::ZERO
-        };
+        // Pinned to zero by the `eval` side.
+        self.low_limb_not_max_inv = F::ZERO;
     }
 }
 
@@ -114,8 +106,6 @@ impl<F: Field + FieldBehavior> FieldWordRangeChecker<F> {
         cols: FieldWordRangeChecker<CB::Var>,
         is_real: CB::Expr,
     ) {
-        let top = CB::F::from_canonical_u16(top_limb::<F>());
-
         // Everything below is gated on `is_real`, so a non-boolean gate would leave the
         // whole gadget saying nothing. The only caller derives `is_real` from a product of
         // two `IsZero` results, which is boolean only by an argument spanning three files;
@@ -126,19 +116,55 @@ impl<F: Field + FieldBehavior> FieldWordRangeChecker<F> {
         builder.when(is_real.clone()).assert_zero(value[2]);
         builder.when(is_real.clone()).assert_zero(value[3]);
 
-        // `ms_limb_lt_top` is the boolean result of `value[1] < TOP_LIMB`. The range check
-        // on `value[1] - TOP_LIMB + bit * 2^16` is only satisfiable for the correct bit:
-        // if `value[1] < TOP_LIMB` the difference is negative and needs the `+2^16` to land
+        // The comparison itself, over the two limbs that carry the value.
+        //
+        // Emission order matters beyond readability: the per-AIR digests in
+        // `vm/tests/riscv_constraint_dump.txt` are taken over the vk's serialized
+        // `symbolic_constraints`, so moving an assertion across this call would change the
+        // Ecall AIR's digest and turn the cross-branch parity gate red for no semantic reason.
+        // The three assertions above therefore stay here, ahead of the delegation, exactly
+        // where they were when this body was one function.
+        Self::range_check_u32_limbs::<CB>(builder, value[0].into(), value[1].into(), cols, is_real);
+    }
+
+    /// The `value < p` comparison for a 32-bit value supplied as its two u16 limbs.
+    ///
+    /// **Assumes `is_real` is already constrained boolean** -- unlike [`Self::range_check`],
+    /// which asserts it. Split out for callers whose value is *structurally* 32 bits and who
+    /// already gate on a column they have asserted boolean themselves: a precompile reading one
+    /// half of a dword has no limbs 2 and 3 to bound, and passing literal zeros to
+    /// [`Self::range_check`] would spend two constraints per call asserting that a literal is
+    /// zero. The poseidon2 precompile makes 32 such calls per row.
+    ///
+    /// `ls_limb` is bits 0..15, `ms_limb` bits 16..31. Both are assumed to be u16 -- the caller
+    /// range checks them (a precompile's memory-value limbs already are, via
+    /// `slice_range_check_u16`). Without that this bounds nothing: the comparison reasons about
+    /// `ms_limb` alone, so an out-of-range `ls_limb` would slip through.
+    pub fn range_check_u32_limbs<CB: ChipBuilder<F>>(
+        builder: &mut CB,
+        ls_limb: CB::Expr,
+        ms_limb: CB::Expr,
+        cols: FieldWordRangeChecker<CB::Var>,
+        is_real: CB::Expr,
+    ) {
+        let top = CB::F::from_u16(top_limb::<F>());
+
+        // `ms_limb_lt_top` is the boolean result of `ms_limb < TOP_LIMB`. The range check
+        // on `ms_limb - TOP_LIMB + bit * 2^16` is only satisfiable for the correct bit:
+        // if `ms_limb < TOP_LIMB` the difference is negative and needs the `+2^16` to land
         // back in u16; if it is `>= TOP_LIMB` the difference is already a u16 and adding
         // `2^16` would overflow the range.
-        // Gated on `is_real`: `OpcodeSpecificCols` is a union, and on non-ecall rows these
-        // columns alias much smaller views (`JumpCols`/`AuipcCols` are `PhantomData`), so
-        // an ungated assertion would start failing the moment any sibling view grows.
-        // The gate costs nothing.
+        // Gated on `is_real`, like everything else in this gadget: the caller only populates
+        // `cols` on the rows its gate selects (`riscv_ecall/traces.rs`, the HALT and
+        // COMMIT_DEFERRED_PROOFS branches), so an ungated assertion would be a claim about rows
+        // the gadget is not being asked to say anything about. The gate costs nothing.
+        // (The comment here used to justify the gate by an aliasing hazard in a
+        // `OpcodeSpecificCols` union holding `JumpCols`/`AuipcCols`; none of those types exist
+        // any more -- these columns are the Ecall chip's own.)
         builder
             .when(is_real.clone())
             .assert_bool(cols.ms_limb_lt_top);
-        let diff = value[1].into() - top + cols.ms_limb_lt_top * CB::F::from_canonical_u32(1 << 16);
+        let diff = ms_limb.clone() - top + cols.ms_limb_lt_top * CB::F::from_u32(1 << 16);
         builder.looking_rangecheck(
             ByteOpcode::U16Range,
             diff,
@@ -150,29 +176,15 @@ impl<F: Field + FieldBehavior> FieldWordRangeChecker<F> {
 
         // If the most significant limb is not strictly below the top, it must equal it.
         let is_top = is_real * (CB::Expr::ONE - cols.ms_limb_lt_top);
-        builder.when(is_top.clone()).assert_eq(value[1], top);
+        builder.when(is_top.clone()).assert_eq(ms_limb, top);
 
         match F::field_type() {
-            FieldType::TypeBabyBear | FieldType::TypeKoalaBear => {
+            FieldType::TypeKoalaBear => {
                 // `p - 1 == TOP_LIMB * 2^16`, so once the top limb is maxed the low limb
                 // must be zero.
-                builder.when(is_top).assert_zero(value[0]);
-                // The Mersenne31 witness is unused here. Pin it so it is not a free column.
+                builder.when(is_top).assert_zero(ls_limb);
+                // Vestigial column. Pin it so it is not a free column.
                 builder.assert_zero(cols.low_limb_not_max_inv);
-            }
-            FieldType::TypeMersenne31 => {
-                // `p == 0x7FFF_FFFF`, so the single forbidden combination is
-                // `value[1] == 0x7FFF && value[0] == 0xFFFF`.
-                //
-                // `witness * (value[0] - 0xFFFF) == is_top` says exactly that: where
-                // `is_top` is one the difference must be invertible, hence non-zero; where
-                // it is zero the product is zero and the honest witness is zero too. Both
-                // sides are degree 2, which keeps this a degree-2 constraint.
-                builder.assert_eq(
-                    cols.low_limb_not_max_inv
-                        * (value[0].into() - CB::F::from_canonical_u16(u16::MAX)),
-                    is_top,
-                );
             }
             _ => unimplemented!("Unsupported field type"),
         }
@@ -185,11 +197,11 @@ mod tests {
     use crate::{
         chips::chips::byte::event::ByteLookupEvent,
         configs::{config::StarkGenericConfig, stark_config::KoalaBearPoseidon2},
-        machine::{folder::DebugConstraintFolder, septic::SepticDigest},
+        machine::{debug_folder::DebugConstraintFolder, septic::SepticDigest},
     };
+    use p3_air::RowWindow;
     use p3_field::PrimeField32;
     use p3_koala_bear::KoalaBear;
-    use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 
     type F = KoalaBear;
     type EF = <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge;
@@ -211,23 +223,10 @@ mod tests {
 
         let word: Word<F> = Word::from(value);
         let empty_f: [F; 0] = [];
-        let empty_ef: [EF; 0] = [];
 
         let mut builder = DebugConstraintFolder::<F, EF> {
-            preprocessed: VerticalPair::new(
-                RowMajorMatrixView::new_row(&empty_f),
-                RowMajorMatrixView::new_row(&empty_f),
-            ),
-            main: VerticalPair::new(
-                RowMajorMatrixView::new_row(&empty_f),
-                RowMajorMatrixView::new_row(&empty_f),
-            ),
-            permutation: VerticalPair::new(
-                RowMajorMatrixView::new_row(&empty_ef),
-                RowMajorMatrixView::new_row(&empty_ef),
-            ),
-            permutation_challenges: [EF::ZERO; 2],
-            regional_cumulative_sum: EF::ZERO,
+            preprocessed: RowWindow::from_two_rows(&empty_f, &empty_f),
+            main: RowWindow::from_two_rows(&empty_f, &empty_f),
             global_cumulative_sum: SepticDigest::<F>::zero(),
             is_first_row: F::ZERO,
             is_last_row: F::ZERO,
@@ -235,6 +234,8 @@ mod tests {
             public_values: &empty_f,
             failures: Vec::new(),
             scopes: Vec::new(),
+            // Only this branch's folder carries it, so upstream's copy of this test omits it.
+            constraint_count: 0,
         };
 
         FieldWordRangeChecker::<F>::range_check(&mut builder, word, cols, F::ONE);
@@ -252,8 +253,8 @@ mod tests {
         // Caveat: this recomputes the formula rather than observing the AIR's emitted
         // tuple, so it does not catch an edit to the `diff` expression in `range_check`
         // itself. Doing that needs a builder that collects lookups instead of ignoring them.
-        let top = F::from_canonical_u16(top_limb::<F>());
-        let expected = word[1] - top + cols.ms_limb_lt_top * F::from_canonical_u32(1 << 16);
+        let top = F::from_u16(top_limb::<F>());
+        let expected = word[1] - top + cols.ms_limb_lt_top * F::from_u32(1 << 16);
         let recorded: Vec<u32> = blu
             .0
             .iter()

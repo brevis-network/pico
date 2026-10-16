@@ -4,6 +4,9 @@
 //! limb arrays instead of heap-allocated BigUint. This eliminates allocation
 //! overhead in hot paths while maintaining correctness.
 
+// Schoolbook loops: one index walks the limbs of several operands at once.
+#![allow(clippy::needless_range_loop)]
+
 use num::BigUint;
 
 /// Maximum number of u32 limbs needed (for BLS12-381: 384 bits = 12 u32s)

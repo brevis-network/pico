@@ -166,7 +166,14 @@ impl Instruction {
 }
 
 /// A transpiler that converts the 32-bit encoded instructions into instructions.
-pub(crate) struct InstructionTranspiler;
+pub(crate) struct InstructionTranspiler {
+    /// Address of the instruction currently being transpiled (`pc_base + 4 * index`).
+    ///
+    /// `InstructionProcessor` hands the decoder no index, so `transpile` writes this before every
+    /// `process_instruction` call. Only `process_auipc` reads it: AUIPC folds its own address into
+    /// the encoded instruction, which is what lets it become a plain two-immediate ADD.
+    pc: u64,
+}
 
 impl InstructionProcessor for InstructionTranspiler {
     type InstructionResult = Instruction;
@@ -332,13 +339,20 @@ impl InstructionProcessor for InstructionTranspiler {
         Instruction::new(Opcode::ADD, dec_insn.rd as u8, 0, dec_insn.imm, true, true)
     }
 
-    /// AUIPC instructions have the third operand set to imm << 12.
+    /// AUIPC is `rd = pc + (imm << 12)`, and `pc` is a compile-time constant for this slot, so the
+    /// instruction is a two-immediate ADD -- the same shape as `process_lui` above, which already
+    /// encodes LUI as `ADD rd, 0, imm`. The rrs-pico UType `imm` field already carries the
+    /// upper-20-bit value shifted into position and sign-extended to 64 bits, so `imm + pc` is
+    /// bit-for-bit the `pc.wrapping_add(imm)` the old AUIPC emulator arm computed.
+    ///
+    /// Since X12 the transpiler emits no `Opcode::AUIPC` at all: the Cpu AIR has no `is_auipc`
+    /// selector, no `is_auipc_not_x0` multiplicity and no AUIPC-specific ALU dispatch.
     fn process_auipc(&mut self, dec_insn: UType) -> Self::InstructionResult {
         Instruction::new(
-            Opcode::AUIPC,
+            Opcode::ADD,
             dec_insn.rd as u8,
             dec_insn.imm,
-            dec_insn.imm,
+            self.pc,
             true,
             true,
         )
@@ -500,24 +514,123 @@ impl InstructionProcessor for InstructionTranspiler {
 
 /// Transpile the [`Instruction`]s from the 32-bit encoded instructions.
 ///
+/// `pc_base` is the guest address of `instructions_u32[0]`; slot `i` therefore sits at
+/// `pc_base + 4 * i`. That address is handed to the transpiler because AUIPC is re-encoded as
+/// `ADD rd, imm, pc` and needs its own address as an immediate. It is the same index the runtime
+/// uses: `Program::fetch` reads slot `(pc - pc_base) / 4`, and the Program preprocessed table
+/// builds row `i` with `pc = pc_base + 4 * i`.
+///
 /// # Panics
 ///
 /// This function will return an error if the [`Instruction`] cannot be processed.
 #[must_use]
-pub(crate) fn transpile(instructions_u32: &[u32]) -> Arc<[Instruction]> {
-    //let mut instructions = Vec::new();
-    let mut transpiler = InstructionTranspiler;
-    //for instruction_u32 in instructions_u32 {
-    //    let instruction = process_instruction(&mut transpiler, *instruction_u32).unwrap();
-    //    instructions.push(instruction);
-    //}
-    //instructions;
+pub(crate) fn transpile(instructions_u32: &[u32], pc_base: u64) -> Arc<[Instruction]> {
+    let mut transpiler = InstructionTranspiler { pc: pc_base };
     instructions_u32
         .iter()
         .copied()
-        .map(|inst| {
+        .enumerate()
+        .map(|(i, inst)| {
+            transpiler.pc = pc_base + 4 * i as u64;
             process_instruction(&mut transpiler, inst)
                 .unwrap_or_else(|| panic!("failed to decode instruction {inst:#010x}"))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rrs_lib::instruction_formats::{OPCODE_AUIPC, OPCODE_LUI};
+
+    /// Guest address of slot 0 in these fixtures. Deliberately not 0, so a transpiler that folded
+    /// the slot *index* instead of the slot *address* would show up.
+    const PC_BASE: u64 = 0x10000;
+
+    /// U-type word: `imm[31:12] | rd[11:7] | opcode[6:0]`. `imm20` is the raw 20-bit field, i.e.
+    /// the value the ISA shifts left by 12 before adding it to the pc.
+    fn u_type_word(opcode: u32, rd: u32, imm20: u32) -> u32 {
+        (imm20 << 12) | (rd << 7) | opcode
+    }
+
+    /// `process_auipc` folds the slot's own address into the instruction, so the re-encoding is
+    /// only correct if that address is `pc_base + 4 * i` and is refreshed before every decode.
+    ///
+    /// Nothing downstream can catch a mistake here. A wrong folded address produces a program
+    /// that is *self-consistent*: the Program preprocessed table, the Cpu rows and the Add chip
+    /// all read the same `op_c`, so the full verification, the CPU/GPU parity tests, the tamper
+    /// battery and the pinned constraint artifact all stay green -- only the guest computing the
+    /// wrong address would ever reveal it. Hence this test.
+    #[test]
+    fn transpile_folds_each_auipc_slots_own_address() {
+        // auipc x1, 0x1000  ;  auipc x2, 0
+        let words = [
+            u_type_word(OPCODE_AUIPC, 1, 0x1000),
+            u_type_word(OPCODE_AUIPC, 2, 0),
+        ];
+
+        let out = transpile(&words, PC_BASE);
+        assert_eq!(out.len(), 2);
+
+        // `rd = pc + (imm20 << 12)` becomes `ADD rd, imm20 << 12, pc`, two immediates.
+        assert_eq!(
+            out[0],
+            Instruction::new(Opcode::ADD, 1, 0x0100_0000, 0x10000, true, true),
+            "slot 0 must fold pc_base itself, and `imm20 << 12` must reach op_b unshifted again"
+        );
+        // Slot 1 pins both halves of the address: the base (0x10000, not 0) and the 4-byte
+        // stride (0x10004, not 0x10001 and not 0x10000).
+        assert_eq!(
+            out[1],
+            Instruction::new(Opcode::ADD, 2, 0, 0x10004, true, true),
+            "slot 1 must fold pc_base + 4"
+        );
+    }
+
+    /// The U-type immediate is sign-extended to 64 bits by `rrs_lib`, and `Instruction` stores
+    /// `op_b` as a `u64` verbatim, so a negative AUIPC displacement has to survive as the
+    /// two's-complement pattern and still add up correctly under `wrapping_add`.
+    #[test]
+    fn transpile_round_trips_a_negative_auipc_immediate() {
+        // auipc x3, 0xfffff  =>  pc - 0x1000
+        let words = [u_type_word(OPCODE_AUIPC, 3, 0xF_FFFF)];
+
+        let out = transpile(&words, PC_BASE);
+        assert_eq!(
+            out[0],
+            Instruction::new(Opcode::ADD, 3, 0xFFFF_FFFF_FFFF_F000, PC_BASE, true, true),
+        );
+        // What the emulator's two-immediate ADD path (and the Add chip) computes is exactly the
+        // `pc.wrapping_add(imm)` the deleted AUIPC arm used to compute.
+        assert_eq!(
+            out[0].op_b.wrapping_add(out[0].op_c),
+            PC_BASE.wrapping_sub(0x1000)
+        );
+    }
+
+    /// The slot address advances per *slot*, not per AUIPC: a transpiler that bumped its `pc`
+    /// field from inside `process_auipc` would pass the test above and fail here. LUI shares the
+    /// U-type decode and the two-immediate ADD shape with AUIPC, so it also pins that only AUIPC
+    /// reads the folded address -- LUI must stay `ADD rd, 0, imm`.
+    #[test]
+    fn transpile_advances_the_slot_address_over_non_auipc_slots() {
+        // lui x4, 0x2  ;  addi x0, x0, 0  ;  auipc x5, 0x1
+        let words = [
+            u_type_word(OPCODE_LUI, 4, 0x2),
+            0x0000_0013,
+            u_type_word(OPCODE_AUIPC, 5, 0x1),
+        ];
+
+        let out = transpile(&words, PC_BASE);
+        assert_eq!(
+            out[0],
+            Instruction::new(Opcode::ADD, 4, 0, 0x2000, true, true),
+            "LUI must not pick up the slot address"
+        );
+        assert_eq!(
+            out[2],
+            Instruction::new(Opcode::ADD, 5, 0x1000, PC_BASE + 8, true, true),
+            "slot 2 must fold pc_base + 8 even though slots 0 and 1 are not AUIPC"
+        );
+    }
 }

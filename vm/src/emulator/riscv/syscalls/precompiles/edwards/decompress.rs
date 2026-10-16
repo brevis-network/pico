@@ -1,12 +1,17 @@
 use std::marker::PhantomData;
 
+use num::BigUint;
+
 use crate::chips::gadgets::{
     curves::{
         curve25519_dalek::CompressedEdwardsY,
         edwards::{ed25519::decompress, EdwardsParameters, WORDS_FIELD_ELEMENT},
         COMPRESSED_POINT_BYTES,
     },
-    utils::conversions::{bytes_to_words_le, words_to_bytes_le},
+    utils::{
+        conversions::{bytes_to_words_le, words_to_bytes_le},
+        field_params::FieldParameters,
+    },
 };
 
 use crate::emulator::riscv::{
@@ -22,9 +27,6 @@ pub(crate) struct EdwardsDecompressSyscall<E: EdwardsParameters> {
     _phantom: PhantomData<E>,
 }
 
-// Unused: the Edwards syscalls are not registered while their chips are out of the machine.
-// Kept so the implementation is ready if they return. See `syscalls/mod.rs`.
-#[allow(dead_code)]
 impl<E: EdwardsParameters> EdwardsDecompressSyscall<E> {
     /// Create a new instance of the [`EdwardsDecompressSyscall`].
     pub const fn new() -> Self {
@@ -63,6 +65,21 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
 
         let y_bytes: [u8; COMPRESSED_POINT_BYTES] = words_to_bytes_le(&y_vec);
 
+        // `y` must already be a canonical field element.
+        //
+        // The chip constrains `y < p`, and the `FD_EDDECOMPRESS` hook tells a patched
+        // curve25519 crate to take the software path rather than the syscall when it is not, so
+        // a guest that goes through that crate never arrives here with one. A guest that calls
+        // the ecall directly still can, and would emulate fine and then have no provable trace.
+        let y_int = BigUint::from_bytes_le(&y_bytes);
+        let modulus = E::BaseField::modulus();
+        assert!(
+            y_int < modulus,
+            "edwards decompress: y is not a canonical field element (>= {modulus}); \
+             a non-canonical y is not decompressable -- the hook on FD_EDDECOMPRESS reports \
+             that, and the guest is expected to fall back to software"
+        );
+
         // Copy bytes into another array so we can modify the last byte and make CompressedEdwardsY,
         // which we'll use to compute the expected X.
         // Re-insert sign bit into last bit of Y for CompressedEdwardsY format
@@ -82,7 +99,9 @@ impl<E: EdwardsParameters> Syscall for EdwardsDecompressSyscall<E> {
 
         // Write decompressed X into slice
         let decompressed_x_dwords = decompressed_x_words
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u64::from(pair[0]) | (u64::from(pair[1]) << 32))
             .collect::<Vec<u64>>();
         let x_memory_records = ctx.mw_dword_slice(slice_ptr, &decompressed_x_dwords);

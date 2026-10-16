@@ -1,10 +1,20 @@
 [package]
 name = "aggregator-prover"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-keywords.workspace = true
-categories.workspace = true
+version = "1.0.0"
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
 
 [dependencies]
-pico-sdk = { path = "../../../sdk/sdk" }
+# The SDK has no entry point for deferred proofs, so this drives the machines in `pico-vm` directly.
+pico-vm = { path = "../../../vm" }
+pico-mle-core = { path = "../../../mle-core", default-features = false }
+p3-field = { git = "https://github.com/brevis-network/Plonky3.git", rev = "da6ca12c" }
+alloy-sol-types = "0.8.0"
+bincode = "1.3.3"
+eyre = "0.6.12"
+fibonacci-lib = { path = "../../fibonacci/lib" }
+sha2 = "0.10.8"
+tracing = "0.1.40"

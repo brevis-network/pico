@@ -13,6 +13,9 @@ pub struct GlobalCols<T: Copy> {
     pub kind: T,
     pub message_0_16bit_limb: T,
     pub message_0_8bit_limb: T,
+    /// The most significant (boolean) bit of message[0] (bit 24) — the 25-bit chunk-clk
+    /// budget widening.
+    pub message_0_high_bit: T,
     pub interaction: GlobalInteractionOperation<T>,
     pub is_real: T,
     pub is_receive: T,

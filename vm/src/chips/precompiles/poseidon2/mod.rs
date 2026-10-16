@@ -1,5 +1,7 @@
 mod columns;
 mod constraints;
+#[cfg(test)]
+mod tests;
 mod traces;
 
 use crate::{
@@ -7,7 +9,6 @@ use crate::{
     machine::field::FieldSpecificPoseidon2Config, primitives::consts::PERMUTATION_WIDTH,
 };
 use core::marker::PhantomData;
-use p3_field::Field;
 
 /// The permutation state is `PERMUTATION_WIDTH` 32-bit words in guest memory.
 const STATE_WORD_BYTES: usize = 4;
@@ -37,8 +38,11 @@ pub struct Poseidon2PermuteChip<F, LinearLayers, Config: Poseidon2Config> {
     pub _phantom: PhantomData<fn(LinearLayers) -> LinearLayers>,
 }
 
-impl<F: Field, LinearLayers, Config: Poseidon2Config> Default
-    for Poseidon2PermuteChip<F, LinearLayers, Config>
+impl<
+        F: FieldSpecificPoseidon2Config<Poseidon2Config = Config>,
+        LinearLayers,
+        Config: Poseidon2Config,
+    > Default for Poseidon2PermuteChip<F, LinearLayers, Config>
 {
     fn default() -> Self {
         let constants = RoundConstants::default();
@@ -48,6 +52,3 @@ impl<F: Field, LinearLayers, Config: Poseidon2Config> Default
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

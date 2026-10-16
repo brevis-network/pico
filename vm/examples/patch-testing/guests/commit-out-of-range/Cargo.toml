@@ -1,0 +1,10 @@
+[package]
+name = "guest-commit-out-of-range"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+pico-sdk = { workspace = true }

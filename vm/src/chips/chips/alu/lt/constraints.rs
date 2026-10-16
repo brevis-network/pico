@@ -1,15 +1,14 @@
 #![allow(clippy::assign_op_pattern)]
 
-use super::{columns::LtCols, traces::LtChip, LtValueCols};
+use super::{columns::LtCols, traces::LtChip, LtValueCols, LT_CMP_OPCODE_TAG};
 use crate::{
     chips::gadgets::lt_signed::LtSignedGadget,
     compiler::riscv::opcode::Opcode,
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use core::borrow::Borrow;
-use p3_air::{Air, AirBuilder};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 
 impl<F: Field, CB> Air<CB> for LtChip<F>
 where
@@ -17,7 +16,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &LtCols<CB::Var> = (*local).borrow();
 
         for values in &local.values {
@@ -28,6 +27,7 @@ where
                 b,
                 c,
                 lt_signed,
+                is_cmp,
             } = values;
 
             let is_real = *is_slt + *is_slt_u;
@@ -37,13 +37,33 @@ where
             builder.assert_bool(*is_slt_u);
             builder.assert_bool(is_real.clone());
 
+            // `is_cmp` marks a merged branch-comparison row: one row pins both `[b < c]` and
+            // `[b > c]` for the Cpu. Its booleanity is a soundness constraint, not a convention.
+            // The bus message below carries `is_cmp * LT_CMP_OPCODE_TAG` in the opcode field, and
+            // over the field a non-boolean `is_cmp = (d - 8) * 256^-1` would move that field onto
+            // any other ALU opcode `d`, letting this row pay for a foreign dispatch.
+            builder.assert_bool(*is_cmp);
+            // Padding rows keep the flag at zero (convention, same as the gadget's `is_signed`).
+            builder.when_not(is_real.clone()).assert_zero(*is_cmp);
+
             // Evaluate the lt_signed gadget
             // This handles MSB extraction, XOR with (1 << 63) for signed comparison,
             // and the unsigned less-than check
             LtSignedGadget::<CB::F>::eval(builder, *b, *c, *lt_signed, *is_slt, is_real.clone());
 
-            // Result should only be in a[0]
-            builder.assert_zero(a[1]);
+            // `a[1]` is the strict "greater than" bit on merged rows and zero elsewhere.
+            //
+            // On a real row the gadget pins `bit = [b' < c']` and `sum_flags = [b' != c']` (on the
+            // sign-adjusted operands; the adjustment is an order-preserving bijection), and a zero
+            // flag sum forces every limb equal so the U16Range on `bit * 2^16` forces `bit = 0`:
+            // `bit = 1 => sum_flags = 1`. Hence `sum_flags - bit` is exactly the boolean
+            // `[b > c]`, and `a[0] * a[1] = 0` / `1 - a[0] - a[1] = [b = c]` hold on one row.
+            // Ungated: padding rows are all-zero, so both sides vanish there.
+            let sum_flags = lt_signed.result.u16_flags[0]
+                + lt_signed.result.u16_flags[1]
+                + lt_signed.result.u16_flags[2]
+                + lt_signed.result.u16_flags[3];
+            builder.assert_eq(a[1], *is_cmp * (sum_flags - lt_signed.result.bit));
             builder.assert_zero(a[2]);
             builder.assert_zero(a[3]);
 
@@ -61,9 +81,11 @@ where
                 .when(is_real.clone())
                 .assert_eq(a[0], lt_signed.result.bit);
 
-            // SLT looked
-            let lt_op_code = *is_slt * CB::F::from_canonical_u32(Opcode::SLT as u32)
-                + *is_slt_u * CB::F::from_canonical_u32(Opcode::SLTU as u32);
+            // SLT looked. Merged rows add `LT_CMP_OPCODE_TAG`, so their message can only pair
+            // with the Cpu's single branch-comparison dispatch, never with a plain SLT/SLTU one.
+            let lt_op_code = *is_slt * CB::F::from_u32(Opcode::SLT as u32)
+                + *is_slt_u * CB::F::from_u32(Opcode::SLTU as u32)
+                + *is_cmp * CB::F::from_u32(LT_CMP_OPCODE_TAG);
             builder.looked_alu(lt_op_code, *a, *b, *c, is_real)
         }
     }
