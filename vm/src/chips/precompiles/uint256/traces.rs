@@ -81,27 +81,32 @@ impl<F: PrimeField32> ChipBehavior<F> for Uint256MulChip<F> {
                         .collect::<Vec<u8>>(),
                 );
 
-                // Reject an operand at or above the modulus here -- a *domain* error, named as
-                // such, rather than the `debug_assert!(&carry < modulus)` several layers below that
-                // the same input would otherwise trip.
+                // The operands may be at or above the modulus. The syscall asks for no particular
+                // representative, and revm's 256-bit MODEXP path reduces an unreduced base by
+                // multiplying it by one; mainnet blocks reach that with a base above BN254's
+                // scalar modulus. The AIR asserts `x * y == result + carry * modulus` and pins the
+                // result below the modulus by the existing exit check and to the memory bus, so
+                // the value written back is unique whatever representative the operands use.
                 //
-                // Trace-side only, deliberately: the AIR asserts `x * y == result + carry * modulus`
-                // and the result is pinned both to the memory bus and below the modulus by the
-                // existing exit check, so the value written back is unique whatever representative
-                // the operands use.
+                // What the columns cannot hold is a carry past their 32 bytes. That is the domain
+                // error, named as such here rather than as the limb-count panic in
+                // `to_limbs_field` that the same input would otherwise trip.
                 //
-                // Skipped when the modulus is zero: that is a legal call the chip gates its field
-                // ops off for, and `x < 0` is not a meaningful requirement.
+                // Skipped when the modulus is zero: the chip then works modulo 2^256, where the
+                // carry of two 256-bit operands always fits.
                 if modulus != BigUint::ZERO {
-                    assert!(x < modulus, "uint256 operand x must be < modulus");
-                    assert!(y < modulus, "uint256 operand y must be < modulus");
+                    let carry = (&x * &y) / &modulus;
+                    assert!(
+                        carry.bits() <= 256,
+                        "uint256 x * y / modulus must fit in the 256-bit carry"
+                    );
                 }
 
                 // Assign basic values to the columns.
                 cols.is_real = F::ONE;
 
-                cols.chunk = F::from_canonical_u32(event.chunk);
-                cols.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "uint256 clk"));
+                cols.chunk = F::from_u32(event.chunk);
+                cols.clk = F::from_u32(checked_u64_to_u32(event.clk, "uint256 clk"));
 
                 // Populate pointer gadgets.
                 cols.x_ptr

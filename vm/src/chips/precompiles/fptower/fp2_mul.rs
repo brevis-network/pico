@@ -28,9 +28,9 @@ use crate::{
 use hybrid_array::{typenum::Unsigned, Array};
 use itertools::Itertools;
 use num::{BigUint, Zero};
-use p3_air::{Air, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
 
 use super::words_to_bytes_le_slice;
@@ -220,8 +220,8 @@ where
             let q_y = BigUint::from_bytes_le(&words_to_bytes_le_slice(&q[q.len() / 2..]));
 
             cols.is_real = F::ONE;
-            cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk = F::from_canonical_u32(checked_u64_to_u32(event.clk, "fptower fp2 mul clk"));
+            cols.chunk = F::from_u32(event.chunk);
+            cols.clk = F::from_u32(checked_u64_to_u32(event.clk, "fptower fp2 mul clk"));
             cols.x_ptr.populate(
                 &mut new_byte_lookup_events,
                 event.x_ptr,
@@ -332,7 +332,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &Fp2MulCols<CB::Var, P> = (*local).borrow();
 
         builder.assert_bool(local.is_real);
@@ -370,7 +370,7 @@ where
 
         let modulus_coeffs = P::MODULUS
             .iter()
-            .map(|&limbs| CB::Expr::from_canonical_u8(limbs))
+            .map(|&limbs| CB::Expr::from_u8(limbs))
             .collect_vec();
         let p_modulus = Polynomial::from_coefficients(&modulus_coeffs);
 
@@ -441,7 +441,7 @@ where
             .map(|x| x.into())
             .collect();
         let c0_result_words =
-            limbs_to_words::<CB::Expr>(&c0_result_limbs, CB::F::from_canonical_u32(256).into());
+            limbs_to_words::<CB::Expr>(&c0_result_limbs, CB::F::from_u32(256).into());
 
         let c1_result_limbs: Vec<CB::Expr> = local
             .c1
@@ -452,7 +452,7 @@ where
             .map(|x| x.into())
             .collect();
         let c1_result_words =
-            limbs_to_words::<CB::Expr>(&c1_result_limbs, CB::F::from_canonical_u32(256).into());
+            limbs_to_words::<CB::Expr>(&c1_result_limbs, CB::F::from_u32(256).into());
 
         let result_words = c0_result_words
             .into_iter()
@@ -544,10 +544,8 @@ where
         }
 
         let syscall_id_felt = match P::FIELD_TYPE {
-            FieldType::Bn254 => CB::F::from_canonical_u32(SyscallCode::BN254_FP2_MUL.syscall_id()),
-            FieldType::Bls381 => {
-                CB::F::from_canonical_u32(SyscallCode::BLS12381_FP2_MUL.syscall_id())
-            }
+            FieldType::Bn254 => CB::F::from_u32(SyscallCode::BN254_FP2_MUL.syscall_id()),
+            FieldType::Bls381 => CB::F::from_u32(SyscallCode::BLS12381_FP2_MUL.syscall_id()),
             _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
         };
 

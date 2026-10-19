@@ -68,7 +68,7 @@ impl Syscall for Sha256CompressSyscall {
         //
         // This costs no extra CPU cycle and no syscall-ABI change: a syscall instruction
         // advances `state.clk` by `4 + num_extra_cycles` (= 5 here, see
-        // `chunk_clk/constraints.rs:48`), while `SyscallContext::clk` is a private copy
+        // `CpuChip::eval_chunk_clk`), while `SyscallContext::clk` is a private copy
         // used only for record timestamps. Offsets 0/1/2 all stay below the next
         // instruction's clk, so `num_extra_cycles` (encoded in byte 2 of the syscall id,
         // which the guest SDK hardcodes) stays at 1.

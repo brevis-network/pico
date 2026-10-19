@@ -1,7 +1,7 @@
 use super::{Array, Ext, Felt, MemIndex, Ptr, TracedVec, Usize, Var};
 use crate::{
     configs::config::FieldGenericConfig, emulator::recursion::public_values::RecursionPublicValues,
-    machine::septic::SepticCurve,
+    machine::septic::SepticCurve, primitives::consts::DIGEST_SIZE,
 };
 
 /// An intermeddiate instruction set for implementing programs.
@@ -233,22 +233,7 @@ pub enum DslIr<FC: FieldGenericConfig> {
     CircuitFelt2Var(Felt<FC::F>, Var<FC::N>),
 
     // Hashing.
-    /// Permutes an array of baby bear elements using Poseidon2 (output = p2_permute(array)).
-    Poseidon2PermuteBabyBear(Box<(Array<FC, Felt<FC::F>>, Array<FC, Felt<FC::F>>)>),
-    /// Compresses two baby bear element arrays using Poseidon2 (output = p2_compress(array1,
-    /// array2)).
-    Poseidon2CompressBabyBear(
-        Box<(
-            Array<FC, Felt<FC::F>>,
-            Array<FC, Felt<FC::F>>,
-            Array<FC, Felt<FC::F>>,
-        )>,
-    ),
-    /// Absorb an array of baby bear elements for a specified hash instance.
-    Poseidon2AbsorbBabyBear(Var<FC::N>, Array<FC, Felt<FC::F>>),
-    /// Finalize and return the hash digest of a specified hash instance.
-    Poseidon2FinalizeBabyBear(Var<FC::N>, Array<FC, Felt<FC::F>>),
-    /// Permutes an array of baby bear elements using Poseidon2 (output = p2_permute(array)).
+    /// Permutes an array of koala bear elements using Poseidon2 (output = p2_permute(array)).
     Poseidon2PermuteKoalaBear(Box<(Array<FC, Felt<FC::F>>, Array<FC, Felt<FC::F>>)>),
     /// Compresses two koala bear element arrays using Poseidon2 (output = p2_compress(array1,
     /// array2)).
@@ -266,10 +251,6 @@ pub enum DslIr<FC: FieldGenericConfig> {
     /// Permutes an array of Bn254 elements using Poseidon2 (output = p2_permute(array)). Should
     /// only be used when target is a gnark circuit.
     CircuitPoseidon2Permute([Var<FC::N>; 3]),
-    /// Permutates an array of BabyBear elements in the circuit.
-    ConstraintPoseidon2BabyBear(Box<[Felt<FC::F>; 16]>),
-    /// Permutates an array of BabyBear elements in the circuit using the skinny precompile.
-    PrecompilePoseidon2BabyBear(Box<([Felt<FC::F>; 16], [Felt<FC::F>; 16])>),
     /// Permutates an array of KoalaBear elements in the circuit.
     ConstraintPoseidon2KoalaBear(Box<[Felt<FC::F>; 16]>),
     /// Permutates an array of KoalaBear elements in the circuit using the skinny precompile.
@@ -329,6 +310,10 @@ pub enum DslIr<FC: FieldGenericConfig> {
     /// Asserts that the inputted var is equal the circuit's committed values digest public input.
     /// Should only be used when target is a gnark circuit.
     CircuitCommitCommittedValuesDigest(Var<FC::N>),
+    /// Asserts that the felts equal the recursion whitelist root, baked in as constants (felts,
+    /// root). One op for the whole root, so the constraints file alone says whether it pins one
+    /// and which. Should only be used when target is a gnark circuit.
+    CircuitAssertVkRoot(Box<([Felt<FC::F>; DIGEST_SIZE], [FC::F; DIGEST_SIZE])>),
 
     /// BatchFRI loop
     CircuitBatchFRI(

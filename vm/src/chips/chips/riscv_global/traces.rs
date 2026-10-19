@@ -20,9 +20,11 @@ use crate::{
     },
     machine::{
         chip::ChipBehavior,
-        estimator::{EventCapture, EventSizeCapture},
+        estimator::EventCapture,
         lookup::LookupScope,
-        septic::{SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension},
+        septic::{
+            FieldSepticCurve, SepticCurve, SepticCurveComplete, SepticDigest, SepticExtension,
+        },
     },
 };
 use p3_field::PrimeField32;
@@ -49,29 +51,57 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
                 let mut blu: Vec<ByteLookupEvent> = vec![];
                 let mut poseidon2: Vec<Poseidon2Event> = vec![];
                 events.iter().for_each(|event| {
+                    // 25-bit decomposition of message[0] (16 + 8 + 1; the boolean high bit
+                    // needs no byte lookup).
                     let message0_16bit_limb = (event.message[0] & 0xFFFF) as u16;
                     let message0_8bit_limb = ((event.message[0] >> 16) & 0xFF) as u8;
                     blu.add_u16_range_check(message0_16bit_limb);
                     blu.add_u16_range_check(event.message[7] as u16);
-                    blu.add_u8_range_check(message0_8bit_limb, 0);
-                    // kind < 64 (6-bit range check via LTU)
-                    blu.push(ByteLookupEvent::new(ByteOpcode::LTU, 1, 0, event.kind, 64));
+                    // No `kind < 32` LTU event: every sender passes a compile-time constant,
+                    // so the multiset pins the receiver's column and keygen checks the constant.
+                    // `message0_8bit_limb` rides the offset U8 pair below instead.
 
-                    poseidon2.push(
-                        GlobalInteractionOperation::<F>::default()
-                            .populate(event.message, event.is_receive, true, event.kind)
-                            .unwrap(),
-                    );
+                    // Populate the interaction columns so we can emit the byte lookups that mirror
+                    // `eval_single_digest`: the offset u8 range check and the three `y6_limbs`
+                    // range checks (U16Range on lo16, LTU bounds on mid/top).
+                    let mut op = GlobalInteractionOperation::<F>::default();
+                    let p2 = op
+                        .populate(event.message, event.is_receive, true, event.kind)
+                        .unwrap();
+                    // Must match `eval_single_digest`'s bounds exactly. The `as u8` casts are only
+                    // lossless for the fields the `y6_limbs` docs allow, which `populate` asserts.
+                    let mid_bound = (1u32 << (30 - F::TOP_BITS - 16)) as u8; // 128
+                    let top_bound = ((1u32 << F::TOP_BITS) - 1) as u8; // 127
+
+                    // Merged U8 pair -- slot order must match the constraint: b = offset,
+                    // c = message0_8bit_limb.
+                    blu.add_u8_range_check(op.offset.as_canonical_u32() as u8, message0_8bit_limb);
+                    blu.add_u16_range_check(op.y6_limbs[0].as_canonical_u32() as u16);
+                    blu.push(ByteLookupEvent::new(
+                        ByteOpcode::LTU,
+                        1,
+                        0,
+                        op.y6_limbs[1].as_canonical_u32() as u8,
+                        mid_bound,
+                    ));
+                    blu.push(ByteLookupEvent::new(
+                        ByteOpcode::LTU,
+                        1,
+                        0,
+                        op.y6_limbs[2].as_canonical_u32() as u8,
+                        top_bound,
+                    ));
+                    poseidon2.push(p2);
                 });
 
                 (blu, poseidon2)
             })
             .unzip();
 
+        let flat_p2: Vec<_> = poseidon2_events.into_iter().flatten().collect();
+
         output.add_byte_lookup_events(blu_batches.into_iter().flatten().collect());
-        output
-            .poseidon2_events
-            .extend(poseidon2_events.into_iter().flatten());
+        output.poseidon2_events.extend(flat_p2);
     }
 
     fn generate_main(&self, input: &Self::Record, _: &mut Self::Record) -> RowMajorMatrix<F> {
@@ -79,7 +109,10 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
 
         let nb_rows = events.len();
         let log_rows = input.shape_chip_size(&self.name());
-        let padded_nb_rows = next_power_of_two(nb_rows, log_rows);
+        // `+ 1`: the accumulation constraints need the last row to be padding (A8), whose `cum`
+        // is the chunk total that `GcsBindAir` binds to the public values.
+        let padded_nb_rows = next_power_of_two(nb_rows + 1, log_rows);
+        assert!(nb_rows < padded_nb_rows);
 
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_GLOBAL_COLS);
         let chunk_size = std::cmp::max(nb_rows / num_cpus::get(), 0) + 1;
@@ -102,12 +135,11 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
                         let idx = i * chunk_size + j;
                         let cols: &mut GlobalCols<F> = row.borrow_mut();
                         let event: &GlobalInteractionEvent = &events[idx];
-                        cols.message = event.message.map(F::from_canonical_u32);
-                        cols.kind = F::from_canonical_u8(event.kind);
-                        cols.message_0_16bit_limb =
-                            F::from_canonical_u32(event.message[0] & 0xFFFF);
-                        cols.message_0_8bit_limb =
-                            F::from_canonical_u32((event.message[0] >> 16) & 0xFF);
+                        cols.message = event.message.map(F::from_u32);
+                        cols.kind = F::from_u8(event.kind);
+                        cols.message_0_16bit_limb = F::from_u32(event.message[0] & 0xFFFF);
+                        cols.message_0_8bit_limb = F::from_u32((event.message[0] >> 16) & 0xFF);
+                        cols.message_0_high_bit = F::from_u32((event.message[0] >> 24) & 1);
                         cols.interaction.populate(
                             event.message,
                             event.is_receive,
@@ -130,18 +162,19 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
             .collect::<Vec<_>>();
 
         let points = point_chunks.into_iter().flatten().collect::<Vec<_>>();
-        let cumulative_sum = points
+        let prefix_sums = points
             .into_pico_iter()
             .with_min_len(1 << 15)
             .pico_scan(|a, b| *a + *b, SepticCurveComplete::Infinity)
             .collect::<Vec<SepticCurveComplete<F>>>();
 
-        let final_digest = match cumulative_sum.last() {
+        // `prefix_sums[k] = START + Σ_{j<k} P_j` (the row-`k` incoming sum); its last entry
+        // (k = nb_rows) is the chunk total. With no events the total is the START point itself
+        // (Σ∅ = zero digest), which is also what the FIRST-row constraint expects.
+        let final_digest = match prefix_sums.last() {
             Some(digest) => digest.point(),
-            None => SepticCurve::<F>::dummy(),
+            None => SepticDigest::<F>::zero().0,
         };
-        let dummy = SepticCurve::<F>::dummy();
-        let final_sum_checker = SepticCurve::<F>::sum_checker_x(final_digest, dummy, final_digest);
 
         let chunk_size = std::cmp::max(padded_nb_rows / num_cpus::get(), 0) + 1;
         values
@@ -155,15 +188,15 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
                         let idx = i * chunk_size + j;
                         let cols: &mut GlobalCols<F> = row.borrow_mut();
                         if idx < nb_rows {
-                            cols.accumulation.populate_real(
-                                &cumulative_sum[idx..idx + 2],
-                                final_digest,
-                                final_sum_checker,
-                            );
+                            let point = SepticCurve {
+                                x: SepticExtension(cols.interaction.x_coordinate.0),
+                                y: SepticExtension(cols.interaction.y_coordinate.0),
+                            };
+                            cols.accumulation
+                                .populate_real(prefix_sums[idx].point(), [point]);
                         } else {
                             cols.interaction.populate_dummy();
-                            cols.accumulation
-                                .populate_dummy(final_digest, final_sum_checker);
+                            cols.accumulation.populate_dummy(final_digest);
                         }
                     });
             });
@@ -180,8 +213,4 @@ impl<F: PrimeField32> ChipBehavior<F> for GlobalChip<F> {
     }
 }
 
-impl<F> EventCapture for GlobalChip<F> {
-    fn count_extra_records(_record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
-        event_counter.num_poseidon2_events += event_counter.num_global_lookup_events;
-    }
-}
+impl<F> EventCapture for GlobalChip<F> {}

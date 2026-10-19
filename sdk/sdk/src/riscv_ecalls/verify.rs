@@ -6,7 +6,7 @@ cfg_if::cfg_if! {
         use crate::zkvm::DEFERRED_PROOFS_DIGEST;
         use crate::ZkField as F;
         use crate::riscv_ecalls::VERIFY_PICO_PROOF;
-        use p3_field::FieldAlgebra;
+        use p3_field::PrimeCharacteristicRing;
         use pico_vm::primitives::hash_deferred_proof;
     }
 }
@@ -37,9 +37,8 @@ pub fn syscall_verify_pico_proof(vk_digest: &[u32; 8], pv_digest: &[u8; 32]) {
         //     deferred_proofs_digest
         // );
 
-        let vk_digest: [F; 8] = core::array::from_fn(|i| F::from_canonical_u32(vk_digest[i]));
-        let pv_digest: [F; 32] =
-            core::array::from_fn(|i| F::from_canonical_u32(pv_digest[i] as u32));
+        let vk_digest: [F; 8] = core::array::from_fn(|i| F::from_u32(vk_digest[i]));
+        let pv_digest: [F; 32] = core::array::from_fn(|i| F::from_u32(pv_digest[i] as u32));
 
         *deferred_proofs_digest =
             hash_deferred_proof::<F>(deferred_proofs_digest, &vk_digest, &pv_digest);

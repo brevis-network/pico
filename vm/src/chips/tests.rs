@@ -1,63 +1,24 @@
-//! Common test functions for RISC-V chips.
+//! Common test functions for RISC-V chips: emulation helpers and event counters. The FRI
+//! prove-and-verify helpers (`run_test`, `test_rv64_prove_and_verify*`) were removed with the FRI
+//! proving path (tag `legacy-fri-last`); the chip tests that were built on them went with it and
+//! are to be rewritten on the MLE engine.
 
 use crate::{
-    chips::chips::riscv_memory::initialize_finalize::{
-        MemoryChipType, MemoryInitializeFinalizeChip,
-    },
     compiler::riscv::program::Program,
-    configs::{config::StarkGenericConfig, stark_config::KoalaBearPoseidon2},
     emulator::{
         opts::EmulatorOpts,
         record::RecordBehavior,
         riscv::{emulator::RiscvEmulator, record::EmulationRecord},
         stdin::EmulatorStdin,
     },
-    instances::{chiptype::riscv_chiptype::RiscvChipType, machine::simple::SimpleMachine},
-    machine::{
-        chip::{ChipBehavior, MetaChip},
-        machine::MachineBehavior,
-        prover::BaseProver,
-    },
-    primitives::consts::RISCV_NUM_PVS,
+    instances::chiptype::riscv_chiptype::RiscvChipType,
+    machine::chip::{ChipBehavior, MetaChip},
 };
 use p3_koala_bear::KoalaBear;
-use p3_matrix::Matrix;
 use std::sync::Arc;
 
-pub fn run_test(program: Program, test_name: &str) {
-    println!("Creating {test_name} program");
-    let program = Arc::new(program);
-
-    println!("Setting up stdin");
-    let stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
-    let (stdin, _proofs) = stdin_builder.finalize();
-
-    println!("Setting up chips");
-    let chips = vec![
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::Program(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::Mul(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::DivRem(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::Add(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::Sub(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::Addw(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::Subw(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::SR(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::MemoryReadWrite(
-            Default::default(),
-        )),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::MemoryLocal(Default::default())),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::MemoryInitialize(
-            MemoryInitializeFinalizeChip::new(MemoryChipType::Initialize),
-        )),
-        MetaChip::test_no_lookup(RiscvChipType::<KoalaBear>::MemoryFinalize(
-            MemoryInitializeFinalizeChip::new(MemoryChipType::Finalize),
-        )),
-    ];
-
-    test_rv64_prove_and_verify(program, stdin, chips);
-}
-
 /// Run emulation and return all records.
+#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn test_rv64_emulate(
     program: Arc<Program>,
     stdin: EmulatorStdin<Program, Vec<u8>>,
@@ -66,6 +27,7 @@ pub(crate) fn test_rv64_emulate(
 }
 
 /// Run emulation with custom opts and return all records.
+#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn test_rv64_emulate_with_opts(
     program: Arc<Program>,
     stdin: EmulatorStdin<Program, Vec<u8>>,
@@ -92,65 +54,9 @@ pub(crate) fn test_rv64_emulate_with_opts(
     all_records
 }
 
-/// Prove and verify using a specific record.
-pub(crate) fn test_rv64_prove_and_verify_chunk(
-    program: Arc<Program>,
-    chips: Vec<MetaChip<KoalaBear, RiscvChipType<KoalaBear>>>,
-    record: crate::emulator::riscv::record::EmulationRecord,
-) {
-    println!("Setting up machine");
-    let config = KoalaBearPoseidon2::test();
-    let machine = SimpleMachine::new(config.clone(), chips, RISCV_NUM_PVS);
-
-    println!("Setting up prover keys");
-    let prover = BaseProver::new();
-    let (pk, vk) = prover.setup_keys(&config, &machine.base_machine().chips(), &program);
-
-    println!("Generate main");
-    let chips_and_main = prover.generate_main(&machine.base_machine().chips(), &record);
-    println!("Chips and main count: {}", chips_and_main.len());
-    for (i, (_, trace)) in chips_and_main.iter().enumerate() {
-        println!("Chip {} trace height: {}", i, trace.height());
-    }
-
-    assert!(
-        !chips_and_main.is_empty(),
-        "should have at least one chip trace"
-    );
-
-    println!("Commit main");
-    let main_commitment = prover.commit_main(&config, &record, chips_and_main.clone());
-
-    let main_commitment = main_commitment.expect("should have main commitment");
-
-    println!("Creating challenger");
-    let mut challenger = config.challenger();
-    pk.observed_by(&mut challenger);
-
-    println!("Proving");
-    let proof = prover.prove(
-        &config,
-        &machine.base_machine().chips(),
-        &pk,
-        main_commitment,
-        &mut challenger,
-        0,
-        RISCV_NUM_PVS,
-    );
-
-    println!("Verifying");
-    let meta_proof =
-        crate::machine::proof::MetaProof::new(vec![proof].into(), vec![vk.clone()].into(), None);
-
-    machine
-        .verify(&meta_proof, &vk)
-        .expect("proof should verify");
-
-    println!("Done");
-}
-
 /// Run extra_record for all active chips to populate derived events
 /// (e.g. global_lookup_events from MemoryInitFinalize, byte_lookups from GlobalChip).
+#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn run_extra_records(
     chips: &[MetaChip<KoalaBear, RiscvChipType<KoalaBear>>],
     record: &mut EmulationRecord,
@@ -165,6 +71,7 @@ pub(crate) fn run_extra_records(
 }
 
 /// Find the first record containing events for the given syscall code.
+#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn find_record_with_events(
     records: Vec<EmulationRecord>,
     syscall_code: crate::emulator::riscv::syscalls::SyscallCode,
@@ -180,6 +87,7 @@ pub(crate) fn find_record_with_events(
 }
 
 /// Count precompile events of a given syscall code in a record.
+#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn count_events(
     record: &EmulationRecord,
     syscall_code: crate::emulator::riscv::syscalls::SyscallCode,
@@ -188,6 +96,7 @@ pub(crate) fn count_events(
 }
 
 /// Count total precompile events across all records.
+#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn count_total_events(
     records: &[EmulationRecord],
     syscall_code: crate::emulator::riscv::syscalls::SyscallCode,
@@ -195,32 +104,85 @@ pub(crate) fn count_total_events(
     records.iter().map(|r| count_events(r, syscall_code)).sum()
 }
 
-/// Common function for proving and verifying RISC-V programs.
-/// Uses only the first emulation record (CPU/ALU/Memory events).
-pub fn test_rv64_prove_and_verify(
-    program: Arc<Program>,
-    stdin: EmulatorStdin<Program, Vec<u8>>,
-    chips: Vec<MetaChip<KoalaBear, RiscvChipType<KoalaBear>>>,
-) {
-    let all_records = test_rv64_emulate(program.clone(), stdin);
+/// Number of constraint-DAG nodes reachable from an AIR's constraint roots. This is the zerocheck
+/// rule count the MLE keygen derives: one rule per node in the sub-edge closure of
+/// `constraint_idx`, leaves (variables, constants, selectors) included, interaction-only nodes
+/// excluded. Pinning it in a unit test localises any change in constraint expression shape.
+pub(crate) fn reachable_constraint_nodes<F: p3_field::Field>(
+    dag: &pico_mle_core::air::symbolic::SymbolicExpressionDag<F>,
+) -> usize {
+    use pico_mle_core::air::symbolic::SymbolicExpressionNode;
 
-    let mut record = all_records.first().cloned().unwrap();
-    println!("CPU events count: {}", record.cpu_events.len());
-    println!("ADD events count: {}", record.add_events.len());
-    println!("SUB events count: {}", record.sub_events.len());
-    println!("MUL events count: {}", record.mul_events.len());
-    println!("DIVREM events count: {}", record.divrem_events.len());
-    println!("LT events count: {}", record.lt_events.len());
-    println!("Bitwise events count: {}", record.bitwise_events.len());
+    let mut seen = vec![false; dag.nodes.len()];
+    let mut stack = dag.constraint_idx.clone();
+    let mut count = 0;
+    while let Some(idx) = stack.pop() {
+        if seen[idx] {
+            continue;
+        }
+        seen[idx] = true;
+        count += 1;
+        match &dag.nodes[idx] {
+            SymbolicExpressionNode::Add {
+                left_idx,
+                right_idx,
+                ..
+            }
+            | SymbolicExpressionNode::Sub {
+                left_idx,
+                right_idx,
+                ..
+            }
+            | SymbolicExpressionNode::Mul {
+                left_idx,
+                right_idx,
+                ..
+            } => {
+                stack.push(*left_idx);
+                stack.push(*right_idx);
+            }
+            SymbolicExpressionNode::Neg { idx: child, .. } => stack.push(*child),
+            SymbolicExpressionNode::Variable(_)
+            | SymbolicExpressionNode::IsFirstRow
+            | SymbolicExpressionNode::IsLastRow
+            | SymbolicExpressionNode::IsTransition
+            | SymbolicExpressionNode::Constant(_) => {}
+        }
+    }
+    count
+}
 
-    // Chain extra_record to populate derived events (e.g. global_lookup_events).
-    run_extra_records(&chips, &mut record);
-    println!(
-        "Memory init events: {}, finalize events: {}, global events: {}",
-        record.memory_initialize_events.len(),
-        record.memory_finalize_events.len(),
-        record.global_lookup_events.len(),
+/// Pins the zerocheck rule count of `GcsBindAir`: one rule per DAG node reachable from the
+/// constraint roots. A different septic expression shape changes this number.
+#[test]
+fn gcs_bind_reachable_rule_count() {
+    use crate::{
+        mle::machine::air::{GcsBindAir, GCS_DIGEST_LEN},
+        primitives::consts::MAX_NUM_PVS,
+    };
+    use p3_air::BaseAir;
+    use p3_koala_bear::KoalaBear;
+    use pico_mle_core::{
+        air::symbolic::{get_symbolic_builder_with_public_values, SymbolicConstraintsDag},
+        keygen::types::TraceWidth,
+    };
+
+    let width = TraceWidth {
+        preprocessed: None,
+        cached_mains: vec![],
+        common_main: BaseAir::<KoalaBear>::width(&GcsBindAir::<KoalaBear>::default()),
+    };
+    let builder = get_symbolic_builder_with_public_values::<KoalaBear, _>(
+        &GcsBindAir::<KoalaBear>::default(),
+        &width,
+        GCS_DIGEST_LEN + MAX_NUM_PVS,
     );
-
-    test_rv64_prove_and_verify_chunk(program, chips, record);
+    let constraints = builder.constraints();
+    // The degree fixes the round-0 zerocheck coset count and the interaction count fixes the
+    // LogUp side; neither is reachable from the constraint roots, so the rule count below would
+    // not notice a change in either.
+    assert_eq!(constraints.max_constraint_degree(), 3);
+    assert_eq!(constraints.interactions.len(), 8);
+    let dag: SymbolicConstraintsDag<KoalaBear> = constraints.into();
+    assert_eq!(reachable_constraint_nodes(&dag.constraints), 836);
 }

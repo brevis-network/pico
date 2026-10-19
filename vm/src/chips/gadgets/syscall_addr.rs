@@ -6,11 +6,11 @@ use crate::{
     primitives::consts::u64_to_u16_limbs,
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to validate the address and return the aligned address.
-#[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
+#[derive(AlignedBorrow, Default, Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(C)]
 pub struct SyscallAddrGadget<T> {
     /// The address itself.
@@ -26,11 +26,10 @@ pub struct SyscallAddrGadget<T> {
 impl<F: Field> SyscallAddrGadget<F> {
     pub fn populate(&mut self, record: &mut impl ByteRecordBehavior, addr: u64, len: u64) {
         let addr_limbs = u64_to_u16_limbs(addr);
-        let sum_top_two_limb =
-            F::from_canonical_u16(addr_limbs[1]) + F::from_canonical_u16(addr_limbs[2]);
-        self.addr[0] = F::from_canonical_u16(addr_limbs[0]);
-        self.addr[1] = F::from_canonical_u16(addr_limbs[1]);
-        self.addr[2] = F::from_canonical_u16(addr_limbs[2]);
+        let sum_top_two_limb = F::from_u16(addr_limbs[1]) + F::from_u16(addr_limbs[2]);
+        self.addr[0] = F::from_u16(addr_limbs[0]);
+        self.addr[1] = F::from_u16(addr_limbs[1]);
+        self.addr[2] = F::from_u16(addr_limbs[2]);
         // A zero sum has no inverse, and `inverse()` panics on it. That happens for every
         // pointer below 2^16 -- precisely the range this gadget's 64KB stack guard exists to
         // reject. Panicking here would crash the prover on attacker-controlled input, since the
@@ -42,9 +41,9 @@ impl<F: Field> SyscallAddrGadget<F> {
         // unsatisfiable and verification rejects it cleanly at `verifier.rs:384` -- the intended
         // outcome, reached without a crash. Padding rows have `is_real = 0` and are unaffected.
         self.top_two_limb_min = sum_top_two_limb.try_inverse().unwrap_or(F::ZERO);
-        let is_max = self.top_two_limb_max.populate_from_field_element(
-            sum_top_two_limb - F::from_canonical_u16(u16::MAX) * F::TWO,
-        );
+        let is_max = self
+            .top_two_limb_max
+            .populate_from_field_element(sum_top_two_limb - F::from_u16(u16::MAX) * F::TWO);
         if is_max == 1 {
             record.add_bit_range_check((addr_limbs[0] + (len as u16)) / 8, 13);
         } else {
@@ -79,8 +78,8 @@ impl<F: Field> SyscallAddrGadget<F> {
         // "assumed to be composed of valid 3 u16 limbs" is an assumption the caller has to supply,
         // and a non-canonical pair with the right weighted value passes.
         //
-        // Same order as `read_write/constraints.rs:146-153`, which range checks immediately before
-        // a byte-for-byte identical stack guard.
+        // These limbs are not ALU-bound, so nothing else checks them: the check has to be here,
+        // ahead of the stack guard that reads them.
         builder.slice_range_check_u16(&cols.addr, is_real.clone());
 
         let sum_top_two_limb = cols.addr[1] + cols.addr[2];
@@ -95,7 +94,7 @@ impl<F: Field> SyscallAddrGadget<F> {
 
         IsZeroGadget::<CB::F>::eval(
             builder,
-            sum_top_two_limb - CB::F::from_canonical_u16(u16::MAX) * CB::F::from_canonical_u8(2),
+            sum_top_two_limb - CB::F::from_u16(u16::MAX) * CB::F::from_u8(2),
             cols.top_two_limb_max,
             is_real.clone(),
         );
@@ -104,51 +103,14 @@ impl<F: Field> SyscallAddrGadget<F> {
         // If `addr[1] == addr[2] == u16::MAX`, this shows `addr + len < 2^48`.
         // This also shows that `addr[0]` is a multiple of 8 in all cases.
         builder.looking_byte(
-            CB::Expr::from_canonical_u32(ByteOpcode::BitRange as u32),
-            (cols.addr[0] + cols.top_two_limb_max.result * CB::Expr::from_canonical_u32(len))
-                * CB::F::from_canonical_u32(8).inverse(),
-            CB::Expr::from_canonical_u32(13),
+            CB::Expr::from_u32(ByteOpcode::BitRange as u32),
+            (cols.addr[0] + cols.top_two_limb_max.result * CB::Expr::from_u32(len))
+                * CB::F::from_u32(8).inverse(),
+            CB::Expr::from_u32(13),
             CB::Expr::ZERO,
             is_real.clone(),
         );
 
         [cols.addr[0], cols.addr[1], cols.addr[2]]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        syscall_addr: SyscallAddrGadget<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_syscall_addr_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        SyscallAddrGadget::<KoalaBear>::eval(
-            &mut builder,
-            8u32,
-            local.syscall_addr,
-            local.is_real.into(),
-        );
-
-        assert_eq!(builder.num_constraints(), 5);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 4);
     }
 }

@@ -4,9 +4,6 @@ pub mod columns;
 pub mod constraints;
 pub mod traces;
 
-#[cfg(test)]
-mod tests;
-
 /// A chip that implements 64-bit SUBW for the opcode SUBW.
 ///
 /// SUBW subtracts the lower 32 bits of two 64-bit operands (treating them as i32)

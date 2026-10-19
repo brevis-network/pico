@@ -17,9 +17,8 @@ use crate::{
     },
 };
 use core::borrow::Borrow;
-use p3_air::Air;
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::Matrix;
+use p3_air::{Air, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use std::iter::once;
 
 impl<F: PrimeField32, CB: ChipBuilder<F>> Air<CB> for ShaExtendChip<F>
@@ -29,7 +28,7 @@ where
     fn eval(&self, builder: &mut CB) {
         // Initialize columns.
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ShaExtendCols<CB::Var> = (*local).borrow();
 
         // Assert that `is_real` is a bool.
@@ -64,10 +63,10 @@ where
         // Check that `16 <= local.i < 64` holds.
         // This makes all the `AddrAddOperation`s below safe, as the increments will be bounded.
         builder.looking_byte(
-            CB::Expr::from_canonical_u32(ByteOpcode::LTU as u32),
+            CB::Expr::from_u32(ByteOpcode::LTU as u32),
             CB::Expr::ONE,
-            local.i - CB::Expr::from_canonical_u32(16),
-            CB::Expr::from_canonical_u32(48),
+            local.i - CB::Expr::from_u32(16),
+            CB::Expr::from_u32(48),
             local.is_real,
         );
 
@@ -82,9 +81,7 @@ where
         AddrAddGadget::<CB::F>::eval(
             builder,
             ptr.clone(),
-            Word::extend_expr::<CB>(
-                (local.i - CB::F::from_canonical_u32(15)) * CB::F::from_canonical_u32(8),
-            ),
+            Word::extend_expr::<CB>((local.i - CB::F::from_u32(15)) * CB::F::from_u32(8)),
             local.w_i_minus_15_ptr,
             local.is_real.into(),
         );
@@ -108,9 +105,7 @@ where
         AddrAddGadget::<CB::F>::eval(
             builder,
             ptr.clone(),
-            Word::extend_expr::<CB>(
-                (local.i - CB::F::from_canonical_u32(2)) * CB::F::from_canonical_u32(8),
-            ),
+            Word::extend_expr::<CB>((local.i - CB::F::from_u32(2)) * CB::F::from_u32(8)),
             local.w_i_minus_2_ptr,
             local.is_real.into(),
         );
@@ -134,9 +129,7 @@ where
         AddrAddGadget::<CB::F>::eval(
             builder,
             ptr.clone(),
-            Word::extend_expr::<CB>(
-                (local.i - CB::F::from_canonical_u32(16)) * CB::F::from_canonical_u32(8),
-            ),
+            Word::extend_expr::<CB>((local.i - CB::F::from_u32(16)) * CB::F::from_u32(8)),
             local.w_i_minus_16_ptr,
             local.is_real.into(),
         );
@@ -160,9 +153,7 @@ where
         AddrAddGadget::<CB::F>::eval(
             builder,
             ptr.clone(),
-            Word::extend_expr::<CB>(
-                (local.i - CB::F::from_canonical_u32(7)) * CB::F::from_canonical_u32(8),
-            ),
+            Word::extend_expr::<CB>((local.i - CB::F::from_u32(7)) * CB::F::from_u32(8)),
             local.w_i_minus_7_ptr,
             local.is_real.into(),
         );
@@ -281,7 +272,7 @@ where
         AddrAddGadget::<CB::F>::eval(
             builder,
             ptr.clone(),
-            Word::extend_expr::<CB>(local.i * CB::F::from_canonical_u32(8)),
+            Word::extend_expr::<CB>(local.i * CB::F::from_u32(8)),
             local.w_i_ptr,
             local.is_real.into(),
         );

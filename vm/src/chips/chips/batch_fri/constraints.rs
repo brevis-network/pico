@@ -9,9 +9,8 @@ use crate::{
     },
     primitives::consts::EXTENSION_DEGREE,
 };
-use p3_air::{Air, AirBuilder};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::{extension::BinomiallyExtendable, Field};
-use p3_matrix::Matrix;
 use std::borrow::Borrow;
 
 impl<F: Field + BinomiallyExtendable<EXTENSION_DEGREE>, CB> Air<CB> for BatchFRIChip<F>
@@ -20,11 +19,11 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &BatchFRICols<CB::Var> = (*local).borrow();
         let next: &BatchFRICols<CB::Var> = (*next).borrow();
-        let prepr = builder.preprocessed();
-        let (prepr_local, _prepr_next) = (prepr.row_slice(0), prepr.row_slice(1));
+        let prepr = builder.preprocessed().clone();
+        let (prepr_local, _prepr_next) = (prepr.current_slice(), prepr.next_slice());
         let prepr_local: &BatchFRIPreprocessedCols<CB::Var> = (*prepr_local).borrow();
 
         // Constrain memory read for alpha_pow, p_at_z, and p_at_x.

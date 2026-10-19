@@ -64,9 +64,9 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
         let padded_row_template = {
             let mut row = [F::ZERO; NUM_SLR_VALUE_COLS];
             let cols: &mut ShiftRightValueCols<F> = row.as_mut_slice().borrow_mut();
-            cols.v_01 = F::from_canonical_u32(16);
-            cols.v_012 = F::from_canonical_u32(256);
-            cols.v_0123 = F::from_canonical_u32(65536);
+            cols.v_01 = F::from_u32(16);
+            cols.v_012 = F::from_u32(256);
+            cols.v_0123 = F::from_u32(65536);
             cols.c = F::ZERO;
             row
         };
@@ -97,6 +97,12 @@ impl<F: PrimeField32> ChipBehavior<F> for ShiftRightChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
+        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
+        // depends on the chunk kind rather than on its opcode mix. Without a shape the
+        // chip is event-driven, which is what the natural-height path wants.
+        if let Some(shape) = record.shape.as_ref() {
+            return shape.included::<F, _>(self);
+        }
         !record.shift_right_events.is_empty()
     }
 
@@ -134,15 +140,15 @@ impl<F: PrimeField32> ShiftRightChip<F> {
         // Set c_bits (6 lowest bits of c)
         let c_val = u64_to_u16_limbs(c)[0];
         for i in 0..6 {
-            cols.c_bits[i] = F::from_canonical_u16((c_val >> i) & 1);
+            cols.c_bits[i] = F::from_u16((c_val >> i) & 1);
         }
-        cols.c = F::from_canonical_u16(c_val);
+        cols.c = F::from_u16(c_val);
         blu.add_bit_range_check(c_val >> 6, 10);
 
         // Set v_01, v_012, v_0123
-        cols.v_01 = F::from_canonical_u32(1 << (4 - (c_val & 3)));
-        cols.v_012 = F::from_canonical_u32(1 << (8 - (c_val & 7)));
-        cols.v_0123 = F::from_canonical_u32(1 << (16 - (c_val & 15)));
+        cols.v_01 = F::from_u32(1 << (4 - (c_val & 3)));
+        cols.v_012 = F::from_u32(1 << (8 - (c_val & 7)));
+        cols.v_0123 = F::from_u32(1 << (16 - (c_val & 15)));
 
         // Convert b to u16 limbs
         let b_limbs = u64_to_u16_limbs(b);
@@ -185,8 +191,8 @@ impl<F: PrimeField32> ShiftRightChip<F> {
             let limb = b_limbs[i] as u32;
             let lower_limb_val = (limb & ((1 << bit_shift) - 1)) as u16;
             let higher_limb_val = (limb >> bit_shift) as u16;
-            cols.lower_limb[i] = F::from_canonical_u16(lower_limb_val);
-            cols.higher_limb[i] = F::from_canonical_u16(higher_limb_val);
+            cols.lower_limb[i] = F::from_u16(lower_limb_val);
+            cols.higher_limb[i] = F::from_u16(higher_limb_val);
             blu.add_bit_range_check(lower_limb_val, bit_shift);
             blu.add_bit_range_check(higher_limb_val, 16 - bit_shift);
         }
@@ -195,8 +201,7 @@ impl<F: PrimeField32> ShiftRightChip<F> {
         for i in 0..WORD_SIZE {
             cols.limb_result[i] = cols.higher_limb[i];
             if i != WORD_SIZE - 1 {
-                cols.limb_result[i] +=
-                    cols.lower_limb[i + 1] * F::from_canonical_u32(1 << (16 - bit_shift));
+                cols.limb_result[i] += cols.lower_limb[i + 1] * F::from_u32(1 << (16 - bit_shift));
             }
         }
 
@@ -211,7 +216,7 @@ impl<F: PrimeField32> ShiftRightChip<F> {
                 shift[i] = 1;
             }
         }
-        cols.shift_u16 = shift.map(|x| F::from_canonical_u16(x));
+        cols.shift_u16 = shift.map(|x| F::from_u16(x));
 
         let is_w_imm = is_word && event.is_imm;
         cols.is_w_imm = F::from_bool(is_w_imm);

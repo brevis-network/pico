@@ -1,0 +1,33 @@
+[package]
+name = "pico-prover"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+# TODO(onchain): back to `pico-vm.workspace = true` once `multi-field-transcript` is unconditional.
+pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict"] }
+# The protocol core, for the proof codec and the verifying-key type a stored proof carries.
+# `default-features = false` mirrors `vm/Cargo.toml`: `parallel` reaches it through `pico-vm`.
+pico-mle-core = { path = "../../mle-core", default-features = false }
+# The AOT program registry, for `aot`.
+pico-aot-runtime = { path = "../../aot-runtime", default-features = false, optional = true }
+
+bincode.workspace = true
+serde = { workspace = true, features = ["derive"] }
+# Declared here rather than in the workspace table, as `pico-sdk` does: the guest accumulates the
+# committed-value digest with the same crate, and the two have to agree.
+sha2 = "0.10.8"
+thiserror.workspace = true
+
+[features]
+default = ["multi-field-transcript"]
+# Forwards to `pico-vm`'s. On by default, so every build reaches the on-chain proof. Off
+# (`default-features = false`) builds without the embed and wrap machines: `Phase::Embed` and
+# `Phase::Wrap` are then named but unimplemented, and return `ProveError::FeatureMissing`.
+multi-field-transcript = ["pico-vm/multi-field-transcript"]
+# Emulates through the snapshot pipeline with a guest's AOT-compiled code: `ProverBuilder::aot`.
+aot = ["pico-vm/aot-emulator", "dep:pico-aot-runtime"]

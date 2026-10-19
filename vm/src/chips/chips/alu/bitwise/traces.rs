@@ -80,6 +80,12 @@ impl<F: PrimeField32> ChipBehavior<F> for BitwiseChip<F> {
 
     // flag reflecting whether chip is used in the record
     fn is_active(&self, record: &Self::Record) -> bool {
+        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
+        // depends on the chunk kind rather than on its opcode mix. Without a shape the
+        // chip is event-driven, which is what the natural-height path wants.
+        if let Some(shape) = record.shape.as_ref() {
+            return shape.included::<F, _>(self);
+        }
         !record.bitwise_events.is_empty()
     }
 

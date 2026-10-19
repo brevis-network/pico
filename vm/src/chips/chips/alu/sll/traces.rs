@@ -100,6 +100,12 @@ impl<F: PrimeField32> ChipBehavior<F> for SLLChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
+        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
+        // depends on the chunk kind rather than on its opcode mix. Without a shape the
+        // chip is event-driven, which is what the natural-height path wants.
+        if let Some(shape) = record.shape.as_ref() {
+            return shape.included::<F, _>(self);
+        }
         !record.shift_left_events.is_empty()
     }
 
@@ -134,13 +140,13 @@ impl<F: Field> SLLChip<F> {
         cols.is_sllw = F::from_bool(event.opcode == Opcode::SLLW);
 
         for i in 0..6 {
-            cols.c_bits[i] = F::from_canonical_u16((c >> i) & 1);
+            cols.c_bits[i] = F::from_u16((c >> i) & 1);
         }
         blu.add_bit_range_check(c >> 6, 10);
 
-        cols.v_01 = F::from_canonical_u16(1 << (c & 3));
-        cols.v_012 = F::from_canonical_u16(1 << (c & 7));
-        cols.v_0123 = F::from_canonical_u16(1 << (c & 15));
+        cols.v_01 = F::from_u16(1 << (c & 3));
+        cols.v_012 = F::from_u16(1 << (c & 7));
+        cols.v_0123 = F::from_u16(1 << (c & 15));
 
         let shift_amount = ((c >> 4) & 1) + 2 * ((c >> 5) & 1) * (is_sll as u16);
 
@@ -157,20 +163,20 @@ impl<F: Field> SLLChip<F> {
             let limb = b[i] as u32;
             let lower_limb = (limb & ((1 << (16 - bit_shift)) - 1)) as u16;
             let higher_limb = (limb >> (16 - bit_shift)) as u16;
-            cols.lower_limb[i] = F::from_canonical_u16(lower_limb);
-            cols.higher_limb[i] = F::from_canonical_u16(higher_limb);
+            cols.lower_limb[i] = F::from_u16(lower_limb);
+            cols.higher_limb[i] = F::from_u16(higher_limb);
             blu.add_bit_range_check(lower_limb, 16 - bit_shift);
             blu.add_bit_range_check(higher_limb, bit_shift);
         }
 
         for i in 0..WORD_SIZE {
-            cols.limb_result[i] = cols.lower_limb[i] * F::from_canonical_u32(1u32 << bit_shift);
+            cols.limb_result[i] = cols.lower_limb[i] * F::from_u32(1u32 << bit_shift);
             if i != 0 {
                 cols.limb_result[i] += cols.higher_limb[i - 1];
             }
         }
 
-        cols.shift_u16 = shift.map(|x| F::from_canonical_u16(x));
+        cols.shift_u16 = shift.map(|x| F::from_u16(x));
     }
 }
 

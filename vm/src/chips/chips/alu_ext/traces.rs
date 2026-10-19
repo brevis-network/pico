@@ -14,7 +14,7 @@ use crate::{
     },
     emulator::recursion::emulator::{ExtAluOpcode, RecursionRecord},
     iter::{IndexedPicoIterator, PicoIterator, PicoSliceMut},
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, PreprocessedRows},
     primitives::consts::{EXTENSION_DEGREE, EXT_ALU_DATAPAR},
 };
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
@@ -30,6 +30,12 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
         "ExtAlu".to_string()
     }
 
+    fn preprocessed_rows(&self, program: &Self::Program) -> Option<PreprocessedRows> {
+        Some(PreprocessedRows::Unpadded(
+            program.prep_row_counts().ext_alu,
+        ))
+    }
+
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let instructions = program
             .instructions
@@ -41,11 +47,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE>> ChipBehavior<F> f
             .collect::<Vec<_>>();
 
         let nb_rows = instructions.len().div_ceil(EXT_ALU_DATAPAR);
-        let fixed_log2_rows = program.fixed_log2_rows(&self.name());
-        let padded_nb_rows = match fixed_log2_rows {
-            Some(log2_rows) => 1 << log2_rows,
-            None => next_power_of_two(nb_rows, None),
-        };
+        let padded_nb_rows = program.padded_prep_rows(&self.name(), nb_rows);
         let mut values = vec![F::ZERO; padded_nb_rows * NUM_EXT_ALU_PREPROCESSED_COLS];
 
         // Generate the trace rows & corresponding records for each chunk of events in parallel.

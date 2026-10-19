@@ -8,4 +8,4 @@ categories = { workspace = true }
 
 [dependencies]
 pico-sdk = { workspace = true }
-curve25519-dalek = { git = "https://github.com/brevis-network/curve25519-dalek-ng.git", branch = "patch-v1.0.1", package = "curve25519-dalek-ng", default-features = false, features = ["std", "u32_backend", "alloc", "serde"] }
+curve25519-dalek = { git = "https://github.com/brevis-network/curve25519-dalek-ng.git", rev = "1d1c268fcf7e10255cf2c51dc814da9caf37d888", package = "curve25519-dalek-ng", default-features = false, features = ["std", "u32_backend", "alloc", "serde"] } # patch-v1.0.1-rv64

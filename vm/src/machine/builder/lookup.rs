@@ -3,35 +3,10 @@
 use super::ChipBuilder;
 use crate::{
     compiler::{riscv::opcode::ByteOpcode, word::Word},
-    configs::config::StarkGenericConfig,
-    machine::{
-        builder::{AirBuilder, FilteredAirBuilder},
-        folder::{ProverConstraintFolder, VerifierConstraintFolder},
-        lookup::{LookupScope, LookupType, SymbolicLookup},
-    },
+    machine::lookup::{LookupScope, LookupType, SymbolicLookup},
 };
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use std::iter::once;
-
-/// message builder for the chips.
-pub trait LookupBuilder<M> {
-    fn looking(&mut self, message: M);
-
-    fn looked(&mut self, message: M);
-}
-
-/// A message builder for which sending and receiving messages is a no-op.
-pub trait EmptyLookupBuilder: AirBuilder {}
-
-impl<AB: EmptyLookupBuilder, M> LookupBuilder<M> for AB {
-    fn looking(&mut self, _message: M) {}
-
-    fn looked(&mut self, _message: M) {}
-}
-
-impl<SC: StarkGenericConfig> EmptyLookupBuilder for ProverConstraintFolder<SC> {}
-impl<SC: StarkGenericConfig> EmptyLookupBuilder for VerifierConstraintFolder<'_, SC> {}
-impl<F: Field, AB: AirBuilder<F = F>> EmptyLookupBuilder for FilteredAirBuilder<'_, AB> {}
 
 pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
     /// Looking for an instruction to be processed.
@@ -172,7 +147,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         c: impl Into<Self::Expr>,
         multiplicity: impl Into<Self::Expr>,
     ) {
-        let opcode = Self::Expr::from_canonical_u8(opcode as u8);
+        let opcode = Self::Expr::from_u8(opcode as u8);
         self.looking_byte_pair(opcode, a1, a2, b, c, multiplicity);
     }
 
@@ -228,8 +203,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         let values: Vec<_> = once(chunk.clone().into())
             .chain(once(clk.clone().into()))
             .chain(once(
-                syscall_id.clone().into()
-                    + arg1[0].clone().into() * Self::Expr::from_canonical_u32(1 << 8),
+                syscall_id.clone().into() + arg1[0].clone().into() * Self::Expr::from_u32(1 << 8),
             ))
             .chain(once(arg1[1].clone().into()))
             .chain(once(arg1[2].clone().into()))
@@ -266,8 +240,7 @@ pub trait ChipLookupBuilder<F: Field>: ChipBuilder<F> {
         let values: Vec<_> = once(chunk.clone().into())
             .chain(once(clk.clone().into()))
             .chain(once(
-                syscall_id.clone().into()
-                    + arg1[0].clone().into() * Self::Expr::from_canonical_u32(1 << 8),
+                syscall_id.clone().into() + arg1[0].clone().into() * Self::Expr::from_u32(1 << 8),
             ))
             .chain(once(arg1[1].clone().into()))
             .chain(once(arg1[2].clone().into()))

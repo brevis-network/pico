@@ -6,6 +6,8 @@ pub mod memory;
 pub mod public_values;
 pub mod public_values_compat;
 pub mod record;
+pub mod record_digest;
+pub mod record_merge;
 pub mod state;
 pub mod syscalls;
 

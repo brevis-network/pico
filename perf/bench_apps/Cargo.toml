@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "tendermint-pico",
     "reth-pico",
     "fibonacci"
 ]

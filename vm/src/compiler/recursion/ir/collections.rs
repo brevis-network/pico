@@ -1,7 +1,7 @@
 use super::{Builder, FromConstant, MemIndex, MemVariable, Ptr, Usize, Var, Variable};
 use crate::configs::config::FieldGenericConfig;
 use itertools::Itertools;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 
 /// An array that is either of static or dynamic size.
 #[derive(Debug, Clone)]
@@ -113,7 +113,7 @@ impl<FC: FieldGenericConfig> Builder<FC> {
     /// Creates a dynamic array for a length.
     pub fn dyn_array<V: MemVariable<FC>>(&mut self, len: impl Into<Usize<FC::N>>) -> Array<FC, V> {
         let len = match len.into() {
-            Usize::Const(len) => self.eval(FC::N::from_canonical_usize(len)),
+            Usize::Const(len) => self.eval(FC::N::from_usize(len)),
             Usize::Var(len) => len,
         };
         let len = Usize::Var(len);

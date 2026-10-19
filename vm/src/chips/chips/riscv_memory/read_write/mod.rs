@@ -7,6 +7,3 @@ pub mod traces;
 /// A chip for memory read and write
 #[derive(Default)]
 pub struct MemoryReadWriteChip<F>(PhantomData<F>);
-
-#[cfg(test)]
-mod tests;

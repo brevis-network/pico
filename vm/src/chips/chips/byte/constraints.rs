@@ -7,9 +7,8 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder},
 };
 use core::borrow::Borrow;
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 
 impl<F: Field> BaseAir<F> for ByteChip<F> {
     fn width(&self) -> usize {
@@ -23,11 +22,11 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local_mult = main.row_slice(0);
+        let local_mult = main.current_slice();
         let local_mult: &ByteMultCols<CB::Var> = (*local_mult).borrow();
 
-        let prep = builder.preprocessed();
-        let prep = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep = prep.current_slice();
         let local: &BytePreprocessedCols<CB::Var> = (*prep).borrow();
 
         for (i, opcode) in ByteOpcode::all().iter().enumerate() {

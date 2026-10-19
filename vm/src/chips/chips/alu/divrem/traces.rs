@@ -1,4 +1,4 @@
-use super::{columns::NUM_DIVREM_COLS, DivRemChip};
+use super::{columns::NUM_DIVREM_COLS, utils::is_signed_operation, DivRemChip};
 use crate::{
     chips::{
         chips::{
@@ -7,7 +7,7 @@ use crate::{
                     columns::{DivRemValueCols, NUM_DIVREM_VALUE_COLS},
                     utils::{
                         get_msb, get_quotient_and_remainder, is_signed_64bit_operation,
-                        is_signed_operation, is_signed_word_operation, is_unsigned_64bit_operation,
+                        is_signed_word_operation, is_unsigned_64bit_operation,
                         is_unsigned_word_operation, is_word_operation,
                     },
                 },
@@ -140,9 +140,9 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
                 // Calculate flags for sign detection.
                 {
                     if is_signed_64bit_operation(event.opcode) {
-                        cols.rem_neg = F::from_canonical_u8(get_msb(remainder));
-                        cols.b_neg = F::from_canonical_u8(get_msb(event.b));
-                        cols.c_neg = F::from_canonical_u8(get_msb(event.c));
+                        cols.rem_neg = F::from_u8(get_msb(remainder));
+                        cols.b_neg = F::from_u8(get_msb(event.b));
+                        cols.c_neg = F::from_u8(get_msb(event.c));
                         cols.is_overflow =
                             F::from_bool(event.b as i64 == i64::MIN && event.c as i64 == -1);
                         cols.abs_remainder = Word::from((remainder as i64).unsigned_abs());
@@ -150,10 +150,9 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
                         cols.max_abs_c_or_1 =
                             Word::from(u64::max(1, (event.c as i64).unsigned_abs()));
                     } else if is_signed_word_operation(event.opcode) {
-                        cols.rem_neg =
-                            F::from_canonical_u8(get_msb((remainder as i32) as i64 as u64));
-                        cols.b_neg = F::from_canonical_u8(get_msb((event.b as i32) as i64 as u64));
-                        cols.c_neg = F::from_canonical_u8(get_msb((event.c as i32) as i64 as u64));
+                        cols.rem_neg = F::from_u8(get_msb((remainder as i32) as i64 as u64));
+                        cols.b_neg = F::from_u8(get_msb((event.b as i32) as i64 as u64));
+                        cols.c_neg = F::from_u8(get_msb((event.c as i32) as i64 as u64));
                         cols.is_overflow =
                             F::from_bool(event.b as i32 == i32::MIN && event.c as i32 == -1);
                         cols.abs_remainder = Word::from((remainder as i64).unsigned_abs());
@@ -255,7 +254,7 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
                     let mut c_times_quotient_byte = [0u8; 16];
 
                     let c_times_quotient_byte_lower =
-                        ((Wrapping(quotient_comp) * Wrapping(c)).0 as u64).to_le_bytes();
+                        (Wrapping(quotient_comp) * Wrapping(c)).0.to_le_bytes();
 
                     let c_times_quotient_byte_upper = if is_signed_64bit_operation(event.opcode)
                         || is_signed_word_operation(event.opcode)
@@ -277,7 +276,7 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
                         ])
                     });
 
-                    cols.c_times_quotient = c_times_quotient_u16.map(F::from_canonical_u16);
+                    cols.c_times_quotient = c_times_quotient_u16.map(F::from_u16);
 
                     cols.c_times_quotient_lower.populate(
                         &mut blu_events,
@@ -327,7 +326,7 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
                             x += carry[i - 1];
                         }
                         carry[i] = x / base;
-                        cols.carry[i] = F::from_canonical_u32(carry[i]);
+                        cols.carry[i] = F::from_u32(carry[i]);
                         output.add_u16_range_check((x & 0xFFFF) as u16);
                     }
 
@@ -417,6 +416,12 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
+        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
+        // depends on the chunk kind rather than on its opcode mix. Without a shape the
+        // chip is event-driven, which is what the natural-height path wants.
+        if let Some(shape) = record.shape.as_ref() {
+            return shape.included::<F, _>(self);
+        }
         !record.divrem_events.is_empty()
     }
 
@@ -425,36 +430,8 @@ impl<F: PrimeField32> ChipBehavior<F> for DivRemChip<F> {
     }
 }
 
-impl<F> EventCapture for DivRemChip<F> {
-    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
-        event_counter.num_divrem_events += record.divrem_events.len();
-        if event_counter.num_divrem_events == 0 {
-            return;
-        }
-
-        event_counter.num_mul_events += 2 * record.divrem_events.len();
-        let chunk_size = std::cmp::max(record.divrem_events.len() / num_cpus::get(), 1);
-        let divrem_counts: Vec<(usize, usize)> = record
-            .divrem_events
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .flat_map_iter(|chunk| chunk.iter().map(|e| Self::count_event(e)))
-            .collect();
-        let (divrem_add, divrem_lt) = divrem_counts
-            .as_slice()
-            .pico_chunks(chunk_size)
-            .map(|chunk| {
-                chunk
-                    .iter()
-                    .fold((0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1))
-            })
-            .pico_reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
-        event_counter.num_add_events += divrem_add;
-        event_counter.num_lt_events += divrem_lt;
-    }
-}
-
 impl<F> DivRemChip<F> {
+    #[inline(always)]
     fn count_event(event: &AluEvent) -> (usize, usize) {
         let mut add_events = 0;
         let mut lt_events = 0;
@@ -484,5 +461,34 @@ impl<F> DivRemChip<F> {
         }
 
         (add_events, lt_events)
+    }
+}
+
+impl<F> EventCapture for DivRemChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_divrem_events += record.divrem_events.len();
+        if event_counter.num_divrem_events == 0 {
+            return;
+        }
+
+        event_counter.num_mul_events += 2 * record.divrem_events.len();
+        let chunk_size = std::cmp::max(record.divrem_events.len() / num_cpus::get(), 1);
+        let divrem_counts: Vec<(usize, usize)> = record
+            .divrem_events
+            .as_slice()
+            .pico_chunks(chunk_size)
+            .flat_map_iter(|chunk| chunk.iter().map(|e| Self::count_event(e)))
+            .collect();
+        let (divrem_add, divrem_lt) = divrem_counts
+            .as_slice()
+            .pico_chunks(chunk_size)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .fold((0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1))
+            })
+            .pico_reduce(|| (0, 0), |(a0, a1), (b0, b1)| (a0 + b0, a1 + b1));
+        event_counter.num_add_events += divrem_add;
+        event_counter.num_lt_events += divrem_lt;
     }
 }

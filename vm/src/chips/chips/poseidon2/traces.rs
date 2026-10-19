@@ -18,7 +18,7 @@ use crate::{
     configs::config::Poseidon2Config,
     emulator::recursion::emulator::RecursionRecord,
     iter::{join, IndexedPicoIterator, PicoIterator, PicoSliceMut},
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, PreprocessedRows},
     primitives::consts::{PERMUTATION_WIDTH, POSEIDON2_DATAPAR},
 };
 use p3_field::PrimeField32;
@@ -28,7 +28,7 @@ use std::borrow::BorrowMut;
 
 impl<
         F: PrimeField32,
-        LinearLayers: GenericPoseidon2LinearLayers<F, PERMUTATION_WIDTH>,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
         Config: Poseidon2Config,
     > ChipBehavior<F> for Poseidon2Chip<F, LinearLayers, Config>
 {
@@ -37,6 +37,12 @@ impl<
 
     fn name(&self) -> String {
         POSEIDON2_CHIPNAME.to_string()
+    }
+
+    fn preprocessed_rows(&self, program: &Self::Program) -> Option<PreprocessedRows> {
+        Some(PreprocessedRows::Unpadded(
+            program.prep_row_counts().poseidon2,
+        ))
     }
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
@@ -50,11 +56,7 @@ impl<
             .collect::<Vec<_>>();
 
         let nrows = instructions.len().div_ceil(POSEIDON2_DATAPAR);
-        let fixed_log2_nrows = program.fixed_log2_rows(&self.name());
-        let padded_nrows = match fixed_log2_nrows {
-            Some(log2_nrows) => 1 << log2_nrows,
-            None => next_power_of_two(nrows, None),
-        };
+        let padded_nrows = program.padded_prep_rows(&self.name(), nrows);
 
         let mut values = vec![F::ZERO; padded_nrows * NUM_PREPROCESSED_POSEIDON2_COLS];
 

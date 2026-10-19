@@ -1,7 +1,6 @@
 use crate::machine::builder::{ChipBaseBuilder, ChipBuilder, RecursionBuilder};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra};
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing};
 use std::borrow::Borrow;
 
 use super::{
@@ -106,11 +105,11 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &ExpReverseBitsLenCols<CB::Var> = (*local).borrow();
         let next: &ExpReverseBitsLenCols<CB::Var> = (*next).borrow();
-        let prepocess = builder.preprocessed();
-        let (prepocess_local, prepocess_next) = (prepocess.row_slice(0), prepocess.row_slice(1));
+        let prepocess = builder.preprocessed().clone();
+        let (prepocess_local, prepocess_next) = (prepocess.current_slice(), prepocess.next_slice());
         let prepocess_local: &ExpReverseBitsLenPreprocessedCols<_> = (*prepocess_local).borrow();
         let prepocess_next: &ExpReverseBitsLenPreprocessedCols<_> = (*prepocess_next).borrow();
         self.eval_exp_reverse_bits_len::<CB>(builder, local, prepocess_local, next, prepocess_next);

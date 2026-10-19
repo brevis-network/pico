@@ -7,4 +7,4 @@ pub mod trace;
 pub mod utils;
 
 #[cfg(test)]
-pub mod tests;
+pub(crate) mod tests;

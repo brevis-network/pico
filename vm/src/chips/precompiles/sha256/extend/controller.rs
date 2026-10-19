@@ -21,9 +21,9 @@ use crate::{
     },
 };
 use core::borrow::Borrow;
-use p3_air::{Air, BaseAir};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::ParallelSlice;
 use pico_derive::AlignedBorrow;
 use std::{borrow::BorrowMut, iter::once};
@@ -139,8 +139,8 @@ impl<F: PrimeField32> ShaExtendControlChip<F> {
         let mut row = [F::ZERO; NUM_SHA_EXTEND_CONTROL_COLS];
         let cols: &mut ShaExtendControlCols<F> = row.as_mut_slice().borrow_mut();
 
-        cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.clk = F::from_canonical_u32(u32::try_from(event.clk).unwrap());
+        cols.chunk = F::from_u32(event.chunk);
+        cols.clk = F::from_u32(u32::try_from(event.clk).unwrap());
         // This precompile accesses 64 words, which is 512 bytes.
         cols.w_ptr.populate(blu, event.w_ptr, 512);
         // Address of 16th element of W, last read only element
@@ -164,7 +164,7 @@ where
     fn eval(&self, builder: &mut CB) {
         // Initialize columns.
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ShaExtendControlCols<CB::Var> = (*local).borrow();
 
         // Check that `is_real` is boolean.
@@ -184,7 +184,7 @@ where
                 CB::Expr::ZERO,
             ]),
             Word([
-                CB::Expr::from_canonical_u32(15 * 8),
+                CB::Expr::from_u32(15 * 8),
                 CB::Expr::ZERO,
                 CB::Expr::ZERO,
                 CB::Expr::ZERO,
@@ -202,7 +202,7 @@ where
                 CB::Expr::ZERO,
             ]),
             Word([
-                CB::Expr::from_canonical_u32(16 * 8),
+                CB::Expr::from_u32(16 * 8),
                 CB::Expr::ZERO,
                 CB::Expr::ZERO,
                 CB::Expr::ZERO,
@@ -220,7 +220,7 @@ where
                 CB::Expr::ZERO,
             ]),
             Word([
-                CB::Expr::from_canonical_u32(63 * 8),
+                CB::Expr::from_u32(63 * 8),
                 CB::Expr::ZERO,
                 CB::Expr::ZERO,
                 CB::Expr::ZERO,
@@ -233,7 +233,7 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            CB::F::from_canonical_u32(SyscallCode::SHA_EXTEND.syscall_id()),
+            CB::F::from_u32(SyscallCode::SHA_EXTEND.syscall_id()),
             w_ptr.map(Into::into),
             [CB::Expr::ZERO, CB::Expr::ZERO, CB::Expr::ZERO],
             local.is_real,
@@ -243,7 +243,7 @@ where
         let send_values = once(local.chunk.into())
             .chain(once(local.clk.into()))
             .chain(w_ptr.map(Into::into))
-            .chain(once(CB::Expr::from_canonical_u32(16)))
+            .chain(once(CB::Expr::from_u32(16)))
             .collect::<Vec<_>>();
         builder.looking(SymbolicLookup::new(
             send_values,
@@ -254,9 +254,9 @@ where
 
         // Receive the final state, with the final index being 64.
         let receive_values = once(local.chunk.into())
-            .chain(once(local.clk.into() + CB::Expr::from_canonical_u8(48)))
+            .chain(once(local.clk.into() + CB::Expr::from_u8(48)))
             .chain(w_ptr.map(Into::into))
-            .chain(once(CB::Expr::from_canonical_u32(64)))
+            .chain(once(CB::Expr::from_u32(64)))
             .collect::<Vec<_>>();
         builder.looked(SymbolicLookup::new(
             receive_values,

@@ -11,9 +11,8 @@ use crate::{
 };
 
 use super::{columns::MulCols, MulChip};
-use p3_air::{Air, AirBuilder};
+use p3_air::{Air, AirBuilder, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 
 impl<F: Field, CB> Air<CB> for MulChip<F>
 where
@@ -21,7 +20,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MulCols<CB::Var> = (*local).borrow();
 
         for MulValueCols {
@@ -88,11 +87,11 @@ where
                         + is_mulw.clone(),
                 );
 
-                let mul: CB::Expr = CB::F::from_canonical_u32(Opcode::MUL as u32).into();
-                let mulh: CB::Expr = CB::F::from_canonical_u32(Opcode::MULH as u32).into();
-                let mulhu: CB::Expr = CB::F::from_canonical_u32(Opcode::MULHU as u32).into();
-                let mulhsu: CB::Expr = CB::F::from_canonical_u32(Opcode::MULHSU as u32).into();
-                let mulw: CB::Expr = CB::F::from_canonical_u32(Opcode::MULW as u32).into();
+                let mul: CB::Expr = CB::F::from_u32(Opcode::MUL as u32).into();
+                let mulh: CB::Expr = CB::F::from_u32(Opcode::MULH as u32).into();
+                let mulhu: CB::Expr = CB::F::from_u32(Opcode::MULHU as u32).into();
+                let mulhsu: CB::Expr = CB::F::from_u32(Opcode::MULHSU as u32).into();
+                let mulw: CB::Expr = CB::F::from_u32(Opcode::MULW as u32).into();
                 is_mul * mul
                     + is_mulh * mulh
                     + is_mulhu * mulhu

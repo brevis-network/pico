@@ -54,9 +54,9 @@ use crate::{
 };
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
 use std::marker::PhantomData;
 use typenum::Unsigned;
@@ -255,9 +255,8 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 row[0..weierstrass_width].borrow_mut();
 
             cols.is_real = F::from_bool(true);
-            cols.chunk = F::from_canonical_u32(event.chunk);
-            cols.clk =
-                F::from_canonical_u32(checked_u64_to_u32(event.clk, "weierstrass decompress clk"));
+            cols.chunk = F::from_u32(event.chunk);
+            cols.clk = F::from_u32(checked_u64_to_u32(event.clk, "weierstrass decompress clk"));
             let num_limbs = <E::BaseField as NumLimbs>::Limbs::USIZE;
             let len = num_limbs as u64 * 2;
             cols.ptr
@@ -313,7 +312,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 let neg_y = &modulus - &decompressed_y;
 
                 let is_y_eq_sqrt_y_result =
-                    F::from_canonical_u8((event.decompressed_y_words[0] & 1) as u8) == lsb;
+                    F::from_u8((event.decompressed_y_words[0] & 1) as u8) == lsb;
                 choice_cols.is_y_eq_sqrt_y_result = F::from_bool(is_y_eq_sqrt_y_result);
 
                 if event.sign_bit {
@@ -364,10 +363,10 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                 for i in 0..cols.x_access.len() {
                     let limbs = u64_to_u16_limbs(u64_words[i]);
                     cols.x_access[i].inner.access.value = crate::compiler::word::Word([
-                        F::from_canonical_u16(limbs[0]),
-                        F::from_canonical_u16(limbs[1]),
-                        F::from_canonical_u16(limbs[2]),
-                        F::from_canonical_u16(limbs[3]),
+                        F::from_u16(limbs[0]),
+                        F::from_u16(limbs[1]),
+                        F::from_u16(limbs[2]),
+                        F::from_u16(limbs[3]),
                     ]);
                     // Must also set prev_value_u8.low_bytes so that the U16→U8
                     // decomposition in eval (generate_limbs_from_read_cols_u8)
@@ -376,7 +375,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
                     // constraint (which is NOT gated by is_real) to fail.
                     for j in 0..4 {
                         cols.x_access[i].prev_value_u8.low_bytes[j] =
-                            F::from_canonical_u8((limbs[j] & 0xFF) as u8);
+                            F::from_u8((limbs[j] & 0xFF) as u8);
                     }
                 }
 
@@ -436,7 +435,7 @@ where
         let main = builder.main();
 
         let weierstrass_cols = num_weierstrass_decompress_cols::<E::BaseField>();
-        let local_slice = main.row_slice(0);
+        let local_slice = main.current_slice();
         let local: &WeierstrassDecompressCols<CB::Var, E::BaseField> =
             (*local_slice)[0..weierstrass_cols].borrow();
 
@@ -523,7 +522,7 @@ where
                 .iter()
                 .map(|v| (*v).into())
                 .collect::<Vec<CB::Expr>>(),
-            CB::F::from_canonical_u32(256).into(),
+            CB::F::from_u32(256).into(),
         );
         let neg_y_words = limbs_to_words(
             &local
@@ -533,7 +532,7 @@ where
                 .iter()
                 .map(|v| (*v).into())
                 .collect::<Vec<CB::Expr>>(),
-            CB::F::from_canonical_u32(256).into(),
+            CB::F::from_u32(256).into(),
         );
 
         // Constrain the y value according the sign rule convention.
@@ -748,15 +747,9 @@ where
         }
 
         let syscall_id = match E::CURVE_TYPE {
-            CurveType::Bls12381 => {
-                CB::F::from_canonical_u32(SyscallCode::BLS12381_DECOMPRESS.syscall_id())
-            }
-            CurveType::Secp256k1 => {
-                CB::F::from_canonical_u32(SyscallCode::SECP256K1_DECOMPRESS.syscall_id())
-            }
-            CurveType::Secp256r1 => {
-                CB::F::from_canonical_u32(SyscallCode::SECP256R1_DECOMPRESS.syscall_id())
-            }
+            CurveType::Bls12381 => CB::F::from_u32(SyscallCode::BLS12381_DECOMPRESS.syscall_id()),
+            CurveType::Secp256k1 => CB::F::from_u32(SyscallCode::SECP256K1_DECOMPRESS.syscall_id()),
+            CurveType::Secp256r1 => CB::F::from_u32(SyscallCode::SECP256R1_DECOMPRESS.syscall_id()),
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
         };
 

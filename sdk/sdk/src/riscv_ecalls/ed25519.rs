@@ -7,15 +7,11 @@ use core::arch::asm;
 ///
 /// ### Safety
 ///
-/// The caller must ensure that `p` and `q` are valid pointers to data that is aligned along a four
-/// byte boundary.
+/// The caller must ensure that `p` and `q` are valid pointers to data that is aligned along an
+/// eight byte boundary. The syscall asserts the alignment: the precompile reads and writes whole
+/// dwords, and the chip's address gadget only expresses dword-aligned accesses.
 #[allow(unused_variables)]
 #[no_mangle]
-#[deprecated(
-    note = "The Ed25519 precompile is not available: its chips are not in the prover's machine and \
-            the syscall is unregistered, so a guest that calls this cannot be proved. Use a \
-            software ed25519 implementation instead."
-)]
 pub extern "C" fn syscall_ed_add(p: *mut [u64; 8], q: *const [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     unsafe {
@@ -39,15 +35,10 @@ pub extern "C" fn syscall_ed_add(p: *mut [u64; 8], q: *const [u64; 8]) {
 ///
 /// ### Safety
 ///
-/// The caller must ensure that `point` is valid pointer to data that is aligned along a four byte
-/// boundary.
+/// The caller must ensure that `point` is a valid pointer to data that is aligned along an eight
+/// byte boundary; the syscall asserts it, for the same reason as `syscall_ed_add`.
 #[allow(unused_variables)]
 #[no_mangle]
-#[deprecated(
-    note = "The Ed25519 precompile is not available: its chips are not in the prover's machine and \
-            the syscall is unregistered, so a guest that calls this cannot be proved. Use a \
-            software ed25519 implementation instead."
-)]
 pub extern "C" fn syscall_ed_decompress(point: &mut [u64; 8]) {
     #[cfg(target_os = "zkvm")]
     {

@@ -109,6 +109,6 @@ pub fn load<P, SC: StarkGenericConfig>(
         stdin_builder.write_slice(&input_bytes);
     }
 
-    let (stdin, _deferred_proof) = stdin_builder.finalize();
+    let stdin = stdin_builder.finalize();
     Ok((elf, stdin))
 }

@@ -9,30 +9,22 @@ categories.workspace = true
 [dependencies]
 # pico
 pico-derive.workspace = true
+# MLE/WHIR protocol core; `parallel` routed via vm's `rayon` feature (see below).
+pico-mle-core = { path = "../mle-core", default-features = false }
+# Row-major CPU device; the engine the MLE RISCV path proves on.
+pico-mle-cpu = { path = "../mle-cpu", default-features = false }
 
 # p3
 p3-air.workspace = true
 p3-field.workspace = true
-p3-commit.workspace = true
 p3-matrix.workspace = true
-p3-baby-bear.workspace = true
 p3-util.workspace = true
-p3-challenger.workspace = true
-p3-dft.workspace = true
-p3-fri.workspace = true
-p3-goldilocks.workspace = true
 p3-keccak.workspace = true
 p3-keccak-air.workspace = true
-p3-blake3.workspace = true
-p3-mds.workspace = true
-p3-merkle-tree.workspace = true
 p3-poseidon2.workspace = true
 p3-symmetric.workspace = true
-p3-uni-stark.workspace = true
 p3-maybe-rayon = { workspace = true, features = [] }
-p3-bn254-fr.workspace = true
-p3-mersenne-31.workspace = true
-p3-circle.workspace = true
+p3-bn254.workspace = true
 p3-koala-bear.workspace = true
 
 # misc
@@ -49,21 +41,23 @@ crossbeam.workspace = true
 core_affinity.workspace = true
 csv.workspace = true
 curve25519-dalek.workspace = true
-dashmap.workspace = true
 dashu.workspace = true
+derivative.workspace = true
+derive-new.workspace = true
 derive_more.workspace = true
 elf.workspace = true
 elliptic-curve.workspace = true
 eyre.workspace = true
-ff.workspace = true
-halo2curves.workspace = true
+getset.workspace = true
 hashbrown.workspace = true
 hex.workspace = true
+hex-literal.workspace = true
 hybrid-array.workspace = true
 itertools.workspace = true
 k256.workspace = true
 lazy_static.workspace = true
 log.workspace = true
+metrics = { workspace = true, optional = true }
 num-bigint.workspace = true
 num-traits.workspace = true
 num.workspace = true
@@ -71,11 +65,13 @@ num_cpus.workspace = true
 once_cell.workspace = true
 p256.workspace = true
 paste.workspace = true
+postcard.workspace = true
 rand.workspace = true
 rayon-scan = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
 rrs-lib.workspace = true
 rug = { workspace = true, optional = true }
+rustc-hash.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
@@ -98,6 +94,10 @@ zkhash.workspace = true
 tikv-jemallocator = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Cargo unions this with the `[dependencies]` entry, so `default-features = false` must be repeated
+# here or `pico-mle-core/parallel` comes back on for every test/bench/example build.
+pico-mle-core = { path = "../mle-core", default-features = false, features = ["test-utils"] }
+pico-mle-cpu = { path = "../mle-cpu", default-features = false }
 num = { workspace = true, features = ["rand"] }
 rand.workspace = true
 
@@ -107,20 +107,32 @@ libc = { version = "0.2", optional = true }
 
 
 [features]
-default = ["rayon", "nightly-features", "strict"]
+default = ["rayon", "strict", "multi-field-transcript"]
 bigint-rug = ["rug"] # curves
 debug = []
 debug-lookups = []
 jemalloc = ["dep:tikv-jemallocator"]
 single-threaded = []
-rayon = ["dep:rayon", "dep:rayon-scan", "p3-maybe-rayon/parallel"]
-nightly-features = [
-    "p3-dft/nightly-features",
-    "p3-keccak/nightly-features",
-    "p3-poseidon2/nightly-features",
-]
+rayon = ["dep:rayon", "dep:rayon-scan", "p3-maybe-rayon/parallel", "parallel"]
 strict = []
 aot-emulator = []
 # Use memory-mapped storage for ContiguousRiscvMemory (Unix only)
 # Enables fast reset via madvise(MADV_DONTNEED)
 mmap-memory = ["dep:memmap2", "dep:libc"]
+
+# Pass-throughs to `pico-mle-core`.
+parallel = ["pico-mle-core/parallel", "pico-mle-cpu/parallel"]
+metrics = ["dep:metrics", "pico-mle-core/metrics"]
+multi-field-transcript = ["pico-mle-core/multi-field-transcript"]
+soundness-bchks25-optimized = ["pico-mle-core/soundness-bchks25-optimized"]
+test-utils = ["pico-mle-core/test-utils"]
+
+# Examples that drive the outer (BN254) transcript/config only exist with the feature.
+[[example]]
+name = "test_outer_twins"
+required-features = ["multi-field-transcript"]
+
+# Writes `mle-core/tests/soundness_manifest.json`, the keys `mle-core/tests/soundness.rs` scores.
+[[example]]
+name = "mle_soundness_manifest"
+required-features = ["multi-field-transcript"]

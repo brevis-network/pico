@@ -1,4 +1,4 @@
-use anyhow::{Context, Error};
+use anyhow::{bail, Context};
 use cargo_metadata::Package;
 use std::{
     io::{BufRead, BufReader},
@@ -10,28 +10,18 @@ use std::{
 #[allow(clippy::module_inception)]
 pub mod build;
 
-pub mod client;
-
-// Execute the command and handle the output depending on the context.
-pub(crate) fn execute_command(
-    mut command: Command,
-    target_dir: impl AsRef<Path>,
-) -> Result<PathBuf, Option<i32>> {
+/// Runs `command` to completion with each line of its output shown as it comes, prefixed.
+pub(crate) fn execute_command(mut command: Command) -> anyhow::Result<()> {
     println!("Start to execute command...");
-    // Add necessary tags for stdout and stderr from the command.
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("failed to spawn command")
-        .expect("cargo build failed");
+        .with_context(|| format!("cannot run `{}`", crate::spell(&command)))?;
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let stderr = BufReader::new(child.stderr.take().unwrap());
 
-    // Add prefix to the output of the process depending on the context.
     let msg = "[pico]";
-
-    // Pipe stdout and stderr to the parent process with [docker] prefix
     let stdout_handle = thread::spawn(move || {
         stdout.lines().for_each(|line| {
             println!("{} {}", msg, line.unwrap());
@@ -42,40 +32,140 @@ pub(crate) fn execute_command(
     });
     stdout_handle.join().unwrap();
 
-    // Wait for the child process to finish and check the result.
-    let result = child.wait().expect("execution of the command failed");
-    if !result.success() {
-        println!("error: {:?}", result.code());
-        Err(result.code())
-    } else {
-        Ok(target_dir
-            .as_ref()
-            .join("riscv64im-pico-zkvm-elf")
-            .join("release"))
+    let result = child.wait().context("execution of the command failed")?;
+    if result.success() {
+        return Ok(());
+    }
+    match result.code() {
+        Some(code) => bail!("Cargo build failed with code: {code}"),
+        None => bail!("Cargo build failed"),
     }
 }
 
-/// Find the target file in the target directory.
+/// The path in `target_dir` of the ELF that `bin` names, or of the package's only bin target.
 pub fn find_target_file(
-    program_pkg: Package,
+    program_pkg: &Package,
     target_dir: impl AsRef<Path>,
+    bin: Option<&str>,
 ) -> anyhow::Result<PathBuf> {
-    let target_dir: &Path = target_dir.as_ref();
-    let elf_paths = program_pkg
+    let bins: Vec<&str> = program_pkg
         .targets
-        .into_iter()
-        .filter(move |target| {
+        .iter()
+        .filter(|target| {
             target.kind.contains(&"bin".to_owned())
                 && target.crate_types.contains(&"bin".to_owned())
         })
-        .collect::<Vec<_>>();
-    if elf_paths.len() != 1 {
-        Err(Error::msg(format!(
-            "Expected 1 target, got {}: {:#?}",
-            elf_paths.len(),
-            elf_paths
-        )))
+        .map(|target| target.name.as_str())
+        .collect();
+    let listed = if bins.is_empty() {
+        "none".to_string()
     } else {
-        Ok(target_dir.join(&elf_paths[0].name))
+        bins.join(", ")
+    };
+    let name = match (bin, bins.as_slice()) {
+        (Some(name), _) if bins.contains(&name) => name,
+        (Some(name), _) => bail!(
+            "no bin target `{name}` in package `{}`; its bins: {listed}",
+            program_pkg.name
+        ),
+        (None, [only]) => only,
+        (None, []) => bail!("package `{}` has no bin target", program_pkg.name),
+        (None, _) => bail!(
+            "package `{}` has {} bin targets: {listed}; pass `--bin <name>` to build one",
+            program_pkg.name,
+            bins.len()
+        ),
+    };
+    Ok(target_dir.as_ref().join(name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A package with a lib target, which is never an ELF, beside `bins`.
+    pub(super) fn package(bins: &[&str]) -> Package {
+        let targets: Vec<_> = std::iter::once(json!({
+            "name": "guest",
+            "kind": ["lib"],
+            "crate_types": ["lib"],
+            "src_path": "/guest/src/lib.rs",
+        }))
+        .chain(bins.iter().map(|name| {
+            json!({
+                "name": name,
+                "kind": ["bin"],
+                "crate_types": ["bin"],
+                "src_path": format!("/guest/src/bin/{name}.rs"),
+            })
+        }))
+        .collect();
+        serde_json::from_value(json!({
+            "name": "guest",
+            "version": "0.1.0",
+            "id": "path+file:///guest#0.1.0",
+            "dependencies": [],
+            "features": {},
+            "manifest_path": "/guest/Cargo.toml",
+            "targets": targets,
+        }))
+        .unwrap()
+    }
+
+    fn error(result: anyhow::Result<PathBuf>) -> String {
+        result.unwrap_err().to_string()
+    }
+
+    #[test]
+    fn the_only_bin_needs_no_name() {
+        let found = find_target_file(&package(&["first"]), "/release", None).unwrap();
+        assert_eq!(found, Path::new("/release/first"));
+    }
+
+    #[test]
+    fn two_bins_without_a_name_are_refused_and_listed() {
+        let message = error(find_target_file(
+            &package(&["first", "second"]),
+            "/release",
+            None,
+        ));
+        assert_eq!(
+            message,
+            "package `guest` has 2 bin targets: first, second; pass `--bin <name>` to build one"
+        );
+    }
+
+    #[test]
+    fn two_bins_with_a_name_pick_that_bin() {
+        let found =
+            find_target_file(&package(&["first", "second"]), "/release", Some("second")).unwrap();
+        assert_eq!(found, Path::new("/release/second"));
+    }
+
+    #[test]
+    fn an_unknown_bin_name_is_refused_and_the_bins_listed() {
+        let message = error(find_target_file(
+            &package(&["first", "second"]),
+            "/release",
+            Some("nope"),
+        ));
+        assert_eq!(
+            message,
+            "no bin target `nope` in package `guest`; its bins: first, second"
+        );
+    }
+
+    #[test]
+    fn a_package_without_bins_is_refused() {
+        let pkg = package(&[]);
+        assert_eq!(
+            error(find_target_file(&pkg, "/release", None)),
+            "package `guest` has no bin target"
+        );
+        assert_eq!(
+            error(find_target_file(&pkg, "/release", Some("guest"))),
+            "no bin target `guest` in package `guest`; its bins: none"
+        );
     }
 }

@@ -1,12 +1,67 @@
 use super::super::{FieldSepticCurve, SepticCurve, SepticCurveComplete, SepticExtension};
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField32};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField32};
 use p3_maybe_rayon::prelude::*;
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 use rayon_scan::ScanParallelIterator;
-use std::{any::Any, time::Instant};
+use std::{any::Any, array, time::Instant};
 
-pub fn test_ext_mul<F: Any + FieldAlgebra>() {
-    let a: SepticExtension<F> = SepticExtension::from_canonical_u32(1);
-    let b: SepticExtension<F> = SepticExtension::from_canonical_u32(2);
+/// Septic multiplication written out as the full 7x7 convolution followed by the
+/// unsigned-coefficient reduction of every `z^k` with `k >= 7`. The oracle for the symmetric
+/// square and the balanced reduction of [`SepticExtension`].
+fn textbook_mul<F: PrimeCharacteristicRing + Any>(
+    a: &SepticExtension<F>,
+    b: &SepticExtension<F>,
+) -> SepticExtension<F> {
+    let mut res = [F::ZERO; 13];
+    for i in 0..7 {
+        for j in 0..7 {
+            res[i + j] = res[i + j].clone() + (a.0[i].clone() * b.0[j].clone());
+        }
+    }
+    for power in (7..=12).rev() {
+        let coeff = res[power].clone();
+        for (offset, &red) in F::EXT_COEFFS.iter().enumerate() {
+            let idx = (power - 7) + offset;
+            res[idx] = res[idx].clone() + (coeff.clone() * F::from_u32(red));
+        }
+        res[power] = F::ZERO;
+    }
+    let mut out = [F::ZERO; 7];
+    out.clone_from_slice(&res[..7]);
+    SepticExtension(out)
+}
+
+/// `square`, `Mul` and `cube` agree with [`textbook_mul`] on random inputs.
+pub fn test_ext_square_mul_textbook<F: Field>() {
+    let mut rng = SmallRng::seed_from_u64(20250918);
+    for _ in 0..1000 {
+        let a: SepticExtension<F> = SepticExtension(array::from_fn(|_| F::from_u32(rng.random())));
+        let b: SepticExtension<F> = SepticExtension(array::from_fn(|_| F::from_u32(rng.random())));
+        assert_eq!(a.square(), textbook_mul(&a, &a));
+        assert_eq!(a * b, textbook_mul(&a, &b));
+        assert_eq!(a * a, a.square());
+        assert_eq!(a.cube(), textbook_mul(&textbook_mul(&a, &a), &a));
+    }
+}
+
+/// The two coefficient tables denote the same field elements: `EXT_COEFFS[k]` equals
+/// `EXT_COEFFS_SIGNED[k]` in the field, sign included.
+pub fn test_ext_coeffs_signed_consistent<F: Field>() {
+    for k in 0..7 {
+        let signed = F::EXT_COEFFS_SIGNED[k];
+        let magnitude = F::from_u32(u32::from(signed.unsigned_abs()));
+        let expected = if signed < 0 { -magnitude } else { magnitude };
+        assert_eq!(
+            F::from_u32(F::EXT_COEFFS[k]),
+            expected,
+            "coefficient {k} disagrees with its balanced form"
+        );
+    }
+}
+
+pub fn test_ext_mul<F: Any + PrimeCharacteristicRing + Copy>() {
+    let a: SepticExtension<F> = SepticExtension::from_u32(1);
+    let b: SepticExtension<F> = SepticExtension::from_u32(2);
     let c = a * b;
     println!("{c}");
 }
@@ -14,13 +69,13 @@ pub fn test_ext_mul<F: Any + FieldAlgebra>() {
 pub fn test_ext_inv<F: Field>() {
     for i in 0..256 {
         let a: SepticExtension<F> = SepticExtension([
-            F::from_canonical_u32(i + 3),
-            F::from_canonical_u32(2 * i + 6),
-            F::from_canonical_u32(5 * i + 17),
-            F::from_canonical_u32(6 * i + 91),
-            F::from_canonical_u32(8 * i + 37),
-            F::from_canonical_u32(11 * i + 35),
-            F::from_canonical_u32(14 * i + 33),
+            F::from_u32(i + 3),
+            F::from_u32(2 * i + 6),
+            F::from_u32(5 * i + 17),
+            F::from_u32(6 * i + 91),
+            F::from_u32(8 * i + 37),
+            F::from_u32(11 * i + 35),
+            F::from_u32(14 * i + 33),
         ]);
         let b = a.inv();
         assert_eq!(a * b, SepticExtension::<F>::ONE);
@@ -40,13 +95,13 @@ pub fn test_ext_legendre<F: Field>() {
 pub fn test_ext_sqrt<F: Field>() {
     for i in 0..256 {
         let a: SepticExtension<F> = SepticExtension([
-            F::from_canonical_u32(i + 3),
-            F::from_canonical_u32(2 * i + 6),
-            F::from_canonical_u32(5 * i + 17),
-            F::from_canonical_u32(6 * i + 91),
-            F::from_canonical_u32(8 * i + 37),
-            F::from_canonical_u32(11 * i + 35),
-            F::from_canonical_u32(14 * i + 33),
+            F::from_u32(i + 3),
+            F::from_u32(2 * i + 6),
+            F::from_u32(5 * i + 17),
+            F::from_u32(6 * i + 91),
+            F::from_u32(8 * i + 37),
+            F::from_u32(11 * i + 35),
+            F::from_u32(14 * i + 33),
         ]);
         let b = a * a;
         let recovered_a = b.sqrt().unwrap();
@@ -180,8 +235,10 @@ pub fn test_const_points<F: Field>() {
     ]
     .iter()
     .for_each(|[x, y]| {
-        let x: SepticExtension<F> = SepticExtension::from_base_fn(|i| F::from_canonical_u32(x[i]));
-        let y: SepticExtension<F> = SepticExtension::from_base_fn(|i| F::from_canonical_u32(y[i]));
+        let x: SepticExtension<F> =
+            SepticExtension::from_basis_coefficients_fn(|i| F::from_u32(x[i]));
+        let y: SepticExtension<F> =
+            SepticExtension::from_basis_coefficients_fn(|i| F::from_u32(y[i]));
         let point = SepticCurve { x, y };
         assert!(point.check_on_point());
     });
@@ -193,15 +250,16 @@ pub fn test_curve_simple_sum<F: PrimeField32>() {
     let mut sum = Vec::with_capacity(D as usize);
     let start = Instant::now();
     for i in 0..D {
-        let x: SepticExtension<F> = SepticExtension::from_base_slice(&[
-            F::from_canonical_u32(i + 25),
-            F::from_canonical_u32(2 * i + 376),
-            F::from_canonical_u32(4 * i + 23),
-            F::from_canonical_u32(8 * i + 531),
-            F::from_canonical_u32(16 * i + 542),
-            F::from_canonical_u32(32 * i + 196),
-            F::from_canonical_u32(64 * i + 667),
-        ]);
+        let x: SepticExtension<F> = SepticExtension::from_basis_coefficients_slice(&[
+            F::from_u32(i + 25),
+            F::from_u32(2 * i + 376),
+            F::from_u32(4 * i + 23),
+            F::from_u32(8 * i + 531),
+            F::from_u32(16 * i + 542),
+            F::from_u32(32 * i + 196),
+            F::from_u32(64 * i + 667),
+        ])
+        .unwrap();
         let m: [F; 8] = [
             x.0[0],
             x.0[1],
@@ -240,15 +298,16 @@ pub fn test_curve_parallel_sum<F: PrimeField32>() {
     let mut vec = Vec::with_capacity(D as usize);
     let start = Instant::now();
     for i in 0..D {
-        let x: SepticExtension<F> = SepticExtension::from_base_slice(&[
-            F::from_canonical_u32(i + 25),
-            F::from_canonical_u32(2 * i + 376),
-            F::from_canonical_u32(4 * i + 23),
-            F::from_canonical_u32(8 * i + 531),
-            F::from_canonical_u32(16 * i + 542),
-            F::from_canonical_u32(32 * i + 196),
-            F::from_canonical_u32(64 * i + 667),
-        ]);
+        let x: SepticExtension<F> = SepticExtension::from_basis_coefficients_slice(&[
+            F::from_u32(i + 25),
+            F::from_u32(2 * i + 376),
+            F::from_u32(4 * i + 23),
+            F::from_u32(8 * i + 531),
+            F::from_u32(16 * i + 542),
+            F::from_u32(32 * i + 196),
+            F::from_u32(64 * i + 667),
+        ])
+        .unwrap();
         let m: [F; 8] = [
             x.0[0],
             x.0[1],

@@ -1,0 +1,62 @@
+[package]
+name = "pico-mle-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "MLE/WHIR STARK backend core for the Pico zkVM (KoalaBear-only)"
+
+# Protocol contract, HAL, col-major reference device, verifier, keygen, and the shared chip
+# vocabulary. The optimized row-major CPU device is the sibling `pico-mle-cpu` crate; the brevis
+# chip glue and recursion layer stay in `vm/src/mle/`.
+# KoalaBear-only: no other field has an engine.
+
+[dependencies]
+# pico
+pico-derive.workspace = true
+
+# p3
+p3-air.workspace = true
+p3-field.workspace = true
+p3-matrix.workspace = true
+p3-util.workspace = true
+p3-maybe-rayon = { workspace = true, features = [] }
+p3-symmetric.workspace = true
+p3-challenger.workspace = true
+p3-dft.workspace = true
+p3-poseidon2.workspace = true
+p3-interpolation.workspace = true
+p3-koala-bear.workspace = true
+
+# misc
+cfg-if.workspace = true
+derivative.workspace = true
+derive-new.workspace = true
+getset.workspace = true
+itertools.workspace = true
+metrics = { workspace = true, optional = true }
+num-bigint = { workspace = true, optional = true }
+postcard.workspace = true
+rayon = { workspace = true, optional = true }
+rustc-hash.workspace = true
+serde.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+bincode.workspace = true
+eyre.workspace = true
+p3-bn254.workspace = true
+rand.workspace = true
+serde_json.workspace = true
+
+[features]
+default = ["parallel"]
+parallel = ["dep:rayon", "p3-maybe-rayon/parallel"]
+metrics = ["dep:metrics"]
+test-utils = []
+multi-field-transcript = ["dep:num-bigint"]
+soundness-bchks25-optimized = []

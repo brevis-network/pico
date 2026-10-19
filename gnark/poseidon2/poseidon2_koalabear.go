@@ -11,6 +11,10 @@ const koalabearNumExternalRounds = 8
 const koalabearNumInternalRounds = 20
 
 type Poseidon2KoalaBearChip struct {
+	// Round constants this chip permutes with. The FRI on-chain circuit and the MLE wrap circuit
+	// use DIFFERENT tables, so the chip must carry its own rather than read a package global —
+	// see constants_koalabear_mle.go.
+	rc          *[30][KOALABEAR_WIDTH]koalabear.Variable
 	State       [16]koalabear.Variable
 	bufferCount int
 
@@ -18,8 +22,25 @@ type Poseidon2KoalaBearChip struct {
 	fieldApi *koalabear.Chip
 }
 
+// NewKoalaBearChip builds the chip with the legacy pico round constants — the table the FRI
+// on-chain circuit's own hashing was generated against.
 func NewKoalaBearChip(api frontend.API) *Poseidon2KoalaBearChip {
+	return newKoalaBearChipWithRc(api, &rc16_koalabear)
+}
+
+// NewKoalaBearMleChip builds the chip with the MLE/WHIR backend's round constants. Only the wrap
+// circuit may use this: the MLE recursion proof's in-circuit PV digest is computed with these, and
+// the legacy table makes that assert unsatisfiable.
+func NewKoalaBearMleChip(api frontend.API) *Poseidon2KoalaBearChip {
+	return newKoalaBearChipWithRc(api, &rc16_koalabear_mle)
+}
+
+func newKoalaBearChipWithRc(
+	api frontend.API,
+	rc *[30][KOALABEAR_WIDTH]koalabear.Variable,
+) *Poseidon2KoalaBearChip {
 	return &Poseidon2KoalaBearChip{
+		rc: rc,
 		State: [16]koalabear.Variable{
 			koalabear.Zero(),
 			koalabear.Zero(),
@@ -76,7 +97,7 @@ func (p *Poseidon2KoalaBearChip) PermuteMut(state *[KOALABEAR_WIDTH]koalabear.Va
 	rounds := koalabearNumExternalRounds + koalabearNumInternalRounds
 	roundsFBeginning := koalabearNumExternalRounds / 2
 	for r := 0; r < roundsFBeginning; r++ {
-		p.addRc(state, rc16_koalabear[r])
+		p.addRc(state, p.rc[r])
 		p.sbox(state)
 		p.externalLinearLayer(state)
 	}
@@ -84,14 +105,14 @@ func (p *Poseidon2KoalaBearChip) PermuteMut(state *[KOALABEAR_WIDTH]koalabear.Va
 	// The internal rounds.
 	p_end := roundsFBeginning + koalabearNumInternalRounds
 	for r := roundsFBeginning; r < p_end; r++ {
-		state[0] = p.fieldApi.AddF(state[0], rc16_koalabear[r][0])
+		state[0] = p.fieldApi.AddF(state[0], p.rc[r][0])
 		state[0] = p.sboxP(state[0])
 		p.diffusionPermuteMut(state)
 	}
 
 	// The second half of the external rounds.
 	for r := p_end; r < rounds; r++ {
-		p.addRc(state, rc16_koalabear[r])
+		p.addRc(state, p.rc[r])
 		p.sbox(state)
 		p.externalLinearLayer(state)
 	}
@@ -103,6 +124,10 @@ func (p *Poseidon2KoalaBearChip) addRc(state *[KOALABEAR_WIDTH]koalabear.Variabl
 	}
 }
 
+// sboxP cubes a felt. It reaches past the field gadget into raw api.Mul, which is safe
+// because cubing is a mod-p operation: if ReduceSlow handed back v + p instead of v, then
+// (v + p)^3 = v^3 (mod p) and the trailing reduction lands on the same field element. Only
+// the BOUND changes, and the bound is what the code below is careful about.
 func (p *Poseidon2KoalaBearChip) sboxP(input koalabear.Variable) koalabear.Variable {
 	zero := koalabear.NewFConst("0")
 	inputCpy := p.fieldApi.AddF(input, zero)
@@ -110,9 +135,13 @@ func (p *Poseidon2KoalaBearChip) sboxP(input koalabear.Variable) koalabear.Varia
 	inputValue := inputCpy.Value
 	i2 := p.api.Mul(inputValue, inputValue)
 	i3 := p.api.Mul(i2, inputValue)
+	// Derived from the reduced input's ACTUAL bound, not hard-coded to p^3. Under lazy
+	// canonicality ReduceSlow only promises < 2^31, so p^3 was a bound the wire no longer
+	// satisfies; it escaped notice because p^3 and (2^31 - 1)^3 share BitLen 93 and BitLen is
+	// all that reduceVar consumes. Deriving it removes the coincidence.
 	i3bb := p.fieldApi.ReduceSlow(koalabear.Variable{
 		Value:      i3,
-		UpperBound: new(big.Int).Exp(new(big.Int).SetUint64(2130706433), new(big.Int).SetUint64(3), new(big.Int).SetUint64(0)),
+		UpperBound: new(big.Int).Exp(inputCpy.UpperBound, big.NewInt(3), nil),
 	})
 	return i3bb
 }

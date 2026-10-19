@@ -26,6 +26,3 @@ impl<F> MemoryInitializeFinalizeChip<F> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

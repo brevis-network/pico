@@ -4,11 +4,15 @@
 
 use super::emulator::AotEmulatorCore;
 use crate::precompiles;
+use p3_koala_bear::KoalaBear;
 use pico_vm::{
     chips::{
         chips::riscv_memory::event::MemoryRecord,
         gadgets::{
-            curves::weierstrass::{bls381::Bls12381, secp256k1::Secp256k1, secp256r1::Secp256r1},
+            curves::{
+                edwards::ed25519::{Ed25519, Ed25519Parameters},
+                weierstrass::{bls381::Bls12381, secp256k1::Secp256k1, secp256r1::Secp256r1},
+            },
             field::{
                 bls381::Bls381BaseField, bn254::Bn254BaseField, field_op::FieldOperation,
                 secp256k1::Secp256k1BaseField,
@@ -16,7 +20,9 @@ use pico_vm::{
         },
     },
     compiler::riscv::register::Register,
-    emulator::riscv::syscalls::SyscallCode,
+    emulator::riscv::{
+        chunk_split::commit_tail_in_flight, riscv_emulator::EmulationError, syscalls::SyscallCode,
+    },
 };
 
 // ============================================================
@@ -32,9 +38,6 @@ const fn build_extra_cycles_table() -> [u32; 256] {
     table[0x05] = 0x30; // SHA_EXTEND
     table[0x06] = 0x01; // SHA_COMPRESS
 
-    // ED_ADD / ED_DECOMPRESS are not dispatched -- their chips are out of the machine, so a
-    // proof for a guest that called one could not be produced. Kept in the table so the cycle
-    // costs stay recorded, but the dispatch arms below are removed to match the interpreter.
     table[0x07] = 0x01; // ED_ADD
     table[0x08] = 0x00; // ED_DECOMPRESS
     table[0x09] = 0x01; // KECCAK_PERMUTE
@@ -215,51 +218,54 @@ impl AotEmulatorCore {
             let result = hook(self, slice);
             let ptr = self.input_stream_ptr;
             self.input_stream.splice(ptr..ptr, result);
-            Ok(())
         } else {
-            Err(format!("tried to write to unknown file descriptor {fd}"))
+            // The interpreter (`vm/src/emulator/riscv/syscalls/write.rs`) warns and carries on,
+            // and the two have to run a guest the same way. Guests do this: the zkCoprocessor
+            // guest writes to fd 9, which nothing listens on.
+            log::warn!("tried to write to unknown file descriptor {fd}");
         }
+        Ok(())
     }
 
     #[inline(always)]
     fn handle_hint_len(&mut self, _syscall_id: u64) -> Result<u64, String> {
         if self.input_stream_ptr >= self.input_stream.len() {
-            return Err(format!(
-                "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
-                self.input_stream_ptr,
-                self.input_stream.len()
-            ));
+            return Err(self.fail(EmulationError::InsufficientInput {
+                stream_ptr: self.input_stream_ptr,
+                stream_len: self.input_stream.len(),
+            }));
         }
         Ok(self.input_stream[self.input_stream_ptr].len() as u64)
     }
 
     fn handle_hint_read(&mut self, _syscall_id: u64, ptr: u64, len: u64) -> Result<(), String> {
-        let len = usize::try_from(len).map_err(|_| format!("hint_read len overflow: {len}"))?;
+        let Ok(len) = usize::try_from(len) else {
+            return Err(self.fail(EmulationError::InvalidHintRead(format!(
+                "length {len} does not fit this host's usize"
+            ))));
+        };
         let stream_ptr = self.input_stream_ptr;
         if stream_ptr >= self.input_stream.len() {
-            return Err(format!(
-                "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
+            return Err(self.fail(EmulationError::InsufficientInput {
                 stream_ptr,
-                self.input_stream.len()
-            ));
+                stream_len: self.input_stream.len(),
+            }));
         }
 
-        {
-            let vec = &self.input_stream[stream_ptr];
-            if vec.len() != len {
-                return Err(format!(
-                    "hint input stream read length mismatch: expected {len}, got {}",
-                    vec.len()
-                ));
-            }
-            if !ptr.is_multiple_of(8) {
-                return Err(format!(
-                    "hint read address not aligned to 8 bytes: 0x{ptr:016x}"
-                ));
-            }
+        let supplied = self.input_stream[stream_ptr].len();
+        if supplied != len {
+            return Err(self.fail(EmulationError::InvalidHintRead(format!(
+                "length mismatch: the guest asked for {len} byte(s), input element {stream_ptr} \
+                 holds {supplied}"
+            ))));
+        }
+        if !ptr.is_multiple_of(8) {
+            return Err(self.fail(EmulationError::InvalidHintRead(format!(
+                "address 0x{ptr:016x} is not aligned to 8 bytes"
+            ))));
         }
 
-        let chunk_count = self.input_stream[stream_ptr].len().div_ceil(8);
+        let chunk_count = supplied.div_ceil(8);
 
         for chunk_idx in 0..chunk_count {
             let word = {
@@ -272,16 +278,18 @@ impl AotEmulatorCore {
                 u64::from_le_bytes(padded)
             };
 
-            let addr = ptr.checked_add((chunk_idx as u64) * 8).ok_or_else(|| {
-                format!("hint_read address overflow: ptr=0x{ptr:016x} chunk_idx={chunk_idx}")
-            })?;
+            let Some(addr) = ptr.checked_add((chunk_idx as u64) * 8) else {
+                return Err(self.fail(EmulationError::InvalidHintRead(format!(
+                    "address overflow: ptr=0x{ptr:016x} chunk_idx={chunk_idx}"
+                ))));
+            };
             let existing = self.uninitialized_memory.get(addr).copied();
             if let Some(old) = existing.filter(|&v| v != 0) {
-                return Err(format!(
-                    "hint read address is initialized already (uninitialized_memory)\n\
-                     addr=0x{addr:016x} ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr}\n\
-                     old_uninit_dword=0x{old:016x} new_dword=0x{word:016x}",
-                ));
+                return Err(self.fail(EmulationError::InvalidHintRead(format!(
+                    "address is initialized already (uninitialized_memory): addr=0x{addr:016x} \
+                     ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr} \
+                     old_uninit_dword=0x{old:016x} new_dword=0x{word:016x}"
+                ))));
             }
             self.uninitialized_memory.insert(addr, word);
 
@@ -296,14 +304,13 @@ impl AotEmulatorCore {
             );
 
             if prev_record.value != 0 || prev_record.chunk != 0 || prev_record.timestamp != 0 {
-                return Err(format!(
-                    "hint read address is initialized already (memory)\n\
-                     addr=0x{addr:016x} ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr}\n\
-                     prev_record={prev_record:?}\n\
-                     new_record={{ value: 0x{word:016x}, chunk: 0, timestamp: 0 }}\n\
-                     existing_uninit_word={:?}",
-                    existing.map(|x| format!("0x{x:016x}")),
-                ));
+                let uninit = existing.map(|x| format!("0x{x:016x}"));
+                return Err(self.fail(EmulationError::InvalidHintRead(format!(
+                    "address is initialized already (memory): addr=0x{addr:016x} \
+                     ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr} \
+                     prev_record={prev_record:?} new_dword=0x{word:016x} \
+                     existing_uninit_word={uninit:?}"
+                ))));
             }
         }
 
@@ -320,6 +327,7 @@ impl AotEmulatorCore {
         )?;
         let slot = &mut self.committed_value_digest[idx];
         *slot = Self::digest_leaf_word_u32(word, "commit digest word")?;
+        self.note_digest_word();
         Ok(())
     }
 
@@ -332,7 +340,18 @@ impl AotEmulatorCore {
         )?;
         let slot = &mut self.deferred_proofs_digest[idx];
         *slot = Self::digest_leaf_word_u32(word, "deferred digest word")?;
+        self.chunk_split_state.deferred_commits += 1;
+        self.note_digest_word();
         Ok(())
+    }
+
+    /// A commit tail in flight holds the chunk cut until it lands (see `should_split`).
+    #[inline(always)]
+    fn note_digest_word(&mut self) {
+        self.chunk_split_state.commit_in_flight = commit_tail_in_flight(
+            &self.committed_value_digest,
+            self.chunk_split_state.deferred_commits,
+        );
     }
 
     /// Execute a syscall using the AOT syscall system.
@@ -345,7 +364,9 @@ impl AotEmulatorCore {
         arg2: u64,
     ) -> Result<(u64, u64, u32, bool), String> {
         let syscall_id_u32 = Self::decode_syscall_id_u32(syscall_id)?;
-        let syscall_code = SyscallCode::from_u32(syscall_id_u32);
+        let Some(syscall_code) = SyscallCode::try_from_u32(syscall_id_u32) else {
+            return Err(self.fail(EmulationError::UnsupportedSyscall(syscall_id_u32)));
+        };
         if syscall_code.should_send() != 0 {
             self.chunk_split_state.record_syscall_event();
         }
@@ -355,10 +376,9 @@ impl AotEmulatorCore {
             && syscall_id_u32 != SyscallCode::EXIT_UNCONSTRAINED as u32
             && syscall_id_u32 != SyscallCode::WRITE as u32
         {
-            return Err(format!(
-                "Syscall {:?} is not allowed in unconstrained mode",
-                syscall_code
-            ));
+            return Err(self.fail(EmulationError::InvalidSyscallUsage(u64::from(
+                syscall_code.syscall_id(),
+            ))));
         }
 
         let id_byte = (syscall_id_u32 & 0xff) as usize;
@@ -380,11 +400,32 @@ impl AotEmulatorCore {
                 precompiles::keccak256::keccak_permute(self, arg1);
                 Ok((syscall_return, next_pc, extra_cycles, false))
             }
-            // POSEIDON2_PERMUTE is deliberately not dispatched -- its chip is out of the machine
-            // and the interpreter no longer registers it, so a proof for a guest that called it
-            // could not be produced. Both execution paths have to agree, or AOT would run the
-            // syscall and only the trace pass would reject it. The implementation stays in
-            // `precompiles::poseidon2`.
+            id if id == SyscallCode::POSEIDON2_PERMUTE as u32 => {
+                // KoalaBear is not a default here, it is the only choice: the MLE backend that
+                // consumes these events is KoalaBear-only (`mle::machine::riscv::Kb`), so there
+                // is no other field whose permutation could be proved. If a second field ever
+                // ships, this is the site that has to thread it -- `AotEmulatorCore` carries no
+                // field parameter, which is why the concrete type appears here rather than in
+                // `poseidon2_permute`'s signature.
+                precompiles::poseidon2::poseidon2_permute::<KoalaBear>(
+                    self,
+                    Self::syscall_leaf_u32(arg1, "poseidon2 input_ptr")?,
+                    Self::syscall_leaf_u32(arg2, "poseidon2 output_ptr")?,
+                );
+                Ok((syscall_return, next_pc, extra_cycles, false))
+            }
+            id if id == SyscallCode::ED_ADD as u32 => {
+                precompiles::ec::edwards_add::<Ed25519>(self, arg1, arg2);
+                Ok((syscall_return, next_pc, extra_cycles, false))
+            }
+            id if id == SyscallCode::ED_DECOMPRESS as u32 => {
+                precompiles::ec::edwards_decompress::<Ed25519Parameters>(
+                    self,
+                    arg1,
+                    Self::syscall_leaf_u32(arg2, "edwards decompress sign")?,
+                );
+                Ok((syscall_return, next_pc, extra_cycles, false))
+            }
             id if id == SyscallCode::UINT256_MUL as u32 => {
                 precompiles::uint256::uint256_mul(self, arg1, arg2);
                 Ok((syscall_return, next_pc, extra_cycles, false))
@@ -607,17 +648,11 @@ impl AotEmulatorCore {
             id if id == SyscallCode::HALT as u32 => {
                 let exit_code = Self::decode_u32_abi_word(arg1, "halt exit_code")?;
                 if exit_code != 0 {
-                    return Err(format!("HALT with non-zero exit code: {}", exit_code));
+                    return Err(self.fail(EmulationError::HaltWithNonZeroExitCode(exit_code)));
                 }
                 Ok((syscall_return, 0, extra_cycles, true))
             }
-            _ => {
-                let syscall_code = SyscallCode::from_u32(syscall_id_u32);
-                Err(format!(
-                    "Unimplemented syscall {:#x} (code: {:?}) at PC {:#x}",
-                    syscall_id, syscall_code, self.pc
-                ))
-            }
+            _ => Err(self.fail(EmulationError::UnsupportedSyscall(syscall_id_u32))),
         }
     }
 }
@@ -648,7 +683,10 @@ fn process_output(fd: u32, rt: &mut AotEmulatorCore, s: &str) {
 mod tests {
     use super::AotEmulatorCore;
     use crate::hook::Hook;
-    use pico_vm::{compiler::riscv::program::Program, emulator::riscv::syscalls::SyscallCode};
+    use pico_vm::{
+        compiler::riscv::program::Program,
+        emulator::riscv::{riscv_emulator::EmulationError, syscalls::SyscallCode},
+    };
     use std::{collections::BTreeMap, sync::Arc};
 
     const TEST_HOOK_FD: u32 = 123;
@@ -672,6 +710,43 @@ mod tests {
 
     fn test_hook(_: &AotEmulatorCore, _: &[u8]) -> Vec<Vec<u8>> {
         vec![vec![0x11, 0x22], vec![0x33]]
+    }
+
+    #[test]
+    fn commit_words_raise_the_in_flight_flag_until_the_digest_is_whole() {
+        let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
+        for i in 0..8u64 {
+            emu.handle_commit(i, 0x1111_1111 * (i + 1))
+                .expect("commit word");
+            assert_eq!(
+                emu.chunk_split_state.commit_in_flight,
+                i < 7,
+                "after word {i}"
+            );
+        }
+        // The deferred digest is all zero for a guest that defers nothing, and still holds the cut
+        // until all eight words are in: the count, not the digest, says it is mid-way.
+        for i in 0..8u64 {
+            emu.handle_commit_deferred(i, 0).expect("deferred word");
+            assert_eq!(
+                emu.chunk_split_state.commit_in_flight,
+                i < 7,
+                "after deferred word {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn leaving_unconstrained_mode_rolls_the_in_flight_flag_back_with_the_digest() {
+        let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
+        emu.enter_unconstrained_mode();
+        emu.handle_commit(0, 0x1234_5678).expect("commit word");
+        emu.handle_commit_deferred(0, 0).expect("deferred word");
+        assert!(emu.chunk_split_state.commit_in_flight);
+        emu.exit_unconstrained_mode();
+        assert!(!emu.chunk_split_state.commit_in_flight);
+        assert_eq!(emu.chunk_split_state.deferred_commits, 0);
+        assert_eq!(emu.committed_value_digest, [0; 8]);
     }
 
     #[test]
@@ -723,6 +798,25 @@ mod tests {
         assert_eq!(emu.memory.get(0x108).value, 0x0000_0000_0000_0A09);
     }
 
+    /// The typed error a failed syscall recorded for the batch, which has to be the one whose
+    /// message the `Err` carried.
+    fn recorded_fault(emu: &mut AotEmulatorCore, message: &str) -> EmulationError {
+        let fault = emu
+            .fault
+            .take()
+            .expect("a failed syscall records its typed error");
+        assert_eq!(fault.to_string(), message);
+        fault
+    }
+
+    fn assert_invalid_hint_read(emu: &mut AotEmulatorCore, message: &str, expected: &str) {
+        let fault = recorded_fault(emu, message);
+        assert!(
+            matches!(&fault, EmulationError::InvalidHintRead(detail) if detail.contains(expected)),
+            "expected InvalidHintRead containing {expected:?}, got {fault:?}"
+        );
+    }
+
     #[test]
     fn phase5_hint_read_rejects_unaligned_pointer() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
@@ -730,7 +824,18 @@ mod tests {
         let err = emu
             .handle_hint_read(SyscallCode::HINT_READ as u64, 0x104, 4)
             .expect_err("unaligned hint read should fail");
-        assert!(err.contains("hint read address not aligned to 8 bytes"));
+        assert_invalid_hint_read(&mut emu, &err, "is not aligned to 8 bytes");
+    }
+
+    #[test]
+    fn phase5_hint_read_rejects_a_length_the_element_does_not_hold() {
+        let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
+
+        let err = emu
+            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 8)
+            .expect_err("a length other than the element's should fail");
+        assert_invalid_hint_read(&mut emu, &err, "length mismatch");
+        assert_eq!(emu.input_stream_ptr, 0, "the element is not consumed");
     }
 
     #[test]
@@ -740,11 +845,40 @@ mod tests {
 
         emu.handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
             .expect("first hint read should succeed");
+        assert!(emu.fault.is_none(), "a well-formed read records nothing");
 
         let err = emu
             .handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
             .expect_err("duplicate initialization should fail");
-        assert!(err.contains("hint read address is initialized already (uninitialized_memory)"));
+        assert_invalid_hint_read(&mut emu, &err, "initialized already (uninitialized_memory)");
+    }
+
+    #[test]
+    fn phase5_hint_read_rejects_an_address_memory_already_holds() {
+        let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
+        emu.write_mem_dword(0x100, 0x55);
+
+        let err = emu
+            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
+            .expect_err("a hint over written memory should fail");
+        assert_invalid_hint_read(&mut emu, &err, "initialized already (memory)");
+    }
+
+    #[test]
+    fn phase5_hint_read_past_the_end_of_stdin_is_insufficient_input() {
+        let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
+        emu.input_stream_ptr = 1;
+
+        let err = emu
+            .handle_hint_read(SyscallCode::HINT_READ as u64, 0x100, 4)
+            .expect_err("no element is left to read");
+        assert!(matches!(
+            recorded_fault(&mut emu, &err),
+            EmulationError::InsufficientInput {
+                stream_ptr: 1,
+                stream_len: 1
+            }
+        ));
     }
 
     #[test]
@@ -809,6 +943,20 @@ mod tests {
     }
 
     #[test]
+    fn phase5_write_to_an_unknown_fd_is_ignored_as_the_interpreter_does() {
+        let mut emu = AotEmulatorCore::new(test_program(), vec![vec![0xaa]]);
+        install_write_bytes(&mut emu, 0x200, &[1, 2, 3]);
+
+        emu.write_reg(12, 3);
+        emu.handle_write(9, 0x200)
+            .expect("a write to an fd without a hook is not an error");
+
+        assert_eq!(emu.input_stream, vec![vec![0xaa]]);
+        assert_eq!(emu.input_stream_ptr, 0);
+        assert!(emu.public_values_stream.is_empty());
+    }
+
+    #[test]
     fn phase5_second_hint_len_errors_without_replenished_input() {
         let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
 
@@ -823,7 +971,13 @@ mod tests {
         let err = emu
             .handle_hint_len(SyscallCode::HINT_LEN as u64)
             .expect_err("second hint len should fail");
-        assert!(err.contains("failed reading stdin due to insufficient input data"));
+        assert!(matches!(
+            recorded_fault(&mut emu, &err),
+            EmulationError::InsufficientInput {
+                stream_ptr: 1,
+                stream_len: 1
+            }
+        ));
     }
 
     #[test]
@@ -850,5 +1004,52 @@ mod tests {
         emu.execute_syscall(0xffff_ffff_ffff_fff1, 0x100, 4)
             .expect("sign-extended HINT_READ should decode");
         assert_eq!(emu.memory.get(0x100).value, 0x0000_0000_0403_0201);
+    }
+
+    #[test]
+    fn an_unknown_syscall_is_unsupported_rather_than_a_panic() {
+        let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
+
+        let err = emu
+            .execute_syscall(0x77, 0, 0)
+            .expect_err("no syscall has this number");
+        assert!(matches!(
+            recorded_fault(&mut emu, &err),
+            EmulationError::UnsupportedSyscall(0x77)
+        ));
+    }
+
+    /// Only `WRITE` and `EXIT_UNCONSTRAINED` run inside an unconstrained region, so a nested
+    /// `ENTER_UNCONSTRAINED` is refused here and never reaches `enter_unconstrained_mode`.
+    #[test]
+    fn a_syscall_refused_in_unconstrained_mode_is_invalid_usage() {
+        let mut emu = AotEmulatorCore::new(test_program(), vec![vec![1, 2, 3, 4]]);
+        emu.execute_syscall(SyscallCode::ENTER_UNCONSTRAINED as u64, 0, 0)
+            .expect("enter unconstrained mode");
+
+        for code in [SyscallCode::HINT_LEN, SyscallCode::ENTER_UNCONSTRAINED] {
+            let err = emu
+                .execute_syscall(code as u64, 0, 0)
+                .expect_err("refused in unconstrained mode");
+            let fault = recorded_fault(&mut emu, &err);
+            assert!(
+                matches!(fault, EmulationError::InvalidSyscallUsage(id) if id == u64::from(code.syscall_id())),
+                "{code:?}: {fault:?}"
+            );
+            assert!(emu.is_unconstrained_mode());
+        }
+    }
+
+    #[test]
+    fn a_non_zero_halt_is_the_interpreters_exit_code_error() {
+        let mut emu = AotEmulatorCore::new(test_program(), Vec::new());
+
+        let err = emu
+            .execute_syscall(SyscallCode::HALT as u64, 1, 0)
+            .expect_err("a non-zero exit code fails the run");
+        assert!(matches!(
+            recorded_fault(&mut emu, &err),
+            EmulationError::HaltWithNonZeroExitCode(1)
+        ));
     }
 }

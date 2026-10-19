@@ -12,10 +12,10 @@ use crate::{
         riscv::{opcode::ByteOpcode, program::Program},
     },
     emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
-    iter::{IntoPicoIterator, IntoPicoRefIterator, PicoBridge, PicoIterator, PicoSlice},
+    iter::{IntoPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice},
     machine::{
         chip::ChipBehavior,
-        estimator::{EventCapture, EventSizeCapture},
+        estimator::EventCapture,
         lookup::{LookupScope, LookupType},
     },
 };
@@ -26,7 +26,6 @@ use std::borrow::BorrowMut;
 
 impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
     type Record = EmulationRecord;
-
     type Program = Program;
 
     fn name(&self) -> String {
@@ -42,9 +41,9 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
             let mut row = [F::ZERO; NUM_SYSCALL_COLS];
             let cols: &mut SyscallCols<F> = row.as_mut_slice().borrow_mut();
 
-            cols.chunk = F::from_canonical_u32(syscall_event.chunk);
-            cols.clk = F::from_canonical_u32(u32::try_from(syscall_event.clk).unwrap());
-            cols.syscall_id = F::from_canonical_u32(syscall_event.syscall_id);
+            cols.chunk = F::from_u32(syscall_event.chunk);
+            cols.clk = F::from_u32(u32::try_from(syscall_event.clk).unwrap());
+            cols.syscall_id = F::from_u32(syscall_event.syscall_id);
             // Convert u64 arg1/arg2 to Addr (48-bit, 3 x 16-bit limbs)
             cols.arg1 =
                 Addr::try_from(syscall_event.arg1).expect("arg1 exceeds 48-bit address range");
@@ -62,9 +61,9 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
                 .collect::<Vec<_>>(),
             SyscallChunkKind::Precompile => input
                 .precompile_events
-                .all_events()
-                .pico_bridge()
-                .map(|(event, _)| row_fn(event))
+                .sorted_groups()
+                .pico_iter()
+                .flat_map_iter(|(_, v)| v.iter().map(|(e, _)| row_fn(e)))
                 .collect::<Vec<_>>(),
         };
 
@@ -80,13 +79,18 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
     }
 
     fn extra_record(&self, input: &Self::Record, extra: &mut Self::Record) {
+        let sorted_precompile_events: Vec<_>;
         let events = match self.chunk_kind {
             SyscallChunkKind::Riscv => &input.syscall_events,
-            SyscallChunkKind::Precompile => &input
-                .precompile_events
-                .all_events()
-                .map(|(event, _)| event.to_owned())
-                .collect_vec(),
+            SyscallChunkKind::Precompile => {
+                sorted_precompile_events = input
+                    .precompile_events
+                    .sorted_groups()
+                    .pico_iter()
+                    .flat_map_iter(|(_, v)| v.iter().map(|(e, _)| *e))
+                    .collect();
+                &sorted_precompile_events
+            }
         };
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
         // arg1 and arg2 are 48-bit addresses (3 x 16-bit limbs)
@@ -149,11 +153,13 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
         } else {
             match self.chunk_kind {
                 SyscallChunkKind::Riscv => !record.syscall_events.is_empty(),
+                // A deferred record that carries precompile events needs this receiver whatever
+                // else it carries: its Regional sends would otherwise lose their counterpart and
+                // unbalance the SYSCALL bus. A memory-only record raises no such send, so it does
+                // not need it. The cpu_events guard stays: CPU chunks defer their precompile
+                // events out and are served by the Riscv-kind chip.
                 SyscallChunkKind::Precompile => {
-                    !record.precompile_events.is_empty()
-                        && record.cpu_events.is_empty()
-                        && record.memory_initialize_events.is_empty()
-                        && record.memory_finalize_events.is_empty()
+                    !record.precompile_events.is_empty() && record.cpu_events.is_empty()
                 }
             }
         }
@@ -164,16 +170,4 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
     }
 }
 
-impl<F> EventCapture for SyscallChip<F> {
-    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
-        event_counter.num_syscall_events += record.syscall_events.len();
-        event_counter.num_global_lookup_events += event_counter.num_syscall_events;
-        event_counter.num_precompile_syscall_events += record
-            .precompile_events
-            .events
-            .iter()
-            .map(|(_, v)| v.len())
-            .sum::<usize>();
-        event_counter.num_global_lookup_events += event_counter.num_precompile_syscall_events;
-    }
-}
+impl<F> EventCapture for SyscallChip<F> {}

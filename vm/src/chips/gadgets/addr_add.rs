@@ -7,11 +7,11 @@ use crate::{
     primitives::consts::{u64_to_u16_limbs, ADDR_SIZE, WORD_SIZE},
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// A set of columns needed to compute the addition of two addresses (u48).
-#[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
+#[derive(AlignedBorrow, Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(C)]
 pub struct AddrAddGadget<T> {
     /// The result of `a + b` in u48 (three u16 limbs).
@@ -35,9 +35,9 @@ impl<F: Field> AddrAddGadget<F> {
         );
 
         self.value = [
-            F::from_canonical_u16((expected & 0xFFFF) as u16),
-            F::from_canonical_u16(((expected >> 16) & 0xFFFF) as u16),
-            F::from_canonical_u16(((expected >> 32) & 0xFFFF) as u16),
+            F::from_u16((expected & 0xFFFF) as u16),
+            F::from_u16(((expected >> 16) & 0xFFFF) as u16),
+            F::from_u16(((expected >> 32) & 0xFFFF) as u16),
         ];
 
         // Range check
@@ -59,7 +59,7 @@ impl<F: Field> AddrAddGadget<F> {
     ) {
         builder.assert_bool(is_real.clone());
 
-        let base = CB::F::from_canonical_u32(1 << 16);
+        let base = CB::F::from_u32(1 << 16);
         let mut builder_is_real = builder.when(is_real.clone());
         let mut carry: CB::Expr = CB::Expr::ZERO;
 
@@ -84,45 +84,5 @@ impl<F: Field> AddrAddGadget<F> {
 
         // Range check each limb.
         builder.slice_range_check_u16(&cols.value, is_real);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        a: Word<T>,
-        b: Word<T>,
-        addr_add: AddrAddGadget<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_addr_add_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        AddrAddGadget::<KoalaBear>::eval(
-            &mut builder,
-            local.a.map(|v| v.into()),
-            local.b.map(|v| v.into()),
-            local.addr_add,
-            local.is_real.into(),
-        );
-
-        assert_eq!(builder.num_constraints(), 5);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 3);
     }
 }

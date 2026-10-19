@@ -1,8 +1,7 @@
-//! Unused by `default_syscall_map`: this syscall is not registered while its chip is out of the
-//! machine, so nothing here is reachable from a non-test build. Kept whole so the implementation
-//! is ready if it returns, and constructed directly by the poseidon2 tests in `chips/tests.rs` so
-//! it stays exercised meanwhile. See `syscalls/mod.rs`.
-#![allow(dead_code)]
+//! The poseidon2 permutation syscall, registered by `default_syscall_map`.
+//!
+//! The AOT interpreter has its own copy of this in `aot-runtime/src/precompiles/poseidon2.rs`;
+//! the two have to agree on what they accept, so a check added here belongs there too.
 
 use super::event::Poseidon2PermuteEvent;
 use crate::{
@@ -14,7 +13,8 @@ use crate::{
             precompiles::PrecompileEvent, syscall_context::SyscallContext, Syscall, SyscallCode,
         },
     },
-    primitives::{consts::PERMUTATION_WIDTH, Poseidon2Init},
+    machine::field::FieldSpecificPoseidon2Config,
+    primitives::consts::PERMUTATION_WIDTH,
 };
 use p3_field::PrimeField32;
 use p3_symmetric::Permutation;
@@ -122,8 +122,7 @@ pub(crate) struct Poseidon2PermuteSyscall<F>(pub(crate) PhantomData<fn(F) -> F>)
 
 impl<F> Syscall for Poseidon2PermuteSyscall<F>
 where
-    F: PrimeField32 + Poseidon2Init,
-    F::Poseidon2: Permutation<[F; 16]>,
+    F: PrimeField32 + FieldSpecificPoseidon2Config,
 {
     fn num_extra_cycles(&self) -> u32 {
         1
@@ -155,15 +154,32 @@ where
             read_word_records_via_dwords(ctx, input_memory_ptr, PERMUTATION_WIDTH);
         let state_read_records = state_records;
 
+        // Every input word must already be a canonical field element.
+        //
+        // `F::from_u32` below is a quotient map, not a checked conversion: it would turn a word
+        // of `v + p` into `v` without a word of complaint. The chip's `input_range_checkers`
+        // reject exactly that word, so without this assertion the two sides disagree -- the
+        // guest emulates fine and then has no provable trace, which surfaces as an unsatisfied
+        // constraint in the prover rather than as anything pointing back at the guest. Same
+        // reasoning as the alignment assertions above: make the side that knows why fail first.
+        for (j, &v) in state_values.iter().enumerate() {
+            assert!(
+                v < F::ORDER_U32,
+                "poseidon2 input word {j} = {v} is not canonical (>= {}); \
+                 the permutation operates on field elements, so the guest must reduce first",
+                F::ORDER_U32
+            );
+        }
+
         let state: [F; PERMUTATION_WIDTH] = state_values
             .iter()
             .copied()
-            .map(F::from_canonical_u32)
+            .map(F::from_u32)
             .collect::<Vec<F>>()
             .try_into()
             .unwrap();
 
-        let state = F::init().permute(state);
+        let state = F::permutation().permute(state);
 
         // Increment the clk by 1 before writing because we read from memory at start_clk.
         ctx.clk += 1;

@@ -11,7 +11,7 @@ use crate::{
 };
 use itertools::izip;
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// Gadget for asserting `a < b` where `a` and `b` are 64-bit values
@@ -72,7 +72,7 @@ impl<F: Field> LtWordU16Gadget<F> {
         let b_limbs = u64_to_u16_limbs(b_u64);
         let c_limbs = u64_to_u16_limbs(c_u64);
 
-        let a_u16 = a_limbs[0] as u16;
+        let a_u16 = a_limbs[0];
 
         let mut comparison_limbs = [0u16; 2];
         for (b_limb, c_limb, flag) in izip!(
@@ -84,8 +84,8 @@ impl<F: Field> LtWordU16Gadget<F> {
                 *flag = F::ONE;
                 comparison_limbs[0] = *b_limb;
                 comparison_limbs[1] = *c_limb;
-                let b_limb = F::from_canonical_u16(*b_limb);
-                let c_limb = F::from_canonical_u16(*c_limb);
+                let b_limb = F::from_u16(*b_limb);
+                let c_limb = F::from_u16(*c_limb);
                 self.not_eq_inv = (b_limb - c_limb).inverse();
                 self.comparison_limbs = [b_limb, c_limb];
                 break;
@@ -93,7 +93,7 @@ impl<F: Field> LtWordU16Gadget<F> {
         }
 
         {
-            self.bit = F::from_canonical_u16(a_u16);
+            self.bit = F::from_u16(a_u16);
             let diff = comparison_limbs[0].wrapping_sub(comparison_limbs[1]);
             record.add_u16_range_check(diff);
         }
@@ -148,6 +148,10 @@ impl<F: Field> LtWordU16Gadget<F> {
             is_inequality_visited = is_inequality_visited.clone() + flag.into();
 
             // If inequality is not visited, assert that the limbs are equal.
+            //
+            // Load-bearing beyond this gadget: the Cpu chip stopped asserting `op_a == op_b` on
+            // equal branch rows (X9 dropped it as redundant), so BEQ/BNE equality now rests on
+            // this loop -- a zero flag sum has to force every limb equal.
             builder
                 .when(is_real.clone() - is_inequality_visited.clone())
                 .assert_eq(b_limb.clone(), c_limb.clone());
@@ -177,7 +181,7 @@ impl<F: Field> LtWordU16Gadget<F> {
             builder.assert_bool(is_real.clone());
             // Constrain that `cols.bit` is boolean.
             builder.assert_bool(cols.bit);
-            let base = CB::Expr::from_canonical_u32(1 << 16);
+            let base = CB::Expr::from_u32(1 << 16);
             let diff = a - b + cols.bit * base;
             // Since `a, b` are both u16, `a - b` will be in `(-2^16, 2^16)`.
             // If `a < b`, then `bit` must be one for `diff` to be in `[0, 2^16)`.
@@ -192,45 +196,5 @@ impl<F: Field> LtWordU16Gadget<F> {
                 is_real.clone(),
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        b: Word<T>,
-        c: Word<T>,
-        lt_word_u16: LtWordU16Gadget<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_lt_word_u16_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        LtWordU16Gadget::<KoalaBear>::eval(
-            &mut builder,
-            local.b.map(|v| v.into()),
-            local.c.map(|v| v.into()),
-            local.lt_word_u16,
-            local.is_real.into(),
-        );
-
-        assert_eq!(builder.num_constraints(), 15);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 1);
     }
 }

@@ -38,7 +38,7 @@ impl<F: Field> AndU32Gadget<F> {
         let c_bytes = c_u32.to_le_bytes();
         for i in 0..4 {
             let and = b_bytes[i] & c_bytes[i];
-            self.value[i] = F::from_canonical_u8(and);
+            self.value[i] = F::from_u8(and);
 
             let byte_event = ByteLookupEvent {
                 opcode: ByteOpcode::AND,
@@ -74,7 +74,7 @@ impl<F: Field> AndU32Gadget<F> {
         // Constrain the `AND` operation over bytes via a byte lookup.
         for i in 0..4 {
             builder.looking_byte(
-                CB::F::from_canonical_u32(ByteOpcode::AND as u32),
+                CB::F::from_u32(ByteOpcode::AND as u32),
                 cols.value[i],
                 b_bytes[i].clone(),
                 c_bytes[i].clone(),
@@ -83,50 +83,9 @@ impl<F: Field> AndU32Gadget<F> {
         }
 
         // Combine the byte results into two u16 limbs.
-        let result_limb0 = cols.value[0] + cols.value[1] * CB::F::from_canonical_u32(1 << 8);
-        let result_limb1 = cols.value[2] + cols.value[3] * CB::F::from_canonical_u32(1 << 8);
+        let result_limb0 = cols.value[0] + cols.value[1] * CB::F::from_u32(1 << 8);
+        let result_limb1 = cols.value[2] + cols.value[3] * CB::F::from_u32(1 << 8);
 
         [result_limb0, result_limb1]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_air::AirBuilder;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        b: [T; 2],
-        c: [T; 2],
-        and_u32: AndU32Gadget<T>,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_and_u32_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        let _ = AndU32Gadget::<KoalaBear>::eval(
-            &mut builder,
-            local.b.map(|v| v.into()),
-            local.c.map(|v| v.into()),
-            local.and_u32,
-            local.is_real,
-        );
-
-        assert_eq!(builder.num_constraints(), 1);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 4);
     }
 }

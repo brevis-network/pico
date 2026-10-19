@@ -1,19 +1,13 @@
 pub mod builder;
 pub mod chip;
-pub mod debug;
+#[cfg(test)]
+pub(crate) mod debug_folder;
 pub mod estimator;
 pub mod extension;
 pub mod field;
-pub mod folder;
-pub mod keys;
 pub mod logger;
 pub mod lookup;
-pub mod machine;
-pub mod permutation;
-pub mod proof;
-pub mod prover;
 pub mod report;
 pub mod septic;
 pub mod utils;
-pub mod verifier;
 pub mod witness;

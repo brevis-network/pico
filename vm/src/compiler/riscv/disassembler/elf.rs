@@ -57,33 +57,6 @@ pub struct Elf {
     pub(crate) memory_image: Arc<BTreeMap<u64, u64>>,
 }
 
-/// Parse symbol table from ELF to extract signature region boundary for RISCOF testing.
-/// Returns (begin, end) addresses as u64 to support both RV32 and RV64.
-pub fn find_signature_region(elf_bytes: &[u8]) -> eyre::Result<(u64, u64)> {
-    let mut begin_signature = None;
-    let mut end_signature = None;
-
-    let file = ElfBytes::<LittleEndian>::minimal_parse(elf_bytes)?;
-
-    if let Some((symbol_table, string_table)) = file.symbol_table()? {
-        for sym in symbol_table.iter() {
-            if let Ok(name) = string_table.get(sym.st_name as usize) {
-                match name {
-                    "begin_signature" => begin_signature = Some(sym.st_value),
-                    "end_signature" => end_signature = Some(sym.st_value),
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    let begin =
-        begin_signature.ok_or_else(|| eyre::eyre!("Missing begin_signature symbol in ELF"))?;
-    let end = end_signature.ok_or_else(|| eyre::eyre!("Missing end_signature symbol in ELF"))?;
-
-    Ok((begin, end))
-}
-
 impl Elf {
     #[inline(always)]
     fn to_guest_addr(value: u64, context: &str) -> eyre::Result<u64> {
@@ -295,7 +268,9 @@ impl Elf {
 
     pub fn compile(&self) -> Arc<Program> {
         // Transpile the RV32IM instructions.
-        let instructions = transpile(&self.instructions);
+        // `pc_base` is passed through so the transpiler can fold each slot's own address into the
+        // instruction it emits (AUIPC becomes `ADD rd, imm, pc`).
+        let instructions = transpile(&self.instructions, self.pc_base);
 
         // Return the program.
         // clone() may take much time, consider optimize in the future

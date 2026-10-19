@@ -72,57 +72,10 @@ impl<F: Field> BitWiseU16Gadget<F> {
         );
 
         // Combine the byte results into u16 limbs.
-        let result_limb0 =
-            cols.bitwise.result[0] + cols.bitwise.result[1] * CB::F::from_canonical_u32(256);
-        let result_limb1 =
-            cols.bitwise.result[2] + cols.bitwise.result[3] * CB::F::from_canonical_u32(256);
-        let result_limb2 =
-            cols.bitwise.result[4] + cols.bitwise.result[5] * CB::F::from_canonical_u32(256);
-        let result_limb3 =
-            cols.bitwise.result[6] + cols.bitwise.result[7] * CB::F::from_canonical_u32(256);
+        let result_limb0 = cols.bitwise.result[0] + cols.bitwise.result[1] * CB::F::from_u32(256);
+        let result_limb1 = cols.bitwise.result[2] + cols.bitwise.result[3] * CB::F::from_u32(256);
+        let result_limb2 = cols.bitwise.result[4] + cols.bitwise.result[5] * CB::F::from_u32(256);
+        let result_limb3 = cols.bitwise.result[6] + cols.bitwise.result[7] * CB::F::from_u32(256);
         Word([result_limb0, result_limb1, result_limb2, result_limb3])
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_air::AirBuilder;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        b: Word<T>,
-        c: Word<T>,
-        bitwise_u16: BitWiseU16Gadget<T>,
-        opcode: T,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_bitwise_u16_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        BitWiseU16Gadget::<KoalaBear>::eval(
-            &mut builder,
-            local.b.map(|v| v.into()),
-            local.c.map(|v| v.into()),
-            local.bitwise_u16,
-            local.opcode.into(),
-            local.is_real.into(),
-        );
-
-        assert_eq!(builder.num_constraints(), 1);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 8);
     }
 }

@@ -5,7 +5,7 @@ use crate::{
     configs::config::FieldGenericConfig,
 };
 use core::fmt::Debug;
-use p3_field::{FieldExtensionAlgebra, PrimeField};
+use p3_field::{BasedVectorSpace, PrimeField};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 /// A constraint is an operation and a list of nested arguments.
@@ -59,7 +59,7 @@ impl<C: FieldGenericConfig + Debug> ConstraintCompiler<C> {
             args: vec![
                 vec![tmp_id.clone()],
                 value
-                    .as_base_slice()
+                    .as_basis_coefficients_slice()
                     .iter()
                     .map(|x| x.as_canonical_biguint().to_string())
                     .collect(),
@@ -84,7 +84,7 @@ impl<C: FieldGenericConfig + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::ImmE,
                     args: vec![
                         vec![a.id()],
-                        b.as_base_slice()
+                        b.as_basis_coefficients_slice()
                             .iter()
                             .map(|x| x.as_canonical_biguint().to_string())
                             .collect(),
@@ -268,10 +268,6 @@ impl<C: FieldGenericConfig + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::Permute,
                     args: state.iter().map(|x| vec![x.id()]).collect(),
                 }),
-                DslIr::ConstraintPoseidon2BabyBear(state) => constraints.push(Constraint {
-                    opcode: ConstraintOpcode::PermuteBabyBear,
-                    args: state.iter().map(|x| vec![x.id()]).collect(),
-                }),
                 DslIr::ConstraintPoseidon2KoalaBear(state) => constraints.push(Constraint {
                     opcode: ConstraintOpcode::PermuteKoalaBear,
                     args: state.iter().map(|x| vec![x.id()]).collect(),
@@ -382,6 +378,18 @@ impl<C: FieldGenericConfig + Debug> ConstraintCompiler<C> {
                     opcode: ConstraintOpcode::CommitCommitedValuesDigest,
                     args: vec![vec![a.id()]],
                 }),
+                DslIr::CircuitAssertVkRoot(data) => {
+                    let (felts, root) = *data;
+                    constraints.push(Constraint {
+                        opcode: ConstraintOpcode::AssertVkRoot,
+                        args: vec![
+                            felts.iter().map(|x| x.id()).collect(),
+                            root.iter()
+                                .map(|x| x.as_canonical_biguint().to_string())
+                                .collect(),
+                        ],
+                    });
+                }
                 DslIr::CircuitFelts2Ext(a, b) => constraints.push(Constraint {
                     opcode: ConstraintOpcode::CircuitFelts2Ext,
                     args: vec![

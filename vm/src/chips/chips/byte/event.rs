@@ -9,6 +9,7 @@ use std::hash::Hash;
 /// This object encapsulates the information needed to prove a byte lookup operation. This includes
 /// the opcode, operands, and other relevant information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
+#[repr(C)]
 pub struct ByteLookupEvent {
     /// The opcode.
     pub opcode: ByteOpcode,

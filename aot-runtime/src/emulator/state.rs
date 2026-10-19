@@ -5,8 +5,9 @@ use pico_vm::{
     emulator::riscv::{
         chunk_split::{ChunkSplitConfig, ChunkSplitState},
         memory::{ContiguousRiscvMemory, Memory},
+        riscv_emulator::EmulationError,
     },
-    primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
+    primitives::consts::{CHUNK_CLK_START, DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
 use std::sync::Arc;
 
@@ -79,6 +80,10 @@ pub struct AotEmulatorCore {
     pub memory_snapshot_clean: bool,
     /// Bitmap of registers snapshotted in this batch (0-31).
     pub snapshot_registers_bitmap: u32,
+    /// Instruction count at which `should_yield` fires *without* a chunk boundary, so the batch
+    /// can hand out a mid-chunk snapshot and the replay of one chunk can be split across threads.
+    /// `u64::MAX` — the default — is split replay switched off.
+    pub next_sub_yield: u64,
     /// A stream of public values from the program (global to entire program).
     pub public_values_stream: Vec<u8>,
     /// Committed value digest updated by COMMIT syscall.
@@ -89,6 +94,11 @@ pub struct AotEmulatorCore {
     pub chunk_split_state: ChunkSplitState,
     /// Saved state for unconstrained execution blocks.
     pub(crate) unconstrained_state: Option<UnconstrainedState>,
+    /// Compiled blocks entered by `run_blocks`, so a run can show it executed generated code.
+    pub(crate) compiled_block_dispatches: u64,
+    /// The typed error behind the `Err` the run is returning. The generated entry point carries
+    /// only a `String`, so the batch takes the error the interpreter would have returned from here.
+    pub(crate) fault: Option<EmulationError>,
 }
 
 #[derive(Debug)]
@@ -108,6 +118,8 @@ pub struct UnconstrainedState {
     pub(crate) memory_diff: HashMap<u64, MemoryRecord>,
     pub(crate) committed_value_digest: [u32; PV_DIGEST_NUM_WORDS],
     pub(crate) deferred_proofs_digest: [u32; DIGEST_SIZE],
+    pub(crate) commit_in_flight: bool,
+    pub(crate) deferred_commits: u32,
 }
 
 impl AotEmulatorCore {
@@ -130,7 +142,7 @@ impl AotEmulatorCore {
             insn_count: 0,
             current_chunk: 1,
             current_batch: 0,
-            clk: 0,
+            clk: CHUNK_CLK_START,
             max_syscall_cycles,
             memory: ContiguousRiscvMemory::new(),
             input_stream,
@@ -151,11 +163,14 @@ impl AotEmulatorCore {
             memory_snapshot: ContiguousRiscvMemory::new(),
             memory_snapshot_clean: true,
             snapshot_registers_bitmap: 0,
+            next_sub_yield: u64::MAX,
             public_values_stream: Vec::new(),
             committed_value_digest: [0; PV_DIGEST_NUM_WORDS],
             deferred_proofs_digest: [0; DIGEST_SIZE],
             chunk_split_state: ChunkSplitState::default(),
             unconstrained_state: None,
+            compiled_block_dispatches: 0,
+            fault: None,
         };
 
         // Initialize memory from Program struct (consolidated value + metadata)
@@ -210,6 +225,15 @@ impl AotEmulatorCore {
     pub fn lookup_block(&self, pc: u64) -> Option<BlockFn> {
         lookup_block_fn(pc)
     }
+
+    /// Records `error` as the run's `fault` and returns its message, for the `Err(String)` that
+    /// carries it out through the generated code.
+    #[cold]
+    pub(crate) fn fail(&mut self, error: EmulationError) -> String {
+        let message = error.to_string();
+        self.fault = Some(error);
+        message
+    }
 }
 
 #[cfg(test)]
@@ -263,6 +287,33 @@ mod tests {
 
         let outside = emu.fetch_instruction(pc_base + 0x100).unwrap_err();
         assert!(outside.contains("outside program"));
+    }
+
+    /// The sub-yield has to stay quiet inside an unconstrained region. The replaying interpreter
+    /// only tests its target outside one, so a cut landing there hands out a target the worker
+    /// runs straight past — and the next segment replays what it already did, with nothing to say
+    /// so. A whole-run proof does not notice: the arms still agree and the proof still verifies.
+    #[test]
+    fn the_sub_yield_does_not_fire_inside_an_unconstrained_region() {
+        let pc_base = 0x2000;
+        let mut emu = AotEmulatorCore::new(test_program(pc_base, pc_base), Vec::new());
+        emu.pc = pc_base;
+        emu.insn_count = 100;
+        emu.next_sub_yield = 10;
+
+        assert!(
+            emu.should_yield(),
+            "a cut point that has been reached yields"
+        );
+
+        emu.enter_unconstrained_mode();
+        assert!(
+            !emu.should_yield(),
+            "not inside an unconstrained region, however far past the cut point"
+        );
+
+        emu.exit_unconstrained_mode().unwrap();
+        assert!(emu.should_yield(), "and it comes back on the way out");
     }
 
     #[test]

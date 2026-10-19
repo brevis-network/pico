@@ -10,6 +10,7 @@ use pico_vm::compiler::riscv::{
     instruction::Instruction as VmInstruction,
     opcode::Opcode as VmOpcode,
 };
+use sha2::{Digest, Sha256};
 
 /// Parse an ELF binary into ProgramInfo for AOT compilation
 ///
@@ -22,7 +23,8 @@ use pico_vm::compiler::riscv::{
 ///
 /// # Returns
 ///
-/// A `ProgramInfo` containing the parsed instruction stream and metadata
+/// A `ProgramInfo` containing the parsed instruction stream and metadata, and the SHA-256 of
+/// `elf_bytes`
 ///
 /// # Panics
 ///
@@ -38,7 +40,10 @@ pub fn parse_elf(elf_bytes: &[u8]) -> ProgramInfo {
         .map(convert_vm_instruction)
         .collect();
 
-    ProgramInfo::new(instructions, program.pc_base, program.pc_start)
+    ProgramInfo {
+        elf_sha256: Sha256::digest(elf_bytes).into(),
+        ..ProgramInfo::new(instructions, program.pc_base, program.pc_start)
+    }
 }
 
 fn convert_vm_instruction(inst: VmInstruction) -> Instruction {

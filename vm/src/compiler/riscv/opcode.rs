@@ -19,9 +19,13 @@ use std::fmt::Display;
 /// Refer to the "RV32I Reference Card" [here](https://github.com/johnwinans/rvalp/releases) for
 /// more details.
 #[allow(non_camel_case_types)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(
+    Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord,
+)]
+#[repr(u8)]
 pub enum Opcode {
     /// rd ← rs1 + rs2, pc ← pc + 4
+    #[default]
     ADD = 0,
     /// rd ← rs1 - rs2, pc ← pc + 4
     SUB = 1,
@@ -74,6 +78,14 @@ pub enum Opcode {
     /// rd ← pc + 4, pc ← (rs1 + imm) & ∼1
     JALR = 25,
     /// rd ← pc + imm, pc ← pc + 4
+    ///
+    /// No longer produced by the transpiler: since X12 `AUIPC rd, imm` is re-encoded as the
+    /// two-immediate `ADD rd, imm, pc` (`disassembler/rrs.rs`), and the Cpu AIR has no `is_auipc`
+    /// selector. The variant is kept for two reasons that have nothing to do with the AIR, which
+    /// pays nothing for an unused opcode value: the ahead-of-time crates match on `VmOpcode`
+    /// exhaustively (`aot-codegen/src/elf_parser.rs`, same workspace, so removing it is a compile
+    /// error), and `Opcode` is `Serialize`/`Deserialize`, so removing it would break
+    /// deserialization of already-serialized `Program`s.
     AUIPC = 27,
     /// Transfer control to the debugger.
     ECALL = 28,
@@ -132,6 +144,7 @@ pub enum Opcode {
 /// operations include both bitwise operations (AND, OR, XOR) as well as basic arithmetic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[allow(clippy::upper_case_acronyms)]
+#[repr(u8)]
 pub enum ByteOpcode {
     /// Bitwise AND.
     AND = 0,
@@ -170,6 +183,15 @@ pub enum RangeCheckOpcode {
 }
 
 impl Opcode {
+    /// `UNIMP` and `EBREAK` are traps: the emulator stops with an error on them and never emits a
+    /// CPU event, and the Program chip's preprocessed table writes row 0 in their place so that no
+    /// table row carries a trap's pc (`riscv_program/traces.rs`). The CUDA preprocessed-table
+    /// kernel repeats this test by opcode value (`chips/include/program.hpp`).
+    #[must_use]
+    pub const fn is_trap(self) -> bool {
+        matches!(self, Opcode::UNIMP | Opcode::EBREAK)
+    }
+
     /// Get the mnemonic for the opcode.
     #[must_use]
     pub const fn mnemonic(&self) -> &str {
@@ -200,6 +222,8 @@ impl Opcode {
             Opcode::BGEU => "bgeu",
             Opcode::JAL => "jal",
             Opcode::JALR => "jalr",
+            // Unreachable for any transpiled program since X12 (see the variant's doc comment),
+            // but this match is exhaustive over `Opcode`, so the arm has to stay.
             Opcode::AUIPC => "auipc",
             Opcode::ECALL => "ecall",
             Opcode::EBREAK => "ebreak",
@@ -231,7 +255,7 @@ impl Opcode {
     /// Convert the opcode to a field element.
     #[must_use]
     pub fn as_field<F: Field>(self) -> F {
-        F::from_canonical_u32(self as u32)
+        F::from_u32(self as u32)
     }
 }
 
@@ -280,7 +304,7 @@ impl ByteOpcode {
     /// Convert the opcode to a field element.
     #[must_use]
     pub fn as_field<F: Field>(self) -> F {
-        F::from_canonical_u8(self as u8)
+        F::from_u8(self as u8)
     }
 }
 
@@ -298,6 +322,6 @@ impl RangeCheckOpcode {
     /// Convert the opcode to a field element.
     #[must_use]
     pub fn as_field<F: Field>(self) -> F {
-        F::from_canonical_u8(self as u8)
+        F::from_u8(self as u8)
     }
 }

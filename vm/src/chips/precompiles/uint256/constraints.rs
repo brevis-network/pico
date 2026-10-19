@@ -27,9 +27,8 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
 };
 use hybrid_array::Array;
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra};
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing};
 use std::borrow::Borrow;
 
 impl<F: Field> BaseAir<F> for Uint256MulChip<F> {
@@ -45,7 +44,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &Uint256MulCols<CB::Var> = (*local).borrow();
 
         // We are computing (x * y) % modulus. The value of x is stored in the "prev_value" of
@@ -128,7 +127,7 @@ where
                 .iter()
                 .map(|v| (*v).into())
                 .collect::<Vec<CB::Expr>>(),
-            CB::F::from_canonical_u32(256).into(),
+            CB::F::from_u32(256).into(),
         );
         let do_check: CB::Expr = local.is_real.into();
         for (i, word) in result_words.iter().enumerate() {
@@ -207,7 +206,7 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            CB::F::from_canonical_u32(SyscallCode::UINT256_MUL.syscall_id()),
+            CB::F::from_u32(SyscallCode::UINT256_MUL.syscall_id()),
             x_ptr.map(Into::into),
             y_ptr.map(Into::into),
             local.is_real,

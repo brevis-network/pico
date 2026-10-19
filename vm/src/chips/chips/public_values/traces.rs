@@ -12,7 +12,7 @@ use crate::{
     },
     compiler::recursion::{instruction::Instruction, program::RecursionProgram},
     emulator::recursion::emulator::RecursionRecord,
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, PreprocessedRows},
 };
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
@@ -29,6 +29,12 @@ impl<F: PrimeField32> ChipBehavior<F> for PublicValuesChip<F> {
 
     fn preprocessed_width(&self) -> usize {
         NUM_PUBLIC_VALUES_PREPROCESSED_COLS
+    }
+
+    /// Pads to a constant, never to the program's shape — mirroring
+    /// `pad_rows_fixed(.., Some(PUB_VALUES_LOG_HEIGHT))` below.
+    fn preprocessed_rows(&self, _program: &Self::Program) -> Option<PreprocessedRows> {
+        Some(PreprocessedRows::FixedLog2(PUB_VALUES_LOG_HEIGHT))
     }
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {

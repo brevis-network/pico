@@ -9,4 +9,4 @@ categories = { workspace = true }
 [dependencies]
 pico-sdk = { workspace = true }
 alloy-sol-types = { workspace = true }
-secp256k1 = { git = "https://github.com/brevis-network/rust-secp256k1.git", branch = "patch-v1.0.1", features = ["recovery", "global-context"] }
+secp256k1 = { git = "https://github.com/brevis-network/rust-secp256k1.git", rev = "ad8a4503d1d79fbf00293fd1c5bb5109e6ac2631", features = ["recovery", "global-context"] } # patch-v1.0.1

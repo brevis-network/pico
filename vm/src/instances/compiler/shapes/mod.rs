@@ -60,7 +60,7 @@ impl ProofShape {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum PicoRecursionProgramShape {
     Convert(RiscvRecursionShape),
     Deferred(RecursionVkShape),

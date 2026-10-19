@@ -13,6 +13,9 @@ members = [
     "patches/substate-bn/*",
     "patches/bigint/*",
     "patches/poseidon2/*",
+    "patches/coprocessor/*",
+    # Guests for the host prover's own tests, not patch cases: `test_patches` runs `patches/` only.
+    "guests/*",
 ]
 resolver = "2"
 
@@ -20,10 +23,30 @@ resolver = "2"
 version = "1.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-keywords = ["zkvm", "plonky3", "stark", "FRI"]
+keywords = ["zkvm", "plonky3", "stark", "whir"]
 categories = ["cryptography"]
+
+# The patched crates depend on `pico-patch-libs` from the public pico repo; redirect it at this
+# workspace's copy, as `perf/bench_apps/Cargo.toml` does.
+#
+# This reaches the deps that name the repo without a branch. A dep that pins one -- the RV64
+# generation does, `branch = "rv64"` -- is a different source id to cargo and is *not* patched,
+# so `bls12_381`, `substrate-bn`, `k256` and one `curve25519-dalek-ng` still bring the `rv64`
+# branch's copy. `pico-patch-libs` only declares the syscall symbols (`pico-sdk` defines them),
+# and the two copies declare the syscalls those crates call identically. They are not identical
+# throughout: the branch's `syscall_poseidon2_permute` still takes `[u32; 16]`, which none of the
+# four calls. So a change to a declaration here does not reach those four until the branch has it.
+#
+# Each app pins its fork by `rev`, with the branch it came from beside it. The branch sources
+# still in `Cargo.lock` are named by the forks' own manifests, and cargo refuses a patch that
+# points a git source at another revision of the same repository, so only the lock fixes those.
+[patch."https://github.com/brevis-network/pico"]
+pico-patch-libs = { path = "../../../sdk/patch-libs" }
 
 [workspace.dependencies]
 pico-sdk = { path = "../../../sdk/sdk" }
+pico-prover = { path = "../../../sdk/prover" }
+pico-vm = { path = "../.." }
 alloy-sol-types = "0.8.19"
 bincode = "1.3.3"
+serde = "1.0"

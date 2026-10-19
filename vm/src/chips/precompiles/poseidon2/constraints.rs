@@ -5,8 +5,8 @@ use crate::{
     chips::{
         chips::riscv_memory::read_write::columns::MemoryCols,
         gadgets::{
-            addr_add::AddrAddGadget, poseidon2::constraints::eval_poseidon2,
-            syscall_addr::SyscallAddrGadget,
+            addr_add::AddrAddGadget, field_range_check::word_range::FieldWordRangeChecker,
+            poseidon2::constraints::eval_poseidon2, syscall_addr::SyscallAddrGadget,
         },
     },
     compiler::word::Word,
@@ -15,14 +15,13 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, RiscVMemoryBuilder},
     primitives::consts::PERMUTATION_WIDTH,
 };
-use p3_air::{Air, AirBuilder};
-use p3_field::{FieldAlgebra, PrimeField32};
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_poseidon2::GenericPoseidon2LinearLayers;
 
 impl<
         F: PrimeField32,
-        LinearLayers: GenericPoseidon2LinearLayers<CB::Expr, PERMUTATION_WIDTH>,
+        LinearLayers: GenericPoseidon2LinearLayers<PERMUTATION_WIDTH>,
         Config: Poseidon2Config,
         CB: ChipBuilder<F>,
     > Air<CB> for Poseidon2PermuteChip<F, LinearLayers, Config>
@@ -31,7 +30,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &Poseidon2Cols<CB::Var, Config> = (*local).borrow();
 
         let is_real = local.value_cols.is_real;
@@ -47,17 +46,18 @@ where
         // `keccak256/constraint.rs`, `uint256/constraints.rs`,
         // `sha256/extend/controller.rs`. The returned limbs are what goes on both buses below.
         //
-        // NOTE on the alignment half: this syscall's emulation does *not* require these pointers
-        // to be 8-byte aligned. `covered_dword_range` aligns down and tracks a 4-byte offset,
-        // where the fp/fp2/ec/edwards/sha256/uint256 syscalls all call
-        // `SyscallContext::assert_dword_aligned_precompile` up front (keccak256 relies on
-        // `mr_dword`'s `debug_assert` instead). So a guest passing a 4-aligned pointer emulates
-        // fine but cannot be proved: measured, an honest call at `0x200004` fails with
-        // `Regional cumulative sum is not zero`, because the gadget's `BitRange(13)` check on
-        // `addr[0] / 8` has no match in `ByteChip`. Such a call was unprovable before this commit
-        // too, for the reasons this commit fixes, so this is not a regression -- but the two
-        // sides should be made to agree, and the cheap option is for the syscall to assert the
-        // alignment the way its siblings do.
+        // NOTE on the alignment half: the gadget's `BitRange(13)` check on `addr[0] / 8` has no
+        // match in `ByteChip` for a pointer that is only 4-aligned, so such a call has no
+        // provable trace -- measured, an honest call at `0x200004` fails with `Regional
+        // cumulative sum is not zero`. The syscall now rejects those pointers up front
+        // (`assert_dword_aligned_precompile`, twice, in
+        // `syscalls/precompiles/poseidon2/permute.rs`), the way its fp/fp2/ec/edwards/sha256/
+        // uint256 siblings do, so the two sides agree and the failure names its cause.
+        //
+        // What is left of that problem is on the *caller* side: the syscall ABI hands over
+        // `*const [u32; 16]` / `*mut [u32; 16]`, which Rust aligns to 4, so the SDK's own hasher
+        // has to align its buffers to 8 before this precompile can be reached from a guest. See
+        // the note beside the commented-out chip in `instances/chiptype/riscv_chiptype.rs`.
         let input_ptr = SyscallAddrGadget::<CB::F>::eval(
             builder,
             STATE_NUM_BYTES,
@@ -71,10 +71,10 @@ where
             is_real.into(),
         );
 
-        // One address per dword, carried across limbs. `eval_memory_access_slice` cannot be used
-        // here: it adds `i * stride` into limb[0] only, so once `limb[0] + i * stride` crosses
-        // 2^16 the emitted address leaves the u16 range with no carry into limb[1] and matches
-        // no correctly encoded address anywhere in the machine.
+        // One address per dword, carried across limbs. A slice helper that adds `i * stride`
+        // into limb[0] only cannot be used here: once `limb[0] + i * stride` crosses 2^16 the
+        // emitted address leaves the u16 range with no carry into limb[1] and matches no
+        // correctly encoded address anywhere in the machine.
         for i in 0..STATE_NUM_DWORDS {
             AddrAddGadget::<CB::F>::eval(
                 builder,
@@ -129,7 +129,7 @@ where
         // Dword `i` holds state words `2i` (limbs 0-1) and `2i + 1` (limbs 2-3). The limbs are
         // range checked first: the two equations below only pin weighted sums, so without the
         // u16 checks a non-canonical limb pair could hit the same field element.
-        let base = CB::F::from_canonical_u32(1 << 16);
+        let base = CB::F::from_u32(1 << 16);
         for i in 0..STATE_NUM_DWORDS {
             let word = *local.input_memory[i].value();
             builder.slice_range_check_u16(&word.0, is_real);
@@ -140,6 +140,36 @@ where
             builder.when(is_real).assert_eq(
                 local.value_cols.inputs[2 * i + 1],
                 word[2].into() + word[3].into() * base,
+            );
+
+            // Each half must additionally be *canonical*, not merely congruent.
+            //
+            // The two equations above are equalities between field elements, so they hold just
+            // as well for a guest word of `state[j] + p`. The emulator would have reduced that
+            // word to `state[j]` (`F::from_u32` is a quotient map, not a checked conversion)
+            // and permuted the reduced value, so prover and emulator agree -- but only because
+            // both silently discarded the same information. Pinning the memory word to the
+            // canonical representative is what makes "the word in guest memory" and "the field
+            // element this chip permuted" the same object, which is the property the syscall's
+            // matching assertion and the output side below both rely on.
+            //
+            // `is_real` is asserted boolean at the top of this function, which is the
+            // precondition `range_check_u32_limbs` carries (it does not re-assert it). The u16
+            // bound on the limbs comes from the `slice_range_check_u16` above -- the comparison
+            // reasons about the most significant limb alone and bounds nothing without it.
+            FieldWordRangeChecker::<CB::F>::range_check_u32_limbs::<CB>(
+                builder,
+                word[0].into(),
+                word[1].into(),
+                local.input_range_checkers[2 * i],
+                is_real.into(),
+            );
+            FieldWordRangeChecker::<CB::F>::range_check_u32_limbs::<CB>(
+                builder,
+                word[2].into(),
+                word[3].into(),
+                local.input_range_checkers[2 * i + 1],
+                is_real.into(),
             );
         }
 
@@ -156,12 +186,11 @@ where
         // column. Same split as the input side, so all four limbs of every written dword are
         // pinned.
         //
-        // NOTE: this does not force the written half to be the *canonical* representative of
-        // `state[j]`. The limbs are u16 and their weighted sum is fixed mod p, which still
-        // leaves `state[j] + p` (and sometimes `+ 2p`) inside `[0, 2^32)`, so the written word
-        // is not unique. Closing that needs a `value < p` check on each written half, which
-        // `gadgets/field_range_check/word_range.rs` now provides. It would be needed on both
-        // sides: 16 input checkers and 16 output checkers.
+        // The equality alone does not force the written half to be the *canonical*
+        // representative of `state[j]`: the limbs are u16 and their weighted sum is fixed only
+        // mod p, which still leaves `state[j] + p` (and sometimes `+ 2p`) inside `[0, 2^32)`.
+        // Left there, the prover -- not the permutation -- would choose which of those lands in
+        // guest memory. `output_range_checkers` closes it, one per written state word.
         for i in 0..STATE_NUM_DWORDS {
             let word = *local.output_memory[i].value();
             builder.slice_range_check_u16(&word.0, is_real);
@@ -171,6 +200,23 @@ where
             builder.when(is_real).assert_eq(
                 state[2 * i + 1].clone(),
                 word[2].into() + word[3].into() * base,
+            );
+
+            // Same preconditions as the input side: `is_real` asserted boolean above, limbs
+            // bounded to u16 by the `slice_range_check_u16` on the line above.
+            FieldWordRangeChecker::<CB::F>::range_check_u32_limbs::<CB>(
+                builder,
+                word[0].into(),
+                word[1].into(),
+                local.output_range_checkers[2 * i],
+                is_real.into(),
+            );
+            FieldWordRangeChecker::<CB::F>::range_check_u32_limbs::<CB>(
+                builder,
+                word[2].into(),
+                word[3].into(),
+                local.output_range_checkers[2 * i + 1],
+                is_real.into(),
             );
         }
 
@@ -182,7 +228,7 @@ where
         builder.looked_syscall(
             local.chunk,
             local.clk,
-            CB::F::from_canonical_u32(SyscallCode::POSEIDON2_PERMUTE.syscall_id()),
+            CB::F::from_u32(SyscallCode::POSEIDON2_PERMUTE.syscall_id()),
             input_ptr.map(Into::into),
             output_ptr.map(Into::into),
             is_real,

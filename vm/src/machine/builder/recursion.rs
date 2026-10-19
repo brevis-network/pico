@@ -5,7 +5,7 @@ use crate::{
     compiler::recursion::{ir::Block, types::Address},
     machine::lookup::{LookupScope, LookupType, SymbolicLookup},
 };
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use std::iter::once;
 
 pub trait RecursionBuilder<F: Field>: ChipBuilder<F> {

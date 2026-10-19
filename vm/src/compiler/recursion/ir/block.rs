@@ -4,8 +4,12 @@ use crate::{
 };
 use core::marker::PhantomData;
 use p3_air::AirBuilder;
-use p3_field::{extension::BinomiallyExtendable, ExtensionField, Field, FieldAlgebra};
+use p3_field::{extension::BinomiallyExtendable, ExtensionField, Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
+use rand::{
+    distr::{Distribution, StandardUniform},
+    Rng, RngExt,
+};
 use serde::{Deserialize, Serialize};
 use std::ops::{Index, IndexMut};
 
@@ -15,6 +19,15 @@ use std::ops::{Index, IndexMut};
 )]
 #[repr(C)]
 pub struct Block<T>(pub [T; EXTENSION_DEGREE]);
+
+impl<T> Distribution<Block<T>> for StandardUniform
+where
+    StandardUniform: Distribution<T>,
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Block<T> {
+        Block([rng.random(), rng.random(), rng.random(), rng.random()])
+    }
+}
 
 pub trait BlockBuilder: AirBuilder {
     fn assert_block_eq<Lhs: Into<Self::Expr>, Rhs: Into<Self::Expr>>(
@@ -43,7 +56,8 @@ impl<T> Block<T> {
         T: Field,
         E: ExtensionField<T>,
     {
-        E::from_base_slice(&self.0)
+        E::from_basis_coefficients_slice(&self.0)
+            .expect("a Block holds EXTENSION_DEGREE coefficients")
     }
 }
 
@@ -78,7 +92,7 @@ impl<T> From<[T; EXTENSION_DEGREE]> for Block<T> {
     }
 }
 
-impl<T: FieldAlgebra> From<T> for Block<T> {
+impl<T: PrimeCharacteristicRing> From<T> for Block<T> {
     fn from(value: T) -> Self {
         Self([value, T::ZERO, T::ZERO, T::ZERO])
     }

@@ -17,7 +17,7 @@ use crate::{
     iter::{
         current_num_threads, IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSliceMut,
     },
-    machine::chip::ChipBehavior,
+    machine::chip::{ChipBehavior, PreprocessedRows},
     primitives::consts::SELECT_DATAPAR,
 };
 use p3_field::PrimeField32;
@@ -37,6 +37,10 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
         NUM_SELECT_PREPROCESSED_COLS
     }
 
+    fn preprocessed_rows(&self, program: &Self::Program) -> Option<PreprocessedRows> {
+        Some(PreprocessedRows::Unpadded(program.prep_row_counts().select))
+    }
+
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let instructions: Vec<_> = program
             .instructions
@@ -48,11 +52,7 @@ impl<F: PrimeField32> ChipBehavior<F> for SelectChip<F> {
             .collect();
 
         let nrows = instructions.len().div_ceil(SELECT_DATAPAR);
-        let fixed_log2_nrows = program.fixed_log2_rows(&self.name());
-        let padded_nrows = match fixed_log2_nrows {
-            Some(log2_nrows) => 1 << log2_nrows,
-            None => next_power_of_two(nrows, None),
-        };
+        let padded_nrows = program.padded_prep_rows(&self.name(), nrows);
 
         let mut values: Vec<F> = vec![F::ZERO; padded_nrows * NUM_SELECT_PREPROCESSED_COLS];
 

@@ -8,4 +8,4 @@ categories = { workspace = true }
 
 [dependencies]
 pico-sdk = { workspace = true }
-substrate-bn = { git = "https://github.com/brevis-network/bn.git", branch = "patch-v1.0.1" }
+substrate-bn = { git = "https://github.com/brevis-network/bn.git", rev = "1ab1d69cac23bc2b55d29b22ffcea51ff8f72391" } # patch-v1.0.1-rv64

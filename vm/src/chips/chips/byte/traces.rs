@@ -62,7 +62,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ByteChip<F> {
                     if row_idx == row_index {
                         let cols: &mut ByteMultCols<F> = row.borrow_mut();
                         let index = lookup.opcode as usize;
-                        cols.multiplicities[index] += F::from_canonical_usize(**mult);
+                        cols.multiplicities[index] += F::from_usize(**mult);
                     }
                 }
             });
@@ -94,32 +94,32 @@ impl<F: Field> ByteChip<F> {
             let col: &mut BytePreprocessedCols<F> = initial_trace.row_mut(row_index).borrow_mut();
 
             // Set the values of `b` and `c`.
-            col.b = F::from_canonical_u8(b);
-            col.c = F::from_canonical_u8(c);
+            col.b = F::from_u8(b);
+            col.c = F::from_u8(c);
 
             // Iterate over all operations for results and updating the table map.
             for opcode in opcodes.iter() {
                 match opcode {
                     ByteOpcode::AND => {
                         let and = b & c;
-                        col.and = F::from_canonical_u8(and);
+                        col.and = F::from_u8(and);
                     }
                     ByteOpcode::OR => {
                         let or = b | c;
-                        col.or = F::from_canonical_u8(or);
+                        col.or = F::from_u8(or);
                     }
                     ByteOpcode::XOR => {
                         let xor = b ^ c;
-                        col.xor = F::from_canonical_u8(xor);
+                        col.xor = F::from_u8(xor);
                     }
                     ByteOpcode::SLL => {
                         let sll = b << (c & 7);
-                        col.sll = F::from_canonical_u8(sll);
+                        col.sll = F::from_u8(sll);
                     }
                     ByteOpcode::ShrCarry => {
                         let (res, carry) = shr_carry(b, c);
-                        col.shr = F::from_canonical_u8(res);
-                        col.shr_carry = F::from_canonical_u8(carry);
+                        col.shr = F::from_u8(res);
+                        col.shr_carry = F::from_u8(carry);
                     }
                     ByteOpcode::LTU => {
                         let ltu = b < c;
@@ -132,12 +132,12 @@ impl<F: Field> ByteChip<F> {
                     ByteOpcode::U8Range => (),
                     ByteOpcode::U16Range => {
                         let v = ((b as u32) << 8) + c as u32;
-                        col.value_u16 = F::from_canonical_u32(v);
+                        col.value_u16 = F::from_u32(v);
                     }
                     ByteOpcode::BitRange => {
                         let v = ((b as u32) << 8) + c as u32;
-                        col.value_u16 = F::from_canonical_u32(v);
-                        col.bits = F::from_canonical_u8(16);
+                        col.value_u16 = F::from_u32(v);
+                        col.bits = F::from_u8(16);
                     }
                 };
             }
@@ -152,8 +152,8 @@ impl<F: Field> ByteChip<F> {
                 if row_index < NUM_ROWS {
                     let col: &mut BytePreprocessedCols<F> =
                         initial_trace.row_mut(row_index).borrow_mut();
-                    col.value_u16 = F::from_canonical_u16(a);
-                    col.bits = F::from_canonical_u8(bits);
+                    col.value_u16 = F::from_u16(a);
+                    col.bits = F::from_u8(bits);
                 }
             }
         }

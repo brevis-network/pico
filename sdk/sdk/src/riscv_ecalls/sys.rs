@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use lazy_static::lazy_static;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 
 use crate::riscv_ecalls::{syscall_halt, syscall_write};
 
@@ -31,7 +31,7 @@ pub unsafe extern "C" fn sys_rand(recv_buf: *mut u8, words: usize) {
     let mut rng = RNG.lock().unwrap();
     for i in 0..words {
         let element = recv_buf.add(i);
-        *element = rng.gen();
+        *element = rng.random();
     }
 }
 

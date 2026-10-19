@@ -1,5 +1,3 @@
-use std::fs;
-
 use alloy_sol_types::sol;
 
 sol! {
@@ -20,11 +18,4 @@ pub fn fibonacci(mut a: u32, mut b: u32, n: u32) -> (u32, u32) {
         b = next;
     }
     (a, b)
-}
-
-/// Loads an ELF file from the specified path.
-pub fn load_elf(path: &str) -> Vec<u8> {
-    fs::read(path).unwrap_or_else(|err| {
-        panic!("Failed to load ELF file from {}: {}", path, err);
-    })
 }

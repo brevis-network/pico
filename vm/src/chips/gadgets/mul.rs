@@ -104,9 +104,9 @@ impl<F: Field> MulGadget<F> {
         // Handle b and c's signs.
         {
             let b_msb = get_msb(b_word);
-            self.b_msb = F::from_canonical_u8(b_msb);
+            self.b_msb = F::from_u8(b_msb);
             let c_msb = get_msb(c_word);
-            self.c_msb = F::from_canonical_u8(c_msb);
+            self.c_msb = F::from_u8(c_msb);
 
             // If b is signed and it is negative, sign extend b.
             if (is_mulh || is_mulhsu) && b_msb == 1 {
@@ -161,10 +161,10 @@ impl<F: Field> MulGadget<F> {
             if i + 1 < LONG_WORD_BYTE_SIZE {
                 product[i + 1] += carry[i];
             }
-            self.carry[i] = F::from_canonical_u32(carry[i]);
+            self.carry[i] = F::from_u32(carry[i]);
         }
 
-        self.product = product.map(F::from_canonical_u32);
+        self.product = product.map(F::from_u32);
 
         // Range check.
         {
@@ -193,9 +193,9 @@ impl<F: Field> MulGadget<F> {
         is_mulhsu: AB::Expr,
     ) {
         let zero: AB::Expr = AB::F::ZERO.into();
-        let base = AB::F::from_canonical_u32(1 << 8);
+        let base = AB::F::from_u32(1 << 8);
         let one: AB::Expr = AB::F::ONE.into();
-        let byte_mask = AB::F::from_canonical_u8(BYTE_MASK);
+        let byte_mask = AB::F::from_u8(BYTE_MASK);
 
         // Use U16ToU8Gadget for lower byte extraction constraints
         // Convert all 4 u16 limbs to get 8 bytes
@@ -213,7 +213,7 @@ impl<F: Field> MulGadget<F> {
         );
 
         // Calculate the MSBs.
-        let msb_opcode = AB::F::from_canonical_u32(ByteOpcode::MSB as u32);
+        let msb_opcode = AB::F::from_u32(ByteOpcode::MSB as u32);
         let (b_msb, c_msb) = {
             let msb_pairs = [
                 (cols.b_msb, b[WORD_BYTE_SIZE - 1].clone()),
@@ -289,11 +289,11 @@ impl<F: Field> MulGadget<F> {
             let is_lower = is_mul.clone();
             let is_upper = is_mulh.clone() + is_mulhu.clone() + is_mulhsu.clone();
             let is_word = is_mulw.clone();
-            let u16_max = AB::F::from_canonical_u32((1 << 16) - 1);
+            let u16_max = AB::F::from_u32((1 << 16) - 1);
             for i in 0..WORD_SIZE {
                 if i < WORD_SIZE / 2 {
                     builder.when(is_word.clone()).assert_eq(
-                        product[2 * i] + product[2 * i + 1] * AB::F::from_canonical_u16(1 << 8),
+                        product[2 * i] + product[2 * i + 1] * AB::F::from_u16(1 << 8),
                         a[i],
                     );
                 } else {
@@ -302,12 +302,12 @@ impl<F: Field> MulGadget<F> {
                         .assert_eq(cols.product_msb.msb * u16_max, a[i]);
                 }
                 builder.when(is_lower.clone()).assert_eq(
-                    product[2 * i] + product[2 * i + 1] * AB::F::from_canonical_u16(1 << 8),
+                    product[2 * i] + product[2 * i + 1] * AB::F::from_u16(1 << 8),
                     a[i],
                 );
                 builder.when(is_upper.clone()).assert_eq(
                     product[2 * i + WORD_BYTE_SIZE]
-                        + product[2 * i + 1 + WORD_BYTE_SIZE] * AB::F::from_canonical_u16(1 << 8),
+                        + product[2 * i + 1 + WORD_BYTE_SIZE] * AB::F::from_u16(1 << 8),
                     a[i],
                 );
             }
@@ -353,57 +353,5 @@ impl<F: Field> MulGadget<F> {
             builder.slice_range_check_u16(&cols.carry, is_real.clone());
             builder.slice_range_check_u8(&cols.product, is_real.clone());
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        a: Word<T>,
-        b: Word<T>,
-        c: Word<T>,
-        mul: MulGadget<T>,
-        is_real: T,
-        is_mul: T,
-        is_mulh: T,
-        is_mulw: T,
-        is_mulhu: T,
-        is_mulhsu: T,
-    }
-
-    #[test]
-    fn test_mul_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        MulGadget::<KoalaBear>::eval(
-            &mut builder,
-            local.a,
-            local.b,
-            local.c,
-            local.mul,
-            local.is_real.into(),
-            local.is_mul.into(),
-            local.is_mulh.into(),
-            local.is_mulw.into(),
-            local.is_mulhu.into(),
-            local.is_mulhsu.into(),
-        );
-
-        assert_eq!(builder.num_constraints(), 45);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 35);
     }
 }

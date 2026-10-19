@@ -2,7 +2,9 @@ use super::{Syscall, SyscallCode, SyscallContext};
 use crate::{
     chips::chips::riscv_memory::event::MemoryRecord,
     emulator::riscv::{
-        emulator::util::align_u64, event_types::RvValue, riscv_emulator::RiscvEmulatorMode,
+        emulator::{error::EmulationError, util::align_u64},
+        event_types::RvValue,
+        riscv_emulator::RiscvEmulatorMode,
     },
 };
 
@@ -17,11 +19,11 @@ impl Syscall for HintLenSyscall {
         _arg2: RvValue,
     ) -> Option<RvValue> {
         if ctx.rt.state.input_stream_ptr >= ctx.rt.state.input_stream.len() {
-            panic!(
-                "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
-                ctx.rt.state.input_stream_ptr,
-                ctx.rt.state.input_stream.len()
-            );
+            ctx.fail(EmulationError::InsufficientInput {
+                stream_ptr: ctx.rt.state.input_stream_ptr,
+                stream_len: ctx.rt.state.input_stream.len(),
+            });
+            return None;
         }
         Some(ctx.rt.state.input_stream[ctx.rt.state.input_stream_ptr].len() as RvValue)
     }
@@ -38,30 +40,40 @@ impl Syscall for HintReadSyscall {
         arg2: RvValue,
     ) -> Option<RvValue> {
         let ptr = arg1;
-        let len =
-            usize::try_from(arg2).unwrap_or_else(|_| panic!("hint_read len overflow: {arg2}"));
+        let Ok(len) = usize::try_from(arg2) else {
+            ctx.fail(EmulationError::InvalidHintRead(format!(
+                "length {arg2} does not fit this host's usize"
+            )));
+            return None;
+        };
         let stream_ptr = ctx.rt.state.input_stream_ptr;
 
         if stream_ptr >= ctx.rt.state.input_stream.len() {
-            panic!(
-                "failed reading stdin due to insufficient input data: input_stream_ptr={}, input_stream_len={}",
+            ctx.fail(EmulationError::InsufficientInput {
                 stream_ptr,
-                ctx.rt.state.input_stream.len()
-            );
+                stream_len: ctx.rt.state.input_stream.len(),
+            });
+            return None;
         }
 
-        {
-            let vec = &ctx.rt.state.input_stream[stream_ptr];
-            assert_eq!(vec.len(), len, "hint input stream read length mismatch");
-            assert_eq!(ptr % 8, 0, "hint read address not aligned to 8 bytes");
+        let supplied = ctx.rt.state.input_stream[stream_ptr].len();
+        if supplied != len {
+            ctx.fail(EmulationError::InvalidHintRead(format!(
+                "length mismatch: the guest asked for {len} byte(s), input element {stream_ptr} \
+                 holds {supplied}"
+            )));
+            return None;
+        }
+        if !ptr.is_multiple_of(8) {
+            ctx.fail(EmulationError::InvalidHintRead(format!(
+                "address 0x{ptr:016x} is not aligned to 8 bytes"
+            )));
+            return None;
         }
 
-        let chunk_count = {
-            let vec = &ctx.rt.state.input_stream[stream_ptr];
-            vec.len().div_ceil(8)
-        };
-
-        for chunk_idx in 0..chunk_count {
+        // The dispatcher ends the emulation on the first recorded failure, so a dword already
+        // written when a later one fails is never read back.
+        for chunk_idx in 0..supplied.div_ceil(8) {
             let mut padded = [0u8; 8];
             {
                 let vec = &ctx.rt.state.input_stream[stream_ptr];
@@ -71,19 +83,24 @@ impl Syscall for HintReadSyscall {
                 padded[..chunk.len()].copy_from_slice(chunk);
             }
             let word = u64::from_le_bytes(padded);
-            let addr = ptr.checked_add((chunk_idx as u64) * 8).unwrap_or_else(|| {
-                panic!("hint_read address overflow: ptr=0x{ptr:016x} chunk_idx={chunk_idx}")
-            });
+            let Some(addr) = ptr.checked_add((chunk_idx as u64) * 8) else {
+                ctx.fail(EmulationError::InvalidHintRead(format!(
+                    "address overflow: ptr=0x{ptr:016x} chunk_idx={chunk_idx}"
+                )));
+                return None;
+            };
 
             let existing = ctx.rt.state.uninitialized_memory.get(addr).copied();
             if let Some(old) = existing.filter(|&v| v != 0) {
                 let is_trace = matches!(ctx.rt.mode, RiscvEmulatorMode::Trace);
                 if !(is_trace && old == word) {
-                    panic!(
-                        "hint read address is initialized already (uninitialized_memory)\n\
-                         addr=0x{addr:016x} ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr}\n\
-                         old_uninit_dword=0x{old:016x} new_dword=0x{word:016x}",
-                    );
+                    ctx.fail(EmulationError::InvalidHintRead(format!(
+                        "address is initialized already (uninitialized_memory): \
+                         addr=0x{addr:016x} ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} \
+                         stream_ptr={stream_ptr} old_uninit_dword=0x{old:016x} \
+                         new_dword=0x{word:016x}"
+                    )));
+                    return None;
                 }
             }
             ctx.rt.state.uninitialized_memory.insert(addr, word);
@@ -105,14 +122,14 @@ impl Syscall for HintReadSyscall {
             );
 
             if prev_record.value != 0 || prev_record.chunk != 0 || prev_record.timestamp != 0 {
-                panic!(
-                    "hint read address is initialized already (memory)\n\
-                     addr=0x{addr:016x} ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr}\n\
-                     prev_record={prev_record:?}\n\
-                     new_record={{ value: 0x{word:016x}, chunk: 0, timestamp: 0 }}\n\
-                     existing_uninit_word={:?}",
-                    existing.map(|x| format!("0x{x:016x}")),
-                );
+                let uninit = existing.map(|x| format!("0x{x:016x}"));
+                ctx.fail(EmulationError::InvalidHintRead(format!(
+                    "address is initialized already (memory): addr=0x{addr:016x} \
+                     ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} stream_ptr={stream_ptr} \
+                     prev_record={prev_record:?} new_dword=0x{word:016x} \
+                     existing_uninit_word={uninit:?}"
+                )));
+                return None;
             }
         }
 
@@ -128,7 +145,7 @@ mod tests {
         compiler::riscv::program::Program,
         emulator::{opts::EmulatorOpts, riscv::riscv_emulator::RiscvEmulator},
     };
-    use p3_baby_bear::BabyBear;
+    use p3_koala_bear::KoalaBear;
     use std::{
         collections::BTreeMap,
         sync::{Arc, Mutex, MutexGuard, OnceLock},
@@ -149,7 +166,7 @@ mod tests {
     }
 
     fn test_emulator(input_stream: Vec<Vec<u8>>) -> RiscvEmulator {
-        RiscvEmulator::new_single::<BabyBear>(test_program(), EmulatorOpts::default(), None)
+        RiscvEmulator::new_single::<KoalaBear>(test_program(), EmulatorOpts::default(), None)
             .tap_mut(|emu| {
                 emu.state.input_stream = input_stream;
             })
@@ -221,18 +238,45 @@ mod tests {
         assert_eq!(accessed, vec![0x100, 0x108]);
     }
 
+    /// Every rejection below is guest-controlled, so each one has to reach the dispatcher as a
+    /// recorded failure. A panic here would abort whatever process is hosting the emulation.
+    fn assert_failed(ctx: &mut SyscallContext, expected: &str) {
+        let error = ctx
+            .take_error()
+            .expect("a hint read this malformed must fail the emulation");
+        assert!(
+            matches!(error, EmulationError::InvalidHintRead(_)),
+            "wrong variant: {error}"
+        );
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected:?} in: {error}"
+        );
+    }
+
     #[test]
-    #[should_panic(expected = "hint read address not aligned to 8 bytes")]
     fn hint_read_rejects_unaligned_pointer() {
         let _guard = hint_test_guard();
         let mut emulator = test_emulator(vec![vec![1, 2, 3, 4]]);
         let mut ctx = SyscallContext::new(&mut emulator);
 
         HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x104, 4);
+
+        assert_failed(&mut ctx, "is not aligned to 8 bytes");
     }
 
     #[test]
-    #[should_panic(expected = "hint read address is initialized already (uninitialized_memory)")]
+    fn hint_read_rejects_a_length_the_element_does_not_hold() {
+        let _guard = hint_test_guard();
+        let mut emulator = test_emulator(vec![vec![1, 2, 3, 4]]);
+        let mut ctx = SyscallContext::new(&mut emulator);
+
+        HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 8);
+
+        assert_failed(&mut ctx, "length mismatch");
+    }
+
+    #[test]
     fn hint_read_rejects_duplicate_initialization_per_dword() {
         let _guard = hint_test_guard();
         let mut emulator = test_emulator(vec![vec![1, 2, 3, 4], vec![5, 6, 7, 8]]);
@@ -240,9 +284,12 @@ mod tests {
         {
             let mut ctx = SyscallContext::new(&mut emulator);
             HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 4);
+            assert!(ctx.take_error().is_none(), "the first read is well formed");
         }
 
         let mut ctx = SyscallContext::new(&mut emulator);
         HintReadSyscall.emulate(&mut ctx, SyscallCode::HINT_READ, 0x100, 4);
+
+        assert_failed(&mut ctx, "initialized already (uninitialized_memory)");
     }
 }

@@ -8,7 +8,7 @@ pub const NUM_OPCODE_SELECTOR_COLS: usize = size_of::<OpcodeSelectorCols<u8>>();
 pub const OPCODE_SELECTORS_COL_MAP: OpcodeSelectorCols<usize> = make_selector_col_map();
 
 /// The column layout for opcode selectors.
-#[derive(AlignedBorrow, Clone, Copy, Debug, Default)]
+#[derive(AlignedBorrow, Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(C)]
 pub struct OpcodeSelectorCols<T> {
     /// Whether op_b is an immediate value.
@@ -18,23 +18,37 @@ pub struct OpcodeSelectorCols<T> {
     pub imm_c: T,
 
     /// Table selectors for opcodes.
-    pub is_alu: T,
-
-    /// Table selectors for opcodes.
+    ///
+    /// The former `is_alu` column is derived, not committed. Since the instruction
+    /// class is a one-hot partition backed by the Program-table lookup (which pins every other
+    /// class selector for the row's pc), ALU is exactly the complement:
+    /// `is_alu = is_real - (is_ecall + is_memory + Σbranch + is_jal + is_jalr)`.
+    /// There is no selector for the trap instructions (UNIMP / EBREAK): the Program table holds
+    /// no row for a trap's pc (`riscv_program/traces.rs`), so no Cpu row can carry one. See
+    /// `CpuChip::is_alu_instruction`.
+    ///
+    /// There is no `is_auipc` term since X12: the transpiler re-encodes `AUIPC rd, imm` as the
+    /// two-immediate `ADD rd, imm, pc`, so AUIPC is no longer an instruction class this table
+    /// knows about. Should an AUIPC instruction still reach this table (a hand-built `Program`),
+    /// `populate` sets no class selector and the row falls into the derived ALU class. That is
+    /// fail-closed. On an honest trace with `rd != x0` the first thing to fail is the
+    /// definitional constraint `is_alu_not_x0 == is_alu_instruction * (1 - op_a_0)`: the AIR
+    /// reads `is_alu_instruction = 1` while `riscv_cpu/traces.rs` writes `is_alu_not_x0 = 0`,
+    /// because `Instruction::is_alu_instruction` does not list AUIPC. Only a prover that forges
+    /// `is_alu_not_x0 = 1` to satisfy it reaches the Alu bus, where nothing receives opcode 27
+    /// and the regional sum stops balancing. `auipc x0, imm` passes both checks, correctly: it is
+    /// a genuine no-op, with `op_a_val()` pinned to zero and the pc advancing by 4.
     pub is_ecall: T,
 
     /// Memory Instructions.
-    pub is_lb: T,
-    pub is_lbu: T,
-    pub is_lh: T,
-    pub is_lhu: T,
-    pub is_lw: T,
-    pub is_lwu: T,
-    pub is_ld: T,
-    pub is_sb: T,
-    pub is_sh: T,
-    pub is_sw: T,
-    pub is_sd: T,
+    ///
+    /// The per-variant flags (is_lb, ..., is_sd) live in the MemoryReadWriteChip's
+    /// `MemoryInstructionCols` and are self-proven there against the opcode; the Cpu
+    /// chip only tracks whether the instruction is a memory instruction at all, plus
+    /// whether it is a store (the register write constraint needs to know that stores,
+    /// like branches, must not modify op_a).
+    pub is_memory: T,
+    pub is_store: T,
 
     /// Branch Instructions.
     pub is_beq: T,
@@ -47,10 +61,6 @@ pub struct OpcodeSelectorCols<T> {
     /// Jump Instructions.
     pub is_jalr: T,
     pub is_jal: T,
-
-    /// Miscellaneous.
-    pub is_auipc: T,
-    pub is_unimpl: T,
 }
 
 impl<F: Field> OpcodeSelectorCols<F> {
@@ -58,24 +68,20 @@ impl<F: Field> OpcodeSelectorCols<F> {
         self.imm_b = F::from_bool(instruction.imm_b);
         self.imm_c = F::from_bool(instruction.imm_c);
 
+        // `is_alu` is no longer a committed column; the ALU class is derived in the
+        // constraints as the one-hot complement of the other class selectors. On ALU rows this
+        // branch simply leaves every class selector at zero.
         if instruction.is_alu_instruction() {
-            self.is_alu = F::ONE;
+            // no-op: ALU class is derived, not committed.
         } else if instruction.is_ecall_instruction() {
             self.is_ecall = F::ONE;
         } else if instruction.is_memory_instruction() {
-            match instruction.opcode {
-                Opcode::LB => self.is_lb = F::ONE,
-                Opcode::LBU => self.is_lbu = F::ONE,
-                Opcode::LHU => self.is_lhu = F::ONE,
-                Opcode::LH => self.is_lh = F::ONE,
-                Opcode::LW => self.is_lw = F::ONE,
-                Opcode::LWU => self.is_lwu = F::ONE,
-                Opcode::LD => self.is_ld = F::ONE,
-                Opcode::SB => self.is_sb = F::ONE,
-                Opcode::SH => self.is_sh = F::ONE,
-                Opcode::SW => self.is_sw = F::ONE,
-                Opcode::SD => self.is_sd = F::ONE,
-                _ => unreachable!(),
+            self.is_memory = F::ONE;
+            if matches!(
+                instruction.opcode,
+                Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD
+            ) {
+                self.is_store = F::ONE;
             }
         } else if instruction.is_branch_instruction() {
             match instruction.opcode {
@@ -91,11 +97,10 @@ impl<F: Field> OpcodeSelectorCols<F> {
             self.is_jal = F::ONE;
         } else if instruction.opcode == Opcode::JALR {
             self.is_jalr = F::ONE;
-        } else if instruction.opcode == Opcode::AUIPC {
-            self.is_auipc = F::ONE;
-        } else if matches!(instruction.opcode, Opcode::UNIMP | Opcode::EBREAK) {
-            self.is_unimpl = F::ONE;
         }
+        // A trap instruction (`Opcode::is_trap`) sets no class selector. It never reaches this
+        // point from a real program: the emulator stops on it before emitting an event, and the
+        // Program table writes row 0 in its place (`riscv_program/traces.rs`).
     }
 }
 
@@ -107,19 +112,9 @@ impl<T> IntoIterator for OpcodeSelectorCols<T> {
         let columns = vec![
             self.imm_b,
             self.imm_c,
-            self.is_alu,
             self.is_ecall,
-            self.is_lb,
-            self.is_lbu,
-            self.is_lh,
-            self.is_lhu,
-            self.is_lw,
-            self.is_lwu,
-            self.is_ld,
-            self.is_sb,
-            self.is_sh,
-            self.is_sw,
-            self.is_sd,
+            self.is_memory,
+            self.is_store,
             self.is_beq,
             self.is_bne,
             self.is_blt,
@@ -128,8 +123,6 @@ impl<T> IntoIterator for OpcodeSelectorCols<T> {
             self.is_bgeu,
             self.is_jalr,
             self.is_jal,
-            self.is_auipc,
-            self.is_unimpl,
         ];
         assert_eq!(columns.len(), NUM_OPCODE_SELECTOR_COLS);
         columns.into_iter()

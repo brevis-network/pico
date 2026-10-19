@@ -1,6 +1,6 @@
 use super::{DslIr, Ext, Felt, InnerBuilder, Var};
 use crate::configs::config::FieldGenericConfig;
-use p3_field::{Field, FieldAlgebra, FieldExtensionAlgebra};
+use p3_field::{Algebra, BasedVectorSpace, Field, PrimeCharacteristicRing};
 use std::{cell::UnsafeCell, mem::ManuallyDrop};
 
 #[derive(Debug)]
@@ -816,7 +816,7 @@ impl<F> FeltHandle<F> {
     }
 }
 
-impl<F: Field, EF: FieldExtensionAlgebra<F>> ExtHandle<F, EF> {
+impl<F: Field, EF: BasedVectorSpace<F> + Algebra<F>> ExtHandle<F, EF> {
     pub fn add_e(&self, lhs: Ext<F, EF>, rhs: Ext<F, EF>) -> Ext<F, EF> {
         (self.add_ext)(self.ptr, lhs, rhs)
     }
@@ -872,7 +872,7 @@ impl<F: Field, EF: FieldExtensionAlgebra<F>> ExtHandle<F, EF> {
     }
 
     pub fn sub_e_const_f(&self, lhs: Ext<F, EF>, rhs: F) -> Ext<F, EF> {
-        (self.sub_const_ext)(self.ptr, lhs, EF::from_base(rhs))
+        (self.sub_const_ext)(self.ptr, lhs, EF::from(rhs))
     }
 
     pub fn sub_f_const_e(
@@ -920,7 +920,7 @@ impl<F: Field, EF: FieldExtensionAlgebra<F>> ExtHandle<F, EF> {
     }
 
     pub fn mul_e_const_f(&self, lhs: Ext<F, EF>, rhs: F) -> Ext<F, EF> {
-        (self.mul_const_ext)(self.ptr, lhs, EF::from_base(rhs))
+        (self.mul_const_ext)(self.ptr, lhs, EF::from(rhs))
     }
 
     pub fn mul_f_const_e(

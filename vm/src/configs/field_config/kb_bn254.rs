@@ -1,5 +1,5 @@
 use crate::configs::config::FieldGenericConfig;
-use p3_bn254_fr::Bn254Fr;
+use p3_bn254::Bn254;
 use p3_field::extension::BinomialExtensionField;
 use p3_koala_bear::KoalaBear;
 
@@ -7,7 +7,7 @@ use p3_koala_bear::KoalaBear;
 pub struct KoalaBearBn254;
 
 impl FieldGenericConfig for KoalaBearBn254 {
-    type N = Bn254Fr;
+    type N = Bn254;
     type F = KoalaBear;
     type EF = BinomialExtensionField<KoalaBear, 4>;
 }

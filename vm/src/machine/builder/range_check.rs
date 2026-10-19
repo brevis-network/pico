@@ -3,7 +3,7 @@
 use super::{ChipBuilder, ChipLookupBuilder};
 use crate::compiler::riscv::opcode::ByteOpcode;
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 
 pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
     /// Check that each limb of the given slice is a u8.
@@ -48,27 +48,43 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
         });
     }
 
-    /// Verifies the inputted value is within 24 bits.
+    /// Verifies the inputted value is within 25 bits, with a 16 + 9 limb decomposition:
+    /// `value = limb_16 + hi9 * 2^16`, `limb_16` U16Range-checked and `hi9` BitRange(9)-checked.
     ///
-    /// This method verifies that the inputted is less than 2^24 by doing a 16 bit and 8 bit range
-    /// check on it's limbs.  It will also verify that the limbs are correct.  This method is needed
-    /// since the memory access timestamp check (see [Self::verify_mem_access_ts]) needs to assume
-    /// the clk is within 24 bits.
-    fn range_check_u24(
+    /// The 25-bit budget is what the memory access timestamp check compares against
+    /// (see [`RiscVMemoryBuilder::eval_memory_access_timestamp`]): a chunk holds up to 2^23
+    /// instructions, so the max chunk clk is 4xCHUNK_SIZE = 2^25, and every compared value has
+    /// to be checked to that same budget.
+    fn range_check_u25_16_9(
         &mut self,
         value: impl Into<Self::Expr>,
         limb_16: impl Into<Self::Expr> + Clone,
-        limb_8: impl Into<Self::Expr> + Clone,
+        hi9: impl Into<Self::Expr> + Clone,
         do_check: impl Into<Self::Expr> + Clone,
     ) {
-        // Verify that value = limb_16 + limb_8 * 2^16.
+        // Verify that value = limb_16 + hi9 * 2^16.
         self.when(do_check.clone()).assert_eq(
             value,
-            limb_16.clone().into()
-                + limb_8.clone().into() * Self::Expr::from_canonical_u32(1 << 16),
+            limb_16.clone().into() + hi9.clone().into() * Self::Expr::from_u32(1 << 16),
         );
 
-        // Send the range checks for the limbs.
+        self.range_check_u25_16_9_limbs(limb_16, hi9, do_check);
+    }
+
+    /// The two limb lookups of [`Self::range_check_u25_16_9`] without the decomposition
+    /// equation: `limb_16` U16Range-checked and `hi9` BitRange(9)-checked, both with
+    /// multiplicity `do_check`.
+    ///
+    /// For callers that do not commit the 25-bit value but *define* it from the limbs
+    /// (`RiscVMemoryBuilder::eval_memory_access_lite`: `prev_clk := clk - (limb_16 + hi9 * 2^16)
+    /// - 1`). There the equation is an identity, and the two lookups alone pin the difference to
+    /// `[0, 2^25)`.
+    fn range_check_u25_16_9_limbs(
+        &mut self,
+        limb_16: impl Into<Self::Expr> + Clone,
+        hi9: impl Into<Self::Expr> + Clone,
+        do_check: impl Into<Self::Expr> + Clone,
+    ) {
         self.looking_rangecheck(
             ByteOpcode::U16Range,
             limb_16,
@@ -77,11 +93,10 @@ pub trait ChipRangeBuilder<F: Field>: ChipBuilder<F> {
             Self::Expr::ZERO,
             do_check.clone(),
         );
-        self.looking_rangecheck(
-            ByteOpcode::U8Range,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            limb_8,
+        self.looking_byte(
+            Self::Expr::from_u8(ByteOpcode::BitRange as u8),
+            hi9,
+            Self::Expr::from_u8(9),
             Self::Expr::ZERO,
             do_check,
         );

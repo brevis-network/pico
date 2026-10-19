@@ -2,9 +2,13 @@ use crate::{
     compiler::word::Word,
     primitives::consts::{DIGEST_SIZE, MAX_NUM_PVS, PV_DIGEST_NUM_WORDS},
 };
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
-use std::borrow::{Borrow, BorrowMut};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    sync::{Condvar, Mutex},
+    time::Duration,
+};
 
 #[derive(Clone, Copy, Default, Debug, Serialize, Deserialize)]
 #[repr(C)]
@@ -47,12 +51,18 @@ pub struct PublicValues<W, T> {
     /// The largest finalization address in the current chunk as 3×u16 limbs.
     pub last_finalize_addr_limbs: [T; 3],
 
+    /// How many COMMIT_DEFERRED_PROOFS ecalls this chunk ran, and the sum of `2^word_index` over
+    /// them. The recursion takes the deferred digest only from a chunk that ran all eight words
+    /// once each; the digest itself is bound only on those rows.
+    pub deferred_commits: T,
+    pub deferred_commit_mask: T,
+
     /// This field is here to ensure that the size of the public values struct is a multiple of 8.
-    pub empty: [T; 3],
+    pub empty: [T; 1],
 }
 
 impl PublicValues<u32, u32> {
-    pub fn to_vec<F: FieldAlgebra>(&self) -> Vec<F> {
+    pub fn to_vec<F: PrimeCharacteristicRing>(&self) -> Vec<F> {
         let mut pv = vec![F::ZERO; MAX_NUM_PVS];
         let field_values = PublicValues::<Word<F>, F>::from(*self);
         let pv_ref_mut: &mut PublicValues<Word<F>, F> = pv.as_mut_slice().borrow_mut();
@@ -86,7 +96,7 @@ impl<T: Clone> BorrowMut<PublicValues<Word<T>, T>> for [T] {
     }
 }
 
-impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> {
+impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> {
     fn from(value: PublicValues<u32, u32>) -> Self {
         let PublicValues {
             committed_value_digest,
@@ -100,6 +110,8 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
             last_init_addr_limbs,
             previous_finalize_addr_limbs,
             last_finalize_addr_limbs,
+            deferred_commits,
+            deferred_commit_mask,
             ..
         } = value;
 
@@ -110,25 +122,25 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
         // the witness-side `as_canonical_u32()` path disagree.
         let committed_value_digest: [_; PV_DIGEST_NUM_WORDS] = core::array::from_fn(|i| {
             Word([
-                F::from_canonical_u32(committed_value_digest[i] & 0xFF),
-                F::from_canonical_u32((committed_value_digest[i] >> 8) & 0xFF),
-                F::from_canonical_u32((committed_value_digest[i] >> 16) & 0xFF),
-                F::from_canonical_u32((committed_value_digest[i] >> 24) & 0xFF),
+                F::from_u32(committed_value_digest[i] & 0xFF),
+                F::from_u32((committed_value_digest[i] >> 8) & 0xFF),
+                F::from_u32((committed_value_digest[i] >> 16) & 0xFF),
+                F::from_u32((committed_value_digest[i] >> 24) & 0xFF),
             ])
         });
 
         let deferred_proofs_digest: [_; DIGEST_SIZE] =
-            core::array::from_fn(|i| F::from_canonical_u32(deferred_proofs_digest[i]));
+            core::array::from_fn(|i| F::from_u32(deferred_proofs_digest[i]));
 
-        let start_pc = start_pc.map(F::from_canonical_u32);
-        let next_pc = next_pc.map(F::from_canonical_u32);
-        let exit_code = F::from_canonical_u32(exit_code);
-        let chunk = F::from_canonical_u32(chunk);
-        let execution_chunk = F::from_canonical_u32(execution_chunk);
-        let previous_init_addr_limbs = previous_init_addr_limbs.map(F::from_canonical_u32);
-        let last_init_addr_limbs = last_init_addr_limbs.map(F::from_canonical_u32);
-        let previous_finalize_addr_limbs = previous_finalize_addr_limbs.map(F::from_canonical_u32);
-        let last_finalize_addr_limbs = last_finalize_addr_limbs.map(F::from_canonical_u32);
+        let start_pc = start_pc.map(F::from_u32);
+        let next_pc = next_pc.map(F::from_u32);
+        let exit_code = F::from_u32(exit_code);
+        let chunk = F::from_u32(chunk);
+        let execution_chunk = F::from_u32(execution_chunk);
+        let previous_init_addr_limbs = previous_init_addr_limbs.map(F::from_u32);
+        let last_init_addr_limbs = last_init_addr_limbs.map(F::from_u32);
+        let previous_finalize_addr_limbs = previous_finalize_addr_limbs.map(F::from_u32);
+        let last_finalize_addr_limbs = last_finalize_addr_limbs.map(F::from_u32);
 
         Self {
             committed_value_digest,
@@ -142,7 +154,68 @@ impl<F: FieldAlgebra> From<PublicValues<u32, u32>> for PublicValues<Word<F>, F> 
             last_init_addr_limbs,
             previous_finalize_addr_limbs,
             last_finalize_addr_limbs,
-            empty: [F::ZERO; 3],
+            deferred_commits: F::from_u32(deferred_commits),
+            deferred_commit_mask: F::from_u32(deferred_commit_mask),
+            empty: [F::ZERO; 1],
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct RecordFinalPvs {
+    committed_value_digest: Option<[u32; PV_DIGEST_NUM_WORDS]>,
+    deferred_proofs_digest: Option<[u32; DIGEST_SIZE]>,
+}
+
+#[derive(Default)]
+pub struct RecordFinalPvsState {
+    cond: Condvar,
+    pvs: Mutex<RecordFinalPvs>,
+}
+
+const FINAL_PVS_TIMEOUT: Duration = Duration::from_secs(1000);
+
+impl RecordFinalPvsState {
+    pub fn set_record_final_pvs(
+        &self,
+        committed: [u32; PV_DIGEST_NUM_WORDS],
+        deferred: [u32; DIGEST_SIZE],
+    ) {
+        let mut s = self.pvs.lock().unwrap();
+        if s.committed_value_digest.is_none() {
+            s.committed_value_digest = Some(committed);
+        }
+        if s.deferred_proofs_digest.is_none() {
+            s.deferred_proofs_digest = Some(deferred);
+        }
+        self.cond.notify_all();
+    }
+
+    pub fn wait_for_final_committed_or_panic(&self) -> [u32; PV_DIGEST_NUM_WORDS] {
+        let s = self.pvs.lock().unwrap();
+        let (s, to) = self
+            .cond
+            .wait_timeout_while(s, FINAL_PVS_TIMEOUT, |st| {
+                st.committed_value_digest.is_none()
+            })
+            .unwrap();
+        if to.timed_out() || s.committed_value_digest.is_none() {
+            panic!("Timeout waiting for final committed_value_digest");
+        }
+        s.committed_value_digest.unwrap()
+    }
+
+    pub fn wait_for_final_deferred_or_panic(&self) -> [u32; DIGEST_SIZE] {
+        let s = self.pvs.lock().unwrap();
+        let (s, to) = self
+            .cond
+            .wait_timeout_while(s, FINAL_PVS_TIMEOUT, |st| {
+                st.deferred_proofs_digest.is_none()
+            })
+            .unwrap();
+        if to.timed_out() || s.deferred_proofs_digest.is_none() {
+            panic!("Timeout waiting for final deferred_proofs_digest");
+        }
+        s.deferred_proofs_digest.unwrap()
     }
 }

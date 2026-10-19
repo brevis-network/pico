@@ -2,10 +2,7 @@
 pico_sdk::entrypoint!(main);
 
 use curve25519_dalek::{
-    constants::ED25519_BASEPOINT_POINT,
-    edwards::CompressedEdwardsY,
-    scalar::Scalar,
-    EdwardsPoint,
+    constants::ED25519_BASEPOINT_POINT, edwards::CompressedEdwardsY, scalar::Scalar, EdwardsPoint,
 };
 use pico_sdk::io::commit_bytes;
 
@@ -20,7 +17,7 @@ pub fn main() {
         let step = ED25519_BASEPOINT_POINT;
 
         for _ in 0..ITERATIONS {
-            point = point + step;
+            point += step;
         }
 
         commit_bytes(point.compress().as_bytes());
@@ -34,7 +31,7 @@ pub fn main() {
         let scalar = Scalar::from(1234u64);
 
         for _ in 0..ITERATIONS {
-            point = point * scalar;
+            point *= scalar;
         }
 
         commit_bytes(point.compress().as_bytes());
@@ -47,7 +44,7 @@ pub fn main() {
         let mut compressed = ED25519_BASEPOINT_POINT.compress();
         let step_point = ED25519_BASEPOINT_POINT;
 
-        for _ in 0..200*ITERATIONS {
+        for _ in 0..200 * ITERATIONS {
             // A. Decompress (Bytes -> Point)
             let point = compressed.decompress().unwrap();
 
@@ -70,11 +67,7 @@ pub fn main() {
 
         for _ in 0..ITERATIONS {
             // result = scalar_a * point + scalar_b * BASEPOINT
-            point = EdwardsPoint::vartime_double_scalar_mul_basepoint(
-                &scalar_a,
-                &point,
-                &scalar_b
-            );
+            point = EdwardsPoint::vartime_double_scalar_mul_basepoint(&scalar_a, &point, &scalar_b);
         }
 
         commit_bytes(point.compress().as_bytes());

@@ -1,29 +1,24 @@
-// Bootstrap stub - will be replaced by generate_crates
+//! Bootstrap stub for `pico-aot-dispatch`, replaced wholesale when the AOT code is generated from
+//! a guest's ELF (`cargo pico aot`, or `generate_crates <elf> aot-generated`).
+//!
+//! It exports what a generated crate exports, so dependents build before any code is generated.
+//! Its [`AOT`] is [`AotProgram::STUB`], which has no compiled code and which
+//! `pico_aot_runtime::register` refuses.
+
 pub use pico_aot_runtime::AotEmulatorCore;
-use pico_aot_runtime::NextStep;
+use pico_aot_runtime::AotProgram;
 
+pub static AOT: AotProgram = AotProgram::STUB;
+
+/// Interprets every block: the stub has no compiled code.
 pub fn run_aot(emu: &mut AotEmulatorCore) -> Result<(), String> {
-    let mut next = if emu.pc == 0 {
-        NextStep::Halt
-    } else {
-        NextStep::Dynamic(emu.pc)
-    };
+    AOT.run(emu)
+}
 
-    loop {
-        if emu.should_yield() {
-            break;
-        }
-        match next {
-            NextStep::Direct(func) => {
-                next = func(emu)?;
-            }
-            NextStep::Dynamic(pc) => {
-                emu.pc = pc;
-                next = emu.interpret_from_current_pc()?;
-            }
-            NextStep::Halt => break,
-        }
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_stub_exports_the_stub_program() {
+        assert!(super::AOT.is_stub());
     }
-
-    Ok(())
 }

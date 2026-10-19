@@ -9,4 +9,4 @@ categories = { workspace = true }
 
 [dependencies]
 pico-sdk = { workspace = true }
-bls12_381 = { git = "https://github.com/brevis-network/bls12_381.git", branch = "patch-v1.0.1" }
+bls12_381 = { git = "https://github.com/brevis-network/bls12_381.git", rev = "79fbbface08629528c9ef6e326d98e38901c39bf" } # patch-v1.0.1-rv64

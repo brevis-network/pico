@@ -2,7 +2,10 @@
 
 use super::ChipBuilder;
 use crate::{
-    compiler::{addr::Addr, word::Word},
+    compiler::{
+        addr::{Addr, Pc},
+        word::Word,
+    },
     primitives::consts::WORD_SIZE,
 };
 use itertools::Itertools;
@@ -24,6 +27,20 @@ pub trait ChipWordBuilder<F: Field>: ChipBuilder<F> {
     /// Asserts that the address is zero.
     fn assert_addr_zero(&mut self, addr: Addr<impl Into<Self::Expr>>) {
         for limb in addr.0 {
+            self.assert_zero(limb);
+        }
+    }
+
+    /// Asserts that the two program counters are equal, limb by limb.
+    fn assert_pc_eq(&mut self, left: Pc<impl Into<Self::Expr>>, right: Pc<impl Into<Self::Expr>>) {
+        for (left, right) in left.0.into_iter().zip(right.0) {
+            self.assert_eq(left, right);
+        }
+    }
+
+    /// Asserts that the program counter is zero.
+    fn assert_pc_zero(&mut self, pc: Pc<impl Into<Self::Expr>>) {
+        for limb in pc.0 {
             self.assert_zero(limb);
         }
     }

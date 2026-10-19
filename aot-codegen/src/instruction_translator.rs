@@ -182,7 +182,7 @@ impl InstructionTranslator {
             if emu.should_yield() {
                 return Ok(crate::NextStep::Dynamic(emu.pc));
             }
-            return Ok(#next_step);
+            Ok(#next_step)
         };
         (code, true, 1, 1)
     }
@@ -209,7 +209,7 @@ impl InstructionTranslator {
             if emu.should_yield() {
                 return Ok(crate::NextStep::Dynamic(emu.pc));
             }
-            return Ok(crate::NextStep::Dynamic(target));
+            Ok(crate::NextStep::Dynamic(target))
         };
         (code, true, 1, 1)
     }
@@ -265,7 +265,7 @@ impl InstructionTranslator {
                 if emu.should_yield() {
                     return Ok(crate::NextStep::Dynamic(emu.pc));
                 }
-                return Ok(#target_step);
+                Ok(#target_step)
             } else {
                 emu.pc = #fallthrough;
                 emu.update_insn_clock();
@@ -273,7 +273,7 @@ impl InstructionTranslator {
                 if emu.should_yield() {
                     return Ok(crate::NextStep::Dynamic(emu.pc));
                 }
-                return Ok(#fallthrough_step);
+                Ok(#fallthrough_step)
             }
         };
         (code, true, 0, 0)
@@ -325,11 +325,9 @@ impl InstructionTranslator {
 
                     // Continue execution using emu.pc (which was set to new_next_pc)
                     // This is important for syscalls that modify the PC like EXIT_UNCONSTRAINED
-                    return Ok(crate::NextStep::Dynamic(emu.pc));
+                    Ok(crate::NextStep::Dynamic(emu.pc))
                 }
-                Err(e) => {
-                    return Err(e);
-                }
+                Err(e) => Err(e),
             }
         };
         (code, true, 0, 1)
@@ -338,7 +336,7 @@ impl InstructionTranslator {
     /// Generates code for EBREAK (breakpoint) instruction.
     fn gen_ebreak(&self, pc: u64) -> (TokenStream, bool, usize, usize) {
         let code = quote! {
-            return Err(format!("Breakpoint at PC {:#x}", #pc));
+            Err(format!("Breakpoint at PC {:#x}", #pc))
         };
         (code, true, 0, 0)
     }
@@ -349,7 +347,7 @@ impl InstructionTranslator {
     fn gen_unimp(&self, pc: u64, _inst: &Instruction) -> (TokenStream, bool, usize, usize) {
         let code = quote! {
             emu.update_insn_clock();
-            return Err(format!("Unimplemented instruction (UNIMP) at PC {:#x}", #pc));
+            Err(format!("Unimplemented instruction (UNIMP) at PC {:#x}", #pc))
         };
         (code, true, 0, 0)
     }
@@ -374,16 +372,16 @@ impl InstructionTranslator {
             let b = sign_extend_imm32_to_u64(inst.op_b);
             let c = sign_extend_imm32_to_u64(inst.op_c);
             let op = match inst.opcode {
-                Opcode::ADD => quote! { let a = (#b as u64).wrapping_add(#c as u64); },
-                Opcode::SUB => quote! { let a = (#b as u64).wrapping_sub(#c as u64); },
-                Opcode::XOR => quote! { let a = (#b as u64) ^ (#c as u64); },
-                Opcode::OR => quote! { let a = (#b as u64) | (#c as u64); },
-                Opcode::AND => quote! { let a = (#b as u64) & (#c as u64); },
+                Opcode::ADD => quote! { let a = #b.wrapping_add(#c); },
+                Opcode::SUB => quote! { let a = #b.wrapping_sub(#c); },
+                Opcode::XOR => quote! { let a = #b ^ #c; },
+                Opcode::OR => quote! { let a = #b | #c; },
+                Opcode::AND => quote! { let a = #b & #c; },
                 Opcode::SLL => {
-                    quote! { let a = (#b as u64).wrapping_shl((#c & 0x3f) as u32); }
+                    quote! { let a = #b.wrapping_shl((#c & 0x3f) as u32); }
                 }
                 Opcode::SRL => {
-                    quote! { let a = (#b as u64).wrapping_shr((#c & 0x3f) as u32); }
+                    quote! { let a = #b.wrapping_shr((#c & 0x3f) as u32); }
                 }
                 Opcode::SRA => {
                     quote! { let a = ((#b as i64).wrapping_shr((#c & 0x3f) as u32)) as u64; }
@@ -392,7 +390,7 @@ impl InstructionTranslator {
                     quote! { let a = if (#b as i64) < (#c as i64) { 1_u64 } else { 0_u64 }; }
                 }
                 Opcode::SLTU => {
-                    quote! { let a = if (#b as u64) < (#c as u64) { 1_u64 } else { 0_u64 }; }
+                    quote! { let a = if #b < #c { 1_u64 } else { 0_u64 }; }
                 }
                 _ => quote! { unreachable!() },
             };

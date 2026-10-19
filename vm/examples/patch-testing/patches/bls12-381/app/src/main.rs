@@ -3,9 +3,9 @@ pico_sdk::entrypoint!(main);
 
 use bls12_381::{
     fp::Fp, fp2::Fp2, multi_miller_loop, pairing, G1Projective, G2Affine, G2Prepared, G2Projective,
-    Scalar,
+    Gt, Scalar,
 };
-use pico_sdk::io::{commit_bytes};
+use pico_sdk::io::commit_bytes;
 
 pub fn main() {
     // Add
@@ -116,7 +116,7 @@ pub fn main() {
 
         println!("cycle-tracker-start: bls12_381-double-g1");
         let _ = lhs.double();
-        println!("cycle-tracker-end: bls12_381-add-g1");
+        println!("cycle-tracker-end: bls12_381-double-g1");
 
         println!("cycle-tracker-start: bls12_381-add-g1");
         let _ = lhs + rhs;
@@ -137,7 +137,7 @@ pub fn main() {
 
         println!("cycle-tracker-start: bls12_381-double-g2");
         let _ = lhs.double();
-        println!("cycle-tracker-end: bls12_381-add-g2");
+        println!("cycle-tracker-end: bls12_381-double-g2");
 
         println!("cycle-tracker-start: bls12_381-add-g2");
         let _ = lhs + rhs;
@@ -148,7 +148,8 @@ pub fn main() {
         println!("cycle-tracker-end: bls12_381-mul-g2");
     }
 
-    // Pairing
+    // Pairing. The results of the field syscalls surface only here, so bilinearity is what checks
+    // them: e(5P, 7Q) = e(7P, 5Q), and neither is the identity.
     {
         let scalar1 = Scalar::from(5u64);
         let scalar2 = Scalar::from(7u64);
@@ -156,8 +157,15 @@ pub fn main() {
         let p2 = G2Projective::generator() * scalar2;
 
         println!("cycle-tracker-start: bls12_381-pairing");
-        let _ = pairing(&p1.into(), &p2.into());
+        let e = pairing(&p1.into(), &p2.into());
         println!("cycle-tracker-end: bls12_381-pairing");
+
+        let swapped = pairing(
+            &(G1Projective::generator() * scalar2).into(),
+            &(G2Projective::generator() * scalar1).into(),
+        );
+        assert_eq!(e, swapped);
+        assert_ne!(e, Gt::identity());
     }
 
     // Pairing Check
@@ -166,7 +174,8 @@ pub fn main() {
         let scalar2 = Scalar::from(7u64);
         let p1 = G1Projective::generator() * scalar1;
         let q1 = G2Projective::generator() * scalar2;
-        let p2 = G1Projective::generator() * scalar2;
+        // e(5P, 7Q) * e(-7P, 5Q) = 1.
+        let p2 = -(G1Projective::generator() * scalar2);
         let q2 = G2Projective::generator() * scalar1;
         let q1_affine: G2Affine = q1.into();
         let q2_affine: G2Affine = q2.into();
@@ -174,8 +183,10 @@ pub fn main() {
         let q2_prepared = G2Prepared::from(q2_affine);
 
         println!("cycle-tracker-start: bls12_381-pairing-check");
-        multi_miller_loop(&[(&p1.into(), &q1_prepared), (&p2.into(), &q2_prepared)])
+        let product = multi_miller_loop(&[(&p1.into(), &q1_prepared), (&p2.into(), &q2_prepared)])
             .final_exponentiation();
         println!("cycle-tracker-end: bls12_381-pairing-check");
+
+        assert_eq!(product, Gt::identity());
     }
 }

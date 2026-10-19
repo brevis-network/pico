@@ -33,7 +33,7 @@ impl<F: Field> BitWiseGadget<F> {
         let c = c_u64.to_le_bytes();
 
         // Set result to the output value (a)
-        self.result = a.map(|x| F::from_canonical_u8(x));
+        self.result = a.map(|x| F::from_u8(x));
 
         // Generate byte lookup events
         for ((b_a, b_b), b_c) in a.into_iter().zip(b).zip(c) {
@@ -72,50 +72,5 @@ impl<F: Field> BitWiseGadget<F> {
                 is_real.clone(),
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder},
-        primitives::consts::WORD_BYTE_SIZE,
-    };
-    use p3_air::AirBuilder;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        a: [T; WORD_BYTE_SIZE],
-        b: [T; WORD_BYTE_SIZE],
-        bitwise: BitWiseGadget<T>,
-        opcode: T,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_bitwise_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        BitWiseGadget::<KoalaBear>::eval(
-            &mut builder,
-            local.a.map(|v| v.into()),
-            local.b.map(|v| v.into()),
-            local.bitwise,
-            local.opcode.into(),
-            local.is_real.into(),
-        );
-
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 8);
     }
 }

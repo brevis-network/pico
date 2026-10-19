@@ -24,7 +24,7 @@ pub trait ExtensionBuilder<F: Field, const D: usize>: ChipBuilder<F> {
         &mut self,
         element: BinomialExtension<B, I, D>,
     ) {
-        let base_slice = element.as_base_slice();
+        let base_slice = element.as_basis_coefficients_slice();
         let degree = base_slice.len();
         base_slice[1..degree].iter().for_each(|coeff| {
             self.assert_zero(coeff.clone().into());

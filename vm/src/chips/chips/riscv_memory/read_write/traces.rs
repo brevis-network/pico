@@ -1,14 +1,13 @@
 use super::{
     columns::{
-        MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols,
-        NUM_MEMORY_CHIP_COLS,
+        MemoryAccessCols, MemoryAccessLiteCols, MemoryReadCols, MemoryReadLiteCols,
+        MemoryReadWriteCols, MemoryReadWriteLiteCols, MemoryWriteCols, NUM_MEMORY_CHIP_COLS,
     },
     MemoryReadWriteChip,
 };
 use crate::{
     chips::{
         chips::{
-            alu::event::AluEvent,
             byte::event::{ByteLookupEvent, ByteRecordBehavior},
             riscv_cpu::event::CpuEvent,
             riscv_memory::{
@@ -18,23 +17,12 @@ use crate::{
         },
         utils::next_power_of_two,
     },
-    compiler::{
-        riscv::{
-            opcode::{ByteOpcode, Opcode},
-            program::Program,
-            register::Register::X0,
-        },
-        word::Word,
-    },
+    compiler::riscv::{opcode::Opcode, program::Program},
     emulator::riscv::record::EmulationRecord,
     iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice, PicoSliceMut},
-    machine::{
-        chip::ChipBehavior,
-        estimator::{EventCapture, EventSizeCapture},
-    },
+    machine::{chip::ChipBehavior, estimator::EventCapture},
     primitives::consts::MEMORY_RW_DATAPAR,
 };
-use hashbrown::HashMap;
 use p3_field::{Field, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
@@ -58,6 +46,7 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         // Parallelize the initial filtering and collection
         let events: Vec<_> = input
             .cpu_events
+            .as_slice()
             .pico_iter()
             .filter(|e| e.instruction.is_memory_instruction())
             .collect();
@@ -75,7 +64,6 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         // Calculate actual population length and handle type conversion
         let populate_len = events.len() * NUM_MEMORY_CHIP_VALUE_COLS;
 
-        // Use rayon's parallel slice operations for better chunk handling
         values[..populate_len]
             .pico_chunks_mut(NUM_MEMORY_CHIP_VALUE_COLS)
             .zip_eq(events.pico_iter())
@@ -91,39 +79,40 @@ impl<F: PrimeField32> ChipBehavior<F> for MemoryReadWriteChip<F> {
         // We only care about the CPU events of memory instructions.
         let mem_events = input
             .cpu_events
+            .as_slice()
             .iter()
             .filter(|e| e.instruction.is_memory_instruction())
             .collect::<Box<[_]>>();
-        // Generate the trace rows for each event.
+        // Generate the trace rows for each event. The only extra records are byte lookups: the
+        // address addition is proven in-chip, so no ALU ADD event is dispatched.
         let chunk_size = std::cmp::max(mem_events.len() / num_cpus::get(), 1);
-        let (alu_events, blu_events): (Vec<_>, Vec<_>) = mem_events
+        let blu_events: Vec<Vec<ByteLookupEvent>> = mem_events
             .pico_chunks(chunk_size)
             .map(|ops: &[&CpuEvent]| {
-                let mut alu = HashMap::new();
-                // The range map stores range (u8) lookup event -> multiplicity.
-                let mut blu = vec![];
+                let mut blu: Vec<ByteLookupEvent> = Vec::new();
                 ops.iter().for_each(|op| {
                     let mut row = [F::ZERO; NUM_MEMORY_CHIP_VALUE_COLS];
                     let cols: &mut MemoryChipValueCols<F> = row.as_mut_slice().borrow_mut();
-                    let alu_events = self.event_to_row(op, cols, &mut blu);
-                    alu_events.into_iter().for_each(|(key, value)| {
-                        alu.entry(key).or_insert(Vec::default()).extend(value);
-                    });
+                    self.event_to_row(op, cols, &mut blu);
                 });
-                (alu, blu)
+                blu
             })
-            .unzip();
-        for alu_events_chunk in alu_events {
-            extra.add_alu_events(alu_events_chunk);
-        }
+            .collect();
         for blu_events_chunk in blu_events {
             extra.add_byte_lookup_events(blu_events_chunk);
         }
     }
 
     fn is_active(&self, record: &Self::Record) -> bool {
+        // Under a pad shape the shape decides presence, so a bucketed chunk's proof shape
+        // depends on the chunk kind rather than on its opcode mix. Without a shape the
+        // chip is event-driven, which is what the natural-height path wants.
+        if let Some(shape) = record.shape.as_ref() {
+            return shape.included::<F, _>(self);
+        }
         record
             .cpu_events
+            .as_slice()
             .iter()
             .any(|e| e.instruction.is_memory_instruction())
     }
@@ -135,11 +124,9 @@ impl<F: Field> MemoryReadWriteChip<F> {
         event: &CpuEvent,
         cols: &mut MemoryChipValueCols<F>,
         blu_events: &mut impl ByteRecordBehavior,
-    ) -> HashMap<Opcode, Vec<AluEvent>> {
-        let mut alu_events = HashMap::new();
-
-        cols.chunk = F::from_canonical_u32(event.chunk);
-        cols.clk = F::from_canonical_u32(encode_memory_trace_clk_u32(event.clk));
+    ) {
+        cols.chunk = F::from_u32(event.chunk);
+        cols.clk = F::from_u32(encode_memory_trace_clk_u32(event.clk));
 
         // Populate memory accesses for reading from memory.
         assert_eq!(event.memory_record.is_some(), event.memory.is_some());
@@ -148,16 +135,13 @@ impl<F: Field> MemoryReadWriteChip<F> {
         }
 
         cols.instruction.populate(event);
-        self.populate_memory(cols, event, &mut alu_events, blu_events);
-
-        alu_events
+        self.populate_memory(cols, event, blu_events);
     }
 
     fn populate_memory(
         &self,
         cols: &mut MemoryChipValueCols<F>,
         event: &CpuEvent,
-        new_alu_events: &mut HashMap<Opcode, Vec<AluEvent>>,
         blu_events: &mut impl ByteRecordBehavior,
     ) {
         assert!(
@@ -181,38 +165,31 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // ---- C1: Address calculation ----
         // Compute full u64 address = b + c (wrapping)
         let memory_addr = event.b.wrapping_add(event.c);
-        // addr_word = Word from ALU ADD result (4×u16 limbs)
-        cols.addr_word = memory_addr.into();
-        // Add ALU ADD event
-        let add_event = AluEvent {
-            clk: event.clk,
-            opcode: Opcode::ADD,
-            a: memory_addr,
-            b: event.b,
-            c: event.c,
-            ..Default::default()
-        };
-        new_alu_events
-            .entry(Opcode::ADD)
-            .and_modify(|op_new_events| op_new_events.push(add_event))
-            .or_insert(vec![add_event]);
+        // `addr_word` holds only the low 2 u16 limbs of the sum; the addition is proven
+        // in-chip by a carry chain whose 3rd and 4th result limbs are literal 0s (fail-closed for
+        // addr >= 2^32), so no ALU ADD event is dispatched for it. The bound is asserted here so
+        // that an out-of-range address fails loudly at trace generation instead of producing an
+        // unprovable trace (alignment only clears the low 3 bits of limb 0, so it is checked on
+        // the raw address).
+        assert!(
+            memory_addr < (1u64 << 32),
+            "memory address must be less than 2^32",
+        );
+        cols.addr_word = [
+            F::from_u16((memory_addr & 0xFFFF) as u16),
+            F::from_u16(((memory_addr >> 16) & 0xFFFF) as u16),
+        ];
 
-        // Stack guard: addr_top_two_limb_inv = 1/(addr[1] + addr[2])
-        // Compute limb values directly from the u64 address
-        let addr0_u16 = (memory_addr & 0xFFFF) as u16;
+        // Stack guard: addr_limb1_inv = 1/addr[1]
         let addr1_u16 = ((memory_addr >> 16) & 0xFFFF) as u16;
-        let addr2_u16 = ((memory_addr >> 32) & 0xFFFF) as u16;
-        let sum_top = (addr1_u16 as u32) + (addr2_u16 as u32);
-        cols.addr_top_two_limb_inv = if sum_top != 0 {
-            (F::from_canonical_u32(sum_top)).inverse()
+        // The AIR U16Range-checks addr_word[1] in-chip (count is_mem); limb 0 is bounded by the
+        // BitRange(13) offset lookup below and gets no event of its own.
+        blu_events.add_u16_range_check(addr1_u16);
+        cols.addr_limb1_inv = if addr1_u16 != 0 {
+            F::from_u16(addr1_u16).inverse()
         } else {
             F::ZERO
         };
-
-        // u16 range check: add range check events for addr limbs
-        blu_events.add_u16_range_check(addr0_u16);
-        blu_events.add_u16_range_check(addr1_u16);
-        blu_events.add_u16_range_check(addr2_u16);
 
         // ---- C2: Offset decomposition ----
         // offset = addr[0] low 3 bits (byte offset within 8-byte slot)
@@ -225,11 +202,9 @@ impl<F: Field> MemoryReadWriteChip<F> {
         let bit0 = (offset & 1) as usize;
         let bit1 = ((offset >> 1) & 1) as usize;
         let bit2 = ((offset >> 2) & 1) as usize;
-        let limb_index = 2 * bit2 + bit1; // index into 4 u16 limbs
-
-        // Populate one-hot limb_select from (bit1, bit2)
-        cols.limb_select = [F::ZERO; 4];
-        cols.limb_select[limb_index] = F::ONE;
+        // Index into the 4 u16 limbs. The one-hot limb selector is not committed: the AIR forms
+        // it from the offset bits.
+        let limb_index = 2 * bit2 + bit1;
 
         // ---- P0-1 trace: byte lookup event for offset_bit binding to addr[0] ----
         // Constraint: looking_byte(BitRange, (addr[0]-offset)/8, 13, 0, is_mem)
@@ -242,7 +217,12 @@ impl<F: Field> MemoryReadWriteChip<F> {
         // For reads: prev_value == value (no change), so either works.
         // For writes: prev_value is the OLD value before the store, which is what the
         // constraint checks against. We must use prev_value here to match.
-        let mem_value_u64 = match event.memory_record.unwrap() {
+        let memory_record = if let Some(record) = event.memory_record {
+            record
+        } else {
+            unreachable!("memory_record should be Some for memory instructions")
+        };
+        let mem_value_u64 = match memory_record {
             MemoryRecordEnum::Read(r) => r.value,
             MemoryRecordEnum::Write(w) => w.prev_value,
         };
@@ -255,7 +235,7 @@ impl<F: Field> MemoryReadWriteChip<F> {
 
         // ---- C5: Limb selection ----
         let selected_limb = mem_limbs[limb_index];
-        cols.selected_limb = F::from_canonical_u16(selected_limb);
+        cols.selected_limb = F::from_u16(selected_limb);
 
         // ---- Load instructions: populate sub-word selection and sign extension ----
         let opcode = event.instruction.opcode;
@@ -273,23 +253,18 @@ impl<F: Field> MemoryReadWriteChip<F> {
         if is_load {
             match opcode {
                 Opcode::LB | Opcode::LBU => {
-                    // Split selected_limb into 2 bytes, select one via bit0
+                    // Split selected_limb into 2 bytes, select one via bit0. The low byte goes
+                    // into `mem_limb_low_byte`, the slot the SB rows use for the same split of
+                    // the memory limb they modify.
                     let low_byte = (selected_limb & 0xFF) as u8;
                     let high_byte = ((selected_limb >> 8) & 0xFF) as u8;
-                    cols.selected_limb_low_byte = F::from_canonical_u8(low_byte);
                     let selected_byte = if bit0 == 1 { high_byte } else { low_byte };
-                    cols.selected_byte = F::from_canonical_u8(selected_byte);
+                    cols.selected_byte = F::from_u8(selected_byte);
+                    cols.mem_limb_low_byte = F::from_u8(low_byte);
 
-                    // Range check both bytes of selected_limb.
+                    // The memory-limb split U8Range lookup (shared with SB rows): (low, high) of
+                    // selected_limb. LBU bounds the high byte nowhere else.
                     blu_events.add_u8_range_check(low_byte, high_byte);
-
-                    // unsigned_mem_val = [selected_byte, 0, 0, 0]
-                    cols.unsigned_mem_val = Word([
-                        F::from_canonical_u8(selected_byte),
-                        F::ZERO,
-                        F::ZERO,
-                        F::ZERO,
-                    ]);
 
                     // MSB = bit7 of selected_byte (only for signed LB, not LBU)
                     let msb = if opcode == Opcode::LB {
@@ -297,37 +272,20 @@ impl<F: Field> MemoryReadWriteChip<F> {
                     } else {
                         0 // LBU: constraint forces msb=0
                     };
-                    cols.msb = F::from_canonical_u8(msb);
+                    cols.msb = F::from_u8(msb);
 
-                    // ---- P0-2 trace: msb verification byte lookup event for LB ----
-                    // Constraint: looking_byte(MSB, msb, selected_byte, 0, is_lb)
-                    // TODO(P0-2): Verify ByteOpcode::MSB event format matches byte chip's
-                    //   looked_byte(MSB, a1=msb, b=selected_byte, c=0) expectations.
+                    // LB rides the LH/LW U16MSB lookup: `lhw_val = 256 * selected_byte` and the
+                    // operand `2 * lhw_val - msb * 2^16 = 512 * byte - msb * 2^16` is a u16
+                    // exactly when `msb` is the byte's bit 7.
                     if opcode == Opcode::LB {
-                        blu_events.add_byte_lookup_event(ByteLookupEvent::new(
-                            ByteOpcode::MSB,
-                            msb as u16,    // a1 = msb result
-                            0,             // a2 = 0
-                            selected_byte, // b = byte value
-                            0,             // c = 0
-                        ));
-                    }
-
-                    // Sign extension for LB (not LBU)
-                    if opcode == Opcode::LB && msb == 1 && event.instruction.op_a != (X0 as u8) {
-                        cols.mem_value_is_neg_not_x0 = F::ONE;
-                        // op_a is set by instruction.populate already
+                        let lhw = 256 * u16::from(selected_byte);
+                        cols.lhw_val = F::from_u16(lhw);
+                        let diff = (lhw as u32) * 2 - (msb as u32) * 65536;
+                        blu_events.add_u16_range_check(diff as u16);
                     }
                 }
                 Opcode::LH | Opcode::LHU => {
                     // selected_limb is already the u16 we want
-                    // unsigned_mem_val = [selected_limb, 0, 0, 0]
-                    cols.unsigned_mem_val = Word([
-                        F::from_canonical_u16(selected_limb),
-                        F::ZERO,
-                        F::ZERO,
-                        F::ZERO,
-                    ]);
 
                     // MSB = bit15 of selected_limb (only for signed LH, not LHU)
                     let msb = if opcode == Opcode::LH {
@@ -335,166 +293,97 @@ impl<F: Field> MemoryReadWriteChip<F> {
                     } else {
                         0 // LHU: constraint forces msb=0
                     };
-                    cols.msb = F::from_canonical_u16(msb);
+                    cols.msb = F::from_u16(msb);
 
-                    // ---- P0-2 trace: U16MSBOperation byte lookup event for LH ----
-                    // Constraint: looking_byte(U16Range, 2*selected_limb - msb*2^16, 0, 0, is_lh)
+                    // U16MSB event for LH (the lookup is shared with LW and LB).
+                    // Shared LH/LW/LB mux operand.
+                    cols.lhw_val = F::from_u16(selected_limb);
                     if opcode == Opcode::LH {
                         let diff = (selected_limb as u32) * 2 - (msb as u32) * 65536;
                         blu_events.add_u16_range_check(diff as u16);
                     }
-
-                    // Sign extension for LH (not LHU)
-                    if opcode == Opcode::LH && msb == 1 && event.instruction.op_a != (X0 as u8) {
-                        cols.mem_value_is_neg_not_x0 = F::ONE;
-                    }
                 }
                 Opcode::LW | Opcode::LWU => {
-                    // selected_word = 2 limbs based on bit2
-                    let sw0 = if bit2 == 0 {
-                        mem_limbs[0]
-                    } else {
-                        mem_limbs[2]
-                    };
+                    // The selected word is `[selected_limb, sw1]` with sw1 chosen by bit2 (word
+                    // alignment makes bit1 = 0, so `selected_limb` already is the low half).
                     let sw1 = if bit2 == 0 {
                         mem_limbs[1]
                     } else {
                         mem_limbs[3]
                     };
-                    cols.selected_word = [F::from_canonical_u16(sw0), F::from_canonical_u16(sw1)];
 
-                    // unsigned_mem_val = [word[0], word[1], 0, 0]
-                    cols.unsigned_mem_val = Word([
-                        F::from_canonical_u16(sw0),
-                        F::from_canonical_u16(sw1),
-                        F::ZERO,
-                        F::ZERO,
-                    ]);
-
-                    // MSB = bit15 of selected_word[1] (only for signed LW, not LWU)
+                    // MSB = bit15 of the high half (only for signed LW, not LWU)
                     let msb = if opcode == Opcode::LW {
                         (sw1 >> 15) & 1
                     } else {
                         0 // LWU: constraint forces msb=0
                     };
-                    cols.msb = F::from_canonical_u16(msb);
+                    cols.msb = F::from_u16(msb);
 
-                    // ---- P0-2 trace: U16MSBOperation byte lookup event for LW ----
-                    // Constraint: looking_byte(U16Range, 2*selected_word[1] - msb*2^16, 0, 0, is_lw)
+                    // U16MSB event for LW (the lookup is shared with LH and LB).
+                    // Shared LH/LW/LB mux operand; the AIR pins it on LWU rows too (it is the
+                    // limb-1 load value there), so it is written on both variants.
+                    cols.lhw_val = F::from_u16(sw1);
                     if opcode == Opcode::LW {
                         let diff = (sw1 as u32) * 2 - (msb as u32) * 65536;
                         blu_events.add_u16_range_check(diff as u16);
                     }
-
-                    // Sign extension for LW (not LWU) — LW is signed in RV64
-                    if opcode == Opcode::LW && msb == 1 && event.instruction.op_a != (X0 as u8) {
-                        cols.mem_value_is_neg_not_x0 = F::ONE;
-                    }
                 }
                 Opcode::LD => {
-                    // unsigned_mem_val = full mem_val (all 4 limbs)
-                    cols.unsigned_mem_val = mem_value_u64.into();
                     // No sign extension for LD
                     cols.msb = F::ZERO;
                 }
                 _ => unreachable!(),
             }
-
-            // Set mem_value_is_pos_not_x0 composite flag
-            let is_signed = matches!(opcode, Opcode::LB | Opcode::LH | Opcode::LW);
-            let msb_is_one = cols.msb == F::ONE;
-            let not_x0 = event.instruction.op_a != (X0 as u8);
-            cols.mem_value_is_pos_not_x0 = F::from_bool(!(is_signed && msb_is_one) && not_x0);
         }
 
-        // ---- Store instructions: populate store_value with increment pattern ----
-        let is_store = matches!(opcode, Opcode::SB | Opcode::SH | Opcode::SW | Opcode::SD);
-        if is_store {
-            let a_val_u64 = event.a;
-            let a_limbs: [u16; 4] = [
-                (a_val_u64 & 0xFFFF) as u16,
-                ((a_val_u64 >> 16) & 0xFFFF) as u16,
-                ((a_val_u64 >> 32) & 0xFFFF) as u16,
-                ((a_val_u64 >> 48) & 0xFFFF) as u16,
-            ];
+        // ---- Store instructions ----
+        // `store_value` is de-materialized; the unified store equation is asserted directly
+        // on `memory_access.value()`, which was populated from the memory record above. SB
+        // needs the byte split plus `shift` (the byte increment), SH needs only `shift` (the
+        // limb replacement); SW/SD need no extra witnesses and leave `shift` at zero, as its
+        // ungated definition requires.
+        if opcode == Opcode::SB {
+            let a_limb0 = (event.a & 0xFFFF) as u16;
 
             // prev_mem_val is in memory_access.prev_value, which was populated above
-            let prev_value_u64 = event
-                .memory_record
-                .map(|r| match r {
-                    MemoryRecordEnum::Write(w) => w.prev_value,
-                    MemoryRecordEnum::Read(r) => r.value,
-                })
-                .unwrap_or(0);
-            let prev_limbs: [u16; 4] = [
-                (prev_value_u64 & 0xFFFF) as u16,
-                ((prev_value_u64 >> 16) & 0xFFFF) as u16,
-                ((prev_value_u64 >> 32) & 0xFFFF) as u16,
-                ((prev_value_u64 >> 48) & 0xFFFF) as u16,
-            ];
+            let prev_value_u64 = match memory_record {
+                MemoryRecordEnum::Write(w) => w.prev_value,
+                MemoryRecordEnum::Read(r) => r.value,
+            };
+            let old_limb = ((prev_value_u64 >> (16 * limb_index)) & 0xFFFF) as u16;
+            let old_low_byte = (old_limb & 0xFF) as u8;
+            let old_high_byte = ((old_limb >> 8) & 0xFF) as u8;
+            let reg_low_byte = (a_limb0 & 0xFF) as u8;
+            let reg_high_byte = ((a_limb0 >> 8) & 0xFF) as u8;
 
-            match opcode {
-                Opcode::SB => {
-                    let target_limb = limb_index;
-                    let old_limb = prev_limbs[target_limb];
-                    let old_low_byte = (old_limb & 0xFF) as u8;
-                    let old_high_byte = ((old_limb >> 8) & 0xFF) as u8;
-                    let reg_low_byte = (a_limbs[0] & 0xFF) as u8;
-                    let reg_high_byte = ((a_limbs[0] >> 8) & 0xFF) as u8;
+            cols.register_low_byte = F::from_u8(reg_low_byte);
+            cols.mem_limb_low_byte = F::from_u8(old_low_byte);
 
-                    cols.register_low_byte = F::from_canonical_u8(reg_low_byte);
-                    cols.mem_limb_low_byte = F::from_canonical_u8(old_low_byte);
-                    cols.selected_limb_low_byte = F::from_canonical_u8(old_low_byte);
+            // The byte increment, which is the SB row's `shift`
+            let increment: i32 = if bit0 == 0 {
+                (reg_low_byte as i32) - (old_low_byte as i32)
+            } else {
+                (reg_low_byte as i32) * 256 - (old_limb as i32) + (old_low_byte as i32)
+            };
+            // Store as field element (handles negative via modular arithmetic)
+            cols.shift = if increment >= 0 {
+                F::from_u32(increment as u32)
+            } else {
+                -F::from_u32((-increment) as u32)
+            };
 
-                    // Compute increment
-                    let increment: i32 = if bit0 == 0 {
-                        (reg_low_byte as i32) - (old_low_byte as i32)
-                    } else {
-                        (reg_low_byte as i32) * 256 - (old_limb as i32) + (old_low_byte as i32)
-                    };
-                    // Store as field element (handles negative via modular arithmetic)
-                    cols.increment = if increment >= 0 {
-                        F::from_canonical_u32(increment as u32)
-                    } else {
-                        -F::from_canonical_u32((-increment) as u32)
-                    };
-
-                    // store_value = prev + increment at target limb
-                    let mut sv = prev_limbs;
-                    let new_limb_val = (prev_limbs[target_limb] as i32 + increment) as u16;
-                    sv[target_limb] = new_limb_val;
-                    cols.store_value = Word(sv.map(|v| F::from_canonical_u16(v)));
-
-                    // ---- P0-3 trace: SB byte-split range check events ----
-                    // Constraint: looking_rangecheck(U8Range, 0, 0, reg_low_byte, reg_high_byte, is_sb)
-                    blu_events.add_u8_range_check(reg_low_byte, reg_high_byte);
-                    // Constraint: looking_rangecheck(U8Range, 0, 0, mem_low_byte, mem_high_byte, is_sb)
-                    blu_events.add_u8_range_check(old_low_byte, old_high_byte);
-                }
-                Opcode::SH => {
-                    // store_limb = a_limbs[0], replaces at limb_index
-                    let mut sv = prev_limbs;
-                    sv[limb_index] = a_limbs[0];
-                    cols.store_value = Word(sv.map(|v| F::from_canonical_u16(v)));
-                }
-                Opcode::SW => {
-                    // Replace 2 limbs based on bit2
-                    let mut sv = prev_limbs;
-                    if bit2 == 0 {
-                        sv[0] = a_limbs[0];
-                        sv[1] = a_limbs[1];
-                    } else {
-                        sv[2] = a_limbs[0];
-                        sv[3] = a_limbs[1];
-                    }
-                    cols.store_value = Word(sv.map(|v| F::from_canonical_u16(v)));
-                }
-                Opcode::SD => {
-                    // Complete write
-                    cols.store_value = a_val_u64.into();
-                }
-                _ => unreachable!(),
-            }
+            // ---- P0-3 trace: SB byte-split range check events ----
+            // Constraint: looking_rangecheck(U8Range, 0, 0, reg_low_byte, reg_high_byte, is_sb)
+            blu_events.add_u8_range_check(reg_low_byte, reg_high_byte);
+            // Constraint: looking_rangecheck(U8Range, 0, 0, mem_low_byte, mem_high_byte,
+            //                                is_sb + is_lb + is_lbu)
+            blu_events.add_u8_range_check(old_low_byte, old_high_byte);
+        } else if opcode == Opcode::SH {
+            // The SH row's `shift` is the limb replacement `op_a[0] - selected_limb`, a
+            // field-negative value whenever the stored half-word is below the old one.
+            let a_limb0 = (event.a & 0xFFFF) as u16;
+            cols.shift = F::from_u16(a_limb0) - F::from_u16(selected_limb);
         }
     }
 }
@@ -583,6 +472,45 @@ impl<F: Field> MemoryReadWriteCols<F> {
     }
 }
 
+/// The timestamp half of an access row, shared by the full and the lite layouts: the in-chunk
+/// predecessor clk and the 16 + 9 limbs of `clk - prev_clk - 1`, with their two byte-table events.
+///
+/// Returns `(prev_clk, diff_16bit_limb, diff_hi9)`.
+fn populate_timestamp_diff(
+    current_record: MemoryRecord,
+    prev_record: MemoryRecord,
+    output: &mut impl ByteRecordBehavior,
+) -> (u32, u16, u16) {
+    // The predecessor named here is always in this chunk. When the address was last touched
+    // in an *earlier* chunk there is no in-chunk timestamp to name, so the sentinel 0 stands
+    // in — the same label `MemoryLocalChip` puts on the state the chunk inherits, which is
+    // what makes the two sides of the memory bus meet. `CHUNK_CLK_START` keeps every real
+    // access above the sentinel, so it can never collide with one.
+    let prev_clk = if prev_record.chunk == current_record.chunk {
+        prev_record.timestamp
+    } else {
+        0
+    };
+
+    // The comparison is unconditionally on `clk` now: same chunk by construction.
+    let diff_minus_one = u64::from(current_record.timestamp) - u64::from(prev_clk) - 1;
+    // 25-bit decomposition (16 + 9): diffs can span the whole chunk-clk range. Assert
+    // instead of silently truncating.
+    assert!(
+        diff_minus_one < (1 << 25),
+        "memory timestamp diff {diff_minus_one} exceeds the 25-bit budget"
+    );
+    let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
+    let diff_hi9 = ((diff_minus_one >> 16) & 0x1ff) as u16;
+
+    // Add a range table lookup with the U16 op.
+    output.add_u16_range_check(diff_16bit_limb);
+    // Range check the merged high limb to 9 bits (BitRange table).
+    output.add_bit_range_check(diff_hi9, 9);
+
+    (prev_clk, diff_16bit_limb, diff_hi9)
+}
+
 impl<F: Field> MemoryAccessCols<F> {
     pub(crate) fn populate_access(
         &mut self,
@@ -592,73 +520,413 @@ impl<F: Field> MemoryAccessCols<F> {
     ) {
         self.value = current_record.value.into();
 
-        self.prev_chunk = F::from_canonical_u32(prev_record.chunk);
-        self.prev_clk = F::from_canonical_u32(prev_record.timestamp);
-
-        // Fill columns used for verifying current memory access time value is greater than
-        // previous's.
-        let use_clk_comparison = prev_record.chunk == current_record.chunk;
-        self.compare_clk = F::from_bool(use_clk_comparison);
-        let prev_time_value = if use_clk_comparison {
-            u64::from(prev_record.timestamp)
-        } else {
-            u64::from(prev_record.chunk)
-        };
-        let current_time_value = if use_clk_comparison {
-            u64::from(current_record.timestamp)
-        } else {
-            u64::from(current_record.chunk)
-        };
-
-        let diff_minus_one = current_time_value - prev_time_value - 1;
-        let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
-        self.diff_16bit_limb = F::from_canonical_u16(diff_16bit_limb);
-        let diff_8bit_limb = ((diff_minus_one >> 16) & 0xff) as u32;
-        self.diff_8bit_limb = F::from_canonical_u32(diff_8bit_limb);
-
-        // Add a range table lookup with the U16 op.
-        output.add_u16_range_check(diff_16bit_limb);
-        // Add a range table lookup with the U8 op.
-        output.add_u8_range_check(diff_8bit_limb as u8, 0);
+        let (prev_clk, diff_16bit_limb, diff_hi9) =
+            populate_timestamp_diff(current_record, prev_record, output);
+        self.prev_clk = F::from_u32(prev_clk);
+        self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
+        self.diff_hi9 = F::from_u16(diff_hi9);
     }
 }
 
-impl<F> EventCapture for MemoryReadWriteChip<F> {
-    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
-        let num_memory_rw_events = record.memory_read_write_event_indices.len();
-        if num_memory_rw_events == 0 {
-            return;
+impl<F: Field> MemoryReadLiteCols<F> {
+    pub fn populate(&mut self, record: MemoryReadRecord, output: &mut impl ByteRecordBehavior) {
+        let current_record = MemoryRecord {
+            value: record.value,
+            chunk: record.chunk,
+            timestamp: record.timestamp,
+        };
+        let prev_record = MemoryRecord {
+            value: record.value,
+            chunk: record.prev_chunk,
+            timestamp: record.prev_timestamp,
+        };
+        self.access
+            .populate_access(current_record, prev_record, output);
+    }
+}
+
+impl<F: Field> MemoryReadWriteLiteCols<F> {
+    pub fn populate(&mut self, record: MemoryRecordEnum, output: &mut impl ByteRecordBehavior) {
+        match record {
+            MemoryRecordEnum::Read(read_record) => self.populate_read(read_record, output),
+            MemoryRecordEnum::Write(write_record) => self.populate_write(write_record, output),
         }
-        event_counter.num_memory_read_writes += num_memory_rw_events;
-        // Use references to avoid copying CpuEvent values
-        let memory_rw_events: Vec<&CpuEvent> = record
-            .memory_read_write_event_indices
-            .iter()
-            .copied()
-            .map(|i| &record.cpu_events[i])
-            .collect();
+    }
 
-        // Use efficient parallel processing similar to CPU chip
-        let chunk_size = std::cmp::max(num_memory_rw_events / num_cpus::get(), 1);
-        let memory_rw_counts: Vec<usize> = memory_rw_events
-            .pico_chunks(chunk_size)
-            .flat_map_iter(|chunk| {
-                chunk
-                    .iter()
-                    .map(|event| Self::count_memory_read_write_events(event))
-            })
-            .collect();
+    pub fn populate_write(
+        &mut self,
+        record: MemoryWriteRecord,
+        output: &mut impl ByteRecordBehavior,
+    ) {
+        let current_record = MemoryRecord {
+            value: record.value,
+            chunk: record.chunk,
+            timestamp: record.timestamp,
+        };
+        let prev_record = MemoryRecord {
+            value: record.prev_value,
+            chunk: record.prev_chunk,
+            timestamp: record.prev_timestamp,
+        };
+        self.prev_value = prev_record.value.into();
+        self.access
+            .populate_access(current_record, prev_record, output);
+    }
 
-        // Sum sub events efficiently
-        let num_add_sub = memory_rw_counts.iter().sum::<usize>();
-        event_counter.num_add_events += num_add_sub;
+    pub fn populate_read(
+        &mut self,
+        record: MemoryReadRecord,
+        output: &mut impl ByteRecordBehavior,
+    ) {
+        let current_record = MemoryRecord {
+            value: record.value,
+            chunk: record.chunk,
+            timestamp: record.timestamp,
+        };
+        let prev_record = MemoryRecord {
+            value: record.value,
+            chunk: record.prev_chunk,
+            timestamp: record.prev_timestamp,
+        };
+        self.prev_value = prev_record.value.into();
+        self.access
+            .populate_access(current_record, prev_record, output);
     }
 }
 
-impl<F> MemoryReadWriteChip<F> {
-    /// Count ALU events generated per memory instruction.
-    /// With direct limb fill sign extension (no ALU SUB), each instruction generates exactly 1 ADD event.
-    fn count_memory_read_write_events(_event: &CpuEvent) -> usize {
-        1
+impl<F: Field> MemoryAccessLiteCols<F> {
+    /// Same as [`MemoryAccessCols::populate_access`] minus the `prev_clk` column: the
+    /// predecessor clk is computed only to take the difference from, and the AIR rebuilds it
+    /// from the two committed limbs.
+    pub(crate) fn populate_access(
+        &mut self,
+        current_record: MemoryRecord,
+        prev_record: MemoryRecord,
+        output: &mut impl ByteRecordBehavior,
+    ) {
+        self.value = current_record.value.into();
+
+        let (_prev_clk, diff_16bit_limb, diff_hi9) =
+            populate_timestamp_diff(current_record, prev_record, output);
+        self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
+        self.diff_hi9 = F::from_u16(diff_hi9);
+    }
+}
+
+impl<F> EventCapture for MemoryReadWriteChip<F> {}
+
+#[cfg(test)]
+mod tests {
+    use super::{encode_memory_trace_clk_u32, MemoryReadWriteChip};
+    use crate::{
+        chips::chips::{
+            byte::event::ByteLookupEvent,
+            riscv_cpu::event::CpuEvent,
+            riscv_memory::{
+                event::{MemoryReadRecord, MemoryRecordEnum, MemoryWriteRecord},
+                read_write::columns::MemoryChipValueCols,
+            },
+        },
+        compiler::{
+            riscv::{
+                instruction::Instruction,
+                opcode::{ByteOpcode, Opcode},
+            },
+            word::Word,
+        },
+    };
+    use p3_field::{PrimeCharacteristicRing, PrimeField32};
+    use p3_koala_bear::KoalaBear;
+
+    fn decode_word<F: PrimeField32>(word: Word<F>) -> u64 {
+        (word[0].as_canonical_u32() as u64)
+            | ((word[1].as_canonical_u32() as u64) << 16)
+            | ((word[2].as_canonical_u32() as u64) << 32)
+            | ((word[3].as_canonical_u32() as u64) << 48)
+    }
+
+    #[test]
+    fn memory_trace_clk_encoding_accepts_u32_range() {
+        assert_eq!(encode_memory_trace_clk_u32(u32::MAX as u64), u32::MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "does not fit u32 compat boundary")]
+    fn memory_trace_clk_encoding_rejects_overflow() {
+        let _ = encode_memory_trace_clk_u32(u64::from(u32::MAX) + 1);
+    }
+
+    /// `addr_word` has two limbs, so an address at or above 2^32 has no row; trace generation
+    /// refuses it instead of producing an unprovable trace.
+    #[test]
+    #[should_panic(expected = "memory address must be less than 2^32")]
+    fn event_to_row_rejects_an_address_at_or_above_2_32() {
+        let chip = MemoryReadWriteChip::<KoalaBear>::default();
+        let value = 0u64;
+        let event = CpuEvent {
+            chunk: 1,
+            clk: 7,
+            instruction: Instruction::new(Opcode::LD, 12, 10, 0, false, true),
+            b: 1u64 << 32,
+            c: 0,
+            memory: Some(value),
+            memory_record: Some(MemoryRecordEnum::Read(MemoryReadRecord {
+                value,
+                chunk: 1,
+                timestamp: 7,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            })),
+            ..Default::default()
+        };
+
+        let mut cols = MemoryChipValueCols::default();
+        let mut blu_events = Vec::<ByteLookupEvent>::new();
+        chip.event_to_row(&event, &mut cols, &mut blu_events);
+    }
+
+    #[test]
+    fn event_to_row_preserves_full_u64_for_ld_reads() {
+        let chip = MemoryReadWriteChip::<KoalaBear>::default();
+        let value = 0xDEAD_BEEF_CAFE_BABEu64;
+        let event = CpuEvent {
+            chunk: 1,
+            clk: 7,
+            instruction: Instruction::new(Opcode::LD, 12, 10, 0, false, true),
+            b: 0x20000,
+            c: 0,
+            memory: Some(value),
+            memory_record: Some(MemoryRecordEnum::Read(MemoryReadRecord {
+                value,
+                chunk: 1,
+                timestamp: 7,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            })),
+            ..Default::default()
+        };
+
+        let mut cols = MemoryChipValueCols::default();
+        let mut blu_events = Vec::<ByteLookupEvent>::new();
+        chip.event_to_row(&event, &mut cols, &mut blu_events);
+
+        assert_eq!(decode_word(cols.memory_access.access.value), value);
+        // `unsigned_mem_val` is de-materialized; the committed access value is the
+        // only per-row word carrying the full 64-bit LD payload.
+        assert_eq!(decode_word(cols.memory_access.prev_value), value);
+    }
+
+    #[test]
+    fn event_to_row_preserves_upper_half_for_sw_at_offset_four() {
+        let chip = MemoryReadWriteChip::<KoalaBear>::default();
+        let prev_value = 0x1122_3344_5566_7788u64;
+        let new_word = 0xA1B2_C3D4u64;
+        let event = CpuEvent {
+            chunk: 1,
+            clk: 9,
+            instruction: Instruction::new(Opcode::SW, 11, 10, 4, false, true),
+            a: new_word,
+            b: 0x20000,
+            c: 4,
+            memory: Some(0xA1B2_C3D4_5566_7788u64),
+            memory_record: Some(MemoryRecordEnum::Write(MemoryWriteRecord {
+                value: 0xA1B2_C3D4_5566_7788u64,
+                chunk: 1,
+                timestamp: 9,
+                prev_value,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            })),
+            ..Default::default()
+        };
+
+        let mut cols = MemoryChipValueCols::default();
+        let mut blu_events = Vec::<ByteLookupEvent>::new();
+        chip.event_to_row(&event, &mut cols, &mut blu_events);
+
+        assert_eq!(decode_word(cols.memory_access.prev_value), prev_value);
+        // `store_value` is de-materialized; the committed post-store access value
+        // carries the merged word.
+        assert_eq!(
+            decode_word(cols.memory_access.access.value),
+            0xA1B2_C3D4_5566_7788u64
+        );
+        // SW rows leave the sub-limb shift at zero (ungated definition).
+        assert_eq!(cols.shift, KoalaBear::ZERO);
+    }
+
+    /// LWU rows write `lhw_val` on the shared LW/LWU arm: the AIR pins it there as the limb-1
+    /// load value on LWU as well as LW, and `msb` must be zero on the unsigned load.
+    #[test]
+    fn event_to_row_lwu_pins_lhw_val_to_the_high_half() {
+        let chip = MemoryReadWriteChip::<KoalaBear>::default();
+        let value = 0xDEAD_BEEF_CAFE_BABEu64;
+        let event = CpuEvent {
+            chunk: 1,
+            clk: 11,
+            instruction: Instruction::new(Opcode::LWU, 12, 10, 4, false, true),
+            a: 0xDEAD_BEEF,
+            b: 0x20000,
+            c: 4,
+            memory: Some(value),
+            memory_record: Some(MemoryRecordEnum::Read(MemoryReadRecord {
+                value,
+                chunk: 1,
+                timestamp: 11,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            })),
+            ..Default::default()
+        };
+
+        let mut cols = MemoryChipValueCols::default();
+        let mut blu_events = Vec::<ByteLookupEvent>::new();
+        chip.event_to_row(&event, &mut cols, &mut blu_events);
+
+        // Offset 4: bit2 = 1, so the selected word is limbs 2 and 3.
+        assert_eq!(cols.selected_limb, KoalaBear::from_u16(0xBEEF));
+        assert_eq!(cols.lhw_val, KoalaBear::from_u16(0xDEAD));
+        assert_eq!(cols.msb, KoalaBear::ZERO);
+        assert_eq!(cols.shift, KoalaBear::ZERO);
+    }
+
+    /// SH rows write `shift = op_a[0] - selected_limb`, which is field-negative when the stored
+    /// half-word is below the one it replaces.
+    #[test]
+    fn event_to_row_sh_writes_the_limb_shift() {
+        let chip = MemoryReadWriteChip::<KoalaBear>::default();
+        let prev_value = 0x1122_3344_5566_7788u64;
+        let new_value = 0x1122_3344_1234_7788u64;
+        let event = CpuEvent {
+            chunk: 1,
+            clk: 13,
+            instruction: Instruction::new(Opcode::SH, 11, 10, 2, false, true),
+            a: 0x1234,
+            b: 0x20000,
+            c: 2,
+            memory: Some(new_value),
+            memory_record: Some(MemoryRecordEnum::Write(MemoryWriteRecord {
+                value: new_value,
+                chunk: 1,
+                timestamp: 13,
+                prev_value,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            })),
+            ..Default::default()
+        };
+
+        let mut cols = MemoryChipValueCols::default();
+        let mut blu_events = Vec::<ByteLookupEvent>::new();
+        chip.event_to_row(&event, &mut cols, &mut blu_events);
+
+        // Offset 2: bit1 = 1, so limb 1 (0x5566) is replaced by the register's low half.
+        assert_eq!(cols.selected_limb, KoalaBear::from_u16(0x5566));
+        assert_eq!(
+            cols.shift,
+            KoalaBear::from_u16(0x1234) - KoalaBear::from_u16(0x5566)
+        );
+        assert_eq!(decode_word(cols.memory_access.access.value), new_value);
+    }
+
+    /// LB rows emit exactly one U8Range event, `(low, high)` of the selected limb, matching the
+    /// memory-limb split lookup they share with SB rows; the low byte lives in
+    /// `mem_limb_low_byte`. The sign bit rides the U16MSB lookup through `lhw_val = 256 * byte`.
+    #[test]
+    fn event_to_row_lb_emits_one_u8_range_event() {
+        let chip = MemoryReadWriteChip::<KoalaBear>::default();
+        let value = 0xDEAD_BEEF_CAFE_BABEu64;
+        let event = CpuEvent {
+            chunk: 1,
+            clk: 15,
+            instruction: Instruction::new(Opcode::LB, 12, 10, 1, false, true),
+            a: 0xFFFF_FFFF_FFFF_FFBA,
+            b: 0x20000,
+            c: 1,
+            memory: Some(value),
+            memory_record: Some(MemoryRecordEnum::Read(MemoryReadRecord {
+                value,
+                chunk: 1,
+                timestamp: 15,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            })),
+            ..Default::default()
+        };
+
+        let mut cols = MemoryChipValueCols::default();
+        let mut blu_events = Vec::<ByteLookupEvent>::new();
+        chip.event_to_row(&event, &mut cols, &mut blu_events);
+
+        // Offset 1: limb 0 (0xBABE), high byte selected.
+        assert_eq!(cols.mem_limb_low_byte, KoalaBear::from_u8(0xBE));
+        assert_eq!(cols.register_low_byte, KoalaBear::ZERO);
+        assert_eq!(cols.selected_byte, KoalaBear::from_u8(0xBA));
+        assert_eq!(cols.msb, KoalaBear::ONE);
+        assert_eq!(cols.lhw_val, KoalaBear::from_u16(256 * 0xBA));
+        let u8_events: Vec<_> = blu_events
+            .iter()
+            .filter(|e| e.opcode == ByteOpcode::U8Range)
+            .collect();
+        assert_eq!(
+            u8_events,
+            vec![&ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0xBE, 0xBA)]
+        );
+        // The U16MSB operand `2 * lhw_val - msb * 2^16 = 512 * 0xBA - 65536 = 0x7400`; a U16Range
+        // event carries the value as its two bytes `(b, c) = (0x74, 0x00)`.
+        assert!(blu_events.contains(&ByteLookupEvent::new(
+            ByteOpcode::U16Range,
+            0,
+            0,
+            0x74,
+            0x00
+        )));
+        assert!(blu_events.iter().all(|e| e.opcode != ByteOpcode::MSB));
+    }
+
+    /// LBU rows have no sign bit: `msb = 0`, `lhw_val` stays 0 (the LB definition is gated on
+    /// `is_lb`) and the row emits one U16Range event fewer than the LB row of the same access.
+    #[test]
+    fn event_to_row_lbu_leaves_the_sign_operand_zero() {
+        let chip = MemoryReadWriteChip::<KoalaBear>::default();
+        let value = 0xDEAD_BEEF_CAFE_BABEu64;
+        let mk = |opcode: Opcode| CpuEvent {
+            chunk: 1,
+            clk: 15,
+            instruction: Instruction::new(opcode, 12, 10, 1, false, true),
+            a: if opcode == Opcode::LB {
+                0xFFFF_FFFF_FFFF_FFBA
+            } else {
+                0xBA
+            },
+            b: 0x20000,
+            c: 1,
+            memory: Some(value),
+            memory_record: Some(MemoryRecordEnum::Read(MemoryReadRecord {
+                value,
+                chunk: 1,
+                timestamp: 15,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            })),
+            ..Default::default()
+        };
+        let mut lb = MemoryChipValueCols::default();
+        let mut lb_events = Vec::<ByteLookupEvent>::new();
+        chip.event_to_row(&mk(Opcode::LB), &mut lb, &mut lb_events);
+        let mut lbu = MemoryChipValueCols::default();
+        let mut lbu_events = Vec::<ByteLookupEvent>::new();
+        chip.event_to_row(&mk(Opcode::LBU), &mut lbu, &mut lbu_events);
+
+        assert_eq!(lbu.mem_limb_low_byte, KoalaBear::from_u8(0xBE));
+        assert_eq!(lbu.selected_byte, KoalaBear::from_u8(0xBA));
+        assert_eq!(lbu.msb, KoalaBear::ZERO);
+        assert_eq!(lbu.lhw_val, KoalaBear::ZERO);
+        let u16_count = |ev: &Vec<ByteLookupEvent>| {
+            ev.iter()
+                .filter(|e| e.opcode == ByteOpcode::U16Range)
+                .count()
+        };
+        assert_eq!(u16_count(&lb_events), u16_count(&lbu_events) + 1);
     }
 }

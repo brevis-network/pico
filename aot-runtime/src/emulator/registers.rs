@@ -32,6 +32,15 @@ impl AotEmulatorCore {
         self.accessed_regs[reg] = true;
     }
 
+    /// Single write site for the per-access register record.
+    #[inline(always)]
+    fn set_reg_record(&mut self, reg: usize, timestamp: u32) {
+        self.register_records[reg] = RegisterRecord {
+            chunk: self.current_chunk,
+            timestamp,
+        };
+    }
+
     #[inline(always)]
     pub(crate) fn track_chunk_split_address(&mut self, addr: u64) {
         self.chunk_split_state.track_address(addr);
@@ -74,10 +83,7 @@ impl AotEmulatorCore {
             self.reg_present[reg] = true;
             self.registers[reg] = 0;
         }
-        self.register_records[reg] = RegisterRecord {
-            chunk: self.current_chunk,
-            timestamp: self.clk.wrapping_add(position as u32),
-        };
+        self.set_reg_record(reg, self.clk.wrapping_add(position as u32));
         if reg == 0 {
             0
         } else {
@@ -125,10 +131,7 @@ impl AotEmulatorCore {
 
         self.mark_reg_accessed(reg);
         // Update register metadata for snapshot compatibility
-        self.register_records[reg] = RegisterRecord {
-            chunk: self.current_chunk,
-            timestamp: self.clk.wrapping_add(MemoryAccessPosition::A as u32),
-        };
+        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
 
         // Account for register write event to match simple-mode behavior.
         // Simple-mode: rw_simple() calls mw_cpu_simple() which always increments.
@@ -149,10 +152,7 @@ impl AotEmulatorCore {
             self.reg_present[reg] = true;
             self.registers[reg] = 0;
         }
-        self.register_records[reg] = RegisterRecord {
-            chunk: self.current_chunk,
-            timestamp: self.clk.wrapping_add(MemoryAccessPosition::A as u32),
-        };
+        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
         if reg == 0 {
             0
         } else {
@@ -168,10 +168,7 @@ impl AotEmulatorCore {
             self.reg_present[reg] = true;
             self.registers[reg] = 0;
         }
-        self.register_records[reg] = RegisterRecord {
-            chunk: self.current_chunk,
-            timestamp: self.clk.wrapping_add(MemoryAccessPosition::B as u32),
-        };
+        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::B as u32));
         if reg == 0 {
             0
         } else {
@@ -187,10 +184,7 @@ impl AotEmulatorCore {
             self.reg_present[reg] = true;
             self.registers[reg] = 0;
         }
-        self.register_records[reg] = RegisterRecord {
-            chunk: self.current_chunk,
-            timestamp: self.clk.wrapping_add(MemoryAccessPosition::C as u32),
-        };
+        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::C as u32));
         if reg == 0 {
             0
         } else {
@@ -209,10 +203,7 @@ impl AotEmulatorCore {
             self.reg_present[reg] = true;
         }
         self.mark_reg_accessed(reg);
-        self.register_records[reg] = RegisterRecord {
-            chunk: self.current_chunk,
-            timestamp: self.clk.wrapping_add(MemoryAccessPosition::A as u32),
-        };
+        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
 
         // Account for register write event to match simple-mode behavior (same as write_reg).
         if !self.is_unconstrained_mode() {
@@ -235,10 +226,7 @@ impl AotEmulatorCore {
             self.reg_present[reg] = true;
         }
         self.mark_reg_accessed(reg);
-        self.register_records[reg] = RegisterRecord {
-            chunk: self.current_chunk,
-            timestamp: self.clk.wrapping_add(MemoryAccessPosition::A as u32),
-        };
+        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
         // Unconditionally increment - we know we're not in unconstrained mode
         self.chunk_split_state.add_memory_rw_events(1);
     }
@@ -257,10 +245,7 @@ impl AotEmulatorCore {
             self.reg_present[reg] = true;
         }
         self.mark_reg_accessed(reg);
-        self.register_records[reg] = RegisterRecord {
-            chunk: self.current_chunk,
-            timestamp: self.clk.wrapping_add(MemoryAccessPosition::A as u32),
-        };
+        self.set_reg_record(reg, self.clk.wrapping_add(MemoryAccessPosition::A as u32));
         // NO increment - deferred to block end
     }
 

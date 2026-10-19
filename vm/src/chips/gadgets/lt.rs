@@ -9,7 +9,7 @@ use crate::{
 };
 use itertools::izip;
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 /// Gadget columns for verifying that a compress is within the range `[0, modulus)`.
@@ -33,8 +33,8 @@ impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
             assert!(a_byte <= b_byte);
             if a_byte < b_byte {
                 *flag = 1;
-                self.a_comparison_byte = F::from_canonical_u8(*a_byte);
-                self.b_comparison_byte = F::from_canonical_u8(*b_byte);
+                self.a_comparison_byte = F::from_u8(*a_byte);
+                self.b_comparison_byte = F::from_u8(*b_byte);
                 record.add_byte_lookup_event(ByteLookupEvent {
                     opcode: ByteOpcode::LTU,
                     a1: 1,
@@ -47,7 +47,7 @@ impl<F: Field, const N: usize> AssertLtColsBytes<F, N> {
         }
 
         for (byte, flag) in izip!(byte_flags.iter(), self.byte_flags.iter_mut()) {
-            *flag = F::from_canonical_u8(*byte);
+            *flag = F::from_u8(*byte);
         }
     }
 }
@@ -160,7 +160,7 @@ impl<F: Field, const N: usize> AssertLtColsBits<F, N> {
         }
 
         for (bit, flag) in izip!(bit_flags.iter(), self.bit_flags.iter_mut()) {
-            *flag = F::from_canonical_u8(*bit);
+            *flag = F::from_u8(*bit);
         }
     }
 }

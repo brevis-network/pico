@@ -1,8 +1,6 @@
 use itertools::enumerate;
-use p3_baby_bear::BabyBear;
 use p3_field::PrimeField32;
 use p3_koala_bear::KoalaBear;
-use p3_symmetric::Permutation;
 use pico_vm::{
     compiler::riscv::{
         compiler::{Compiler, SourceType},
@@ -17,8 +15,7 @@ use pico_vm::{
         },
         stdin::EmulatorStdin,
     },
-    machine::logger::setup_logger,
-    primitives::Poseidon2Init,
+    machine::{field::FieldSpecificPoseidon2Config, logger::setup_logger},
 };
 use std::time::Instant;
 use tracing::{debug, info, trace};
@@ -28,8 +25,7 @@ mod parse_args;
 
 fn run<F>(elf: &'static [u8], stdin: EmulatorStdin<Program, Vec<u8>>)
 where
-    F: PrimeField32 + Poseidon2Init,
-    F::Poseidon2: Permutation<[F; 16]>,
+    F: PrimeField32 + FieldSpecificPoseidon2Config,
 {
     let start = Instant::now();
 
@@ -113,7 +109,6 @@ fn main() {
 
     let (elf, stdin, args) = parse_args::parse_args::<KoalaBearPoseidon2>();
     match args.field.as_str() {
-        "bb" => run::<BabyBear>(elf, stdin),
         "kb" => run::<KoalaBear>(elf, stdin),
         _ => panic!("Unsupported field for RISCV emulator: {}", args.field),
     }

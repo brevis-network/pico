@@ -1,6 +1,6 @@
 mod bls;
 mod ecrecover;
-mod ed_decompress;
+pub mod ed_decompress;
 mod fp;
 
 use super::riscv_emulator::RiscvEmulator;

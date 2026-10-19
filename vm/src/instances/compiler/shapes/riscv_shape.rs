@@ -1,3 +1,9 @@
+//! RISC-V shape configuration, from the FRI era.
+//!
+//! Nothing calls it any more — removing the FRI path took the last caller, and the MLE backend
+//! sizes chips through `mle::machine::shape::bucket_log_height` instead. Kept as the reference for
+//! how shapes were laid out; assume anything here has drifted until a caller brings it back.
+
 use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
@@ -215,14 +221,10 @@ pub(crate) fn precompile_syscall_code(chip_name: &str) -> SyscallCode {
         "Bn254Fp2AddSub" => SyscallCode::BN254_FP2_ADD,
         "Bn254Fp2Mul" => SyscallCode::BN254_FP2_MUL,
         "Bn254FpOp" => SyscallCode::BN254_FP_ADD,
-        // Unreachable while the two Ed25519 chips are out of `all_chip_variants` -- this lookup is
-        // only ever called with the name of a chip that is in the machine. Kept so the mapping is
-        // still here if either chip is restored.
         "EdAddAssign" => SyscallCode::ED_ADD,
         "EdDecompress" => SyscallCode::ED_DECOMPRESS,
         "KeccakPermute" => SyscallCode::KECCAK_PERMUTE,
-        // Unreachable while the poseidon2 precompile chip is out of `all_chip_variants`, for the
-        // same reason as the two Ed25519 entries above. Kept so the mapping survives.
+        "KeccakControl" => SyscallCode::KECCAK_PERMUTE,
         "Poseidon2Permute" => SyscallCode::POSEIDON2_PERMUTE,
         "Secp256k1AddAssign" => SyscallCode::SECP256K1_ADD,
         "Secp256k1Decompress" => SyscallCode::SECP256K1_DECOMPRESS,
@@ -534,7 +536,8 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                             let mem_events_height = shape[2].1;
                             let global_events_height = shape[3].1;
                             if mem_events <= (1 << mem_events_height) * LOCAL_MEMORY_DATAPAR
-                                && num_global_events <= (1 << global_events_height)
+                                // Strict: the Global trace's last row must be padding.
+                                && num_global_events < (1 << global_events_height)
                             {
                                 debug!(
                                     "Chunk Lifted: Precompile={}, AllowedLogHeight={}",
@@ -548,7 +551,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                                     log2_ceil_usize(mem_events.div_ceil(LOCAL_MEMORY_DATAPAR));
                                 let new_mem_events_log = mem_events_height;
 
-                                let old_global_events_log = log2_ceil_usize(num_global_events);
+                                let old_global_events_log = log2_ceil_usize(num_global_events + 1);
                                 let new_global_events_log = global_events_height;
 
                                 debug!(
@@ -624,13 +627,15 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                             .ilog2() as usize)
                             .clamp(4, 23),
                     ),
+                    // `+ 1`: the Global trace always ends with one padding row (its accumulation
+                    // constraints require it); Poseidon2 follows so the log-height gap stays 2.
                     (
                         RiscvChipType::<F>::Global(GlobalChip::default()).name(),
-                        (num_global_events.next_power_of_two().ilog2() as usize).clamp(4, 23),
+                        ((num_global_events + 1).next_power_of_two().ilog2() as usize).clamp(4, 23),
                     ),
                     (
                         <F as FieldSpecificPoseidon2Config>::riscv_poseidon2_name().to_string(),
-                        (num_global_events
+                        ((num_global_events + 1)
                             .div_ceil(RISCV_POSEIDON2_DATAPAR)
                             .next_power_of_two()
                             .ilog2() as usize)
@@ -645,6 +650,7 @@ impl<F: PrimeField32 + FieldSpecificPoseidon2Config> RiscvShapeConfig<F> {
                 let control_name = match chip_name.as_str() {
                     "ShaCompress" => Some("ShaCompressControl".to_string()),
                     "ShaExtend" => Some("ShaExtendControl".to_string()),
+                    "KeccakPermute" => Some("KeccakControl".to_string()),
                     _ => None,
                 };
                 if let Some(name) = control_name {

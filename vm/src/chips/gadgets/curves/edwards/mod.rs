@@ -137,9 +137,11 @@ impl<E: EdwardsParameters> AffinePoint<EdwardsCurve<E>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chips::gadgets::curves::edwards::ed25519::{Ed25519, Ed25519Parameters};
-    use num::bigint::RandBigInt;
-    use rand::thread_rng;
+    use crate::chips::gadgets::{
+        curves::edwards::ed25519::{Ed25519, Ed25519Parameters},
+        utils::RandBigUint,
+    };
+    use rand::rng;
 
     #[test]
     fn test_bigint_ed_add() {
@@ -161,10 +163,10 @@ mod tests {
         let p = <E as EllipticCurveParameters>::BaseField::modulus();
         assert_eq!((d * 121666u32) % &p, (&p - 121665u32) % &p);
 
-        let mut rng = thread_rng();
+        let mut rng = rng();
         for _ in 0..10 {
-            let x = rng.gen_biguint(24);
-            let y = rng.gen_biguint(25);
+            let x = rng.random_biguint(24);
+            let y = rng.random_biguint(25);
 
             let x_base = &base * &x;
             let y_x_base = &x_base * &y;

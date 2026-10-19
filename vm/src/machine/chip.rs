@@ -2,17 +2,31 @@ use crate::{
     compiler::program::ProgramBehavior,
     emulator::record::RecordBehavior,
     machine::{
-        builder::{ChipBuilder, PermutationBuilder},
-        folder::SymbolicConstraintFolder,
-        lookup::{LookupScope, VirtualPairLookup},
-        permutation::{eval_permutation_constraints, generate_permutation_trace, get_grouped_maps},
-        utils::get_log_quotient_degree,
+        builder::ChipBuilder,
+        lookup::{LookupScope, LookupSummary},
     },
+    primitives::consts::MAX_NUM_PVS,
 };
 use p3_air::{Air, BaseAir};
-use p3_field::{ExtensionField, Field};
+use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
+use pico_mle_core::{
+    air::symbolic::{get_symbolic_builder_with_public_values, SymbolicRapBuilder},
+    keygen::types::TraceWidth,
+};
+use std::marker::PhantomData;
 use tracing::debug;
+
+/// A chip's declared preprocessed height, from [`ChipBehavior::preprocessed_rows`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreprocessedRows {
+    /// Raw, unpadded row count; the caller pads it the way the generators do (the program's
+    /// shape if present, else `next_power_of_two`'s 16-row floor).
+    Unpadded(usize),
+    /// Padded to `1 << log2` unconditionally; the chip never consults the program's shape
+    /// (`PublicValuesChip`, which hardcodes `PUB_VALUES_LOG_HEIGHT`).
+    FixedLog2(usize),
+}
 
 /// Chip behavior
 pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
@@ -24,6 +38,16 @@ pub trait ChipBehavior<F: Field>: BaseAir<F> + Sync {
     fn name(&self) -> String;
 
     fn generate_preprocessed(&self, _program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        None
+    }
+
+    /// Declared preprocessed height, derived from the program without building the trace; the
+    /// width comes from [`Self::preprocessed_width`]. `None` means "not declared" — the caller
+    /// falls back to [`Self::generate_preprocessed`].
+    ///
+    /// A declaration must reproduce the generator's row count exactly; the parity test in
+    /// `mle::machine::recursion::chips` checks every chip against its own generator.
+    fn preprocessed_rows(&self, _program: &Self::Program) -> Option<PreprocessedRows> {
         None
     }
 
@@ -56,34 +80,34 @@ pub struct MetaChip<F: Field, C> {
     /// Underlying chip
     chip: C,
     /// messages for chip as looking table
-    pub(crate) looking: Vec<VirtualPairLookup<F>>,
+    pub(crate) looking: Vec<LookupSummary>,
     /// messages for chip as looked table
-    pub(crate) looked: Vec<VirtualPairLookup<F>>,
-    /// log degree of quotient polynomial
-    log_quotient_degree: usize,
+    pub(crate) looked: Vec<LookupSummary>,
+    _field: PhantomData<F>,
 }
 
 impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
     pub fn new(chip: C) -> Self
     where
-        C: ChipBehavior<F> + Air<SymbolicConstraintFolder<F>>,
+        C: ChipBehavior<F> + Air<SymbolicRapBuilder<F>>,
     {
-        let mut builder = SymbolicConstraintFolder::new(chip.preprocessed_width(), chip.width());
-        chip.eval(&mut builder);
-        let (looking, looked) = builder.lookups();
-
-        // need to dive deeper, currently following p3.
-        let log_quotient_degree = get_log_quotient_degree::<F, C>(
-            &chip,
-            chip.preprocessed_width(),
-            !(looking.is_empty() && looked.is_empty()),
-        );
+        // Same symbolic evaluation the MLE keygen runs, sized like the legacy folder was
+        // (`MAX_NUM_PVS` public values, so every chip's PV reads resolve regardless of which
+        // machine it lands in); only the lookup summaries are kept.
+        let preprocessed_width = chip.preprocessed_width();
+        let width = TraceWidth {
+            preprocessed: (preprocessed_width > 0).then_some(preprocessed_width),
+            cached_mains: vec![],
+            common_main: chip.width(),
+        };
+        let builder = get_symbolic_builder_with_public_values(&chip, &width, MAX_NUM_PVS);
+        let (looking, looked) = builder.lookup_summaries();
+        let (looking, looked) = (looking.to_vec(), looked.to_vec());
 
         debug!(
-            "new chip {:<21} pre_width {:<2} quotient_degree {:<2} looking_len {:<3} looked_len {:<3}",
+            "new chip {:<21} pre_width {:<2} looking_len {:<3} looked_len {:<3}",
             chip.name(),
             chip.preprocessed_width(),
-            log_quotient_degree,
             looking.len(),
             looked.len()
         );
@@ -91,7 +115,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
             chip,
             looking,
             looked,
-            log_quotient_degree,
+            _field: PhantomData,
         }
     }
 
@@ -99,7 +123,7 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
     /// Useful for testing individual chips without lookup dependencies.
     pub fn test_no_lookup(chip: C) -> Self
     where
-        C: ChipBehavior<F> + Air<SymbolicConstraintFolder<F>>,
+        C: ChipBehavior<F> + Air<SymbolicRapBuilder<F>>,
     {
         let mut chip = Self::new(chip);
         chip.looking.clear();
@@ -107,52 +131,12 @@ impl<F: Field, C: ChipBehavior<F>> MetaChip<F, C> {
         chip
     }
 
-    pub fn generate_permutation<EF: ExtensionField<F>>(
-        &self,
-        preprocessed: Option<&RowMajorMatrix<F>>,
-        main: &RowMajorMatrix<F>,
-        perm_challenges: &[EF],
-    ) -> (RowMajorMatrix<EF>, EF) {
-        let batch_size = 1 << self.log_quotient_degree;
-
-        generate_permutation_trace(
-            &self.looking,
-            &self.looked,
-            preprocessed,
-            main,
-            perm_challenges,
-            batch_size,
-        )
-    }
-
-    /// Returns the width of the permutation trace.
-    #[inline]
-    pub fn permutation_width(&self) -> usize {
-        let (_, _, grouped_widths) =
-            get_grouped_maps(&self.looking, &self.looked, self.logup_batch_size());
-
-        grouped_widths
-            .get(&LookupScope::Regional)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// Returns the log2 of the batch size.
-    #[inline]
-    pub const fn logup_batch_size(&self) -> usize {
-        1 << self.log_quotient_degree
-    }
-
-    pub fn get_log_quotient_degree(&self) -> usize {
-        self.log_quotient_degree
-    }
-
     /// The looking of the chip.
-    pub fn get_looking(&self) -> &[VirtualPairLookup<F>] {
+    pub fn get_looking(&self) -> &[LookupSummary] {
         &self.looking
     }
 
-    pub fn get_looked(&self) -> &[VirtualPairLookup<F>] {
+    pub fn get_looked(&self) -> &[LookupSummary] {
         &self.looked
     }
 
@@ -185,17 +169,10 @@ impl<F, C, CB> Air<CB> for MetaChip<F, C>
 where
     F: Field,
     C: Air<CB> + ChipBehavior<F>,
-    CB: ChipBuilder<F> + PermutationBuilder,
+    CB: ChipBuilder<F>,
 {
     fn eval(&self, builder: &mut CB) {
         self.chip.eval(builder);
-        eval_permutation_constraints(
-            &self.looking,
-            &self.looked,
-            1 << self.log_quotient_degree,
-            self.lookup_scope(),
-            builder,
-        )
     }
 }
 
@@ -214,6 +191,13 @@ where
 
     fn generate_preprocessed(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         self.chip.generate_preprocessed(program)
+    }
+
+    /// Forwarded alongside `generate_preprocessed`: falling through to the trait default would
+    /// report "does not declare" for a chip that does, sending merged deferred-commit keygen back
+    /// to generating the trace.
+    fn preprocessed_rows(&self, program: &Self::Program) -> Option<PreprocessedRows> {
+        self.chip.preprocessed_rows(program)
     }
 
     fn extra_record(&self, input: &C::Record, extra: &mut C::Record) {

@@ -277,6 +277,16 @@ impl RiscvEmulator {
             }
 
             // Upper immediate instructions.
+            //
+            // Unreachable since X12, for the same reason as the full emulator's arm: the
+            // transpiler re-encodes `AUIPC rd, imm` as `ADD rd, imm, pc`. Kept so a hand-built
+            // `Program` still emulates correctly; it would be rejected (not under-constrained)
+            // if proved. With `rd != x0` the rejection comes from the Cpu AIR's definitional
+            // constraint `is_alu_not_x0 == is_alu_instruction * (1 - op_a_0)`, which an honest
+            // trace violates because the row lands in the derived ALU class while
+            // `Instruction::is_alu_instruction` does not list AUIPC; forging past it only moves
+            // the failure to the Alu bus, where nothing receives opcode 27. `auipc x0, imm`
+            // proves fine -- it is a no-op either way.
             Opcode::AUIPC => {
                 let (rd, imm) = instruction.u_type();
                 (b, _) = (imm, imm);
@@ -319,9 +329,13 @@ impl RiscvEmulator {
                         // Executing a syscall optionally returns a value to write to the t0
                         // register. If it returns None, we just keep the
                         // syscall_id in t0.
-                        let ret_value = syscall_impl
-                            .emulate(&mut precompile_rt, syscall, b, c)
-                            .unwrap_or(u64::from(syscall_id));
+                        let returned = syscall_impl.emulate(&mut precompile_rt, syscall, b, c);
+                        // Checked before `returned` is used: on the failing path it is a
+                        // placeholder, not a result.
+                        if let Some(error) = precompile_rt.take_error() {
+                            return Err(error);
+                        }
+                        let ret_value = returned.unwrap_or(u64::from(syscall_id));
 
                         // If the syscall is `HALT` and the exit code is non-zero, return an error.
                         if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
@@ -390,11 +404,7 @@ impl RiscvEmulator {
             }
             Opcode::DIVU => {
                 (rd, b, c) = self.alu_rr_simple(instruction);
-                if c == 0 {
-                    a = u64::MAX;
-                } else {
-                    a = b / c;
-                }
+                a = b.checked_div(c).unwrap_or(u64::MAX);
                 self.alu_rw_simple(rd, a);
             }
             Opcode::REM => {
@@ -456,11 +466,9 @@ impl RiscvEmulator {
             }
             Opcode::DIVUW => {
                 (rd, b, c) = self.w_alu_rr_simple(instruction);
-                let result = if c as u32 == 0 {
-                    u64::MAX
-                } else {
-                    ((b as u32 / c as u32) as i32) as i64 as u64
-                };
+                let result = (b as u32)
+                    .checked_div(c as u32)
+                    .map_or(u64::MAX, |quotient| quotient as i32 as i64 as u64);
                 self.rw_simple(rd, result);
             }
             Opcode::REMW => {

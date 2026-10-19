@@ -17,7 +17,7 @@ use crate::{
 use core::fmt::Debug;
 use itertools::Itertools;
 use p3_field::{
-    Field, FieldAlgebra, FieldExtensionAlgebra, PrimeField, PrimeField64, TwoAdicField,
+    BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField, PrimeField64, TwoAdicField,
 };
 use std::{borrow::Borrow, collections::HashMap, mem::transmute};
 use tracing::instrument;
@@ -159,13 +159,37 @@ where
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
                     }
-                    // Instructions that do not write to memory.
+                    // Instructions that do not write to memory (nothing to backfill).
+                    // AssertZeroExt / MleOpen only read (`memory.mr`) their operands.
                     Instruction::Mem(MemInstr {
                         kind: MemAccessKind::Read,
                         ..
                     })
                     | Instruction::CommitPublicValues(_)
-                    | Instruction::Print(_) => (),
+                    | Instruction::Print(_)
+                    | Instruction::AssertZeroExt(_)
+                    | Instruction::MleOpen(_) => (),
+                    // FracFold / UnivariateFold DO write memory (out_p/out_q, next_sum),
+                    // but the MLE recursion builder backfills their multiplicities in its own
+                    // finish() pass (mle/compiler/recursion/lowering.rs), not through this generic IR
+                    // compiler. If a program containing them is ever routed through here,
+                    // their write mults would silently stay zero — fail loudly instead.
+                    Instruction::FracFold(_)
+                    | Instruction::UnivariateFold(_)
+                    | Instruction::LagrangeEvalD2(_)
+                    | Instruction::GkrSumcheckRound(_)
+                    | Instruction::ExtDotProduct(_)
+                    | Instruction::HornerEval(_)
+                    | Instruction::DigestSelect(_)
+                    | Instruction::BinaryFoldStep(_)
+                    | Instruction::PackBlock(_)
+                    | Instruction::UnpackBlock(_)
+                    | Instruction::Poseidon2Packed(_)
+                    | Instruction::ExpBitsLen(_) => panic!(
+                        "FracFold/UnivariateFold/LagrangeEvalD2/ExpBitsLen write memory but are not \
+                         backfilled by the generic IR compiler; build them via the MLE convert \
+                         builder's finish() pass"
+                    ),
                 }
             }
         });
@@ -197,7 +221,7 @@ where
             instructions,
             total_memory,
             traces,
-            shape: None,
+            ..Default::default()
         }
     }
 
@@ -284,7 +308,6 @@ where
             DslIr::AssertNeFI(lhs, rhs) => self.base_assert_ne(lhs, Imm::F(rhs), f),
             DslIr::AssertNeEI(lhs, rhs) => self.ext_assert_ne(lhs, Imm::EF(rhs), f),
 
-            DslIr::PrecompilePoseidon2BabyBear(data) => f(self.poseidon2_permute(data.0, data.1)),
             DslIr::PrecompilePoseidon2KoalaBear(data) => f(self.poseidon2_permute(data.0, data.1)),
             DslIr::CircuitExpReverseBits(dst, base, exp) => {
                 f(self.exp_reverse_bits(dst, base, exp))
@@ -754,6 +777,20 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::Hint(_) => "Hint",
         Instruction::CommitPublicValues(_) => "CommitPublicValues",
         Instruction::HintAddCurve(_) => "HintAddCurve",
+        Instruction::AssertZeroExt(_) => "AssertZeroExt",
+        Instruction::FracFold(_) => "FracFold",
+        Instruction::UnivariateFold(_) => "UnivariateFold",
+        Instruction::MleOpen(_) => "MleOpen",
+        Instruction::LagrangeEvalD2(_) => "LagrangeEvalD2",
+        Instruction::GkrSumcheckRound(_) => "GkrSumcheckRound",
+        Instruction::ExtDotProduct(_) => "ExtDotProduct",
+        Instruction::HornerEval(_) => "HornerEval",
+        Instruction::DigestSelect(_) => "DigestSelect",
+        Instruction::BinaryFoldStep(_) => "BinaryFoldStep",
+        Instruction::PackBlock(_) => "PackBlock",
+        Instruction::UnpackBlock(_) => "UnpackBlock",
+        Instruction::Poseidon2Packed(_) => "Poseidon2Packed",
+        Instruction::ExpBitsLen(_) => "ExpBitsLen",
     }
 }
 
@@ -778,14 +815,14 @@ pub enum Imm<F, EF> {
 
 impl<F, EF> Imm<F, EF>
 where
-    F: FieldAlgebra + Copy,
-    EF: FieldExtensionAlgebra<F>,
+    F: PrimeCharacteristicRing + Copy,
+    EF: BasedVectorSpace<F>,
 {
     // Get a `Block` of memory representing this immediate.
     pub fn as_block(&self) -> Block<F> {
         match self {
             Imm::F(f) => Block::from(*f),
-            Imm::EF(ef) => ef.as_base_slice().into(),
+            Imm::EF(ef) => ef.as_basis_coefficients_slice().into(),
         }
     }
 }

@@ -12,9 +12,8 @@ use crate::{
         lookup::{LookupScope, LookupType, SymbolicLookup},
     },
 };
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::Field;
-use p3_matrix::Matrix;
 use std::{any::Any, borrow::Borrow};
 
 impl<F: Field> BaseAir<F> for GlobalChip<F> {
@@ -29,9 +28,9 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &GlobalCols<CB::Var> = (*local).borrow();
-        let next = main.row_slice(1);
+        let next = main.next_slice();
         let next: &GlobalCols<CB::Var> = (*next).borrow();
 
         // Receive the arguments, which consists of 8 message columns, `is_send`, `is_receive`, and `kind`.
@@ -40,7 +39,9 @@ where
         // For a global receive interaction, `is_send = 0` and `is_receive = 1` are used.
         // For a memory global interaction, `kind = InteractionKind::Memory` is used.
         // For a syscall global interaction, `kind = InteractionKind::Syscall` is used.
-        // Therefore, `is_send`, `is_receive` are already known to be boolean, and `kind` is also known to be a `u8` value.
+        // Therefore, `is_send`, `is_receive` are already known to be boolean, and `kind` is known
+        // to be < 32 -- which is what the digest packing needs, and what
+        // `assert_global_kind_is_bounded_constant` checks of every sender at keygen.
         // Note that `local.is_real` is constrained to be boolean in `eval_single_digest`.
         builder.looked(SymbolicLookup::new(
             vec![
@@ -70,7 +71,11 @@ where
             local.is_send.into(),
             local.is_real,
             local.kind,
-            [local.message_0_16bit_limb, local.message_0_8bit_limb],
+            [
+                local.message_0_16bit_limb,
+                local.message_0_8bit_limb,
+                local.message_0_high_bit,
+            ],
         );
 
         // Evaluate the accumulation.

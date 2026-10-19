@@ -11,42 +11,37 @@ categories = { workspace = true }
 bincode.workspace = true
 serde.workspace = true
 anyhow.workspace = true
-p3-baby-bear.workspace = true
 p3-challenger.workspace = true
 p3-field.workspace = true
 p3-koala-bear.workspace = true
-p3-mersenne-31.workspace = true
-pico-vm.workspace = true
+# TODO(onchain): back to `pico-vm.workspace = true` once `multi-field-transcript` is unconditional.
+pico-vm = { path = "../../vm", default-features = false, features = ["rayon", "strict"] }
 pico-patch-libs.workspace = true
 cfg-if.workspace = true
 rand.workspace = true
-log.workspace = true
 env_logger.workspace = true
 lazy_static.workspace = true
 getrandom = { version = "0.2.15", features = ["custom"] }
+# Reached through p3's `rand`; needs its own backend, registered differently from 0.2.
+getrandom_v04 = { package = "getrandom", version = "0.4" }
 libm = { version = "0.2.8", optional = true }
 sha2 = { version = "0.10.8" }
-# Shelved together with the poseidon2 precompile: the zkCoprocessor input commitment is a
-# Poseidon2 Merkle root computed through that syscall, which this VM no longer serves.
-# Restore this line and the original `coprocessor` feature below to bring it back.
-# coprocessor-sdk = { git = "https://github.com/brevis-network/Pico-zkCoprocessor", optional = true }
+# The zkCoprocessor input commitment is a Poseidon2 Merkle root computed through
+# `syscall_poseidon2_permute`. That repository's `main` predates the syscall's alignment and
+# canonicality checks; this revision, on its `pico-3.0-rv64` branch, hands it 8-byte-aligned
+# states of canonical KoalaBear words. A `rev` rather than the branch: a lock pins either, but a
+# crate that depends on this one resolves it without our lock, and would take whatever the branch
+# held that day -- the input commitment its guest produces included.
+coprocessor-sdk = { git = "https://github.com/brevis-network/Pico-zkCoprocessor", rev = "0c5a781fd0bc73f2706748a04d4cccf167a19654", optional = true }
 hex.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
+tracing-forest.workspace = true
+tracing-subscriber.workspace = true
 
 [features]
-default = ["kb"]
-prover = ["pico-vm/jemalloc", "pico-vm/nightly-features"]
+prover = ["pico-vm/jemalloc"]
 libm = ["dep:libm"]
-# coprocessor = ["coprocessor-sdk"]   # original -- see the commented-out dependency above.
-# Kept declared but empty on purpose: the ~8 `#[cfg(feature = "coprocessor")]` blocks in
-# `io.rs`, `riscv_ecalls/io.rs` and `riscv_ecalls/halt.rs` stay in the source untouched, and
-# an undeclared feature would make every one of them an `unexpected_cfgs` warning, which is
-# a build failure under `-D warnings`. Turning it on now hits the `compile_error!` in lib.rs.
-coprocessor = []
-bb = []     # BabyBear
-kb = []     # KoalaBear
-m31 = []    # Mersenne31
-# Enable the AOT snapshot-main emulator in pico-vm. Consumers must also
-# register an AOT factory (see `prover/src/aot_glue.rs` in a generated project)
-# before constructing a prover client for the mode flip to take effect.
-aot = ["pico-vm/aot-emulator"]
+coprocessor = ["dep:coprocessor-sdk"]
+# No-op: KoalaBear is the only field. Kept so guests that still select it keep building.
+kb = []

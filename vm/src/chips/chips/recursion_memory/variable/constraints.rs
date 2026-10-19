@@ -3,9 +3,8 @@ use super::{
     MemoryVarChip,
 };
 use crate::machine::builder::{ChipBuilder, RecursionBuilder};
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::PrimeField32;
-use p3_matrix::Matrix;
 use std::{borrow::Borrow, iter::zip};
 
 impl<F: PrimeField32> BaseAir<F> for MemoryVarChip<F> {
@@ -20,10 +19,10 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MemoryCols<CB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &MemoryPreprocessedCols<CB::Var> = (*prep_local).borrow();
 
         for (value, access) in zip(local.values, prep_local.accesses) {

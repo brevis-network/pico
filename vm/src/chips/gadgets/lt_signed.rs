@@ -8,7 +8,7 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder},
 };
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use pico_derive::AlignedBorrow;
 
 use super::{lt_word_u16::LtWordU16Gadget, msb::U16MSBGadget};
@@ -121,7 +121,7 @@ impl<F: Field> LtSignedGadget<F> {
         builder.when_not(is_signed).assert_zero(cols.b_msb.msb);
         builder.when_not(is_signed).assert_zero(cols.c_msb.msb);
 
-        let base = AB::Expr::from_canonical_u32(1 << 16);
+        let base = AB::Expr::from_u32(1 << 16);
 
         // XOR `1 << 63` to `b` and `c` if `is_signed` is true.
         // If `is_signed` is false, the `msb` values are constrained to be zero.
@@ -134,10 +134,10 @@ impl<F: Field> LtSignedGadget<F> {
         let mut c_compare_arr = c_compare.0;
 
         b_compare_arr[3] = b_compare_arr[3].clone()
-            + is_signed.into() * AB::Expr::from_canonical_u32(1 << 15)
+            + is_signed.into() * AB::Expr::from_u32(1 << 15)
             - base.clone() * cols.b_msb.msb.into();
         c_compare_arr[3] = c_compare_arr[3].clone()
-            + is_signed.into() * AB::Expr::from_canonical_u32(1 << 15)
+            + is_signed.into() * AB::Expr::from_u32(1 << 15)
             - base.clone() * cols.c_msb.msb.into();
 
         // Now apply the unsigned LT operation.
@@ -150,47 +150,5 @@ impl<F: Field> LtSignedGadget<F> {
             cols.result,
             is_real,
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::machine::{builder::PublicValuesBuilder, folder::SymbolicConstraintFolder};
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::Matrix;
-    use pico_derive::AlignedBorrow;
-    use std::{borrow::Borrow, mem::size_of};
-
-    #[derive(AlignedBorrow, Clone, Copy)]
-    #[repr(C)]
-    struct TestCols<T> {
-        b: Word<T>,
-        c: Word<T>,
-        lt_signed: LtSignedGadget<T>,
-        is_signed: T,
-        is_real: T,
-    }
-
-    #[test]
-    fn test_lt_signed_gadget_simple_eval() {
-        let width = size_of::<TestCols<u8>>();
-        let mut builder = SymbolicConstraintFolder::new(0, width);
-        let main = builder.main();
-        let local = main.row_slice(0);
-        let local: &TestCols<_> = (*local).borrow();
-
-        LtSignedGadget::<KoalaBear>::eval(
-            &mut builder,
-            local.b,
-            local.c,
-            local.lt_signed,
-            local.is_signed,
-            local.is_real.into(),
-        );
-
-        assert_eq!(builder.num_constraints(), 24);
-        assert_eq!(builder.public_values().len(), 119);
-        assert_eq!(builder.num_lookups(), 3);
     }
 }

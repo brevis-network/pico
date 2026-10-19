@@ -9,4 +9,4 @@ categories = { workspace = true }
 [dependencies]
 # pico-sdk = { git = "https://github.com/brevis-network/pico", branch = "rv64" }
 pico-sdk.workspace = true
-sha2 = { git = "https://github.com/brevis-network/hashes.git", package = "sha2", branch = "sha2-0.10.9-rv64" }
+sha2 = { git = "https://github.com/brevis-network/hashes.git", package = "sha2", rev = "b0144c6cffccf93c019089d8998a8889ea516e7b" } # sha2-0.10.9-rv64

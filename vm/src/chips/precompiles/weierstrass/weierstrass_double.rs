@@ -38,9 +38,9 @@ use core::{
 };
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, FieldAlgebra, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelIterator, ParallelSlice};
 use pico_derive::AlignedBorrow;
 use std::{fmt::Debug, marker::PhantomData};
@@ -277,11 +277,9 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
 
                         // Populate basic columns.
                         cols.is_real = F::ONE;
-                        cols.chunk = F::from_canonical_u32(event.chunk);
-                        cols.clk = F::from_canonical_u32(checked_u64_to_u32(
-                            event.clk,
-                            "weierstrass double clk",
-                        ));
+                        cols.chunk = F::from_u32(event.chunk);
+                        cols.clk =
+                            F::from_u32(checked_u64_to_u32(event.clk, "weierstrass double clk"));
                         let len = <E::BaseField as NumLimbs>::Limbs::USIZE as u64 * 2;
                         cols.p_ptr
                             .populate(&mut new_byte_lookup_events, event.p_ptr, len);
@@ -397,7 +395,7 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &WeierstrassDoubleAssignCols<CB::Var, E::BaseField> = (*local).borrow();
 
         let num_words_field_element = <E::BaseField as NumLimbs>::Limbs::USIZE / 8;
@@ -429,7 +427,7 @@ where
             E::BaseField::to_limbs_field::<CB::Expr, CB::F>(&E::BaseField::modulus());
 
         // `a` in the Weierstrass form: y^2 = x^3 + a * x + b.
-        let a = E::BaseField::to_limbs_field::<CB::Expr, _>(&E::a_int());
+        let a = E::BaseField::to_limbs_field::<CB::Expr, CB::F>(&E::a_int());
 
         // slope = slope_numerator / slope_denominator.
         let slope = {
@@ -442,7 +440,7 @@ where
                 local.p_x_squared_times_3.eval(
                     builder,
                     &local.p_x_squared.result,
-                    &E::BaseField::to_limbs_field::<CB::Expr, _>(&BigUint::from(3u32)),
+                    &E::BaseField::to_limbs_field::<CB::Expr, CB::F>(&BigUint::from(3u32)),
                     FieldOperation::Mul,
                     local.is_real,
                 );
@@ -459,7 +457,7 @@ where
             // slope_denominator = 2 * y.
             local.slope_denominator.eval(
                 builder,
-                &E::BaseField::to_limbs_field::<CB::Expr, _>(&BigUint::from(2u32)),
+                &E::BaseField::to_limbs_field::<CB::Expr, CB::F>(&BigUint::from(2u32)),
                 &p_y,
                 FieldOperation::Mul,
                 local.is_real,
@@ -557,7 +555,7 @@ where
                 .iter()
                 .map(|v| (*v).into())
                 .collect::<Vec<CB::Expr>>(),
-            CB::F::from_canonical_u32(256).into(),
+            CB::F::from_u32(256).into(),
         );
         let y3_result_words = limbs_to_words(
             &local
@@ -567,7 +565,7 @@ where
                 .iter()
                 .map(|v| (*v).into())
                 .collect::<Vec<CB::Expr>>(),
-            CB::F::from_canonical_u32(256).into(),
+            CB::F::from_u32(256).into(),
         );
         let result_words: Vec<_> = x3_result_words.into_iter().chain(y3_result_words).collect();
 
@@ -616,16 +614,10 @@ where
 
         // Fetch the syscall id for the curve type.
         let syscall_id_felt = match E::CURVE_TYPE {
-            CurveType::Secp256k1 => {
-                CB::F::from_canonical_u32(SyscallCode::SECP256K1_DOUBLE.syscall_id())
-            }
-            CurveType::Secp256r1 => {
-                CB::F::from_canonical_u32(SyscallCode::SECP256R1_DOUBLE.syscall_id())
-            }
-            CurveType::Bn254 => CB::F::from_canonical_u32(SyscallCode::BN254_DOUBLE.syscall_id()),
-            CurveType::Bls12381 => {
-                CB::F::from_canonical_u32(SyscallCode::BLS12381_DOUBLE.syscall_id())
-            }
+            CurveType::Secp256k1 => CB::F::from_u32(SyscallCode::SECP256K1_DOUBLE.syscall_id()),
+            CurveType::Secp256r1 => CB::F::from_u32(SyscallCode::SECP256R1_DOUBLE.syscall_id()),
+            CurveType::Bn254 => CB::F::from_u32(SyscallCode::BN254_DOUBLE.syscall_id()),
+            CurveType::Bls12381 => CB::F::from_u32(SyscallCode::BLS12381_DOUBLE.syscall_id()),
             _ => panic!("Unsupported curve: {}", E::CURVE_TYPE),
         };
 

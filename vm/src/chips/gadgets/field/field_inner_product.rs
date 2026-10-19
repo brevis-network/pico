@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use num::{BigUint, Zero};
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra, PrimeField32};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use pico_derive::AlignedBorrow;
 use typenum::Unsigned;
 
@@ -22,7 +22,7 @@ use super::{field_op::eval_field_operation, utils::compute_root_quotient_and_shi
 /// `M` is the modulus `P::modulus()` under the assumption that the length of `a` and `b` is small
 /// enough so that the vanishing polynomial has limbs bounded by the witness shift. It is the
 /// responsibility of the caller to ensure that the length of `a` and `b` is small enough.
-#[derive(Clone, AlignedBorrow)]
+#[derive(Clone, AlignedBorrow, Eq, PartialEq)]
 #[repr(C)]
 pub struct FieldInnerProductCols<T, P: FieldParameters> {
     /// The result of `a inner product b`, where a, b are field elements

@@ -8,7 +8,6 @@
 #![allow(internal_features)]
 // allow unused crate::iter::* imports for now until i figure out how to deal with them
 #![cfg_attr(all(not(feature = "rayon"), feature = "strict"), allow(unused_imports))]
-#![feature(const_type_id)]
 #![feature(core_intrinsics)]
 #![feature(generic_const_items)]
 #![feature(const_cmp)]
@@ -24,6 +23,7 @@ pub mod emulator;
 pub mod instances;
 pub mod iter;
 pub mod machine;
+pub mod mle;
 pub mod primitives;
 pub mod proverchain;
 pub mod thread;

@@ -75,9 +75,8 @@ use crate::{
     machine::builder::{ChipBuilder, ChipLookupBuilder, ChipRangeBuilder, ChipWordBuilder},
     primitives::consts::{LONG_WORD_SIZE, WORD_SIZE},
 };
-use p3_air::{Air, AirBuilder};
-use p3_field::{Field, FieldAlgebra};
-use p3_matrix::Matrix;
+use p3_air::{Air, AirBuilder, WindowAccess};
+use p3_field::{Field, PrimeCharacteristicRing};
 use std::borrow::Borrow;
 
 impl<F: Field, CB: ChipBuilder<F>> Air<CB> for DivRemChip<F>
@@ -86,9 +85,9 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &DivRemCols<CB::Var> = (*local).borrow();
-        let base = CB::F::from_canonical_u32(1 << 16);
+        let base = CB::F::from_u32(1 << 16);
         let one: CB::Expr = CB::F::ONE.into();
         let zero: CB::Expr = CB::F::ZERO.into();
 
@@ -177,7 +176,7 @@ where
             // materialises `0xFFFF_FFFFu32` as `li -1`, leaving them all ones). The bus
             // therefore has to carry `*_raw`, and `b`/`c` are derived from it here.
             {
-                let u16_max = CB::F::from_canonical_u16(u16::MAX);
+                let u16_max = CB::F::from_u16(u16::MAX);
                 for i in 0..WORD_SIZE / 2 {
                     builder.assert_eq(local_b_raw[i], local_b[i]);
                     builder.assert_eq(local_c_raw[i], local_c[i]);
@@ -212,11 +211,11 @@ where
                         .assert_eq(local_quotient_comp[i], zero.clone());
                     builder.when(is_signed_word_operation.clone()).assert_eq(
                         local_quotient_comp[i],
-                        local_quot_msb.msb * CB::F::from_canonical_u16(u16::MAX),
+                        local_quot_msb.msb * CB::F::from_u16(u16::MAX),
                     );
                     builder.when(is_word_operation.clone()).assert_eq(
                         local_quotient[i],
-                        local_quot_msb.msb * CB::F::from_canonical_u16(u16::MAX),
+                        local_quot_msb.msb * CB::F::from_u16(u16::MAX),
                     );
                     builder
                         .when(is_not_word_operation.clone())
@@ -237,11 +236,11 @@ where
                         .assert_eq(local_remainder_comp[i], zero.clone());
                     builder.when(is_signed_word_operation.clone()).assert_eq(
                         local_remainder_comp[i],
-                        local_rem_msb.msb * CB::F::from_canonical_u16(u16::MAX),
+                        local_rem_msb.msb * CB::F::from_u16(u16::MAX),
                     );
                     builder.when(is_word_operation.clone()).assert_eq(
                         local_remainder[i],
-                        local_rem_msb.msb * CB::F::from_canonical_u16(u16::MAX),
+                        local_rem_msb.msb * CB::F::from_u16(u16::MAX),
                     );
                     builder
                         .when(is_not_word_operation.clone())
@@ -369,7 +368,7 @@ where
 
             // Add remainder to product c * quotient, and compare it to b.
             {
-                let sign_extension = local_rem_neg * CB::F::from_canonical_u16(u16::MAX);
+                let sign_extension = local_rem_neg * CB::F::from_u16(u16::MAX);
                 let mut c_times_quotient_plus_remainder: Vec<CB::Expr> =
                     vec![CB::F::ZERO.into(); LONG_WORD_SIZE];
 
@@ -414,7 +413,7 @@ where
                             } else {
                                 // The upper 4 bytes: when NOT overflow, must equal b_neg * 0xFFFF
                                 builder.when_not(local_is_overflow).assert_eq(
-                                    local_b_neg * CB::F::from_canonical_u16(u16::MAX),
+                                    local_b_neg * CB::F::from_u16(u16::MAX),
                                     quotient_plus_remainder_times.clone(),
                                 );
                             }
@@ -474,7 +473,7 @@ where
                 for i in 0..WORD_SIZE {
                     builder
                         .when(local_is_c_0.result)
-                        .assert_eq(local_quotient[i], CB::F::from_canonical_u16(u16::MAX));
+                        .assert_eq(local_quotient[i], CB::F::from_u16(u16::MAX));
                 }
 
                 // If is_c_0 is true, then the remainder must be b.
@@ -500,14 +499,14 @@ where
                 // In the case that `c` or `rem` is negative, instead check that their sum is zero by
                 // sending an AddEvent.
                 builder.looking_alu(
-                    CB::Expr::from_canonical_u32(Opcode::ADD as u32),
+                    CB::Expr::from_u32(Opcode::ADD as u32),
                     Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                     local_c,
                     local_abs_c,
                     local_abs_c_alu_event,
                 );
                 builder.looking_alu(
-                    CB::Expr::from_canonical_u32(Opcode::ADD as u32),
+                    CB::Expr::from_u32(Opcode::ADD as u32),
                     Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
                     local_remainder,
                     local_abs_remainder,
@@ -695,14 +694,14 @@ where
                 );
 
                 let opcode = {
-                    let divu: CB::Expr = CB::F::from_canonical_u32(Opcode::DIVU as u32).into();
-                    let remu: CB::Expr = CB::F::from_canonical_u32(Opcode::REMU as u32).into();
-                    let div: CB::Expr = CB::F::from_canonical_u32(Opcode::DIV as u32).into();
-                    let rem: CB::Expr = CB::F::from_canonical_u32(Opcode::REM as u32).into();
-                    let divw: CB::Expr = CB::F::from_canonical_u32(Opcode::DIVW as u32).into();
-                    let remw: CB::Expr = CB::F::from_canonical_u32(Opcode::REMW as u32).into();
-                    let divuw: CB::Expr = CB::F::from_canonical_u32(Opcode::DIVUW as u32).into();
-                    let remuw: CB::Expr = CB::F::from_canonical_u32(Opcode::REMUW as u32).into();
+                    let divu: CB::Expr = CB::F::from_u32(Opcode::DIVU as u32).into();
+                    let remu: CB::Expr = CB::F::from_u32(Opcode::REMU as u32).into();
+                    let div: CB::Expr = CB::F::from_u32(Opcode::DIV as u32).into();
+                    let rem: CB::Expr = CB::F::from_u32(Opcode::REM as u32).into();
+                    let divw: CB::Expr = CB::F::from_u32(Opcode::DIVW as u32).into();
+                    let remw: CB::Expr = CB::F::from_u32(Opcode::REMW as u32).into();
+                    let divuw: CB::Expr = CB::F::from_u32(Opcode::DIVUW as u32).into();
+                    let remuw: CB::Expr = CB::F::from_u32(Opcode::REMUW as u32).into();
 
                     local_is_divu * divu
                         + local_is_remu * remu

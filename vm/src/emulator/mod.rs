@@ -7,3 +7,5 @@ pub mod recursion;
 pub mod riscv;
 pub mod snapshot;
 pub mod stdin;
+
+pub use stdin::{EmulatorStdin, EmulatorStdinBuilder};

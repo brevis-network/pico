@@ -8,9 +8,8 @@ use crate::{
     machine::builder::{ChipBuilder, ExtensionBuilder, RecursionBuilder},
     primitives::consts::EXTENSION_DEGREE,
 };
-use p3_air::{Air, BaseAir};
+use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{extension::BinomiallyExtendable, Field};
-use p3_matrix::Matrix;
 use std::{borrow::Borrow, iter::zip};
 
 impl<F> BaseAir<F> for ExtAluChip<F> {
@@ -25,10 +24,10 @@ where
 {
     fn eval(&self, builder: &mut CB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &ExtAluCols<CB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &ExtAluPreprocessedCols<CB::Var> = (*prep_local).borrow();
 
         for (
@@ -60,6 +59,11 @@ where
             builder
                 .when(is_mul)
                 .assert_ext_eq(in1.clone() * in2.clone(), out.clone());
+            // NOTE: division is constrained as in1 == in2 * out, which leaves `out` free when
+            // in2 == 0 (only in1 == 0 is forced then). Safe today because the recursion lowering
+            // emits no consumed division whose divisor an adversary could drive to zero (every
+            // inverse used is a compile-time-constant nonzero value). Re-audit if a consumed
+            // division over an adversary-controlled divisor is ever emitted.
             builder.when(is_div).assert_ext_eq(in1, in2 * out);
 
             // Read the inputs from memory.

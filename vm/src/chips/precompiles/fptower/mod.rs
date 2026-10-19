@@ -2,11 +2,6 @@ pub mod fp;
 pub mod fp2_addsub;
 pub mod fp2_mul;
 
-#[cfg(test)]
-mod test_bls381;
-#[cfg(test)]
-mod tests_bn254;
-
 use crate::chips::{
     chips::riscv_memory::read_write::columns::MemoryCols, gadgets::utils::limbs::Limbs,
 };

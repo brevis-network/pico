@@ -23,6 +23,8 @@ pub struct UnconstrainedState {
     pub(crate) op_record: MemoryAccessRecord,
     pub(crate) record: EmulationRecord,
     pub(crate) prev_mode: EmulatorMode,
+    pub(crate) commit_in_flight: bool,
+    pub(crate) deferred_commits: u32,
 }
 
 impl UnconstrainedState {
@@ -43,6 +45,8 @@ impl UnconstrainedState {
             memory_diff: HashMap::default(),
             register_diff: HashMap::default(),
             record: core::mem::take(&mut rt.record),
+            commit_in_flight: rt.chunk_split_state.commit_in_flight,
+            deferred_commits: rt.chunk_split_state.deferred_commits,
             op_record: core::mem::take(&mut rt.memory_accesses),
             prev_mode,
         }

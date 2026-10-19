@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 pub mod columns;
 pub mod constraints;
 pub mod traces;
-mod utils;
+pub mod utils;
 
 #[cfg(test)]
 mod tests;
