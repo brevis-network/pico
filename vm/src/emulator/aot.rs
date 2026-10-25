@@ -17,9 +17,8 @@ use std::num::NonZeroU32;
 
 /// The card count this process drives, or `None` when nothing said.
 ///
-/// `PROVER_COUNT` is read from the environment only on this branch -- the CLI that also bound it
-/// as a flag lived in the distributed driver. Read once: both knobs below ask, and a typo should
-/// be reported once, not twice.
+/// `PROVER_COUNT` is the env binding of a CLI field, so it is missing when a caller passes the
+/// flag instead. Read once: both knobs below ask, and a typo should be reported once, not twice.
 fn prover_count() -> Option<NonZeroU32> {
     static COUNT: OnceLock<Option<NonZeroU32>> = OnceLock::new();
     *COUNT.get_or_init(|| env_u32("PROVER_COUNT").and_then(NonZeroU32::new))
@@ -42,31 +41,19 @@ fn requested_segments() -> Option<u32> {
 /// several threads. `0` and `1` are both off.
 ///
 /// Only the AOT snapshot runtime reads this, and only `emulate_snapshot_pipeline` consumes what
-/// it hands back: the AOT validation harness, and `pico-prover`'s AOT path through
-/// `mle::machine::riscv::emulate_with_pipeline`.
+/// it hands back: the prover pipeline, the AOT validation harness, and `pico-prover`'s AOT path
+/// through `mle::machine::riscv::emulate_with_pipeline`.
 pub fn split_segments() -> u32 {
     static SEGMENTS: OnceLock<u32> = OnceLock::new();
     *SEGMENTS.get_or_init(|| {
-        let segments = chosen_segments(
-            requested_segments(),
-            env_u32("NUM_THREADS").unwrap_or(1),
-            prover_count(),
-        );
+        let threads = env_u32("NUM_THREADS").unwrap_or(1);
+        let segments = chosen_segments(requested_segments(), threads, prover_count());
         // Splitting without knowing the card count cuts the first chunk alone, which moves the
         // stall rather than removing it. Only an explicit request gets here, so say so and go on.
         if segments > 1 && prover_count().is_none() {
             tracing::warn!(
                 "split replay is on but PROVER_COUNT is unset, so only the first chunk is cut; \
                  set PROVER_COUNT, or MLE_SPLIT_CHUNKS, to cut one per card"
-            );
-        }
-        // Derived, not asked for: `PROVER_COUNT` is how the GPU prover sizes the split, so a
-        // script copied from it is the likely cause here — and it would turn on a replay path
-        // nothing on this branch drives end to end.
-        if segments > 1 && requested_segments().is_none() {
-            tracing::warn!(
-                "split replay is on because PROVER_COUNT and NUM_THREADS imply {segments} \
-                 segments; set MLE_SPLIT_REPLAY=1 to keep one segment per chunk"
             );
         }
         // A split bigger than the memory pool waits on it forever, and
@@ -141,7 +128,6 @@ pub fn create_aot_emulator(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::emulator::{opts::EmulatorOpts, riscv::public_values::RecordFinalPvsState};
 
     // OnceLock is process-wide and cannot be reset between tests; all
     // assertions that observe registration share a single test fn.

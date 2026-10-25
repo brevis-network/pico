@@ -5,11 +5,11 @@
 //! same code differ — so this, not a proof comparison, is what a change to how a chunk is
 //! replayed has to be judged against.
 //!
-//! `byte_lookups` and `precompile_events` reach the record out of a hash map and carry no
-//! meaningful order, so both are canonicalised before digesting. Without that the gate fires on
-//! two runs of the *same* code and sends the reader after a bug that is not there.
+//! Two fields are drained from hash maps and carry no meaningful order (`bump_record`: "output
+//! order is irrelevant"), so they are canonicalised before digesting. Without that the gate
+//! fires on two runs of the *same* code and sends the reader after a bug that is not there.
 
-use std::{collections::HashMap, io::Write};
+use std::io::Write;
 
 use crate::chips::chips::riscv_memory::event::MemoryRecord;
 
@@ -76,8 +76,10 @@ pub fn field_digests(record: &EmulationRecord) -> Vec<(&'static str, usize, u64)
     // Collapsing them is what makes this comparable across a split, which adds exactly such a
     // pair. What it must not collapse is a window that went missing: its neighbours then do not
     // meet, and the chain stays two links where the unsplit replay had one.
-    let mut windows_by_addr: HashMap<u64, Vec<(u32, u64, MemoryRecord, MemoryRecord)>> =
-        HashMap::new();
+    let mut windows_by_addr: std::collections::HashMap<
+        u64,
+        Vec<(u32, u64, MemoryRecord, MemoryRecord)>,
+    > = std::collections::HashMap::new();
     for event in &record.cpu_local_memory_access {
         windows_by_addr.entry(event.addr).or_default().push((
             event.final_mem_access.timestamp,
@@ -124,16 +126,10 @@ pub fn field_digests(record: &EmulationRecord) -> Vec<(&'static str, usize, u64)
             record.memory_read_write_event_indices.len(),
             digest(&record.memory_read_write_event_indices),
         ),
-        // Two rows: this record keeps adds and subs apart, where the GPU prover merges them.
         (
-            "add_events",
-            record.add_events.len(),
-            digest(&record.add_events),
-        ),
-        (
-            "sub_events",
-            record.sub_events.len(),
-            digest(&record.sub_events),
+            "add_sub_events",
+            record.add_sub_events.len(),
+            digest(record.add_sub_events.as_slice()),
         ),
         (
             "mul_events",
@@ -163,7 +159,7 @@ pub fn field_digests(record: &EmulationRecord) -> Vec<(&'static str, usize, u64)
         (
             "lt_events",
             record.lt_events.len(),
-            digest(&record.lt_events),
+            digest(record.lt_events.as_slice()),
         ),
         ("byte_lookups", byte_lookups.len(), digest(&byte_lookups)),
         (
@@ -294,27 +290,19 @@ mod tests {
     /// the same code — and then every real finding is buried in false ones.
     #[test]
     fn local_memory_order_is_not_a_difference() {
-        let left = EmulationRecord {
-            cpu_local_memory_access: vec![local_event(0x100, 1), local_event(0x200, 2)],
-            ..Default::default()
-        };
-        let right = EmulationRecord {
-            cpu_local_memory_access: vec![local_event(0x200, 2), local_event(0x100, 1)],
-            ..Default::default()
-        };
+        let mut left = EmulationRecord::default();
+        left.cpu_local_memory_access = vec![local_event(0x100, 1), local_event(0x200, 2)];
+        let mut right = EmulationRecord::default();
+        right.cpu_local_memory_access = vec![local_event(0x200, 2), local_event(0x100, 1)];
         assert_eq!(first_difference(&left, &right), None);
     }
 
     #[test]
     fn a_changed_outermost_value_is_a_difference() {
-        let left = EmulationRecord {
-            cpu_local_memory_access: vec![local_event(0x100, 1)],
-            ..Default::default()
-        };
-        let right = EmulationRecord {
-            cpu_local_memory_access: vec![local_event(0x100, 2)],
-            ..Default::default()
-        };
+        let mut left = EmulationRecord::default();
+        left.cpu_local_memory_access = vec![local_event(0x100, 1)];
+        let mut right = EmulationRecord::default();
+        right.cpu_local_memory_access = vec![local_event(0x100, 2)];
         let reported = first_difference(&left, &right).expect("a changed value must be reported");
         assert!(
             reported.starts_with("cpu_local_memory_chain:"),
@@ -327,20 +315,16 @@ mod tests {
     /// exactly such an access — and it cancels against its neighbour, so the bus cannot see it.
     #[test]
     fn an_interior_access_is_deliberately_not_compared() {
-        let left = EmulationRecord {
-            cpu_local_memory_access: vec![
-                window(0x100, access(1, 5), access(2, 40)),
-                window(0x100, access(2, 40), access(3, 90)),
-            ],
-            ..Default::default()
-        };
-        let right = EmulationRecord {
-            cpu_local_memory_access: vec![
-                window(0x100, access(1, 5), access(0xdead, 40)),
-                window(0x100, access(0xdead, 40), access(3, 90)),
-            ],
-            ..Default::default()
-        };
+        let mut left = EmulationRecord::default();
+        left.cpu_local_memory_access = vec![
+            window(0x100, access(1, 5), access(2, 40)),
+            window(0x100, access(2, 40), access(3, 90)),
+        ];
+        let mut right = EmulationRecord::default();
+        right.cpu_local_memory_access = vec![
+            window(0x100, access(1, 5), access(0xdead, 40)),
+            window(0x100, access(0xdead, 40), access(3, 90)),
+        ];
         assert_eq!(first_difference(&left, &right), None);
     }
 
@@ -348,17 +332,13 @@ mod tests {
     /// where the unsplit replay had one. Same span, so not a difference.
     #[test]
     fn a_window_split_in_two_at_the_same_span_is_not_a_difference() {
-        let unsplit = EmulationRecord {
-            cpu_local_memory_access: vec![window(0x100, access(1, 5), access(9, 90))],
-            ..Default::default()
-        };
-        let split = EmulationRecord {
-            cpu_local_memory_access: vec![
-                window(0x100, access(1, 5), access(4, 40)),
-                window(0x100, access(4, 40), access(9, 90)),
-            ],
-            ..Default::default()
-        };
+        let mut unsplit = EmulationRecord::default();
+        unsplit.cpu_local_memory_access = vec![window(0x100, access(1, 5), access(9, 90))];
+        let mut split = EmulationRecord::default();
+        split.cpu_local_memory_access = vec![
+            window(0x100, access(1, 5), access(4, 40)),
+            window(0x100, access(4, 40), access(9, 90)),
+        ];
         assert_eq!(first_difference(&unsplit, &split), None);
     }
 
@@ -368,17 +348,13 @@ mod tests {
     /// unsplit replay of the same execution disagree for no real reason.
     #[test]
     fn windows_are_ordered_by_when_they_close() {
-        let split = EmulationRecord {
-            cpu_local_memory_access: vec![
-                window(0x100, access(1, 9_000), access(2, 10)),
-                window(0x100, access(2, 10), access(3, 20)),
-            ],
-            ..Default::default()
-        };
-        let unsplit = EmulationRecord {
-            cpu_local_memory_access: vec![window(0x100, access(1, 9_000), access(3, 20))],
-            ..Default::default()
-        };
+        let mut split = EmulationRecord::default();
+        split.cpu_local_memory_access = vec![
+            window(0x100, access(1, 9_000), access(2, 10)),
+            window(0x100, access(2, 10), access(3, 20)),
+        ];
+        let mut unsplit = EmulationRecord::default();
+        unsplit.cpu_local_memory_access = vec![window(0x100, access(1, 9_000), access(3, 20))];
         assert_eq!(first_difference(&split, &unsplit), None);
     }
 
@@ -386,17 +362,13 @@ mod tests {
     /// ends that address on a different access.
     #[test]
     fn a_split_window_that_ends_elsewhere_is_a_difference() {
-        let unsplit = EmulationRecord {
-            cpu_local_memory_access: vec![window(0x100, access(1, 5), access(9, 90))],
-            ..Default::default()
-        };
-        let split = EmulationRecord {
-            cpu_local_memory_access: vec![
-                window(0x100, access(1, 5), access(4, 40)),
-                window(0x100, access(4, 40), access(9, 110)),
-            ],
-            ..Default::default()
-        };
+        let mut unsplit = EmulationRecord::default();
+        unsplit.cpu_local_memory_access = vec![window(0x100, access(1, 5), access(9, 90))];
+        let mut split = EmulationRecord::default();
+        split.cpu_local_memory_access = vec![
+            window(0x100, access(1, 5), access(4, 40)),
+            window(0x100, access(4, 40), access(9, 110)),
+        ];
         let reported =
             first_difference(&unsplit, &split).expect("a changed final access must be reported");
         assert!(
@@ -410,21 +382,17 @@ mod tests {
     /// The chain does not: its neighbours no longer meet, so it stays two links.
     #[test]
     fn a_dropped_middle_window_is_a_difference() {
-        let whole = EmulationRecord {
-            cpu_local_memory_access: vec![
-                window(0x100, access(1, 5), access(2, 40)),
-                window(0x100, access(2, 40), access(3, 90)),
-                window(0x100, access(3, 90), access(4, 150)),
-            ],
-            ..Default::default()
-        };
-        let dropped = EmulationRecord {
-            cpu_local_memory_access: vec![
-                window(0x100, access(1, 5), access(2, 40)),
-                window(0x100, access(3, 90), access(4, 150)),
-            ],
-            ..Default::default()
-        };
+        let mut whole = EmulationRecord::default();
+        whole.cpu_local_memory_access = vec![
+            window(0x100, access(1, 5), access(2, 40)),
+            window(0x100, access(2, 40), access(3, 90)),
+            window(0x100, access(3, 90), access(4, 150)),
+        ];
+        let mut dropped = EmulationRecord::default();
+        dropped.cpu_local_memory_access = vec![
+            window(0x100, access(1, 5), access(2, 40)),
+            window(0x100, access(3, 90), access(4, 150)),
+        ];
         let reported =
             first_difference(&whole, &dropped).expect("a dropped window must be reported");
         assert!(
@@ -437,18 +405,14 @@ mod tests {
     /// reduce to the one span an unsplit replay would have left.
     #[test]
     fn a_chain_of_windows_reduces_to_the_unsplit_span() {
-        let split = EmulationRecord {
-            cpu_local_memory_access: vec![
-                window(0x100, access(1, 5), access(2, 40)),
-                window(0x100, access(2, 40), access(3, 90)),
-                window(0x100, access(3, 90), access(4, 150)),
-            ],
-            ..Default::default()
-        };
-        let unsplit = EmulationRecord {
-            cpu_local_memory_access: vec![window(0x100, access(1, 5), access(4, 150))],
-            ..Default::default()
-        };
+        let mut split = EmulationRecord::default();
+        split.cpu_local_memory_access = vec![
+            window(0x100, access(1, 5), access(2, 40)),
+            window(0x100, access(2, 40), access(3, 90)),
+            window(0x100, access(3, 90), access(4, 150)),
+        ];
+        let mut unsplit = EmulationRecord::default();
+        unsplit.cpu_local_memory_access = vec![window(0x100, access(1, 5), access(4, 150))];
         assert_eq!(first_difference(&split, &unsplit), None);
     }
 
@@ -456,14 +420,10 @@ mod tests {
     /// appended without rebasing them leaves this field — and only this field — wrong.
     #[test]
     fn an_unrebased_index_is_a_difference() {
-        let left = EmulationRecord {
-            memory_read_write_event_indices: vec![0, 5, 9],
-            ..Default::default()
-        };
-        let right = EmulationRecord {
-            memory_read_write_event_indices: vec![0, 5, 8],
-            ..Default::default()
-        };
+        let mut left = EmulationRecord::default();
+        left.memory_read_write_event_indices = vec![0, 5, 9];
+        let mut right = EmulationRecord::default();
+        right.memory_read_write_event_indices = vec![0, 5, 8];
         let reported =
             first_difference(&left, &right).expect("an unrebased index must be reported");
         assert!(
@@ -474,14 +434,10 @@ mod tests {
 
     #[test]
     fn a_missing_event_is_a_difference() {
-        let left = EmulationRecord {
-            mul_events: vec![AluEvent::default(), AluEvent::default()],
-            ..Default::default()
-        };
-        let right = EmulationRecord {
-            mul_events: vec![AluEvent::default()],
-            ..Default::default()
-        };
+        let mut left = EmulationRecord::default();
+        left.mul_events = vec![AluEvent::default(), AluEvent::default()];
+        let mut right = EmulationRecord::default();
+        right.mul_events = vec![AluEvent::default()];
         let reported = first_difference(&left, &right).expect("a dropped event must be reported");
         assert!(
             reported.starts_with("mul_events:"),

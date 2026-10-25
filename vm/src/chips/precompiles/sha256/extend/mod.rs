@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 pub mod columns;
 mod constraints;
 pub mod controller;
+pub mod ffi;
 mod trace;
 
 #[derive(Default)]
@@ -18,3 +19,6 @@ pub fn sha_extend(w: &mut [u32]) {
         w[i] = w[i - 16] + s0 + w[i - 7] + s1;
     }
 }
+
+#[cfg(test)]
+pub mod tests;

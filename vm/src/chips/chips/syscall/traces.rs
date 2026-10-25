@@ -5,27 +5,42 @@ use crate::{
             riscv_global::event::GlobalInteractionEvent,
             syscall::{columns::SyscallCols, SyscallChip, SyscallChunkKind, NUM_SYSCALL_COLS},
         },
-        utils::pad_rows_fixed,
+        trace::TraceData,
+        utils::{next_power_of_two, pad_rows_fixed},
     },
     compiler::{
         addr::{encode_proof_addr_to_u32_limbs_48, Addr},
         riscv::{opcode::ByteOpcode, program::Program},
     },
-    emulator::riscv::{record::EmulationRecord, syscalls::SyscallEvent},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+    },
+    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord, syscalls::SyscallEvent},
+    instances::preparer::{EventCounter, PreallocatedGpuMemory, PreparedGpuEvents},
     iter::{IntoPicoIterator, IntoPicoRefIterator, PicoIterator, PicoSlice},
     machine::{
         chip::ChipBehavior,
-        estimator::EventCapture,
+        estimator::{EventCapture, EventSizeCapture},
         lookup::{LookupScope, LookupType},
     },
 };
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+use cudart_sys::*;
 use itertools::Itertools;
 use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use pico_gpu_api::cuda_syscall_generate_extra_record_and_main_u64;
 use std::borrow::BorrowMut;
+use tracing::info;
 
 impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
     type Record = EmulationRecord;
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -168,6 +183,149 @@ impl<F: PrimeField32> ChipBehavior<F> for SyscallChip<F> {
     fn lookup_scope(&self) -> LookupScope {
         LookupScope::Regional
     }
+
+    fn count_extra_records(record: &Self::Record, counter: &mut EventCounter) {
+        // RISCV Syscall events
+        counter.num_syscall_events += record.syscall_events.len();
+        counter.num_global_lookup_events += counter.num_syscall_events;
+        // Precompile Syscall events
+        // counter.num_precompile_syscall_events += record.precompile_events.all_events().count();
+        counter.num_precompile_syscall_events += record
+            .precompile_events
+            .events
+            .iter()
+            .map(|(_, v)| v.len())
+            .sum::<usize>();
+        counter.num_global_lookup_events += counter.num_precompile_syscall_events;
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            match self.chunk_kind {
+                SyscallChunkKind::Riscv => record.event_counter.num_syscall_events > 0,
+                // Tail-merge: keep in lockstep with `is_active` above — catch-all chunks may
+                // carry memory events alongside precompile events (memory must not deactivate).
+                SyscallChunkKind::Precompile => {
+                    !record.precompile_syscall_events.is_empty()
+                        && record.event_counter.num_cpu_events == 0
+                }
+            }
+        }
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let events = match self.chunk_kind {
+            SyscallChunkKind::Riscv => &input.syscall_events,
+            SyscallChunkKind::Precompile => &prepared_gpu_events.precompile_syscall_events,
+        };
+
+        let nb_rows = events.len();
+        let log_rows = input.shape_chip_size(&self.name());
+        let padded_nb_rows = match log_rows {
+            Some(log_rows) => 1 << log_rows,
+            None => next_power_of_two(nb_rows, None),
+        };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * NUM_SYSCALL_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        let event_size = events.len();
+        if event_size > 0 {
+            let mut d_events = DevicePoolAllocation::<SyscallEvent>::alloc_from_pool_async(
+                event_size, mem_pool, stream,
+            )
+            .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_events.as_mut_c_void_ptr(),
+                    events.as_c_void_ptr(),
+                    event_size * size_of::<SyscallEvent>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+            }
+
+            let d_global_events = preallocated_gpu_memory.d_global_events.as_mut().unwrap();
+
+            let start_index = match self.chunk_kind {
+                SyscallChunkKind::Riscv => {
+                    prepared_gpu_events
+                        .event_counter
+                        .start_indices
+                        .syscall_riscv_extra_global_lookup_start_index
+                }
+                SyscallChunkKind::Precompile => {
+                    prepared_gpu_events
+                        .event_counter
+                        .start_indices
+                        .syscall_precompile_extra_global_lookup_start_index
+                }
+            };
+
+            let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+
+            unsafe {
+                cuda_syscall_generate_extra_record_and_main_u64(
+                    NUM_SYSCALL_COLS,
+                    event_size,
+                    trace_size,
+                    d_events.as_ptr() as *const _,
+                    d_trace.as_mut_ptr() as *mut _,
+                    stream.into(),
+                    d_global_events.as_mut_ptr() as *mut _,
+                    start_index,
+                    self.chunk_kind as u8,
+                    d_byte_trace.as_mut_ptr() as *mut _,
+                );
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[syscall-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(NUM_SYSCALL_COLS, d_trace)
+    }
 }
 
-impl<F> EventCapture for SyscallChip<F> {}
+impl<F> EventCapture for SyscallChip<F> {
+    fn count_extra_records(record: &EmulationRecord, event_counter: &mut EventSizeCapture) {
+        event_counter.num_syscall_events += record.syscall_events.len();
+        event_counter.num_global_lookup_events += event_counter.num_syscall_events;
+        event_counter.num_precompile_syscall_events += record
+            .precompile_events
+            .events
+            .iter()
+            .map(|(_, v)| v.len())
+            .sum::<usize>();
+        event_counter.num_global_lookup_events += event_counter.num_precompile_syscall_events;
+    }
+}

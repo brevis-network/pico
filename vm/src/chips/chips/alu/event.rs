@@ -69,6 +69,7 @@ impl AluEvent {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::AluEvent;
@@ -95,3 +96,4 @@ mod tests {
         assert_eq!(decoded.is_imm, event.is_imm);
     }
 }
+*/

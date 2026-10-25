@@ -4,6 +4,7 @@ macro_rules! impl_chip_behavior {
 
         impl<$F: PrimeField32 + $crate::machine::field::FieldSpecificPoseidon2Config> ChipBehavior<$F> for $enum_name<$F> {
             type Record = EmulationRecord;
+            type GpuRecord = FFIEmulationRecord;
             type Program = Program;
 
             fn name(&self) -> String {
@@ -18,6 +19,14 @@ macro_rules! impl_chip_behavior {
                 match self {
                     $(
                         Self::$variant(chip) => chip.generate_preprocessed(program),
+                    )+
+                }
+            }
+
+            fn gpu_generate_preprocessed(&self, device_id: usize, program: &Program) -> Option<TraceData<'_, $F>> {
+                match self {
+                    $(
+                        Self::$variant(chip) => chip.gpu_generate_preprocessed(device_id, program),
                     )+
                 }
             }
@@ -66,6 +75,30 @@ macro_rules! impl_chip_behavior {
                 match self {
                     $(
                         Self::$variant(chip) => chip.local_only(),
+                    )+
+                }
+            }
+
+            fn gpu_generate_main(&self, device_id: usize, input: &Self::Record, output: &mut Self::Record, gpu_input: Option<&Self::GpuRecord>) -> TraceData<'_, $F> {
+                match self {
+                    $(
+                        Self::$variant(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+                    )+
+                }
+            }
+
+            fn is_active_for_extra_record(&self, prepared_events: &PreparedGpuEvents) -> bool {
+                match self {
+                    $(
+                        Self::$variant(chip) => chip.is_active_for_extra_record(prepared_events),
+                    )+
+                }
+            }
+
+            fn gpu_generate_extra_record_and_main(&self, device_id: usize, input: &Self::Record, prepared_events: &PreparedGpuEvents, preallocated_gpu_memory: &mut PreallocatedGpuMemory) -> TraceData<'_, $F> {
+                match self {
+                    $(
+                        Self::$variant(chip) => chip.gpu_generate_extra_record_and_main(device_id, input, prepared_events, preallocated_gpu_memory),
                     )+
                 }
             }

@@ -5,11 +5,17 @@
 //!   convert → wrap each RISCV proof in a recursion (Convert) proof and verify it
 //!   combine → tree-reduce the convert proofs to one complete root proof and verify it
 //!   embed   → re-prove that root under the outer BN254-Poseidon2 config and verify it
-//!   wrap    → embed, then emit the gnark circuit + witness for it
+//!   wrap    → embed, then emit the gnark circuit + witness for it, and the verifier's inputs
 //!             (both require the default `multi-field-transcript` feature)
+//! (compress arrives in a later phase.)
 //!
 //! Usage:
 //!   cargo run --release -p pico-vm --example test_mle_e2e -- --elf fib --n 10 --field kb --step combine
+//!
+//! Operating point: `log_stacked_height` 23 and a chunk of 2^23 derived from it, i.e. what
+//! `mle-single-node` ships. `MLE_LOG_STACKED_HEIGHT` moves both. The whitelist is OFF by
+//! default (`VK_VERIFICATION`), again matching the prover; turning it on needs a bucket table
+//! that reaches the chosen height.
 //!
 //! Cross-build check (env vars):
 //!   MLE_DUMP_ROOT=<path>   after the root verifies, write it plus its VK and child layouts there
@@ -20,16 +26,14 @@
 //! Negative-test hooks (env vars; each run MUST fail — a zero exit is a fail-open bug):
 //!   N1_INCOMPLETE=1   combine a strict prefix of the chunks under a complete root
 //!                     (fails at next_pc == 0; needs >= 3 chunks — use e.g. --n 3000000)
-//!   N1_BAD_GCS=1      bake a wrong global-cumulative-sum target into the trusted exe identity
-//!                     (host-side, at `CombineMachine::verify`'s PV comparison — same check and
-//!                     same strength as N3/N4, one different field of the same digest; the
-//!                     in-circuit GCS closure is N6's job, not this one)
+//!   N1_BAD_GCS=1      bake a wrong global-cumulative-sum target (fails at GCS == E,
+//!                     isolating the cross-chunk closure; any chunk count)
 //!   N2_TAMPER_CHILD=1 corrupt one opened value of a convert child (in a release build witness
 //!                     generation goes through and the root's STARK verify rejects it on the
 //!                     in-circuit WHIR checks; with debug assertions the recursion runtime's
 //!                     `AssertZeroExt` panics first; any chunk count)
-//!   N3_BAD_ENTRY=1    wrong TRUSTED entry pc (host-side, at `CombineMachine::verify`; any count)
-//!   N4_WRONG_PROGRAM=1 wrong TRUSTED program commitment (same check as N3)
+//!   N3_BAD_ENTRY=1    wrong TRUSTED entry pc (fails at the apex exe anchor; any count)
+//!   N4_WRONG_PROGRAM=1 wrong TRUSTED program commitment (fails at the apex exe anchor)
 //!   N5_BAD_PC_WITNESS=1 wrong PROVER-side pc_start witness (the chunk-1 convert's gated
 //!                     in-circuit assert start_pc == pc_start is unsatisfiable)
 //!   N6_BAD_GCS_WITNESS=1 wrong PROVER-side initial_gcs witness (the root's in-circuit GCS
@@ -47,8 +51,10 @@
 
 use p3_field::PrimeCharacteristicRing;
 use pico_mle_core::{
-    codec::{Decode, Encode},
-    config::{recursion_params_with_100_bits_security, riscv_params_with_100_bits_security},
+    config::{
+        recursion_params_with_100_bits_security, riscv_params_with_100_bits_security,
+        MAX_RISCV_LOG_STACKED_HEIGHT,
+    },
     StarkEngine,
 };
 use pico_vm::{
@@ -57,7 +63,6 @@ use pico_vm::{
         riscv::compiler::{Compiler, SourceType},
     },
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::opts::EmulatorOpts,
     machine::{logger::setup_logger, septic::SepticDigest},
     mle::machine::{
         combine::CombineMachine,
@@ -101,6 +106,7 @@ fn main() {
         ) = bincode::deserialize(&bytes).expect("root dump decode");
         // Through the versioned codec, so a wire-format divergence fails here rather than
         // surfacing as an unexplained verification error later.
+        use pico_mle_core::codec::Decode;
         let proof =
             pico_mle_core::protocol::proof::Proof::<riscv::Sc>::decode_from_bytes(&proof_bytes)
                 .expect("root proof decode");
@@ -149,28 +155,27 @@ fn main() {
         return;
     }
 
+    // Only reached once this run is going to prove. The GPU prover allocates from the shared pico
+    // pool and refuses to run without it; the single-node driver is what normally sets it up per
+    // card. (A verify-only run still touches the device when it builds the engine — what it skips
+    // is the pool, not the card.)
+    #[cfg(feature = "cuda-mle")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
+
     let log_stacked_height: usize = riscv::log_stacked_height_from_env();
     info!("log_stacked_height = {log_stacked_height}");
 
-    // A chunk holds one CPU row per instruction, so `2^n` instructions need a stacked height of at
-    // least `n`. `CHUNK_SIZE` can outrank the default below, so check the pair rather than assume
-    // it: a chunk wider than the height proves the wrong shape.
-    let opts = EmulatorOpts::from_env_chunk_size(1 << 23);
-    assert!(
-        (opts.chunk_size as u64) <= (1u64 << log_stacked_height),
-        "chunk_size {} exceeds 2^{log_stacked_height}: raise MLE_LOG_STACKED_HEIGHT with CHUNK_SIZE",
-        opts.chunk_size
-    );
-    let emulated =
-        riscv::emulate_with_opts(program.clone(), &stdin, opts).expect("emulation failed");
+    // A chunk holds one CPU row per instruction, so the stacked height is its natural capacity;
+    // `CHUNK_SIZE` can take it lower to split a program into more chunks.
+    let chunk_size = riscv::chunk_size_from_env(log_stacked_height);
+    info!("chunk_size = {chunk_size}");
+    let (records, committed) =
+        riscv::emulate_with_committed_bytes(program.clone(), stdin, Some(chunk_size));
     info!(
-        "emulated {} chunk(s) into {} record(s), {} cycle(s), {} committed byte(s)",
-        emulated.chunks,
-        emulated.records.len(),
-        emulated.cycles,
-        emulated.committed_bytes.len()
+        "emulated {} chunk(s), {} committed byte(s)",
+        records.len(),
+        committed.len()
     );
-    let records = emulated.records;
 
     // Off = natural heights and dynamic per-shape keygen, which is how the MLE prover runs; on =
     // bucketed shapes and a finite whitelist. Shape bucketing is linked to this flag, and the
@@ -194,9 +199,7 @@ fn main() {
         );
     }
     // Log the resolved mode, as the FRI stack does — the two differ in what they cover, and a run
-    // that does not say which one it took is hard to read back. Whitelist off also skips the
-    // standalone apex verifier below (it needs the vk map) and leaves the child's merged
-    // preprocessed commitment unpinned in the combine circuit; both are covered only when on.
+    // that does not say which one it took is hard to read back.
     info!(
         "vk_verification = {vk_verification} ({})",
         if vk_verification {
@@ -206,12 +209,6 @@ fn main() {
         }
     );
     // ── Phase 1: RISCV ──────────────────────────────────────────────────────
-    // The operating point the MLE prover ships. Moves with the chunk size above: a chunk holds one
-    // CPU row per instruction, so `2^n` instructions need a stacked height of at least `n`.
-    // `MAX_RISCV_LOG_STACKED_HEIGHT` is 23, the largest height whose RS domain exists.
-    //
-    // Under `VK_VERIFICATION=true` this height only works as far as the bucket tables reach:
-    // `MLE_RISCV_MAIN_LOG_HEIGHTS` caps the CPU chip at 22, i.e. ~4.19M instructions.
     let bundle = riscv::prove_riscv(
         program.clone(),
         &records,
@@ -478,6 +475,7 @@ fn main() {
         // The proof travels in its own versioned wire codec, not bincode: that codec is what a
         // real consumer decodes with, so routing the dump through it makes this gate cover the
         // wire format too. The vk and layouts have no such codec and go through serde.
+        use pico_mle_core::codec::Encode;
         // The operating point and the whitelist mode ride along: they change the keygen'd shape,
         // so a verifier that guessed them from its own environment would fail with a digest
         // mismatch rather than a mismatch it can name.
@@ -496,8 +494,10 @@ fn main() {
         "Combine: root proved + verified (complete, {} distinct shape(s)) ✓",
         combine.num_distinct_shapes()
     );
+    // Root proof size + per-field attribution. Shared with the GPU driver so the field
+    // list exists once (`recursion::log_proof_size`); measures the proof only — the vk is a
+    // fixed, separately known artifact.
     pico_vm::mle::machine::recursion::log_proof_size("Combine: root", &root.0);
-
     if args.step == "combine" {
         return;
     }
@@ -514,11 +514,12 @@ fn main() {
             trusted_vm_vk_for_apex,
             vk_verification,
             vk_map,
-            emit_wrap,
+            emit_wrap.then_some(committed.as_slice()),
         );
         return;
     }
 
+    // compress: later phase.
     info!(
         "step `{}` not yet implemented on the MLE backend",
         args.step
@@ -526,15 +527,17 @@ fn main() {
 }
 
 /// Re-prove the complete root under the outer BN254-Poseidon2 config, verify it, and report its
-/// size. Only compiled with the feature that brings the outer config into existence.
+/// size; with `wrap_committed`, also build the wrap circuit for it. Only compiled with the feature
+/// that brings the outer config into existence.
 #[cfg(feature = "multi-field-transcript")]
 fn run_embed_step(
     root: pico_vm::mle::machine::convert::ProofWithVk,
     trusted_vm_vk: RiscvVmVk,
     vk_verification: bool,
     vk_map: Option<std::sync::Arc<MleVkMap>>,
-    emit_wrap: bool,
+    wrap_committed: Option<&[u8]>,
 ) {
+    use pico_mle_core::codec::Encode;
     use pico_vm::mle::machine::embed::EmbedMachine;
 
     let mut embed = EmbedMachine::new(
@@ -582,9 +585,9 @@ fn run_embed_step(
         sz(&p.whir_proof),
     );
 
-    if !emit_wrap {
+    let Some(committed) = wrap_committed else {
         return;
-    }
+    };
 
     // ── wrap: the embed-proof verifier as a gnark circuit ───────────────────────────────────
     //
@@ -680,6 +683,50 @@ fn run_embed_step(
         .save("wrap_constraints.json", "wrap_groth16_witness.json")
         .expect("write wrap artifacts");
     info!("wrap: wrote wrap_constraints.json + wrap_groth16_witness.json ✓");
+
+    // What the verifier contract is called with, apart from the proof gnark has yet to make:
+    // `contracts/`'s `verifyPicoProof(riscvVKey, publicValues, proof)`. The digest is the one
+    // input the contract computes itself, from `publicValues`, so the bytes written here must hash
+    // to the proof's — checked rather than assumed.
+    let word = |n: &<pico_vm::configs::field_config::KoalaBearBn254 as
+        pico_vm::configs::config::FieldGenericConfig>::N| {
+        use p3_field::PrimeField;
+        let be = n.as_canonical_biguint().to_bytes_be();
+        assert!(be.len() <= 32, "a BN254 scalar is at most 32 bytes");
+        let mut out = [0u8; 32];
+        out[32 - be.len()..].copy_from_slice(&be);
+        out
+    };
+    let mut digest: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(committed).into();
+    // `hashPublicValues`: the top three bits cleared, so the digest fits one BN254 scalar.
+    digest[0] &= 0x1f;
+    let cvd = word(&artifacts.committed_values_digest);
+    assert_eq!(
+        digest, cvd,
+        "the committed bytes do not hash to the proof's committed_values_digest"
+    );
+    // The fields of main's `inputs.json` (`cargo pico prove --evm`), in its order, less the
+    // proof: `jq` appends that once gnark has made it (see `gnark/README.md`).
+    #[derive(serde::Serialize)]
+    struct WrapInputs {
+        #[serde(rename = "riscvVKey")]
+        riscv_vkey: String,
+        #[serde(rename = "publicValues")]
+        public_values: String,
+        #[serde(rename = "committedValuesDigest")]
+        committed_values_digest: String,
+    }
+    let inputs = WrapInputs {
+        riscv_vkey: format!("0x{}", hex::encode(word(&artifacts.vkey_hash))),
+        public_values: format!("0x{}", hex::encode(committed)),
+        committed_values_digest: format!("0x{}", hex::encode(cvd)),
+    };
+    std::fs::write(
+        "wrap_inputs.json",
+        serde_json::to_string_pretty(&inputs).expect("inputs serialize") + "\n",
+    )
+    .expect("write wrap_inputs.json");
+    info!("wrap: wrote wrap_inputs.json (the verifier's inputs, less the proof) ✓");
 }
 
 #[cfg(not(feature = "multi-field-transcript"))]
@@ -688,11 +735,15 @@ fn run_embed_step(
     _trusted_vm_vk: RiscvVmVk,
     _vk_verification: bool,
     _vk_map: Option<std::sync::Arc<MleVkMap>>,
-    emit_wrap: bool,
+    wrap_committed: Option<&[u8]>,
 ) {
     panic!(
         "`--step {}` needs the outer BN254 config: rebuild without --no-default-features, or \
          with --features multi-field-transcript",
-        if emit_wrap { "wrap" } else { "embed" }
+        if wrap_committed.is_some() {
+            "wrap"
+        } else {
+            "embed"
+        }
     );
 }

@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/duration.proto";
+
+
+package prover_server;
+
+service PicoProver {
+    rpc CheckHealth(google.protobuf.Empty) returns (google.protobuf.Empty);
+    rpc RequestProver(ProvingRequest) returns (ProvingResponse);
+    rpc GetProveResult(GetProveResultRequest) returns (GetProveResultResponse);
+}
+
+message ProvingRequest {
+    uint64 block_number = 1;
+    optional bytes input_buffer = 2;
+    ProvingType proving_type = 3;
+}
+
+message ProvingResponse {
+    ErrMsg err = 1;
+}
+
+message GetProveResultRequest {
+    uint64 block_number = 1;
+}
+
+message GetProveResultResponse {
+    ErrMsg err = 1;
+    ProofInfo proof_info = 2;
+}
+
+message ProofInfo {
+    bytes proof_with_publics = 1; // bincode bytes of combined MetaProof when the proof type is COMBINE
+    uint64 block_number = 2;
+    uint64 proving_cycles = 3;
+    string verifier_id = 4; // vk hash digest 
+    ProofType proof_type = 5;
+    google.protobuf.Duration proving_duration = 6;
+}
+
+// Refer to https://docs.brevis.network/writing-apps/advanced/proverchain
+enum ProofType {
+    CORE = 0;
+    COVERT = 1;
+    COMBINE = 2;
+    COMPRESS = 3;
+    EMBED = 4;
+}
+
+enum ProvingType {
+    CPU = 0;
+    GPU = 1;
+}
+
+message ErrMsg {
+    ErrCode code = 1;
+    string msg = 2;
+}
+
+enum ErrCode {
+    ERROR_CODE_UNDEFINED = 0;
+    INVALID_AUTH = 1;
+    INTERNAL = 2;
+    PROVE_FAILED = 3;
+}
+
+

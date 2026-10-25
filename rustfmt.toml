@@ -4,3 +4,6 @@ imports_granularity = "Crate"
 max_width = 100
 newline_style = "Unix"
 reorder_imports = true
+
+# A local pico-gpu checkout used through a `[patch]` is another repository with its own style.
+ignore = ["pico-gpu"]

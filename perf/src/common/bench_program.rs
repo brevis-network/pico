@@ -1,6 +1,6 @@
 use anyhow::Error;
 use pico_vm::{configs::config::StarkGenericConfig, emulator::stdin::EmulatorStdin};
-use std::fs;
+use std::{env, fs};
 
 #[derive(Clone, Copy, Debug)]
 pub struct BenchProgram {
@@ -10,6 +10,16 @@ pub struct BenchProgram {
 }
 
 pub const PROGRAMS: &[BenchProgram] = &[
+    BenchProgram {
+        name: "subblock",
+        elf: "./perf/bench_data/subblock-elf",
+        input: None,
+    },
+    BenchProgram {
+        name: "aggregator",
+        elf: "./perf/bench_data/aggregator-elf",
+        input: None,
+    },
     BenchProgram {
         name: "fibonacci-300kn",
         elf: "./perf/bench_data/fibonacci-elf",
@@ -35,6 +45,14 @@ pub const PROGRAMS: &[BenchProgram] = &[
         elf: "./perf/bench_data/tendermint-elf",
         input: None,
     },
+    // common reth app, could custom input by ENV `BENCH_RETH_BLOCK`
+    BenchProgram {
+        name: "reth",
+        elf: "./perf/bench_data/reth-elf",
+        // specify input file by ENV `BENCH_RETH_BLOCK`
+        // e.g. if `BENCH_RETH_BLOCK=22712700`, the input is `./perf/bench_data/reth-22712700.bin`
+        input: Some("reth"),
+    },
     BenchProgram {
         name: "reth-17106222",
         elf: "./perf/bench_data/reth-elf",
@@ -46,34 +64,9 @@ pub const PROGRAMS: &[BenchProgram] = &[
         input: Some("./perf/bench_data/reth-18884864.bin"),
     },
     BenchProgram {
-        name: "reth-22059900",
-        elf: "./perf/bench_data/reth-elf",
-        input: Some("./perf/bench_data/reth-22059900.bin"),
-    },
-    BenchProgram {
-        name: "reth-20528709",
-        elf: "./perf/bench_data/reth-elf",
-        input: Some("./perf/bench_data/reth-20528709.bin"),
-    },
-    BenchProgram {
-        name: "reth-22528700",
-        elf: "./perf/bench_data/reth-elf",
-        input: Some("./perf/bench_data/reth-22528700.bin"),
-    },
-    BenchProgram {
-        name: "reth-22515566",
-        elf: "./perf/bench_data/reth-elf",
-        input: Some("./perf/bench_data/reth-22515566.bin"),
-    },
-    BenchProgram {
-        name: "reth-22745330",
-        elf: "./perf/bench_data/reth-elf",
-        input: Some("./perf/bench_data/reth-22745330.bin"),
-    },
-    BenchProgram {
-        name: "reth-23993050",
-        elf: "./perf/bench_data/reth-elf",
-        input: Some("./perf/bench_data/reth-23993050.bin"),
+        name: "primus",
+        elf: "./perf/bench_data/primus-elf",
+        input: Some("./perf/bench_data/primus.bin"),
     },
     BenchProgram {
         name: "reth-24600825",
@@ -85,13 +78,41 @@ pub const PROGRAMS: &[BenchProgram] = &[
         elf: "./examples/fibonacci/app/elf/riscv32im-pico-zkvm-elf",
         input: None,
     },
+    BenchProgram {
+        name: "rv64-fibonacci",
+        elf: "./perf/bench_data/rv64/no-commit-fib-elf",
+        input: Some("rv64-fibonacci"),
+    },
+    BenchProgram {
+        name: "rv64-reth",
+        elf: "./perf/bench_data/rv64/reth-elf",
+        // specify input file by ENV `BENCH_RETH_BLOCK`
+        // e.g. if `BENCH_RETH_BLOCK=22712700`, the input is `./perf/bench_data/reth-22712700.bin`
+        input: Some("rv64-reth"),
+    },
 ];
 
-fn load_input(input: &str) -> Result<Vec<u8>, Error> {
+pub fn load_input(input: &str) -> Result<Vec<u8>, Error> {
     if input == "fibonacci-300kn" {
         Ok(bincode::serialize(&300_000u32)?)
     } else if input == "pure-fibonacci" {
-        Ok(bincode::serialize(&0u32)?)
+        Ok(bincode::serialize(&20u32)?)
+    } else if input == "rv64-fibonacci" {
+        let n: u32 = env::var("FIB_N")
+            .unwrap_or("10".to_string())
+            .parse()
+            .expect("FIB_N must be a valid u32");
+        Ok(bincode::serialize(&n)?)
+    } else if input == "reth" {
+        // use block `18884864` as default
+        let block = env::var("BENCH_RETH_BLOCK").unwrap_or("18884864".to_string());
+        let input = format!("./perf/bench_data/reth-{block}.bin");
+        Ok(fs::read(input)?)
+    } else if input == "rv64-reth" {
+        // use block `18884864` as default
+        let block = env::var("BENCH_RETH_BLOCK").unwrap_or("18884864".to_string());
+        let input = format!("./perf/bench_data/rv64/reth-{block}.bin");
+        Ok(fs::read(input)?)
     } else {
         Ok(fs::read(input)?)
     }

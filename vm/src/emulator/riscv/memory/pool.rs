@@ -1,6 +1,9 @@
 use crossbeam::channel::{Receiver, Sender};
 use once_cell::sync::Lazy;
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Duration,
+};
 
 /// Re-exported so callers outside this crate can tell a timed-out wait from a closed pool without
 /// taking a crossbeam dependency of their own.
@@ -14,7 +17,19 @@ pub fn memory_pool_size() -> usize {
     std::env::var("MEMORY_POOL_SIZE")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(16)
+        .unwrap_or_else(|| POOL_SIZE_FLOOR.load(Ordering::Relaxed).max(16))
+}
+
+/// What an unset `MEMORY_POOL_SIZE` is raised to; see [`raise_pool_size_floor`].
+static POOL_SIZE_FLOOR: AtomicUsize = AtomicUsize::new(0);
+
+/// Raises the size an unset `MEMORY_POOL_SIZE` stands for to at least `needed`, while the pool is
+/// not yet built, so a run that names no size gets a pool it can finish on. A size someone set,
+/// or a pool already built, stays.
+pub fn raise_pool_size_floor(needed: usize) {
+    if Lazy::get(&GLOBAL_MEMORY_POOL).is_none() {
+        POOL_SIZE_FLOOR.fetch_max(needed, Ordering::Relaxed);
+    }
 }
 
 /// How many memories the pool creates up front; the rest are created as it runs low.

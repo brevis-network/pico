@@ -316,7 +316,7 @@ pub fn set_fresh_local_mem_flips(addrs: &[RvAddr]) {
 /// one in the same record write, i.e. `2 * i - fresh_before(i)` for the `i`-th entry: a fresh
 /// entry writes only its final-state event, so a fixed `2 * i` stride would leave holes. The
 /// kernel writes this entry's events at `global_events_start_index + global_slot`, initial (if
-/// any) first. Mirrored by `MemoryLocalEventU64` in the pico `types.hpp`; the field order is the
+/// any) first. Mirrored by `MemoryLocalEventU64` in the pico `types.cuh`; the field order is the
 /// FFI layout.
 #[derive(Debug, Clone, Copy, Default)]
 #[repr(C)]

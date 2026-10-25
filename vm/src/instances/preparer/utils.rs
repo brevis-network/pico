@@ -1,0 +1,342 @@
+use crate::{
+    chips::chips::{
+        alu::event::AluEvent, riscv_global::event::GlobalInteractionEvent,
+        riscv_poseidon2::Poseidon2Event,
+    },
+    emulator::riscv::record::EmulationRecord,
+    instances::preparer::EventCounter,
+};
+use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSlice, stream::CudaStream};
+use cudart_sys;
+
+pub fn verify_alu_events<F>(
+    alu_events: &Option<DevicePoolAllocation<AluEvent>>,
+    expected_count: usize,
+    complete_record: &EmulationRecord,
+    stream: &CudaStream,
+    event_type: &str,
+    get_expected_events: F,
+) -> bool
+where
+    F: Fn(&EmulationRecord) -> Vec<AluEvent>,
+{
+    if let Some(d_alu_events) = alu_events {
+        if expected_count > 0 {
+            // Allocate host memory for the GPU events
+            let mut host_gpu_events = vec![AluEvent::default(); expected_count];
+
+            // Copy from GPU to host
+            unsafe {
+                let _ = cudart_sys::cudaMemcpyAsync(
+                    host_gpu_events.as_mut_ptr() as *mut std::ffi::c_void,
+                    d_alu_events.as_c_void_ptr(),
+                    expected_count * std::mem::size_of::<AluEvent>(),
+                    cudart_sys::CudaMemoryCopyKind::DeviceToHost,
+                    stream.into(),
+                );
+            }
+
+            // Synchronize to ensure copy is complete
+            stream.synchronize().unwrap();
+
+            // Get expected events from complete record
+            let expected_events = get_expected_events(complete_record);
+
+            // Sort both arrays for comparison (since order might differ)
+            let mut sorted_host_events = host_gpu_events.clone();
+            let mut sorted_expected_events = expected_events.clone();
+
+            sorted_host_events.sort_by(|a, b| {
+                a.clk
+                    .cmp(&b.clk)
+                    .then(a.opcode.cmp(&b.opcode))
+                    .then(a.a.cmp(&b.a))
+                    .then(a.b.cmp(&b.b))
+                    .then(a.c.cmp(&b.c))
+            });
+
+            sorted_expected_events.sort_by(|a, b| {
+                a.clk
+                    .cmp(&b.clk)
+                    .then(a.opcode.cmp(&b.opcode))
+                    .then(a.a.cmp(&b.a))
+                    .then(a.b.cmp(&b.b))
+                    .then(a.c.cmp(&b.c))
+            });
+
+            // Assert that the events match
+            assert_eq!(
+                sorted_host_events.len(),
+                sorted_expected_events.len(),
+                "Number of {} events from GPU ({}) doesn't match complete_record ({})",
+                event_type,
+                sorted_host_events.len(),
+                sorted_expected_events.len()
+            );
+
+            for (i, (host_event, expected_event)) in sorted_host_events
+                .iter()
+                .zip(sorted_expected_events.iter())
+                .enumerate()
+            {
+                assert_eq!(
+                    host_event.clk, expected_event.clk,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                assert_eq!(
+                    host_event.opcode, expected_event.opcode,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                assert_eq!(
+                    host_event.a, expected_event.a,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                assert_eq!(
+                    host_event.b, expected_event.b,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                assert_eq!(
+                    host_event.c, expected_event.c,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                // The flags share the same 48-byte layout; a kernel that forgets to set
+                // `is_cmp` on a merged branch comparison would otherwise pass this check and only
+                // fail at MLE_VERIFY.
+                assert_eq!(
+                    host_event.is_imm, expected_event.is_imm,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                assert_eq!(
+                    host_event.is_cmp, expected_event.is_cmp,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+            }
+
+            println!(
+                "Successfully verified {} {} events generated by GPU match counted_record",
+                sorted_host_events.len(),
+                event_type
+            );
+
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Verify add/sub events specifically.
+pub fn verify_add_sub_events(
+    alu_events: &Option<DevicePoolAllocation<AluEvent>>,
+    event_counter: &EventCounter,
+    complete_record: &EmulationRecord,
+    stream: &CudaStream,
+) -> bool {
+    let expected_count = event_counter.num_add_sub_events;
+    verify_alu_events(
+        alu_events,
+        expected_count,
+        complete_record,
+        stream,
+        "add/sub",
+        |record| record.add_sub_events.to_vec(),
+    )
+}
+
+/// Verify multiplication events specifically.
+pub fn verify_mul_events(
+    alu_events: &Option<DevicePoolAllocation<AluEvent>>,
+    expected_count: usize,
+    complete_record: &EmulationRecord,
+    stream: &CudaStream,
+) -> bool {
+    verify_alu_events(
+        alu_events,
+        expected_count,
+        complete_record,
+        stream,
+        "mul",
+        |record| record.mul_events.clone(),
+    )
+}
+
+/// Verify less-than events specifically.
+pub fn verify_lt_events(
+    alu_events: &Option<DevicePoolAllocation<AluEvent>>,
+    expected_count: usize,
+    complete_record: &EmulationRecord,
+    stream: &CudaStream,
+) -> bool {
+    verify_alu_events(
+        alu_events,
+        expected_count,
+        complete_record,
+        stream,
+        "lt",
+        |record| record.lt_events.to_vec(),
+    )
+}
+
+/// Verify global events specifically.
+pub fn verify_global_events(
+    global_events: &Option<DevicePoolAllocation<GlobalInteractionEvent>>,
+    complete_record: &EmulationRecord,
+    stream: &CudaStream,
+    starting_index: usize,
+    length: usize,
+) -> bool {
+    if let Some(d_global_events) = global_events {
+        if length > 0 {
+            // Allocate host memory for the GPU events
+            let mut host_gpu_events = vec![GlobalInteractionEvent::default(); length];
+
+            // Copy from GPU to host
+            unsafe {
+                let _ = cudart_sys::cudaMemcpyAsync(
+                    host_gpu_events.as_mut_ptr() as *mut std::ffi::c_void,
+                    d_global_events.as_c_void_ptr(),
+                    length * std::mem::size_of::<GlobalInteractionEvent>(),
+                    cudart_sys::CudaMemoryCopyKind::DeviceToHost,
+                    stream.into(),
+                );
+            }
+
+            // Synchronize to ensure copy is complete
+            stream.synchronize().unwrap();
+
+            // Get expected events from complete record
+            let expected_events = complete_record.global_lookup_events
+                [starting_index..starting_index + length]
+                .to_vec();
+
+            // Assert that the events match
+            assert_eq!(
+                host_gpu_events.len(),
+                expected_events.len(),
+                "Number of global events from GPU ({}) doesn't match complete_record ({})",
+                host_gpu_events.len(),
+                expected_events.len()
+            );
+
+            for (i, (host_event, expected_event)) in host_gpu_events
+                .iter()
+                .zip(expected_events.iter())
+                .enumerate()
+            {
+                assert_eq!(
+                    host_event.message, expected_event.message,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                assert_eq!(
+                    host_event.is_receive, expected_event.is_receive,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                assert_eq!(
+                    host_event.kind, expected_event.kind,
+                    "Event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+            }
+
+            println!(
+                "Successfully verified {} global events generated by GPU match counted_record",
+                host_gpu_events.len()
+            );
+
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Verify that Poseidon2 events generated on GPU match the expected CPU events
+pub fn verify_poseidon2_events(
+    d_poseidon2_events: &Option<DevicePoolAllocation<Poseidon2Event>>,
+    expected_count: usize,
+    complete_record: &EmulationRecord,
+    stream: &CudaStream,
+) -> bool {
+    if let Some(d_events) = d_poseidon2_events {
+        if expected_count > 0 {
+            // Allocate host memory for the GPU events
+            let mut host_gpu_events = vec![Poseidon2Event::default(); expected_count];
+
+            // Copy from GPU to host
+            unsafe {
+                let _ = cudart_sys::cudaMemcpyAsync(
+                    host_gpu_events.as_mut_ptr() as *mut std::ffi::c_void,
+                    d_events.as_c_void_ptr(),
+                    expected_count * std::mem::size_of::<Poseidon2Event>(),
+                    cudart_sys::CudaMemoryCopyKind::DeviceToHost,
+                    stream.into(),
+                );
+            }
+
+            // Synchronize to ensure copy is complete
+            stream.synchronize().unwrap();
+
+            // Get expected events from complete record
+            let expected_events = &complete_record.poseidon2_events;
+
+            // Sort both arrays for comparison (since order might differ)
+            let mut sorted_host_events = host_gpu_events.clone();
+            let mut sorted_expected_events = expected_events.clone();
+
+            sorted_host_events.sort_by(|a, b| a.input.cmp(&b.input).then(a.output.cmp(&b.output)));
+
+            sorted_expected_events
+                .sort_by(|a, b| a.input.cmp(&b.input).then(a.output.cmp(&b.output)));
+
+            // Assert that the events match
+            assert_eq!(
+                sorted_host_events.len(),
+                sorted_expected_events.len(),
+                "Number of Poseidon2 events from GPU ({}) doesn't match complete_record ({})",
+                sorted_host_events.len(),
+                sorted_expected_events.len()
+            );
+
+            for (i, (host_event, expected_event)) in sorted_host_events
+                .iter()
+                .zip(sorted_expected_events.iter())
+                .enumerate()
+            {
+                assert_eq!(
+                    host_event.input, expected_event.input,
+                    "Poseidon2 event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+                assert_eq!(
+                    host_event.output, expected_event.output,
+                    "Poseidon2 event {} from GPU doesn't match complete_record: GPU={:?}, Complete={:?}",
+                    i, host_event, expected_event
+                );
+            }
+
+            println!(
+                "Successfully verified {} Poseidon2 events generated by GPU match complete_record",
+                sorted_host_events.len()
+            );
+
+            return true;
+        }
+    } else {
+        assert_eq!(
+            expected_count, 0,
+            "Expected no Poseidon2 events but got {}",
+            expected_count
+        );
+    }
+
+    false
+}

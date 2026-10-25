@@ -8,7 +8,7 @@
 //! - `MLE_REC_EMULATE_PROFILE=1` — per-kind counts and ticks, one line per `run_range`, so a
 //!   split node reports four: prologue, each child, merge tail.
 //! - `MLE_REC_EMULATE_DUMP=<dir>` — bincode of `(program, witness_stream)`, the interpreter's
-//!   entire input, so one node can be replayed off the box (gpu-base's `rec-emulate-replay`).
+//!   entire input, so one node can be replayed off the box (`rec-emulate-replay`).
 //!   `MLE_REC_EMULATE_DUMP_LABEL` picks which runs to catch (default `combine`) and
 //!   `MLE_REC_EMULATE_DUMP_MAX` how many (default 1).
 //!

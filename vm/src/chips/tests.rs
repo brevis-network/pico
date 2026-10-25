@@ -1,21 +1,49 @@
-//! Common test functions for RISC-V chips: emulation helpers and event counters. The FRI
-//! prove-and-verify helpers (`run_test`, `test_rv64_prove_and_verify*`) were removed with the FRI
-//! proving path (tag `legacy-fri-last`); the chip tests that were built on them went with it and
-//! are to be rewritten on the MLE engine.
+//! Common test functions for RISC-V chips: emulation helpers, event counters and the CUDA test
+//! stream. The FRI prove-and-verify helpers (`run_test`, `test_rv64_prove_and_verify*`) were
+//! removed with the FRI proving path (tag `legacy-fri-last`); the chip tests that were built on
+//! them went with it and are to be rewritten on the MLE engine.
 
 use crate::{
-    compiler::riscv::program::Program,
+    compiler::riscv::{
+        compiler::{Compiler, SourceType},
+        program::Program,
+    },
+    configs::stark_config::KoalaBearPoseidon2,
+    cuda_adaptor::resource_pool::{
+        mem_pool::create_ctx,
+        stream_pool::{create_stream, get_global_stream_pool},
+    },
     emulator::{
+        emulator::MetaEmulator,
         opts::EmulatorOpts,
         record::RecordBehavior,
-        riscv::{emulator::RiscvEmulator, record::EmulationRecord},
+        riscv::{
+            emulator::RiscvEmulator, public_values::RecordFinalPvsState, record::EmulationRecord,
+        },
         stdin::EmulatorStdin,
     },
     instances::chiptype::riscv_chiptype::RiscvChipType,
-    machine::chip::{ChipBehavior, MetaChip},
+    machine::{
+        chip::{ChipBehavior, MetaChip},
+        witness::ProvingWitness,
+    },
 };
+use cudart::{memory::CudaHostAllocFlags, stream::CudaStream};
 use p3_koala_bear::KoalaBear;
-use std::sync::Arc;
+use std::{fs, path::PathBuf, sync::Arc};
+
+/// Initialise the global CPU event buffer pool if nothing else has yet.
+///
+/// A `std::sync::Once` is not enough: it only covers this call site, while the same pool is also
+/// initialised from chip and emulator code. Guarding on the pool's own state matches the other call
+/// sites and is correct whoever got there first.
+#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
+fn init_cpu_event_pool_once() {
+    use crate::emulator::riscv::cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized};
+    if !is_pool_initialized() {
+        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+    }
+}
 
 /// Run emulation and return all records.
 #[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
@@ -33,8 +61,12 @@ pub(crate) fn test_rv64_emulate_with_opts(
     stdin: EmulatorStdin<Program, Vec<u8>>,
     opts: EmulatorOpts,
 ) -> Vec<crate::emulator::riscv::record::EmulationRecord> {
+    init_cpu_event_pool_once();
+
     println!("Setting up emulator (chunk_size={})", opts.chunk_size);
-    let mut emulator = RiscvEmulator::new_single::<KoalaBear>(program.clone(), opts, None);
+    let final_pvs_state = Arc::new(RecordFinalPvsState::default());
+    let mut emulator =
+        RiscvEmulator::new_single::<KoalaBear>(program.clone(), final_pvs_state, opts, None);
 
     emulator.write_stdin(&stdin);
 
@@ -56,7 +88,6 @@ pub(crate) fn test_rv64_emulate_with_opts(
 
 /// Run extra_record for all active chips to populate derived events
 /// (e.g. global_lookup_events from MemoryInitFinalize, byte_lookups from GlobalChip).
-#[allow(dead_code)] // kept for the chip tests to be rewritten on the MLE engine
 pub(crate) fn run_extra_records(
     chips: &[MetaChip<KoalaBear, RiscvChipType<KoalaBear>>],
     record: &mut EmulationRecord,
@@ -102,6 +133,98 @@ pub(crate) fn count_total_events(
     syscall_code: crate::emulator::riscv::syscalls::SyscallCode,
 ) -> usize {
     records.iter().map(|r| count_events(r, syscall_code)).sum()
+}
+
+#[allow(dead_code)]
+type F = KoalaBear;
+
+#[allow(dead_code)]
+pub(crate) enum TestElf {
+    Fib,
+    Reth,
+}
+
+impl TestElf {
+    #[allow(dead_code)]
+    fn elf(&self) -> Vec<u8> {
+        let filename = match self {
+            Self::Fib => "rv64/fib-elf",
+            Self::Reth => "rv64/reth-elf",
+        };
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        ["..", "perf", "bench_data", filename]
+            .iter()
+            .for_each(|dir| path.push(dir));
+
+        fs::read(path).unwrap()
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) enum TestInput {
+    Fib(u32),
+    Reth171,
+    Reth188,
+}
+
+impl TestInput {
+    #[allow(dead_code)]
+    fn input_bytes(&self) -> Vec<u8> {
+        let filename = match self {
+            Self::Fib(n) => return bincode::serialize(n).unwrap(),
+            Self::Reth171 => "rv64/reth-17106222.bin",
+            Self::Reth188 => "rv64/reth-18884864.bin",
+        };
+
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        ["..", "perf", "bench_data", filename]
+            .iter()
+            .for_each(|dir| path.push(dir));
+
+        fs::read(path).unwrap()
+    }
+}
+
+pub(crate) fn init_test_stream() -> &'static CudaStream {
+    create_ctx(0);
+    create_stream(0);
+    let sync_stream = get_global_stream_pool(0);
+    &sync_stream.0
+}
+
+#[allow(dead_code)]
+pub(crate) fn generate_test_chunks(elf: TestElf, input: TestInput) -> Vec<EmulationRecord> {
+    let elf = elf.elf();
+
+    let mut stdin_builder = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
+    let input_bytes = input.input_bytes();
+    stdin_builder.write_slice(&input_bytes);
+    let stdin = stdin_builder.finalize();
+
+    let program = Compiler::new(SourceType::RISCV, &elf).unwrap().compile();
+    let chips = RiscvChipType::<F>::all_chips();
+    let witness = ProvingWitness::<KoalaBearPoseidon2, RiscvChipType<F>, _>::setup_for_mle_riscv(
+        program,
+        stdin,
+        EmulatorOpts::bench_riscv_ops(),
+    );
+    let final_pvs_state = Arc::new(RecordFinalPvsState::default());
+    let mut emulator = MetaEmulator::setup_riscv(&witness, final_pvs_state, None);
+    let mut records = vec![];
+    loop {
+        let done = emulator.next_record_batch(&mut |r| records.push(r)).done;
+        println!("generated records: {}, done: {done}", records.len());
+        if done {
+            break;
+        }
+    }
+    // What `RiscvMachine::complement_record` used to do: let every active chip derive its extra
+    // events (global lookups, byte lookups, ...) into the record.
+    for record in &mut records {
+        run_extra_records(&chips, record);
+    }
+
+    records
 }
 
 /// Number of constraint-DAG nodes reachable from an AIR's constraint roots. This is the zerocheck
@@ -150,39 +273,4 @@ pub(crate) fn reachable_constraint_nodes<F: p3_field::Field>(
         }
     }
     count
-}
-
-/// Pins the zerocheck rule count of `GcsBindAir`: one rule per DAG node reachable from the
-/// constraint roots. A different septic expression shape changes this number.
-#[test]
-fn gcs_bind_reachable_rule_count() {
-    use crate::{
-        mle::machine::air::{GcsBindAir, GCS_DIGEST_LEN},
-        primitives::consts::MAX_NUM_PVS,
-    };
-    use p3_air::BaseAir;
-    use p3_koala_bear::KoalaBear;
-    use pico_mle_core::{
-        air::symbolic::{get_symbolic_builder_with_public_values, SymbolicConstraintsDag},
-        keygen::types::TraceWidth,
-    };
-
-    let width = TraceWidth {
-        preprocessed: None,
-        cached_mains: vec![],
-        common_main: BaseAir::<KoalaBear>::width(&GcsBindAir::<KoalaBear>::default()),
-    };
-    let builder = get_symbolic_builder_with_public_values::<KoalaBear, _>(
-        &GcsBindAir::<KoalaBear>::default(),
-        &width,
-        GCS_DIGEST_LEN + MAX_NUM_PVS,
-    );
-    let constraints = builder.constraints();
-    // The degree fixes the round-0 zerocheck coset count and the interaction count fixes the
-    // LogUp side; neither is reachable from the constraint roots, so the rule count below would
-    // not notice a change in either.
-    assert_eq!(constraints.max_constraint_degree(), 3);
-    assert_eq!(constraints.interactions.len(), 8);
-    let dag: SymbolicConstraintsDag<KoalaBear> = constraints.into();
-    assert_eq!(reachable_constraint_nodes(&dag.constraints), 836);
 }

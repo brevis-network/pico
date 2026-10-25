@@ -1,0 +1,17 @@
+syntax = "proto3";
+package finalproof;
+
+service FinalProof {
+  rpc SubmitFinalCombineProof(SubmitFinalCombineProofRequest)
+      returns (SubmitFinalCombineProofReply);
+}
+
+message SubmitFinalCombineProofRequest {
+  uint64 block   = 1;
+  uint64 e2e_ms  = 2;
+  bytes  payload = 3;
+}
+
+message SubmitFinalCombineProofReply {
+  bool ok = 1;
+}

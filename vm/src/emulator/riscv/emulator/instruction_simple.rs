@@ -3,6 +3,7 @@ use crate::{
     chips::chips::riscv_memory::event::MemoryAccessPosition,
     compiler::riscv::{instruction::Instruction, opcode::Opcode, register::Register},
     emulator::riscv::syscalls::{syscall_context::SyscallContext, SyscallCode},
+    primitives::consts::CHUNK_CLK_START,
 };
 use tracing::debug;
 
@@ -40,10 +41,15 @@ impl RiscvEmulator {
         instruction: &Instruction,
     ) -> Result<(), EmulationError> {
         let mut next_pc = self.state.pc.wrapping_add(4);
+        let exit_code = 0u32;
 
         let rd: Register;
         let (a, b, c): (u64, u64, u64);
         let (addr, memory_read_value): (u64, u64);
+
+        if self.state.clk == u64::from(CHUNK_CLK_START) {
+            self.chunk_start_pc = self.state.pc;
+        }
 
         match instruction.opcode {
             // Arithmetic instructions.
@@ -495,6 +501,9 @@ impl RiscvEmulator {
                 return Err(EmulationError::Unimplemented());
             }
         }
+
+        self.chunk_last_next_pc = next_pc;
+        self.chunk_exit_code = exit_code;
 
         // Update the program counter.
         self.state.pc = next_pc;

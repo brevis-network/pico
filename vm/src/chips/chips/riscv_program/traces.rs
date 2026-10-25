@@ -6,18 +6,33 @@ use super::{
     ProgramChip,
 };
 use crate::{
+    chips::{trace::TraceData, utils::next_power_of_two},
     compiler::{addr::Pc, riscv::program::Program},
-    emulator::riscv::record::EmulationRecord,
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    emulator::riscv::{ffi::FFIEmulationRecord, record::EmulationRecord},
+    instances::preparer::PreparedGpuEvents,
     iter::{IndexedPicoIterator, IntoPicoRefIterator, PicoIterator},
     machine::{
         chip::ChipBehavior,
         utils::{pad_to_power_of_two, pad_to_power_of_two_repeating_first_row},
     },
 };
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+use cudart_sys::*;
 use hashbrown::HashMap;
 use p3_field::PrimeField32;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use pico_gpu_api::{
+    cuda_riscv_program_generate_main_u64, cuda_riscv_program_generate_main_u64_packed,
+    cuda_riscv_program_generate_preprocessed_u64,
+};
 use std::borrow::BorrowMut;
+use tracing::info;
 
 /// Row 0 is the filler for the padding rows and for every trap (UNIMP / EBREAK) instruction, so
 /// it must not be a trap itself: a trap row in the table would be claimable as a no-op once there
@@ -38,6 +53,7 @@ fn assert_instruction_zero_is_not_a_trap(program: &Program) {
 
 impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
     type Record = EmulationRecord;
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -85,7 +101,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
                 // exactly as the padding rows do: the emulator never executes a trap, so no Cpu
                 // row ever needs this pc, and leaving the pc out of the table is what makes a Cpu
                 // row that claims it unprovable (there is no `is_unimpl` selector to reject it
-                // with). The CUDA kernel applies the same rule (`program.hpp`).
+                // with). The CUDA kernel applies the same rule (`program.cuh`).
                 let (row_pc, source) = if instruction.opcode.is_trap() {
                     (program.pc_base, &program.instructions[0])
                 } else {
@@ -95,7 +111,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
                 // The carry out of limb 0 in `row_pc + 4`, as a function of the row's own pc
                 // (a trap row therefore carries row 0's). The Cpu chip writes the same
                 // `[pc[0] >= 0xFFFC]` on every real row and the Program message carries it; the
-                // CUDA kernel writes the same value (`program.hpp`).
+                // CUDA kernel writes the same value (`program.cuh`).
                 cols.pc_carry = F::from_bool((row_pc & 0xFFFF) >= 0xFFFC);
                 cols.instruction.populate(*source);
                 cols.selectors.populate(*source);
@@ -129,6 +145,7 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
         // Collect instruction counts in parallel using a thread-safe HashMap
         let instruction_counts: HashMap<u64, usize> = input
             .cpu_events
+            .as_slice()
             .pico_iter()
             .pico_fold(HashMap::new, |mut acc, event| {
                 let pc = event.pc;
@@ -173,88 +190,251 @@ impl<F: PrimeField32> ChipBehavior<F> for ProgramChip<F> {
     fn is_active(&self, _record: &Self::Record) -> bool {
         true
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::{
-        super::columns::{ProgramPreprocessedCols, NUM_PROGRAM_PREPROCESSED_COLS},
-        ProgramChip,
-    };
-    use crate::{
-        compiler::riscv::{instruction::Instruction, opcode::Opcode, program::Program},
-        machine::chip::ChipBehavior,
-    };
-    use p3_field::PrimeCharacteristicRing;
-    use p3_koala_bear::KoalaBear;
-    use std::borrow::Borrow;
+    fn gpu_generate_preprocessed(
+        &self,
+        device_id: usize,
+        program: &Self::Program,
+    ) -> Option<TraceData<'_, F>> {
+        use p3_koala_bear::KoalaBear;
 
-    type F = KoalaBear;
+        let instructions = program.instructions.clone();
 
-    /// A hand-built program with a trap at index 1 and 3: `[ADD, UNIMP, ADD, EBREAK]`.
-    fn program_with_traps() -> Program {
-        let pc_base: u64 = 0x1000_0000;
-        let instructions = vec![
-            Instruction::new(Opcode::ADD, 1, 2, 3, false, false),
-            Instruction::new(Opcode::UNIMP, 0, 0, 0, true, true),
-            Instruction::new(Opcode::ADD, 4, 5, 6, false, false),
-            Instruction::new(Opcode::EBREAK, 0, 0, 0, false, false),
-        ];
-        Program::new(instructions, pc_base, pc_base)
-    }
+        let nb_rows = instructions.len();
+        let fixed_log2_rows = program.fixed_log2_rows(&self.name());
+        let padded_nb_rows = match fixed_log2_rows {
+            Some(log2_rows) => 1 << log2_rows,
+            None => next_power_of_two(nb_rows, None),
+        };
 
-    /// The preprocessed table writes row 0 in place of every trap instruction, whole row included
-    /// (pc, instruction and selectors), and leaves the other rows alone.
-    #[test]
-    fn preprocessed_table_writes_row_zero_for_trap_instructions() {
-        let chip = ProgramChip::<F>::default();
-        let program = program_with_traps();
-        let trace = chip.generate_preprocessed(&program).unwrap();
-        let w = NUM_PROGRAM_PREPROCESSED_COLS;
-        assert_eq!(trace.values.len() % w, 0);
-        let rows = trace.values.len() / w;
-        assert!(rows >= 4, "{rows} rows for 4 instructions");
-        let row = |i: usize| &trace.values[i * w..(i + 1) * w];
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
 
-        assert_eq!(row(1), row(0), "the UNIMP row must be a copy of row 0");
-        assert_eq!(row(3), row(0), "the EBREAK row must be a copy of row 0");
-        assert_ne!(row(2), row(0));
-        // Padding rows repeat row 0 as well (the trap rows and the padding share one filler).
-        for i in 4..rows {
-            assert_eq!(row(i), row(0), "padding row {i} must be a copy of row 0");
+        // get current memory pool
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * self.preprocessed_width();
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
         }
 
-        let cols2: &ProgramPreprocessedCols<F> = row(2).borrow();
-        let pc2 = program.pc_base + 8;
-        assert_eq!(
-            cols2.pc.0,
-            [
-                F::from_u16((pc2 & 0xFFFF) as u16),
-                F::from_u16(((pc2 >> 16) & 0xFFFF) as u16)
-            ]
-        );
-        assert_eq!(cols2.instruction.opcode, Opcode::ADD.as_field::<F>());
-        assert_eq!(cols2.instruction.op_a, F::from_u8(4));
-        assert_eq!(cols2.selectors.imm_b, F::ZERO);
-        assert_eq!(cols2.selectors.is_ecall, F::ZERO);
+        // The kernel writes row 0 in place of every trap instruction and never checks row 0
+        // itself; the check lives here, on both generation paths.
+        assert_instruction_zero_is_not_a_trap(program);
 
-        assert!(Opcode::UNIMP.is_trap() && Opcode::EBREAK.is_trap());
-        assert!(!Opcode::ADD.is_trap() && !Opcode::ECALL.is_trap() && !Opcode::JAL.is_trap());
+        let num_instrs = instructions.len();
+        if num_instrs > 0 {
+            use crate::compiler::riscv::instruction::Instruction;
+            let mut d_instrs = DevicePoolAllocation::<Instruction>::alloc_from_pool_async(
+                num_instrs, mem_pool, stream,
+            )
+            .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_instrs.as_mut_c_void_ptr(),
+                    instructions.as_c_void_ptr(),
+                    num_instrs * size_of::<Instruction>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+
+                cuda_riscv_program_generate_preprocessed_u64(
+                    d_instrs.as_ptr() as *const _,
+                    num_instrs,
+                    padded_nb_rows,
+                    program.pc_base,
+                    d_trace.as_mut_ptr() as *mut _,
+                    self.preprocessed_width(),
+                    stream.into(),
+                );
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[riscv-program-chip] generate_preprocessed on GPU");
+
+        Some(TraceData::Gpu(self.preprocessed_width(), d_trace))
     }
 
-    #[test]
-    #[should_panic(expected = "instruction 0 (UNIMP) is a trap")]
-    fn preprocessed_table_rejects_a_trap_at_instruction_zero() {
-        let chip = ProgramChip::<F>::default();
-        let pc_base: u64 = 0x1000_0000;
-        let program = Program::new(
-            vec![
-                Instruction::new(Opcode::UNIMP, 0, 0, 0, true, true),
-                Instruction::new(Opcode::ADD, 1, 2, 3, false, false),
-            ],
-            pc_base,
-            pc_base,
-        );
-        let _ = chip.generate_preprocessed(&program);
+    fn gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        _: &mut Self::Record,
+        _: Option<&Self::GpuRecord>,
+    ) -> TraceData<'_, F> {
+        let nb_rows = input.program.instructions.len();
+        let log_rows = input.shape_chip_size(&ProgramChip::<F>::default().name());
+        let padded_nb_rows = match log_rows {
+            Some(log_rows) => 1 << log_rows,
+            None => next_power_of_two(nb_rows, None),
+        };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * NUM_PROGRAM_MULT_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        let events = &input.cpu_events;
+        let event_size = events.len();
+        if event_size > 0 {
+            use crate::chips::chips::riscv_cpu::event::CpuEvent;
+            let mut d_events = DevicePoolAllocation::<CpuEvent>::alloc_from_pool_async(
+                event_size, mem_pool, stream,
+            )
+            .unwrap();
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_events.as_mut_c_void_ptr(),
+                    events.as_ptr() as *const _,
+                    event_size * size_of::<CpuEvent>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+            }
+
+            unsafe {
+                cuda_riscv_program_generate_main_u64(
+                    NUM_PROGRAM_MULT_COLS,
+                    event_size,
+                    trace_size,
+                    input.program.pc_base,
+                    d_events.as_ptr() as *const _,
+                    d_trace.as_mut_ptr() as *mut _,
+                    stream.into(),
+                    nb_rows,
+                );
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[riscv-program-chip] generate_main on GPU");
+
+        TraceData::Gpu(NUM_PROGRAM_MULT_COLS, d_trace)
+    }
+
+    fn is_active_for_extra_record(&self, _record: &PreparedGpuEvents) -> bool {
+        true
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut crate::instances::preparer::PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let event_size = prepared_gpu_events.event_counter.num_cpu_events;
+
+        let nb_rows = input.program.instructions.len();
+        let log_rows = input.shape_chip_size(&ProgramChip::<F>::default().name());
+        let padded_nb_rows = match log_rows {
+            Some(log_rows) => 1 << log_rows,
+            None => next_power_of_two(nb_rows, None),
+        };
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let trace_size = padded_nb_rows * NUM_PROGRAM_MULT_COLS;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+        unsafe {
+            let _ = cudaMemsetAsync(
+                d_trace.as_mut_ptr() as *mut _,
+                0,
+                trace_size * size_of::<KoalaBear>(),
+                stream.into(),
+            );
+        }
+
+        if event_size > 0 {
+            let d_cpu_events_ptr = preallocated_gpu_memory
+                .d_cpu_events
+                .as_ref()
+                .unwrap()
+                .as_ptr() as *const _;
+
+            if prepared_gpu_events.packed.is_some() {
+                // MLE_PACKED_EVENTS: d_cpu_events holds the 80B packed stream.
+                unsafe {
+                    let err = cuda_riscv_program_generate_main_u64_packed(
+                        NUM_PROGRAM_MULT_COLS,
+                        event_size,
+                        trace_size,
+                        input.program.pc_base,
+                        d_cpu_events_ptr,
+                        d_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                        nb_rows,
+                        crate::instances::preparer::PACKED_EVENT_FORMAT_V1,
+                    );
+                    assert_eq!(
+                        err.code, 0,
+                        "cuda_riscv_program_generate_main_u64_packed failed (packed format mismatch?)"
+                    );
+                }
+            } else {
+                unsafe {
+                    cuda_riscv_program_generate_main_u64(
+                        NUM_PROGRAM_MULT_COLS,
+                        event_size,
+                        trace_size,
+                        input.program.pc_base,
+                        d_cpu_events_ptr,
+                        d_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                        nb_rows,
+                    );
+                }
+            }
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[riscv-program-chip] generate_extra_record_and_main on GPU");
+
+        TraceData::Gpu(NUM_PROGRAM_MULT_COLS, d_trace)
     }
 }

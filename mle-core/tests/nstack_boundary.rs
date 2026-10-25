@@ -9,7 +9,7 @@
 //! trigger was the padded-height boundary alone.
 //!
 //! These are the CPU (reference-device) cases, so a future regression here means the shared
-//! mle-core prover logic broke.
+//! mle-core prover logic broke; the cuda-mle suite covers the GPU path.
 
 use pico_mle_core::{
     engine::koala_bear_poseidon2::KoalaBearPoseidon2RefEngine,

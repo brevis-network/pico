@@ -6,10 +6,16 @@ use crate::{
         },
         gadgets::{
             addr_add::AddrAddGadget,
-            curves::{AffinePoint, CurveType, EllipticCurve},
+            curves::{
+                weierstrass::secp256r1::Secp256r1BaseField, AffinePoint, CurveType, EllipticCurve,
+                EllipticCurveParameters,
+            },
             field::{
+                bls381::Bls381BaseField,
+                bn254::Bn254BaseField,
                 field_lt::FieldLtCols,
                 field_op::{FieldOpCols, FieldOperation},
+                secp256k1::Secp256k1BaseField,
             },
             syscall_addr::SyscallAddrGadget,
             utils::{
@@ -23,13 +29,22 @@ use crate::{
             },
         },
         precompiles::checked_u64_to_u32,
-        utils::pad_rows_fixed,
+        trace::TraceData,
+        utils::{next_power_of_two, pad_rows_fixed},
     },
     compiler::{riscv::program::Program, word::Word},
-    emulator::riscv::{
-        record::EmulationRecord,
-        syscalls::{precompiles::PrecompileEvent, SyscallCode},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
+    emulator::riscv::{
+        ffi::FFIEmulationRecord,
+        record::EmulationRecord,
+        syscalls::{
+            precompiles::{edwards::event::EllipticCurveAddEventFFI, PrecompileEvent},
+            SyscallCode,
+        },
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::{
         builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
@@ -39,14 +54,27 @@ use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
 };
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
-use std::{fmt::Debug, marker::PhantomData};
-use tracing::debug;
+use pico_gpu_api::{
+    cuda_weierstrass_add_bls12381_generate_extra_record_and_main,
+    cuda_weierstrass_add_bn254_generate_extra_record_and_main,
+    cuda_weierstrass_add_secp256k1_generate_extra_record_and_main,
+    cuda_weierstrass_add_secp256r1_generate_extra_record_and_main,
+};
+use std::{fmt::Debug, marker::PhantomData, mem::transmute};
+use tracing::{debug, info};
 use typenum::Unsigned;
 
 pub const fn num_weierstrass_add_cols<P: FieldParameters + NumWords>() -> usize {
@@ -190,7 +218,7 @@ impl<F: PrimeField32, E: EllipticCurve> WeierstrassAddAssignChip<F, E> {
 
 impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssignChip<F, E> {
     type Record = EmulationRecord;
-
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -348,6 +376,180 @@ impl<F: PrimeField32, E: EllipticCurve> ChipBehavior<F> for WeierstrassAddAssign
 
     fn local_only(&self) -> bool {
         true
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        // 1. Get events
+        let events: &[EllipticCurveAddEventFFI<E::BaseField>] = match E::CURVE_TYPE {
+            CurveType::Bn254 => {
+                let events = prepared_gpu_events.bn254_weierstrass_add_events.as_slice();
+                unsafe {
+                    transmute::<
+                        &[EllipticCurveAddEventFFI<Bn254BaseField>],
+                        &[EllipticCurveAddEventFFI<E::BaseField>],
+                    >(events)
+                }
+            }
+            CurveType::Bls12381 => {
+                let events = prepared_gpu_events
+                    .bls12381_weierstrass_add_events
+                    .as_slice();
+                unsafe {
+                    transmute::<
+                        &[EllipticCurveAddEventFFI<Bls381BaseField>],
+                        &[EllipticCurveAddEventFFI<E::BaseField>],
+                    >(events)
+                }
+            }
+            CurveType::Secp256k1 => {
+                let events = prepared_gpu_events
+                    .secp256k1_weierstrass_add_events
+                    .as_slice();
+                unsafe {
+                    transmute::<
+                        &[EllipticCurveAddEventFFI<Secp256k1BaseField>],
+                        &[EllipticCurveAddEventFFI<E::BaseField>],
+                    >(events)
+                }
+            }
+            CurveType::Secp256r1 => {
+                let events = prepared_gpu_events
+                    .secp256r1_weierstrass_add_events
+                    .as_slice();
+                unsafe {
+                    transmute::<
+                        &[EllipticCurveAddEventFFI<Secp256r1BaseField>],
+                        &[EllipticCurveAddEventFFI<E::BaseField>],
+                    >(events)
+                }
+            }
+            _ => panic!("Unsupported curve"),
+        };
+
+        // 2. Calculate padding rows
+        let nrows = events.len();
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = next_power_of_two(nrows, log2_nrows);
+
+        // 3. Create CUDA stream and memory pool
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING)
+            .expect("Failed to create CUDA stream");
+
+        // 4. Copy events to the gpu
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let event_size = events.len();
+        let mut d_events =
+            DevicePoolAllocation::<EllipticCurveAddEventFFI<E::BaseField>>::alloc_from_pool_async(
+                event_size, mem_pool, stream,
+            )
+            .expect("GPU event memory allocation failed");
+
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events.as_c_void_ptr(),
+                std::mem::size_of_val(events),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        // 5. Allocate and generate trace
+        let num_cols = num_weierstrass_add_cols::<<E as EllipticCurveParameters>::BaseField>();
+        let trace_size = padded_nrows * num_cols;
+
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .expect("GPU trace memory allocation failed");
+
+        // Generate trace
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        unsafe {
+            match E::CURVE_TYPE {
+                CurveType::Secp256k1 => {
+                    cuda_weierstrass_add_secp256k1_generate_extra_record_and_main(
+                        num_cols,
+                        event_size,
+                        trace_size,
+                        d_events.as_ptr() as *const _,
+                        d_trace.as_mut_ptr() as *mut _,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    );
+                }
+                CurveType::Secp256r1 => {
+                    cuda_weierstrass_add_secp256r1_generate_extra_record_and_main(
+                        num_cols,
+                        event_size,
+                        trace_size,
+                        d_events.as_ptr() as *const _,
+                        d_trace.as_mut_ptr() as *mut _,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    );
+                }
+                CurveType::Bn254 => {
+                    cuda_weierstrass_add_bn254_generate_extra_record_and_main(
+                        num_cols,
+                        event_size,
+                        trace_size,
+                        d_events.as_ptr() as *const _,
+                        d_trace.as_mut_ptr() as *mut _,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    );
+                }
+                CurveType::Bls12381 => {
+                    cuda_weierstrass_add_bls12381_generate_extra_record_and_main(
+                        num_cols,
+                        event_size,
+                        trace_size,
+                        d_events.as_ptr() as *const _,
+                        d_trace.as_mut_ptr() as *mut _,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    );
+                }
+                _ => panic!("Unsupported curve"),
+            }
+        }
+
+        // 6. Switch to main stream and return result
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!(
+            "[weierstrass-add-assign-chip] generate_main on GPU, curve={:?}",
+            E::CURVE_TYPE
+        );
+
+        TraceData::Gpu(num_cols, d_trace)
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            match E::CURVE_TYPE {
+                CurveType::Secp256k1 => !record.secp256k1_weierstrass_add_events.is_empty(),
+                CurveType::Secp256r1 => !record.secp256r1_weierstrass_add_events.is_empty(),
+                CurveType::Bn254 => !record.bn254_weierstrass_add_events.is_empty(),
+                CurveType::Bls12381 => !record.bls12381_weierstrass_add_events.is_empty(),
+                _ => panic!("Unsupported curve"),
+            }
+        }
     }
 }
 
@@ -601,5 +803,591 @@ where
             q_ptr.map(Into::into),
             local.is_real,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::LazyLock;
+
+    use crate::chips::gadgets::utils::RandBigUint;
+    use itertools::Itertools;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::{rng, rngs::ThreadRng, RngExt};
+
+    use crate::{
+        chips::{
+            chips::{
+                byte::{columns::NUM_BYTE_MULT_COLS, ByteChip},
+                events::{MemoryReadRecord, MemoryWriteRecord},
+            },
+            gadgets::curves::{
+                weierstrass::{
+                    bls381::Bls12381Parameters, bn254::Bn254Parameters,
+                    secp256k1::Secp256k1Parameters, secp256r1::Secp256r1Parameters, SwCurve,
+                },
+                CurveType, EllipticCurve,
+            },
+            precompiles::weierstrass::weierstrass_add::WeierstrassAddAssignChip,
+            tests::init_test_stream,
+            trace::TraceData,
+        },
+        emulator::riscv::{
+            record::EmulationRecord,
+            syscalls::{
+                precompiles::{EllipticCurveAddEvent, PrecompileEvent, PrecompileEvents},
+                SyscallCode, SyscallEvent,
+            },
+        },
+        instances::{
+            compiler::shapes::riscv_shape::RiscvPadShape,
+            preparer::{
+                gpu_allocate_byte_trace, gpu_finalize_byte_trace, precompute_event_size,
+                PreallocatedGpuMemory, PreparedGpuEvents,
+            },
+        },
+        machine::chip::ChipBehavior,
+    };
+
+    type F = KoalaBear;
+
+    /// Lazily initialized record for use across multiple tests.
+    static SECP256K1_SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| {
+        generate_record::<SwCurve<Secp256k1Parameters>, 16>(1 << 4, CurveType::Secp256k1)
+    });
+
+    static SECP256R1_SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| {
+        generate_record::<SwCurve<Secp256r1Parameters>, 16>(1 << 4, CurveType::Secp256r1)
+    });
+
+    static BN254_SHARD: LazyLock<EmulationRecord> =
+        LazyLock::new(|| generate_record::<SwCurve<Bn254Parameters>, 16>(1 << 4, CurveType::Bn254));
+
+    static BLS12381_SHARD: LazyLock<EmulationRecord> = LazyLock::new(|| {
+        generate_record::<SwCurve<Bls12381Parameters>, 24>(1 << 4, CurveType::Bls12381)
+    });
+
+    fn cpu_generate_main<E: EllipticCurve>(
+        chip: &WeierstrassAddAssignChip<F, E>,
+        input: &EmulationRecord,
+    ) -> RowMajorMatrix<F> {
+        chip.generate_main(input, &mut EmulationRecord::default())
+    }
+
+    fn generate_record<E: EllipticCurve, const WORDS_CURVE_POINT: usize>(
+        size: usize,
+        curve_type: CurveType,
+    ) -> EmulationRecord {
+        let mut rng = rng();
+        let size = size as u32;
+        let p_q_pairs = (0..4)
+            .map(|_| {
+                let p = random_point::<E>(&mut rng);
+                let mut q = random_point::<E>(&mut rng);
+                while p == q {
+                    q = random_point::<E>(&mut rng);
+                }
+                (p, q)
+            })
+            .collect_vec();
+        let events = (0..size)
+            .map(|i| {
+                let chunk = 0u32;
+                let clk = i as u64;
+                let p_ptr = (rng.random_range(0..size) * 4) as u64;
+                let q_ptr = (rng.random_range(0..size) * 4) as u64;
+                let (p, q) = p_q_pairs[(i as usize) % p_q_pairs.len()].clone();
+                let p_memory_records = (0..WORDS_CURVE_POINT as u32)
+                    .map(|_| MemoryWriteRecord {
+                        prev_timestamp: i,
+                        timestamp: i + 1,
+                        ..Default::default()
+                    })
+                    .collect();
+                let q_memory_records = (0..WORDS_CURVE_POINT as u32)
+                    .map(|_| MemoryReadRecord {
+                        prev_timestamp: i,
+                        timestamp: i + 1,
+                        ..Default::default()
+                    })
+                    .collect();
+                let event = EllipticCurveAddEvent {
+                    chunk,
+                    clk,
+                    p_ptr,
+                    p,
+                    q_ptr,
+                    q,
+                    p_memory_records,
+                    q_memory_records,
+                    local_mem_access: vec![],
+                };
+                match curve_type {
+                    CurveType::Secp256k1 => (
+                        SyscallEvent {
+                            syscall_id: SyscallCode::SECP256K1_ADD.syscall_id(),
+                            ..Default::default()
+                        },
+                        PrecompileEvent::Secp256k1Add(event),
+                    ),
+                    CurveType::Secp256r1 => (
+                        SyscallEvent {
+                            syscall_id: SyscallCode::SECP256R1_ADD.syscall_id(),
+                            ..Default::default()
+                        },
+                        PrecompileEvent::Secp256r1Add(event),
+                    ),
+                    CurveType::Bn254 => (
+                        SyscallEvent {
+                            syscall_id: SyscallCode::BN254_ADD.syscall_id(),
+                            ..Default::default()
+                        },
+                        PrecompileEvent::Bn254Add(event),
+                    ),
+                    CurveType::Bls12381 => (
+                        SyscallEvent {
+                            syscall_id: SyscallCode::BLS12381_ADD.syscall_id(),
+                            ..Default::default()
+                        },
+                        PrecompileEvent::Bls12381Add(event),
+                    ),
+                    _ => panic!("Unsupported curve: {}", curve_type),
+                }
+            })
+            .collect_vec();
+
+        let syscode = match curve_type {
+            CurveType::Secp256k1 => SyscallCode::SECP256K1_ADD,
+            CurveType::Secp256r1 => SyscallCode::SECP256R1_ADD,
+            CurveType::Bn254 => SyscallCode::BN254_ADD,
+            CurveType::Bls12381 => SyscallCode::BLS12381_ADD,
+            _ => panic!("Unsupported curve: {}", curve_type),
+        };
+        let mut precompile_events = PrecompileEvents::default();
+        precompile_events.insert(syscode, events);
+
+        let mut record = EmulationRecord::default();
+        record.precompile_events = precompile_events.clone();
+
+        record
+    }
+
+    fn random_point<E: EllipticCurve>(rng: &mut ThreadRng) -> Vec<u64> {
+        let base = E::ec_generator();
+        let point = rng.random_biguint(E::nb_scalar_bits() as u64);
+        let point = base * point;
+        // Convert u32 words to u64 dwords
+        let words = point.to_words_le();
+        words
+            .chunks(2)
+            .map(|chunk| {
+                let lo = chunk[0] as u64;
+                let hi = if chunk.len() > 1 { chunk[1] as u64 } else { 0 };
+                lo | (hi << 32)
+            })
+            .collect()
+    }
+
+    fn gpu_generate_extra_record_and_main<E: EllipticCurve>(
+        chip: &WeierstrassAddAssignChip<F, E>,
+        input: &EmulationRecord,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> RowMajorMatrix<F> {
+        let stream = init_test_stream();
+        let trace = chip.gpu_generate_extra_record_and_main(
+            0,
+            input,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        );
+        trace.to_host(stream)
+    }
+
+    #[test]
+    fn test_secp256k1_addassign_generate_extra_record_and_main() {
+        let original_record = LazyLock::force(&SECP256K1_SHARD);
+
+        type E = SwCurve<Secp256k1Parameters>;
+        let chip = WeierstrassAddAssignChip::<F, E>::default();
+
+        // Complete the record for CPU computation.
+        let mut complete_record = original_record.clone();
+        chip.extra_record(&original_record, &mut complete_record);
+        // Precompute event sizes for GPU computation.
+        let mut counted_record = original_record.clone();
+        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+        // ignore events
+        event_counter.num_poseidon2_events = 0;
+        event_counter.num_global_lookup_events = 0;
+        event_counter.num_syscall_events = 0;
+        event_counter.num_precompile_syscall_events = 0;
+        // Assert that the event counts are the same.
+        event_counter.assert_event_counts_match(&complete_record);
+
+        // Shape padding for CPU and GPU computation.
+        complete_record.shape = Some(RiscvPadShape::default());
+        complete_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 4);
+        counted_record.shape = Some(RiscvPadShape::default());
+        counted_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 4);
+
+        // Generate CPU trace.
+        let cpu_trace = cpu_generate_main(&chip, &complete_record);
+        let byte_chip = ByteChip::<F>::default();
+        let cpu_byte_trace =
+            byte_chip.generate_main(&complete_record, &mut EmulationRecord::default());
+
+        // Generate GPU trace.
+        let stream = init_test_stream();
+        let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
+        let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+            d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let gpu_trace = gpu_generate_extra_record_and_main(
+            &chip,
+            &counted_record,
+            &prepared_gpu_events,
+            &mut preallocated_gpu_memory,
+        );
+        // Assert trace consistency.
+        assert_eq!(cpu_trace, gpu_trace);
+
+        // Finalize the byte trace. And assert that the byte trace is consistent.
+        gpu_finalize_byte_trace(&stream, &mut preallocated_gpu_memory).unwrap();
+        stream.synchronize().unwrap();
+
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.take().unwrap();
+
+        let host_gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace).to_host(&stream);
+        assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
+    }
+
+    #[test]
+    fn test_secp256r1_addassign_generate_extra_record_and_main() {
+        let original_record = LazyLock::force(&SECP256R1_SHARD);
+
+        type E = SwCurve<Secp256r1Parameters>;
+        let chip = WeierstrassAddAssignChip::<F, E>::default();
+
+        // Complete the record for CPU computation.
+        let mut complete_record = original_record.clone();
+        chip.extra_record(&original_record, &mut complete_record);
+        // Precompute event sizes for GPU computation.
+        let mut counted_record = original_record.clone();
+        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+        // ignore events
+        event_counter.num_poseidon2_events = 0;
+        event_counter.num_global_lookup_events = 0;
+        event_counter.num_syscall_events = 0;
+        event_counter.num_precompile_syscall_events = 0;
+        // Assert that the event counts are the same.
+        event_counter.assert_event_counts_match(&complete_record);
+
+        // Shape padding for CPU and GPU computation.
+        complete_record.shape = Some(RiscvPadShape::default());
+        complete_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 4);
+        counted_record.shape = Some(RiscvPadShape::default());
+        counted_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 4);
+
+        // Generate CPU trace.
+        let cpu_trace = cpu_generate_main(&chip, &complete_record);
+        let byte_chip = ByteChip::<F>::default();
+        let cpu_byte_trace =
+            byte_chip.generate_main(&complete_record, &mut EmulationRecord::default());
+
+        // Generate GPU trace.
+        let stream = init_test_stream();
+        let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
+        let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+            d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let gpu_trace = gpu_generate_extra_record_and_main(
+            &chip,
+            &counted_record,
+            &prepared_gpu_events,
+            &mut preallocated_gpu_memory,
+        );
+        // Assert trace consistency.
+        assert_eq!(cpu_trace, gpu_trace);
+
+        // Finalize the byte trace. And assert that the byte trace is consistent.
+        gpu_finalize_byte_trace(&stream, &mut preallocated_gpu_memory).unwrap();
+        stream.synchronize().unwrap();
+
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.take().unwrap();
+
+        let host_gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace).to_host(&stream);
+        assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
+    }
+
+    #[test]
+    fn test_bn254_addassign_generate_extra_record_and_main() {
+        let original_record = LazyLock::force(&BN254_SHARD);
+
+        type E = SwCurve<Bn254Parameters>;
+        let chip = WeierstrassAddAssignChip::<F, E>::default();
+
+        // Complete the record for CPU computation.
+        let mut complete_record = original_record.clone();
+        chip.extra_record(&original_record, &mut complete_record);
+        // Precompute event sizes for GPU computation.
+        let mut counted_record = original_record.clone();
+        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+        // ignore events
+        event_counter.num_poseidon2_events = 0;
+        event_counter.num_global_lookup_events = 0;
+        event_counter.num_syscall_events = 0;
+        event_counter.num_precompile_syscall_events = 0;
+        // Assert that the event counts are the same.
+        event_counter.assert_event_counts_match(&complete_record);
+
+        // Shape padding for CPU and GPU computation.
+        complete_record.shape = Some(RiscvPadShape::default());
+        complete_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 4);
+        counted_record.shape = Some(RiscvPadShape::default());
+        counted_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 4);
+
+        // Generate CPU trace.
+        let cpu_trace = cpu_generate_main(&chip, &complete_record);
+        let byte_chip = ByteChip::<F>::default();
+        let cpu_byte_trace =
+            byte_chip.generate_main(&complete_record, &mut EmulationRecord::default());
+
+        // Generate GPU trace.
+        let stream = init_test_stream();
+        let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
+        let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+            d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let gpu_trace = gpu_generate_extra_record_and_main(
+            &chip,
+            &counted_record,
+            &prepared_gpu_events,
+            &mut preallocated_gpu_memory,
+        );
+        // Assert trace consistency.
+        assert_eq!(cpu_trace, gpu_trace);
+
+        // Finalize the byte trace. And assert that the byte trace is consistent.
+        gpu_finalize_byte_trace(&stream, &mut preallocated_gpu_memory).unwrap();
+        stream.synchronize().unwrap();
+
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.take().unwrap();
+
+        let host_gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace).to_host(&stream);
+        assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
+    }
+
+    #[test]
+    fn test_bls12381_addassign_generate_extra_record_and_main() {
+        let original_record = LazyLock::force(&BLS12381_SHARD);
+
+        type E = SwCurve<Bls12381Parameters>;
+        let chip = WeierstrassAddAssignChip::<F, E>::default();
+
+        // Complete the record for CPU computation.
+        let mut complete_record = original_record.clone();
+        chip.extra_record(&original_record, &mut complete_record);
+        // Precompute event sizes for GPU computation.
+        let mut counted_record = original_record.clone();
+        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+        // ignore events
+        event_counter.num_poseidon2_events = 0;
+        event_counter.num_global_lookup_events = 0;
+        event_counter.num_syscall_events = 0;
+        event_counter.num_precompile_syscall_events = 0;
+        // Assert that the event counts are the same.
+        event_counter.assert_event_counts_match(&complete_record);
+
+        // Shape padding for CPU and GPU computation.
+        complete_record.shape = Some(RiscvPadShape::default());
+        complete_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 4);
+        counted_record.shape = Some(RiscvPadShape::default());
+        counted_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 4);
+
+        // Generate CPU trace.
+        let cpu_trace = cpu_generate_main(&chip, &complete_record);
+        let byte_chip = ByteChip::<F>::default();
+        let cpu_byte_trace =
+            byte_chip.generate_main(&complete_record, &mut EmulationRecord::default());
+
+        // Generate GPU trace.
+        let stream = init_test_stream();
+        let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
+        let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+            d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let gpu_trace = gpu_generate_extra_record_and_main(
+            &chip,
+            &counted_record,
+            &prepared_gpu_events,
+            &mut preallocated_gpu_memory,
+        );
+
+        // Assert trace consistency.
+        assert_eq!(cpu_trace, gpu_trace);
+
+        // Finalize the byte trace. And assert that the byte trace is consistent.
+        gpu_finalize_byte_trace(&stream, &mut preallocated_gpu_memory).unwrap();
+        stream.synchronize().unwrap();
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.take().unwrap();
+
+        let host_gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace).to_host(&stream);
+        assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
+    }
+
+    #[test]
+    fn bench_weierstrass_add_cpu_vs_gpu() {
+        use std::time::Instant;
+
+        fn bench_curve<E: EllipticCurve, const WORDS_CURVE_POINT: usize>(curve_type: CurveType) {
+            let chip = WeierstrassAddAssignChip::<F, E>::new();
+            let warmup_sizes: Vec<usize> = vec![1 << 10];
+            let bench_sizes: Vec<usize> = vec![1 << 10, 1 << 14, 1 << 16];
+
+            println!("\n  [{curve_type}]");
+            println!("  {:-<58}", "");
+            println!(
+                "  {:<12} {:>12} {:>12} {:>12}",
+                "events", "cpu (ms)", "gpu (ms)", "speedup"
+            );
+            println!("  {:-<58}", "");
+
+            for (is_warmup, &num_events) in warmup_sizes
+                .iter()
+                .map(|n| (true, n))
+                .chain(bench_sizes.iter().map(|n| (false, n)))
+            {
+                let original_record =
+                    generate_record::<E, WORDS_CURVE_POINT>(num_events, curve_type);
+
+                let mut complete_record = original_record.clone();
+                let mut counted_record = original_record.clone();
+
+                let log_rows = (num_events as f64).log2().ceil() as usize + 1;
+                complete_record.shape = Some(RiscvPadShape::default());
+                complete_record
+                    .shape
+                    .as_mut()
+                    .unwrap()
+                    .inner
+                    .insert(chip.name(), log_rows);
+                counted_record.shape = Some(RiscvPadShape::default());
+                counted_record
+                    .shape
+                    .as_mut()
+                    .unwrap()
+                    .inner
+                    .insert(chip.name(), log_rows);
+
+                // CPU
+                let cpu_start = Instant::now();
+                chip.extra_record(&original_record, &mut complete_record);
+                let cpu_trace = cpu_generate_main(&chip, &complete_record);
+                let cpu_ms = cpu_start.elapsed().as_secs_f64() * 1000.0;
+
+                // GPU
+                let stream = init_test_stream();
+                let prepared_gpu_events = PreparedGpuEvents::new(
+                    &counted_record,
+                    precompute_event_size::<F>(&mut counted_record.clone()),
+                );
+                let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+                    d_byte_trace: gpu_allocate_byte_trace(stream, 0).unwrap(),
+                    ..Default::default()
+                };
+
+                stream.synchronize().unwrap();
+
+                let gpu_start = Instant::now();
+                let gpu_trace = gpu_generate_extra_record_and_main(
+                    &chip,
+                    &counted_record,
+                    &prepared_gpu_events,
+                    &mut preallocated_gpu_memory,
+                );
+                stream.synchronize().unwrap();
+                let gpu_ms = gpu_start.elapsed().as_secs_f64() * 1000.0;
+
+                if is_warmup {
+                    println!(
+                        "  {:<12} {:>12} {:>12} {:>12}",
+                        num_events, "warmup", "warmup", "—"
+                    );
+                    continue;
+                }
+
+                assert_eq!(
+                    cpu_trace, gpu_trace,
+                    "Main trace mismatch at bench size {}",
+                    num_events
+                );
+
+                let speedup = cpu_ms / gpu_ms;
+                println!(
+                    "  {:<12} {:>12.2} {:>12.2} {:>11.1}x  ✓",
+                    num_events, cpu_ms, gpu_ms, speedup
+                );
+            }
+            println!("  {:-<58}", "");
+        }
+
+        println!("\n{:=<60}", "");
+        println!("  WeierstrassAddAssign CPU vs GPU Benchmark");
+        println!("{:=<60}", "");
+
+        bench_curve::<SwCurve<Secp256k1Parameters>, 16>(CurveType::Secp256k1);
+        bench_curve::<SwCurve<Secp256r1Parameters>, 16>(CurveType::Secp256r1);
+        bench_curve::<SwCurve<Bn254Parameters>, 16>(CurveType::Bn254);
+        bench_curve::<SwCurve<Bls12381Parameters>, 24>(CurveType::Bls12381);
     }
 }

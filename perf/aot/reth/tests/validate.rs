@@ -1,21 +1,29 @@
 //! Validation test comparing AOT emulator against baseline interpreter.
 //! Compares snapshots and memory images for every chunk to ensure identical outputs.
 
-use aot_common::{compare_reports, compare_snapshots, recycle_snapshot_memory};
+use aot_common::{compare_reports, compare_snapshots, recycle_snapshot_memory, AotRun};
+use cudart::memory::CudaHostAllocFlags;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2 as RiscvKBSC,
-    emulator::{opts::EmulatorOpts, riscv::emulator::RiscvEmulator},
+    emulator::{
+        opts::EmulatorOpts,
+        riscv::{
+            cpu_event_pool::{init_cpu_event_buffer_pool, is_pool_initialized},
+            emulator::RiscvEmulator,
+            public_values::RecordFinalPvsState,
+        },
+    },
     primitives::consts::{DIGEST_SIZE, PV_DIGEST_NUM_WORDS},
 };
-use reth_aot::{AotRun, RethEmulator};
+use reth_aot::AotEmulatorCore;
 use reth_lib::{create_stdin, load_block_input, load_reth_elf};
-use std::env;
+use std::{env, sync::Arc};
 
 fn maybe_debug_single_step(
     chunk_idx: usize,
     baseline_emu: &mut RiscvEmulator,
-    aot_emu: &mut RethEmulator,
+    aot_emu: &mut AotEmulatorCore,
 ) {
     let target_chunk = env::var("PICO_DEBUG_RETH_CHUNK")
         .ok()
@@ -141,6 +149,10 @@ fn run_and_compare_chunks(
 ) -> ([u32; PV_DIGEST_NUM_WORDS], [u32; DIGEST_SIZE]) {
     use p3_koala_bear::KoalaBear;
 
+    if !is_pool_initialized() {
+        init_cpu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+    }
+
     let opts = EmulatorOpts::test_opts();
 
     let program = Compiler::new(SourceType::RISCV, elf_bytes)
@@ -149,13 +161,18 @@ fn run_and_compare_chunks(
 
     // Set up baseline emulator directly.
     let stdin = create_stdin::<RiscvKBSC>(block_input).expect("Failed to create stdin");
-    let mut baseline_emu = RiscvEmulator::new_single::<KoalaBear>(program.clone(), opts, None);
+    let mut baseline_emu = RiscvEmulator::new_single::<KoalaBear>(
+        program.clone(),
+        Arc::new(RecordFinalPvsState::default()),
+        opts,
+        None,
+    );
     baseline_emu.write_stdin(&stdin);
 
     // Set up AOT emulator.
     let stdin = create_stdin::<RiscvKBSC>(block_input).expect("Failed to create stdin");
     let input_stream = stdin.inputs.to_vec();
-    let mut aot_emu = RethEmulator::new(program, input_stream);
+    let mut aot_emu = AotEmulatorCore::new(program, input_stream);
 
     let mut chunk_idx = 0usize;
     loop {

@@ -45,10 +45,7 @@ use pico_vm::{
         program::Program,
     },
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::{
-        opts::EmulatorOpts, recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
-        stdin::EmulatorStdin,
-    },
+    emulator::{recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP, stdin::EmulatorStdin},
     machine::logger::setup_logger,
     mle::machine::{
         apex::MleApexVerifier,
@@ -63,6 +60,9 @@ use pico_vm::{
     primitives::consts::DIGEST_SIZE,
 };
 use tracing::info;
+
+#[path = "common/emulate.rs"]
+mod emulate;
 
 const ELF: &str = "./perf/bench_data/rv64/fib-elf";
 const AGGREGATOR_ELF: &str = "./perf/bench_data/rv64/aggregator-elf";
@@ -82,13 +82,13 @@ fn prove_guest(elf: &str, stdin: EmulatorStdin<Program, Vec<u8>>) -> Guest {
             .expect("parse elf")
             .compile(),
     );
-    let opts = EmulatorOpts::from_env_chunk_size(1 << 23);
+    let opts = emulate::opts_from_env_chunk_size(1 << 23);
     assert!(
         (opts.chunk_size as u64) <= (1u64 << LOG_STACKED_HEIGHT),
         "chunk_size {} exceeds 2^{LOG_STACKED_HEIGHT}",
         opts.chunk_size
     );
-    let emulated = riscv::emulate_with_opts(Arc::clone(&program), &stdin, opts).expect("emulation");
+    let emulated = emulate::emulate_with_opts(Arc::clone(&program), &stdin, opts);
     let (riscv_vk, proofs) = riscv::prove_riscv(
         Arc::clone(&program),
         &emulated.records,
@@ -238,6 +238,9 @@ fn vk_root_of(proof: &ProofWithVk) -> [Kb; 8] {
 
 fn main() {
     setup_logger();
+    // The GPU riscv prover allocates from the shared pool; a CPU build has none to set up.
+    #[cfg(feature = "cuda-mle")]
+    riscv::init_mle_gpu_pool(riscv::MLE_GPU_DEVICE);
 
     let mut fib_stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
     fib_stdin.write(&10u32);

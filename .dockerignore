@@ -3,6 +3,8 @@ target
 # Proving outputs: wrap circuits are hundreds of MB and Groth16 key sets gigabytes.
 wrap_constraints.json
 wrap_groth16_witness.json
+wrap_inputs.json
+inputs.json
 outer_twins_constraints.json
 outer_twins_groth16_witness.json
 pico_out

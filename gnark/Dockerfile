@@ -6,6 +6,9 @@
 #
 #   docker build -f gnark/Dockerfile -t pico-gnark .
 #
+# It needs no CUDA toolchain: the field library is built with the workspace cut down to it (see the
+# first stage).
+#
 # The paths a run names are the container's, so mount what it reads and writes:
 #
 #   docker run --rm -v "$PWD/pico_out:/out" pico-gnark -cmd prove \
@@ -20,8 +23,16 @@ FROM rust:1-bookworm AS ffi
 ENV RUSTUP_TOOLCHAIN=nightly-2026-09-27
 RUN rustup toolchain install nightly-2026-09-27 --profile minimal
 WORKDIR /src
-COPY . .
-RUN cargo build --release --locked --package field-ffi
+# field-ffi alone. Cargo resolves the whole workspace to build any one member, which would fetch the
+# GPU crates and their git dependencies, none of which field-ffi uses. So the member list is cut
+# down to field-ffi before the build. Its dependencies
+# still resolve to the versions Cargo.lock pins; `--locked` cannot be passed, since the cut drops
+# the other members' entries from the lock.
+COPY Cargo.toml Cargo.lock ./
+COPY gnark/field-ffi gnark/field-ffi
+RUN sed -i 's|^members = .*|members = ["gnark/field-ffi"]|' Cargo.toml \
+ && grep -qx 'members = \["gnark/field-ffi"\]' Cargo.toml \
+ && cargo build --release --package field-ffi
 
 FROM golang:1.24-bookworm AS go
 WORKDIR /src/gnark

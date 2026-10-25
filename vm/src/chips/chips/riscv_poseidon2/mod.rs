@@ -9,7 +9,10 @@ use std::marker::PhantomData;
 
 pub mod columns;
 pub mod constraints;
+pub mod dummy_row;
 pub mod event;
+#[cfg(test)]
+pub mod tests;
 pub mod traces;
 
 pub use event::Poseidon2Event;

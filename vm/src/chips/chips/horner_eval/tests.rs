@@ -100,3 +100,126 @@ fn test_horner_eval_preprocessed_segmentation() {
         assert_eq!(row[mult_col], mult, "row {i} mult");
     }
 }
+
+/// GPU trace-gen must be element-wise identical to the CPU path. main computes x^2/x^3/x^4 on the
+/// device; preprocessed expands each instruction's len/DATAPAR rows on the device via the two-buffer
+/// layout, so this exercises multi-instruction concatenation and multi-row segments. KoalaBear-only;
+/// needs a CUDA device.
+mod gpu {
+    use crate::{
+        chips::{chips::horner_eval::HornerEvalChip, tests::init_test_stream},
+        compiler::recursion::{
+            instruction::Instruction,
+            ir::Block,
+            program::RecursionProgram,
+            types::{Address, HornerEvalEvent, HornerEvalInstr},
+        },
+        emulator::recursion::emulator::RecursionRecord,
+        machine::chip::ChipBehavior,
+        primitives::consts::HORNER_EVAL_DATAPAR,
+    };
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+
+    type F = KoalaBear;
+    const D: usize = HORNER_EVAL_DATAPAR;
+
+    fn blk(base: u32) -> Block<F> {
+        Block(std::array::from_fn(|k| F::from_u32(base + k as u32)))
+    }
+
+    fn sample_events(n: u32) -> Vec<HornerEvalEvent<F>> {
+        (0..n)
+            .map(|i| {
+                let b = i.wrapping_mul(100);
+                HornerEvalEvent {
+                    coeffs: std::array::from_fn(|k| blk(b + 4 * k as u32)),
+                    x: blk(b + 50),
+                    acc: blk(b + 90),
+                }
+            })
+            .collect()
+    }
+
+    /// Build a program whose instructions have exactly the given per-instruction row counts.
+    fn program_with_row_counts(counts: &[usize]) -> RecursionProgram<F> {
+        let mk = |v: u32| Address(F::from_u32(v));
+        let instructions = counts
+            .iter()
+            .enumerate()
+            .map(|(k, &n_rows)| {
+                let base = (k as u32 + 1) * 10_000;
+                Instruction::HornerEval(Box::new(HornerEvalInstr {
+                    coeff_addrs: (0..(n_rows * D) as u32).map(|i| mk(base + i)).collect(),
+                    x_addr: mk(base + 5000),
+                    out_addr: mk(base + 5001),
+                    mult: F::from_u32(k as u32 + 1),
+                }))
+            })
+            .collect();
+        RecursionProgram {
+            instructions,
+            ..Default::default()
+        }
+    }
+
+    fn assert_main_parity(n: u32) {
+        let stream = init_test_stream();
+        let chip = HornerEvalChip::<F>::default();
+        let mut record = RecursionRecord::<F>::default();
+        record.horner_eval_events = sample_events(n);
+        let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
+        let gpu = chip
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default(), None)
+            .to_host(stream);
+        assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");
+    }
+
+    fn assert_preprocessed_parity(counts: &[usize]) {
+        let stream = init_test_stream();
+        let chip = HornerEvalChip::<F>::default();
+        let program = program_with_row_counts(counts);
+        let cpu = chip.generate_preprocessed(&program).unwrap();
+        let gpu = chip
+            .gpu_generate_preprocessed(0, &program)
+            .unwrap()
+            .to_host(stream);
+        assert_eq!(
+            cpu.values, gpu.values,
+            "preprocessed parity failed for row counts {counts:?}"
+        );
+    }
+
+    #[test]
+    fn test_horner_eval_gpu_main_empty_matches_cpu() {
+        assert_main_parity(0);
+    }
+    #[test]
+    fn test_horner_eval_gpu_main_sub16_matches_cpu() {
+        assert_main_parity(5);
+    }
+    #[test]
+    fn test_horner_eval_gpu_main_matches_cpu() {
+        assert_main_parity(40);
+    }
+    #[test]
+    fn test_horner_eval_gpu_main_pow2_matches_cpu() {
+        assert_main_parity(64);
+    }
+    #[test]
+    fn test_horner_eval_gpu_preprocessed_empty_matches_cpu() {
+        assert_preprocessed_parity(&[]);
+    }
+    #[test]
+    fn test_horner_eval_gpu_preprocessed_single_matches_cpu() {
+        assert_preprocessed_parity(&[1]);
+    }
+    #[test]
+    fn test_horner_eval_gpu_preprocessed_multi_matches_cpu() {
+        assert_preprocessed_parity(&[2, 1, 3]);
+    }
+    #[test]
+    fn test_horner_eval_gpu_preprocessed_multirow_matches_cpu() {
+        assert_preprocessed_parity(&[10, 20, 5]);
+    }
+}

@@ -74,3 +74,6 @@ pub fn dump_dense_matrix_csv<T: Debug + ToString, V: AsRef<[T]>>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

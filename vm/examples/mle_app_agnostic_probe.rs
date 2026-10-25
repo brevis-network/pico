@@ -18,7 +18,6 @@ use pico_mle_core::config::recursion_params_with_100_bits_security;
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::opts::EmulatorOpts,
     machine::logger::setup_logger,
     mle::machine::{
         convert::ConvertMachine,
@@ -38,9 +37,7 @@ fn main() {
 
     let compiler = Compiler::new(SourceType::RISCV, elf).expect("failed to parse ELF");
     let program = compiler.compile();
-    let records = riscv::emulate_with_opts(program.clone(), &stdin, EmulatorOpts::default())
-        .expect("emulation failed")
-        .records;
+    let records = riscv::emulate(program.clone(), stdin, None);
     let bundle = riscv::prove_riscv(
         program.clone(),
         &records,

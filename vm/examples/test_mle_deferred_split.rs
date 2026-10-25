@@ -44,7 +44,6 @@ use pico_vm::{
     },
     configs::stark_config::KoalaBearPoseidon2,
     emulator::{
-        opts::EmulatorOpts,
         recursion::public_values::RECURSION_PUBLIC_VALUES_COL_MAP,
         riscv::{record::EmulationRecord, syscalls::SyscallCode},
         stdin::EmulatorStdin,
@@ -62,6 +61,8 @@ use pico_vm::{
 };
 use tracing::{error, info};
 
+#[path = "common/emulate.rs"]
+mod emulate;
 #[path = "common/tree.rs"]
 mod tree;
 use tree::build_tree;
@@ -83,6 +84,7 @@ fn deferred_commits(record: &EmulationRecord) -> usize {
     let id = SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id();
     record
         .cpu_events
+        .as_slice()
         .iter()
         .filter(|e| syscall(e) == Some(id))
         .count()
@@ -90,17 +92,20 @@ fn deferred_commits(record: &EmulationRecord) -> usize {
 
 fn halts(record: &EmulationRecord) -> bool {
     let id = SyscallCode::HALT.syscall_id();
-    record.cpu_events.iter().any(|e| syscall(e) == Some(id))
+    record
+        .cpu_events
+        .as_slice()
+        .iter()
+        .any(|e| syscall(e) == Some(id))
 }
 
 fn emulate(program: &Arc<Program>, n: u32, chunk_size: u32) -> Vec<EmulationRecord> {
     let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&n);
-    let mut opts = EmulatorOpts::from_env_chunk_size(chunk_size);
+    // Sized for the largest chunk this run emulates (`emulate_cycles`), whichever comes first.
+    let mut opts = emulate::opts_from_env_chunk_size(1 << 22);
     opts.chunk_size = chunk_size;
-    riscv::emulate_with_opts(Arc::clone(program), &stdin.finalize(), opts)
-        .expect("emulation")
-        .records
+    emulate::emulate_with_opts(Arc::clone(program), &stdin.finalize(), opts).records
 }
 
 /// Run `f` with the emulator's commit-tail hold off.
@@ -122,11 +127,9 @@ fn run_is_whole(records: &[EmulationRecord]) -> bool {
 fn emulate_cycles(program: &Arc<Program>, n: u32) -> u64 {
     let mut stdin = EmulatorStdin::<Program, Vec<u8>>::new_builder::<KoalaBearPoseidon2>();
     stdin.write(&n);
-    let mut opts = EmulatorOpts::from_env_chunk_size(1 << 22);
+    let mut opts = emulate::opts_from_env_chunk_size(1 << 22);
     opts.chunk_size = 1 << 22;
-    riscv::emulate_with_opts(Arc::clone(program), &stdin.finalize(), opts)
-        .expect("emulation")
-        .cycles
+    emulate::emulate_with_opts(Arc::clone(program), &stdin.finalize(), opts).cycles
 }
 
 /// The first chunk size `range` yields whose records satisfy `hit`.

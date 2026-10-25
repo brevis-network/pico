@@ -1,11 +1,11 @@
 //! The parity gate: the RISC-V machine's constraint surface must still match the
 //! pinned artifact.
 //!
-//! This is the check that stops `main` and `gpu-base` drifting apart silently again. The same
-//! artifact is pinned on both branches; a constraint change on one side that is not mirrored on the
-//! other turns this red. Because the digest is params-free it does **not** care about
-//! `CHUNK_SIZE` / `log_stacked_height`, so the two branches can be compared while they sit at
-//! different operating points.
+//! This is the check that stops the CPU and GPU provers' constraints drifting apart silently. The
+//! same artifact is pinned in both trees; a constraint change on one side that is not mirrored on
+//! the other turns this red. Because the digest is params-free it does **not** care about
+//! `CHUNK_SIZE` / `log_stacked_height`, so the two can be compared while they sit at different
+//! operating points.
 //!
 //! When this fails legitimately (you meant to change constraints), regenerate the artifact:
 //!   cargo run --release -p pico-vm --example mle_constraint_dump -- \

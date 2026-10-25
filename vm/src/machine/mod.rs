@@ -7,6 +7,7 @@ pub mod extension;
 pub mod field;
 pub mod logger;
 pub mod lookup;
+pub mod prover;
 pub mod report;
 pub mod septic;
 pub mod utils;

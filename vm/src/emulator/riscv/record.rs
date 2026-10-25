@@ -1,4 +1,6 @@
 use super::{
+    alu_event_pool::{return_alu_event_buffer, AluEventBuffer},
+    cpu_event_pool::{return_cpu_event_buffer, CpuEventBuffer},
     event_types::{RvAddr, RvChunk},
     syscalls::precompiles::{PrecompileEvent, PrecompileEvents, PrecompileLocalMemory},
 };
@@ -42,18 +44,30 @@ use crate::{
             syscalls::{SyscallCode, SyscallEvent},
         },
     },
-    instances::compiler::shapes::riscv_shape::RiscvPadShape,
+    instances::{
+        compiler::shapes::riscv_shape::RiscvPadShape,
+        preparer::{
+            gpu_allocate_and_copy_add_sub_events, gpu_allocate_and_copy_cpu_events,
+            gpu_allocate_and_copy_global_events, gpu_allocate_and_copy_lt_events,
+            gpu_allocate_and_copy_mul_events, gpu_allocate_and_copy_poseidon2_events,
+            gpu_allocate_byte_trace, gpu_allocate_cpu_events, GpuMemoryError, PreparedGpuEvents,
+        },
+    },
     primitives::consts::{KoalaBearConfig, LOCAL_MEMORY_DATAPAR, RISCV_POSEIDON2_DATAPAR},
 };
+use cudart::{memory_pools::DevicePoolAllocation, slice::CudaSlice, stream::CudaStream};
 use hashbrown::HashMap;
-use itertools::Itertools;
 use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
+    env,
     mem::take,
     ops::Range,
     sync::{Arc, OnceLock},
 };
+use tracing::info;
 
 #[inline(always)]
 fn encode_proof_addr_48(addr: u64) -> [u32; 3] {
@@ -75,8 +89,8 @@ fn encode_proof_addr_48(addr: u64) -> [u32; 3] {
 /// deferred-memory record per bucket). Precompile
 /// remainders form one record per kind under both settings. Nothing ships with the gate off: the
 /// OFF branch was the FRI prover's, whose `fri_commit` could not hold a multi-pair memory record
-/// on a 32 GB card, and that proving path left with the tag `legacy-fri-last`. This branch proves
-/// on the host, so a merged record is bounded by RAM rather than by a card.
+/// on a 32 GB card, and that proving path left with the tag `legacy-fri-last`. The MLE prover
+/// streams its RS commit and proves+verifies the merged records fine.
 fn deferred_tail_merge() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var("DEFERRED_TAIL_MERGE").map_or(true, |v| v != "0"))
@@ -110,14 +124,15 @@ const TAIL_TARGET_CELLS: u64 = 1_575_461_400;
 /// Poseidon2 area). Calibrated between two measured anchors on a 32 GB card (RTX 5090, MLE
 /// prover, streaming RS commit): a 2.14e9-cell tail record proved and verified repeatedly, a
 /// 2.52e9-cell one OOM'd (6.4 GB DeviceBuffer allocation while proving). 2.25e9 keeps ~5%
-/// above the proven point and ~11% below the failing one.
+/// above the proven point and ~11% below the failing one. The legacy split
+/// (`DEFERRED_TAIL_MERGE=0`) never reaches this path.
 ///
 /// TODO(tail-merge): ALL tail-merge constants in this block (TAIL_TARGET_CELLS, this
 /// budget, the row caps below) are calibrated on a 32 GB card only. The legacy per-syscall
-/// thresholds were tier-aware (`ProverHardwareConfig`); under tail-merge the 24 GB tier
-/// would get the 32 GB-calibrated sizes (e.g. 2^19-row keccak blocks vs its own 2^18).
-/// Whoever brings a second tier back has to scale these constants with it or fall back to
-/// the legacy thresholds there.
+/// thresholds were tier-aware (ProverHardwareConfig / PICO_GPU_MEM); under tail-merge a
+/// 24 GB tier currently gets the 32 GB-calibrated sizes (e.g. 2^19-row keccak blocks vs
+/// the old tier's 2^18). Before enabling DEFERRED_TAIL_MERGE as a default on smaller
+/// tiers, either scale these constants per tier or fall back to legacy thresholds there.
 const TAIL_MERGE_BUDGET_CELLS: u64 = 2_250_000_000;
 
 /// Maximum deferred memory init+finalize events per tail record. Some prover buffer
@@ -143,7 +158,7 @@ const TAIL_MERGE_MAX_WIDE_ROWS: usize = 1 << 17;
 /// (rows_per_event, trace width) for the precompile chips that appear in deferred tail
 /// chunks. Widths come from the chips' column structs at compile time
 /// (`size_of::<Cols<u8>>()` — `#[repr(C)]`, all-scalar fields), so AIR width changes
-/// (e.g. the area-reduction campaign) re-calibrate the tail thresholds automatically.
+/// (e.g. a column reduction) re-calibrate the tail thresholds automatically.
 /// Returns None for syscalls without an entry; callers fall back to the legacy
 /// event-count threshold, valued conservatively at one full block per threshold.
 pub(crate) fn tail_rows_and_width(syscall_code: SyscallCode) -> Option<(u64, u64)> {
@@ -198,11 +213,11 @@ fn mem_tail_padded_cost(events: u64) -> u64 {
 
 /// Per-record budget on estimated logup-GKR leaves (memory records).
 ///
-/// The MLE prover allocates ONE buffer for the whole logup-GKR fractional tree, sized
-/// `2^(l_skip+n_logup)` Frac elements (32 B each) where
+/// The MLE prover allocates ONE device buffer for the whole logup-GKR fractional tree,
+/// sized `2^(l_skip+n_logup)` Frac elements (32 B each) where
 /// `total = Σ_air num_interactions × 2^max(log_height, l_skip)` and the stacked layout
-/// pads to the next power of two ≥ `total + 1` (`calculate_n_logup`,
-/// mle-core/src/protocol/stacking.rs, verifier-enforced). Crossing the 2^28-leaf
+/// pads to the next power of two ≥ `total + 1` (cuda-mle logup_zerocheck/mod.rs,
+/// `calculate_n_logup` in mle-core's stacking protocol, verifier-enforced). Crossing the 2^28-leaf
 /// step therefore doubles that buffer from 8 GiB to 16 GiB. reth-171's fused keccak tail
 /// crossed it (used > 2.68e8 → 16 GiB) and OOM'd once a keccak force-JIT experiment added its
 /// lmem residency (that experiment was since rolled back); reth-188's fused tail sits just under it
@@ -214,8 +229,8 @@ fn mem_tail_padded_cost(events: u64) -> u64 {
 /// Like the cells budget above, this is an anchored proxy, not an exact replica of the
 /// prover's accounting: per-row interaction counts are hand-derived from the AIRs (see
 /// `tail_gkr_interactions`) and shared-chip heights are reconstructed from event counts.
-/// The `CHUNK_SPLIT_DEBUG=1` probe prints the estimate per tail record; compare against the
-/// prover's own per-chunk interaction total to recalibrate if the tables drift.
+/// The `CHUNK_SPLIT_DEBUG=1` probe prints the estimate per tail record; compare against
+/// `G3_MEASURE=1` (cuda-mle) to recalibrate if the tables drift.
 const TAIL_MERGE_MAX_GKR_LEAVES: u64 = (1 << 28) - 1;
 
 /// riscv MLE proving lifts every active AIR's height to at least `2^l_skip` in the leaf
@@ -251,7 +266,7 @@ const TAIL_GKR_FALLBACK_INTERACTIONS: u64 = 2048;
 ///     RISCV_POSEIDON2_DATAPAR(4) slots/row.
 ///   - Syscall 4/row: U8(syscall_id) + U16(arg1[0]) (syscall/constraints.rs:27,29) +
 ///     looked/looking syscall (:51/:85) + looking Global (:62/:96).
-///   - Byte 10/row × 2^17 fixed rows (byte/constraints.rs:33-63, byte/traces.rs:19).
+///   - Byte 10/row × 2^17 fixed rows (byte/constraints.rs:33-63, byte/traces.rs:29).
 ///   - Program 1/row (riscv_program/constraints.rs:41) × pow2(instruction count) rows.
 const TAIL_GKR_GLOBAL_INTERACTIONS: u64 = 8;
 const TAIL_GKR_INIT_FIN_INTERACTIONS: u64 = 13;
@@ -325,13 +340,13 @@ fn tail_gkr_interactions(syscall_code: SyscallCode) -> Option<u64> {
 /// record-shared chips (Global/Poseidon2/MemoryLocal/InitFin/Syscall) are re-padded
 /// from running event totals on every probe, exactly like tracegen will size them:
 ///   - 1 local-memory event → 2 global events (`riscv_memory/local/traces.rs`),
-///   - 1 memory init/finalize event → 1 global event (initialize_finalize/traces.rs:229),
-///   - 1 syscall (= precompile) event → 1 global event (syscall/traces.rs:125),
+///   - 1 memory init/finalize event → 1 global event (initialize_finalize/traces.rs:247),
+///   - 1 syscall (= precompile) event → 1 global event (syscall/traces.rs:140),
 ///   - 1 global event → 1 Poseidon2 permutation (`riscv_global/traces.rs`).
 ///
 /// Byte and Program are height-invariant per record and enter as `base_leaves`
-/// (both are always active in a deferred record: byte/traces.rs:73,
-/// riscv_program/traces.rs:117).
+/// (both are always active in a deferred record: byte/traces.rs:92,
+/// riscv_program/traces.rs:191).
 #[derive(Clone, Copy)]
 struct TailGkrLeavesAccount {
     base_leaves: u64,
@@ -486,13 +501,13 @@ fn deferred_memory_blocks(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProverMemoryTier {
+pub enum GpuMemoryTier {
     Tier24GB,
     Tier32GB,
 }
 
 pub struct ProverHardwareConfig {
-    tier: ProverMemoryTier,
+    tier: GpuMemoryTier,
 }
 
 impl ProverHardwareConfig {
@@ -500,8 +515,8 @@ impl ProverHardwareConfig {
     /// based on the active hardware tier.
     pub fn get_threshold(&self, syscall: SyscallCode) -> usize {
         match self.tier {
-            ProverMemoryTier::Tier24GB => self.threshold_24gb(syscall),
-            ProverMemoryTier::Tier32GB => self.threshold_32gb(syscall),
+            GpuMemoryTier::Tier24GB => self.threshold_24gb(syscall),
+            GpuMemoryTier::Tier32GB => self.threshold_32gb(syscall),
         }
     }
 
@@ -571,12 +586,59 @@ static PROVER_HARDWARE_CONFIG: OnceLock<ProverHardwareConfig> = OnceLock::new();
 
 pub fn get_prover_hardware_config() -> &'static ProverHardwareConfig {
     PROVER_HARDWARE_CONFIG.get_or_init(|| {
-        // The tiers are the VRAM capacities gpu-base calibrated these tables on (RTX 4090 24 GB,
-        // RTX 5090 32 GB). There is no such tier here, so the table is fixed to the one gpu-base
-        // ships and the 24 GB arm goes unused -- kept so the two tables stay one thing.
-        ProverHardwareConfig {
-            tier: ProverMemoryTier::Tier32GB,
-        }
+        // Detect Tier
+        let val = env::var("PICO_GPU_MEM").unwrap_or_else(|_| "4090".to_string());
+        let tier = match val.to_lowercase().as_str() {
+            "5090" | "32gb" | "high" => GpuMemoryTier::Tier32GB,
+            _ => GpuMemoryTier::Tier24GB,
+        };
+
+        let config = ProverHardwareConfig { tier };
+
+        info!(
+            tier = ?config.tier,
+
+            // --- Hashing & Permutation ---
+            keccak_permute = config.get_threshold(SyscallCode::KECCAK_PERMUTE),
+            sha_extend     = config.get_threshold(SyscallCode::SHA_EXTEND),
+            sha_compress   = config.get_threshold(SyscallCode::SHA_COMPRESS),
+            poseidon2      = config.get_threshold(SyscallCode::POSEIDON2_PERMUTE),
+
+            // --- SECP256K1 Operations ---
+            secp_add        = config.get_threshold(SyscallCode::SECP256K1_ADD),
+            secp_double     = config.get_threshold(SyscallCode::SECP256K1_DOUBLE),
+            secp_fp_add     = config.get_threshold(SyscallCode::SECP256K1_FP_ADD),
+            secp_decompress = config.get_threshold(SyscallCode::SECP256K1_DECOMPRESS),
+
+            // --- SECP256R1 Operations ---
+            secp_add        = config.get_threshold(SyscallCode::SECP256R1_ADD),
+            secp_double     = config.get_threshold(SyscallCode::SECP256R1_DOUBLE),
+            secp_decompress = config.get_threshold(SyscallCode::SECP256R1_DECOMPRESS),
+
+            // --- BN254 Operations ---
+            bn254_add     = config.get_threshold(SyscallCode::BN254_ADD),
+            bn254_double  = config.get_threshold(SyscallCode::BN254_DOUBLE),
+            bn254_fp_add  = config.get_threshold(SyscallCode::BN254_FP_ADD),
+            bn254_fp2_add = config.get_threshold(SyscallCode::BN254_FP2_ADD),
+            bn254_fp2_mul = config.get_threshold(SyscallCode::BN254_FP2_MUL),
+
+            // --- BLS12381 Operations ---
+            bls_add        = config.get_threshold(SyscallCode::BLS12381_ADD),
+            bls_double     = config.get_threshold(SyscallCode::BLS12381_DOUBLE),
+            bls_fp_add     = config.get_threshold(SyscallCode::BLS12381_FP_ADD),
+            bls_fp2_add    = config.get_threshold(SyscallCode::BLS12381_FP2_ADD),
+            bls_fp2_mul    = config.get_threshold(SyscallCode::BLS12381_FP2_MUL),
+            bls_decompress = config.get_threshold(SyscallCode::BLS12381_DECOMPRESS),
+
+            // --- Edwards & Others ---
+            ed_add        = config.get_threshold(SyscallCode::ED_ADD),
+            ed_decompress = config.get_threshold(SyscallCode::ED_DECOMPRESS),
+            uint256_mul   = config.get_threshold(SyscallCode::UINT256_MUL),
+
+            "Initialized Pico GPU Prover Config"
+        );
+
+        config
     })
 }
 
@@ -588,16 +650,17 @@ pub struct EmulationRecord {
     /// The program.
     pub program: Arc<Program>,
 
-    pub cpu_events: Vec<CpuEvent>,
+    /// CPU events stored in a pinned memory buffer for fast CPU writing and host->device transfer
+    #[serde(default)]
+    pub cpu_events: CpuEventBuffer,
 
     pub memory_read_write_event_indices: Vec<usize>,
 
-    /// A trace of the ADD, and ADDI events.
-    pub add_events: Vec<AluEvent>,
+    /// A trace of the ADD, ADDI, and SUB events (pinned memory for fast H2D transfer).
+    #[serde(default)]
+    pub add_sub_events: AluEventBuffer,
     /// A trace of the MUL events.
     pub mul_events: Vec<AluEvent>,
-    /// A trace of the SUB events.
-    pub sub_events: Vec<AluEvent>,
     /// A trace of the XOR, XORI, OR, ORI, AND, and ANDI events.
     pub bitwise_events: Vec<AluEvent>,
     /// A trace of the SLL and SLLI events.
@@ -606,8 +669,9 @@ pub struct EmulationRecord {
     pub shift_right_events: Vec<AluEvent>,
     /// A trace of the DIV, DIVU, REM, and REMU events.
     pub divrem_events: Vec<AluEvent>,
-    /// A trace of the SLT, SLTI, SLTU, and SLTIU events.
-    pub lt_events: Vec<AluEvent>,
+    /// A trace of the SLT, SLTI, SLTU, and SLTIU events (pinned memory for fast H2D transfer).
+    #[serde(default)]
+    pub lt_events: AluEventBuffer,
     /// A trace of the byte lookups that are needed.
     pub byte_lookups: HashMap<ByteLookupEvent, usize>,
     /// A trace of the memory initialize events.
@@ -637,13 +701,67 @@ pub struct EmulationRecord {
 impl EmulationRecord {
     #[must_use]
     pub fn new(program: Arc<Program>) -> Self {
+        // Since we defined a custom `Drop` for EmulationRecord, we need to initialize each field.
         Self {
             program,
-            // Not `Default`'s `false`: every chunk record is born here, and the split sets the
-            // flag the other way on the deferred records it makes.
+            cpu_events: CpuEventBuffer::empty(),
+            memory_read_write_event_indices: Vec::new(),
+            add_sub_events: AluEventBuffer::empty(),
+            mul_events: Vec::new(),
+            bitwise_events: Vec::new(),
+            shift_left_events: Vec::new(),
+            shift_right_events: Vec::new(),
+            divrem_events: Vec::new(),
+            lt_events: AluEventBuffer::empty(),
+            byte_lookups: HashMap::new(),
+            memory_initialize_events: Vec::new(),
+            memory_finalize_events: Vec::new(),
+            cpu_local_memory_access: Vec::new(),
+            public_values: PublicValues::default(),
             is_cpu_chunk: true,
-            ..Default::default()
+            precompile_events: PrecompileEvents::default(),
+            syscall_events: Vec::new(),
+            poseidon2_events: Vec::new(),
+            global_lookup_events: Vec::new(),
+            shape: None,
+            is_last: false,
         }
+    }
+
+    /// Efficiently adds multiple CPU events to the buffer from a slice.
+    ///
+    /// It adds as many events as can fit in the buffer's remaining capacity.
+    /// If the buffer is a `Empty`, it will acquire a real buffer from the pool.
+    ///
+    /// Returns the number of events that were successfully added.
+    pub fn add_cpu_events(&mut self, events: &[CpuEvent]) -> Result<usize, &'static str> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+
+        // Ensure we have a real buffer before computing capacity.
+        if matches!(self.cpu_events, CpuEventBuffer::Empty) {
+            if let Some(buf) = super::cpu_event_pool::get_cpu_event_buffer() {
+                self.cpu_events = buf;
+            } else {
+                // Pool exhausted; cannot add any events now.
+                return Ok(0);
+            }
+        }
+
+        let remaining_cap = self.cpu_events.remaining_capacity();
+        let num_to_add = events.len().min(remaining_cap);
+
+        if num_to_add > 0 {
+            self.cpu_events.extend_from_slice(&events[..num_to_add])?;
+        }
+
+        Ok(num_to_add)
+    }
+
+    /// Clears all CPU events in the buffer.
+    pub fn clear_cpu_events(&mut self) {
+        self.cpu_events.clear();
     }
 
     /// Add a mul event to the execution record.
@@ -653,21 +771,18 @@ impl EmulationRecord {
 
     /// Add a lt event to the execution record.
     pub fn add_lt_event(&mut self, lt_event: AluEvent) {
-        self.lt_events.push(lt_event);
+        let _ = self.lt_events.push_alu(lt_event);
     }
 
     /// Add a batch of alu events to the execution record.
     pub fn add_alu_events(&mut self, mut alu_events: HashMap<Opcode, Vec<AluEvent>>) {
         for (opcode, value) in &mut alu_events {
             match opcode {
-                Opcode::ADD | Opcode::ADDW => {
-                    self.add_events.append(value);
+                Opcode::ADD | Opcode::ADDW | Opcode::SUB | Opcode::SUBW => {
+                    let _ = self.add_sub_events.append_vec(value);
                 }
                 Opcode::MUL | Opcode::MULH | Opcode::MULHU | Opcode::MULHSU | Opcode::MULW => {
                     self.mul_events.append(value);
-                }
-                Opcode::SUB | Opcode::SUBW => {
-                    self.sub_events.append(value);
                 }
                 Opcode::XOR | Opcode::OR | Opcode::AND => {
                     self.bitwise_events.append(value);
@@ -679,7 +794,7 @@ impl EmulationRecord {
                     self.shift_right_events.append(value);
                 }
                 Opcode::SLT | Opcode::SLTU => {
-                    self.lt_events.append(value);
+                    let _ = self.lt_events.append_vec(value);
                 }
                 Opcode::DIV
                 | Opcode::DIVU
@@ -753,6 +868,8 @@ impl EmulationRecord {
     pub fn defer(&mut self) -> EmulationRecord {
         let mut emulation_record = EmulationRecord::new(self.program.clone());
         emulation_record.is_cpu_chunk = false;
+        // Note: CPU event buffers are not shared in defer operations
+        // Each new record will need to acquire its own buffer if needed
         emulation_record.precompile_events = take(&mut self.precompile_events);
         // emulation_record.uint256_mul_events = take(&mut self.uint256_mul_events);
         emulation_record.memory_initialize_events = take(&mut self.memory_initialize_events);
@@ -827,16 +944,10 @@ impl EmulationRecord {
                 None => legacy,
             }
         };
-        // Serial, where gpu-base runs this map on rayon: the sequencer calls `split` while it
-        // holds the deferred state's lock, and its replay workers are rayon tasks that take that
-        // same lock. With the worker count at or above the rayon pool's size a parallel map here
-        // waits for a pool thread that is itself waiting for the lock this call holds, and the
-        // pipeline stops dead at the first split (reproduced at NUM_THREADS=RAYON_NUM_THREADS=2).
-        // The map has one entry per syscall and collects in the same order either way, so only
-        // the wall clock differs.
         let per_syscall = self
             .precompile_events
             .iter_mut()
+            .par_bridge()
             .map(|(syscall_code, events)| {
                 let mut local_records = Vec::new();
                 if events.is_empty() {
@@ -1148,8 +1259,8 @@ impl EmulationRecord {
                 let key = |(se, _): &(SyscallEvent, PrecompileEvent)| (se.chunk, se.clk);
                 let first_key = groups.first().and_then(|(_, e)| e.first()).map(key);
                 let last_key = groups.last().and_then(|(_, e)| e.last()).map(key);
-                // Estimated GKR-leaf account of the record, for calibration against the
-                // prover's own per-chunk interaction total.
+                // Estimated GKR-leaf account of the record, for calibration against
+                // the prover's `G3_MEASURE=1` per-chunk total_interactions.
                 let mut leaves = TailGkrLeavesAccount::new(rec.program.instructions.len() as u64);
                 for (code, events) in rec.precompile_events.iter() {
                     if !events.is_empty() {
@@ -1349,6 +1460,19 @@ fn merge_precompile_local_mem_inner(group: &mut [(SyscallEvent, PrecompileEvent)
     merges
 }
 
+impl Drop for EmulationRecord {
+    fn drop(&mut self) {
+        // Return CPU event buffer to global pool
+        let buffer = std::mem::replace(&mut self.cpu_events, CpuEventBuffer::empty());
+        return_cpu_event_buffer(buffer);
+        // Return ALU event buffers to global pool
+        let buffer = std::mem::replace(&mut self.add_sub_events, AluEventBuffer::empty());
+        return_alu_event_buffer(buffer);
+        let buffer = std::mem::replace(&mut self.lt_events, AluEventBuffer::empty());
+        return_alu_event_buffer(buffer);
+    }
+}
+
 impl RecordBehavior for EmulationRecord {
     fn name(&self) -> String {
         "RiscvEmulationRecord".to_string()
@@ -1361,9 +1485,8 @@ impl RecordBehavior for EmulationRecord {
         /*
         Arithmetic-related
          */
-        stats.insert("Add Events".to_string(), self.add_events.len());
+        stats.insert("Add Sub Events".to_string(), self.add_sub_events.len());
         stats.insert("Mul Events".to_string(), self.mul_events.len());
-        stats.insert("Sub Events".to_string(), self.sub_events.len());
         stats.insert("Bitwise Events".to_string(), self.bitwise_events.len());
         stats.insert(
             "Shift Left Events".to_string(),
@@ -1393,11 +1516,7 @@ impl RecordBehavior for EmulationRecord {
         );
         stats.insert(
             "Memory Read-Write Events".to_string(),
-            self.cpu_events
-                .iter()
-                .filter(|e| e.instruction.is_memory_instruction())
-                .collect_vec()
-                .len(),
+            self.memory_read_write_event_indices.len(),
         );
         stats.insert(
             "Local Memory Access Events".to_string(),
@@ -1423,18 +1542,38 @@ impl RecordBehavior for EmulationRecord {
     }
 
     fn append(&mut self, extra: &mut EmulationRecord) {
-        self.cpu_events.append(&mut extra.cpu_events);
+        // Handle CPU events.
+        // Fast-path: if destination has an empty buffer, move the entire buffer from extra.
+        match (&mut self.cpu_events, &mut extra.cpu_events) {
+            (CpuEventBuffer::Empty, CpuEventBuffer::Buffer(_)) => {
+                let moved = std::mem::replace(&mut extra.cpu_events, CpuEventBuffer::empty());
+                self.cpu_events = moved;
+            }
+            (CpuEventBuffer::Buffer(dst), CpuEventBuffer::Buffer(_)) if dst.is_empty() => {
+                // Swap entire buffers to avoid copying when destination is empty
+                std::mem::swap(&mut self.cpu_events, &mut extra.cpu_events);
+            }
+            _ => {
+                // Otherwise, copy as many as fit and clear the source
+                let extra_slice = extra.cpu_events.as_slice();
+                if !extra_slice.is_empty() {
+                    let _ = self.add_cpu_events(extra_slice);
+                }
+                extra.clear_cpu_events();
+            }
+        }
+
+        // Append all other events.
         self.memory_read_write_event_indices
             .append(&mut extra.memory_read_write_event_indices);
-        self.add_events.append(&mut extra.add_events);
+        self.add_sub_events.append_from(&mut extra.add_sub_events);
         self.mul_events.append(&mut extra.mul_events);
-        self.sub_events.append(&mut extra.sub_events);
         self.bitwise_events.append(&mut extra.bitwise_events);
         self.shift_left_events.append(&mut extra.shift_left_events);
         self.shift_right_events
             .append(&mut extra.shift_right_events);
         self.divrem_events.append(&mut extra.divrem_events);
-        self.lt_events.append(&mut extra.lt_events);
+        self.lt_events.append_from(&mut extra.lt_events);
         self.memory_initialize_events
             .append(&mut extra.memory_initialize_events);
         self.memory_finalize_events
@@ -1460,12 +1599,90 @@ impl RecordBehavior for EmulationRecord {
         // rest of the public values from one chunk into the next.
         let mut pvs = self.public_values;
         (pvs.deferred_commits, pvs.deferred_commit_mask) =
-            crate::chips::chips::riscv_ecall::traces::deferred_commit_tally(&self.cpu_events);
+            crate::chips::chips::riscv_ecall::traces::deferred_commit_tally(
+                self.cpu_events.as_slice(),
+            );
         pvs.to_vec()
     }
 
     fn chunk_index(&self) -> usize {
         self.public_values.chunk as usize
+    }
+
+    fn gpu_allocate_and_copy_cpu_events<'a>(
+        &'a self,
+        stream: &'a CudaStream,
+        device_id: usize,
+        prepared_gpu_events: &'a PreparedGpuEvents,
+    ) -> Result<Option<DevicePoolAllocation<'a, CpuEvent>>, GpuMemoryError> {
+        gpu_allocate_and_copy_cpu_events(stream, device_id, self, prepared_gpu_events)
+    }
+
+    fn gpu_allocate_cpu_events<'a>(
+        &'a self,
+        stream: &'a CudaStream,
+        device_id: usize,
+        prepared_gpu_events: &'a PreparedGpuEvents,
+    ) -> Result<Option<DevicePoolAllocation<'a, CpuEvent>>, GpuMemoryError> {
+        gpu_allocate_cpu_events(stream, device_id, prepared_gpu_events)
+    }
+
+    fn gpu_allocate_and_copy_add_sub_events<'a>(
+        &'a self,
+        stream: &'a CudaStream,
+        device_id: usize,
+        prepared_gpu_events: &'a PreparedGpuEvents,
+    ) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
+        gpu_allocate_and_copy_add_sub_events(stream, device_id, self, prepared_gpu_events)
+    }
+
+    fn gpu_allocate_and_copy_lt_events<'a>(
+        &'a self,
+        stream: &'a CudaStream,
+        device_id: usize,
+        prepared_gpu_events: &'a PreparedGpuEvents,
+    ) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
+        gpu_allocate_and_copy_lt_events(stream, device_id, self, prepared_gpu_events)
+    }
+
+    fn gpu_allocate_and_copy_mul_events<'a>(
+        &'a self,
+        stream: &'a CudaStream,
+        device_id: usize,
+        prepared_gpu_events: &'a PreparedGpuEvents,
+    ) -> Result<Option<DevicePoolAllocation<'a, AluEvent>>, GpuMemoryError> {
+        gpu_allocate_and_copy_mul_events(stream, device_id, self, prepared_gpu_events)
+    }
+
+    fn gpu_allocate_and_copy_global_events<'a>(
+        &'a self,
+        stream: &'a CudaStream,
+        device_id: usize,
+        prepared_gpu_events: &'a PreparedGpuEvents,
+    ) -> Result<Option<DevicePoolAllocation<'a, GlobalInteractionEvent>>, GpuMemoryError> {
+        gpu_allocate_and_copy_global_events(stream, device_id, self, prepared_gpu_events)
+    }
+
+    fn gpu_allocate_and_copy_poseidon2_events<'a>(
+        &'a self,
+        stream: &'a CudaStream,
+        device_id: usize,
+        prepared_gpu_events: &'a PreparedGpuEvents,
+    ) -> Result<Option<DevicePoolAllocation<'a, Poseidon2Event>>, GpuMemoryError> {
+        gpu_allocate_and_copy_poseidon2_events(
+            stream,
+            device_id,
+            &self.poseidon2_events,
+            prepared_gpu_events,
+        )
+    }
+
+    fn gpu_allocate_byte_trace<'a>(
+        &'a self,
+        stream: &'a CudaStream,
+        device_id: usize,
+    ) -> Result<Option<DevicePoolAllocation<'a, KoalaBear>>, GpuMemoryError> {
+        gpu_allocate_byte_trace(stream, device_id)
     }
 }
 
@@ -1493,12 +1710,18 @@ mod tests {
     use crate::{
         chips::chips::alu::event::AluEvent,
         compiler::riscv::{opcode::Opcode, program::Program},
+        emulator::riscv::alu_event_pool::{init_alu_event_buffer_pool, is_alu_pool_initialized},
     };
+    use cudart::memory::CudaHostAllocFlags;
     use hashbrown::HashMap;
     use std::sync::Arc;
 
     #[test]
     fn add_alu_events_accepts_wide_rv64_opcode_families() {
+        // ADD/SUB and SLT land in pinned buffers drawn from this pool.
+        if !is_alu_pool_initialized() {
+            init_alu_event_buffer_pool(50, CudaHostAllocFlags::DEFAULT);
+        }
         let mut record = EmulationRecord::new(Arc::new(Program::default()));
         let mut grouped = HashMap::new();
 
@@ -1545,8 +1768,8 @@ mod tests {
 
         record.add_alu_events(grouped);
 
-        assert_eq!(record.add_events.len(), 1);
-        assert_eq!(record.sub_events.len(), 1);
+        // ADDW and SUBW share one buffer here.
+        assert_eq!(record.add_sub_events.len(), 2);
         assert_eq!(record.shift_left_events.len(), 1);
         assert_eq!(record.shift_right_events.len(), 2);
         assert_eq!(record.mul_events.len(), 1);
@@ -1771,8 +1994,8 @@ mod tail_merge_constants {
             .expect("KECCAK_PERMUTE has no tail_gkr_interactions entry");
         assert_eq!(
             estimate_per_row, 280,
-            "the keccak estimate is pinned to gpu-base's value; changing it here alone makes the \
-             two branches' probe output incomparable"
+            "the keccak estimate is pinned at 280; changing it here alone makes probe output \
+             incomparable across builds"
         );
         let (keccak_rows, _) = tail_rows_and_width(SyscallCode::KECCAK_PERMUTE)
             .expect("KECCAK_PERMUTE has no tail_rows_and_width entry");

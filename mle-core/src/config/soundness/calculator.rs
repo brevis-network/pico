@@ -189,8 +189,10 @@ impl SoundnessCalculator {
     /// Proof-of-work grinding is an orthogonal amplification that callers add on top via
     /// [`Self::effective_pow_bits`]. `LogUpSecurityParameters::bits_of_security` states the same
     /// bound at list size 1 with the nominal grinding added, as a conservatively rounded integer:
-    /// it floors the field term and ceils the interaction-count term. The bound is the LogUp
-    /// soundness analysis with the extension-field challenge and the message-length bound.
+    /// it floors the field term and ceils the interaction-count term.
+    ///
+    /// Reference: Section 4 of the note *Soundness of Interactions via LogUp* (the LogUp
+    /// soundness analysis with the extension-field challenge and the message-length bound).
     pub fn logup_soundness(
         max_interaction_count: u32,
         log_max_message_length: u32,

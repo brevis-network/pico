@@ -125,9 +125,9 @@ where
         };
         let height = match rows {
             PreprocessedRows::FixedLog2(log2_rows) => 1 << log2_rows,
-            // Same rule, same assert, one home: the five generators that read a declared
-            // count pad with `padded_prep_rows` too, so a declaration cannot drift from the
-            // generator it mirrors, and an undersized shape is rejected on both paths.
+            // Same rule, same assert, one home: `padded_prep_rows` is what every
+            // `generate_preprocessed` (host and device) pads with, so a declaration cannot drift
+            // from the generators, and an undersized shape is rejected on both sides.
             PreprocessedRows::Unpadded(rows) => self
                 .program
                 .padded_prep_rows(&ChipBehavior::<F>::name(&self.inner), rows),
@@ -330,20 +330,25 @@ pub fn build_proving_ctx<SC: StarkProtocolConfig<F = Kb>>(
     ProvingContext::new(per_trace)
 }
 
+/// Recursion programs used as fixtures by more than one test module: the preprocessed-geometry
+/// tests below, and the GPU keygen parity tests in `recursion::gpu`.
 #[cfg(test)]
 mod tests {
     use super::*;
     use pico_mle_core::config::koala_bear_poseidon2::KoalaBearPoseidon2Config;
 
-    /// The AIR list length is the recursion chip-set size — the two must stay in lockstep, since
+    /// The AIR list length is the recursion chip-set size -- the two must stay in lockstep, since
     /// `build_proving_ctx` pairs them positionally (slice index == AIR id).
     #[test]
     fn air_refs_match_the_chip_set_length() {
-        let program = Arc::new(RecursionProgram::<Kb>::default());
+        let program = std::sync::Arc::new(crate::compiler::recursion::program::RecursionProgram::<
+            Kb,
+        >::default());
         let airs = recursion_air_refs_with_preprocessed::<KoalaBearPoseidon2Config>(&program);
         assert_eq!(
             airs.len(),
-            RecursionChipType::<Kb>::mle_recursion_chips().len()
+            crate::instances::chiptype::recursion_chiptype::RecursionChipType::<Kb>::mle_recursion_chips()
+                .len()
         );
     }
 
@@ -376,7 +381,6 @@ mod tests {
     }
 }
 
-/// Recursion programs used as fixtures by the preprocessed-geometry tests below.
 #[cfg(test)]
 pub(crate) mod test_programs {
     use super::*;
@@ -428,8 +432,7 @@ pub(crate) mod test_programs {
             // The three chips whose height is a SUM of per-instruction vector lengths, not an
             // instruction count — the counts most likely to be got wrong, so they need real
             // instructions here. Lengths satisfy each generator's own `debug_assert`: MemoryVar
-            // takes every Hint variant's output list and the tally has one arm per variant, so
-            // all four are emitted (4 accesses each = one whole `div_ceil(VAR_MEM_DATAPAR)` row);
+            // takes every Hint's output list (4 = one whole `div_ceil(VAR_MEM_DATAPAR)` row);
             // ExtDotProduct needs `val_addrs` a multiple of `EXT_DOT_PRODUCT_GROUPS`(2) and
             // `mu_addrs` exactly 4x its group count; HornerEval needs `coeff_addrs` a multiple
             // of `HORNER_EVAL_DATAPAR`(4).
@@ -574,7 +577,8 @@ pub(crate) mod test_programs {
 ///
 /// This is the guard that makes [`ChipBehavior::preprocessed_rows`] safe to hand-write: each
 /// override replicates one generator's row count, and a generator that changes without its
-/// override fails here. It needs no device, so it runs wherever `cargo test -p pico-vm` runs.
+/// override fails here. CPU-only and cheap, so it runs wherever `cargo test -p pico-vm` runs —
+/// unlike the GPU keygen parity tests, which need a CUDA device.
 #[cfg(test)]
 mod dims_tests {
     use super::{test_programs::mixed_program, *};
@@ -686,9 +690,10 @@ mod dims_tests {
     }
 
     /// The tripwire the shared padding rule exists for: an undersized shape must be REJECTED, not
-    /// rounded up. Were it rounded, the declaration and the generator would both report
-    /// `1 << log2_rows` and agree with each other while both being smaller than the program, so
-    /// the disagreement this test exists to catch would read as agreement.
+    /// rounded up. Were it rounded, the declaration would report `1 << log2_rows`, every device
+    /// generator would size its allocation from that same number — so the assembler's height
+    /// check could not see it — and the kernel, bounded only by the instruction count, would write
+    /// past the allocation.
     #[test]
     #[should_panic(expected = "fixed_log2_rows too small")]
     fn an_undersized_shape_is_rejected_not_rounded_up() {

@@ -133,3 +133,131 @@ fn test_gkr_round_preprocessed_dimensions() {
     assert_eq!(preprocessed.row_slice(0).unwrap()[0], F::ONE); // is_real
     assert_eq!(preprocessed.row_slice(1).unwrap()[0], F::ZERO); // padding
 }
+
+/// GPU trace-gen must be element-wise identical to the CPU path, including the device-computed r_sq
+/// and padding rows. KoalaBear-only; needs a CUDA device.
+mod gpu {
+    use crate::{
+        chips::{chips::gkr_sumcheck_round::GkrSumcheckRoundChip, tests::init_test_stream},
+        compiler::recursion::{
+            instruction::Instruction,
+            ir::Block,
+            program::RecursionProgram,
+            types::{Address, GkrSumcheckRoundEvent, GkrSumcheckRoundInstr},
+        },
+        emulator::recursion::emulator::RecursionRecord,
+        machine::chip::ChipBehavior,
+    };
+    use p3_field::PrimeCharacteristicRing;
+    use p3_koala_bear::KoalaBear;
+
+    type F = KoalaBear;
+
+    fn blk(base: u32) -> Block<F> {
+        Block(std::array::from_fn(|k| F::from_u32(base + k as u32)))
+    }
+
+    fn sample_events(n: u32) -> Vec<GkrSumcheckRoundEvent<F>> {
+        (0..n)
+            .map(|i| {
+                let b = i.wrapping_mul(100);
+                GkrSumcheckRoundEvent {
+                    claim: blk(b),
+                    s1: blk(b + 10),
+                    s2: blk(b + 20),
+                    s3: blk(b + 30),
+                    r: blk(b + 40),
+                    xi: blk(b + 50),
+                    eq_in: blk(b + 60),
+                    next_claim: blk(b + 70),
+                    eq_out: blk(b + 80),
+                }
+            })
+            .collect()
+    }
+
+    fn sample_program(n: u32) -> RecursionProgram<F> {
+        let mk = |v: u32| Address(F::from_u32(v));
+        RecursionProgram {
+            instructions: (0..n)
+                .map(|i| {
+                    let b = i.wrapping_mul(100);
+                    Instruction::GkrSumcheckRound(Box::new(GkrSumcheckRoundInstr {
+                        claim_addr: mk(b),
+                        s1_addr: mk(b + 1),
+                        s2_addr: mk(b + 2),
+                        s3_addr: mk(b + 3),
+                        r_addr: mk(b + 4),
+                        xi_addr: mk(b + 5),
+                        eq_in_addr: mk(b + 6),
+                        next_claim_addr: mk(b + 7),
+                        eq_out_addr: mk(b + 8),
+                        mult_next: F::ONE,
+                        mult_eq: F::TWO,
+                    }))
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn assert_main_parity(n: u32) {
+        let stream = init_test_stream();
+        let chip = GkrSumcheckRoundChip::<F>::default();
+        let mut record = RecursionRecord::<F>::default();
+        record.gkr_sumcheck_round_events = sample_events(n);
+        let cpu = chip.generate_main(&record, &mut RecursionRecord::default());
+        let gpu = chip
+            .gpu_generate_main(0, &record, &mut RecursionRecord::default(), None)
+            .to_host(stream);
+        assert_eq!(cpu.values, gpu.values, "main parity failed for {n} events");
+    }
+
+    fn assert_preprocessed_parity(n: u32) {
+        let stream = init_test_stream();
+        let chip = GkrSumcheckRoundChip::<F>::default();
+        let program = sample_program(n);
+        let cpu = chip.generate_preprocessed(&program).unwrap();
+        let gpu = chip
+            .gpu_generate_preprocessed(0, &program)
+            .unwrap()
+            .to_host(stream);
+        assert_eq!(
+            cpu.values, gpu.values,
+            "preprocessed parity failed for {n} instrs"
+        );
+    }
+
+    #[test]
+    fn test_gkr_sumcheck_round_gpu_main_empty_matches_cpu() {
+        assert_main_parity(0);
+    }
+    #[test]
+    fn test_gkr_sumcheck_round_gpu_main_sub16_matches_cpu() {
+        assert_main_parity(5);
+    }
+    #[test]
+    fn test_gkr_sumcheck_round_gpu_main_matches_cpu() {
+        assert_main_parity(40);
+    }
+    #[test]
+    fn test_gkr_sumcheck_round_gpu_main_pow2_matches_cpu() {
+        assert_main_parity(64);
+    }
+    #[test]
+    fn test_gkr_sumcheck_round_gpu_preprocessed_empty_matches_cpu() {
+        assert_preprocessed_parity(0);
+    }
+    #[test]
+    fn test_gkr_sumcheck_round_gpu_preprocessed_sub16_matches_cpu() {
+        assert_preprocessed_parity(5);
+    }
+    #[test]
+    fn test_gkr_sumcheck_round_gpu_preprocessed_matches_cpu() {
+        assert_preprocessed_parity(40);
+    }
+    #[test]
+    fn test_gkr_sumcheck_round_gpu_preprocessed_pow2_matches_cpu() {
+        assert_preprocessed_parity(64);
+    }
+}

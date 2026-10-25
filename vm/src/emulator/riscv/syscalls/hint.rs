@@ -4,7 +4,6 @@ use crate::{
     emulator::riscv::{
         emulator::{error::EmulationError, util::align_u64},
         event_types::RvValue,
-        riscv_emulator::RiscvEmulatorMode,
     },
 };
 
@@ -92,8 +91,8 @@ impl Syscall for HintReadSyscall {
 
             let existing = ctx.rt.state.uninitialized_memory.get(addr).copied();
             if let Some(old) = existing.filter(|&v| v != 0) {
-                let is_trace = matches!(ctx.rt.mode, RiscvEmulatorMode::Trace);
-                if !(is_trace && old == word) {
+                let is_recording = ctx.rt.mode.is_recording();
+                if !(is_recording && old == word) {
                     ctx.fail(EmulationError::InvalidHintRead(format!(
                         "address is initialized already (uninitialized_memory): \
                          addr=0x{addr:016x} ptr=0x{ptr:016x} chunk_idx={chunk_idx} len={len} \
@@ -143,7 +142,10 @@ mod tests {
     use super::*;
     use crate::{
         compiler::riscv::program::Program,
-        emulator::{opts::EmulatorOpts, riscv::riscv_emulator::RiscvEmulator},
+        emulator::{
+            opts::EmulatorOpts,
+            riscv::{public_values::RecordFinalPvsState, riscv_emulator::RiscvEmulator},
+        },
     };
     use p3_koala_bear::KoalaBear;
     use std::{
@@ -166,10 +168,15 @@ mod tests {
     }
 
     fn test_emulator(input_stream: Vec<Vec<u8>>) -> RiscvEmulator {
-        RiscvEmulator::new_single::<KoalaBear>(test_program(), EmulatorOpts::default(), None)
-            .tap_mut(|emu| {
-                emu.state.input_stream = input_stream;
-            })
+        RiscvEmulator::new_single::<KoalaBear>(
+            test_program(),
+            Arc::new(RecordFinalPvsState::default()),
+            EmulatorOpts::default(),
+            None,
+        )
+        .tap_mut(|emu| {
+            emu.state.input_stream = input_stream;
+        })
     }
 
     trait TapMut: Sized {

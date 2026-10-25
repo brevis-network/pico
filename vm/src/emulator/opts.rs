@@ -8,6 +8,13 @@ use std::env;
 use sysinfo::System;
 use tracing::debug;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SnapshotMainMode {
+    #[default]
+    Interpreter,
+    Aot,
+}
+
 /// Options for the core prover.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmulatorOpts {
@@ -23,17 +30,9 @@ pub struct EmulatorOpts {
     pub cycle_tracker: bool,
     /// Whether or not to track cycle prediction information
     pub cost_estimator: bool,
-    /// Selects which emulator implementation runs in the snapshot-main thread.
+    /// Backend used for the snapshot-main phase of the pipeline.
     #[serde(default)]
     pub snapshot_main: SnapshotMainMode,
-}
-
-/// Which emulator drives the snapshot-main thread in `emulate_snapshot_pipeline`.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SnapshotMainMode {
-    #[default]
-    Interpreter,
-    Aot,
 }
 
 impl Default for EmulatorOpts {
@@ -66,7 +65,7 @@ impl Default for EmulatorOpts {
             max_cycles: default_max_cycles.into(),
             cycle_tracker: false,
             cost_estimator: false,
-            snapshot_main: SnapshotMainMode::default(),
+            snapshot_main: SnapshotMainMode::Interpreter,
         }
     }
 }
@@ -141,8 +140,17 @@ impl EmulatorOpts {
                 |s| s.parse::<u32>().unwrap_or(default_chunk_batch_size),
             ),
             split_opts: SplitOpts::new(split_threshold),
+            snapshot_main: Self::default_snapshot_main_mode(),
             ..Default::default()
         }
+    }
+
+    fn default_snapshot_main_mode() -> SnapshotMainMode {
+        #[cfg(feature = "aot-emulator")]
+        if crate::emulator::aot::is_aot_factory_registered() {
+            return SnapshotMainMode::Aot;
+        }
+        SnapshotMainMode::Interpreter
     }
 
     pub fn bench_recursion_opts() -> Self {
@@ -270,10 +278,7 @@ fn chunk_size(total_available_mem: u64) -> u32 {
 /// The sequencer hands `EmulationRecord::split` the batch index it has committed, and
 /// `SyscallEvent.chunk` counts chunks, so the `chunk <= committed + 1` filter admits a batch's
 /// own precompile events only while a batch is a single chunk -- a larger batch would drop the
-/// rest of them in silence. The single-machine emulator turns that filter off instead, so this
-/// pin is for the sequencer, which asserts on what it is handed. The `bench_*` constructors do
-/// not come through here and keep their own batch size; their only callers are the AOT emulation
-/// harnesses, which never reach the sequencer.
+/// rest of them in silence. The sequencer asserts on what it is handed.
 fn chunk_batch_size(_total_available_mem: u64) -> u32 {
-    1
+    BENCH_MAX_CHUNK_BATCH_SIZE
 }

@@ -25,6 +25,11 @@ Pico 3.0 proves with a multilinear (MLE) STARK on the KoalaBear field (prime $p 
 
 Pico 3.0 is a breaking release: 2.x proofs, keys and verifier contracts do not carry over. See the [release notes](./docs/release-notes/3.0.md), the [migration guide](./docs/migration-2.x-to-3.0.md) and the [support matrix](./docs/support-matrix.md).
 
+## GPU Prover
+This branch, `gpu`, is a preview of Pico 3.1 (`v3.1.0-gpu.1`): Pico 3.0 with a GPU prover for the RISCV, CONVERT and COMBINE phases. It proves the same proof system with the same parameters, verifying-key whitelist and verifier contracts as 3.0. The CPU-only 3.0 release line stays on `main`.
+
+Building Pico on this branch needs the CUDA Toolkit on x86-64 Linux, also for the CLI; executing or proving a program needs an NVIDIA GPU, also with the CPU prover. macOS is not supported here. The CUDA kernels come from [pico-gpu](https://github.com/brevis-network/pico-gpu), which is licensed under BUSL-1.1. See the [release notes](./docs/release-notes/3.1.0-gpu.md) and the [support matrix](./docs/support-matrix.md).
+
 ## Security
 Pico 3.0 targets 100 bits of provable round-by-round soundness under the random-oracle model, through the recursion root; the on-chain Groth16 step is held to BN254's security level. This is a computed bound, not a formal verification.
 
@@ -46,3 +51,4 @@ Pico draws inspiration from the following projects, each representing cutting-ed
 - [SP1](https://github.com/succinctlabs/sp1): Pico derives significant inspiration from SP1's chip design and their constraints. Its recursion compiler and precompiles originate from SP1.
 - [Valida](https://github.com/valida-xyz/valida): Pico's implementation of cross-table lookups is inspired by Valida's pioneering work in this area.
 - [RISC0](https://github.com/risc0/risc0): Pico's Rust toolchain is based on the one originally developed by RISC0.
+- [OpenVM](https://github.com/openvm-org/openvm): Pico's multilinear proving backend (LogUp-GKR, stacked reduction and WHIR) is based on OpenVM's stark-backend.

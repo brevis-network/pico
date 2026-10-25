@@ -1,57 +1,71 @@
+use super::{ffi::FfiFp2MulEvent, words_to_bytes_le_slice};
+use crate::{
+    chips::{
+        chips::{
+            byte::event::ByteRecordBehavior,
+            riscv_memory::read_write::columns::{MemoryCols, MemoryReadColsU8, MemoryWriteColsU8},
+        },
+        gadgets::{
+            addr_add::AddrAddGadget,
+            curves::weierstrass::{bls381::Bls381BaseField, bn254::Bn254BaseField},
+            field::{
+                field_lt::FieldLtCols,
+                field_op::{FieldOpCols, FieldOperation},
+            },
+            syscall_addr::SyscallAddrGadget,
+            utils::{
+                conversions::{
+                    generate_limbs_from_read_cols_u8, generate_limbs_from_write_cols_u8,
+                    limbs_to_words,
+                },
+                field_params::{FieldType, FpOpField, NumLimbs, NumWords},
+                limbs::Limbs,
+                polynomial::Polynomial,
+            },
+        },
+        precompiles::checked_u64_to_u32,
+        trace::TraceData,
+        utils::{next_power_of_two, pad_rows_fixed},
+    },
+    compiler::{riscv::program::Program, word::Word},
+    cuda_adaptor::{get_global_mem_pool, get_global_stream_pool},
+    emulator::riscv::{
+        ffi::FFIEmulationRecord,
+        record::EmulationRecord,
+        syscalls::{precompiles::PrecompileEvent, SyscallCode},
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
+    machine::{
+        builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
+        chip::ChipBehavior,
+    },
+};
 use core::{
     borrow::{Borrow, BorrowMut},
     fmt::Debug,
     marker::PhantomData,
     mem::size_of,
 };
-
-use crate::{
-    chips::{
-        chips::byte::event::ByteRecordBehavior,
-        gadgets::{
-            field::field_op::FieldOperation,
-            utils::{
-                field_params::{FieldType, FpOpField, NumLimbs},
-                limbs::Limbs,
-                polynomial::Polynomial,
-            },
-        },
-        precompiles::checked_u64_to_u32,
-    },
-    compiler::riscv::program::Program,
-    emulator::riscv::{record::EmulationRecord, syscalls::SyscallCode},
-    machine::{
-        builder::{ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
-        chip::ChipBehavior,
-    },
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
 };
+use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use hybrid_array::{typenum::Unsigned, Array};
 use itertools::Itertools;
 use num::{BigUint, Zero};
 use p3_air::{Air, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
-
-use super::words_to_bytes_le_slice;
-use crate::{
-    chips::{
-        chips::riscv_memory::read_write::columns::{
-            MemoryCols, MemoryReadColsU8, MemoryWriteColsU8,
-        },
-        gadgets::{
-            addr_add::AddrAddGadget,
-            field::{field_lt::FieldLtCols, field_op::FieldOpCols},
-            syscall_addr::SyscallAddrGadget,
-            utils::conversions::{
-                generate_limbs_from_read_cols_u8, generate_limbs_from_write_cols_u8, limbs_to_words,
-            },
-        },
-        utils::pad_rows_fixed,
-    },
-    compiler::word::Word,
-    emulator::riscv::syscalls::precompiles::PrecompileEvent,
+use pico_gpu_api::{
+    cuda_precompile_fp2_mul_bls12381_generate_extra_record_and_main,
+    cuda_precompile_fp2_mul_bn254_generate_extra_record_and_main,
 };
+use std::mem::transmute;
+use tracing::info;
 
 pub const fn num_fp2_mul_cols<P>() -> usize
 where
@@ -66,7 +80,7 @@ pub struct Fp2MulChip<F, P> {
     _marker: PhantomData<fn(F, P) -> (F, P)>,
 }
 
-/// A set of columns for the FpAdd operation.
+/// A set of columns for the FpMul operation.
 #[derive(Debug, Clone, AlignedBorrow)]
 #[repr(C)]
 pub struct Fp2MulCols<F, P>
@@ -181,7 +195,7 @@ where
     P: FpOpField,
 {
     type Record = EmulationRecord;
-
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -293,6 +307,110 @@ where
         self.generate_main(input, extra);
     }
 
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        let events: &[FfiFp2MulEvent<P::WordsCurvePoint>] = match P::FIELD_TYPE {
+            FieldType::Bn254 => {
+                let events = prepared_gpu_events.bn254_fp2_mul_events.as_slice();
+                unsafe {
+                    transmute::<
+                        &[FfiFp2MulEvent<<Bn254BaseField as NumWords>::WordsCurvePoint>],
+                        &[FfiFp2MulEvent<P::WordsCurvePoint>],
+                    >(events)
+                }
+            }
+            FieldType::Bls381 => {
+                let events = prepared_gpu_events.bls12381_fp2_mul_events.as_slice();
+                unsafe {
+                    transmute::<
+                        &[FfiFp2MulEvent<<Bls381BaseField as NumWords>::WordsCurvePoint>],
+                        &[FfiFp2MulEvent<P::WordsCurvePoint>],
+                    >(events)
+                }
+            }
+            _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
+        };
+
+        let num_cols_per_row = num_fp2_mul_cols::<P>();
+        let log_rows = input.shape_chip_size(&self.name());
+        let num_total_rows = next_power_of_two(events.len(), log_rows);
+
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING).unwrap();
+
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let event_size = events.len();
+        let mut d_events =
+            DevicePoolAllocation::<FfiFp2MulEvent<P::WordsCurvePoint>>::alloc_from_pool_async(
+                event_size, mem_pool, stream,
+            )
+            .unwrap();
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events.as_c_void_ptr(),
+                std::mem::size_of_val(events),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        let trace_size = num_total_rows * num_cols_per_row;
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .unwrap();
+
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        match P::FIELD_TYPE {
+            FieldType::Bls381 => {
+                unsafe {
+                    cuda_precompile_fp2_mul_bls12381_generate_extra_record_and_main(
+                        num_cols_per_row,
+                        event_size,
+                        trace_size,
+                        d_events.as_ptr() as *const _,
+                        d_trace.as_mut_ptr() as *mut _,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    );
+                }
+
+                info!("[precompile-fp2-mul-chip-bls381] generate_extra_record_and_main on GPU");
+            }
+            FieldType::Bn254 => {
+                unsafe {
+                    cuda_precompile_fp2_mul_bn254_generate_extra_record_and_main(
+                        num_cols_per_row,
+                        event_size,
+                        trace_size,
+                        d_events.as_ptr() as *const _,
+                        d_trace.as_mut_ptr() as *mut _,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    );
+                }
+
+                info!("[precompile-fp2-mul-chip-bn254] generate_extra_record_and_main on GPU")
+            }
+            _ => unreachable!(),
+        }
+
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        TraceData::Gpu(num_fp2_mul_cols::<P>(), d_trace)
+    }
+
     fn is_active(&self, input: &Self::Record) -> bool {
         if let Some(shape) = input.shape.as_ref() {
             shape.included::<F, _>(self)
@@ -304,6 +422,18 @@ where
                 FieldType::Bls381 => !input
                     .get_precompile_events(SyscallCode::BLS12381_FP2_MUL)
                     .is_empty(),
+                _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
+            }
+        }
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            match P::FIELD_TYPE {
+                FieldType::Bls381 => !record.bls12381_fp2_mul_events.is_empty(),
+                FieldType::Bn254 => !record.bn254_fp2_mul_events.is_empty(),
                 _ => unimplemented!("fp2 available only for Bn254 and Bls12381"),
             }
         }
@@ -557,5 +687,441 @@ where
             y_ptr.map(Into::into),
             local.is_real,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::LazyLock;
+
+    use crate::chips::gadgets::utils::RandBigUint;
+    use itertools::Itertools;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::{rng, rngs::ThreadRng, RngExt};
+
+    use crate::{
+        chips::{
+            chips::{
+                byte::{columns::NUM_BYTE_MULT_COLS, ByteChip},
+                events::{MemoryReadRecord, MemoryWriteRecord},
+            },
+            gadgets::{
+                curves::weierstrass::bls381::Bls381BaseField,
+                field::bn254::Bn254BaseField,
+                utils::field_params::{FieldType, FpOpField},
+            },
+            precompiles::fptower::fp2_mul::Fp2MulChip,
+            tests::init_test_stream,
+            trace::TraceData,
+        },
+        emulator::riscv::{
+            record::EmulationRecord,
+            syscalls::{
+                precompiles::{Fp2MulEvent, PrecompileEvent, PrecompileEvents},
+                SyscallCode, SyscallEvent,
+            },
+        },
+        instances::{
+            compiler::shapes::riscv_shape::RiscvPadShape,
+            preparer::{
+                gpu_allocate_byte_trace, gpu_finalize_byte_trace, precompute_event_size,
+                PreallocatedGpuMemory, PreparedGpuEvents,
+            },
+        },
+        machine::chip::ChipBehavior,
+    };
+
+    type F = KoalaBear;
+
+    // Lazily initialized record for use across multiple tests (small size for debugging).
+    static BN254_SHARD: LazyLock<EmulationRecord> =
+        LazyLock::new(|| generate_record::<Bn254BaseField>(1 << 3));
+
+    static BLS12381_SHARD: LazyLock<EmulationRecord> =
+        LazyLock::new(|| generate_record::<Bls381BaseField>(1 << 3));
+
+    fn cpu_generate_main<P: FpOpField>(
+        chip: &Fp2MulChip<F, P>,
+        input: &EmulationRecord,
+    ) -> RowMajorMatrix<F> {
+        chip.generate_main(input, &mut EmulationRecord::default())
+    }
+
+    pub(super) fn generate_record<P: FpOpField>(size: usize) -> EmulationRecord {
+        use typenum::Unsigned;
+        let mut rng = rng();
+        let size = size as u32;
+        let double_num_words = P::WordsCurvePoint::USIZE;
+        let mut precompile_events = PrecompileEvents::default();
+        let syscall_id = match P::FIELD_TYPE {
+            FieldType::Bn254 => SyscallCode::BN254_FP2_MUL,
+            FieldType::Bls381 => SyscallCode::BLS12381_FP2_MUL,
+            _ => unreachable!(),
+        };
+        let events = (0..size)
+            .map(|i| {
+                let chunk = 0;
+                let clk = i as u64;
+                let x_ptr = (rng.random_range(0..size) * 4) as u64;
+                let y_ptr = (rng.random_range(0..size) * 4) as u64;
+                let x = random_base_field_elements::<P>(&mut rng);
+                let y = random_base_field_elements::<P>(&mut rng);
+                let x_memory_records = (0..double_num_words as u32)
+                    .map(|_| MemoryWriteRecord {
+                        prev_timestamp: i,
+                        timestamp: i + 1,
+                        ..Default::default()
+                    })
+                    .collect();
+                let y_memory_records = (0..double_num_words as u32)
+                    .map(|_| MemoryReadRecord {
+                        prev_timestamp: i,
+                        timestamp: i + 1,
+                        ..Default::default()
+                    })
+                    .collect();
+                let event = Fp2MulEvent {
+                    chunk,
+                    clk,
+                    x_ptr,
+                    x,
+                    y_ptr,
+                    y,
+                    x_memory_records,
+                    y_memory_records,
+                    local_mem_access: vec![],
+                };
+                let precompile_event = match P::FIELD_TYPE {
+                    FieldType::Bn254 => PrecompileEvent::Bn254Fp2Mul(event),
+                    FieldType::Bls381 => PrecompileEvent::Bls12381Fp2Mul(event),
+                    _ => unreachable!(),
+                };
+                let syscall_event = SyscallEvent {
+                    syscall_id: syscall_id as u32,
+                    ..Default::default()
+                };
+                (syscall_event, precompile_event)
+            })
+            .collect_vec();
+        precompile_events.insert(syscall_id, events);
+
+        let mut record = EmulationRecord::default();
+        record.precompile_events = precompile_events.clone();
+
+        record
+    }
+
+    fn random_base_field_elements<P: FpOpField>(rng: &mut ThreadRng) -> Box<[u64]> {
+        let x = rng.random_biguint(P::num_bits() as u64) % P::modulus();
+        let y = rng.random_biguint(P::num_bits() as u64) % P::modulus();
+        // Each BigUint is converted to u64 dwords
+        let x_dwords = x.to_u64_digits();
+        let y_dwords = y.to_u64_digits();
+        use typenum::Unsigned;
+        let field_dwords = P::WordsFieldElement::USIZE;
+        let mut result = vec![0u64; field_dwords * 2];
+        for (i, &d) in x_dwords.iter().enumerate().take(field_dwords) {
+            result[i] = d;
+        }
+        for (i, &d) in y_dwords.iter().enumerate().take(field_dwords) {
+            result[field_dwords + i] = d;
+        }
+        result.into_boxed_slice()
+    }
+
+    #[test]
+    fn test_bn254_fp2_mul_generate_extra_record_and_main() {
+        type P = Bn254BaseField;
+        let chunk = LazyLock::force(&BN254_SHARD);
+        test_precompile_fp2_mul_generate_extra_record_and_main_helper::<P>(chunk);
+    }
+
+    #[test]
+    fn test_bls12381_fp2_mul_generate_extra_record_and_main() {
+        type P = Bls381BaseField;
+        let chunk = LazyLock::force(&BLS12381_SHARD);
+        test_precompile_fp2_mul_generate_extra_record_and_main_helper::<P>(chunk);
+    }
+
+    fn test_precompile_fp2_mul_generate_extra_record_and_main_helper<P: FpOpField>(
+        original_record: &EmulationRecord,
+    ) {
+        let chip = Fp2MulChip::<F, P>::new();
+
+        // Complete the record for CPU computation.
+        let mut complete_record = original_record.clone();
+        chip.extra_record(original_record, &mut complete_record);
+        // Precompute event sizes for GPU computation.
+        let mut counted_record = original_record.clone();
+        complete_record.shape = Some(RiscvPadShape::default());
+        complete_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 5);
+        counted_record.shape = Some(RiscvPadShape::default());
+        counted_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 5);
+
+        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+        // Ignore Poseidon2 event counting
+        event_counter.num_poseidon2_events = complete_record.poseidon2_events.len();
+        // Ignore Global lookup event counting
+        event_counter.num_global_lookup_events = complete_record.global_lookup_events.len();
+        // Assert that the event counts are the same.
+        event_counter.assert_event_counts_match(&complete_record);
+
+        // Generate CPU trace.
+        let cpu_trace = cpu_generate_main(&chip, &complete_record);
+        let byte_chip = ByteChip::<F>::default();
+        let cpu_byte_trace =
+            byte_chip.generate_main(&complete_record, &mut EmulationRecord::default());
+
+        // Generate GPU trace.
+        let stream = init_test_stream();
+        let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+            d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
+        let gpu_trace = gpu_generate_extra_record_and_main(
+            &chip,
+            &counted_record,
+            &prepared_gpu_events,
+            &mut preallocated_gpu_memory,
+        );
+        // Assert trace consistency.
+        assert_eq!(cpu_trace, gpu_trace);
+
+        // Finalize the byte trace. And assert that the byte trace is consistent.
+        gpu_finalize_byte_trace(stream, &mut preallocated_gpu_memory).unwrap();
+        stream.synchronize().unwrap();
+
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.take().unwrap();
+
+        let host_gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace).to_host(stream);
+        assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
+    }
+
+    fn gpu_generate_extra_record_and_main<P: FpOpField>(
+        chip: &Fp2MulChip<F, P>,
+        input: &EmulationRecord,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> RowMajorMatrix<F> {
+        let stream = init_test_stream();
+        let trace = chip.gpu_generate_extra_record_and_main(
+            0,
+            input,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        );
+        trace.to_host(stream)
+    }
+
+    #[test]
+    fn bench_fp2_mul_cpu_vs_gpu() {
+        // Initialize CUDA context and global memory pool
+        init_test_stream();
+
+        println!("\n============================================================");
+        println!("  Fp2Mul CPU vs GPU Benchmark (kernel only)");
+        println!("============================================================\n");
+
+        bench_fp2_mul_for_field::<Bn254BaseField>("bn254");
+        bench_fp2_mul_for_field::<Bls381BaseField>("bls12381");
+    }
+
+    fn bench_fp2_mul_for_field<P: FpOpField>(label: &str) {
+        use std::{
+            mem::{size_of, transmute},
+            time::Instant,
+        };
+
+        use cudart::{
+            memory_pools::DevicePoolAllocation,
+            slice::{CudaSlice, CudaSliceMut},
+            stream::{CudaStream, CudaStreamCreateFlags},
+        };
+        use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
+        use pico_gpu_api::{
+            cuda_precompile_fp2_mul_bls12381_generate_extra_record_and_main,
+            cuda_precompile_fp2_mul_bn254_generate_extra_record_and_main,
+        };
+
+        use super::num_fp2_mul_cols;
+        use crate::{
+            chips::precompiles::fptower::ffi::FfiFp2MulEvent,
+            cuda_adaptor::resource_pool::{
+                mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+            },
+        };
+
+        println!("  [{}]", label);
+        println!("  ----------------------------------------------------------");
+        println!(
+            "  {:10}    {:>10}  {:>10}   {:>10}",
+            "events", "cpu (ms)", "gpu (ms)", "speedup"
+        );
+        println!("  ----------------------------------------------------------");
+
+        let warmup_sizes: Vec<usize> = vec![1 << 10];
+        let bench_sizes: Vec<usize> = vec![1 << 10, 1 << 14, 1 << 16, 1 << 18];
+
+        for (is_warmup, &num_events) in warmup_sizes
+            .iter()
+            .map(|n| (true, n))
+            .chain(bench_sizes.iter().map(|n| (false, n)))
+        {
+            let record = generate_record::<P>(num_events);
+            let chip = Fp2MulChip::<F, P>::new();
+
+            let log_rows = (num_events as f64).log2().ceil() as usize + 1;
+
+            // CPU — needs complete record (with extra_record applied)
+            let mut complete_record = record.clone();
+            complete_record.shape = Some(RiscvPadShape::default());
+            complete_record
+                .shape
+                .as_mut()
+                .unwrap()
+                .inner
+                .insert(chip.name(), log_rows);
+            chip.extra_record(&record, &mut complete_record);
+            let cpu_start = Instant::now();
+            let cpu_trace = cpu_generate_main(&chip, &complete_record);
+            let cpu_ms = cpu_start.elapsed().as_secs_f64() * 1000.0;
+
+            // === GPU (inline to separate H2D / kernel / D2H) ===
+            let mut counted_record = record.clone();
+            counted_record.shape = Some(RiscvPadShape::default());
+            counted_record
+                .shape
+                .as_mut()
+                .unwrap()
+                .inner
+                .insert(chip.name(), log_rows);
+            let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+            event_counter.num_poseidon2_events = record.poseidon2_events.len();
+            event_counter.num_global_lookup_events = record.global_lookup_events.len();
+            let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
+
+            // Get events slice
+            let events: &[FfiFp2MulEvent<P::WordsCurvePoint>] = match P::FIELD_TYPE {
+                FieldType::Bn254 => unsafe {
+                    transmute(prepared_gpu_events.bn254_fp2_mul_events.as_slice())
+                },
+                FieldType::Bls381 => unsafe {
+                    transmute(prepared_gpu_events.bls12381_fp2_mul_events.as_slice())
+                },
+                _ => unreachable!(),
+            };
+
+            let padded_nrows = 1usize << log_rows;
+            let num_cols = num_fp2_mul_cols::<P>();
+            let trace_size = padded_nrows * num_cols;
+
+            let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING)
+                .expect("Failed to create CUDA stream");
+            let sync_mem_pool = get_global_mem_pool(0);
+            let mem_pool = &sync_mem_pool.0;
+
+            // H2D: copy events to GPU (outside timer)
+            let mut d_events =
+                DevicePoolAllocation::<FfiFp2MulEvent<P::WordsCurvePoint>>::alloc_from_pool_async(
+                    events.len(),
+                    mem_pool,
+                    stream,
+                )
+                .expect("GPU event alloc failed");
+            unsafe {
+                let _ = cudaMemcpyAsync(
+                    d_events.as_mut_c_void_ptr(),
+                    events.as_c_void_ptr(),
+                    events.len() * size_of::<FfiFp2MulEvent<P::WordsCurvePoint>>(),
+                    CudaMemoryCopyKind::HostToDevice,
+                    stream.into(),
+                );
+            }
+
+            // Allocate trace + byte trace on GPU (outside timer)
+            let mut d_trace =
+                DevicePoolAllocation::<p3_koala_bear::KoalaBear>::alloc_from_pool_async(
+                    trace_size, mem_pool, stream,
+                )
+                .expect("GPU trace alloc failed");
+            let mut d_byte_trace = gpu_allocate_byte_trace(stream, 0).unwrap().unwrap();
+
+            // Sync to ensure H2D and allocations are done
+            stream.synchronize().unwrap();
+
+            // === TIMED: kernel only ===
+            let gpu_start = Instant::now();
+            unsafe {
+                match P::FIELD_TYPE {
+                    FieldType::Bn254 => {
+                        cuda_precompile_fp2_mul_bn254_generate_extra_record_and_main(
+                            num_cols,
+                            events.len(),
+                            trace_size,
+                            d_events.as_ptr() as *const _,
+                            d_trace.as_mut_ptr() as *mut _,
+                            d_byte_trace.as_mut_ptr() as *mut _,
+                            stream.into(),
+                        );
+                    }
+                    FieldType::Bls381 => {
+                        cuda_precompile_fp2_mul_bls12381_generate_extra_record_and_main(
+                            num_cols,
+                            events.len(),
+                            trace_size,
+                            d_events.as_ptr() as *const _,
+                            d_trace.as_mut_ptr() as *mut _,
+                            d_byte_trace.as_mut_ptr() as *mut _,
+                            stream.into(),
+                        );
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            stream.synchronize().unwrap();
+            let gpu_ms = gpu_start.elapsed().as_secs_f64() * 1000.0;
+
+            // D2H: copy trace back for verification (outside timer)
+            let sync_stream = get_global_stream_pool(0);
+            let main_stream = &sync_stream.0;
+            let d_trace = d_trace.swap_stream(main_stream);
+            main_stream.synchronize().unwrap();
+            let gpu_trace = TraceData::<F>::Gpu(num_cols, d_trace).to_host(main_stream);
+
+            if is_warmup {
+                println!(
+                    "  {:10}    {:>10}  {:>10}   {:>10}",
+                    num_events, "warmup", "warmup", "—"
+                );
+                continue;
+            }
+
+            assert_eq!(
+                cpu_trace, gpu_trace,
+                "Main trace mismatch at bench size {}",
+                num_events
+            );
+
+            let speedup = cpu_ms / gpu_ms;
+            println!(
+                "  {:10}    {:10.2}  {:10.2}   {:7.1}x  ✓",
+                num_events, cpu_ms, gpu_ms, speedup
+            );
+        }
+
+        println!("  ----------------------------------------------------------\n");
     }
 }

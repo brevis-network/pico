@@ -46,10 +46,7 @@ use pico_vm::{
         },
     },
     configs::stark_config::KoalaBearPoseidon2,
-    emulator::{
-        opts::EmulatorOpts, record::RecordBehavior, riscv::record::EmulationRecord,
-        stdin::EmulatorStdin,
-    },
+    emulator::{record::RecordBehavior, riscv::record::EmulationRecord, stdin::EmulatorStdin},
     instances::chiptype::riscv_chiptype::RiscvChipType,
     machine::logger::setup_logger,
     mle::machine::{
@@ -266,21 +263,14 @@ fn main() {
     let program = Compiler::new(SourceType::RISCV, &elf)
         .expect("failed to parse ELF")
         .compile();
-    // Paired with `LOG_STACKED_HEIGHT`: a chunk of 2^23 instructions needs a stacked height of 23.
-    // `CHUNK_SIZE` can outrank the default, so check the pair rather than assume it.
-    let opts = EmulatorOpts::from_env_chunk_size(1 << LOG_STACKED_HEIGHT);
-    assert!(
-        (opts.chunk_size as u64) <= (1u64 << LOG_STACKED_HEIGHT),
-        "chunk_size {} exceeds 2^{LOG_STACKED_HEIGHT}: this control needs the pair to hold",
-        opts.chunk_size
-    );
-    let emulated =
-        riscv::emulate_with_opts(program.clone(), &stdin, opts).expect("emulation failed");
-    let records = emulated.records;
+    // Paired with `LOG_STACKED_HEIGHT`: a chunk of 2^23 instructions needs a stacked height of 23,
+    // so a larger `CHUNK_SIZE` would prove a different shape than this test pins; refuse it.
+    let chunk_size = riscv::chunk_size_from_env(LOG_STACKED_HEIGHT);
+    let records = riscv::emulate(program.clone(), stdin, Some(chunk_size));
 
     let honest = honest_digest(&records[0]);
     println!("\n=== cvd forgery positive control ===");
-    println!("chunks             : {}", emulated.chunks);
+    println!("chunks             : {}", records.len());
     println!("honest cvd limbs   : {honest:?}");
     println!(
         "expectation        : attack must {} (CVD_EXPECT={})",

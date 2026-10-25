@@ -1,27 +1,30 @@
 use crate::{
-    chips::chips::{
-        alu_base::BaseAluChip,
-        alu_ext::ExtAluChip,
-        assert_zero_ext::AssertZeroExtChip,
-        batch_fri::BatchFRIChip,
-        binary_fold_step::BinaryFoldStepChip,
-        digest_select::DigestSelectChip,
-        exp_bits_len::ExpBitsLenChip,
-        exp_reverse_bits::ExpReverseBitsLenChip,
-        ext_dot_product::ExtDotProductChip,
-        frac_fold::FracFoldChip,
-        gkr_sumcheck_round::GkrSumcheckRoundChip,
-        horner_eval::HornerEvalChip,
-        lagrange_eval_d2::LagrangeEvalD2Chip,
-        mle_open::MleOpenChip,
-        pack_block::PackBlockChip,
-        poseidon2::{FieldSpecificPoseidon2Chip, POSEIDON2_CHIPNAME},
-        poseidon2_packed::FieldSpecificPoseidon2PackedChip,
-        public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
-        recursion_memory::{constant::MemoryConstChip, variable::MemoryVarChip},
-        select::SelectChip,
-        univariate_fold::UnivariateFoldChip,
-        unpack_block::UnpackBlockChip,
+    chips::{
+        chips::{
+            alu_base::BaseAluChip,
+            alu_ext::ExtAluChip,
+            assert_zero_ext::AssertZeroExtChip,
+            batch_fri::BatchFRIChip,
+            binary_fold_step::BinaryFoldStepChip,
+            digest_select::DigestSelectChip,
+            exp_bits_len::ExpBitsLenChip,
+            exp_reverse_bits::ExpReverseBitsLenChip,
+            ext_dot_product::ExtDotProductChip,
+            frac_fold::FracFoldChip,
+            gkr_sumcheck_round::GkrSumcheckRoundChip,
+            horner_eval::HornerEvalChip,
+            lagrange_eval_d2::LagrangeEvalD2Chip,
+            mle_open::MleOpenChip,
+            pack_block::PackBlockChip,
+            poseidon2::{FieldSpecificPoseidon2Chip, POSEIDON2_CHIPNAME},
+            poseidon2_packed::FieldSpecificPoseidon2PackedChip,
+            public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
+            recursion_memory::{constant::MemoryConstChip, variable::MemoryVarChip},
+            select::SelectChip,
+            univariate_fold::UnivariateFoldChip,
+            unpack_block::UnpackBlockChip,
+        },
+        trace::TraceData,
     },
     compiler::recursion::{
         instruction::{
@@ -79,6 +82,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
     ChipBehavior<F> for RecursionChipType<F>
 {
     type Record = RecursionRecord<F>;
+    // NOTE: unnecessary to support additional gpu record in recursion for now
+    type GpuRecord = ();
     type Program = RecursionProgram<F>;
 
     fn name(&self) -> String {
@@ -137,6 +142,38 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
         }
     }
 
+    fn gpu_generate_preprocessed(
+        &self,
+        device_id: usize,
+        program: &RecursionProgram<F>,
+    ) -> Option<TraceData<'_, F>> {
+        match self {
+            Self::MemoryConst(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::MemoryVar(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::Select(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::ExpReverseBitsLen(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::BaseAlu(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::ExtAlu(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::Poseidon2(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::BatchFRI(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::PublicValues(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::AssertZeroExt(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::FracFold(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::MleOpen(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::UnivariateFold(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::LagrangeEvalD2(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::GkrSumcheckRound(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::ExtDotProduct(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::HornerEval(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::DigestSelect(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::BinaryFoldStep(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::PackBlock(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::UnpackBlock(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::Poseidon2Packed(chip) => chip.gpu_generate_preprocessed(device_id, program),
+            Self::ExpBitsLen(chip) => chip.gpu_generate_preprocessed(device_id, program),
+        }
+    }
+
     fn generate_main(&self, input: &Self::Record, output: &mut Self::Record) -> RowMajorMatrix<F> {
         match self {
             Self::MemoryConst(chip) => chip.generate_main(input, output),
@@ -162,6 +199,56 @@ impl<F: PrimeField32 + BinomiallyExtendable<EXTENSION_DEGREE> + FieldSpecificPos
             Self::UnpackBlock(chip) => chip.generate_main(input, output),
             Self::Poseidon2Packed(chip) => chip.generate_main(input, output),
             Self::ExpBitsLen(chip) => chip.generate_main(input, output),
+        }
+    }
+
+    fn gpu_generate_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        output: &mut Self::Record,
+        gpu_input: Option<&Self::GpuRecord>,
+    ) -> TraceData<'_, F> {
+        match self {
+            Self::MemoryConst(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::MemoryVar(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::Select(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::ExpReverseBitsLen(chip) => {
+                chip.gpu_generate_main(device_id, input, output, gpu_input)
+            }
+            Self::BaseAlu(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::ExtAlu(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::Poseidon2(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::BatchFRI(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::PublicValues(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::AssertZeroExt(chip) => {
+                chip.gpu_generate_main(device_id, input, output, gpu_input)
+            }
+            Self::FracFold(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::MleOpen(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::UnivariateFold(chip) => {
+                chip.gpu_generate_main(device_id, input, output, gpu_input)
+            }
+            Self::LagrangeEvalD2(chip) => {
+                chip.gpu_generate_main(device_id, input, output, gpu_input)
+            }
+            Self::GkrSumcheckRound(chip) => {
+                chip.gpu_generate_main(device_id, input, output, gpu_input)
+            }
+            Self::ExtDotProduct(chip) => {
+                chip.gpu_generate_main(device_id, input, output, gpu_input)
+            }
+            Self::HornerEval(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::DigestSelect(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::BinaryFoldStep(chip) => {
+                chip.gpu_generate_main(device_id, input, output, gpu_input)
+            }
+            Self::PackBlock(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::UnpackBlock(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
+            Self::Poseidon2Packed(chip) => {
+                chip.gpu_generate_main(device_id, input, output, gpu_input)
+            }
+            Self::ExpBitsLen(chip) => chip.gpu_generate_main(device_id, input, output, gpu_input),
         }
     }
 

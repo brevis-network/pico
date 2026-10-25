@@ -1409,7 +1409,7 @@ mod tests {
     /// `n_stack`, i.e. different `log_stacked_height`) produce the **same** dump for the same AIRs.
     ///
     /// This is the property `compute_vk_pre_hash` does NOT have, and the reason this comparator
-    /// exists: `main` and `gpu-base` are not at the same `CHUNK_SIZE`, so a params-dependent
+    /// exists: the CPU and GPU provers are not at the same `CHUNK_SIZE`, so a params-dependent
     /// digest could not compare them.
     #[test]
     fn constraint_dump_is_independent_of_the_operating_point() {

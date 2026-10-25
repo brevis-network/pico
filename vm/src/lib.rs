@@ -13,12 +13,28 @@
 #![feature(const_cmp)]
 #![feature(const_trait_impl)]
 
+pub static SHOW_BENCH_TIMER: once_cell::sync::Lazy<bool> = once_cell::sync::Lazy::new(|| {
+    std::env::var("BENCH_TIMER")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+});
+
+#[macro_export]
+macro_rules! bench_timer {
+    ($($arg:tt)*) => {
+        if *$crate::SHOW_BENCH_TIMER {
+            println!($($arg)*);
+        }
+    };
+}
+
 extern crate alloc;
 extern crate core;
 
 pub mod chips;
 pub mod compiler;
 pub mod configs;
+pub mod cuda_adaptor;
 pub mod emulator;
 pub mod instances;
 pub mod iter;
@@ -28,6 +44,15 @@ pub mod primitives;
 pub mod proverchain;
 pub mod thread;
 
-#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+#[cfg(feature = "tcmalloc")]
+#[global_allocator]
+static GLOBAL: tcmalloc::TCMalloc = tcmalloc::TCMalloc;
+
+// tcmalloc wins when a workspace build unifies both features (the SDK asks for jemalloc).
+#[cfg(all(
+    feature = "jemalloc",
+    not(feature = "tcmalloc"),
+    not(target_env = "msvc")
+))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;

@@ -6,6 +6,9 @@ pub mod event;
 pub mod traces;
 pub mod utils;
 
+#[cfg(test)]
+pub mod tests;
+
 /// A chip for computing byte operations.
 ///
 /// The chip contains a preprocessed table of all possible byte operations. Other chips can then

@@ -1,6 +1,5 @@
-//! Snapshot-based RISC-V emulation pipeline: the threaded driver for replaying emulator
-//! snapshots. The FRI prover chain that used to live here was removed; see tag
-//! `legacy-fri-last`.
+//! Snapshot-based RISC-V emulation pipeline shared by the MLE single-node prover and the AOT
+//! tooling. The FRI prover chain that used to live here was removed; see tag `legacy-fri-last`.
 
 pub mod riscv;
 

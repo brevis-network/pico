@@ -1,9 +1,3 @@
-use core::{
-    borrow::{Borrow, BorrowMut},
-    mem::size_of,
-};
-use std::fmt::Debug;
-
 use crate::{
     chips::{
         chips::{
@@ -39,26 +33,52 @@ use crate::{
             },
         },
         precompiles::checked_u64_to_u32,
-        utils::pad_rows_fixed,
+        trace::TraceData,
+        utils::{next_power_of_two, pad_rows_fixed},
     },
     compiler::{riscv::program::Program, word::Word},
-    emulator::riscv::{
-        record::EmulationRecord,
-        syscalls::{precompiles::PrecompileEvent, SyscallCode},
+    cuda_adaptor::resource_pool::{
+        mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
     },
+    emulator::riscv::{
+        ffi::FFIEmulationRecord,
+        record::EmulationRecord,
+        syscalls::{
+            precompiles::{ec::event::EllipticCurveDecompressEventFFI, PrecompileEvent},
+            SyscallCode,
+        },
+    },
+    instances::preparer::{PreallocatedGpuMemory, PreparedGpuEvents},
     machine::{
         builder::{ChipBaseBuilder, ChipBuilder, ChipLookupBuilder, RiscVMemoryBuilder},
         chip::ChipBehavior,
     },
     primitives::consts::u64_to_u16_limbs,
 };
+use core::{
+    borrow::{Borrow, BorrowMut},
+    marker::PhantomData,
+    mem::size_of,
+};
+use cudart::{
+    memory_pools::DevicePoolAllocation,
+    slice::{CudaSlice, CudaSliceMut},
+    stream::{CudaStream, CudaStreamCreateFlags},
+};
+use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
 use hybrid_array::Array;
 use num::{BigUint, One, Zero};
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use pico_derive::AlignedBorrow;
-use std::marker::PhantomData;
+use pico_gpu_api::{
+    cuda_weierstrass_decompress_bls12381_generate_extra_record_and_main,
+    cuda_weierstrass_decompress_secp256k1_generate_extra_record_and_main,
+    cuda_weierstrass_decompress_secp256r1_generate_extra_record_and_main,
+};
+use std::fmt::Debug;
+use tracing::{debug, info};
 use typenum::Unsigned;
 
 pub const fn num_weierstrass_decompress_cols<P: FieldParameters + NumWords>() -> usize {
@@ -67,7 +87,7 @@ pub const fn num_weierstrass_decompress_cols<P: FieldParameters + NumWords>() ->
 
 /// A set of columns to compute `WeierstrassDecompress` that decompresses a point on a Weierstrass
 /// curve.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, Eq, PartialEq)]
 #[repr(C)]
 pub struct WeierstrassDecompressCols<T, P: FieldParameters + NumWords> {
     pub is_real: T,
@@ -91,7 +111,7 @@ pub struct WeierstrassDecompressCols<T, P: FieldParameters + NumWords> {
 
 /// A set of columns to compute `WeierstrassDecompress` that decompresses a point on a Weierstrass
 /// curve.
-#[derive(Debug, Clone, AlignedBorrow)]
+#[derive(Debug, Clone, AlignedBorrow, Eq, PartialEq)]
 #[repr(C)]
 pub struct LexicographicChoiceCols<T, P: FieldParameters + NumWords> {
     pub comparison_lt_cols: FieldLtCols<T, P>,
@@ -101,6 +121,7 @@ pub struct LexicographicChoiceCols<T, P: FieldParameters + NumWords> {
 }
 
 /// The convention for choosing the decompressed `y` value given a sign bit.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SignChoiceRule {
     /// Lease significant bit convention.
     ///
@@ -205,6 +226,7 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
     for WeierstrassDecompressChip<F, E>
 {
     type Record = EmulationRecord;
+    type GpuRecord = FFIEmulationRecord;
     type Program = Program;
 
     fn name(&self) -> String {
@@ -409,6 +431,156 @@ impl<F: PrimeField32, E: EllipticCurve + WeierstrassParameters> ChipBehavior<F>
 
     fn local_only(&self) -> bool {
         true
+    }
+
+    fn gpu_generate_extra_record_and_main(
+        &self,
+        device_id: usize,
+        input: &Self::Record,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> TraceData<'_, F> {
+        use p3_koala_bear::KoalaBear;
+
+        // 1. Get events
+        // coerce to c_void here to avoid type confusion since this is multi typed event
+        let events = match E::CURVE_TYPE {
+            CurveType::Secp256k1 => prepared_gpu_events
+                .secp256k1_weierstrass_decompress_events
+                .as_c_void_ptr(),
+            CurveType::Secp256r1 => prepared_gpu_events
+                .secp256r1_weierstrass_decompress_events
+                .as_c_void_ptr(),
+            CurveType::Bls12381 => prepared_gpu_events
+                .bls12381_weierstrass_decompress_events
+                .as_c_void_ptr(),
+            _ => panic!("Unsupported curve"),
+        };
+        let num_events = match E::CURVE_TYPE {
+            CurveType::Secp256k1 => prepared_gpu_events
+                .secp256k1_weierstrass_decompress_events
+                .len(),
+            CurveType::Secp256r1 => prepared_gpu_events
+                .secp256r1_weierstrass_decompress_events
+                .len(),
+            CurveType::Bls12381 => prepared_gpu_events
+                .bls12381_weierstrass_decompress_events
+                .len(),
+            _ => panic!("Unsupported curve"),
+        };
+
+        // 2. Calculate padding rows
+        let nrows = num_events;
+        let log2_nrows = input.shape_chip_size(&self.name());
+        let padded_nrows = next_power_of_two(nrows, log2_nrows);
+
+        // 3. Create CUDA stream and memory pool
+        let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING)
+            .expect("Failed to create CUDA stream");
+
+        // 4. Copy events to the gpu
+        let sync_mem_pool = get_global_mem_pool(device_id);
+        let mem_pool = &sync_mem_pool.0;
+
+        let event_size = num_events;
+        let mut d_events = DevicePoolAllocation::<EllipticCurveDecompressEventFFI<E::BaseField>>::alloc_from_pool_async(
+            event_size, mem_pool, stream,
+        )
+        .expect("GPU event memory allocation failed");
+
+        unsafe {
+            let _ = cudaMemcpyAsync(
+                d_events.as_mut_c_void_ptr(),
+                events,
+                event_size * size_of::<EllipticCurveDecompressEventFFI<E::BaseField>>(),
+                CudaMemoryCopyKind::HostToDevice,
+                stream.into(),
+            );
+        }
+
+        // 5. Allocate and generate trace
+        let total_cols = BaseAir::<F>::width(self);
+        let num_cols = num_weierstrass_decompress_cols::<E::BaseField>();
+        let num_lexi_cols = total_cols - num_cols;
+        let trace_size = padded_nrows * total_cols;
+        debug!("[weierstrass-decompress-chip] num_events: {num_events}");
+        debug!("[weierstrass-decompress-chip] num_cols: {total_cols}");
+
+        let mut d_trace =
+            DevicePoolAllocation::<KoalaBear>::alloc_from_pool_async(trace_size, mem_pool, stream)
+                .expect("GPU trace memory allocation failed");
+
+        // Generate trace
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.as_mut().unwrap();
+        unsafe {
+            match E::CURVE_TYPE {
+                CurveType::Bls12381 => {
+                    cuda_weierstrass_decompress_bls12381_generate_extra_record_and_main(
+                        d_events.as_ptr() as *const _,
+                        num_events,
+                        d_trace.as_mut_ptr() as *mut _,
+                        padded_nrows,
+                        num_cols,
+                        num_lexi_cols,
+                        self.sign_rule == SignChoiceRule::Lexicographic,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    )
+                }
+                CurveType::Secp256k1 => {
+                    cuda_weierstrass_decompress_secp256k1_generate_extra_record_and_main(
+                        d_events.as_ptr() as *const _,
+                        num_events,
+                        d_trace.as_mut_ptr() as *mut _,
+                        padded_nrows,
+                        num_cols,
+                        num_lexi_cols,
+                        self.sign_rule == SignChoiceRule::Lexicographic,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    )
+                }
+                CurveType::Secp256r1 => {
+                    cuda_weierstrass_decompress_secp256r1_generate_extra_record_and_main(
+                        d_events.as_ptr() as *const _,
+                        num_events,
+                        d_trace.as_mut_ptr() as *mut _,
+                        padded_nrows,
+                        num_cols,
+                        num_lexi_cols,
+                        self.sign_rule == SignChoiceRule::Lexicographic,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    )
+                }
+                _ => panic!("Unsupported curve"),
+            };
+        }
+
+        // 6. Switch to main stream and return result
+        let sync_stream = get_global_stream_pool(device_id);
+        let main_stream = &sync_stream.0;
+        stream.synchronize().unwrap();
+        let d_trace = d_trace.swap_stream(main_stream);
+        stream.synchronize().unwrap();
+        main_stream.synchronize().unwrap();
+
+        info!("[weierstrass-decompress-chip] generate_main on GPU");
+
+        TraceData::Gpu(total_cols, d_trace)
+    }
+
+    fn is_active_for_extra_record(&self, record: &PreparedGpuEvents) -> bool {
+        if let Some(shape) = record.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            match E::CURVE_TYPE {
+                CurveType::Secp256k1 => !record.secp256k1_weierstrass_decompress_events.is_empty(),
+                CurveType::Secp256r1 => !record.secp256r1_weierstrass_decompress_events.is_empty(),
+                CurveType::Bls12381 => !record.bls12381_weierstrass_decompress_events.is_empty(),
+                _ => panic!("Unsupported curve"),
+            }
+        }
     }
 }
 
@@ -761,6 +933,771 @@ where
             ptr.map(Into::into),
             [sign_bit_expr, CB::Expr::ZERO, CB::Expr::ZERO],
             local.is_real,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        chips::{
+            chips::{
+                byte::{columns::NUM_BYTE_MULT_COLS, ByteChip},
+                events::{MemoryReadRecord, MemoryWriteRecord},
+            },
+            gadgets::curves::{
+                weierstrass::{bls381::Bls12381, secp256k1::Secp256k1, WeierstrassParameters},
+                CurveType, EllipticCurve, EllipticCurveParameters,
+            },
+            tests::init_test_stream,
+            trace::TraceData,
+        },
+        emulator::riscv::{
+            record::EmulationRecord,
+            syscalls::{
+                precompiles::{ec::event::EllipticCurveDecompressEvent, PrecompileEvent},
+                SyscallCode, SyscallEvent,
+            },
+        },
+        instances::{
+            compiler::shapes::riscv_shape::RiscvPadShape,
+            preparer::{
+                gpu_allocate_byte_trace, gpu_finalize_byte_trace, precompute_event_size,
+                PreallocatedGpuMemory, PreparedGpuEvents,
+            },
+        },
+        machine::chip::ChipBehavior,
+    };
+    use alloy_primitives::hex;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::RngExt;
+
+    type Chip<F, P> = super::WeierstrassDecompressChip<F, P>;
+    type F = KoalaBear;
+
+    fn cpu_generate_main<P: EllipticCurve + WeierstrassParameters>(
+        chip: &Chip<F, P>,
+        input: &EmulationRecord,
+    ) -> RowMajorMatrix<F> {
+        chip.generate_main(input, &mut EmulationRecord::default())
+    }
+
+    fn gpu_generate_extra_record_and_main<E: EllipticCurve + WeierstrassParameters>(
+        chip: &Chip<F, E>,
+        input: &EmulationRecord,
+        prepared_gpu_events: &PreparedGpuEvents,
+        preallocated_gpu_memory: &mut PreallocatedGpuMemory,
+    ) -> RowMajorMatrix<F> {
+        let stream = init_test_stream();
+        let trace = chip.gpu_generate_extra_record_and_main(
+            0,
+            input,
+            prepared_gpu_events,
+            preallocated_gpu_memory,
+        );
+        trace.to_host(stream)
+    }
+
+    // TODO: add test_secp256r1_decompress_generate_extra_record_and_main
+
+    #[test]
+    fn test_secp256k1_decompress_generate_extra_record_and_main() {
+        use crate::{
+            //chips::gadgets::field::bls381::Bls381BaseField,
+            emulator::riscv::{
+                record::EmulationRecord,
+                syscalls::{
+                    precompiles::{ec::event::EllipticCurveDecompressEvent, PrecompileEvent},
+                    SyscallEvent,
+                },
+            },
+        };
+        use alloy_primitives::hex;
+        use rand::RngExt;
+        let mut chunk = EmulationRecord::default();
+
+        let mut rng = rand::rng();
+        let x_memory = MemoryReadRecord {
+            value: 1010,
+            chunk: 0,
+            timestamp: 50,
+            prev_chunk: 0,
+            prev_timestamp: 20,
+        };
+        let y_memory = MemoryWriteRecord {
+            value: 10101,
+            chunk: 0,
+            timestamp: 52,
+            prev_value: 33,
+            prev_chunk: 0,
+            prev_timestamp: 22,
+        };
+        // Helper: convert hex bytes to Vec<u64> words (LE)
+        fn bytes_to_u64_words(bytes: &[u8]) -> Vec<u64> {
+            bytes
+                .chunks(8)
+                .map(|chunk| {
+                    let mut arr = [0u8; 8];
+                    arr[..chunk.len()].copy_from_slice(chunk);
+                    u64::from_le_bytes(arr)
+                })
+                .collect()
+        }
+        let decompress_events = vec![
+            EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 100,
+                ptr: 200,
+                sign_bit: false,
+                x_words: bytes_to_u64_words(&hex!(
+                    "0400000000000000000000000000000000000000000000000000000000000000"
+                )),
+                decompressed_y_words: bytes_to_u64_words(&hex!(
+                    "9310b168b56d03437b45d2832c3f2a8ff53c2474e1f5e20afe0f8e7253c48e59"
+                )),
+                x_memory_records: [x_memory; 4].to_vec(),
+                y_memory_records: [y_memory; 4].to_vec(),
+                local_mem_access: vec![],
+            },
+            EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 101,
+                ptr: 201,
+                sign_bit: true,
+                x_words: bytes_to_u64_words(&hex!(
+                    "0400000000000000000000000000000000000000000000000000000000000000"
+                )),
+                decompressed_y_words: bytes_to_u64_words(&hex!(
+                    "9ceb4e974992fcbc84ba2d7cd3c0d5700ac3db8b1e0a1df501f0718dac3b71a6"
+                )),
+                x_memory_records: [x_memory; 4].to_vec(),
+                y_memory_records: [y_memory; 4].to_vec(),
+                local_mem_access: vec![],
+            },
+            EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 102,
+                ptr: 202,
+                sign_bit: false,
+                x_words: bytes_to_u64_words(&hex!(
+                    "feffffffffffffff000000000000000000000000000000000000000000000000"
+                )),
+                decompressed_y_words: bytes_to_u64_words(&hex!(
+                    "96a09a39e2a23c89829e6faea0fa65bb6aae70eb0e3560994a40e93cf0d95f65"
+                )),
+                x_memory_records: [x_memory; 4].to_vec(),
+                y_memory_records: [y_memory; 4].to_vec(),
+                local_mem_access: vec![],
+            },
+            EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 103,
+                ptr: 203,
+                sign_bit: true,
+                x_words: bytes_to_u64_words(&hex!(
+                    "feffffffffffffff000000000000000000000000000000000000000000000000"
+                )),
+                decompressed_y_words: bytes_to_u64_words(&hex!(
+                    "995b65c61c5dc3767d6190515f059a4495518f14f1ca9f66b5bf16c30f26a09a"
+                )),
+                x_memory_records: [x_memory; 4].to_vec(),
+                y_memory_records: [y_memory; 4].to_vec(),
+                local_mem_access: vec![],
+            },
+        ];
+        let rand_syscall = SyscallEvent {
+            chunk: rng.random(),
+            clk: rng.random(),
+            syscall_id: rng.random(),
+            arg1: rng.random(),
+            arg2: rng.random(),
+        };
+        let decompress_events = decompress_events
+            .into_iter()
+            .map(|x| (rand_syscall, PrecompileEvent::Secp256k1Decompress(x)))
+            .collect();
+        chunk
+            .precompile_events
+            .insert(SyscallCode::SECP256K1_DECOMPRESS, decompress_events);
+        let original_record = &chunk;
+
+        type E = Secp256k1;
+        let chip = Chip::<F, E>::default();
+
+        // Complete the record for CPU computation.
+        let mut complete_record = original_record.clone();
+        chip.extra_record(&original_record, &mut complete_record);
+        // Precompute event sizes for GPU computation.
+        let mut counted_record = original_record.clone();
+        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+        // ignore events
+        event_counter.num_poseidon2_events = 0;
+        event_counter.num_global_lookup_events = 0;
+        event_counter.num_syscall_events = 0;
+        event_counter.num_precompile_syscall_events = 0;
+        // Assert that the event counts are the same.
+        event_counter.assert_event_counts_match(&complete_record);
+
+        // Shape padding for CPU and GPU computation.
+        complete_record.shape = Some(RiscvPadShape::default());
+        complete_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 16);
+        counted_record.shape = Some(RiscvPadShape::default());
+        counted_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 16);
+
+        // Generate CPU trace.
+        let cpu_trace = cpu_generate_main(&chip, &complete_record);
+        let byte_chip = ByteChip::<F>::default();
+        let cpu_byte_trace =
+            byte_chip.generate_main(&complete_record, &mut EmulationRecord::default());
+
+        // Generate GPU trace.
+        let stream = init_test_stream();
+        let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
+        let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+            d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let gpu_trace = gpu_generate_extra_record_and_main(
+            &chip,
+            &counted_record,
+            &prepared_gpu_events,
+            &mut preallocated_gpu_memory,
+        );
+        // Assert trace consistency.
+        for (i, (cpu_row, gpu_row)) in cpu_trace
+            .row_slices()
+            .zip(gpu_trace.row_slices())
+            .enumerate()
+        {
+            assert_eq!(cpu_row, gpu_row, "Main trace mismatch at row {i}");
+        }
+
+        // Finalize the byte trace. And assert that the byte trace is consistent.
+        gpu_finalize_byte_trace(&stream, &mut preallocated_gpu_memory).unwrap();
+        stream.synchronize().unwrap();
+
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.take().unwrap();
+
+        let host_gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace).to_host(&stream);
+        for (i, (cpu, gpu)) in cpu_byte_trace
+            .row_slices()
+            .zip(host_gpu_byte_trace.row_slices())
+            .enumerate()
+        {
+            assert_eq!(cpu, gpu, "row {i}");
+        }
+        assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
+    }
+
+    #[test]
+    fn test_bls12381_decompress_generate_extra_record_and_main() {
+        use crate::{
+            //chips::gadgets::field::bls381::Bls381BaseField,
+            emulator::riscv::{
+                record::EmulationRecord,
+                syscalls::{
+                    precompiles::{ec::event::EllipticCurveDecompressEvent, PrecompileEvent},
+                    SyscallEvent,
+                },
+            },
+        };
+        use alloy_primitives::hex;
+        use rand::RngExt;
+        let mut chunk = EmulationRecord::default();
+
+        let mut rng = rand::rng();
+        let x_memory = MemoryReadRecord {
+            value: 1010,
+            chunk: 0,
+            timestamp: 50,
+            prev_chunk: 0,
+            prev_timestamp: 20,
+        };
+        let y_memory = MemoryWriteRecord {
+            value: 10101,
+            chunk: 0,
+            timestamp: 52,
+            prev_value: 33,
+            prev_chunk: 0,
+            prev_timestamp: 22,
+        };
+        // Helper: convert hex bytes to Vec<u64> words (LE)
+        fn bytes_to_u64_words(bytes: &[u8]) -> Vec<u64> {
+            bytes
+                .chunks(8)
+                .map(|chunk| {
+                    let mut arr = [0u8; 8];
+                    arr[..chunk.len()].copy_from_slice(chunk);
+                    u64::from_le_bytes(arr)
+                })
+                .collect()
+        }
+        let decompress_events = vec![
+            EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 100,
+                ptr: 200,
+                sign_bit: false,
+                x_words: bytes_to_u64_words(&hex!("040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+                decompressed_y_words: bytes_to_u64_words(&hex!(
+                    "6c70be4a353ea95e5ddee100edb84663448384925ed89dda266b92c988f960c79b3e76f3c3ff3cb312620dd4ad9b980a"
+                )),
+                x_memory_records: [x_memory; 6].to_vec(),
+                y_memory_records: [y_memory; 6].to_vec(),
+                local_mem_access: vec![],
+            },
+            EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 101,
+                ptr: 201,
+                sign_bit: true,
+                x_words: bytes_to_u64_words(&hex!("040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+                decompressed_y_words: bytes_to_u64_words(&hex!(
+                    "3f3a41b5cac1555ba22172b0114765bbdf722c6442fa928c98a7f229fc51169d3b6ed54ff2a7de97878472653c76680f"
+                )),
+                x_memory_records: [x_memory; 6].to_vec(),
+                y_memory_records: [y_memory; 6].to_vec(),
+                local_mem_access: vec![],
+            },
+            EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 102,
+                ptr: 202,
+                sign_bit: false,
+                x_words: bytes_to_u64_words(&hex!("ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+                decompressed_y_words: bytes_to_u64_words(&hex!(
+                    "333297ee8b157d3791a8c1c439f20c4bd60df2f10ee7c6376fa1370b5f8d524481ba72fdb28c54d348380ccf545c4f01"
+                )),
+                x_memory_records: [x_memory; 6].to_vec(),
+                y_memory_records: [y_memory; 6].to_vec(),
+                local_mem_access: vec![],
+            },
+            EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 103,
+                ptr: 203,
+                sign_bit: true,
+                x_words: bytes_to_u64_words(&hex!("ffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000")),
+                decompressed_y_words: bytes_to_u64_words(&hex!(
+                    "7878681174ea81826e5792ecc40d9fd34de8be0492eb692f50714de825be242056f2d845031bc77751ae736a95b5b118"
+                )),
+                x_memory_records: [x_memory; 6].to_vec(),
+                y_memory_records: [y_memory; 6].to_vec(),
+                local_mem_access: vec![],
+            },
+        ];
+        let rand_syscall = SyscallEvent {
+            chunk: rng.random(),
+            clk: rng.random(),
+            syscall_id: rng.random(),
+            arg1: rng.random(),
+            arg2: rng.random(),
+        };
+        let decompress_events = decompress_events
+            .into_iter()
+            .map(|x| (rand_syscall, PrecompileEvent::Bls12381Decompress(x)))
+            .collect();
+        chunk
+            .precompile_events
+            .insert(SyscallCode::BLS12381_DECOMPRESS, decompress_events);
+        let original_record = &chunk;
+
+        type E = Bls12381;
+        let chip = Chip::<F, E>::default();
+
+        // Complete the record for CPU computation.
+        let mut complete_record = original_record.clone();
+        chip.extra_record(&original_record, &mut complete_record);
+        // Precompute event sizes for GPU computation.
+        let mut counted_record = original_record.clone();
+        let mut event_counter = precompute_event_size::<F>(&mut counted_record);
+        // ignore events
+        event_counter.num_poseidon2_events = 0;
+        event_counter.num_global_lookup_events = 0;
+        event_counter.num_syscall_events = 0;
+        event_counter.num_precompile_syscall_events = 0;
+        // Assert that the event counts are the same.
+        event_counter.assert_event_counts_match(&complete_record);
+
+        // Shape padding for CPU and GPU computation.
+        complete_record.shape = Some(RiscvPadShape::default());
+        complete_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 16);
+        counted_record.shape = Some(RiscvPadShape::default());
+        counted_record
+            .shape
+            .as_mut()
+            .unwrap()
+            .inner
+            .insert(chip.name(), 16);
+
+        // Generate CPU trace.
+        let cpu_trace = cpu_generate_main(&chip, &complete_record);
+        let byte_chip = ByteChip::<F>::default();
+        let cpu_byte_trace =
+            byte_chip.generate_main(&complete_record, &mut EmulationRecord::default());
+
+        // Generate GPU trace.
+        let stream = init_test_stream();
+        let prepared_gpu_events = PreparedGpuEvents::new(&counted_record, event_counter);
+        let mut preallocated_gpu_memory = PreallocatedGpuMemory {
+            d_byte_trace: gpu_allocate_byte_trace(&stream, 0).unwrap(),
+            ..Default::default()
+        };
+        let gpu_trace = gpu_generate_extra_record_and_main(
+            &chip,
+            &counted_record,
+            &prepared_gpu_events,
+            &mut preallocated_gpu_memory,
+        );
+        // Assert trace consistency.
+        for (i, (cpu_row, gpu_row)) in cpu_trace
+            .row_slices()
+            .zip(gpu_trace.row_slices())
+            .enumerate()
+        {
+            assert_eq!(cpu_row, gpu_row, "Main trace mismatch at row {i}");
+        }
+
+        // Finalize the byte trace. And assert that the byte trace is consistent.
+        gpu_finalize_byte_trace(&stream, &mut preallocated_gpu_memory).unwrap();
+        stream.synchronize().unwrap();
+
+        let d_byte_trace = preallocated_gpu_memory.d_byte_trace.take().unwrap();
+
+        let host_gpu_byte_trace =
+            TraceData::<F>::Gpu(NUM_BYTE_MULT_COLS, d_byte_trace).to_host(&stream);
+        for (i, (cpu, gpu)) in cpu_byte_trace
+            .row_slices()
+            .zip(host_gpu_byte_trace.row_slices())
+            .enumerate()
+        {
+            assert_eq!(cpu, gpu, "row {i}");
+        }
+        assert_eq!(host_gpu_byte_trace.values, cpu_byte_trace.values);
+    }
+
+    #[test]
+    fn bench_weierstrass_decompress_cpu_vs_gpu() {
+        use std::{mem::size_of, time::Instant};
+
+        use cudart::{
+            memory_pools::DevicePoolAllocation,
+            slice::{CudaSlice, CudaSliceMut},
+            stream::{CudaStream, CudaStreamCreateFlags},
+        };
+        use cudart_sys::{cudaMemcpyAsync, CudaMemoryCopyKind};
+        use p3_air::BaseAir;
+        use pico_gpu_api::{
+            cuda_weierstrass_decompress_bls12381_generate_extra_record_and_main,
+            cuda_weierstrass_decompress_secp256k1_generate_extra_record_and_main,
+        };
+
+        use crate::{
+            cuda_adaptor::resource_pool::{
+                mem_pool::get_global_mem_pool, stream_pool::get_global_stream_pool,
+            },
+            emulator::riscv::syscalls::precompiles::ec::event::EllipticCurveDecompressEventFFI,
+        };
+
+        fn bytes_to_u64_words(bytes: &[u8]) -> Vec<u64> {
+            bytes
+                .chunks(8)
+                .map(|chunk| {
+                    let mut word = [0u8; 8];
+                    word[..chunk.len()].copy_from_slice(chunk);
+                    u64::from_le_bytes(word)
+                })
+                .collect()
+        }
+
+        fn generate_decompress_record<E: EllipticCurve + WeierstrassParameters>(
+            num_events: usize,
+            _curve_type: CurveType,
+            syscall_code: SyscallCode,
+            wrap_event: fn(EllipticCurveDecompressEvent) -> PrecompileEvent,
+            x_bytes: &[u8],
+            y_bytes: &[u8],
+            num_dwords: usize,
+        ) -> EmulationRecord {
+            let mut rng = rand::rng();
+            let x_memory = MemoryReadRecord {
+                value: 10101,
+                chunk: 1,
+                timestamp: 2,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            };
+            let y_memory = MemoryWriteRecord {
+                value: 10101,
+                chunk: 1,
+                timestamp: 2,
+                prev_value: 33,
+                prev_chunk: 0,
+                prev_timestamp: 0,
+            };
+            let base_event = EllipticCurveDecompressEvent {
+                chunk: 0,
+                clk: 100,
+                ptr: 200,
+                sign_bit: false,
+                x_words: bytes_to_u64_words(x_bytes),
+                decompressed_y_words: bytes_to_u64_words(y_bytes),
+                x_memory_records: vec![x_memory; num_dwords],
+                y_memory_records: vec![y_memory; num_dwords],
+                local_mem_access: vec![],
+            };
+            let rand_syscall = SyscallEvent {
+                chunk: rng.random(),
+                clk: rng.random(),
+                syscall_id: rng.random(),
+                arg1: rng.random(),
+                arg2: rng.random(),
+            };
+            let events: Vec<_> = (0..num_events)
+                .map(|i| {
+                    let mut e = base_event.clone();
+                    e.clk = 100 + i as u64;
+                    e.ptr = 200 + (i as u64) * 32;
+                    (rand_syscall, wrap_event(e))
+                })
+                .collect();
+            let mut chunk = EmulationRecord::default();
+            chunk.precompile_events.insert(syscall_code, events);
+            chunk
+        }
+
+        fn bench_decompress<E: EllipticCurve + WeierstrassParameters>(
+            curve_name: &str,
+            syscall_code: SyscallCode,
+            wrap_event: fn(EllipticCurveDecompressEvent) -> PrecompileEvent,
+            x_bytes: &[u8],
+            y_bytes: &[u8],
+            num_dwords: usize,
+            lexi: bool,
+            cuda_fn: unsafe extern "C" fn(
+                *const std::ffi::c_void,
+                usize,
+                *mut std::ffi::c_void,
+                usize,
+                usize,
+                usize,
+                bool,
+                *mut std::ffi::c_void,
+                cudart_sys::cudaStream_t,
+            ) -> pico_gpu_api::Error,
+        ) {
+            let chip = super::WeierstrassDecompressChip::<F, E>::new(if lexi {
+                super::SignChoiceRule::Lexicographic
+            } else {
+                super::SignChoiceRule::LeastSignificantBit
+            });
+            let warmup_sizes: Vec<usize> = vec![1 << 10];
+            let bench_sizes: Vec<usize> = vec![1 << 10, 1 << 14, 1 << 16];
+
+            println!("\n  [{curve_name}]");
+            println!("  {:-<58}", "");
+            println!(
+                "  {:<12} {:>12} {:>12} {:>12}",
+                "events", "cpu (ms)", "gpu (ms)", "speedup"
+            );
+            println!("  {:-<58}", "");
+
+            for (is_warmup, &num_events) in warmup_sizes
+                .iter()
+                .map(|n| (true, n))
+                .chain(bench_sizes.iter().map(|n| (false, n)))
+            {
+                let original_record = generate_decompress_record::<E>(
+                    num_events,
+                    E::CURVE_TYPE,
+                    syscall_code,
+                    wrap_event,
+                    x_bytes,
+                    y_bytes,
+                    num_dwords,
+                );
+
+                let mut complete_record = original_record.clone();
+                let mut counted_record = original_record.clone();
+
+                let log_rows = (num_events as f64).log2().ceil() as usize + 1;
+                complete_record.shape = Some(RiscvPadShape::default());
+                complete_record
+                    .shape
+                    .as_mut()
+                    .unwrap()
+                    .inner
+                    .insert(chip.name(), log_rows);
+                counted_record.shape = Some(RiscvPadShape::default());
+                counted_record
+                    .shape
+                    .as_mut()
+                    .unwrap()
+                    .inner
+                    .insert(chip.name(), log_rows);
+
+                // === CPU ===
+                let cpu_start = Instant::now();
+                chip.extra_record(&original_record, &mut complete_record);
+                let cpu_trace = cpu_generate_main(&chip, &complete_record);
+                let cpu_ms = cpu_start.elapsed().as_secs_f64() * 1000.0;
+
+                // === GPU ===
+                let prepared_gpu_events = PreparedGpuEvents::new(
+                    &counted_record,
+                    precompute_event_size::<F>(&mut counted_record.clone()),
+                );
+
+                let events_ptr = match E::CURVE_TYPE {
+                    CurveType::Secp256k1 => prepared_gpu_events
+                        .secp256k1_weierstrass_decompress_events
+                        .as_c_void_ptr(),
+                    CurveType::Bls12381 => prepared_gpu_events
+                        .bls12381_weierstrass_decompress_events
+                        .as_c_void_ptr(),
+                    _ => panic!("Unsupported curve"),
+                };
+                let events_len = match E::CURVE_TYPE {
+                    CurveType::Secp256k1 => prepared_gpu_events
+                        .secp256k1_weierstrass_decompress_events
+                        .len(),
+                    CurveType::Bls12381 => prepared_gpu_events
+                        .bls12381_weierstrass_decompress_events
+                        .len(),
+                    _ => panic!("Unsupported curve"),
+                };
+
+                let padded_nrows = 1usize << log_rows;
+                let total_cols = BaseAir::<F>::width(&chip);
+                let num_cols = super::num_weierstrass_decompress_cols::<
+                    <E as EllipticCurveParameters>::BaseField,
+                >();
+                let num_lexi_cols = total_cols - num_cols;
+                let trace_size = padded_nrows * total_cols;
+
+                let stream = &CudaStream::create_with_flags(CudaStreamCreateFlags::NON_BLOCKING)
+                    .expect("Failed to create CUDA stream");
+                let sync_mem_pool = get_global_mem_pool(0);
+                let mem_pool = &sync_mem_pool.0;
+
+                // H2D
+                let mut d_events = DevicePoolAllocation::<
+                    EllipticCurveDecompressEventFFI<E::BaseField>,
+                >::alloc_from_pool_async(
+                    events_len, mem_pool, stream
+                )
+                .expect("GPU event alloc failed");
+                unsafe {
+                    let _ = cudaMemcpyAsync(
+                        d_events.as_mut_c_void_ptr(),
+                        events_ptr,
+                        events_len * size_of::<EllipticCurveDecompressEventFFI<E::BaseField>>(),
+                        CudaMemoryCopyKind::HostToDevice,
+                        stream.into(),
+                    );
+                }
+
+                let mut d_trace =
+                    DevicePoolAllocation::<p3_koala_bear::KoalaBear>::alloc_from_pool_async(
+                        trace_size, mem_pool, stream,
+                    )
+                    .expect("GPU trace alloc failed");
+                let mut d_byte_trace = gpu_allocate_byte_trace(stream, 0).unwrap().unwrap();
+
+                stream.synchronize().unwrap();
+
+                // === TIMED: kernel only ===
+                let gpu_start = Instant::now();
+                unsafe {
+                    cuda_fn(
+                        d_events.as_ptr() as *const _,
+                        events_len,
+                        d_trace.as_mut_ptr() as *mut _,
+                        padded_nrows,
+                        num_cols,
+                        num_lexi_cols,
+                        lexi,
+                        d_byte_trace.as_mut_ptr() as *mut _,
+                        stream.into(),
+                    );
+                }
+                stream.synchronize().unwrap();
+                let gpu_ms = gpu_start.elapsed().as_secs_f64() * 1000.0;
+
+                // D2H
+                let sync_stream = get_global_stream_pool(0);
+                let main_stream = &sync_stream.0;
+                let d_trace = d_trace.swap_stream(main_stream);
+                main_stream.synchronize().unwrap();
+                let gpu_trace = TraceData::<F>::Gpu(total_cols, d_trace).to_host(main_stream);
+
+                if is_warmup {
+                    println!(
+                        "  {:<12} {:>12} {:>12} {:>12}",
+                        num_events, "warmup", "warmup", "—"
+                    );
+                    continue;
+                }
+
+                assert_eq!(
+                    cpu_trace, gpu_trace,
+                    "Main trace mismatch at bench size {}",
+                    num_events
+                );
+
+                let speedup = cpu_ms / gpu_ms;
+                println!(
+                    "  {:<12} {:>12.2} {:>12.2} {:>11.1}x  ✓",
+                    num_events, cpu_ms, gpu_ms, speedup
+                );
+            }
+            println!("  {:-<58}", "");
+        }
+
+        // Initialize CUDA context and global memory pool
+        init_test_stream();
+
+        println!("\n{:=<60}", "");
+        println!("  WeierstrassDecompress CPU vs GPU Benchmark (kernel only)");
+        println!("{:=<60}", "");
+
+        bench_decompress::<Secp256k1>(
+            "secp256k1",
+            SyscallCode::SECP256K1_DECOMPRESS,
+            PrecompileEvent::Secp256k1Decompress,
+            &hex!("0400000000000000000000000000000000000000000000000000000000000000"),
+            &hex!("9310b168b56d03437b45d2832c3f2a8ff53c2474e1f5e20afe0f8e7253c48e59"),
+            4,
+            false,
+            cuda_weierstrass_decompress_secp256k1_generate_extra_record_and_main,
+        );
+
+        bench_decompress::<Bls12381>(
+            "bls12381",
+            SyscallCode::BLS12381_DECOMPRESS,
+            PrecompileEvent::Bls12381Decompress,
+            &hex!("040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+            &hex!("6c70be4a353ea95e5ddee100edb84663448384925ed89dda266b92c988f960c79b3e76f3c3ff3cb312620dd4ad9b980a"),
+            6,
+            true,
+            cuda_weierstrass_decompress_bls12381_generate_extra_record_and_main,
         );
     }
 }

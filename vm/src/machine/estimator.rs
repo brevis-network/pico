@@ -4,6 +4,7 @@ use crate::{
             alu::{
                 bitwise::BitwiseChip, divrem::DivRemChip, sll::SLLChip, sr::traces::ShiftRightChip,
             },
+            riscv_cpu::CpuChip,
             riscv_global::GlobalChip,
             riscv_memory::{
                 initialize_finalize::MemoryInitializeFinalizeChip, local::MemoryLocalChip,
@@ -80,8 +81,7 @@ impl PrecompileCache {
 pub struct EventSizeCapture<'a> {
     pub(crate) num_program_events: usize,
     pub(crate) num_cpu_events: usize,
-    pub(crate) num_add_events: usize,
-    pub(crate) num_sub_events: usize,
+    pub(crate) num_add_sub_events: usize,
     pub(crate) num_mul_events: usize,
     pub(crate) num_bitwise_events: usize,
     pub(crate) num_shift_left_events: usize,
@@ -145,8 +145,7 @@ impl<'a> EventSizeCapture<'a> {
     pub fn snapshot(record: &'a EmulationRecord, field: &'a str) -> Self {
         let mut result = Self {
             num_lt_events: record.lt_events.len(),
-            num_add_events: record.add_events.len(),
-            num_sub_events: record.sub_events.len(),
+            num_add_sub_events: record.add_sub_events.len(),
             num_mul_events: record.mul_events.len(),
             num_program_events: record.program.instructions.len(),
             num_global_lookup_events: record.global_lookup_events.len(),
@@ -155,6 +154,8 @@ impl<'a> EventSizeCapture<'a> {
             field,
             ..Self::default()
         };
+
+        CpuChip::<()>::count_extra_records(record, &mut result);
 
         MemoryInitializeFinalizeChip::<()>::count_extra_records(record, &mut result);
 
@@ -316,7 +317,8 @@ impl<'a> EventSizeCapture<'a> {
         let nb_rows = record.shape_chip_size("ShiftLeft");
         data[CHIP_SLL] = next_power_of_two(data[CHIP_SLL], nb_rows);
         //TODO
-        data[CHIP_ADDSUB] = (self.num_add_events + self.num_sub_events).div_ceil(ADD_DATAPAR);
+        // data[CHIP_ADDSUB] = self.num_add_sub_events.div_ceil(ADD_SUB_DATAPAR);
+        data[CHIP_ADDSUB] = (self.num_add_sub_events).div_ceil(ADD_DATAPAR);
         let nb_rows = record.shape_chip_size("AddSub");
         data[CHIP_ADDSUB] = next_power_of_two(data[CHIP_ADDSUB], nb_rows);
         data[CHIP_BITWISE] = self.num_bitwise_events.div_ceil(BITWISE_DATAPAR);
@@ -362,8 +364,8 @@ impl<'a> EventSizeCapture<'a> {
         let nb_rows = record.shape_chip_size("SyscallPrecompile");
         data[CHIP_SYSCALLPRECOMPILE] = next_power_of_two(data[CHIP_SYSCALLPRECOMPILE], nb_rows);
         // riscv global: 1 row per event, plus the trailing padding row the accumulation
-        // constraints require (`riscv_global/traces.rs`): a power-of-two event count lands one
-        // row above the boundary and the trace doubles.
+        // constraints require (`riscv_global/traces.rs`, `mem_tail_padded_cost`): a power-of-two
+        // event count lands one row above the boundary and the trace doubles.
         data[CHIP_GLOBAL] = self.num_global_lookup_events + 1;
         let nb_rows = record.shape_chip_size("Global");
         data[CHIP_GLOBAL] = next_power_of_two(data[CHIP_GLOBAL], nb_rows);

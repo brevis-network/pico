@@ -1,11 +1,13 @@
 //! Emulation without proving: the builder's keygen-free `execute` against the built prover's, and
 //! the per-code precompile counts against the emulator's own.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use pico_vm::{
     compiler::riscv::compiler::{Compiler, SourceType},
-    emulator::riscv::{emulator::RiscvEmulator, syscalls::SyscallCode},
+    emulator::riscv::{
+        emulator::RiscvEmulator, public_values::RecordFinalPvsState, syscalls::SyscallCode,
+    },
     mle::machine::riscv::Kb,
 };
 
@@ -91,7 +93,12 @@ fn emulator_precompile_counts(elf: &[u8], chunk: u32) -> BTreeMap<SyscallCode, u
     let program = Compiler::new(SourceType::RISCV, elf)
         .expect("the guest parses")
         .compile();
-    let mut emulator = RiscvEmulator::new_single::<Kb>(program, emulator_opts(chunk), None);
+    let mut emulator = RiscvEmulator::new_single::<Kb>(
+        program,
+        Arc::new(RecordFinalPvsState::default()),
+        emulator_opts(chunk),
+        None,
+    );
     emulator.write_stdin(&Stdin::new().into_emulator_stdin());
     while !emulator
         .emulate_batch(&mut |_| {})
